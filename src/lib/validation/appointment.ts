@@ -29,6 +29,13 @@ const createAppointmentSchema = z
     businessId: uuidSchema,
     customerId: uuidSchema,
     serviceId: uuidSchema,
+    /**
+     * Branch-aware (DECISIONS #30, PROMPT-ARCH-02): resolved SERVER-side
+     * from the owning Business (its Default Branch today) — the field
+     * exists on the repository DTO because the write is branch-scoped,
+     * but no client form ever supplies it.
+     */
+    branchId: uuidSchema,
     assignedUserId: uuidSchema.nullish(),
     date: appointmentDateSchema,
     startTime: timeSchema,

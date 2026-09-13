@@ -8,8 +8,9 @@ beauty, coaching, gyms, education, services) before selecting a winning
 vertical. **The UI and domain model stay completely vertical-agnostic.**
 
 > 📚 **Project memory / source of truth:** start with
-> [`docs/CORE_CONTEXT.md`](docs/CORE_CONTEXT.md), then follow
-> [`docs/AGENT_RULES.md`](docs/AGENT_RULES.md) before making any change.
+> [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) and
+> [`docs/AGENT_RULES.md`](docs/AGENT_RULES.md) (the full context-tier
+> reading policy lives there) before making any change.
 
 ---
 
@@ -61,7 +62,7 @@ pnpm run doctor      # environment diagnostics
 pnpm dev             # http://localhost:3000 (use --webpack on Termux)
 ```
 
-Full platform guide: [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md).
+Full platform guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ### Environment variables
 
@@ -120,11 +121,14 @@ Feature-based modular monolith:
 ```
 src/
 ├── app/                    # Routing layer only (thin)
-│   ├── (auth)/             #   sign-in / sign-up — public auth screens
-│   ├── (app)/              #   main authenticated app shell
-│   ├── (admin)/            #   admin area (guards added later)
-│   ├── (staff)/            #   staff area (guards added later)
+│   ├── (auth)/             #   sign-in / sign-up / invite activation — public
+│   ├── (app)/              #   authenticated app shell
+│   ├── (onboarding)/       #   onboarding wizard (ADMIN-only)
+│   ├── (admin)/            #   admin area (requireRole ADMIN)
+│   ├── (staff)/            #   staff workspace (requireRole STAFF)
 │   ├── api/auth/[...all]/  #   Better Auth route handler
+│   ├── api/health/         #   dependency-free liveness probe
+│   ├── api/conversations/inbound/  # provider-neutral inbound webhook
 │   ├── error.tsx           #   route error boundary
 │   ├── global-error.tsx    #   root error boundary
 │   ├── not-found.tsx
@@ -132,17 +136,21 @@ src/
 ├── features/               # Domain modules — isolated from each other
 │   ├── auth/               #   sessions, sign-in/out flows
 │   ├── onboarding/         #   first-run setup (vertical-agnostic)
+│   ├── dashboard/          #   admin overview
 │   ├── services/           #   bookable service catalog
-│   ├── appointments/       #   booking lifecycle
-│   ├── conversations/      #   WhatsApp threads & templates
+│   ├── appointments/       #   booking lifecycle + Smart Create
+│   ├── conversations/      #   threads + conversation engine
 │   ├── customers/          #   customer directory & history
-│   └── staff/              #   team, roles, availability
+│   ├── staff/              #   team management + staff workspace
+│   ├── invitations/        #   invitation lifecycle
+│   ├── knowledge/          #   business FAQ entries
+│   └── settings/           #   business settings
 ├── components/
 │   ├── ui/                 # shadcn/ui primitives
 │   └── shared/             # cross-feature components (providers, etc.)
 ├── hooks/                  # cross-feature client hooks
 ├── lib/                    # framework-agnostic utilities (env, auth, utils)
-├── server/                 # server-only layer (db client singleton)
+├── server/                 # server-only layer (db client singleton + repositories)
 └── types/                  # small shared type contracts
 ```
 

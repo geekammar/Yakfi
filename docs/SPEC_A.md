@@ -1,8 +1,9 @@
 # FlowPilot — Spec A (Current Scope)
 
 > The complete, frozen scope of the current build. Anything not listed under
-> "Included" is out of scope. Last updated: PROMPT-13.5 (absorbed
-> `ROADMAP.md` — the spec sequence + exit criteria below; scope unchanged).
+> "Included" is out of scope. The spec sequence (A → B → C) and exit
+> criteria live in `ROADMAP.md`. Implementation status lives in
+> `BUILD_STATE.md` (never here). Last updated: PROMPT-ARCH-01.
 
 ## Scope Definition
 
@@ -93,6 +94,11 @@ collect evidence.
   view/edit AI summary
 - Message transport (WhatsApp provider integration) kept behind an interface;
   UI reads/writes via repositories
+- **Implemented (PROMPT-19, DECISIONS #29):** the conversation engine slice
+  — provider-neutral inbound webhook → engine → deterministic AI turn →
+  reply or NEED_HUMAN, with `ConversationAi` + `MessageTransport` as the
+  only vendor seams. The REAL WhatsApp and LLM providers remain undecided
+  operator decisions.
 
 ### 9. Appointments
 
@@ -116,19 +122,19 @@ collect evidence.
 
 ## Excluded (do NOT build)
 
-| Excluded                | Reason                                             |
-| ----------------------- | -------------------------------------------------- |
-| Billing / subscriptions | Pilots are invoiced manually                       |
-| Payments                | No money movement inside the product               |
-| CRM features            | Pipelines/leads are out of product identity        |
-| Marketing tools         | No campaigns/broadcasts                            |
-| Founder Console         | Founder-side tooling arrives in Spec B             |
-| Discovery Engine        | Vertical scoring arrives in Spec C                 |
-| Marketplace             | Never part of FlowPilot identity                   |
-| Public API platform     | No external developers during discovery            |
-| Multi-language UI       | Arabic-only until verticalization                  |
-| Native mobile apps      | PWA covers mobile                                  |
-| Automated reminders     | Listed only as future scalability note; not Spec A |
+| Excluded                | Reason                                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Billing / subscriptions | Deferred (not never — DECISIONS #36); pilots are invoiced manually. Usage/cost metering IS in scope (`ECONOMICS.md`) |
+| Payments                | No money movement inside the product                                                                                 |
+| CRM features            | Pipelines/leads are out of product identity                                                                          |
+| Marketing tools         | No campaigns/broadcasts                                                                                              |
+| Founder Console         | Founder-side tooling arrives in Spec B                                                                               |
+| Discovery Engine        | Vertical scoring arrives in Spec C                                                                                   |
+| Marketplace             | Never part of FlowPilot identity                                                                                     |
+| Public API platform     | No external developers during discovery                                                                              |
+| Multi-language UI       | Arabic-only until verticalization                                                                                    |
+| Native mobile apps      | PWA covers mobile                                                                                                    |
+| Automated reminders     | Listed only as future scalability note; not Spec A                                                                   |
 
 ## Screens (Included)
 
@@ -150,65 +156,15 @@ collect evidence.
 | `(admin)`   | `/admin/team`         | Team management                                                                                                            |
 | `(staff)`   | `/staff`              | Staff area shell (own agenda/tasks)                                                                                        |
 
-Route groups/layouts already exist; individual screens land prompt-by-prompt.
-The public `/sign-up` route exists today as a placeholder only and is no
-longer a Spec A deliverable — invitation-based activation replaces it as the
-pilot account-creation flow. Exact invitation route naming is an
-implementation decision for the next prompt. Do NOT add Founder Console or
-any Spec B functionality here.
+Route groups/layouts exist and every Spec A screen listed above is
+implemented (see `BUILD_STATE.md → Completed Major Work`). The public
+`/sign-up` route exists as a placeholder only and is no longer a Spec A
+deliverable — invitation-based activation replaces it as the pilot
+account-creation flow. Do NOT add Founder Console or any Spec B
+functionality here.
 
 ## Spec Sequence & Exit Criteria
 
-> Merged from `ROADMAP.md` (PROMPT-13.5 documentation reset). Each spec is
-> frozen before the next begins. Status tracking: `BUILD_STATE.md`.
-
-### Spec A — Discovery Foundation + Booking Core (CURRENT)
-
-**Goal:** a pilot-ready generic engine that proves daily usefulness for one
-business at a time.
-
-**Exit criteria:**
-
-- A real business can be onboarded in < 1 day using the app alone.
-- A conversation can flow: customer message → AI/staff reply → booked,
-  confirmed appointment.
-- Owner can see today's agenda and act on `NEED_HUMAN` threads.
-
-### Spec B — Evidence Layer + Founder Side (planned)
-
-**Goal:** turn pilot operations into structured, comparable evidence.
-
-Contents (planned): 1. Pilot tracking (pilot registry: business, vertical,
-start date, plan price, status trial/paid/churned; weekly check-in log). 2. ROI tracking (baseline vs. current: recovered bookings, response time,
-no-show rate; monthly ROI statement per pilot). 3. Vertical registry
-(first-class vertical records attached to pilots; vertical-scoped
-copy/template packs — still no vertical UI forks). 4. Evidence logging
-(structured event log: onboarding steps, objections, feature requests,
-churn reasons; exportable timeline per vertical). 5. Founder Side
-(cross-pilot read-only founder dashboard over the same database;
-founder-only route group; no new infrastructure).
-
-Still excluded: billing automation, payments, public API.
-
-**Exit criterion:** the founder can answer "which vertical is winning and
-why?" from the product, not from memory.
-
-### Spec C — Vertical Discovery Engine (planned)
-
-**Goal:** make the vertical decision data-driven and repeatable.
-
-Contents (planned): vertical scoring (composite score per vertical from the
-`PRODUCT_STRATEGY.md` decision criteria), willingness-to-pay tracking,
-feature clustering (grouped requests/objections by vertical), and a decision
-center (guided comparison + double-down / iterate / drop recommendation with
-evidence links).
-
-**Exit criterion:** a documented, evidence-backed choice of the winning
-vertical, ready for the verticalization plan in `PRODUCT_STRATEGY.md`.
-
-### Beyond Spec C (unplanned — do not start)
-
-Geographic expansion playbook, vertical-specific deepening (e.g., dental
-recall cycles), automated reminders/notifications, public API (only if a
-paying partner demands it). Nothing here may be built without a scope
-decision recorded in `DECISIONS.md`.
+Moved to `ROADMAP.md` (PROMPT-ARCH-01): Spec A → Spec B (Evidence Layer +
+Founder Side) → Spec C (Vertical Discovery Engine), with goals, contents,
+and exit criteria. Implementation status: `BUILD_STATE.md`.

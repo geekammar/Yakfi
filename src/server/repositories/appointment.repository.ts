@@ -13,6 +13,50 @@ import type {
 
 const notDeleted = { deletedAt: null } as const;
 
+/**
+ * Booking concurrency (DECISIONS #34, PROMPT-ARCH-02): conflict-checked
+ * writes run in SERIALIZABLE transactions with a bounded retry loop.
+ * Under SSI, two concurrent transactions that both pass the overlap
+ * count and both insert the same slot CANNOT both commit — one aborts
+ * (Prisma P2034) and the retry re-evaluates the conflict check against
+ * the now-committed row (a real conflict → typed null result; a rare
+ * false-positive abort → the retry succeeds). This preserves the exact
+ * existing conflict rule — including its asymmetric staff/unassigned
+ * scoping — which is NOT expressible as a symmetric DB exclusion
+ * constraint; serializability IS the invariant here.
+ */
+const SERIALIZABLE_ATTEMPTS = 3;
+
+/** Prisma P2034 — serialization failure / deadlock in a transaction. */
+function isTransactionConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2034"
+  );
+}
+
+/**
+ * Runs a conflict-checked write with serializable semantics. Exhausted
+ * retries surface as a typed conflict (null) — the honest, rare
+ * worst-case is a user-visible SLOT_CONFLICT that a manual retry
+ * resolves.
+ */
+async function withSerializableRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T | null> {
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isTransactionConflict(error)) throw error;
+      if (attempt === SERIALIZABLE_ATTEMPTS) return null;
+    }
+  }
+  return null;
+}
+
 /** "YYYY-MM-DD" → UTC midnight Date (matches Prisma @db.Date). */
 function toDate(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
@@ -197,38 +241,51 @@ export class AppointmentRepository {
     });
   }
 
-  async createWithConflictCheck(input: CreateAppointmentDto) {
+  /**
+   * Conflict-checked create — SERIALIZABLE + retry (PROMPT-ARCH-02).
+   * Returns the appointment, or null when the slot is (or became)
+   * taken. `branchId` is part of the DTO and is written as-is — callers
+   * resolve it SERVER-side (never client input).
+   */
+  async createWithConflictCheck(
+    input: CreateAppointmentDto,
+  ): Promise<Appointment | null> {
     const { date, startTime, endTime, assignedUserId, notes, ...rest } = input;
-    return db.$transaction(async (tx) => {
-      const conflict = await tx.appointment.count({
-        where: {
-          businessId: input.businessId,
-          ...notDeleted,
-          date: toDate(date),
-          status: { in: ["PENDING", "CONFIRMED"] },
-          ...(assignedUserId ? { assignedUserId } : {}),
-          startTime: { lt: toTime(endTime) },
-          endTime: { gt: toTime(startTime) },
-        },
-      });
-      if (conflict > 0) return null;
+    return withSerializableRetry(() =>
+      db.$transaction(
+        async (tx) => {
+          const conflict = await tx.appointment.count({
+            where: {
+              businessId: input.businessId,
+              ...notDeleted,
+              date: toDate(date),
+              status: { in: ["PENDING", "CONFIRMED"] },
+              ...(assignedUserId ? { assignedUserId } : {}),
+              startTime: { lt: toTime(endTime) },
+              endTime: { gt: toTime(startTime) },
+            },
+          });
+          if (conflict > 0) return null;
 
-      const appointment = await tx.appointment.create({
-        data: {
-          ...rest,
-          date: toDate(date),
-          startTime: toTime(startTime),
-          endTime: toTime(endTime),
-          ...(assignedUserId != null ? { assignedUserId } : {}),
-          ...(notes !== undefined ? { notes } : {}),
+          const appointment = await tx.appointment.create({
+            data: {
+              ...rest,
+              date: toDate(date),
+              startTime: toTime(startTime),
+              endTime: toTime(endTime),
+              ...(assignedUserId != null ? { assignedUserId } : {}),
+              ...(notes !== undefined ? { notes } : {}),
+            },
+          });
+          await tx.customer.update({
+            where: { id: input.customerId },
+            data: { lastAppointmentAt: new Date() },
+          });
+          return appointment;
         },
-      });
-      await tx.customer.update({
-        where: { id: input.customerId },
-        data: { lastAppointmentAt: new Date() },
-      });
-      return appointment;
-    });
+        { isolationLevel: "Serializable" },
+      ),
+    );
   }
 
   async update(id: string, input: UpdateAppointmentDto): Promise<Appointment> {
@@ -246,40 +303,50 @@ export class AppointmentRepository {
     });
   }
 
+  /**
+   * Conflict-checked reschedule — SERIALIZABLE + retry
+   * (PROMPT-ARCH-02). Same semantics as create: null = the new slot is
+   * (or became) taken.
+   */
   async rescheduleWithConflictCheck(
     id: string,
     input: { date: string; startTime: string; endTime: string },
-  ) {
-    return db.$transaction(async (tx) => {
-      const appointment = await tx.appointment.findFirst({
-        where: { id, ...notDeleted },
-      });
-      if (!appointment) return null;
-      const conflict = await tx.appointment.count({
-        where: {
-          businessId: appointment.businessId,
-          ...notDeleted,
-          id: { not: id },
-          date: toDate(input.date),
-          status: { in: ["PENDING", "CONFIRMED"] },
-          ...(appointment.assignedUserId
-            ? { assignedUserId: appointment.assignedUserId }
-            : {}),
-          startTime: { lt: toTime(input.endTime) },
-          endTime: { gt: toTime(input.startTime) },
-        },
-      });
-      if (conflict > 0) return null;
+  ): Promise<Appointment | null> {
+    return withSerializableRetry(() =>
+      db.$transaction(
+        async (tx) => {
+          const appointment = await tx.appointment.findFirst({
+            where: { id, ...notDeleted },
+          });
+          if (!appointment) return null;
+          const conflict = await tx.appointment.count({
+            where: {
+              businessId: appointment.businessId,
+              ...notDeleted,
+              id: { not: id },
+              date: toDate(input.date),
+              status: { in: ["PENDING", "CONFIRMED"] },
+              ...(appointment.assignedUserId
+                ? { assignedUserId: appointment.assignedUserId }
+                : {}),
+              startTime: { lt: toTime(input.endTime) },
+              endTime: { gt: toTime(input.startTime) },
+            },
+          });
+          if (conflict > 0) return null;
 
-      return tx.appointment.update({
-        where: { id },
-        data: {
-          date: toDate(input.date),
-          startTime: toTime(input.startTime),
-          endTime: toTime(input.endTime),
+          return tx.appointment.update({
+            where: { id },
+            data: {
+              date: toDate(input.date),
+              startTime: toTime(input.startTime),
+              endTime: toTime(input.endTime),
+            },
+          });
         },
-      });
-    });
+        { isolationLevel: "Serializable" },
+      ),
+    );
   }
 
   async setStatus(id: string, status: AppointmentStatus) {

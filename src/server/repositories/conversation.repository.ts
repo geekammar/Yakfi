@@ -6,6 +6,7 @@ import type {
 } from "@/lib/validation";
 import { paginationSchema, paginationToSkipTake } from "@/lib/validation";
 import { db } from "@/server/db";
+import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
 import type {
   Conversation,
   ConversationStatus,
@@ -165,12 +166,24 @@ export class ConversationRepository {
   /**
    * Adds a message and advances `lastMessageAt` in one transaction.
    * This is the single write path for messages.
+   *
+   * With `dedupe` (the inbound webhook path, PROMPT-ARCH-02): the
+   * claim's conversationId/customerMessageId are recorded in the SAME
+   * transaction as the message insert — "claim has a message id" ⟺
+   * "message row exists". If a concurrent duplicate already recorded a
+   * message for the claim, the conditional update matches zero rows,
+   * the whole transaction (including this message insert) rolls back,
+   * and `InboundDuplicateError` carries the winner's ids — a retried
+   * webhook can never double-write a customer message.
    */
   async addMessage(
     input: CreateMessageDto,
     workflow?: {
       assignedUserId?: string | null;
       status?: ConversationStatus;
+    },
+    dedupe?: {
+      claimId: string;
     },
   ): Promise<Message> {
     return db.$transaction(async (tx) => {
@@ -181,6 +194,25 @@ export class ConversationRepository {
         where: { id: input.conversationId },
         data: { lastMessageAt: message.createdAt, ...workflow },
       });
+      if (dedupe) {
+        const won = await tx.inboundMessageDedupe.updateMany({
+          where: { id: dedupe.claimId, customerMessageId: null },
+          data: {
+            customerMessageId: message.id,
+            conversationId: input.conversationId,
+          },
+        });
+        if (won.count === 0) {
+          const winner = await tx.inboundMessageDedupe.findUnique({
+            where: { id: dedupe.claimId },
+            select: { conversationId: true, customerMessageId: true },
+          });
+          throw new InboundDuplicateError({
+            conversationId: winner?.conversationId ?? null,
+            customerMessageId: winner?.customerMessageId ?? null,
+          });
+        }
+      }
       return message;
     });
   }

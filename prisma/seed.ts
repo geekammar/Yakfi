@@ -22,6 +22,7 @@ import {
 } from "./demo-data";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
+import { createLocalAccountIssuer } from "better-auth/db";
 
 import "dotenv/config";
 
@@ -42,6 +43,12 @@ async function main() {
   console.log("🌱 بدء تعبئة البيانات التجريبية…");
 
   // ── Wipe previous demo data (idempotent re-runs, demo business only) ──
+  await prisma.usageRecord.deleteMany({
+    where: { businessId: DEMO_IDS.business },
+  });
+  await prisma.inboundMessageDedupe.deleteMany({
+    where: { businessId: DEMO_IDS.business },
+  });
   await prisma.message.deleteMany({
     where: { conversation: { businessId: DEMO_IDS.business } },
   });
@@ -55,6 +62,17 @@ async function main() {
     where: { businessId: DEMO_IDS.business },
   });
   await prisma.service.deleteMany({
+    where: { businessId: DEMO_IDS.business },
+  });
+  // Release the Default-Branch pointer before deleting branches (ARCH-02:
+  // businesses.default_branch_id → branches is ON DELETE RESTRICT — without
+  // this, a re-run would fail on the FK while wiping). No-op on a fresh
+  // database where the demo business does not exist yet.
+  await prisma.business.updateMany({
+    where: { id: DEMO_IDS.business },
+    data: { defaultBranchId: null },
+  });
+  await prisma.branch.deleteMany({
     where: { businessId: DEMO_IDS.business },
   });
 
@@ -93,6 +111,21 @@ async function main() {
   });
   console.log("✔ المنشأة:", business.name, `(${demoBusiness.city})`);
 
+  // ── Default Branch (DECISIONS #30, PROMPT-ARCH-02) ──
+  const branch = await prisma.branch.create({
+    data: {
+      id: stableId("branch", "default"),
+      businessId: business.id,
+      name: "الفرع الرئيسي",
+      isActive: true,
+    },
+  });
+  await prisma.business.update({
+    where: { id: business.id },
+    data: { defaultBranchId: branch.id },
+  });
+  console.log("✔ الفرع الافتراضي:", branch.name);
+
   // ── Team: ADMIN + STAFF demo users (with login credentials) ──
   const users = new Map<"admin" | "staff", string>();
 
@@ -125,6 +158,9 @@ async function main() {
     });
 
     // Better Auth credential account — lets the demo user sign in immediately.
+    // `issuer` (Better Auth v1.7 core field) is required by sign-in's
+    // credential-account matching (sign-in looks up providerId "credential"
+    // + issuer "local:credential" + accountId = user id).
     const existing = await prisma.account.findFirst({
       where: { userId: user.id, providerId: "credential" },
     });
@@ -135,8 +171,15 @@ async function main() {
           userId: user.id,
           accountId: user.id,
           providerId: "credential",
+          issuer: createLocalAccountIssuer("credential"),
           password: await hashPassword(member.password),
         },
+      });
+    } else if (existing.issuer !== createLocalAccountIssuer("credential")) {
+      // Repair pre-issuer accounts (seeded before the column existed).
+      await prisma.account.update({
+        where: { id: existing.id },
+        data: { issuer: createLocalAccountIssuer("credential") },
       });
     }
 
@@ -206,6 +249,7 @@ async function main() {
         id: conversation.id,
         businessId: business.id,
         customerId,
+        branchId: branch.id,
         assignedUserId: userId(conversation.assignee),
         status: conversation.status,
         aiSummary: conversation.aiSummary ?? undefined,
@@ -255,6 +299,7 @@ async function main() {
         businessId: business.id,
         customerId,
         serviceId,
+        branchId: branch.id,
         assignedUserId: userId(appointment.assignee),
         date: new Date(`${date}T00:00:00.000Z`),
         startTime: new Date(`1970-01-01T${appointment.start}:00.000Z`),

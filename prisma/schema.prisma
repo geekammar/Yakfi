@@ -74,15 +74,57 @@ model Business {
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt          DateTime? @map("deleted_at")
 
-  users         User[]
-  services      Service[]
-  customers     Customer[]
-  conversations Conversation[]
-  appointments  Appointment[]
-  invitations   Invitation[]
+  // The Business's Default Branch (DECISIONS #30, PROMPT-ARCH-02): an
+  // operational unit pointer — NOT the tenant boundary (businessId is).
+  // Exactly one per Business, maintained structurally by the atomic
+  // business-creation path (business + Default Branch + pointer in ONE
+  // transaction) and the ARCH-02 backfill. Nullable only inside that
+  // transaction; every existing Business row has it set.
+  defaultBranchId    String?   @unique @map("default_branch_id")
+
+  users              User[]
+  branches           Branch[]
+  defaultBranch      Branch?   @relation("DefaultBranch", fields: [defaultBranchId], references: [id], onDelete: Restrict)
+  services           Service[]
+  customers          Customer[]
+  conversations      Conversation[]
+  appointments       Appointment[]
+  invitations        Invitation[]
+  whatsappConnections WhatsAppConnection[]
+  providerProfiles   ProviderProfile[]
+  inboundDedupe      InboundMessageDedupe[]
+  usageRecords       UsageRecord[]
 
   @@index([isActive])
   @@map("businesses")
+}
+
+// ─── Branches (DECISIONS #30, PROMPT-ARCH-02) ────────────────
+// Branch = an operational unit INSIDE the Business. The Business stays
+// the tenant boundary (businessId); Branch is selective operational
+// scoping only. Every Business has exactly one Default Branch (the
+// Business.defaultBranchId pointer — no isDefault flag, no second
+// source of truth). No Branch CRUD UI exists; the current UX remains
+// effectively single-Branch (the Default Branch).
+
+model Branch {
+  id         String    @id @default(uuid())
+  businessId String    @map("business_id")
+  name       String
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  business            Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  defaultForBusiness  Business?            @relation("DefaultBranch")
+  conversations       Conversation[]
+  appointments        Appointment[]
+  whatsappConnections WhatsAppConnection[]
+  providerBranches    ProviderBranch[]
+
+  @@index([businessId])
+  @@map("branches")
 }
 
 model Service {
@@ -96,8 +138,9 @@ model Service {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointments Appointment[]
+  business          Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments      Appointment[]
+  providerServices  ProviderService[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -133,6 +176,10 @@ model Conversation {
   id             String             @id @default(uuid())
   businessId     String             @map("business_id")
   customerId     String             @map("customer_id")
+  // Branch-aware (DECISIONS #30): the operational unit this thread runs
+  // in — always the Business's Default Branch today (single-Branch UX).
+  // Resolved SERVER-side from the Business; never client input.
+  branchId       String             @map("branch_id")
   assignedUserId String?            @map("assigned_user_id")
   status         ConversationStatus @default(AI_ACTIVE)
   lastMessageAt  DateTime?          @map("last_message_at")
@@ -143,11 +190,13 @@ model Conversation {
 
   business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch      Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   assignedTo  User?     @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   messages    Message[]
 
   @@index([businessId])
   @@index([businessId, status])
+  @@index([branchId])
   @@index([customerId])
   @@index([assignedUserId])
   @@index([lastMessageAt])
@@ -176,6 +225,9 @@ model Appointment {
   businessId     String            @map("business_id")
   customerId     String            @map("customer_id")
   serviceId      String            @map("service_id")
+  // Branch-aware (DECISIONS #30): always the Business's Default Branch
+  // today; resolved SERVER-side, never client input.
+  branchId       String            @map("branch_id")
   assignedUserId String?           @map("assigned_user_id")
   date           DateTime          @db.Date
   startTime      DateTime          @map("start_time") @db.Time
@@ -189,14 +241,180 @@ model Appointment {
   business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   service    Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
   assignedTo User?     @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   @@index([businessId])
   @@index([businessId, date])
+  @@index([branchId, date])
   @@index([status])
   @@index([customerId])
   @@index([serviceId])
   @@map("appointments")
+}
+
+// ─── WhatsApp connections (DECISIONS #31, PROMPT-ARCH-02) ────
+// First-class, Business-owned WhatsApp identity with an OPTIONAL Branch
+// scope and a provider-neutral external identity. The Business owns the
+// number; a future Business-shared connection (branchId null) stays
+// architecturally possible. `status` is a stable machine key validated
+// by the Zod union `WHATSAPP_CONNECTION_STATUS_VALUES` — no Prisma
+// enum, extending the list needs no migration (the confirmationMode /
+// vertical pattern). SECRETS: `credentialsRef` stores a REFERENCE to a
+// secret (env var name / secret-store pointer / encrypted-blob locator)
+// — NEVER raw provider credentials. No vendor is integrated; no
+// connection-management UI exists yet.
+
+model WhatsAppConnection {
+  id             String    @id @default(uuid())
+  businessId     String    @map("business_id")
+  branchId       String?   @map("branch_id")
+  displayName    String?   @map("display_name")
+  // The WhatsApp number itself (E.164). Unique per Business — a number
+  // is one WhatsApp identity; migrating it between Businesses is a
+  // deliberate future workflow, not a schema assumption.
+  phoneNumber    String    @map("phone_number")
+  // Provider-neutral external identity: provider machine key (e.g. a
+  // future "meta_cloud") + the provider's own connection/WABA id. Both
+  // nullable until a provider decision exists (DECISIONS #29).
+  provider       String?
+  externalId     String?   @map("external_id")
+  status         String    @default("PENDING")
+  credentialsRef String?   @map("credentials_ref")
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@unique([businessId, phoneNumber])
+  @@index([businessId])
+  @@index([branchId])
+  @@map("whatsapp_connections")
+}
+
+// ─── Providers (DECISIONS #32, PROMPT-ARCH-02) ───────────────
+// A Provider is a bookable professional identity — NOT an authorization
+// role (roles stay ADMIN/STAFF only). ProviderProfile is minimal and
+// optional: attached to a User, owned by the Business. ProviderService
+// and ProviderBranch are lightweight eligibility relations. One
+// Appointment carries at most one Provider (the existing
+// assignedUserId seam — unchanged in this pass).
+
+model ProviderProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique @map("user_id")
+  businessId  String   @map("business_id")
+  displayName String?  @map("display_name")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services ProviderService[]
+  branches ProviderBranch[]
+
+  @@index([businessId])
+  @@map("provider_profiles")
+}
+
+model ProviderService {
+  id         String   @id @default(uuid())
+  providerId String   @map("provider_id")
+  serviceId  String   @map("service_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, serviceId])
+  @@index([serviceId])
+  @@map("provider_services")
+}
+
+model ProviderBranch {
+  id         String   @id @default(uuid())
+  providerId String   @map("provider_id")
+  branchId   String   @map("branch_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  branch   Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, branchId])
+  @@index([branchId])
+  @@map("provider_branches")
+}
+
+// ─── Inbound webhook idempotency (DECISIONS #34, PROMPT-ARCH-02) ──
+// Durable dedupe ledger for the provider-neutral inbound boundary: ONE
+// row per (business, external message key). The external key is the
+// transport's message id when provided, else a deterministic SHA-256 of
+// the canonical payload — provider-neutral, tenant-safe. The row is
+// claimed before processing and its conversationId/customerMessageId
+// are recorded in the SAME transaction as the customer message insert,
+// so "row has a message id" ⟺ "message row exists" — a retried webhook
+// can never duplicate a persisted message, and a crashed attempt never
+// strands the key. Ids are plain references (no FKs) on purpose: they
+// are provenance records, and hard deletes cascade from the Business
+// anyway.
+
+model InboundMessageDedupe {
+  id                String   @id @default(uuid())
+  businessId        String   @map("business_id")
+  externalKey       String   @map("external_key")
+  conversationId    String?  @map("conversation_id")
+  customerMessageId String?  @map("customer_message_id")
+  claimedAt         DateTime @default(now()) @map("claimed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, externalKey])
+  @@index([businessId])
+  @@map("inbound_message_dedupe")
+}
+
+// ─── Usage telemetry (DECISIONS #36, PROMPT-ARCH-02) ─────────
+// Append-only RAW USAGE FACTS ONLY — no pricing, no billing, no
+// entitlements (Usage ≠ Cost ≠ Price ≠ Entitlement ≠ Billing; see
+// ECONOMICS.md). `kind` is a stable machine key validated by the Zod
+// union `USAGE_KIND_VALUES`; `status` by `USAGE_STATUS_VALUES`.
+// Token counts + provider/model identifiers are stored so any future
+// cost model can be computed RETROACTIVELY without rewriting history;
+// `estimatedCostMicros` is an optional point-in-time snapshot (micro
+// units of the provider's billing currency) — never computed by this
+// codebase yet. NO message content, NO secrets, NO chain-of-thought —
+// only ids and counters. Deletes happen solely via the Business cascade.
+
+model UsageRecord {
+  id                   String   @id @default(uuid())
+  businessId           String   @map("business_id")
+  kind                 String
+  conversationId       String?  @map("conversation_id")
+  messageId            String?  @map("message_id")
+  whatsappConnectionId String?  @map("whatsapp_connection_id")
+  provider             String?
+  model                String?
+  inputTokens          Int?     @map("input_tokens")
+  outputTokens         Int?     @map("output_tokens")
+  estimatedCostMicros  Int?     @map("estimated_cost_micros")
+  status               String
+  occurredAt           DateTime @map("occurred_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, occurredAt])
+  @@index([businessId, kind, occurredAt])
+  @@index([conversationId])
+  @@map("usage_records")
 }
 
 // ─── Invitations ─────────────────────────────────────────────
@@ -251,17 +469,26 @@ model User {
   businessId    String?   @map("business_id")
   role          UserRole  @default(STAFF)
   isActive      Boolean   @default(true)
+  // Account scope (DECISIONS #22, PROMPT-ARCH-02): explicit platform-level
+  // authorization marker — "BUSINESS" (default; every account the
+  // invitation-first flows create) or "PLATFORM" (Platform Operator).
+  // Platform access is NEVER inferred from businessId = null; the marker
+  // is server-managed (Better Auth input:false) and unreachable from any
+  // client input. NOT a role: business roles stay ADMIN/STAFF only.
+  accountType   String    @default("BUSINESS") @map("account_type")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
   business              Business?     @relation(fields: [businessId], references: [id], onDelete: SetNull)
   sessions              Session[]
   accounts              Account[]
+  providerProfile       ProviderProfile?
   assignedConversations Conversation[] @relation("ConversationAssignee")
   assignedAppointments  Appointment[]  @relation("AppointmentAssignee")
-  invitationsCreated    Invitation[]  @relation("InvitationCreator")
+  invitationsCreated    Invitation[]   @relation("InvitationCreator")
 
   @@index([businessId])
+  @@index([accountType])
   @@map("users")
 }
 
@@ -286,6 +513,11 @@ model Account {
   userId                String    @map("user_id")
   accountId             String    @map("account_id")
   providerId            String    @map("provider_id")
+  // Better Auth core field (v1.7): sign-up writes the synthetic issuer
+  // ("local:credential" for local accounts) and sign-in matches the
+  // credential account by it. Required by the installed version's
+  // credential-account lookup — without it every credential flow fails.
+  issuer                String?
   accessToken           String?   @map("access_token")
   refreshToken          String?   @map("refresh_token")
   idToken               String?   @map("id_token")

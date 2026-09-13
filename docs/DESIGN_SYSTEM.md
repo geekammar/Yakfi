@@ -1,10 +1,10 @@
-# FlowPilot — UX & Design System
+# FlowPilot — Design System (UX & UI)
 
 > The ONE canonical UX/design document. Implemented tokens live in
 > `src/app/globals.css`; primitives in `src/components/ui` and
 > `src/components/shared`; canonical statuses in `src/lib/status.ts`.
-> Formed in the PROMPT-13.5 reset by merging `DESIGN_SYSTEM.md` and the UX
-> improvement plan. UI copy terms: `PRODUCT_GLOSSARY.md` (Arabic column).
+> Renamed from `UX.md` in the PROMPT-ARCH-01 documentation reconciliation.
+> UI copy terms: `PRODUCT_GLOSSARY.md` (Arabic column).
 
 ## UX Principles (binding)
 

@@ -10,12 +10,17 @@
  */
 
 import { AppointmentRepository } from "./appointment.repository";
+import { BranchRepository } from "./branch.repository";
 import { BusinessRepository } from "./business.repository";
 import { ConversationRepository } from "./conversation.repository";
 import { CustomerRepository } from "./customer.repository";
+import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
+import { ProviderRepository } from "./provider.repository";
 import { ServiceRepository } from "./service.repository";
+import { UsageRepository } from "./usage.repository";
 import { UserRepository } from "./user.repository";
+import { WhatsAppConnectionRepository } from "./whatsapp-connection.repository";
 
 export const businessRepository = new BusinessRepository();
 export const userRepository = new UserRepository();
@@ -24,13 +29,23 @@ export const customerRepository = new CustomerRepository();
 export const conversationRepository = new ConversationRepository();
 export const appointmentRepository = new AppointmentRepository();
 export const invitationRepository = new InvitationRepository();
+export const branchRepository = new BranchRepository();
+export const whatsAppConnectionRepository = new WhatsAppConnectionRepository();
+export const providerRepository = new ProviderRepository();
+export const inboundDedupeRepository = new InboundDedupeRepository();
+export const usageRepository = new UsageRepository();
 
 export {
   AppointmentRepository,
+  BranchRepository,
   BusinessRepository,
   ConversationRepository,
   CustomerRepository,
+  InboundDedupeRepository,
   InvitationRepository,
+  ProviderRepository,
   ServiceRepository,
+  UsageRepository,
   UserRepository,
+  WhatsAppConnectionRepository,
 };

@@ -37,6 +37,17 @@ export const auth = betterAuth({
         input: false,
         defaultValue: true,
       },
+      // Account scope (DECISIONS #22, PROMPT-ARCH-02): explicit
+      // PLATFORM/BUSINESS marker. input:false — a client can never set
+      // or escalate it; every invitation-first flow creates BUSINESS
+      // accounts only. Platform access is NEVER inferred from
+      // businessId = null (see server/auth/guards.ts).
+      accountType: {
+        type: "string",
+        required: false,
+        input: false,
+        defaultValue: "BUSINESS",
+      },
     },
   },
 });

@@ -13,6 +13,12 @@ export const messageSenderTypeValues = ["CUSTOMER", "AI", "STAFF"] as const;
 const createConversationSchema = z.object({
   businessId: uuidSchema,
   customerId: uuidSchema,
+  /**
+   * Branch-aware (DECISIONS #30, PROMPT-ARCH-02): the operational unit
+   * the thread runs in — always resolved SERVER-side (the Business's
+   * Default Branch today); never accepted from client input.
+   */
+  branchId: uuidSchema,
   assignedUserId: uuidSchema.nullish(),
 });
 

@@ -1,7 +1,7 @@
 # FlowPilot — Project Vision
 
-> Single source of truth for product identity. Read this file before any
-> development work. Last updated: Prompt 03.
+> Single source of truth for product identity and non-negotiables. Read this
+> file before any development work. Last updated: PROMPT-ARCH-01.
 
 ## What FlowPilot Is
 
@@ -9,6 +9,10 @@
 
 It turns inbound WhatsApp conversations into confirmed, attended appointments —
 automatically where possible, with a human in the loop where it matters.
+
+**WhatsApp-first.** WhatsApp is the current product channel; additional
+channels are future possibilities only — FlowPilot does not become an
+omnichannel platform.
 
 ## Product Mission
 
@@ -50,14 +54,16 @@ The UI, domain model, and copy must remain **completely vertical-agnostic**.
 
 FlowPilot is **not**:
 
-| Not this                  | Why                                                             |
-| ------------------------- | --------------------------------------------------------------- |
-| A CRM                     | We do not manage sales pipelines or leads beyond booking flows. |
-| An ERP                    | No inventory, accounting, HR, or operations modules.            |
-| A POS                     | No point-of-sale, checkout, or payment processing.              |
-| A Marketing Platform      | No campaigns, broadcasts funnels, or ad tooling.                |
-| A Marketplace             | We are not a directory connecting customers to businesses.      |
-| A General Chatbot Builder | AI exists only for appointment conversion, not arbitrary bots.  |
+| Not this                  | Why                                                                 |
+| ------------------------- | ------------------------------------------------------------------- |
+| A CRM                     | We do not manage sales pipelines or leads beyond booking flows.     |
+| An ERP                    | No inventory, accounting, HR, or operations modules.                |
+| A POS                     | No point-of-sale, checkout, or payment processing.                  |
+| A Marketing Platform      | No campaigns, broadcasts funnels, or ad tooling.                    |
+| A Marketplace             | We are not a directory connecting customers to businesses.          |
+| A General Chatbot Builder | AI exists only for appointment conversion, not arbitrary bots.      |
+| An Enterprise Platform    | No roles engines, org charts, SSO, or governance — not prematurely. |
+| An Omnichannel Platform   | WhatsApp-first; the channel boundary stays thin.                    |
 
 If a proposed feature drifts toward any of the above, reject it or escalate
 for an explicit scope decision.

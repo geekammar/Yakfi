@@ -3,6 +3,19 @@ import { z } from "zod";
 
 export const userRoleValues = ["ADMIN", "STAFF"] as const;
 
+/**
+ * Account scope (DECISIONS #22, PROMPT-ARCH-02): the explicit
+ * platform-level authorization marker. "BUSINESS" is the default (and
+ * the only value any invitation/auth flow creates); "PLATFORM" marks a
+ * Platform Operator — a platform-level identity that is NOT a Business
+ * User and NOT a `UserRole`. Server-managed only (Better Auth
+ * `input: false` + no client DTO carries it); platform access is never
+ * inferred from `businessId = null`.
+ */
+export const accountTypeValues = ["PLATFORM", "BUSINESS"] as const;
+
+export const accountTypeSchema = z.enum(accountTypeValues);
+
 const createUserSchema = z.object({
   businessId: uuidSchema,
   name: z.string().trim().min(2, "الاسم قصير جداً").max(120),

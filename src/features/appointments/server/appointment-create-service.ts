@@ -31,12 +31,14 @@ import { createAppointmentFormSchema } from "@/features/appointments/schemas/app
 import type { CreateAppointmentActionResult } from "@/features/appointments/types";
 import type {
   AppointmentRepository,
+  BranchRepository,
   BusinessRepository,
   CustomerRepository,
   ServiceRepository,
 } from "@/server/repositories";
 import {
   appointmentRepository,
+  branchRepository,
   businessRepository,
   customerRepository,
   serviceRepository,
@@ -58,6 +60,7 @@ export type AppointmentCreateServiceDeps = {
   customerRepository: Pick<CustomerRepository, "findById">;
   serviceRepository: Pick<ServiceRepository, "findById">;
   businessRepository: Pick<BusinessRepository, "findById">;
+  branchRepository: Pick<BranchRepository, "findDefaultByBusiness">;
   appointmentRepository: Pick<AppointmentRepository, "createWithConflictCheck">;
 };
 
@@ -67,6 +70,7 @@ export const defaultAppointmentCreateServiceDeps: AppointmentCreateServiceDeps =
     customerRepository,
     serviceRepository,
     businessRepository,
+    branchRepository,
     appointmentRepository,
   };
 
@@ -145,12 +149,27 @@ export async function createAppointmentRecord(
   // Booking confirmation mode (PROMPT-09): server-derived from the
   // Business record — never client input. "automatic" confirms new
   // appointments on creation; "manual" (default) keeps them PENDING.
-  const business = await deps.businessRepository.findById(actor.businessId);
+  const [business, defaultBranch] = await Promise.all([
+    deps.businessRepository.findById(actor.businessId),
+    deps.branchRepository.findDefaultByBusiness(actor.businessId),
+  ]);
   if (!business) {
     return {
       success: false,
       code: "NO_BUSINESS",
       message: "لا يمكن الوصول إلى المنشأة",
+    };
+  }
+  // Branch-aware (DECISIONS #30, PROMPT-ARCH-02): the write is scoped to
+  // the Business's Default Branch — resolved SERVER-side; a client can
+  // never supply or choose a branch (single-Branch UX). A missing
+  // Default Branch is impossible by construction (atomic creation +
+  // ARCH-02 backfill); the generic create failure is the fail-safe.
+  if (!defaultBranch) {
+    return {
+      success: false,
+      code: "CREATE_FAILED",
+      message: "تعذر إنشاء الموعد الآن",
     };
   }
   const initialStatus =
@@ -162,6 +181,7 @@ export async function createAppointmentRecord(
         businessId: actor.businessId,
         customerId: customer.id,
         serviceId: service.id,
+        branchId: defaultBranch.id,
         assignedUserId: actor.userId,
         date: parsed.data.date,
         startTime: parsed.data.startTime,

@@ -1,8 +1,11 @@
 # FlowPilot — Architecture
 
-> Technical architecture reference. Read together with `SPEC_A.md` and
-> `BUILD_STATE.md`. Last updated: PROMPT-06 (activation → onboarding
-> integration).
+> Current technical architecture and dependency boundaries. Read together
+> with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
+> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-ARCH-03 —
+> the P0 hardening foundations of DECISIONS #30–#36 are IMPLEMENTED
+> (record: DECISIONS #38; schema: `DATABASE.md`), and the migration
+> chain is a complete empty-database bootstrap path (DECISIONS #40).
 
 ## Stack
 
@@ -33,14 +36,17 @@ No microservices, no message brokers, no external state stores.
 ```
 src/
 ├── app/                    # Routing layer only (thin) — route groups:
-│   ├── (auth)/             #   sign-in / sign-up
+│   ├── (auth)/             #   sign-in / sign-up / invite activation
 │   ├── (app)/              #   authenticated app shell (sidebar/bottom nav)
-│   ├── (admin)/            #   admin area
-│   ├── (staff)/            #   staff area
-│   └── api/auth/[...all]/  #   Better Auth handler
-├── features/               # Domain modules — isolated from each other
-│   ├── auth/ onboarding/ services/ appointments/
-│   ├── conversations/ customers/ staff/
+│   ├── (onboarding)/       #   onboarding wizard (ADMIN-only)
+│   ├── (admin)/            #   admin area (team management)
+│   ├── (staff)/            #   staff workspace (STAFF-only)
+│   └── api/                #   route handlers (auth, health,
+│                           #   conversations/inbound webhook)
+├── features/               # Domain modules — isolated from each other:
+│   ├── auth/ onboarding/ dashboard/ services/ settings/
+│   ├── appointments/ conversations/ customers/ staff/
+│   ├── invitations/ knowledge/
 ├── components/
 │   ├── ui/                 # shadcn/ui primitives (generated)
 │   └── shared/             # cross-feature components (AppShell, DataTable,
@@ -73,14 +79,139 @@ prisma/                     # schema.prisma + seed.ts
    `@/server` deliberately and stays small.
 6. No giant barrels or mega-utils.
 
+## Channel Boundary (WhatsApp-first)
+
+- WhatsApp is the **current product channel**; additional channels are
+  future possibilities only.
+- The boundary is **thin and channel-agnostic**: the Conversation Engine
+  works against provider-neutral seams (`MessageTransport`,
+  `ConversationAi` — DECISIONS #29) and never embeds vendor specifics.
+- Do NOT build omnichannel infrastructure: no channel registry, no generic
+  event bus, no channel capability matrix, no multi-channel UI.
+
+## Business / Branch Model (DECISIONS #30 — IMPLEMENTED, PROMPT-ARCH-02)
+
+- **Business** = the commercial tenant/company (billing identity, owner of
+  data). **Branch** = an operational unit inside the Business.
+- Every Business gets a **Default Branch** automatically — structurally:
+  `Business.defaultBranchId` is a one-to-one pointer, created in the SAME
+  transaction as the Business and backfilled for existing Businesses
+  (migration `20260910120000_...`). No `isDefault` flag, no second source
+  of truth.
+- The current product UX remains effectively single-Branch (the Default
+  Branch). Branch-aware ONLY where operationally meaningful — never
+  `branchId` on every table:
+
+| Scoping        | Entities                                                                        |
+| -------------- | ------------------------------------------------------------------------------- |
+| Branch-aware   | Conversation, Appointment, operational Availability context, WhatsAppConnection |
+| Business-level | Customer, User, Service, Knowledge                                              |
+| Relation-based | Provider ↔ Branch, Provider ↔ Service                                           |
+
+- `Conversation.branchId` and `Appointment.branchId` are required and
+  always resolved SERVER-side (the Default Branch today) — never client
+  input. No Branch CRUD UI exists.
+- A Customer can interact with multiple Branches (Customer stays
+  Business-level; never Branch-owned by default).
+- `User.branchId` is NEVER the multi-branch model.
+
+## Provider Model (DECISIONS #32 — IMPLEMENTED as data foundation, PROMPT-ARCH-02)
+
+- **Provider is NOT an authorization role** (roles stay ADMIN/STAFF only).
+  A Provider is a bookable capability/profile: a minimal `ProviderProfile`
+  attached to a User. No profession-specific role system, no generic
+  skills/capability engine.
+- **ProviderService** = lightweight Provider↔Service eligibility relation
+  (unique pair, same-Business validated in the repository). **ProviderBranch**
+  = lightweight Provider↔Branch relation (unique pair; a Provider may work
+  in multiple Branches).
+- **One Appointment carries at most one Provider** for now — represented by
+  the existing `assignedUserId` seam (unchanged in ARCH-02; a future
+  providerId rewiring is a separate decision). Multiple Providers can exist
+  in the same Business. Multi-provider appointments are explicitly deferred.
+- "أي دكتور / any provider" behavior: resolve eligible providers → resolve
+  availability → rank **deterministically** by useful/earliest slot →
+  return a small set (normally 2–3) → let the customer choose. This is NOT
+  an AI/ML recommendation engine; booking and availability stay
+  deterministic. (Flow not yet built — the relations are the foundation.)
+
+## Scheduling (DECISIONS #35 — scope unchanged)
+
+- Initial Provider availability **inherits Business working hours**.
+- Provider-specific shifts, leave, and complex workforce scheduling are
+  deferred. Do not build scheduling infrastructure the current pilot does
+  not require.
+
+## WhatsApp Connection (DECISIONS #31 — IMPLEMENTED as data foundation, PROMPT-ARCH-02)
+
+- `WhatsAppConnection` is a **first-class entity**: the Business owns the
+  WhatsApp identity — `businessId` required, `branchId` optional.
+- Default pilot model: one Default Branch + one Branch-scoped
+  WhatsAppConnection. A future **Business-shared** WhatsApp connection must
+  remain architecturally possible.
+- Provider-neutral by construction: `provider`/`externalId` are opaque
+  machine keys; `status` is a Zod-validated machine key; `credentialsRef`
+  stores a REFERENCE to a secret (env var / secret-store pointer / blob
+  locator) — NEVER raw credentials. No vendor is integrated; no
+  connection-management UI exists.
+- Do NOT hard-code "one Business = one WhatsApp number" as a permanent
+  domain assumption, and do NOT tie Conversation Core to a specific
+  WhatsApp provider. `Business.whatsappNumber` remains the inbound
+  business mapping until a real provider decision lands.
+
+## Responsibility Separation (DECISIONS #33 — binding; contract IMPLEMENTED, PROMPT-ARCH-02)
+
+| Layer               | Owns                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| Conversation Engine | orchestration, persistence, customer/conversation resolution, state, human handoff        |
+| AI                  | understanding, intent/entity/preference extraction, ambiguity handling, response phrasing |
+| Domain              | authoritative validation and deterministic execution                                      |
+
+**Rule: AI interprets. Domain decides and executes. Conversation
+orchestrates.**
+
+- AI must NEVER be the source of truth for availability, provider
+  eligibility, conflicts, or booking.
+- **AI minimal context (enforced by `ai-contract.ts`):** the request is a
+  bounded, typed object — current message + compact conversation state +
+  only task-relevant facts (services, knowledge entries, provider
+  preference, availability results when relevant). The complete
+  DB/business context is never sent on every AI call; the response is a
+  structured, bounded object (intent family, action, content, facts-only
+  extraction) — unknown keys (any provider "reasoning") are STRIPPED by
+  Zod, so chain-of-thought never crosses the boundary and is never
+  persisted.
+- Deterministic turns avoid AI calls when safely possible
+  (`bypassDeterministicAi` — the engine consults it before the assistant).
+- Never store chain-of-thought — the structured Conversation State stores
+  useful facts only.
+
+## Production Reliability Prerequisites (DECISIONS #34 — IMPLEMENTED, PROMPT-ARCH-02)
+
+1. Booking concurrency is protected at the DB/transaction boundary:
+   conflict-checked create/reschedule run in SERIALIZABLE transactions
+   with a bounded retry loop; concurrent conflicting creates cannot both
+   commit, and the loser surfaces the typed `SLOT_CONFLICT` (mechanism
+   rationale: DECISIONS #38 — the asymmetric conflict rule is not
+   expressible as symmetric DB exclusion constraints).
+2. Inbound webhook processing is idempotent: a durable
+   `inbound_message_dedupe` ledger (unique per business + external key) is
+   claimed BEFORE irreversible processing, and the claim's message ids are
+   recorded in the SAME transaction as the customer-message insert —
+   redeliveries return idempotent successes with the original ids and
+   zero new side effects.
+3. Duplicate provider events cannot create duplicate business actions
+   (same ledger; the external key is the transport message id when
+   provided, else a deterministic hash of the canonical payload).
+
 ## Authentication & Authorization Model
 
-> Locked in Prompt 09 (Auth & User Management Architecture Alignment).
-> Binding decision: `DECISIONS.md` #22. Implementation lands
-> prompt-by-prompt: the invitation foundation, ADMIN account
-> activation, and the activation UI → onboarding handoff (PROMPT-06,
-> DECISIONS #25) exist; platform identity, invitation creation UI, and
-> the STAFF activation workflow are pending.
+> Locked in Prompt 09; binding decisions: `DECISIONS.md` #22–#25, #27.
+> Implementation is complete for the BUSINESS scope: invitation model,
+> creation, acceptance, ADMIN/STAFF activation, activation UI
+> (`/invite/[token]`), role-aware sign-in handoff, onboarding handoff, and
+> STAFF invitation via team management. The Platform Operator identity /
+> platform-level authorization marker remains planned (no code).
 
 **One authentication system.** Better Auth is the single authentication
 layer for ALL human users — Platform Operators, Business ADMINs, and
@@ -97,8 +228,15 @@ provider.
 Platform-level access is NOT a Business role. The Platform Operator
 (Founder / Super User) is a platform-level identity, NOT a Business User,
 and MUST NOT be represented by `UserRole.ADMIN` or `UserRole.STAFF`. The
-Founder Side UI remains outside Spec A and belongs conceptually to the
-future Spec B Founder Side.
+platform-level authorization marker is IMPLEMENTED (PROMPT-ARCH-02):
+`users.accountType` (`PLATFORM` / `BUSINESS`, machine key, default
+BUSINESS) — server-managed (Better Auth `input: false`), unreachable from
+any client input, and never inferred from `businessId = null`. Server
+primitives: `isPlatformOperator(user)` and `requirePlatformOperator()`
+(`src/server/auth/guards.ts`); Business-role guards (`requireRole`,
+`requireApiUser({role})`) refuse platform operators. No operator account is
+provisioned by any flow yet (direct-DB operator action); the Founder Side
+UI remains Spec B.
 
 **Business roles remain `ADMIN` and `STAFF` only** (DECISIONS #02):
 
@@ -133,7 +271,8 @@ acquisition/provisioning mode after PMF.
 
 **Tenancy & authorization rules (non-negotiable):**
 
-1. Business data remains tenant-scoped by `businessId`.
+1. Business data remains tenant-scoped by `businessId` (the tenant
+   boundary); Branch scoping is selective (see Business / Branch Model).
 2. Business ADMIN/STAFF may access only their Business.
 3. UI visibility is NOT an authorization mechanism.
 4. Server-side authorization is mandatory.
@@ -145,26 +284,33 @@ acquisition/provisioning mode after PMF.
 10. Do NOT introduce organizations/membership frameworks unless later
     evidence requires them.
 
-Conceptual account model, Invitation model, and lifecycles:
-`DATABASE.md → Target Authorization / Invitation Model`. Implementation
-status: the Invitation model, creation, acceptance, and ADMIN account
-activation (Better Auth identity + Business ADMIN membership) are
-implemented at the service layer, and the ADMIN activation UI
-(`/invite/[token]`, composing acceptance + activation with a safe
-sign-in → onboarding handoff) is implemented (PROMPT-06); the Platform
-Operator identity / platform-level marker (`accountType`
-discriminator), invitation creation UI, token delivery, and the STAFF
-activation workflow remain planned.
-
 ## Database Philosophy
 
-- **Single shared Postgres**, tenant isolation via `businessId` on every
-  domain row — sufficient for pilot scale; no RLS/multi-schema yet.
+- **Single shared Postgres**, tenant isolation via `businessId` — the
+  Business is the tenant; Branch/Provider scoping is selective and
+  relation-based (DECISIONS #30–#32). No RLS/multi-schema yet.
 - UUID primary keys everywhere; `createdAt`/`updatedAt` on every table.
 - Soft deletes (`deletedAt`) where history matters; repositories always filter
   `deletedAt: null`. Details: `docs/DATABASE.md`.
-- Schema changes only via Prisma migrations (`pnpm db:migrate`), never
-  `db push` against shared environments without notice.
+- Schema changes only via Prisma migrations (`pnpm db:migrate`, never
+  `db push` against shared environments without notice). The committed
+  migration chain is the bootstrap truth (DECISIONS #40): a genuinely
+  EMPTY database reaches EXACTLY `prisma/schema.prisma` via
+  `pnpm db:deploy` — verified invariant, chain shape in
+  `docs/DATABASE.md → Migration Chain`.
+
+## Usage & Economics Foundation
+
+Usage + cost metering (messages, conversations, AI runs, token usage, AI
+cost, WhatsApp/provider cost, cost-to-serve, bookings, handoffs) belongs to
+the current foundation; billing/subscriptions/payments stay deferred. Hard
+separation: Usage ≠ Cost ≠ Price ≠ Entitlement ≠ Billing. Canonical
+reference: `ECONOMICS.md` (DECISIONS #36). IMPLEMENTED as raw usage facts
+(PROMPT-ARCH-02): append-only `usage_records` rows recorded best-effort by
+the conversation engine (INBOUND_MESSAGE / OUTBOUND_MESSAGE / AI_TURN)
+carrying ids, counters, provider/model machine keys, and status — never
+message content, secrets, or chain-of-thought, and never pricing logic
+(cost is only an optional point-in-time snapshot).
 
 ## State Management Philosophy
 
@@ -183,9 +329,9 @@ activation workflow remain planned.
 
 ## Design System
 
-Documented separately in `UX.md` (UX + design rules); implemented via tokens in
-`src/app/globals.css` (colors, radii, shadows, z-index scale, animation
-scale, status colors).
+Documented separately in `DESIGN_SYSTEM.md` (UX + design rules); implemented
+via tokens in `src/app/globals.css` (colors, radii, shadows, z-index scale,
+animation scale, status colors).
 
 ## Future Scalability Notes
 
@@ -203,13 +349,16 @@ These are notes, not commitments. Do not pre-build them.
 Without explicit human approval recorded in `DECISIONS.md`:
 
 - ❌ Microservices / service splitting
-- ❌ Event bus / Kafka / RabbitMQ / external queues
+- ❌ Event bus / Kafka / RabbitMQ / Redis / external queues / message brokers
 - ❌ Additional databases, ORMs, or query engines
 - ❌ GraphQL / tRPC / additional API layers (server actions + route handlers suffice)
 - ❌ Global client state libraries (Redux, Zustand, MobX)
 - ❌ CSS frameworks beyond Tailwind / component libs beyond shadcn/ui
 - ❌ Replacing Better Auth or Prisma
 - ❌ Any infrastructure (containers, k8s, self-hosting) beyond Vercel + Neon
+- ❌ Omnichannel infrastructure (channel registry, capability matrix, multi-channel UI)
+- ❌ RAG / vector databases / generic workflow engines / ActionRegistry /
+  OutcomeRegistry or any speculative infrastructure
 - ❌ Premature optimization: caching layers, CDNs beyond Vercel defaults,
   rate limiting services — until real load demands it
 

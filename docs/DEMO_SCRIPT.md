@@ -89,8 +89,8 @@ Close with the value line:
 
 ## Things NOT to Do
 
-- Don't open placeholder screens (customers directory, settings, team) —
-  say "ده شغال دلوقتي" فقط if asked.
+- Don't open settings/team/knowledge screens unless asked — demo the outcome
+  (conversations → appointments), not the admin surfaces.
 - Don't type long replies; every second of typing is silence.
 - Don't apologize for AI messages — they're the product. If asked "هو ده
   رد آلي؟" — answer proudly: "أيوه، ورد مظبوط من معلومات منشأتها."

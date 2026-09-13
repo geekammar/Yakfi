@@ -1,7 +1,8 @@
 # FlowPilot — Product Strategy
 
-> Current strategy only. Superseded strategies move to the bottom of this file
-> with a date. Last updated: Prompt 03.
+> Current strategy only. Superseded strategies move to the bottom of this
+> file with a date. Pricing/economics hypothesis: `ECONOMICS.md`.
+> Last updated: PROMPT-ARCH-01.
 
 ## Core Philosophy: Human-in-the-Loop
 

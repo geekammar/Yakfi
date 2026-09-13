@@ -1,12 +1,14 @@
 /**
- * AI assistant boundary for the conversation engine (PROMPT-19, Spec A §8).
+ * AI assistant boundary for the conversation engine (PROMPT-19; contract
+ * strengthened in PROMPT-ARCH-02 — DECISIONS #33).
  *
  * The domain depends on the `ConversationAi` interface — never on an LLM
  * vendor SDK. The only implementation today is
  * `deterministicConversationAi`: a transparent rule-based Arabic
  * classifier (keyword/phrase matching + FAQ answer matching against
- * `Business.faqs`). It is NOT live LLM inference; a real AI provider is a
- * future operator decision (see DECISIONS.md).
+ * `Business.faqs`). It is NOT live LLM inference; a real AI provider is
+ * a future operator decision (see DECISIONS.md) and will implement the
+ * SAME typed contract (`ai-contract.ts`) without changing the engine.
  *
  * Non-negotiable behavior encoded here (DECISIONS #03, PRODUCT_STRATEGY):
  * - FAQ answers are the VERBATIM stored `Business.faqs` answer text —
@@ -16,68 +18,32 @@
  *   forces an answer and never fakes certainty.
  * - Booking-related intents produce a typed `booking_handoff` — the
  *   assistant orchestrates, it never creates appointments itself.
+ * - Extraction returns FACTS ONLY (matched service name at most) — the
+ *   deterministic classifier never guesses dates, times, or providers,
+ *   and never emits chain-of-thought.
  */
 
-import type { ConversationStatus, MessageSenderType } from "@/types/domain";
+import type {
+  AiRequest,
+  AiResponse,
+} from "@/features/conversations/server/ai-contract";
+import {
+  emptyAiExtraction,
+  parseAiRequest,
+} from "@/features/conversations/server/ai-contract";
 
-/** Minimal appointment-conversion intent model (no invented intents). */
-export type ConversationIntent =
-  | "FAQ"
-  | "BOOKING"
-  | "AVAILABILITY"
-  | "RESCHEDULE"
-  | "CANCELLATION"
-  | "HUMAN_REQUEST"
-  | "AMBIGUOUS";
+export type {
+  AiIntent,
+  AiRequest,
+  AiResponse,
+  HandoffReason,
+} from "@/features/conversations/server/ai-contract";
 
-/** Why the assistant handed the thread to a human. */
-export type HandoffReason =
-  "HUMAN_REQUEST" | "SENSITIVE" | "NO_KNOWLEDGE" | "AMBIGUOUS";
-
-/** Everything the assistant may see for the CURRENT conversation turn. */
-export type AiTurnInput = {
-  businessName: string;
-  faqs: ReadonlyArray<{ question: string; answer: string }>;
-  services: ReadonlyArray<{ name: string; durationMinutes: number }>;
-  conversationStatus: ConversationStatus;
-  /** Chronological recent messages, bounded by the caller. */
-  recentMessages: ReadonlyArray<{
-    senderType: MessageSenderType;
-    content: string;
-  }>;
-  /** The customer message being answered. */
-  message: string;
-};
-
-/**
- * Typed next action for the engine:
- * - `reply` — safe answer from stored knowledge; thread stays AI_ACTIVE.
- * - `handoff` — NEED_HUMAN (human request / sensitive / no knowledge /
- *   ambiguous), optionally with an honest acknowledgment message.
- * - `booking_handoff` — NEED_HUMAN routed to staff for the EXISTING
- *   booking flow, with a short staff-facing summary.
- */
-export type AiTurnResult =
-  | { action: "reply"; intent: "FAQ"; content: string }
-  | {
-      action: "handoff";
-      intent: "HUMAN_REQUEST" | "AMBIGUOUS";
-      reason: HandoffReason;
-      content: string;
-    }
-  | {
-      action: "booking_handoff";
-      intent: "BOOKING" | "AVAILABILITY" | "RESCHEDULE" | "CANCELLATION";
-      content: string;
-      /** Short Arabic note for the staff-facing `aiSummary` field. */
-      summary: string;
-    };
-
-/** Provider-neutral assistant. */
+/** Provider-neutral assistant over the structured AI contract. */
 export interface ConversationAi {
   /** Honest reporting of WHICH assistant implementation answered. */
   readonly providerName: string;
-  respond(input: AiTurnInput): Promise<AiTurnResult>;
+  respond(request: AiRequest): Promise<AiResponse>;
 }
 
 // ─── Arabic text normalization ───────────────────────────────────────────────
@@ -393,14 +359,32 @@ function matchFaq(
 // ─── The deterministic assistant ─────────────────────────────────────────────
 
 /**
- * Pure classification of one customer message into a typed next action.
- * Exported for verification; production callers go through
- * `deterministicConversationAi.respond`.
+ * Deterministic, provider-independent extraction of FACTS: a service
+ * name is returned only when the message contains it verbatim
+ * (normalized). Dates, times, and provider preferences are never
+ * guessed — they stay null for the domain to resolve.
+ */
+function extractServiceFacts(
+  message: string,
+  services: ReadonlyArray<{ name: string }>,
+): string | null {
+  const normalized = normalizeArabicText(message);
+  for (const service of services) {
+    const name = normalizeArabicText(service.name);
+    if (name.length > 0 && normalized.includes(name)) return service.name;
+  }
+  return null;
+}
+
+/**
+ * Pure classification of one customer message into a structured AI
+ * response (PROMPT-ARCH-02 contract). Exported for verification;
+ * production callers go through `deterministicConversationAi.respond`.
  */
 export function classifyCustomerMessage(
   message: string,
   faqs: ReadonlyArray<{ question: string; answer: string }>,
-): AiTurnResult {
+): AiResponse {
   const normalized = normalizeArabicText(message);
   const tokens = tokenize(message);
 
@@ -409,8 +393,10 @@ export function classifyCustomerMessage(
     return {
       action: "handoff",
       intent: "AMBIGUOUS",
-      reason: "AMBIGUOUS",
       content: REPLIES.AMBIGUOUS,
+      extraction: emptyAiExtraction,
+      handoffReason: "AMBIGUOUS",
+      summary: null,
     };
   }
 
@@ -422,8 +408,10 @@ export function classifyCustomerMessage(
     return {
       action: "handoff",
       intent: "HUMAN_REQUEST",
-      reason: "HUMAN_REQUEST",
       content: REPLIES.HUMAN_REQUEST,
+      extraction: emptyAiExtraction,
+      handoffReason: "HUMAN_REQUEST",
+      summary: null,
     };
   }
 
@@ -435,8 +423,10 @@ export function classifyCustomerMessage(
     return {
       action: "handoff",
       intent: "AMBIGUOUS",
-      reason: "SENSITIVE",
       content: REPLIES.SENSITIVE,
+      extraction: emptyAiExtraction,
+      handoffReason: "SENSITIVE",
+      summary: null,
     };
   }
 
@@ -449,6 +439,8 @@ export function classifyCustomerMessage(
       action: "booking_handoff",
       intent: "CANCELLATION",
       content: REPLIES.CANCELLATION,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: BOOKING_SUMMARIES.CANCELLATION,
     };
   }
@@ -467,6 +459,8 @@ export function classifyCustomerMessage(
       action: "booking_handoff",
       intent: "RESCHEDULE",
       content: REPLIES.RESCHEDULE,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: BOOKING_SUMMARIES.RESCHEDULE,
     };
   }
@@ -482,6 +476,8 @@ export function classifyCustomerMessage(
       action: "booking_handoff",
       intent: "BOOKING",
       content: REPLIES.BOOKING,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: BOOKING_SUMMARIES.BOOKING,
     };
   }
@@ -489,7 +485,14 @@ export function classifyCustomerMessage(
   // Strong stored-knowledge match answers from Business.faqs — verbatim.
   const faq = matchFaq(tokens, faqs);
   if (faq) {
-    return { action: "reply", intent: "FAQ", content: faq.answer };
+    return {
+      action: "reply",
+      intent: "FAQ",
+      content: faq.answer,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
+      summary: null,
+    };
   }
 
   // Availability — real slots come from the availability engine, so staff.
@@ -501,6 +504,8 @@ export function classifyCustomerMessage(
       action: "booking_handoff",
       intent: "AVAILABILITY",
       content: REPLIES.AVAILABILITY,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: BOOKING_SUMMARIES.AVAILABILITY,
     };
   }
@@ -510,8 +515,10 @@ export function classifyCustomerMessage(
     return {
       action: "handoff",
       intent: "AMBIGUOUS",
-      reason: "NO_KNOWLEDGE",
       content: REPLIES.NO_KNOWLEDGE,
+      extraction: emptyAiExtraction,
+      handoffReason: "NO_KNOWLEDGE",
+      summary: null,
     };
   }
 
@@ -519,19 +526,57 @@ export function classifyCustomerMessage(
   return {
     action: "handoff",
     intent: "AMBIGUOUS",
-    reason: "AMBIGUOUS",
     content: REPLIES.AMBIGUOUS,
+    extraction: emptyAiExtraction,
+    handoffReason: "AMBIGUOUS",
+    summary: null,
   };
+}
+
+/**
+ * Deterministic LLM bypass (DECISIONS #33, PROMPT-ARCH-02): returns a
+ * COMPLETE structured response when the turn is safely decidable
+ * without any AI provider call, else null. The engine consults this
+ * BEFORE calling the assistant, so deterministic turns never spend an
+ * LLM call. Currently covers the one case that is provider-independent
+ * by nature: a message too short to understand (→ ambiguous handoff).
+ */
+export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
+  const normalized = normalizeArabicText(request.message);
+  if (normalized.length < 2 || tokenize(request.message).length === 0) {
+    return {
+      action: "handoff",
+      intent: "AMBIGUOUS",
+      content: REPLIES.AMBIGUOUS,
+      extraction: emptyAiExtraction,
+      handoffReason: "AMBIGUOUS",
+      summary: null,
+    };
+  }
+  return null;
 }
 
 /**
  * The current assistant: deterministic rules, fully typed results, safe
  * handoffs. Drop-in replaceable by a real provider adapter later without
- * changing the engine (the interface is the contract).
+ * changing the engine (the ai-contract is the contract).
  */
 export const deterministicConversationAi: ConversationAi = {
   providerName: "deterministic",
-  async respond(input: AiTurnInput): Promise<AiTurnResult> {
-    return classifyCustomerMessage(input.message, input.faqs);
+  async respond(rawRequest: AiRequest): Promise<AiResponse> {
+    // Defensive re-validation: an adapter must still satisfy the request
+    // contract before its output is trusted downstream.
+    const request = parseAiRequest(rawRequest) ?? {
+      ...rawRequest,
+      services: rawRequest.services ?? [],
+      faqs: rawRequest.faqs ?? [],
+    };
+    const result = classifyCustomerMessage(request.message, request.faqs);
+    const service = extractServiceFacts(request.message, request.services);
+    if (service === null) return result;
+    return {
+      ...result,
+      extraction: { ...result.extraction, service },
+    };
   },
 };

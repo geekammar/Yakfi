@@ -1,7 +1,7 @@
 # FlowPilot — Troubleshooting
 
-> Symptom → fix, ordered by how often they bite. For setup itself see
-> `ENVIRONMENT_SETUP.md`; for daily workflow `LOCAL_DEVELOPMENT.md`.
+> Symptom → fix, ordered by how often they bite. Setup and daily workflow:
+> `DEVELOPMENT.md`.
 
 ## Setup & Tooling
 
@@ -58,5 +58,5 @@
 ## Still stuck?
 
 1. `pnpm run doctor` — read every `→ fix:` line; it covers the common cases.
-2. `docs/BUILD_STATE.md` → Known Issues of each prompt (device limitations).
-3. `docs/AGENT_RULES.md` — binding context-loading and lifecycle rules.
+2. `docs/BUILD_STATE.md` → Key Known Limitations (incl. device limitations).
+3. `docs/AGENT_RULES.md` — binding rules and lifecycle process.

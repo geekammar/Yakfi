@@ -93,7 +93,10 @@ IDs/phones are deterministic, so the demo state is identical every time.
 
 - The dataset is dental **because the demo business is** — the product UI copy
   stays vertical-agnostic (a salon demo would seed its own dataset).
-- Messages are seeded data; WhatsApp transport itself is outside Spec A —
-  replies you send persist as STAFF messages in the database.
-- The Customers directory screen is still a placeholder (Spec A pending) —
-  customer profiles are visible from conversation detail pages.
+- WhatsApp transport is NOT live: outbound replies persist as STAFF messages
+  in the database (offline logging adapter behind `MessageTransport`,
+  DECISIONS #29); the inbound webhook is provider-neutral and token-gated. A
+  real WhatsApp provider is an operator decision.
+- The Customers directory (`/customers` + `/customers/[id]`) is implemented
+  (PROMPT-15); customer profiles are also reachable from conversation detail
+  pages.

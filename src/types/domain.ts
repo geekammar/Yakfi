@@ -7,29 +7,43 @@
 import type {
   Appointment,
   AppointmentStatus,
+  Branch,
   Business,
   Conversation,
   ConversationStatus,
   Customer,
+  InboundMessageDedupe,
   Invitation,
   Message,
   MessageSenderType,
+  ProviderBranch,
+  ProviderProfile,
+  ProviderService,
   Service,
+  UsageRecord,
   UserRole,
+  WhatsAppConnection,
 } from "@/generated/prisma/client";
 
 export type {
   Appointment,
   AppointmentStatus,
+  Branch,
   Business,
   Conversation,
   ConversationStatus,
   Customer,
+  InboundMessageDedupe,
   Invitation,
   Message,
   MessageSenderType,
+  ProviderBranch,
+  ProviderProfile,
+  ProviderService,
   Service,
+  UsageRecord,
   UserRole,
+  WhatsAppConnection,
 };
 
 /** Conversation with its messages (thread view). */

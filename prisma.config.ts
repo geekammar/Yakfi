@@ -17,5 +17,12 @@ export default defineConfig({
   },
   datasource: {
     url: process.env.DATABASE_URL ?? "",
+    // Optional (PROMPT-ARCH-03): shadow database for `prisma migrate dev`
+    // and `migrate diff --from-migrations` — Prisma 7 requires it when a
+    // migrations directory is involved and the main-database user cannot
+    // CREATE DATABASE (typical on Neon). No-op unless the env var is set.
+    ...(process.env.SHADOW_DATABASE_URL && {
+      shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
+    }),
   },
 });
