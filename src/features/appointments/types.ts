@@ -189,3 +189,54 @@ export type AvailabilityResult =
       success: false;
       error: { code: AvailabilityErrorCode; message: string };
     };
+
+/**
+ * Provider / Service Eligibility result contract (PROMPT-CORE-01).
+ *
+ * One small deterministic contract answering: "Which Providers are
+ * eligible for this requested Service within the current Business /
+ * operational scope?" — the source of truth for Provider eligibility
+ * (relation-driven: ProviderService + ProviderBranch, never names or
+ * AI text), and the first step of the any-provider flow (DECISIONS
+ * #32): eligible Providers → later availability lookup → options.
+ *
+ * - `providers` carry only what a downstream Conversation/AI layer
+ *   needs to identify an eligible Provider — no credentials, no auth
+ *   fields, no unrelated profile data.
+ * - `branchId` echoes the applied operational scope (null when the
+ *   request had no Branch scope).
+ * - The resolution is deterministic: repeated calls with the same
+ *   persisted state produce the same result, so deterministic turns
+ *   can avoid AI calls entirely.
+ */
+
+/** One eligible Provider — compact identity for downstream AI use. */
+export type EligibleProvider = {
+  /** The ProviderProfile id (the booking seam, DECISIONS #32). */
+  providerId: string;
+  /** Profile display name, falling back to the member's name. */
+  displayName: string;
+};
+
+export type ProviderEligibilityData = {
+  /** The requested Service the eligibility was resolved against. */
+  serviceId: string;
+  /** The applied Branch scope — null when the request had none. */
+  branchId: string | null;
+  /** Eligible Providers, stable order (creation, then id). */
+  providers: EligibleProvider[];
+};
+
+export type ProviderEligibilityErrorCode =
+  | "INVALID_INPUT"
+  | "NO_BUSINESS"
+  | "SERVICE_NOT_FOUND"
+  | "SERVICE_INACTIVE"
+  | "BRANCH_NOT_FOUND";
+
+export type ProviderEligibilityResult =
+  | { success: true; data: ProviderEligibilityData }
+  | {
+      success: false;
+      error: { code: ProviderEligibilityErrorCode; message: string };
+    };

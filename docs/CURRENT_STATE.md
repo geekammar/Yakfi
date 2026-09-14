@@ -3,7 +3,7 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-OPS-05.1.
+> PROMPT-CORE-01.
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -50,6 +50,13 @@
     `pnpm bootstrap:operator` (the FIRST Platform Operator identity —
     operator must run it). Checks: `pnpm check:signup` (13/13),
     `pnpm check:policy` (13/13).
+- **PROVIDER ELIGIBILITY RESOLVER (PROMPT-CORE-01):** deterministic
+  `resolveEligibleProviders` — relation-driven ProviderService /
+  ProviderBranch eligibility within the server-resolved Business scope
+  (optional Branch scope, existing Branch semantics), compact AI-ready
+  DTO (`providerId` + `displayName`), cross-tenant leakage impossible,
+  ZERO schema changes; `pnpm check:eligibility` 29/29. Not exposed in
+  any UI/conversation turn yet (CORE-02 consumes it next).
 - **DEMO LIVE (PROMPT-OPS-02):** `https://flowpilot-demo-gamma.vercel.app`
   — dedicated Vercel project `flowpilot-demo` (framework nextjs, SSO
   protection off) + the isolated Demo Neon DB (`neondb` @
@@ -101,12 +108,13 @@
   project `flowpilot-prod` (framework nextjs, SSO protection off), four
   Production env vars set, `.vercel` links `flowpilot-prod`. Repository
   visibility: **PRIVATE** (verified via `gh`).
-- **Version:** v0.15.3 · `pnpm verify` green · single `main` branch, tags
-  through `v0.15.3`.
+- **Version:** v0.15.4 · `pnpm verify` green · single `main` branch, tags
+  through `v0.15.4`.
 
-**Current next step:** Provider / Service Eligibility Resolver (first
-step of the provider sequence, DECISIONS #41 handoff), then the provider
-sequence: Any-Provider Booking Options Resolver → Meta WhatsApp
+**Current next step:** PROMPT-CORE-02 — Any-Provider Booking Options
+Resolver (first consumer of the CORE-01 eligibility resolver: requested
+Service → eligible Providers → later availability lookup → compact
+customer options), then the provider sequence: Meta WhatsApp
 integration → OpenRouter + AgentRouter production integration →
 End-to-End WhatsApp → AI → Booking → Production pilot validation.
 Remaining operator actions (not implementation blockers): add

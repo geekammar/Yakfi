@@ -6,14 +6,12 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-OPS-05.1 (OPS-05 deployed to Production and the live
-> Platform Control Plane verified: health, sign-in, anonymous redirects,
-> signup closed 403 `SIGNUP_CLOSED`, platform guard surface, owner-invite
->
-> - AI-policy pages, policy values openrouter/agentrouter/fallback,
->   no key exposure; Production Platform Operator verified at the DB level —
->   authenticated role smoke skipped per operator decision).
->   Product version: **v0.15.3** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-CORE-01 (Provider / Service Eligibility Resolver:
+> deterministic `resolveEligibleProviders` — relation-driven
+> ProviderService/ProviderBranch eligibility within the server-resolved
+> Business scope, optional Branch scope, compact AI-ready DTO; ZERO schema
+> changes; proven by `pnpm check:eligibility` 29/29).
+> Product version: **v0.15.4** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
 
@@ -57,6 +55,20 @@ onboarding), and the Platform AI Policy (`platform_ai_policies` singleton
 — OpenRouter primary / AgentRouter secondary, runtime-changeable,
 secret REFERENCES only). One-time operator tool: `pnpm bootstrap:operator`
 (creates the FIRST Platform Operator identity).
+
+**Provider / Service Eligibility Resolver is IMPLEMENTED (PROMPT-CORE-01):**
+deterministic `resolveEligibleProviders` (appointments feature server) —
+relation-driven eligibility over the EXISTING ProviderService /
+ProviderBranch relations (ZERO schema changes): server-resolved Business
+scope (never client input; the input schema strips hostile identity
+keys), optional Branch scope (existing Branch semantics), active Provider
+
+- active same-Business Service required, cross-business leakage
+  impossible (typed `SERVICE_NOT_FOUND` / `BRANCH_NOT_FOUND` — no
+  cross-tenant existence leaks), compact AI-ready DTO (`providerId` +
+  `displayName`, scope echoed; no secrets/auth fields). Proven by
+  `pnpm check:eligibility` (29/29, in-memory harness). Not exposed in any
+  UI/conversation turn yet — CORE-02 consumes it next.
 
 **Two strictly separated environments are LIVE (PROMPT-OPS-02; production
 identity closed in PROMPT-OPS-04; OPS-05 build + live verification in
@@ -163,6 +175,8 @@ post-deploy.
 
 | Platform Control Plane deployment + live verification | PROMPT-OPS-05.1 (ops/verification only — ZERO code changes): current worktree deployed to Production via `pnpm deploy` (prerequisites verified first: project `flowpilot-prod`, four Production env vars, Production `DATABASE_URL` → `ep-tiny-grass-a5e63jev-pooler`, DEMO_MODE absent everywhere). Live verification PASSED: `/api/health` 200 (`deploymentReady:true`, `database:connected`), `/sign-in` 200 Arabic RTL, anonymous `/` + `/services` + `/staff` → 307 `/sign-in?redirect=…`, public signup 403 `SIGNUP_CLOSED` (Arabic message), all three platform routes + owner-invite resolve (platform routes guard-engaged: anonymous → 307 `/sign-in`; owner-invite invalid token → 200 safe Arabic error state), AI-policy values verified at the DB level (primary=openrouter / secondary=agentrouter / fallback=true), no key material in public responses (grep clean), policy runtime-changeable (DB singleton mutated via server actions — no redeploy needed). Production Platform Operator verified at the DB level (ammarjaberx@gmail.com, role=STAFF, account_type=PLATFORM, isActive); authenticated RBAC smoke skipped per operator decision. Production healthy: migrations 10/10 (last = `20260913170000_platform_control_plane`), Demo DB untouched. No GitHub operations | PROMPT-OPS-05.1 |
 
+| Provider / Service Eligibility Resolver | PROMPT-CORE-01: deterministic `resolveEligibleProviders` (`src/features/appointments/server/provider-eligibility-service.ts`) — relation-driven eligibility over the EXISTING `ProviderService`/`ProviderBranch` relations via ONE repository query (`ProviderRepository.listEligibleForService` + pure `eligibleProvidersWhere` builder): server-resolved Business scope (session + persisted user; input schema strips hostile identity keys), optional Branch scope (existing `findByIdWithinBusiness` semantics — no new branch framework), active Provider + active same-Business Service required, cross-business leakage impossible (typed `*_NOT_FOUND` codes — no cross-tenant existence leaks); compact DTO (`providerId` + `displayName` falling back to the member name; `branchId` scope echoed; no credentials/auth fields); ZERO schema changes, no new indexes, no LLM/WhatsApp/appointment changes; `resolveEligibleProvidersAction` thin hook; proven by `pnpm check:eligibility` (29/29 in-memory harness) | PROMPT-CORE-01 |
+
 ## Key Known Limitations (current)
 
 - Smart Create has no notes entry: Step 6 submits without notes (PROMPT-14
@@ -206,10 +220,12 @@ post-deploy.
   (NEED_HUMAN with an `aiSummary` intent note); the AI posts a polite
   acknowledgment message on handoff turns, and threads in any
   non-AI_ACTIVE state (or assigned) never receive AI interjections.
-- The Branch/Provider/WhatsAppConnection/usage foundations (ARCH-02)
-  have NO management UI and NO consumer flows yet — they are the
-  schema/domain base for the future provider-integration phase.
-  Usage telemetry is recorded but not surfaced anywhere (no dashboards);
+- The Branch/WhatsAppConnection/usage foundations (ARCH-02) have NO
+  management UI and NO consumer flows yet; the Provider eligibility
+  relations gained their FIRST consumer in PROMPT-CORE-01 (the
+  deterministic eligibility resolver — read-only, no UI). Provider
+  management UI remains the provider-integration phase. Usage telemetry
+  is recorded but not surfaced anywhere (no dashboards);
   `estimatedCostMicros` is never computed by the codebase.
 - Platform Operator marker exists (`users.accountType`, ARCH-02) and the
   control surface is LIVE since PROMPT-OPS-05: the `(platform)` route
@@ -420,17 +436,17 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP: Provider / Service Eligibility Resolver (DECISIONS #41
-handoff — the first step of the provider sequence), then: Any-Provider
-Booking Options Resolver → Meta WhatsApp integration → OpenRouter +
+NEXT STEP: PROMPT-CORE-02 — Any-Provider Booking Options Resolver
+(consume the CORE-01 eligibility resolver: requested Service → eligible
+Providers → later availability lookup → compact customer options; no
+slot ranking yet), then: Meta WhatsApp integration → OpenRouter +
 AgentRouter production integration (consume `getEffectiveAiPolicy()`; no
 engine changes) → End-to-End WhatsApp → AI → Booking → Production pilot
-validation. Remaining operator actions (parallel, not blockers for the
-resolver's implementation): add `OPENROUTER_API_KEY` /
-`AGENTROUTER_API_KEY` to the Vercel project env vars before the
-provider-integration phase (#7), and run `pnpm db:deploy` against the
-Demo Neon DB before its next code deploy (#8). Do not start provider
-integration before the eligibility resolver and a DECISIONS entry.
+validation. Remaining operator actions (parallel, not blockers): add
+`OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to the Vercel project env
+vars before the provider-integration phase (#7), and run `pnpm db:deploy`
+against the Demo Neon DB before its next code deploy (#8). Do not start
+provider integration before a DECISIONS entry.
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

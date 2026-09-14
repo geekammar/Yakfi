@@ -2,8 +2,10 @@
 
 > Current technical architecture and dependency boundaries. Read together
 > with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
-> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-ARCH-03 —
-> the P0 hardening foundations of DECISIONS #30–#36 are IMPLEMENTED
+> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-01 —
+> the deterministic Provider / Service Eligibility Resolver is
+> implemented (first step of the any-provider flow, DECISIONS #32); the
+> P0 hardening foundations of DECISIONS #30–#36 are IMPLEMENTED
 > (record: DECISIONS #38; schema: `DATABASE.md`), and the migration
 > chain is a complete empty-database bootstrap path (DECISIONS #40).
 
@@ -133,7 +135,11 @@ prisma/                     # schema.prisma + seed.ts
   availability → rank **deterministically** by useful/earliest slot →
   return a small set (normally 2–3) → let the customer choose. This is NOT
   an AI/ML recommendation engine; booking and availability stay
-  deterministic. (Flow not yet built — the relations are the foundation.)
+  deterministic. (First step IMPLEMENTED — PROMPT-CORE-01: the
+  deterministic Provider / Service Eligibility Resolver
+  `resolveEligibleProviders`, relation-driven over the existing
+  ProviderService/ProviderBranch relations; availability lookup and slot
+  ranking not yet built.)
 
 ## Scheduling (DECISIONS #35 — scope unchanged)
 

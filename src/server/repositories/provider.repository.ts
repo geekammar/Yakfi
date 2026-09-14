@@ -28,6 +28,48 @@ export type ProviderRelationCode =
 export type ProviderRelationResult =
   { ok: true } | { ok: false; code: ProviderRelationCode };
 
+/** Minimal eligible-provider row (display fallback via the User name). */
+export type EligibleProviderRow = {
+  id: string;
+  displayName: string | null;
+  user: { name: string };
+};
+
+/**
+ * The persisted-relation eligibility constraints (PROMPT-CORE-01): the
+ * provider is active, owned by the Business, linked to the requested
+ * Service (which must itself be active, non-deleted, same Business),
+ * and linked to the Branch when a Branch scope applies. Pure so the
+ * rules are verifiable without a live database (the check-harness
+ * pattern); the query below is their only consumer.
+ */
+export function eligibleProvidersWhere(
+  businessId: string,
+  serviceId: string,
+  options?: { branchId?: string },
+): Prisma.ProviderProfileWhereInput {
+  return {
+    businessId,
+    isActive: true,
+    services: {
+      some: {
+        serviceId,
+        service: { businessId, isActive: true, deletedAt: null },
+      },
+    },
+    ...(options?.branchId
+      ? {
+          branches: {
+            some: {
+              branchId: options.branchId,
+              branch: { businessId, deletedAt: null },
+            },
+          },
+        }
+      : {}),
+  };
+}
+
 /** Prisma unique-constraint violation (the relation-race backstop). */
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -95,6 +137,30 @@ export class ProviderRepository {
     return db.providerBranch.findMany({
       where: { providerId },
       orderBy: { createdAt: "asc" },
+      take: 200,
+    });
+  }
+
+  /**
+   * Eligible Providers for one Service (PROMPT-CORE-01): ONE query with
+   * all persisted relational constraints (`eligibleProvidersWhere`) —
+   * a provider from another Business can never appear, and a provider
+   * row can never duplicate (unique PK rows; the `@@unique` relation
+   * pairs are the write-time backstop).
+   */
+  async listEligibleForService(
+    businessId: string,
+    serviceId: string,
+    options?: { branchId?: string },
+  ): Promise<EligibleProviderRow[]> {
+    return db.providerProfile.findMany({
+      where: eligibleProvidersWhere(businessId, serviceId, options),
+      select: {
+        id: true,
+        displayName: true,
+        user: { select: { name: true } },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 200,
     });
   }
