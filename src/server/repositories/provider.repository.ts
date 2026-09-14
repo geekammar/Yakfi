@@ -165,6 +165,27 @@ export class ProviderRepository {
     });
   }
 
+  /**
+   * The assignment seam for already-resolved eligible Providers
+   * (PROMPT-CORE-02): ONE batched Business-scoped projection of
+   * ProviderProfile.id → userId (the Appointment.assignedUserId seam,
+   * DECISIONS #32). A provider id from another Business (or an unknown
+   * one) never resolves — callers skip it. This is NOT eligibility
+   * re-resolution: eligibility stays CORE-01's; this is only the
+   * id→seam projection the availability lookup needs.
+   */
+  async listAssignmentSeams(
+    businessId: string,
+    providerIds: string[],
+  ): Promise<Array<{ providerId: string; userId: string }>> {
+    if (providerIds.length === 0) return [];
+    const rows = await db.providerProfile.findMany({
+      where: { businessId, id: { in: providerIds } },
+      select: { id: true, userId: true },
+    });
+    return rows.map((row) => ({ providerId: row.id, userId: row.userId }));
+  }
+
   /** Links a Provider to a Service it is eligible to deliver. */
   async addServiceEligibility(
     businessId: string,

@@ -382,6 +382,51 @@ export class AppointmentRepository {
     }));
   }
 
+  /**
+   * Blocking appointments for provider-scoped availability
+   * (PROMPT-CORE-02): the read counterpart of the write path's existing
+   * assignee scoping (`hasConflict` / `createWithConflictCheck`) — the
+   * SAME PENDING/CONFIRMED, same-date, non-deleted rule, restricted to
+   * the given assignees (a Provider's calendar is blocked only by its
+   * own appointments). ONE batched business-scoped read; callers group
+   * the rows by assignedUserId in application memory.
+   */
+  async listBlockingByAssignees(
+    businessId: string,
+    date: string,
+    assignedUserIds: string[],
+  ): Promise<
+    Array<{ assignedUserId: string; startTime: string; endTime: string }>
+  > {
+    if (assignedUserIds.length === 0) return [];
+    const rows = await db.appointment.findMany({
+      where: {
+        businessId,
+        ...notDeleted,
+        date: toDate(date),
+        status: { in: ["PENDING", "CONFIRMED"] as AppointmentStatus[] },
+        assignedUserId: { in: assignedUserIds },
+      },
+      select: { assignedUserId: true, startTime: true, endTime: true },
+      orderBy: { startTime: "asc" },
+      take: 200,
+    });
+    const result: Array<{
+      assignedUserId: string;
+      startTime: string;
+      endTime: string;
+    }> = [];
+    for (const row of rows) {
+      if (!row.assignedUserId) continue;
+      result.push({
+        assignedUserId: row.assignedUserId,
+        startTime: toWallClock(row.startTime),
+        endTime: toWallClock(row.endTime),
+      });
+    }
+    return result;
+  }
+
   /** Overlap check for a staff member (or the whole business when unassigned). */
   async hasConflict(params: {
     businessId: string;

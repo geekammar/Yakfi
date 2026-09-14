@@ -99,8 +99,10 @@ function toWallClock(minutes: number): string {
  * Weekday key for a calendar date. A "YYYY-MM-DD" string maps to one
  * exact weekday — timezone-independent by construction, so the
  * Business timezone never changes which working-hours entry applies.
+ * Exported for CORE-02 (the same business-weekday logic, never
+ * duplicated).
  */
-function weekdayOf(date: string): WeekDay {
+export function weekdayOf(date: string): WeekDay {
   // 1970-01-03 (epoch day 2) was a Saturday.
   const daysSinceEpoch = Math.floor(
     Date.parse(`${date}T00:00:00.000Z`) / 86_400_000,
@@ -112,9 +114,10 @@ function weekdayOf(date: string): WeekDay {
  * Working-hours entry for the requested weekday. Returns null when the
  * business is closed that day or has no working-hours data yet (an
  * onboarded business always has the full week persisted; a missing
- * week is treated as closed, never as 24h availability).
+ * week is treated as closed, never as 24h availability). Exported for
+ * CORE-02 (the same business-hours logic, never duplicated).
  */
-function resolveWorkingDay(
+export function resolveWorkingDay(
   business: Business,
   weekday: WeekDay,
 ): { openMinutes: number; closeMinutes: number } | null {

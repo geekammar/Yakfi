@@ -6,12 +6,19 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-CORE-01 (Provider / Service Eligibility Resolver:
-> deterministic `resolveEligibleProviders` — relation-driven
-> ProviderService/ProviderBranch eligibility within the server-resolved
-> Business scope, optional Branch scope, compact AI-ready DTO; ZERO schema
-> changes; proven by `pnpm check:eligibility` 29/29).
-> Product version: **v0.15.4** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-CORE-02 (Any-Provider Booking Options Resolver:
+> deterministic `resolveBookingOptions` — consumes CORE-01 eligibility,
+> per-Provider availability over the EXISTING availability layer with
+> provider-scoped conflicts mirroring the write path, deterministic
+> nearest-useful ranking, small 2–3 option result; ZERO schema changes;
+> proven by `pnpm check:booking-options` 32/32). PROMPT-CORE-02A: the
+> interrupted attempt had already completed the FULL CORE-02 (foundation +
+> resolver + `check:booking-options` harness); kept and re-verified per
+> operator decision (`pnpm verify` green, `pnpm security` pass,
+> `check:booking-options` 32/32 re-run) — ZERO code changes this session;
+> next step = the Conversation/WhatsApp layer consumption (no PROMPT-CORE-02B
+> resolver build — it already exists).
+> Product version: **v0.15.5** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
 
@@ -67,8 +74,36 @@ keys), optional Branch scope (existing Branch semantics), active Provider
   impossible (typed `SERVICE_NOT_FOUND` / `BRANCH_NOT_FOUND` — no
   cross-tenant existence leaks), compact AI-ready DTO (`providerId` +
   `displayName`, scope echoed; no secrets/auth fields). Proven by
-  `pnpm check:eligibility` (29/29, in-memory harness). Not exposed in any
-  UI/conversation turn yet — CORE-02 consumes it next.
+  `pnpm check:eligibility` (29/29, in-memory harness). Not exposed in
+  any UI/conversation turn yet — CORE-02 consumes it next.
+
+**Any-Provider Booking Options Resolver is IMPLEMENTED (PROMPT-CORE-02):**
+deterministic `resolveBookingOptions` (appointments feature server) —
+CONSUMES CORE-01 (`resolveEligibleProviders` is the eligibility source of
+truth; its typed errors pass through unchanged; eligibility is never
+re-resolved) and computes availability for the eligible Providers over the
+EXISTING deterministic Availability layer (the same business-hours logic,
+slot model, and conflict rule — `resolveWorkingDay`/`weekdayOf`/
+`generateCandidateSlots`/`filterConflictingSlots` are reused, never
+duplicated): per-Provider conflicts are provider-scoped EXACTLY like the
+booking write path (`listBlockingByAssignees` — the read counterpart of
+the existing `assignedUserId` scoping in `hasConflict`/
+`createWithConflictCheck`), ONE batched Business-scoped conflict read (no
+N+1); deterministic nearest-useful ranking (`rankBookingOptions` — each
+Provider's earliest slot ranks first by time then the stable CORE-01
+order; backfill in global time order when fewer than `MAX_BOOKING_OPTIONS`
+= 3 distinct options exist); result carries only serviceId/branchId/date/
+timezone/preference (ANY|PROVIDER) + 2–3 compact options (`providerId`,
+`displayName`, `startAt`, `endAt`) — never the full availability list,
+never credentials/auth fields; explicit empty reasons
+(NO_ELIGIBLE_PROVIDERS / BUSINESS_CLOSED / SERVICE_TOO_LONG /
+FULLY_BOOKED); a requested Provider is verified against CORE-01
+eligibility (`PROVIDER_NOT_ELIGIBLE` — cross-Business provider ids cannot
+leak); READ-ONLY (no appointment write, no reservation, no LLM, no
+WhatsApp — booking stays a later command); ZERO schema changes; proven by
+`pnpm check:booking-options` (32/32, in-memory harness). Not exposed in
+any UI/conversation turn yet — the Conversation/WhatsApp layer consumes
+it next.
 
 **Two strictly separated environments are LIVE (PROMPT-OPS-02; production
 identity closed in PROMPT-OPS-04; OPS-05 build + live verification in
@@ -131,7 +166,10 @@ P0 checks (removed after the run, per harness discipline);
 `DATABASE_URL` — device-local, not a code defect). PROMPT-OPS-05.1:
 fresh Production deploy green (Vercel build incl. platform routes);
 `pnpm check:signup` 13/13 + `pnpm check:policy` 13/13 re-verified
-post-deploy.
+post-deploy. PROMPT-CORE-02A: `pnpm verify` green + `pnpm security` pass +
+`pnpm check:booking-options` 32/32 re-verified after reconciling the
+interrupted attempt's state (concurrent-session conflict resolved with
+zero code changes).
 
 ## Completed Major Work
 
@@ -176,6 +214,8 @@ post-deploy.
 | Platform Control Plane deployment + live verification | PROMPT-OPS-05.1 (ops/verification only — ZERO code changes): current worktree deployed to Production via `pnpm deploy` (prerequisites verified first: project `flowpilot-prod`, four Production env vars, Production `DATABASE_URL` → `ep-tiny-grass-a5e63jev-pooler`, DEMO_MODE absent everywhere). Live verification PASSED: `/api/health` 200 (`deploymentReady:true`, `database:connected`), `/sign-in` 200 Arabic RTL, anonymous `/` + `/services` + `/staff` → 307 `/sign-in?redirect=…`, public signup 403 `SIGNUP_CLOSED` (Arabic message), all three platform routes + owner-invite resolve (platform routes guard-engaged: anonymous → 307 `/sign-in`; owner-invite invalid token → 200 safe Arabic error state), AI-policy values verified at the DB level (primary=openrouter / secondary=agentrouter / fallback=true), no key material in public responses (grep clean), policy runtime-changeable (DB singleton mutated via server actions — no redeploy needed). Production Platform Operator verified at the DB level (ammarjaberx@gmail.com, role=STAFF, account_type=PLATFORM, isActive); authenticated RBAC smoke skipped per operator decision. Production healthy: migrations 10/10 (last = `20260913170000_platform_control_plane`), Demo DB untouched. No GitHub operations | PROMPT-OPS-05.1 |
 
 | Provider / Service Eligibility Resolver | PROMPT-CORE-01: deterministic `resolveEligibleProviders` (`src/features/appointments/server/provider-eligibility-service.ts`) — relation-driven eligibility over the EXISTING `ProviderService`/`ProviderBranch` relations via ONE repository query (`ProviderRepository.listEligibleForService` + pure `eligibleProvidersWhere` builder): server-resolved Business scope (session + persisted user; input schema strips hostile identity keys), optional Branch scope (existing `findByIdWithinBusiness` semantics — no new branch framework), active Provider + active same-Business Service required, cross-business leakage impossible (typed `*_NOT_FOUND` codes — no cross-tenant existence leaks); compact DTO (`providerId` + `displayName` falling back to the member name; `branchId` scope echoed; no credentials/auth fields); ZERO schema changes, no new indexes, no LLM/WhatsApp/appointment changes; `resolveEligibleProvidersAction` thin hook; proven by `pnpm check:eligibility` (29/29 in-memory harness) | PROMPT-CORE-01 |
+
+| Any-Provider Booking Options Resolver | PROMPT-CORE-02: deterministic `resolveBookingOptions` (`src/features/appointments/server/booking-options-service.ts`) — CONSUMES CORE-01 (`resolveEligibleProviders` + its typed error pass-through; eligibility never re-resolved) then computes availability for the eligible Providers over the EXISTING Availability layer (reused `resolveWorkingDay`/`weekdayOf`/`generateCandidateSlots`/`filterConflictingSlots` — the same business-hours logic and slot model, never duplicated): per-Provider conflicts via `listBlockingByAssignees` (the read counterpart of the existing write-path `assignedUserId` scoping — a Provider's calendar is blocked only by its own PENDING/CONFIRMED appointments; ONE batched Business-scoped read, no N+1) + `listAssignmentSeams` (ONE batched ProviderProfile.id → userId projection); deterministic nearest-useful ranking (`rankBookingOptions`: each Provider's earliest slot first by time then the stable CORE-01 order; backfill in global time order when fewer than `MAX_BOOKING_OPTIONS` = 3 distinct options exist; no ML/LLM); small result (serviceId/branchId/date/timezone/preference ANY\|PROVIDER + 2–3 options `providerId`/`displayName`/`startAt`/`endAt`); explicit empty reasons (NO_ELIGIBLE_PROVIDERS / BUSINESS_CLOSED / SERVICE_TOO_LONG / FULLY_BOOKED); requested Provider verified against CORE-01 (`PROVIDER_NOT_ELIGIBLE` — no cross-Business leak); READ-ONLY (no appointment write/reservation/LLM/WhatsApp); ZERO schema changes; `resolveBookingOptionsAction` thin hook; proven by `pnpm check:booking-options` (32/32 in-memory harness) | PROMPT-CORE-02 |
 
 ## Key Known Limitations (current)
 
@@ -436,13 +476,14 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP: PROMPT-CORE-02 — Any-Provider Booking Options Resolver
-(consume the CORE-01 eligibility resolver: requested Service → eligible
-Providers → later availability lookup → compact customer options; no
-slot ranking yet), then: Meta WhatsApp integration → OpenRouter +
-AgentRouter production integration (consume `getEffectiveAiPolicy()`; no
-engine changes) → End-to-End WhatsApp → AI → Booking → Production pilot
-validation. Remaining operator actions (parallel, not blockers): add
+NEXT STEP: the provider sequence — Meta WhatsApp integration →
+OpenRouter + AgentRouter production integration (consume
+`getEffectiveAiPolicy()`; no engine changes) → End-to-End WhatsApp → AI
+→ Booking → Production pilot validation. CORE-01 + CORE-02 are both
+IMPLEMENTED and ready for the Conversation/WhatsApp layer to consume
+(eligible Providers + ranked booking options; neither exposed in any
+UI/conversation turn yet — the conversation engine integration decides
+that surface). Remaining operator actions (parallel, not blockers): add
 `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase (#7), and run `pnpm db:deploy`
 against the Demo Neon DB before its next code deploy (#8). Do not start

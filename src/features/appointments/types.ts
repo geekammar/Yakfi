@@ -240,3 +240,91 @@ export type ProviderEligibilityResult =
       success: false;
       error: { code: ProviderEligibilityErrorCode; message: string };
     };
+
+/**
+ * Any-Provider Booking Options result contract (PROMPT-CORE-02).
+ *
+ * One small deterministic contract answering: "Among the eligible
+ * Providers (CORE-01), what are the best useful appointment options
+ * available to the customer?" — consumed by the future
+ * Conversation/AI layer (and any deterministic response template).
+ *
+ * - `options` are the ranked useful options (normally 2–3,
+ *   `MAX_BOOKING_OPTIONS`): each carries only the Provider identity +
+ *   its slot — no credentials, no auth fields, no unrelated profile
+ *   data, no full availability list.
+ * - `startAt`/`endAt` are business-local "YYYY-MM-DDTHH:mm" instants —
+ *   the existing wall-clock slot semantics (start + Service
+ *   durationMinutes) combined with the echoed business date; the
+ *   booking write splits them back into date + "HH:mm".
+ * - `preference` echoes the applied provider preference (`ANY` when no
+ *   specific Provider was requested, `PROVIDER` otherwise).
+ * - Empty options are EXPLICIT (`reason`), never an unexplained
+ *   empty array.
+ * - The resolution is deterministic: repeated calls with the same
+ *   persisted state produce the same result, so deterministic turns
+ *   can avoid AI calls entirely.
+ */
+
+/** The applied provider preference, echoed back. */
+export type BookingOptionsPreference = "ANY" | "PROVIDER";
+
+/**
+ * How many options one result carries (PROMPT-CORE-02): a SMALL set —
+ * the customer-decision-efficiency target (2–3). Shared by the
+ * resolver and its checks as one source of truth.
+ */
+export const MAX_BOOKING_OPTIONS = 3 as const;
+
+/** Why zero options exist — present ONLY when `options` is empty. */
+export type BookingOptionsNoOptionsReason =
+  | "NO_ELIGIBLE_PROVIDERS"
+  | "BUSINESS_CLOSED"
+  | "SERVICE_TOO_LONG"
+  | "FULLY_BOOKED";
+
+/** One useful customer-facing option — compact identity + slot. */
+export type BookingOption = {
+  /** The ProviderProfile id (the booking seam, DECISIONS #32). */
+  providerId: string;
+  /** Profile display name, falling back to the member's name. */
+  displayName: string;
+  /** Slot start — business-local "YYYY-MM-DDTHH:mm". */
+  startAt: string;
+  /** Slot end — start + Service.durationMinutes. */
+  endAt: string;
+};
+
+export type BookingOptionsData = {
+  /** The requested Service the options were resolved against. */
+  serviceId: string;
+  /** The applied Branch scope — null when the request had none. */
+  branchId: string | null;
+  /** The requested business date ("YYYY-MM-DD"), echoed back. */
+  date: string;
+  /** Business timezone the times are interpreted in. */
+  timezone: string;
+  /** The applied provider preference. */
+  preference: BookingOptionsPreference;
+  /** Ranked useful options, ascending by start time. */
+  options: BookingOption[];
+};
+
+export type BookingOptionsErrorCode =
+  | "INVALID_INPUT"
+  | "NO_BUSINESS"
+  | "SERVICE_NOT_FOUND"
+  | "SERVICE_INACTIVE"
+  | "BRANCH_NOT_FOUND"
+  | "PROVIDER_NOT_ELIGIBLE";
+
+export type BookingOptionsResult =
+  | {
+      success: true;
+      data: BookingOptionsData;
+      reason: BookingOptionsNoOptionsReason | null;
+    }
+  | {
+      success: false;
+      error: { code: BookingOptionsErrorCode; message: string };
+    };

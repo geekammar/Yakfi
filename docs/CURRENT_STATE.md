@@ -3,7 +3,8 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-CORE-01.
+> PROMPT-CORE-02A (verified the completed CORE-02 work after reconciling
+> the interrupted attempt's state; zero code changes this session).
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -57,6 +58,23 @@
   DTO (`providerId` + `displayName`), cross-tenant leakage impossible,
   ZERO schema changes; `pnpm check:eligibility` 29/29. Not exposed in
   any UI/conversation turn yet (CORE-02 consumes it next).
+- **ANY-PROVIDER BOOKING OPTIONS RESOLVER (PROMPT-CORE-02):**
+  deterministic `resolveBookingOptions` — the first consumer of CORE-01
+  (requested Service → eligible Providers) that adds per-Provider
+  availability over the EXISTING Availability layer (provider-scoped
+  conflicts mirroring the booking write path's `assignedUserId`
+  scoping; ONE batched conflict read — no N+1, no second availability
+  engine), deterministic nearest-useful ranking (earliest first, stable
+  CORE-01 order as tie-breaker; no ML/LLM), and a SMALL result:
+  service/branch/date/timezone context + `preference` (ANY|PROVIDER) +
+  normally 2–3 options (`providerId`, `displayName`, `startAt`,
+  `endAt`). Explicit empty reasons (no eligible providers / business
+  closed / service too long / fully booked); a requested Provider is
+  verified against CORE-01 (`PROVIDER_NOT_ELIGIBLE` — no cross-Business
+  leak). READ-ONLY: no appointment write, no reservation, no LLM, no
+  WhatsApp. ZERO schema changes; `pnpm check:booking-options` 32/32.
+  Not exposed in any UI/conversation turn yet — the Conversation layer
+  consumes it next.
 - **DEMO LIVE (PROMPT-OPS-02):** `https://flowpilot-demo-gamma.vercel.app`
   — dedicated Vercel project `flowpilot-demo` (framework nextjs, SSO
   protection off) + the isolated Demo Neon DB (`neondb` @
@@ -108,15 +126,16 @@
   project `flowpilot-prod` (framework nextjs, SSO protection off), four
   Production env vars set, `.vercel` links `flowpilot-prod`. Repository
   visibility: **PRIVATE** (verified via `gh`).
-- **Version:** v0.15.4 · `pnpm verify` green · single `main` branch, tags
-  through `v0.15.4`.
+- **Version:** v0.15.5 · `pnpm verify` green · single `main` branch, tags
+  through `v0.15.5`.
 
-**Current next step:** PROMPT-CORE-02 — Any-Provider Booking Options
-Resolver (first consumer of the CORE-01 eligibility resolver: requested
-Service → eligible Providers → later availability lookup → compact
-customer options), then the provider sequence: Meta WhatsApp
-integration → OpenRouter + AgentRouter production integration →
-End-to-End WhatsApp → AI → Booking → Production pilot validation.
+**Current next step:** the provider sequence — Meta WhatsApp integration
+→ OpenRouter + AgentRouter production integration → End-to-End WhatsApp
+→ AI → Booking → Production pilot validation. CORE-01 (eligible
+Providers) + CORE-02 (ranked booking options) are both IMPLEMENTED and
+ready for the Conversation/WhatsApp layer to consume; neither is exposed
+in any UI/conversation turn yet (the conversation engine integration
+decides that surface).
 Remaining operator actions (not implementation blockers): add
 `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase, and `pnpm db:deploy` against
