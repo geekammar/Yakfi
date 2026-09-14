@@ -47,3 +47,14 @@ export const STAFF_NAV_ITEMS: NavItem[] = [
   { href: "/conversations", label: "المحادثات", icon: "message" },
   { href: "/appointments", label: "المواعيد", icon: "calendar" },
 ];
+
+/**
+ * Platform Control Plane navigation (PROMPT-OPS-05) — the Platform
+ * Operator's own surface, separate from every Business area. Guarded
+ * by `requirePlatformOperator`; intentionally small.
+ */
+export const PLATFORM_NAV_ITEMS: NavItem[] = [
+  { href: "/platform", label: "نظرة عامة", icon: "home" },
+  { href: "/platform/invitations", label: "دعوات الملاك", icon: "mail" },
+  { href: "/platform/ai-policy", label: "سياسة الذكاء", icon: "settings" },
+];

@@ -6,10 +6,14 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-OPS-02 (production identity audit + isolated demo
-> environment — one schema fix (Better Auth `accounts.issuer`), demo Vercel
-> project + seeded Demo DB, ZERO product-logic changes).
-> Product version: **v0.15.2** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-OPS-05.1 (OPS-05 deployed to Production and the live
+> Platform Control Plane verified: health, sign-in, anonymous redirects,
+> signup closed 403 `SIGNUP_CLOSED`, platform guard surface, owner-invite
+>
+> - AI-policy pages, policy values openrouter/agentrouter/fallback,
+>   no key exposure; Production Platform Operator verified at the DB level —
+>   authenticated role smoke skipped per operator decision).
+>   Product version: **v0.15.3** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
 
@@ -36,12 +40,45 @@ ship path, Vercel deployment, demo dataset, pilot distribution).
 `MessageTransport`, and the AI is the deterministic Arabic keyword/FAQ
 classifier behind `ConversationAi` (NO LLM). Both real providers remain
 operator decisions. The `/sign-up` placeholder page remains in code but is
-superseded (invitation-first, DECISIONS #22).
+superseded (invitation-first, DECISIONS #22). **PUBLIC SIGNUP IS CLOSED
+(PROMPT-OPS-05):** the proxy refuses public `POST /api/auth/sign-up/email`
+(403 `SIGNUP_CLOSED`); internal `auth.api.signUpEmail` (invitation
+activation) is unaffected.
 
-**Two strictly separated environments are LIVE (PROMPT-OPS-02):**
-PRODUCTION `https://flowpilot-prod.vercel.app` — data-empty, no demo
-credentials, no demo seed, `accounts.issuer` migration applied (chain 9/9,
-schema diff clean). DEMO `https://flowpilot-demo-gamma.vercel.app` —
+**Minimal Platform Control Plane is LIVE (PROMPT-OPS-05, DECISIONS #41;
+deployed to Production + verified live in PROMPT-OPS-05.1):**
+public signup closed (invitation-first preserved), Platform Operator
+guard surface enforced (`requireUser`/`requireRole` redirect operators to
+`/platform`; `requirePlatformOperator` guards the `(platform)` group),
+the `(platform)` UI (overview / دعوات الملاك / سياسة الذكاء — Arabic
+RTL), platform owner invitations (`platform_invitations` — pre-Business,
+one-time hash-only tokens, activation → ADMIN credential → canonical
+onboarding), and the Platform AI Policy (`platform_ai_policies` singleton
+— OpenRouter primary / AgentRouter secondary, runtime-changeable,
+secret REFERENCES only). One-time operator tool: `pnpm bootstrap:operator`
+(creates the FIRST Platform Operator identity).
+
+**Two strictly separated environments are LIVE (PROMPT-OPS-02; production
+identity closed in PROMPT-OPS-04; OPS-05 build + live verification in
+PROMPT-OPS-05.1):**
+PRODUCTION `https://flowpilot-prod.vercel.app` — Neon production DB
+(`ep-tiny-grass-a5e63jev-pooler`; chain 10/10, schema diff clean), first
+ADMIN identity bootstrapped (PROMPT-OPS-04) and Production onboarding
+COMPLETED (1 Business + ADMIN attached — verified at the DB level in
+PROMPT-OPS-05.1; 0 demo data), Platform Operator identity verified
+(STAFF, `account_type=PLATFORM`, isActive), redeployed with the
+PROMPT-OPS-05 worktree (build includes `/platform`, `/platform/ai-policy`,
+`/platform/invitations`, `/owner-invite/[token]`). Live verification
+PASSED (PROMPT-OPS-05.1): health `deploymentReady:true/database:connected`,
+sign-in 200 (Arabic RTL), anonymous `/` + business routes → 307
+`/sign-in?redirect=…`, public signup 403 `SIGNUP_CLOSED`, all three
+platform routes guard-engaged (anonymous → 307 `/sign-in`), owner-invite
+page resolves with a safe invalid-token state, AI-policy values verified
+at the DB level (openrouter / agentrouter / fallback=true), no key
+material in public responses. Authenticated RBAC smoke (operator reaches
+`/platform`, ADMIN/STAFF refused) was SKIPPED per operator decision —
+guard surface verified at code + DB level. DEMO
+`https://flowpilot-demo-gamma.vercel.app` —
 separate Vercel project (`flowpilot-demo`, framework nextjs, SSO
 protection disabled) + the isolated Demo Neon DB (`neondb` @
 `ep-weathered-feather-aef123ef-pooler`, fully EMPTY before this prompt —
@@ -53,7 +90,8 @@ sign in end-to-end (dashboard, conversations, appointments, admin-only
 areas; staff workspace NEED_HUMAN queue; role isolation verified:
 STAFF redirected from `/admin/team`, ADMIN redirected from `/staff`,
 services data never rendered for STAFF). Demo credentials exist ONLY in
-the Demo DB (Production DB: 0 users / 0 accounts). NOTE: the demo
+the Demo DB (Production DB: 1 ADMIN identity from the PROMPT-OPS-04
+bootstrap, 0 businesses). NOTE: the demo
 project's production domain is `flowpilot-demo-gamma.vercel.app` — the
 suggested `flowpilot-demo.vercel.app` is owned by an unrelated third
 party.
@@ -66,7 +104,8 @@ DB-serializable booking concurrency, the structured AI contract with
 deterministic bypass, and append-only usage telemetry all exist in the
 schema and code. The migration chain is repaired and complete
 (PROMPT-ARCH-03, DECISIONS #40; extended in PROMPT-OPS-02 with
-`20260913150000_account_issuer` — 9/9): an empty database bootstraps
+`20260913150000_account_issuer` — 9/9; 10/10 since PROMPT-OPS-05): an
+empty database bootstraps
 fully via `pnpm db:deploy`; the old Demo/Neon database was found
 completely EMPTY in PROMPT-OPS-02 and became the isolated Demo DB (see
 the PROMPT-OPS-02 row). The two real
@@ -77,7 +116,10 @@ decisions (DECISIONS #29).
 `pnpm security` clean; a temporary offline harness verified 24/24
 P0 checks (removed after the run, per harness discipline);
 `pnpm run doctor` NOT READY on this device only (placeholder
-`DATABASE_URL` — device-local, not a code defect).
+`DATABASE_URL` — device-local, not a code defect). PROMPT-OPS-05.1:
+fresh Production deploy green (Vercel build incl. platform routes);
+`pnpm check:signup` 13/13 + `pnpm check:policy` 13/13 re-verified
+post-deploy.
 
 ## Completed Major Work
 
@@ -114,6 +156,12 @@ P0 checks (removed after the run, per harness discipline);
 | Ops (ship tooling)                     | Lightweight operator ship path `pnpm ship patch/minor` (`scripts/ship.mjs`, dependency-free Node; DECISIONS #26): safety validation → version bump → one conventional commit → annotated tag → push main + tag → published GitHub Release; never re-runs the full gate (the prompt's `pnpm verify` is the gate), never deploys or touches the DB; full `pnpm release` preserved unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Ops 07           |
 | Production launch                      | PROMPT-OPS-01 (deployment-only — ZERO code changes): NEW EMPTY Neon production DB (`neondb` @ `ep-tiny-grass-a5e63jev-pooler`) bootstrapped via the chain (`pnpm db:deploy`, 8/8; `migrate status` clean; `migrate diff --from-config-datasource` vs `schema.prisma` → "No difference detected"); data-empty (DEMO_MODE off, no seed, old Demo DB untouched). Vercel production LIVE: new dedicated project `flowpilot-prod` (scope `ammarj1`, framework nextjs, SSO deployment protection disabled), Production env vars = the four required (DATABASE_URL → new Neon, real BETTER_AUTH_SECRET, BETTER_AUTH_URL/NEXT_PUBLIC_APP_URL → `https://flowpilot-prod.vercel.app`; NO DEMO_MODE, INBOUND_WEBHOOK_TOKEN unset → inbound webhook disabled). Deployed via `pnpm deploy` from the local worktree (worktree left uncommitted). Health: `deploymentReady:true`, `database:connected`; smoke: sign-in 200 (dir=rtl, lang=ar), `/api/auth/ok` 200, protected routes redirect unauthenticated sessions. No authenticated smoke test (no production users — data-empty). Old Vercel projects (`flowpilot_v3`, `flowpilot-ammarj`, `test-deploy-flowpilot`) untouched                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | PROMPT-OPS-01    |
 | Production identity + Demo environment | PROMPT-OPS-02: **auth audit** — the public `/api/auth/sign-up/email` endpoint is OPEN (emailAndPassword enabled; Better Auth's `disableSignUp` option also blocks the internal `auth.api.signUpEmail` the invitation activation uses, so it cannot simply be set — remediation is an operator decision, see Known Limitations); Better Auth v1.7 core drift fixed: the `Account` model lacked `issuer` (sign-up writes `local:credential`, sign-in matches the credential account by it — the installed version's lookup SELECTs `issuer` and FAILED against the old schema, breaking every credential flow) → `issuer String?` + hand-authored migration `20260913150000_account_issuer` (shadow DB unavailable on-device — no local postgres, `SHADOW_DATABASE_URL` unset; SQL = single ADD COLUMN, verified by deploy + diff + live sign-in); seed sets `issuer: createLocalAccountIssuer("credential")` + repairs pre-issuer accounts; **Demo environment LIVE**: the old Demo/Neon DB found completely EMPTY → bootstrapped via the chain (9/9, schema diff clean) + seeded ×2 deterministic/idempotent; new dedicated Vercel project `flowpilot-demo` created (scope `ammarj1`, framework nextjs set via API — the CLI-created project defaulted to `framework: null` which 404s every route; SSO deployment protection disabled via API to match prod), env vars = DATABASE_URL → Demo Neon DB, dedicated BETTER_AUTH_SECRET, BETTER_AUTH_URL/NEXT_PUBLIC_APP_URL → `https://flowpilot-demo-gamma.vercel.app` (the suggested `flowpilot-demo.vercel.app` is owned by an unrelated third party; the CLI's initial alias also failed silently and was re-aliased via `vercel alias set`), DEMO_MODE=true; deployed via `pnpm deploy` from the worktree; health `{status:ok, environment:production, deploymentReady:true, database:connected}`; authenticated smoke green end-to-end (Admin: dashboard `/`, conversations, appointments, admin/team, customers, services, settings, knowledge; Staff: `/staff` NEED_HUMAN queue; role isolation verified). Production: `accounts.issuer` migration applied (0 users / 0 accounts unchanged — data-empty, no demo seed ever run against it). `pnpm deploy` currently re-links `.vercel` per project — relink `flowpilot-prod` before the next production deploy | PROMPT-OPS-02    |
+
+| Production identity & security closure | PROMPT-OPS-04 (ops/security only — ZERO product-logic changes): **repository visibility PASS** (GitHub repo verified PRIVATE via `gh repo view`). **Production auth audit PASS** (code-level): invitation-first lifecycle (create → accept → activate, hash-only tokens), ADMIN/STAFF + Platform-Operator guards (`requireRole`/`requireApiUser` refuse operators; `accountType` input:false), server-derived business/tenant/role resolution in every action's `currentActor`, service-level `role !== "ADMIN"` enforcement, safe sign-in redirects, Zod-stripped hostile identity fields. **Production redeployed to v0.15.3** after the live build was found STALE (generated Prisma client predated `accounts.issuer` → every credential flow failed `Unknown argument 'issuer'`, sign-up 500 — diagnosed via Vercel runtime logs; redeploy regenerates the client from the current schema; verified fixed). **First Production ADMIN bootstrapped** via the NEW one-time operator tool `pnpm bootstrap:admin` (`scripts/bootstrap-production-admin.ts`): reuses the exact seed.ts primitives (better-auth/crypto `hashPassword` + better-auth/db `createLocalAccountIssuer`, credential-account shape), interactive no-echo password + typed YES confirmation, host assertion (`ep-tiny-grass…`), data-empty precondition, single-transaction write (1 ADMIN user `role=ADMIN`/`account_type=BUSINESS`/`is_active`/`businessId=null` + 1 credential account `providerId=credential`/`issuer=local:credential`), 17/17 DB row verification + automatic live sign-in verification (all ✔: sign-in 200, session, /onboarding handoff, ADMIN-only access, STAFF refusal → access-denied, sign-out, session invalidated) — NO backdoor: the Business is created in-app via the canonical onboarding wizard (`createForUser` attaches ADMIN membership + Default Branch). No DECISIONS entry (reuses decided primitives; ops tool only) | PROMPT-OPS-04 |
+
+| Platform Control Plane | PROMPT-OPS-05 (DECISIONS #41): **public signup CLOSED at the proxy** (403 `SIGNUP_CLOSED` for public `POST /api/auth/sign-up/email`; internal `auth.api.signUpEmail` unaffected — invitation-first preserved; proven by `pnpm check:signup` 13/13); **Platform Operator separation enforced** (`requireUser`/`requireRole` redirect operators to `/platform`; `requirePlatformOperator` guards the new `(platform)` group; one-time `pnpm bootstrap:operator` tool creates the FIRST PLATFORM identity); **platform owner invitations** (`platform_invitations` — pre-Business, hash-only one-time tokens, 7-day expiry, duplicate-open guard per email, activation → ADMIN credential with businessId null → canonical onboarding; public `/owner-invite/[token]` activation route reusing the existing notice/activation UI patterns); **Platform AI policy** (`platform_ai_policies` singleton — OpenRouter primary / AgentRouter secondary, runtime-changeable via the `(platform)/ai-policy` form, secret REFERENCE names only; deterministic `getEffectiveAiPolicy()` seam for the future LLM adapter; proven by `pnpm check:policy` 13/13); migration `20260913170000_platform_control_plane` applied to Production (chain 10/10, schema diff EMPTY, policy singleton verified; Demo DB untouched at 9/9); API keys are env-backed secrets (`OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` in `env.ts`/`.env.example`) — never in DB/UI/source/logs | PROMPT-OPS-05 |
+
+| Platform Control Plane deployment + live verification | PROMPT-OPS-05.1 (ops/verification only — ZERO code changes): current worktree deployed to Production via `pnpm deploy` (prerequisites verified first: project `flowpilot-prod`, four Production env vars, Production `DATABASE_URL` → `ep-tiny-grass-a5e63jev-pooler`, DEMO_MODE absent everywhere). Live verification PASSED: `/api/health` 200 (`deploymentReady:true`, `database:connected`), `/sign-in` 200 Arabic RTL, anonymous `/` + `/services` + `/staff` → 307 `/sign-in?redirect=…`, public signup 403 `SIGNUP_CLOSED` (Arabic message), all three platform routes + owner-invite resolve (platform routes guard-engaged: anonymous → 307 `/sign-in`; owner-invite invalid token → 200 safe Arabic error state), AI-policy values verified at the DB level (primary=openrouter / secondary=agentrouter / fallback=true), no key material in public responses (grep clean), policy runtime-changeable (DB singleton mutated via server actions — no redeploy needed). Production Platform Operator verified at the DB level (ammarjaberx@gmail.com, role=STAFF, account_type=PLATFORM, isActive); authenticated RBAC smoke skipped per operator decision. Production healthy: migrations 10/10 (last = `20260913170000_platform_control_plane`), Demo DB untouched. No GitHub operations | PROMPT-OPS-05.1 |
 
 ## Key Known Limitations (current)
 
@@ -163,22 +211,20 @@ P0 checks (removed after the run, per harness discipline);
   schema/domain base for the future provider-integration phase.
   Usage telemetry is recorded but not surfaced anywhere (no dashboards);
   `estimatedCostMicros` is never computed by the codebase.
-- Platform Operator marker exists (`users.accountType`, ARCH-02) but no
-  operator account is provisioned by any flow — creating one is a
-  direct-DB operator action; no platform UI exists (Spec B).
-- **Public sign-up API is OPEN (PROMPT-OPS-02 audit finding):** the
-  Better Auth endpoint `POST /api/auth/sign-up/email` accepts anonymous
-  sign-ups (emailAndPassword enabled). Better Auth's built-in
-  `emailAndPassword.disableSignUp` CANNOT be used to close it — it also
-  blocks the internal `auth.api.signUpEmail` that the invitation
-  activation flow depends on (`EMAIL_PASSWORD_SIGN_UP_DISABLED`),
-  breaking the canonical account-creation path. Candidate remediation
-  (operator decision pending): a Next.js middleware refusing public
-  `POST /api/auth/sign-up/email` (internal `auth.api` calls do not
-  traverse middleware), or an equivalent edge guard. Until then,
-  anonymous sign-ups create orphan BUSINESS users (`businessId = null`)
-  — no cross-tenant access (server-side tenant scoping), but account
-  pollution on a public URL is possible.
+- Platform Operator marker exists (`users.accountType`, ARCH-02) and the
+  control surface is LIVE since PROMPT-OPS-05: the `(platform)` route
+  group (overview / دعوات الملاك / سياسة الذكاء) guarded by
+  `requirePlatformOperator`. The FIRST operator identity was created via
+  the one-time `pnpm bootstrap:operator` and is verified on Production
+  (PROMPT-OPS-05.1, DB level); no further operator is provisioned by any
+  in-app flow yet (platform owner invitations create pre-Business ADMINs).
+- **Public sign-up API is CLOSED (PROMPT-OPS-05, DECISIONS #41):** the
+  route proxy refuses public `POST /api/auth/sign-up/email` (+
+  `/api/auth/sign-up`) with 403 `SIGNUP_CLOSED`; anonymous visitors
+  cannot create arbitrary accounts. Internal `auth.api.signUpEmail`
+  calls (invitation activation) do not traverse the proxy and remain
+  functional (Better Auth's `disableSignUp` stays unused — it would
+  break the internal path). Proven by `pnpm check:signup` (13/13).
 - Credential accounts REQUIRE the Better Auth v1.7 `issuer` field
   (`local:credential`): since PROMPT-OPS-02 the column exists
   (`20260913150000_account_issuer`) and the seed writes it; any
@@ -282,7 +328,14 @@ The chain in `prisma/migrations/` (with `migration_lock.toml`, provider
 `20260903130000_business_vertical` →
 `20260903140000_business_confirmation_mode` →
 `20260910120000_architecture_hardening_foundation` →
-`20260913120000_invitation_updated_at_default`.
+`20260913120000_invitation_updated_at_default` →
+`20260913150000_account_issuer` →
+`20260913170000_platform_control_plane` (PROMPT-OPS-05:
+platform_invitations + platform_ai_policies + the initial
+operator-approved policy row — OpenRouter primary / AgentRouter
+secondary; applied to Production, chain 10/10, `migrate diff` vs
+`schema.prisma` EMPTY; the Demo DB is at 9/9 and needs
+`pnpm db:deploy` before its next code deploy).
 Chain end-state == `prisma/schema.prisma` (empty `migrate diff`).
 
 **Old Demo/Neon database (NOT touched by PROMPT-ARCH-03):** the one-time
@@ -301,13 +354,18 @@ NOT drop/reset it.
 - Deploy: `pnpm deploy` / `deploy:preview` / `deploy:check` (gated; URL
   captured); `/api/health` reports version + DB reachability +
   `deploymentReady`. Guides: `VERCEL_DEPLOYMENT.md` (§0 = quick path),
-  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE** (PROMPT-OPS-01):
-  `https://flowpilot-prod.vercel.app` — dedicated Vercel project
-  `flowpilot-prod` (scope `ammarj1`), NEW Neon DB bootstrapped 8/8,
-  data-empty; redeploy loop = `pnpm deploy` from the worktree (no Git
-  connection on this project yet). NOTE (PROMPT-OPS-02): `.vercel`
-  currently links `flowpilot-demo` — relink `flowpilot-prod` (`vercel
-link --project flowpilot-prod`) before the next production deploy.
+  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE and identity-closed**
+  (PROMPT-OPS-01; PROMPT-OPS-04; OPS-05 build + live verification in
+  PROMPT-OPS-05.1): `https://flowpilot-prod.vercel.app` —
+  dedicated Vercel project `flowpilot-prod` (scope `ammarj1`), Neon DB
+  chain 10/10, first ADMIN bootstrapped, v0.15.3 build live (redeploy
+  PROMPT-OPS-04 fixed the stale issuer-client build; PROMPT-OPS-05.1
+  deployed the OPS-05 Platform Control Plane worktree — verified live).
+  `.vercel` links
+  `flowpilot-prod` (PROMPT-OPS-02's stale note resolved). Redeploy loop =
+  `pnpm deploy` from the worktree (no Git connection on this project yet).
+  One-time bootstrap tool: `pnpm bootstrap:admin` (refuses non-empty DBs
+  and non-production hosts — safe to keep in the repo; unused now).
 - Demo environment (PROMPT-OPS-02): LIVE at
   `https://flowpilot-demo-gamma.vercel.app` — dedicated Vercel project
   `flowpilot-demo` (scope `ammarj1`, framework nextjs, SSO protection
@@ -324,50 +382,55 @@ link --project flowpilot-prod`) before the next production deploy.
   dev launchers and every deploy. Docs: `DEMO_GUIDE.md`, `DEMO_SCRIPT.md`,
   `CLIENT_DEMO.md`. Demo logins (demo DBs only): `admin@flowpilot.app` /
   `Admin@1234`, `staff@flowpilot.app` / `Staff@1234`.
-- Releases v0.1.0–v0.15.2 are published on GitHub (tags pushed; each has a
+- Releases v0.1.0–v0.15.3 are published on GitHub (tags pushed; each has a
   GitHub Release; newest = Latest). Local and origin `main` are in sync.
 
 ## Unresolved User Actions (not code)
 
-1. Make the GitHub repository **private** (currently public; required by
-   `GITHUB_WORKFLOW.md` / DECISIONS #18).
+1. ~~Make the GitHub repository **private**~~ DONE — verified PRIVATE
+   (PROMPT-OPS-04; required by `GITHUB_WORKFLOW.md` / DECISIONS #18).
 2. Set a real `DATABASE_URL` in `.env.local` on this device (doctor gate).
 3. ~~For deployment: Vercel env vars (Production + Preview) + `pnpm
 db:deploy` against Neon from desktop/CI~~ DONE for the new Production
-   project (PROMPT-OPS-01: `flowpilot-prod` + NEW Neon DB bootstrapped).
-4. Create the FIRST production ADMIN identity on the data-empty
-   Production DB (invitation-first: no users exist — direct-DB operator
-   action; do NOT run the demo seed against Production). The user row
-   needs `role = 'ADMIN'`, `account_type = 'BUSINESS'`, `is_active =
-true`, a `business_id` once a real business exists, and a credential
-   account row (`provider_id = 'credential'`, `issuer =
-'local:credential'`, `account_id = user.id`, Better Auth-hashed
-   password via `better-auth/crypto hashPassword`). `accounts.issuer`
-   exists since PROMPT-OPS-02. Alternatively: create the first Business
-   - ADMIN via a one-time operator seed, then invite future staff
-     in-app.
-5. Close the public sign-up API (PROMPT-OPS-02 audit finding): approve
-   the remediation (Next.js middleware refusing public
-   `POST /api/auth/sign-up/email` — internal `auth.api` calls do not
-   traverse middleware), then implement in a follow-up prompt. Better
-   Auth's own `disableSignUp` option is NOT viable (it breaks the
-   internal invitation-activation path — see Known Limitations).
+   project (PROMPT-OPS-01: `flowpilot-prod` + Neon DB bootstrapped).
+4. ~~Create the FIRST production ADMIN identity~~ DONE (PROMPT-OPS-04):
+   bootstrapped via the one-time `pnpm bootstrap:admin` operator tool and
+   verified end-to-end (17/17 DB row checks + live sign-in flow all ✔;
+   role ADMIN, account_type BUSINESS, isActive, businessId null, 1
+   credential account with `issuer=local:credential`; 0 businesses / 0
+   demo data / no duplicates). ~~Remaining operator step: sign in to
+   `https://flowpilot-prod.vercel.app` with the bootstrapped ADMIN
+   credentials and complete the onboarding wizard~~ DONE — verified at
+   the DB level in PROMPT-OPS-05.1 (1 Business exists; the ADMIN user is
+   attached to it via the canonical `createForUser` path).
+5. ~~Close the public sign-up API~~ DONE (PROMPT-OPS-05, DECISIONS #41):
+   the proxy refuses public `POST /api/auth/sign-up/email`; the
+   invitation-first lifecycle is unaffected (`pnpm check:signup` 13/13).
+6. ~~Create the FIRST Platform Operator identity~~ DONE — verified at the
+   DB level in PROMPT-OPS-05.1 (ammarjaberx@gmail.com, role=STAFF,
+   account_type=PLATFORM, isActive; the single PLATFORM account that can
+   sign in to `/platform`; authenticated RBAC smoke skipped per operator
+   decision).
+7. Add `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to the Vercel
+   project env vars before the provider-integration phase (a key
+   change requires redeploy; never commit real values).
+8. Demo DB is at 9/9 (missing `20260913170000_platform_control_plane`);
+   run `pnpm db:deploy` against the Demo Neon DB before its next code
+   deploy (the deploy gate checks schema-applied).
 
 ## Next Step
 
-NEXT STEP: (1) Operator: commit + push the current worktree and create
-the FIRST production ADMIN identity on the data-empty Production DB
-(invitation-first; never the demo seed; direct-DB row requirements in
-Unresolved User Actions #4). (2) Approve + schedule the public sign-up
-API remediation (Unresolved User Actions #5; small follow-up prompt).
-(3) Then resolve the two pending provider decisions BEFORE provider
-integration planning/implementation: (1) the real WhatsApp transport
-provider and (2) the real LLM provider behind `ConversationAi`
-(DECISIONS #29). Both are operator decisions requiring explicit
-approval + a new DECISIONS entry; the ARCH-02 foundations
-(provider-neutral seams, WhatsAppConnection model, structured AI
-contract, usage telemetry) are ready for them. Do not start provider
-integration until those decisions are recorded.
+NEXT STEP: Provider / Service Eligibility Resolver (DECISIONS #41
+handoff — the first step of the provider sequence), then: Any-Provider
+Booking Options Resolver → Meta WhatsApp integration → OpenRouter +
+AgentRouter production integration (consume `getEffectiveAiPolicy()`; no
+engine changes) → End-to-End WhatsApp → AI → Booking → Production pilot
+validation. Remaining operator actions (parallel, not blockers for the
+resolver's implementation): add `OPENROUTER_API_KEY` /
+`AGENTROUTER_API_KEY` to the Vercel project env vars before the
+provider-integration phase (#7), and run `pnpm db:deploy` against the
+Demo Neon DB before its next code deploy (#8). Do not start provider
+integration before the eligibility resolver and a DECISIONS entry.
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

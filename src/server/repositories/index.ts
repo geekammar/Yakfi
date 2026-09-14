@@ -9,6 +9,7 @@
  * - Features depend on these repositories, never on `db` directly.
  */
 
+import { AiPolicyRepository } from "./ai-policy.repository";
 import { AppointmentRepository } from "./appointment.repository";
 import { BranchRepository } from "./branch.repository";
 import { BusinessRepository } from "./business.repository";
@@ -16,6 +17,7 @@ import { ConversationRepository } from "./conversation.repository";
 import { CustomerRepository } from "./customer.repository";
 import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
+import { PlatformInvitationRepository } from "./platform-invitation.repository";
 import { ProviderRepository } from "./provider.repository";
 import { ServiceRepository } from "./service.repository";
 import { UsageRepository } from "./usage.repository";
@@ -34,15 +36,19 @@ export const whatsAppConnectionRepository = new WhatsAppConnectionRepository();
 export const providerRepository = new ProviderRepository();
 export const inboundDedupeRepository = new InboundDedupeRepository();
 export const usageRepository = new UsageRepository();
+export const platformInvitationRepository = new PlatformInvitationRepository();
+export const aiPolicyRepository = new AiPolicyRepository();
 
 export {
   AppointmentRepository,
+  AiPolicyRepository,
   BranchRepository,
   BusinessRepository,
   ConversationRepository,
   CustomerRepository,
   InboundDedupeRepository,
   InvitationRepository,
+  PlatformInvitationRepository,
   ProviderRepository,
   ServiceRepository,
   UsageRepository,

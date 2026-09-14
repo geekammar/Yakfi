@@ -25,6 +25,10 @@ export const getSession = cache(async (): Promise<Session | null> => {
 async function loadActiveSession(): Promise<Session> {
   const session = await getSession();
   if (!session) redirect("/sign-in");
+  // Platform/business separation (PROMPT-OPS-05): business guards never
+  // admit the Platform Operator — it is redirected to its own control
+  // surface instead of the business app.
+  if (isPlatformOperator(session.user)) redirect("/platform");
   if (!session.user.isActive) {
     await signOutQuietly();
     redirect("/access-denied");
@@ -44,7 +48,7 @@ export function isPlatformOperator(user: {
   return user.accountType === "PLATFORM";
 }
 
-/** Any authenticated, active user. Protects the `(app)` area. */
+/** Any authenticated, active BUSINESS user. Protects the `(app)` area. */
 export async function requireUser(): Promise<Session> {
   return loadActiveSession();
 }
@@ -64,12 +68,15 @@ export async function requireRole(role: UserRole): Promise<Session> {
 }
 
 /**
- * Platform Operator guard (PROMPT-ARCH-02 foundation): the smallest
- * explicit authorization primitive for future platform-level surfaces.
- * No platform UI exists yet; this is the seam future routes compose.
+ * Platform Operator guard (PROMPT-ARCH-02 foundation; the control
+ * surface is live since PROMPT-OPS-05). Loads the session WITHOUT the
+ * business guards' operator redirect (an operator must never be pushed
+ * away from /platform), then admits PLATFORM accounts only.
  */
 export async function requirePlatformOperator(): Promise<Session> {
-  const session = await loadActiveSession();
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  if (!session.user.isActive) redirect("/access-denied");
   if (!isPlatformOperator(session.user)) redirect("/access-denied");
   return session;
 }

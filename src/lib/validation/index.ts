@@ -1,4 +1,5 @@
 export * from "./common";
+export * from "./platform";
 export * from "./business";
 export * from "./service";
 export * from "./customer";

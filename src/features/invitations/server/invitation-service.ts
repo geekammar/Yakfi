@@ -161,7 +161,12 @@ export type IdentityCreator = (input: {
   password: string;
 }) => Promise<CreateIdentityResult>;
 
-const defaultCreateIdentity: IdentityCreator = async (input) => {
+/**
+ * The default Better Auth identity creator — the SINGLE source of
+ * server-side credential creation (shared with the Platform Control
+ * Plane's owner-invitation activation, PROMPT-OPS-05).
+ */
+export const defaultCreateIdentity: IdentityCreator = async (input) => {
   try {
     const result = await auth.api.signUpEmail({
       body: {

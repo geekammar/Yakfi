@@ -12,6 +12,17 @@ const serverEnvSchema = z.object({
    * holds this token or calls the engine service directly.
    */
   INBOUND_WEBHOOK_TOKEN: z.string().min(32).optional(),
+  /**
+   * AI provider API keys (PROMPT-OPS-05) — environment-backed SECRETS,
+   * optional until the provider integration phase. They are NEVER
+   * stored in the database, returned by any API, or logged: the
+   * platform AI policy carries only their reference NAMES
+   * (OPENROUTER_API_KEY / AGENTROUTER_API_KEY). Local development:
+   * .env.local; production: Vercel Environment Variables (a key change
+   * requires redeploy in the current deployment model).
+   */
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  AGENTROUTER_API_KEY: z.string().min(1).optional(),
 });
 
 const clientEnvSchema = z.object({

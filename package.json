@@ -1,12 +1,14 @@
 {
   "name": "flowpilot",
-  "version": "0.15.3",
+  "version": "0.15.4",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
     "doctor": "node scripts/doctor.mjs",
     "verify": "node scripts/verify.mjs",
     "security": "node scripts/security-check.mjs",
+    "check:signup": "tsx scripts/check-signup-policy.ts",
+    "check:policy": "tsx scripts/check-ai-policy.ts",
     "release": "bash scripts/release.sh",
     "ship": "node scripts/ship.mjs",
     "vercel:check": "node scripts/vercel-check.mjs",
@@ -31,6 +33,8 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "dotenv -e .env.local -e .env -- tsx prisma/seed.ts",
+    "bootstrap:admin": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-production-admin.ts",
+    "bootstrap:operator": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-platform-operator.ts",
     "icons": "node scripts/generate-pwa-icons.mjs"
   },
   "engines": {

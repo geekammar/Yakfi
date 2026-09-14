@@ -455,6 +455,76 @@ model Invitation {
   @@map("invitations")
 }
 
+// ─── Platform Control Plane (PROMPT-OPS-05) ──────────────────
+// Owner invitations are PLATFORM-scoped and PRE-Business: the Business
+// does not exist yet — it is created by the canonical onboarding wizard
+// after the owner activates a credential. Only the token HASH is stored
+// (same security utility as business invitations; raw tokens are never
+// persisted). Lifecycle is derived from timestamps (no status enum):
+// pending = acceptedAt/activatedAt null + unexpired; accepted =
+// acceptedAt set; activated = activatedAt set (credential created, role
+// ADMIN attached, businessId still null until onboarding); expired =
+// pending + past expiry. Duplicate-open invitations are prevented per
+// email at the workflow layer (transaction-scoped check-then-create,
+// DECISIONS #23 semantics — the same email may be re-invited after
+// expiry/acceptance, so no DB unique constraint on email).
+
+model PlatformInvitation {
+  id           String    @id @default(uuid())
+  email        String
+  // Operator-facing memo (which business the invitation was created
+  // for) — display-only, never authorization.
+  businessName String?   @map("business_name")
+  tokenHash    String    @unique @map("token_hash")
+  expiresAt    DateTime  @map("expires_at")
+  acceptedAt   DateTime? @map("accepted_at")
+  // Completed credential activation (PROMPT-OPS-05): set exactly once
+  // by the activation workflow — identity exists + role ADMIN.
+  activatedAt  DateTime? @map("activated_at")
+  // Nullable: the Platform Operator identity may not exist yet.
+  createdById  String?   @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  createdBy User? @relation("PlatformInvitationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([createdById])
+  @@map("platform_invitations")
+}
+
+// ─── Platform AI Policy (PROMPT-OPS-05) ──────────────────────
+// ONE platform-scoped, DB-backed configuration row (runtime-readable,
+// no deployment needed for policy changes). Provider/model identity +
+// fallback policy + secret REFERENCE names only — NEVER API keys (keys
+// stay environment-backed: OPENROUTER_API_KEY / AGENTROUTER_API_KEY).
+// The singleton is structurally enforced: the fixed 'singleton' primary
+// key — a second insert fails on the PK conflict, so there is always
+// exactly ONE effective policy row. Provider identities are validated
+// by the Zod union `aiProviderValues` (lib/validation/platform) — no
+// Prisma enum, extending the list needs no migration. ConversationAi
+// keeps depending on its abstraction — this row is configuration, not
+// integration.
+
+model PlatformAiPolicy {
+  id                 String   @id @default("singleton")
+  primaryProvider    String   @map("primary_provider")
+  primaryModel       String   @map("primary_model")
+  secondaryProvider  String?  @map("secondary_provider")
+  secondaryModel     String?  @map("secondary_model")
+  fallbackEnabled    Boolean  @default(true) @map("fallback_enabled")
+  primarySecretRef   String   @map("primary_secret_ref")
+  secondarySecretRef String?  @map("secondary_secret_ref")
+  // Audit reference — the Platform Operator who last changed the policy.
+  updatedById        String?  @map("updated_by_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  updatedBy User? @relation("PlatformAiPolicyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_ai_policies")
+}
+
 // ─── Users & auth ────────────────────────────────────────────
 // The Better Auth required fields stay untouched; domain fields
 // (business, role) extend the same `users` table.
@@ -486,6 +556,8 @@ model User {
   assignedConversations Conversation[] @relation("ConversationAssignee")
   assignedAppointments  Appointment[]  @relation("AppointmentAssignee")
   invitationsCreated    Invitation[]   @relation("InvitationCreator")
+  platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
+  aiPolicyUpdates       PlatformAiPolicy[] @relation("PlatformAiPolicyUpdater")
 
   @@index([businessId])
   @@index([accountType])

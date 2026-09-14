@@ -5,6 +5,7 @@ import {
   ClipboardList,
   House,
   Layers,
+  Mail,
   MessageCircle,
   SettingsIcon,
   Shield,
@@ -21,6 +22,7 @@ const ICONS: Record<string, LucideIcon> = {
   clipboard: ClipboardList,
   layers: Layers,
   settings: SettingsIcon,
+  mail: Mail,
 };
 
 export function getNavIcon(iconName: string): LucideIcon {
