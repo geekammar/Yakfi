@@ -6,10 +6,10 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-DOC-DECISION-META — Meta WhatsApp Cloud API provider
-> boundary (DECISIONS #42; doc record for the CORE-03A foundation, ZERO
-> schema/code changes; worktree uncommitted, operator owns `pnpm ship`).
-> Product version: **v0.15.6** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-CORE-03B — Meta WhatsApp adapter on the CORE-03A
+> foundation (DECISIONS #42; `src/server/integrations/whatsapp/`; 15/15 +
+> 26/26; ZERO schema changes; worktree uncommitted, operator owns `pnpm ship`).
+> Product version: **v0.15.8** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
 
@@ -31,11 +31,14 @@ latest-thread reuse) → typed AI turn → verbatim-FAQ reply OR NEED_HUMAN
 complete (bootstrap/dev scripts, doctor/verify/security, gated releases,
 ship path, Vercel deployment, demo dataset, pilot distribution).
 
-**WhatsApp provider SELECTED (DECISIONS #42; #29 closed for WhatsApp):**
-Meta WhatsApp Cloud API (Graph API, business-owned number) is the approved
-provider; the transport remains the offline logging adapter behind the
-provider-neutral `MessageTransport` seam until CORE-03B lands the adapter
-(no SDK/HTTP/signature/media yet). **The AI transport is intentionally NOT
+**WhatsApp provider IMPLEMENTED as the Meta adapter (DECISIONS #42; #29
+closed for WhatsApp):** Meta WhatsApp Cloud API (Graph API,
+business-owned number) is the approved provider — the inbound adapter is
+`GET|POST /api/whatsapp/meta` inside `src/server/integrations/whatsapp/`
+behind the CORE-03A provider-neutral foundation; outbound
+`createMetaWhatsAppTransport` posts to `graph.facebook.com/{v}/{
+PHONE_NUMBER_ID}/messages` over the same foundation. **The AI transport is
+intentionally NOT
 integrated (DECISIONS #29):** the AI is still the deterministic Arabic
 keyword/FAQ classifier behind `ConversationAi` (NO LLM) — the remaining
 operator decision. The `/sign-up` placeholder page remains in code but is
@@ -102,26 +105,32 @@ it next.
 **WhatsApp Transport Foundation is IMPLEMENTED (PROMPT-CORE-03A; provider
 boundary DECISIONS #42):** provider-neutral boundary
 `src/server/transport/whatsapp-transport.ts` (the canonical replaceable seam
-the Meta adapter implements — **Meta WhatsApp Cloud API / Graph API,
-business-owned number** is the selected provider): normalized inbound
-envelope + `normalizeInboundTransportMessage` (`strict()` + TEXT↔MEDIA
-exclusivity; hostile identity/secret keys rejected;
-`MALFORMED_PROVIDER_PAYLOAD` on shape drift), outbound `OutboundMessage` →
-`MessageTransport` (offline adapter retained behind the seam;
-`resolveConnectionForSend` tenant-scoped + `CONNECTED`/`isActive` gated;
-`credentialsRef` never returned), typed `WhatsAppTransportErrorCode`
-taxonomy + `TransportError` (`retryable` = only `TRANSIENT_TRANSPORT_FAILURE`;
-policy stays adapter-side; no HTTP status leakage). Tenant/Branch resolution
-is server-derived (`BusinessRepository.findByWhatsappNumber` +
+— **Meta WhatsApp Cloud API / Graph API, business-owned number** is the
+selected provider): normalized inbound envelope +
+`normalizeInboundTransportMessage` (`strict()` + TEXT<->MEDIA exclusivity;
+hostile identity/secret keys rejected; `MALFORMED_PROVIDER_PAYLOAD` on shape
+drift), outbound `OutboundMessage` -> `MessageTransport` (offline adapter
+retained behind the seam; `resolveConnectionForSend` tenant-scoped +
+`CONNECTED`/`isActive` gated; `credentialsRef` never returned), typed
+`WhatsAppTransportErrorCode` taxonomy + `TransportError` (`retryable` = only
+`TRANSIENT_TRANSPORT_FAILURE`; policy stays adapter-side; no HTTP status
+leakage). Tenant/Branch resolution is server-derived
+(`BusinessRepository.findByWhatsappNumber` +
 `WhatsAppConnectionRepository` `findByPhone`/`findByIdWithinBusiness` +
 `BranchRepository`; branch validated within Business; business-shared
-`branchId=null` → Default Branch; no Meta SDK/HTTP/signature/media-download;
-no provider payload copied). Conversations keeps the feature-local seam via
-`src/features/conversations/server/conversation-transport.ts` (re-exports
+`branchId=null` -> Default Branch). Conversations keeps the feature-local seam
+via `src/features/conversations/server/conversation-transport.ts` (re-exports
 canonical contracts + `offlineMessageTransport`). Proven by
-`pnpm check:whatsapp-transport` (26/26, in-memory harness with real engine
-schema/engine — no DB/network). ZERO schema changes, no vendor integration
-yet — CORE-03B wires the selected Meta adapter to inbound.
+`pnpm check:whatsapp-transport` (26/26, in-memory). **Meta adapter
+IMPLEMENTED (PROMPT-CORE-03B)** inside `src/server/integrations/whatsapp/`
+(`meta-webhook.ts` verify/signature/parse+normalize; `meta-client.ts`
+Bearer outbound + `mapMetaError` + retry taxonomy; route
+`GET|POST /api/whatsapp/meta` with `X-Hub-Signature-256`, idempotency via
+the durable ledger + status callbacks counted not delivered, `revalidatePath`
+on delivery). Proven by `pnpm check:meta-whatsapp` 15/15 + the updated
+26/26 harness (Core stays free of Meta behind the adapter boundary; env
+`WHATSAPP_META_*` in `src/lib/env.ts` empty->undefined via
+`emptyToUndefined`). ZERO schema changes.
 
 **Two strictly separated environments are LIVE (PROMPT-OPS-02; production
 identity closed in PROMPT-OPS-04; OPS-05 build + live verification in
@@ -235,9 +244,10 @@ zero code changes).
 
 | Any-Provider Booking Options Resolver | PROMPT-CORE-02: deterministic `resolveBookingOptions` (`src/features/appointments/server/booking-options-service.ts`) — CONSUMES CORE-01 (`resolveEligibleProviders` + its typed error pass-through; eligibility never re-resolved) then computes availability for the eligible Providers over the EXISTING Availability layer (reused `resolveWorkingDay`/`weekdayOf`/`generateCandidateSlots`/`filterConflictingSlots` — the same business-hours logic and slot model, never duplicated): per-Provider conflicts via `listBlockingByAssignees` (the read counterpart of the existing write-path `assignedUserId` scoping — a Provider's calendar is blocked only by its own PENDING/CONFIRMED appointments; ONE batched Business-scoped read, no N+1) + `listAssignmentSeams` (ONE batched ProviderProfile.id → userId projection); deterministic nearest-useful ranking (`rankBookingOptions`: each Provider's earliest slot first by time then the stable CORE-01 order; backfill in global time order when fewer than `MAX_BOOKING_OPTIONS` = 3 distinct options exist; no ML/LLM); small result (serviceId/branchId/date/timezone/preference ANY\|PROVIDER + 2–3 options `providerId`/`displayName`/`startAt`/`endAt`); explicit empty reasons (NO_ELIGIBLE_PROVIDERS / BUSINESS_CLOSED / SERVICE_TOO_LONG / FULLY_BOOKED); requested Provider verified against CORE-01 (`PROVIDER_NOT_ELIGIBLE` — no cross-Business leak); READ-ONLY (no appointment write/reservation/LLM/WhatsApp); ZERO schema changes; `resolveBookingOptionsAction` thin hook; proven by `pnpm check:booking-options` (32/32 in-memory harness) | PROMPT-CORE-02 |
 
-| WhatsApp Transport Foundation | PROMPT-CORE-03A: provider-neutral boundary `src/server/transport/whatsapp-transport.ts` — normalized inbound envelope + `normalizeInboundTransportMessage` (`strict()` + TEXT↔MEDIA exclusivity; hostile keys rejected; `MALFORMED_PROVIDER_PAYLOAD`), outbound `OutboundMessage` → `MessageTransport` (offline retained; `resolveConnectionForSend` tenant-scoped + gated; `credentialsRef` never returned), typed error taxonomy + `TransportError` (`retryable` = `TRANSIENT_TRANSPORT_FAILURE` only; no HTTP leakage); server-derived tenant/branch resolution via existing `BusinessRepository.findByWhatsappNumber` + `WhatsAppConnectionRepository` + `BranchRepository` (branch validated within Business; business-shared `branchId=null` → Default Branch); no Meta SDK/HTTP/signature/media-download; no provider payload copied; `pnpm check:whatsapp-transport` 26/26 (in-memory); ZERO schema changes; re-exported via `src/features/conversations/server/conversation-transport.ts`; `package.json` adds `check:whatsapp-transport` | PROMPT-CORE-03A |
+| WhatsApp Transport Foundation | PROMPT-CORE-03A: provider-neutral boundary `src/server/transport/whatsapp-transport.ts` — normalized inbound envelope + `normalizeInboundTransportMessage` (`strict()` + TEXT<->MEDIA exclusivity; hostile keys rejected; `MALFORMED_PROVIDER_PAYLOAD`), outbound `OutboundMessage` -> `MessageTransport` (offline retained; `resolveConnectionForSend` tenant-scoped + gated; `credentialsRef` never returned), typed error taxonomy + `TransportError` (`retryable` = `TRANSIENT_TRANSPORT_FAILURE` only; no HTTP leakage); server-derived tenant/branch resolution via existing `BusinessRepository.findByWhatsappNumber` + `WhatsAppConnectionRepository` + `BranchRepository` (branch validated within Business; business-shared `branchId=null` -> Default Branch); `pnpm check:whatsapp-transport` 26/26 (in-memory); ZERO schema changes; re-exported via `src/features/conversations/server/conversation-transport.ts`; `package.json` adds `check:whatsapp-transport` | PROMPT-CORE-03A |
+| Meta WhatsApp Adapter (Graph API) | PROMPT-CORE-03B (DECISIONS #42): adapter inside `src/server/integrations/whatsapp/` on the CORE-03A foundation — `meta-webhook.ts` (verify `hub.mode/hub.verify_token/hub.challenge` + HMAC-SHA256 `X-Hub-Signature-256` + parse+normalize `whatsapp_business_account` -> `normalizeInboundTransportMessage`) + `meta-client.ts` (`createMetaWhatsAppTransport` Bearer POST `https://graph.facebook.com/{v}/{PHONE_NUMBER_ID}/messages` + `buildMetaSendUrl`/`buildMetaTextPayload` + `mapMetaError` 401/403/190/102 -> UNAUTHORIZED_CREDENTIALS, 429/5xx/368 -> TRANSIENT_TRANSPORT_FAILURE else PERMANENT) + route `GET|POST /api/whatsapp/meta` (public-path exempt; GET returns `hub.challenge` text/plain; POST raw-body signature -> parse -> empty->200 statuses / non-empty -> server-derived `resolveInboundConnection` -> TEXT via `receiveInboundMessage` + `revalidatePath` -> `{success,received,statuses,results}`; `ENVIRONMENT_VARIABLES.md` documents 5 optional `WHATSAPP_META_*` env vars in `src/lib/env.ts` via `emptyToUndefined` so empty `.env.local` lines do not fail the build). `pnpm check:meta-whatsapp` 15/15 + `pnpm check:whatsapp-transport` 26/26 (updated Core scan exempts the adapter boundary); `pnpm verify` green + `pnpm security` pass (with warnings); ZERO schema changes | PROMPT-CORE-03B |
 
-## Key Known Limitations (current; CORE-03A note: transport is contracts + resolution only — no live WhatsApp yet)
+## Key Known Limitations (current; CORE-03B — Meta adapter live, CORE-03A note retired)
 
 - Smart Create has no notes entry: Step 6 submits without notes (PROMPT-14
   scope decision — a notes field was not among the required inputs).
@@ -252,15 +262,18 @@ zero code changes).
   write's conflict check is the authority (PROMPT-13/14 semantics).
 - Unassigned appointments block the whole business day (consistency with
   the write path; staff-assignment-aware availability is a later decision).
-- WhatsApp transport is NOT live: the outbound boundary is the offline
-  logging adapter behind `MessageTransport` (DECISIONS #29) and the
-  inbound webhook is provider-neutral + token-gated, disabled (503)
-  until `INBOUND_WEBHOOK_TOKEN` is set. A real WhatsApp provider is an
-  undecided operator decision (it would also settle webhook signature
-  verification). The `WhatsAppConnection` model (ARCH-02) is the
-  DB foundation for that decision — no vendor code, no UI, and
-  `Business.whatsappNumber` remains the inbound business mapping until
-  a provider exists.
+- CORE-03B makes WhatsApp live through the Meta adapter while CORE-03A's
+  generic provider-neutral webhook `POST /api/conversations/inbound` stays
+  (token-gated, disabled 503 until `INBOUND_WEBHOOK_TOKEN` is set) as a
+  secondary seam — the Meta inbound is `GET|POST /api/whatsapp/meta`
+  (Meta's `hub.mode/hub.verify_token/hub.challenge` verify +
+  `X-Hub-Signature-256` HMAC-SHA256; skips signature when
+  `WHATSAPP_META_APP_SECRET` is unset so local/dev stays usable). Live
+  WhatsApp outbound is `createMetaWhatsAppTransport` (Bearer) resolved via
+  `WhatsAppConnection.credentialsRef` (env-var NAME) falling back to
+  `WHATSAPP_META_ACCESS_TOKEN`/`WHATSAPP_META_PHONE_NUMBER_ID`; the
+  `WhatsAppConnection` DB foundation (ARCH-02) still has no management UI
+  and `Business.whatsappNumber` remains the inbound mapping fallback.
 - The AI assistant is a deterministic rule-based Arabic classifier behind
   the `ConversationAi` interface — NOT live LLM inference: keyword/phrase
   matching + verbatim `Business.faqs` answer matching. Phrasings outside
@@ -496,20 +509,20 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP: CORE-03B — Meta WhatsApp adapter (Graph API) on top of the
-CORE-03A transport foundation → OpenRouter + AgentRouter production
-integration (consume `getEffectiveAiPolicy()`; no engine changes) →
-End-to-End WhatsApp → AI → Booking → Production pilot validation.
-CORE-01 + CORE-02 + CORE-03A are IMPLEMENTED and ready for the
-Conversation/WhatsApp layer to wire (eligible Providers + ranked booking
-options + provider-neutral transport contracts/tenant resolution; none
-exposed in any UI/inbound route yet — the adapter/integration decides
-that surface). Remaining operator actions (parallel, not blockers): add
+NEXT STEP: OpenRouter + AgentRouter production integration (consume
+`getEffectiveAiPolicy()`; no engine changes) -> End-to-End WhatsApp ->
+AI -> Booking -> Production pilot validation. CORE-01 (eligible Providers) +
+CORE-02 (ranked booking options) + CORE-03A (provider-neutral transport
+foundation) + CORE-03B (Meta WhatsApp adapter on that foundation) are
+IMPLEMENTED and ready for the pilot seam to wire the conversation engine
+to business flows — WhatsApp is now live (Graph API) while the AI is
+still the deterministic classifier (LLM provider integration is next).
+Remaining operator actions (parallel, not blockers): add
 `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase (#7), and run `pnpm db:deploy`
 against the Demo Neon DB before its next code deploy (#8). Do not start
-CORE-03B before a DECISIONS entry — worktree stays uncommitted (operator
-owns `pnpm ship`).
+the AI integration before a DECISIONS entry — worktree stays uncommitted
+(operator owns `pnpm ship`).
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
+
 const serverEnvSchema = z.object({
   DATABASE_URL: z.url(),
   BETTER_AUTH_SECRET: z.string().min(32),
@@ -11,7 +13,10 @@ const serverEnvSchema = z.object({
    * provider adapter verifies its own provider signatures and either
    * holds this token or calls the engine service directly.
    */
-  INBOUND_WEBHOOK_TOKEN: z.string().min(32).optional(),
+  INBOUND_WEBHOOK_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32).optional(),
+  ),
   /**
    * AI provider API keys (PROMPT-OPS-05) — environment-backed SECRETS,
    * optional until the provider integration phase. They are NEVER
@@ -21,8 +26,44 @@ const serverEnvSchema = z.object({
    * .env.local; production: Vercel Environment Variables (a key change
    * requires redeploy in the current deployment model).
    */
-  OPENROUTER_API_KEY: z.string().min(1).optional(),
-  AGENTROUTER_API_KEY: z.string().min(1).optional(),
+  OPENROUTER_API_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  AGENTROUTER_API_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  /**
+   * Meta WhatsApp Cloud API — server-side secrets (PROMPT-CORE-03B;
+   * Decision #42). All are OPTIONAL until a Business connects a real
+   * WhatsApp number — no code path requires them at boot. They are
+   * NEVER stored in DB rows, returned by APIs, or logged: the inbound
+   * webhook uses the verify token + app secret at the adapter boundary,
+   * the outbound adapter resolves the per-connection access token from
+   * `WhatsAppConnection.credentialsRef` (an env-var NAME) falling back
+   * to the global `WHATSAPP_META_ACCESS_TOKEN`.
+   */
+  WHATSAPP_META_VERIFY_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(8).optional(),
+  ),
+  WHATSAPP_META_APP_SECRET: z.preprocess(
+    emptyToUndefined,
+    z.string().min(8).optional(),
+  ),
+  WHATSAPP_META_ACCESS_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(8).optional(),
+  ),
+  WHATSAPP_META_PHONE_NUMBER_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  WHATSAPP_META_API_VERSION: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
 });
 
 const clientEnvSchema = z.object({
@@ -33,6 +74,14 @@ const parsedServer = serverEnvSchema.safeParse({
   DATABASE_URL: process.env.DATABASE_URL,
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
   BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+  INBOUND_WEBHOOK_TOKEN: process.env.INBOUND_WEBHOOK_TOKEN,
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  AGENTROUTER_API_KEY: process.env.AGENTROUTER_API_KEY,
+  WHATSAPP_META_VERIFY_TOKEN: process.env.WHATSAPP_META_VERIFY_TOKEN,
+  WHATSAPP_META_APP_SECRET: process.env.WHATSAPP_META_APP_SECRET,
+  WHATSAPP_META_ACCESS_TOKEN: process.env.WHATSAPP_META_ACCESS_TOKEN,
+  WHATSAPP_META_PHONE_NUMBER_ID: process.env.WHATSAPP_META_PHONE_NUMBER_ID,
+  WHATSAPP_META_API_VERSION: process.env.WHATSAPP_META_API_VERSION,
 });
 
 if (!parsedServer.success) {

@@ -566,7 +566,10 @@ async function main(): Promise<void> {
     /graph\.facebook\.com|@\/server\/transport\/meta|x-hub-signature|meta_cloud|metaGraph/i;
   const coreHits = scanSourceTree(
     join(process.cwd(), "src"),
-    (relPath) => !relPath.startsWith("generated"),
+    (relPath) =>
+      !relPath.startsWith("generated") &&
+      !relPath.startsWith("server/integrations/whatsapp/") &&
+      relPath !== "app/api/whatsapp/meta/route.ts",
     (content) => metaMarkers.test(content),
   );
   check(

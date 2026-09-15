@@ -23,6 +23,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/invite/",
   "/owner-invite/",
   "/api/auth",
+  "/api/whatsapp/meta",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

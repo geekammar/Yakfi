@@ -2,10 +2,9 @@
 
 > Current technical architecture and dependency boundaries. Read together
 > with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
-> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-03A —
-> provider-neutral WhatsApp Transport Foundation (`src/server/transport/
-whatsapp-transport.ts` + `check:whatsapp-transport` 26/26; zero schema
-> changes); PROMPT-CORE-02's Any-Provider Booking Options Resolver
+> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-03B —
+> Meta WhatsApp adapter on the CORE-03A foundation (`src/server/integrations/whatsapp/`;
+> 15/15 + 26/26; ZERO schema changes); PROMPT-CORE-02's Any-Provider Booking Options Resolver
 > (DECISIONS #32; consumes CORE-01) and the P0 hardening foundations of
 > DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS #38; schema:
 > `DATABASE.md`), and the migration chain stays a complete

@@ -3,9 +3,9 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-DOC-DECISION-META — Meta WhatsApp Cloud API provider boundary
-> (DECISIONS #42; doc record for the CORE-03A transport foundation,
-> zero schema/code changes; worktree uncommitted).
+> PROMPT-CORE-03B — Meta WhatsApp adapter on the CORE-03A foundation
+> (DECISIONS #42; `src/server/integrations/whatsapp/`; 15/15 + 26/26;
+> ZERO schema changes; worktree uncommitted).
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -30,12 +30,16 @@
   schema diff empty, seed ×3 idempotent). The old Demo/Neon DB still needs
   a one-time HUMAN-ONLY baseline reconciliation
   (`prisma migrate resolve --applied 0_init` → `pnpm db:deploy`).
-- **NOT live:** WhatsApp provider **selected** — Meta WhatsApp Cloud API
-  (Graph API, business-owned number — DECISIONS #42); transport stays
-  provider-neutral with the offline adapter behind `MessageTransport`
-  until CORE-03B lands the Meta adapter; real LLM inference remains a
-  provider-neutral deterministic implementation (DECISIONS #29); the
-  ARCH-02 foundations are ready for both.
+- **WhatsApp LIVE via Meta adapter (PROMPT-CORE-03B; DECISIONS #42):**
+  `GET|POST /api/whatsapp/meta` inside
+  `src/server/integrations/whatsapp/` on the CORE-03A provider-neutral
+  foundation (`X-Hub-Signature-256` + `hub.verify_token` verify; Graph
+  `POST /{v}/{PHONE_NUMBER_ID}/messages` bearer outbound; tenant-scoped
+  resolution + durable idempotency preserved). Real LLM inference remains
+  a provider-neutral deterministic implementation (DECISIONS #29); the
+  ARCH-02 foundations are ready for it. `pnpm check:meta-whatsapp` 15/15
+  - `pnpm check:whatsapp-transport` 26/26; `pnpm verify` green; ZERO
+    schema changes.
 - **PUBLIC SIGNUP CLOSED (PROMPT-OPS-05, DECISIONS #41):** the proxy
   refuses public `POST /api/auth/sign-up/email` (403 `SIGNUP_CLOSED`);
   the invitation-first lifecycle (business `/invite/[token]` + platform
@@ -153,18 +157,15 @@
   project `flowpilot-prod` (framework nextjs, SSO protection off), four
   Production env vars set, `.vercel` links `flowpilot-prod`. Repository
   visibility: **PRIVATE** (verified via `gh`).
-- **Version:** v0.15.6 · `pnpm verify` green · single `main` branch, tags
-  through `v0.15.6` (worktree uncommitted — operator owns `pnpm ship`).
+- **Version:** v0.15.8 · `pnpm verify` green · single `main` branch, tags
+  through `v0.15.8` (worktree uncommitted — operator owns `pnpm ship`).
 
-**Current next step:** CORE-03B — Meta WhatsApp adapter (Graph API)
-→ OpenRouter + AgentRouter production integration (consume
-`getEffectiveAiPolicy()`; no engine changes) → End-to-End WhatsApp →
-AI → Booking → Production pilot validation. CORE-01 (eligible
-Providers) + CORE-02 (ranked booking options) + CORE-03A (provider-
-neutral transport foundation) are all IMPLEMENTED and ready for the
-Conversation/WhatsApp layer to consume; none is exposed in any
-UI/conversation turn yet (the conversation engine integration decides
-that surface).
+**Current next step:** OpenRouter + AgentRouter production integration
+(consume `getEffectiveAiPolicy()`; no engine changes) -> End-to-End
+WhatsApp -> AI -> Booking -> Production pilot validation. CORE-01
+(eligible Providers) + CORE-02 (ranked booking options) + CORE-03A
+(provider-neutral transport foundation) + CORE-03B (Meta WhatsApp adapter)
+are all IMPLEMENTED and ready for the pilot seam to wire.
 Remaining operator actions (not implementation blockers): add
 `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase, and `pnpm db:deploy` against
