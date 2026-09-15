@@ -6,19 +6,11 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-CORE-02 (Any-Provider Booking Options Resolver:
-> deterministic `resolveBookingOptions` — consumes CORE-01 eligibility,
-> per-Provider availability over the EXISTING availability layer with
-> provider-scoped conflicts mirroring the write path, deterministic
-> nearest-useful ranking, small 2–3 option result; ZERO schema changes;
-> proven by `pnpm check:booking-options` 32/32). PROMPT-CORE-02A: the
-> interrupted attempt had already completed the FULL CORE-02 (foundation +
-> resolver + `check:booking-options` harness); kept and re-verified per
-> operator decision (`pnpm verify` green, `pnpm security` pass,
-> `check:booking-options` 32/32 re-run) — ZERO code changes this session;
-> next step = the Conversation/WhatsApp layer consumption (no PROMPT-CORE-02B
-> resolver build — it already exists).
-> Product version: **v0.15.5** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-CORE-03A — provider-neutral WhatsApp Transport
+> Foundation (canonical contracts + tenant/branch resolution + harness
+> 26/26; ZERO schema changes; code/quality gates green — docs reconciled
+> this pass, worktree uncommitted, operator owns `pnpm ship`).
+> Product version: **v0.15.6** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
 
@@ -104,6 +96,30 @@ WhatsApp — booking stays a later command); ZERO schema changes; proven by
 `pnpm check:booking-options` (32/32, in-memory harness). Not exposed in
 any UI/conversation turn yet — the Conversation/WhatsApp layer consumes
 it next.
+
+**WhatsApp Transport Foundation is IMPLEMENTED (PROMPT-CORE-03A):**
+provider-neutral boundary `src/server/transport/whatsapp-transport.ts`
+(the canonical replaceable seam the future Meta adapter implements):
+normalized inbound envelope + `normalizeInboundTransportMessage`
+(`strict()` + TEXT↔MEDIA exclusivity; hostile identity/secret keys
+rejected; `MALFORMED_PROVIDER_PAYLOAD` on shape drift), outbound
+`OutboundMessage` → `MessageTransport` (offline adapter retained behind
+the seam; `resolveConnectionForSend` tenant-scoped + `CONNECTED`/
+`isActive` gated; `credentialsRef` never returned), typed
+`WhatsAppTransportErrorCode` taxonomy + `TransportError` (`retryable` =
+only `TRANSIENT_TRANSPORT_FAILURE`; policy stays adapter-side; no HTTP
+status leakage). Tenant/Branch resolution is server-derived
+(`BusinessRepository.findByWhatsappNumber` + `WhatsAppConnectionRepository`
+`findByPhone`/`findByIdWithinBusiness` + `BranchRepository`; branch
+validated within Business; business-shared `branchId=null` → Default
+Branch; no Meta SDK/HTTP/signature/media-download; no provider payload
+copied). Conversations keeps the feature-local seam via
+`src/features/conversations/server/conversation-transport.ts` (re-exports
+canonical contracts + `offlineMessageTransport`). Proven by
+`pnpm check:whatsapp-transport` (26/26, in-memory harness with real engine
+schema/engine — no DB/network). ZERO schema changes, ZERO vendor
+integration; not exposed in any UI/inbound route yet — CORE-03B wires the
+Meta adapter to inbound.
 
 **Two strictly separated environments are LIVE (PROMPT-OPS-02; production
 identity closed in PROMPT-OPS-04; OPS-05 build + live verification in
@@ -217,7 +233,9 @@ zero code changes).
 
 | Any-Provider Booking Options Resolver | PROMPT-CORE-02: deterministic `resolveBookingOptions` (`src/features/appointments/server/booking-options-service.ts`) — CONSUMES CORE-01 (`resolveEligibleProviders` + its typed error pass-through; eligibility never re-resolved) then computes availability for the eligible Providers over the EXISTING Availability layer (reused `resolveWorkingDay`/`weekdayOf`/`generateCandidateSlots`/`filterConflictingSlots` — the same business-hours logic and slot model, never duplicated): per-Provider conflicts via `listBlockingByAssignees` (the read counterpart of the existing write-path `assignedUserId` scoping — a Provider's calendar is blocked only by its own PENDING/CONFIRMED appointments; ONE batched Business-scoped read, no N+1) + `listAssignmentSeams` (ONE batched ProviderProfile.id → userId projection); deterministic nearest-useful ranking (`rankBookingOptions`: each Provider's earliest slot first by time then the stable CORE-01 order; backfill in global time order when fewer than `MAX_BOOKING_OPTIONS` = 3 distinct options exist; no ML/LLM); small result (serviceId/branchId/date/timezone/preference ANY\|PROVIDER + 2–3 options `providerId`/`displayName`/`startAt`/`endAt`); explicit empty reasons (NO_ELIGIBLE_PROVIDERS / BUSINESS_CLOSED / SERVICE_TOO_LONG / FULLY_BOOKED); requested Provider verified against CORE-01 (`PROVIDER_NOT_ELIGIBLE` — no cross-Business leak); READ-ONLY (no appointment write/reservation/LLM/WhatsApp); ZERO schema changes; `resolveBookingOptionsAction` thin hook; proven by `pnpm check:booking-options` (32/32 in-memory harness) | PROMPT-CORE-02 |
 
-## Key Known Limitations (current)
+| WhatsApp Transport Foundation | PROMPT-CORE-03A: provider-neutral boundary `src/server/transport/whatsapp-transport.ts` — normalized inbound envelope + `normalizeInboundTransportMessage` (`strict()` + TEXT↔MEDIA exclusivity; hostile keys rejected; `MALFORMED_PROVIDER_PAYLOAD`), outbound `OutboundMessage` → `MessageTransport` (offline retained; `resolveConnectionForSend` tenant-scoped + gated; `credentialsRef` never returned), typed error taxonomy + `TransportError` (`retryable` = `TRANSIENT_TRANSPORT_FAILURE` only; no HTTP leakage); server-derived tenant/branch resolution via existing `BusinessRepository.findByWhatsappNumber` + `WhatsAppConnectionRepository` + `BranchRepository` (branch validated within Business; business-shared `branchId=null` → Default Branch); no Meta SDK/HTTP/signature/media-download; no provider payload copied; `pnpm check:whatsapp-transport` 26/26 (in-memory); ZERO schema changes; re-exported via `src/features/conversations/server/conversation-transport.ts`; `package.json` adds `check:whatsapp-transport` | PROMPT-CORE-03A |
+
+## Key Known Limitations (current; CORE-03A note: transport is contracts + resolution only — no live WhatsApp yet)
 
 - Smart Create has no notes entry: Step 6 submits without notes (PROMPT-14
   scope decision — a notes field was not among the required inputs).
@@ -476,18 +494,20 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP: the provider sequence — Meta WhatsApp integration →
-OpenRouter + AgentRouter production integration (consume
-`getEffectiveAiPolicy()`; no engine changes) → End-to-End WhatsApp → AI
-→ Booking → Production pilot validation. CORE-01 + CORE-02 are both
-IMPLEMENTED and ready for the Conversation/WhatsApp layer to consume
-(eligible Providers + ranked booking options; neither exposed in any
-UI/conversation turn yet — the conversation engine integration decides
+NEXT STEP: CORE-03B — Meta WhatsApp adapter (Graph API) on top of the
+CORE-03A transport foundation → OpenRouter + AgentRouter production
+integration (consume `getEffectiveAiPolicy()`; no engine changes) →
+End-to-End WhatsApp → AI → Booking → Production pilot validation.
+CORE-01 + CORE-02 + CORE-03A are IMPLEMENTED and ready for the
+Conversation/WhatsApp layer to wire (eligible Providers + ranked booking
+options + provider-neutral transport contracts/tenant resolution; none
+exposed in any UI/inbound route yet — the adapter/integration decides
 that surface). Remaining operator actions (parallel, not blockers): add
 `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase (#7), and run `pnpm db:deploy`
 against the Demo Neon DB before its next code deploy (#8). Do not start
-provider integration before a DECISIONS entry.
+CORE-03B before a DECISIONS entry — worktree stays uncommitted (operator
+owns `pnpm ship`).
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

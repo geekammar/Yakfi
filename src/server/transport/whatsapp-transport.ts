@@ -1,0 +1,462 @@
+/**
+ * Provider-neutral WhatsApp transport contract foundation
+ * (PROMPT-CORE-03A; DECISIONS #29/#31).
+ *
+ * The canonical, replaceable transport boundary between the FlowPilot
+ * Core and ANY WhatsApp vendor:
+ *
+ *   inbound:  provider webhook → provider adapter (PROMPT-CORE-03B) →
+ *             normalizeInboundTransportMessage → resolveInboundConnection
+ *             → toEngineInboundMessage → Conversation Engine
+ *
+ *   outbound: Conversation result → OutboundMessage → MessageTransport →
+ *             provider adapter (PROMPT-CORE-03B)
+ *
+ * The contracts carry ONLY normalized internal identity:
+ * - no Meta request/response objects, Graph API shapes, or HTTP status
+ *   assumptions — the future adapter maps vendor errors onto the
+ *   taxonomy below;
+ * - no provider access tokens — connections hold `credentialsRef`
+ *   REFERENCES, and the credential itself is never returned;
+ * - no provider-specific retry semantics — the taxonomy only classifies
+ *   retryable vs permanent; retry POLICY belongs to the adapter layer;
+ * - unknown/hostile keys in provider payloads are stripped by Zod:
+ *   businessId/branchId/connectionId/role/accountType can never be
+ *   injected from a client payload — identity is resolved SERVER-side
+ *   from persisted state over the EXISTING repositories.
+ *
+ * No vendor is integrated here: no SDK, no HTTP, no webhook
+ * verification, no media download, no actual send. Pure contracts +
+ * normalization + tenant resolution.
+ */
+
+import { phoneSchema } from "@/lib/validation";
+import type {
+  BranchRepository,
+  BusinessRepository,
+  WhatsAppConnectionRepository,
+} from "@/server/repositories";
+import {
+  branchRepository,
+  businessRepository,
+  whatsAppConnectionRepository,
+} from "@/server/repositories";
+
+import { z } from "zod";
+
+// ─── Transport error taxonomy ────────────────────────────────────────────────
+
+/**
+ * Minimal provider-neutral failure taxonomy for the transport boundary.
+ * The future Meta adapter maps vendor-specific errors (HTTP statuses,
+ * Graph API error payloads) onto these categories — Core never assumes
+ * provider-specific statuses. Retry POLICY (backoff, budgets) belongs to
+ * the adapter/integration layer; only the retryable classification is
+ * part of this contract.
+ */
+export const whatsappTransportErrorCodes = [
+  /** The connection is missing, inactive, or disconnected for the tenant. */
+  "INVALID_CONNECTION",
+  /** The credential reference is unusable (never the secret itself). */
+  "UNAUTHORIZED_CREDENTIALS",
+  /** The adapter received a payload it cannot map to the contract. */
+  "MALFORMED_PROVIDER_PAYLOAD",
+  /** A redelivered inbound message (idempotent success, not an error). */
+  "DUPLICATE_INBOUND",
+  /** The message kind is not supported by the transport/Core yet. */
+  "UNSUPPORTED_MESSAGE_TYPE",
+  /** Transient transport failure — retryable by the adapter. */
+  "TRANSIENT_TRANSPORT_FAILURE",
+  /** Permanent transport failure — never retried. */
+  "PERMANENT_TRANSPORT_FAILURE",
+] as const;
+
+export type WhatsAppTransportErrorCode =
+  (typeof whatsappTransportErrorCodes)[number];
+
+/** Only transient failures may be retried — the adapter's retry policy decides how. */
+export function isRetryableTransportErrorCode(
+  code: WhatsAppTransportErrorCode,
+): boolean {
+  return code === "TRANSIENT_TRANSPORT_FAILURE";
+}
+
+/** Typed transport failure carrying its normalized category. */
+export class TransportError extends Error {
+  readonly code: WhatsAppTransportErrorCode;
+  readonly retryable: boolean;
+
+  constructor(code: WhatsAppTransportErrorCode, message?: string) {
+    super(message ?? code);
+    this.name = "TransportError";
+    this.code = code;
+    this.retryable = isRetryableTransportErrorCode(code);
+  }
+}
+
+// ─── Normalized inbound envelope ─────────────────────────────────────────────
+
+/** Normalized message kinds. TEXT is the only kind the Core consumes today. */
+export const inboundTransportKindValues = [
+  "TEXT",
+  "MEDIA",
+  "UNSUPPORTED",
+] as const;
+
+export type InboundTransportKind = (typeof inboundTransportKindValues)[number];
+
+/**
+ * Minimal media REFERENCE contract — the provider payload is never
+ * copied into Core and media is never downloaded here (a later
+ * decision); only what the transport legitimately observed crosses.
+ */
+export const inboundTransportMediaSchema = z.object({
+  mimeType: z.string().trim().min(1).max(128),
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(1024 * 1024 * 1024)
+    .optional(),
+  /** Provider-side locator only — never fetched by Core. */
+  externalReference: z.string().trim().min(1).max(512),
+});
+
+export type InboundTransportMedia = z.infer<typeof inboundTransportMediaSchema>;
+
+const normalizedInboundTransportSchema = z
+  .object({
+    /** Provider message id — the inbound idempotency key when present. */
+    externalMessageId: z.string().trim().min(1).max(256),
+    /** The customer's phone identifier. */
+    senderExternalId: phoneSchema,
+    /** The receiving WhatsApp number. */
+    recipientExternalId: phoneSchema,
+    /** Transport-owned receive timestamp. */
+    timestamp: z.iso.datetime(),
+    kind: z.enum(inboundTransportKindValues).default("TEXT"),
+    /** Text payload — required for TEXT, forbidden otherwise. */
+    text: z.string().trim().min(1).max(4096).optional(),
+    /** Media reference — required for MEDIA, forbidden otherwise. */
+    media: inboundTransportMediaSchema.optional(),
+  })
+  .strict()
+  .refine((message) => message.kind !== "TEXT" || message.text != null, {
+    error: "نص الرسالة مطلوب للرسائل النصية",
+    path: ["text"],
+  })
+  .refine((message) => message.kind !== "MEDIA" || message.media != null, {
+    error: "مرجع الوسائط مطلوب للرسائل المرئية",
+    path: ["media"],
+  })
+  .refine(
+    (message) =>
+      message.kind !== "UNSUPPORTED" ||
+      (message.text == null && message.media == null),
+    { error: "الرسائل غير المدعومة لا تحمل محتوى" },
+  );
+
+const normalizedInboundTransportSchemaWithExclusivity =
+  normalizedInboundTransportSchema
+    .refine((message) => message.kind !== "TEXT" || message.media == null, {
+      error: "الرسائل النصية لا تحمل مرجع وسائط",
+      path: ["media"],
+    })
+    .refine((message) => message.kind !== "MEDIA" || message.text == null, {
+      error: "الرسائل المرئية لا تحمل نصًا",
+      path: ["text"],
+    });
+
+const effectiveInboundSchema = normalizedInboundTransportSchemaWithExclusivity;
+
+/**
+ * The normalized inbound envelope — the ONLY shape a transport adapter
+ * may hand to the Core. Unknown keys (including hostile identity keys:
+ * businessId/branchId/connectionId/role/accountType) are REJECTED by
+ * construction (`strict()`), never copied from the provider payload.
+ */
+export type NormalizedInboundTransportMessage = z.infer<
+  typeof effectiveInboundSchema
+>;
+
+export type NormalizeInboundResult =
+  | { ok: true; message: NormalizedInboundTransportMessage }
+  | { ok: false; error: TransportError };
+
+/** Provider payload → normalized envelope (boundary entry point). */
+export function normalizeInboundTransportMessage(
+  input: unknown,
+): NormalizeInboundResult {
+  const parsed = effectiveInboundSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: new TransportError(
+        "MALFORMED_PROVIDER_PAYLOAD",
+        parsed.error.issues[0]?.message ?? "حمولة الرسالة الواردة غير صالحة",
+      ),
+    };
+  }
+  return { ok: true, message: parsed.data };
+}
+
+/**
+ * Server-resolved tenant identity — NEVER accepted from a provider
+ * payload; attached only after `resolveInboundConnection` ran against
+ * persisted state.
+ */
+export type ResolvedInboundIdentity = {
+  /** The Business-owned connection row id when one exists (null = the
+   *  legacy whatsappNumber mapping only). */
+  connectionId: string | null;
+  businessId: string;
+  /** Optional Branch scope of the connection (null = Business-shared). */
+  branchId: string | null;
+};
+
+/** Normalized envelope + server-resolved identity — engine-ready. */
+export type ResolvedInboundTransportMessage =
+  NormalizedInboundTransportMessage & ResolvedInboundIdentity;
+
+/**
+ * Structural twin of the Conversation Engine's inbound contract
+ * (`inboundMessageSchema` in the conversations feature) — the shape is
+ * proven identical by `pnpm check:whatsapp-transport`, which runs the
+ * REAL engine schema (and the REAL engine) against this output. The
+ * boundary never imports the feature (dependency direction: features →
+ * server).
+ */
+export type EngineInboundMessage = {
+  to: string;
+  from: string;
+  text: string;
+  receivedAt: string;
+  externalId?: string;
+};
+
+/**
+ * Normalized envelope → the Conversation Engine's inbound input. Only
+ * TEXT messages cross into the Core today: a non-TEXT envelope is
+ * refused at this boundary with UNSUPPORTED_MESSAGE_TYPE (the adapter
+ * decides how to respond — media handling is not implemented yet).
+ */
+export function toEngineInboundMessage(
+  resolved: ResolvedInboundTransportMessage,
+): EngineInboundMessage {
+  if (resolved.kind !== "TEXT" || resolved.text == null) {
+    throw new TransportError(
+      "UNSUPPORTED_MESSAGE_TYPE",
+      "نوع الرسالة غير مدعوم في نواة المحادثات",
+    );
+  }
+  return {
+    to: resolved.recipientExternalId,
+    from: resolved.senderExternalId,
+    text: resolved.text,
+    receivedAt: resolved.timestamp,
+    externalId: resolved.externalMessageId,
+  };
+}
+
+// ─── Normalized outbound contract ────────────────────────────────────────────
+
+/** One outbound assistant reply to deliver to a customer. */
+export type OutboundMessage = {
+  /** Customer phone number (E.164-ish, as received inbound). */
+  to: string;
+  /** Display name of the sending business. */
+  businessName: string;
+  /** Conversation the reply belongs to. */
+  conversationId: string;
+  /** Reply text exactly as persisted. */
+  content: string;
+  /** Normalized internal connection id (which WhatsApp identity sends) —
+   *  resolved server-side; a connection of ANOTHER Business is unusable
+   *  (see `resolveConnectionForSend`). */
+  connectionId?: string;
+  /** Internal correlation id (the persisted Message id) — outbound
+   *  idempotency/audit metadata, never a provider id. */
+  correlationId?: string;
+  /** Normalized message kind — TEXT is the only kind Core sends today. */
+  kind?: "TEXT";
+};
+
+/** Result of one delivery attempt. */
+export type TransportSendResult = {
+  provider: string;
+  delivered: boolean;
+  /** Human-readable failure reason when not delivered. */
+  error?: string;
+  /** Normalized error category when not delivered — the adapter maps
+   *  provider-specific failures onto the taxonomy. */
+  errorCode?: WhatsAppTransportErrorCode;
+};
+
+/** Provider-neutral outbound transport. */
+export interface MessageTransport {
+  readonly providerName: string;
+  send(message: OutboundMessage): Promise<TransportSendResult>;
+}
+
+// ─── Connection / tenant resolution boundary ─────────────────────────────────
+
+/** Canonical phone form for the number-mapping lookups (digits + leading +). */
+function canonicalPhone(phone: string): string {
+  return phone.replace(/[\s-]/g, "");
+}
+
+export type ConnectionResolutionDeps = {
+  businessRepository: Pick<BusinessRepository, "findByWhatsappNumber">;
+  whatsappConnectionRepository: Pick<
+    WhatsAppConnectionRepository,
+    "findByPhone" | "findByIdWithinBusiness"
+  >;
+  branchRepository: Pick<
+    BranchRepository,
+    "findDefaultByBusiness" | "findByIdWithinBusiness"
+  >;
+};
+
+/** Production dependencies (app singletons). */
+export const defaultConnectionResolutionDeps: ConnectionResolutionDeps = {
+  businessRepository,
+  whatsappConnectionRepository: whatsAppConnectionRepository,
+  branchRepository,
+};
+
+export type InboundConnectionResolution =
+  | {
+      ok: true;
+      businessId: string;
+      businessName: string;
+      /** The Business-owned connection row id when one exists. */
+      connectionId: string | null;
+      /** Validated Branch scope: the connection's own branch, else the
+       *  Business's Default Branch (null only for a Business-shared
+       *  connection without a resolvable default). */
+      branchId: string | null;
+      /** Machine connection status when a connection row exists. */
+      connectionStatus: string | null;
+    }
+  | { ok: false; code: WhatsAppTransportErrorCode; message: string };
+
+export type SendConnectionResolution =
+  | {
+      ok: true;
+      connectionId: string;
+      branchId: string | null;
+      /** The business-owned sending number (not a secret). */
+      phoneNumber: string;
+    }
+  | { ok: false; code: WhatsAppTransportErrorCode; message: string };
+
+/**
+ * INBOUND tenancy: recipient number → Business → optional connection →
+ * optional Branch. All identity comes from persisted server-side state
+ * (the established `BusinessRepository.findByWhatsappNumber` mapping) —
+ * never from the provider payload. A connection row (when present) is
+ * same-Business BY CONSTRUCTION (Business-scoped repository lookup), and
+ * its optional Branch scope is VALIDATED within the Business: a foreign
+ * or corrupt branchId refuses with INVALID_CONNECTION instead of being
+ * silently trusted.
+ */
+export async function resolveInboundConnection(
+  deps: ConnectionResolutionDeps,
+  recipientPhone: string,
+): Promise<InboundConnectionResolution> {
+  const phone = canonicalPhone(recipientPhone);
+  const business = await deps.businessRepository.findByWhatsappNumber(phone);
+  if (!business) {
+    return {
+      ok: false,
+      code: "INVALID_CONNECTION",
+      message: "تعذر تحديد المنشأة المستقبلة للرسالة",
+    };
+  }
+  if (!business.isActive) {
+    return {
+      ok: false,
+      code: "INVALID_CONNECTION",
+      message: "المنشأة غير مفعّلة حالياً",
+    };
+  }
+  const connection = await deps.whatsappConnectionRepository.findByPhone(
+    business.id,
+    phone,
+  );
+  let branchId: string | null = null;
+  if (connection?.branchId) {
+    const branch = await deps.branchRepository.findByIdWithinBusiness(
+      connection.branchId,
+      business.id,
+    );
+    if (!branch) {
+      return {
+        ok: false,
+        code: "INVALID_CONNECTION",
+        message: "نطاق فرع الاتصال غير صالح",
+      };
+    }
+    branchId = branch.id;
+  } else {
+    const defaultBranch = await deps.branchRepository.findDefaultByBusiness(
+      business.id,
+    );
+    branchId = defaultBranch?.id ?? null;
+  }
+  return {
+    ok: true,
+    businessId: business.id,
+    businessName: business.name,
+    connectionId: connection?.id ?? null,
+    branchId,
+    connectionStatus: connection?.status ?? null,
+  };
+}
+
+/**
+ * OUTBOUND tenancy: which connection may send for a Business. The
+ * connection id is a NORMALIZED internal id resolved WITHIN the Business
+ * — a connection of ANOTHER Business (or an unknown one) is "not found"
+ * for the caller (no cross-tenant existence leak), so cross-Business
+ * connection use is impossible. Only an active CONNECTED connection may
+ * send. The credential reference itself is never returned — the future
+ * adapter resolves it inside the transport layer.
+ */
+export async function resolveConnectionForSend(
+  deps: ConnectionResolutionDeps,
+  params: { connectionId: string; businessId: string },
+): Promise<SendConnectionResolution> {
+  const connection =
+    await deps.whatsappConnectionRepository.findByIdWithinBusiness(
+      params.connectionId,
+      params.businessId,
+    );
+  if (!connection) {
+    return {
+      ok: false,
+      code: "INVALID_CONNECTION",
+      message: "الاتصال غير متاح لهذه المنشأة",
+    };
+  }
+  if (!connection.isActive) {
+    return {
+      ok: false,
+      code: "INVALID_CONNECTION",
+      message: "الاتصال غير مفعّل حالياً",
+    };
+  }
+  if (connection.status !== "CONNECTED") {
+    return {
+      ok: false,
+      code: "INVALID_CONNECTION",
+      message: "الاتصال غير موصول حالياً",
+    };
+  }
+  return {
+    ok: true,
+    connectionId: connection.id,
+    branchId: connection.branchId ?? null,
+    phoneNumber: connection.phoneNumber,
+  };
+}

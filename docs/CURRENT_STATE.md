@@ -3,8 +3,9 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-CORE-02A (verified the completed CORE-02 work after reconciling
-> the interrupted attempt's state; zero code changes this session).
+> PROMPT-CORE-03A — provider-neutral WhatsApp Transport Foundation
+> (canonical contracts + tenant resolution + `check:whatsapp-transport`
+> 26/26; zero schema changes; worktree uncommitted).
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -75,6 +76,27 @@
   WhatsApp. ZERO schema changes; `pnpm check:booking-options` 32/32.
   Not exposed in any UI/conversation turn yet — the Conversation layer
   consumes it next.
+- **WHATSAPP TRANSPORT FOUNDATION (PROMPT-CORE-03A):** provider-neutral
+  boundary `src/server/transport/whatsapp-transport.ts` — normalized
+  inbound envelope (`externalMessageId`/`senderExternalId`/
+  `recipientExternalId`/`timestamp`/`kind`/`text`/`media` reference;
+  `strict()` + TEXT↔MEDIA exclusivity; hostile keys rejected),
+  `normalizeInboundTransportMessage` → `resolveInboundConnection` →
+  `toEngineInboundMessage` (TEXT-only into Core; MEDIA →
+  `UNSUPPORTED_MESSAGE_TYPE`), outbound `OutboundMessage` →
+  `MessageTransport` (offline adapter retained behind the seam;
+  `resolveConnectionForSend` tenant-scoped + `CONNECTED`/`isActive`
+  gated; `credentialsRef` never returned), typed
+  `WhatsAppTransportErrorCode` taxonomy + `TransportError` (`retryable`
+  = only `TRANSIENT_TRANSPORT_FAILURE`). Tenant/branch resolution is
+  server-derived via `BusinessRepository.findByWhatsappNumber` +
+  `WhatsAppConnectionRepository` + `BranchRepository` (branch validated
+  within Business; business-shared `branchId=null` falls back to Default
+  Branch); no Meta SDK/HTTP/signature/media-download; no provider
+  payload copied; `pnpm check:whatsapp-transport` 26/26 (in-memory
+  fakes; offline checks — no DB/network). ZERO schema changes;
+  re-exported for the conversations feature via
+  `src/features/conversations/server/conversation-transport.ts`.
 - **DEMO LIVE (PROMPT-OPS-02):** `https://flowpilot-demo-gamma.vercel.app`
   — dedicated Vercel project `flowpilot-demo` (framework nextjs, SSO
   protection off) + the isolated Demo Neon DB (`neondb` @
@@ -126,16 +148,18 @@
   project `flowpilot-prod` (framework nextjs, SSO protection off), four
   Production env vars set, `.vercel` links `flowpilot-prod`. Repository
   visibility: **PRIVATE** (verified via `gh`).
-- **Version:** v0.15.5 · `pnpm verify` green · single `main` branch, tags
-  through `v0.15.5`.
+- **Version:** v0.15.6 · `pnpm verify` green · single `main` branch, tags
+  through `v0.15.6` (worktree uncommitted — operator owns `pnpm ship`).
 
-**Current next step:** the provider sequence — Meta WhatsApp integration
-→ OpenRouter + AgentRouter production integration → End-to-End WhatsApp
-→ AI → Booking → Production pilot validation. CORE-01 (eligible
-Providers) + CORE-02 (ranked booking options) are both IMPLEMENTED and
-ready for the Conversation/WhatsApp layer to consume; neither is exposed
-in any UI/conversation turn yet (the conversation engine integration
-decides that surface).
+**Current next step:** CORE-03B — Meta WhatsApp adapter (Graph API)
+→ OpenRouter + AgentRouter production integration (consume
+`getEffectiveAiPolicy()`; no engine changes) → End-to-End WhatsApp →
+AI → Booking → Production pilot validation. CORE-01 (eligible
+Providers) + CORE-02 (ranked booking options) + CORE-03A (provider-
+neutral transport foundation) are all IMPLEMENTED and ready for the
+Conversation/WhatsApp layer to consume; none is exposed in any
+UI/conversation turn yet (the conversation engine integration decides
+that surface).
 Remaining operator actions (not implementation blockers): add
 `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to the Vercel project env
 vars before the provider-integration phase, and `pnpm db:deploy` against

@@ -1,8 +1,11 @@
 # Database Layer
 
 PostgreSQL (Neon) · Prisma 7 · UUID primary keys everywhere.
-Last updated: PROMPT-ARCH-03 (migration-chain repair: root baseline
-`0_init` + `migration_lock.toml` + chain/schema alignment; DECISIONS #40).
+Last updated: PROMPT-CORE-03A (transport foundation — zero schema
+changes; `pnpm check:whatsapp-transport` 26/26; docs only — migration
+chain through PROMPT-ARCH-03 unchanged). Prior chain record:
+PROMPT-ARCH-03 (migration-chain repair: root baseline `0_init` +
+`migration_lock.toml` + chain/schema alignment; DECISIONS #40).
 
 ## Migration Chain (PROMPT-ARCH-03)
 
@@ -392,6 +395,7 @@ Zod v4 schemas per entity, Arabic error messages:
 | `appointment.ts`         | appointment DTOs (cross-field refine: end > start), status union; `CreateAppointmentDto` carries the server-resolved `branchId` (ARCH-02)                                                                                                                                                                                                                                                                                                            |
 | `user.ts`                | user DTOs (identity itself stays in Better Auth) + `accountTypeValues`/`accountTypeSchema` (ARCH-02; NO user DTO exposes accountType — server-managed only)                                                                                                                                                                                                                                                                                          |
 | `whatsapp-connection.ts` | ARCH-02: `WHATSAPP_CONNECTION_STATUS_VALUES` + create/update DTOs (`businessId` required, `branchId` optional, `credentialsRef` = secret REFERENCE only — raw credentials stripped)                                                                                                                                                                                                                                                                  |
+| `whatsapp-transport.ts`  | PROMPT-CORE-03A: transport-boundary Zod contracts (`normalizedInboundTransportSchema` + `strict()` + TEXT↔MEDIA exclusivity; `transportErrorCodes` / `TransportError`); NOT a business-entity DTO — the boundary normalizes provider payloads into the conversation engine's inbound contract                                                                                                                                                        |
 | `usage.ts`               | ARCH-02: `usageKindValues`/`usageStatusValues` + `RecordUsageDto` (ids, counters, machine keys, status — content/secrets stripped by construction)                                                                                                                                                                                                                                                                                                   |
 
 DTOs are the repository input contract — controllers/routes validate with
@@ -435,7 +439,11 @@ Highlights:
   surface (creation lives only in Business creation + the backfill).
 - `WhatsAppConnectionRepository` (ARCH-02) — Business-scoped
   provider-neutral connection primitives; `credentialsRef` is an opaque
-  reference, never a secret.
+  reference, never a secret; resolution seam used by
+  `src/server/transport/whatsapp-transport.ts`
+  (`findByPhone`/`findByIdWithinBusiness`) — the transport foundation
+  (PROMPT-CORE-03A) validates tenant/branch server-side (zero schema
+  change).
 - `ProviderRepository` (ARCH-02) — ProviderProfile creation (same-Business
   user only) + eligibility relations with typed
   `PROVIDER_NOT_FOUND`/`SERVICE_NOT_FOUND`/`BRANCH_NOT_FOUND`/

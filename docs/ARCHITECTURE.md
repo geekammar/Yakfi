@@ -2,12 +2,13 @@
 
 > Current technical architecture and dependency boundaries. Read together
 > with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
-> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-02 —
-> the deterministic Any-Provider Booking Options Resolver is
-> implemented (second step of the any-provider flow, DECISIONS #32; it
-> consumes the CORE-01 eligibility resolver); the P0 hardening
-> foundations of DECISIONS #30–#36 are IMPLEMENTED (record: DECISIONS
-> #38; schema: `DATABASE.md`), and the migration chain is a complete
+> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-03A —
+> provider-neutral WhatsApp Transport Foundation (`src/server/transport/
+whatsapp-transport.ts` + `check:whatsapp-transport` 26/26; zero schema
+> changes); PROMPT-CORE-02's Any-Provider Booking Options Resolver
+> (DECISIONS #32; consumes CORE-01) and the P0 hardening foundations of
+> DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS #38; schema:
+> `DATABASE.md`), and the migration chain stays a complete
 > empty-database bootstrap path (DECISIONS #40).
 
 ## Stack
@@ -87,8 +88,14 @@ prisma/                     # schema.prisma + seed.ts
 - WhatsApp is the **current product channel**; additional channels are
   future possibilities only.
 - The boundary is **thin and channel-agnostic**: the Conversation Engine
-  works against provider-neutral seams (`MessageTransport`,
-  `ConversationAi` — DECISIONS #29) and never embeds vendor specifics.
+  works against provider-neutral seams — `MessageTransport` /
+  `ConversationAi` (DECISIONS #29) plus the transport foundation
+  `src/server/transport/whatsapp-transport.ts` (PROMPT-CORE-03A:
+  normalized inbound envelope + `normalizeInboundTransportMessage` →
+  `resolveInboundConnection` → `toEngineInboundMessage`, outbound
+  `OutboundMessage` → `MessageTransport`, `WhatsAppTransportErrorCode` /
+  `TransportError`) — and never embeds vendor specifics (no Meta
+  SDK/HTTP/signature/media-download in the boundary).
 - Do NOT build omnichannel infrastructure: no channel registry, no generic
   event bus, no channel capability matrix, no multi-channel UI.
 
@@ -157,7 +164,7 @@ listAssignmentSeams` as the ONE batched ProviderProfile.id → userId
   deferred. Do not build scheduling infrastructure the current pilot does
   not require.
 
-## WhatsApp Connection (DECISIONS #31 — IMPLEMENTED as data foundation, PROMPT-ARCH-02)
+## WhatsApp Connection (DECISIONS #31 — data foundation PROMPT-ARCH-02; transport contracts PROMPT-CORE-03A)
 
 - `WhatsAppConnection` is a **first-class entity**: the Business owns the
   WhatsApp identity — `businessId` required, `branchId` optional.
@@ -173,6 +180,17 @@ listAssignmentSeams` as the ONE batched ProviderProfile.id → userId
   domain assumption, and do NOT tie Conversation Core to a specific
   WhatsApp provider. `Business.whatsappNumber` remains the inbound
   business mapping until a real provider decision lands.
+- PROMPT-CORE-03A: the transport foundation's canonical seams live in
+  `src/server/transport/whatsapp-transport.ts` (`NormalizedInbound
+TransportMessage` / `OutboundMessage` / `MessageTransport` /
+  `TransportError` + taxonomy; `resolveInboundConnection` /
+  `resolveConnectionForSend` are the ONLY tenant/branch resolution
+  boundary — server-derived via the existing repositories, `strict()`ed
+  at the envelope, `credentialsRef` never returned). The conversations
+  feature re-exports them via
+  `src/features/conversations/server/conversation-transport.ts`
+  (feature-local `offlineMessageTransport` stays offline honest).
+  Zero schema changes; no vendor code — the Meta adapter is CORE-03B.
 
 ## Responsibility Separation (DECISIONS #33 — binding; contract IMPLEMENTED, PROMPT-ARCH-02)
 
