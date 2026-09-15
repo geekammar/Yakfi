@@ -6,10 +6,9 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-CORE-03A — provider-neutral WhatsApp Transport
-> Foundation (canonical contracts + tenant/branch resolution + harness
-> 26/26; ZERO schema changes; code/quality gates green — docs reconciled
-> this pass, worktree uncommitted, operator owns `pnpm ship`).
+> Last updated: PROMPT-DOC-DECISION-META — Meta WhatsApp Cloud API provider
+> boundary (DECISIONS #42; doc record for the CORE-03A foundation, ZERO
+> schema/code changes; worktree uncommitted, operator owns `pnpm ship`).
 > Product version: **v0.15.6** (pre-ship; operator bumps via `pnpm ship`).
 
 ## Current State (summary)
@@ -32,11 +31,14 @@ latest-thread reuse) → typed AI turn → verbatim-FAQ reply OR NEED_HUMAN
 complete (bootstrap/dev scripts, doctor/verify/security, gated releases,
 ship path, Vercel deployment, demo dataset, pilot distribution).
 
-**Two external providers are intentionally NOT integrated (DECISIONS
-#29):** the WhatsApp transport is the offline logging adapter behind
-`MessageTransport`, and the AI is the deterministic Arabic keyword/FAQ
-classifier behind `ConversationAi` (NO LLM). Both real providers remain
-operator decisions. The `/sign-up` placeholder page remains in code but is
+**WhatsApp provider SELECTED (DECISIONS #42; #29 closed for WhatsApp):**
+Meta WhatsApp Cloud API (Graph API, business-owned number) is the approved
+provider; the transport remains the offline logging adapter behind the
+provider-neutral `MessageTransport` seam until CORE-03B lands the adapter
+(no SDK/HTTP/signature/media yet). **The AI transport is intentionally NOT
+integrated (DECISIONS #29):** the AI is still the deterministic Arabic
+keyword/FAQ classifier behind `ConversationAi` (NO LLM) — the remaining
+operator decision. The `/sign-up` placeholder page remains in code but is
 superseded (invitation-first, DECISIONS #22). **PUBLIC SIGNUP IS CLOSED
 (PROMPT-OPS-05):** the proxy refuses public `POST /api/auth/sign-up/email`
 (403 `SIGNUP_CLOSED`); internal `auth.api.signUpEmail` (invitation
@@ -97,29 +99,29 @@ WhatsApp — booking stays a later command); ZERO schema changes; proven by
 any UI/conversation turn yet — the Conversation/WhatsApp layer consumes
 it next.
 
-**WhatsApp Transport Foundation is IMPLEMENTED (PROMPT-CORE-03A):**
-provider-neutral boundary `src/server/transport/whatsapp-transport.ts`
-(the canonical replaceable seam the future Meta adapter implements):
-normalized inbound envelope + `normalizeInboundTransportMessage`
-(`strict()` + TEXT↔MEDIA exclusivity; hostile identity/secret keys
-rejected; `MALFORMED_PROVIDER_PAYLOAD` on shape drift), outbound
-`OutboundMessage` → `MessageTransport` (offline adapter retained behind
-the seam; `resolveConnectionForSend` tenant-scoped + `CONNECTED`/
-`isActive` gated; `credentialsRef` never returned), typed
-`WhatsAppTransportErrorCode` taxonomy + `TransportError` (`retryable` =
-only `TRANSIENT_TRANSPORT_FAILURE`; policy stays adapter-side; no HTTP
-status leakage). Tenant/Branch resolution is server-derived
-(`BusinessRepository.findByWhatsappNumber` + `WhatsAppConnectionRepository`
-`findByPhone`/`findByIdWithinBusiness` + `BranchRepository`; branch
-validated within Business; business-shared `branchId=null` → Default
-Branch; no Meta SDK/HTTP/signature/media-download; no provider payload
-copied). Conversations keeps the feature-local seam via
+**WhatsApp Transport Foundation is IMPLEMENTED (PROMPT-CORE-03A; provider
+boundary DECISIONS #42):** provider-neutral boundary
+`src/server/transport/whatsapp-transport.ts` (the canonical replaceable seam
+the Meta adapter implements — **Meta WhatsApp Cloud API / Graph API,
+business-owned number** is the selected provider): normalized inbound
+envelope + `normalizeInboundTransportMessage` (`strict()` + TEXT↔MEDIA
+exclusivity; hostile identity/secret keys rejected;
+`MALFORMED_PROVIDER_PAYLOAD` on shape drift), outbound `OutboundMessage` →
+`MessageTransport` (offline adapter retained behind the seam;
+`resolveConnectionForSend` tenant-scoped + `CONNECTED`/`isActive` gated;
+`credentialsRef` never returned), typed `WhatsAppTransportErrorCode`
+taxonomy + `TransportError` (`retryable` = only `TRANSIENT_TRANSPORT_FAILURE`;
+policy stays adapter-side; no HTTP status leakage). Tenant/Branch resolution
+is server-derived (`BusinessRepository.findByWhatsappNumber` +
+`WhatsAppConnectionRepository` `findByPhone`/`findByIdWithinBusiness` +
+`BranchRepository`; branch validated within Business; business-shared
+`branchId=null` → Default Branch; no Meta SDK/HTTP/signature/media-download;
+no provider payload copied). Conversations keeps the feature-local seam via
 `src/features/conversations/server/conversation-transport.ts` (re-exports
 canonical contracts + `offlineMessageTransport`). Proven by
 `pnpm check:whatsapp-transport` (26/26, in-memory harness with real engine
-schema/engine — no DB/network). ZERO schema changes, ZERO vendor
-integration; not exposed in any UI/inbound route yet — CORE-03B wires the
-Meta adapter to inbound.
+schema/engine — no DB/network). ZERO schema changes, no vendor integration
+yet — CORE-03B wires the selected Meta adapter to inbound.
 
 **Two strictly separated environments are LIVE (PROMPT-OPS-02; production
 identity closed in PROMPT-OPS-04; OPS-05 build + live verification in

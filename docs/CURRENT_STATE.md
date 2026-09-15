@@ -3,9 +3,9 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-CORE-03A — provider-neutral WhatsApp Transport Foundation
-> (canonical contracts + tenant resolution + `check:whatsapp-transport`
-> 26/26; zero schema changes; worktree uncommitted).
+> PROMPT-DOC-DECISION-META — Meta WhatsApp Cloud API provider boundary
+> (DECISIONS #42; doc record for the CORE-03A transport foundation,
+> zero schema/code changes; worktree uncommitted).
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -30,10 +30,12 @@
   schema diff empty, seed ×3 idempotent). The old Demo/Neon DB still needs
   a one-time HUMAN-ONLY baseline reconciliation
   (`prisma migrate resolve --applied 0_init` → `pnpm db:deploy`).
-- **NOT live (operator decisions pending):** real WhatsApp transport and
-  real LLM inference — both are provider-neutral interfaces with
-  deterministic offline implementations (DECISIONS #29); the ARCH-02
-  foundations are ready for them.
+- **NOT live:** WhatsApp provider **selected** — Meta WhatsApp Cloud API
+  (Graph API, business-owned number — DECISIONS #42); transport stays
+  provider-neutral with the offline adapter behind `MessageTransport`
+  until CORE-03B lands the Meta adapter; real LLM inference remains a
+  provider-neutral deterministic implementation (DECISIONS #29); the
+  ARCH-02 foundations are ready for both.
 - **PUBLIC SIGNUP CLOSED (PROMPT-OPS-05, DECISIONS #41):** the proxy
   refuses public `POST /api/auth/sign-up/email` (403 `SIGNUP_CLOSED`);
   the invitation-first lifecycle (business `/invite/[token]` + platform
@@ -76,11 +78,14 @@
   WhatsApp. ZERO schema changes; `pnpm check:booking-options` 32/32.
   Not exposed in any UI/conversation turn yet — the Conversation layer
   consumes it next.
-- **WHATSAPP TRANSPORT FOUNDATION (PROMPT-CORE-03A):** provider-neutral
-  boundary `src/server/transport/whatsapp-transport.ts` — normalized
-  inbound envelope (`externalMessageId`/`senderExternalId`/
-  `recipientExternalId`/`timestamp`/`kind`/`text`/`media` reference;
-  `strict()` + TEXT↔MEDIA exclusivity; hostile keys rejected),
+- **WHATSAPP TRANSPORT FOUNDATION (PROMPT-CORE-03A; provider boundary
+  DECISIONS #42):** provider-neutral boundary
+  `src/server/transport/whatsapp-transport.ts` — Meta WhatsApp Cloud API
+  (Graph API) is the selected provider (business-owned number) — the
+  boundary itself stays provider-neutral: normalized inbound envelope
+  (`externalMessageId`/`senderExternalId`/`recipientExternalId`/
+  `timestamp`/`kind`/`text`/`media` reference; `strict()` + TEXT↔MEDIA
+  exclusivity; hostile keys rejected),
   `normalizeInboundTransportMessage` → `resolveInboundConnection` →
   `toEngineInboundMessage` (TEXT-only into Core; MEDIA →
   `UNSUPPORTED_MESSAGE_TYPE`), outbound `OutboundMessage` →
