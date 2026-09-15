@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.15.10",
+  "version": "0.15.11",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -13,6 +13,7 @@
     "check:booking-options": "tsx scripts/check-booking-options.ts",
     "check:whatsapp-transport": "tsx scripts/check-whatsapp-transport.ts",
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
+    "check:ai-prompts": "tsx scripts/check-ai-prompts.ts",
     "release": "bash scripts/release.sh",
     "ship": "node scripts/ship.mjs",
     "vercel:check": "node scripts/vercel-check.mjs",
