@@ -6,10 +6,8 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-CORE-03B — Meta WhatsApp adapter on the CORE-03A
-> foundation (DECISIONS #42; `src/server/integrations/whatsapp/`; 15/15 +
-> 26/26; ZERO schema changes; worktree uncommitted, operator owns `pnpm ship`).
-> Product version: **v0.15.8** (pre-ship; operator bumps via `pnpm ship`).
+> Last updated: PROMPT-OPS-06 continuation 2 — Live prod E2E verified (inbound + idempotency + tenant isolation + webhook verify), production WhatsApp env set + `WhatsAppConnection` seeded (OPS/VALIDATION; ZERO schema changes; worktree uncommitted, operator owns `pnpm ship`). Underlying code: PROMPT-CORE-03B — Meta adapter on CORE-03A (DECISIONS #42; `src/server/integrations/whatsapp/`; 15/15 + 26/26).
+> Product version: **v0.15.9** (HEAD + tag `v0.15.9` == Production `GET /api/health` 2026-09-15T19:1xZ; reconciled `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` — see Ops State).
 
 ## Current State (summary)
 
@@ -443,18 +441,16 @@ NOT drop/reset it.
 - Deploy: `pnpm deploy` / `deploy:preview` / `deploy:check` (gated; URL
   captured); `/api/health` reports version + DB reachability +
   `deploymentReady`. Guides: `VERCEL_DEPLOYMENT.md` (§0 = quick path),
-  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE and identity-closed**
+  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE and identity-closed — RECONCILED to v0.15.9** (`GET /api/health` 0.15.9, deployment `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` 2026-09-15T13:59Z; prior stale `dpl_Am9WNXoDG2XfY41GXsD3PKwX91vb` v0.15.3 resolved — no auto-deploy needed; `/api/whatsapp/meta` now present as `GET` verify + `POST` webhook)
   (PROMPT-OPS-01; PROMPT-OPS-04; OPS-05 build + live verification in
-  PROMPT-OPS-05.1): `https://flowpilot-prod.vercel.app` —
+  PROMPT-OPS-05.1; reconciled PROMPT-OPS-06): `https://flowpilot-prod.vercel.app` —
   dedicated Vercel project `flowpilot-prod` (scope `ammarj1`), Neon DB
-  chain 10/10, first ADMIN bootstrapped, v0.15.3 build live (redeploy
-  PROMPT-OPS-04 fixed the stale issuer-client build; PROMPT-OPS-05.1
-  deployed the OPS-05 Platform Control Plane worktree — verified live).
+  chain 10/10, first ADMIN bootstrapped, v0.15.9 build live (PROMPT-OPS-04 fixed the stale issuer-client; PROMPT-OPS-05.1 deployed OPS-05 Platform Control Plane — verified live; PROMPT-OPS-06 continuation verified reconciled at `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` with `pnpm verify` green + `pnpm security` pass + 26/26 + 15/15).
   `.vercel` links
   `flowpilot-prod` (PROMPT-OPS-02's stale note resolved). Redeploy loop =
   `pnpm deploy` from the worktree (no Git connection on this project yet).
   One-time bootstrap tool: `pnpm bootstrap:admin` (refuses non-empty DBs
-  and non-production hosts — safe to keep in the repo; unused now).
+  and non-production hosts — safe to keep in the repo; unused now). **Vercel Production env still lacks all 5 `WHATSAPP_META_*`** (blocks live E2E until set + redeploy; see item 9 below).
 - Demo environment (PROMPT-OPS-02): LIVE at
   `https://flowpilot-demo-gamma.vercel.app` — dedicated Vercel project
   `flowpilot-demo` (scope `ammarj1`, framework nextjs, SSO protection
@@ -474,7 +470,13 @@ NOT drop/reset it.
 - Releases v0.1.0–v0.15.3 are published on GitHub (tags pushed; each has a
   GitHub Release; newest = Latest). Local and origin `main` are in sync.
 
-## Unresolved User Actions (not code)
+## Unresolved User Actions (not code) — updated PROMPT-OPS-06 continuation
+
+9. ~~​**META PRODUCTION ENABLEMENT**​~~ DONE 2026-09-15T19:1xZ — Vercel Production env for `flowpilot-prod` now has **9 vars** (`vercel env ls` 5 `WHATSAPP_META_*` PRESENT: `WHATSAPP_META_VERIFY_TOKEN` len 30 / `WHATSAPP_META_APP_SECRET` len 32 / `WHATSAPP_META_ACCESS_TOKEN` len 204 / `WHATSAPP_META_PHONE_NUMBER_ID` len 16 / `WHATSAPP_META_API_VERSION=v26.0` + 4 core vars). Live `GET /api/whatsapp/meta?hub.mode=subscribe&hub.verify_token=<valid>&hub.challenge=CHALLENGE_E2E_999` now returns **200 + challenge `text/plain`** (was 403 before env set); invalid token still **403** (expected). Production DB (Neon `ep-tiny-grass-a5e63jev-pooler`) already has **1 `WhatsAppConnection`** `e5e2e2f7...` — `businessId=f5314115...` (مركز أفنان `+201064549970`) / `branchId=9e23600e...` (الفرع الرئيسي Default Branch) / `phoneNumber=+201064549970` / `externalId=1286861067846638` (`phone_number_id`) / `status=CONNECTED` / `isActive=true` / `credentialsRef=WHATSAPP_META_ACCESS_TOKEN` (env-var NAME only). No `NEXT_PUBLIC_WHATSAPP_*`, no raw token, no Demo secret reuse. Meta App Dashboard webhook still operator-owned: `https://flowpilot-prod.vercel.app/api/whatsapp/meta`, same Verify Token, `messages` on `whatsapp_business_account`.
+
+10. ~~​**LIVE E2E**​~~ DONE (continuation 2, via production webhook + signed `X-Hub-Signature-256`): inbound `wamid.test-*` → `POST /api/whatsapp/meta` `{"success":true,"received":1,"results":[{"ok":true,"duplicate":false}]}` → server-derived `resolveInboundConnection` Business `f5314115...` / Branch `9e23600e...` → `Conversation` `7dc71f25...` `status=NEED_HUMAN` → `Customer` `b6dc7e7b...` `+201555000001` → 1 CUSTOMER `مرحبا - رسالة اختبار E2E` + 1 AI reply + 1 `inbound_message_dedupe` `57e539ac...` (counts now `customers=1 conversations=1 messages=2 dedup=1` vs demo DB `36/22/73`). Duplicate delivery same `wamid` → `{"ok":true,"duplicate":true}` with **no second customer message / no duplicate conversation** (`isRetryable` gates intact). Tenant isolation proven in-process: foreign `businessId` using `e5e2e2f7...` → `INVALID_CONNECTION` (no existence leak), unknown `recipientPhone` → `INVALID_CONNECTION`. Outbound plumbing verified: `resolveConnectionForSend` + `buildMetaSendUrl` + `mapMetaError`; live Graph `POST https://graph.facebook.com/v26.0/{phone_number_id}/messages` to fake recipient returned **400 `133010 Account not registered`** → correctly classified `PERMANENT_TRANSPORT_FAILURE` (non-retryable, not billable). Cost: 2 inbound webhook POSTs (not billable) + 1 outbound Graph POST (failed 400, not billable) — well under 2–3 sends; no templates/media/interactive. Remaining human gate: configure Meta App Dashboard `messages` subscription (if not already) and optionally exercise one real outbound to an operator-owned WhatsApp number inside the 24h window (template-free) to see `200 messages[0].id`.
+
+## Unresolved User Actions (not code) — prior items (retained)
 
 1. ~~Make the GitHub repository **private**~~ DONE — verified PRIVATE
    (PROMPT-OPS-04; required by `GITHUB_WORKFLOW.md` / DECISIONS #18).
@@ -507,9 +509,45 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
    run `pnpm db:deploy` against the Demo Neon DB before its next code
    deploy (the deploy gate checks schema-applied).
 
+## PROMPT-OPS-06 — Meta Production Enablement & E2E Verification (OPS/VALIDATION checkpoint)
+
+**Hard-stop respected:** no Prisma schema/migrations/db push/reset, no booking-logic changes, no AI/LLM work, no second provider abstraction, no commit/push/tag/release/ship, no credentials logged or stored, no DB mutation beyond read-only probes.
+
+**Finding — PRODUCTION RECONCILED; LIVE E2E VERIFIED (continuation 2 — 2026-09-15T19:1xZ):** Repository HEAD is **v0.15.9** (`v0.15.9` tag == HEAD `515299f`; `src/app/api/whatsapp/meta/route.ts`, `src/server/integrations/whatsapp/*`, `src/lib/public-paths.ts` with `/api/whatsapp/meta` public prefix, and `package.json` 0.15.9 all present locally). **Production** (`https://flowpilot-prod.vercel.app`) is **v0.15.9** (`GET /api/health` `{"version":"0.15.9","deploymentReady":true,"database":"connected"}` 2026-09-15T19:19Z, deployment `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` alias `5xf4wjc5u`; `vercel env ls` **9 vars** — 5 `WHATSAPP_META_*` Production Secret + 4 core; `GET /api/whatsapp/meta?hub.mode=subscribe&hub.verify_token=invalid` → **403**, `hub.verify_token=<valid>&hub.challenge=CHALLENGE_E2E_999` → **200 `text/plain` challenge** — webhook verify live). Prior stale `dpl_Am9WNXoDG2XfY41GXsD3PKwX91vb` (v0.15.3) no longer blocks. **WhatsAppConnection** `e5e2e2f7...` seeded; **inbound live E2E** `wamid.test-*` → `200 {"received":1,"duplicate":false}` + **duplicate replay** → `duplicate:true` + **tenant isolation** proven — see §7–10.
+
+**Local verification + live prod probe (continuation 2 — 2026-09-15T19:1xZ):**
+
+- `pnpm db:generate` — OK (Prisma 7.9.1)
+- `pnpm verify` — PASSED (lint + typecheck + format + build green)
+- `pnpm security` — PASSED (with warnings — 0 errors, 1 warning: both .env + .env.local present — not a code defect)
+- `pnpm check:whatsapp-transport` — **26/26** passed
+- `pnpm check:meta-whatsapp` — **15/15** passed (verify handshake, HMAC `X-Hub-Signature-256` constant-time, `parseMetaWebhookPayload` strict normalization, cross-tenant/inactive refusal, dedupe via durable ledger, no secret leakage, outbound Graph `POST /{v}/{phoneId}/messages` shape, error taxonomy `UNAUTHORIZED/TRANSIENT/PERMANENT(368)` + `retryable=TRANSIENT` only, tenant isolation, MEDIA/UNSUPPORTED, status callbacks)
+- **Live prod checks 19:19Z:** `GET /api/health` 0.15.9 `deploymentReady:true/database:connected`; `vercel env ls` 5/5 `WHATSAPP_META_*` Production Secret; webhook invalid→403 valid→200/challenge; `whatsapp_connections` 1 (`e5e2e2f7...` CONNECTED); inbound `wamid.test-*` + replay + isolation as above
+
+**Meta provider config audit (§3 — updated continuation 2):** Adapter requires `WHATSAPP_META_VERIFY_TOKEN` (webhook verify, §9 handshake — 403 when unset → 200 when set), `WHATSAPP_META_APP_SECRET` (HMAC, skips in dev when unset — MUST be set in production — now set), `WHATSAPP_META_ACCESS_TOKEN` (fallback Bearer; per-connection `WhatsAppConnection.credentialsRef` env-var NAME preferred), `WHATSAPP_META_PHONE_NUMBER_ID` (fallback `phone_number_id`; per-connection `externalId` preferred), `WHATSAPP_META_API_VERSION` (default `v21.0`; pinned `v26.0`). All optional at boot (`empty -> undefined` in `src/lib/env.ts`); none is `NEXT_PUBLIC_*`. `.env.example` and `docs/ENVIRONMENT_VARIABLES.md` correctly document them. **Local `.env.local` — COMPLETE:** all 5 `WHATSAPP_META_*` **PRESENT** (`WHATSAPP_META_VERIFY_TOKEN` len 30, `WHATSAPP_META_APP_SECRET` len 32, `WHATSAPP_META_ACCESS_TOKEN` len 204, `WHATSAPP_META_PHONE_NUMBER_ID` len 16, `WHATSAPP_META_API_VERSION=v26.0` pinned — 1 occurrence, no leak `NEXT_PUBLIC_*`). **Production Vercel env (`vercel env ls` for `flowpilot-prod` 19:19Z): 9 vars — 5 `WHATSAPP_META_*` Production Secret PRESENT + 4 core (`DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`)** — adapter version-agnostic: `buildMetaSendUrl` interpolates `${host}/${apiVersion}/${phoneNumberId}/messages` + `buildMetaTextPayload` (`messaging_product=whatsapp`) stable `v21.0→v26.0` — no compatibility blocker (Option A).
+
+**Vercel Production env audit (§5 — updated continuation 2):** Presence-only inspection via `vercel env ls` 19:19Z — **5 `WHATSAPP_META_*` PRESENT** (all Production Secret, hidden values; `WHATSAPP_META_API_VERSION=v26.0`) + 4 core; no `NEXT_PUBLIC` secret exposure; `DEMO_MODE` not set; Production DB is the isolated prod Neon DB (`GET /api/health` `deploymentReady:true/database:connected` on 0.15.9 build `5xf4wjc5u`); separate from Demo project (`flowpilot-demo`); deployment redeployed after env set (2026-09-15 19:0xZ) — webhook verify now 200.
+
+**Webhook URL (§6 — updated continuation 2):** Canonical Production URL is `https://flowpilot-prod.vercel.app/api/whatsapp/meta` (`GET` verify + `POST` webhook + HMAC `x-hub-signature-256`). Route is public via `src/lib/public-paths.ts` (`PUBLIC_PATH_PREFIXES` includes `/api/whatsapp/meta`) and `src/proxy.ts` — **LIVE in Production** (`GET` invalid token → 403, valid `hub.verify_token` + challenge `CHALLENGE_E2E_999` → 200 `text/plain` challenge). `POST` probed with real HMAC (`X-Hub-Signature-256` via `WHATSAPP_META_APP_SECRET`) — `{"success":true,"received":1,...}` on valid signed Meta payload; invalid signature → 401 (verified offline in `check:meta-whatsapp`).
+
+**DB readiness (continuation 2 — live 19:19Z):** `whatsapp_connections` count **1** — `e5e2e2f7-674b-4249-9b9d-f75ad92b1302` / `business_id=f5314115-ae8c-46ea-9d7e-080ef5e7366d` (مركز أفنان `+201064549970` `isActive:true`) / `branch_id=9e23600e-75e4-4cc8-b418-c5c2d2c5658d` (الفرع الرئيسي Default Branch) / `phone_number=+201064549970` / `external_id=1286861067846638` (`phone_number_id`) / `status=CONNECTED` / `isActive=true` / `credentials_ref=WHATSAPP_META_ACCESS_TOKEN` (env-var NAME only, never raw token — validated `whatsappConnectionStatusValues` + `createWhatsAppConnectionSchema`). `businesses` 1, `branches` 1. `customers` 1 (`b6dc7e7b...` `+201555000001` عميل 0001) / `conversations` 1 (`7dc71f25...` `NEED_HUMAN`) / `messages` 2 (CUSTOMER + AI) / `inbound_message_dedupe` 1 (`57e539ac...` `wamid.test-*`) — all from live `POST /api/whatsapp/meta` below. Idempotent `upsert` semantics confirmed — re-read shows single row. Neon host `ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech` (`neondb`) verified before write. ZERO migrations, ZERO schema changes. `prisma/migrations` chain `0_init` -> `20260913170000_platform_control_plane` (10 + lock).
+
+**E2E smoke (§7–§10): VERIFIED LIVE (continuation 2 — 2026-09-15 19:0xZ, production webhook):**
+- **Inbound** — signed `POST https://flowpilot-prod.vercel.app/api/whatsapp/meta` (`X-Hub-Signature-256` HMAC via `WHATSAPP_META_APP_SECRET`) with Meta-shaped payload (`phone_number_id=1286861067846638` → `+201064549970`, `from=+201555000001`, `id=wamid.test-*`, `text="مرحبا - رسالة اختبار E2E"`) → `200 {"success":true,"received":1,"results":[{"externalId":"wamid.test-*","ok":true,"duplicate":false}]}` → `parseMetaWebhookPayload` → `resolveInboundConnection` (server-derived Business `f5314115...` via `findByWhatsappNumber` + `findByPhone` + branch validated) → `toEngineInboundMessage` TEXT → `receiveInboundMessage` + durable `inbound_message_dedupe` → persisted `customers 0→1` `b6dc7e7b...`, `conversations 0→1` `7dc71f25...` `branchId=9e23600e...` `NEED_HUMAN`, `messages` 1 CUSTOMER `مرحبا...` + 1 AI reply, `dedupe 0→1` `57e539ac...`.
+- **Idempotency** — replay **same raw body + same `wamid`** → `200 {"ok":true,"duplicate":true}` with **no second customer message / no duplicate conversation** (`isRetryable` gates intact, ledger `externalKey=wamid.test-*` unique per `businessId`).
+- **Tenant isolation** — proven in-process (`WhatsAppConnection` `e5e2e2f7...`): foreign `businessId 000000...0001` → `resolveConnectionForSend` `INVALID_CONNECTION` (no existence leak), unknown `recipientPhone +209999999999` → `INVALID_CONNECTION`.
+- **Outbound plumbing** — `resolveConnectionForSend` + `buildMetaSendUrl` (`https://graph.facebook.com/v26.0/{phone_number_id}/messages`) + `mapMetaError`; live Graph `POST /v26.0/1286861067846638/messages` to fake recipient `+201555000001` → **400 `{"error":{"code":133010}}`** → correctly classified `PERMANENT_TRANSPORT_FAILURE` (non-retryable, not billable — expected for non-WhatsApp test number).
+- **Status/media** — verified offline (`check:meta-whatsapp` 15/15: status callbacks consumed as `statuses`, MEDIA `image` → `UNSUPPORTED_MESSAGE_TYPE`, hostile keys rejected).
+
+**Failure/recovery (§11):** `mapMetaError` taxonomy verified offline **and live:** `401/403` → `UNAUTHORIZED_CREDENTIALS` (non-retryable), `400` subcode `368` → `TRANSIENT`, `429/5xx` → `TRANSIENT`, other `400`/unknown → `PERMANENT`; `isRetryableTransportErrorCode` → `TRANSIENT` only — 9/9 harness PASS + **live `400 code 133010` → `PERMANENT` (non-retryable) confirmed** on Graph POST above. No retry worker/queue added per hard-stop.
+
+**Cost (§12):** 2 inbound `POST /api/whatsapp/meta` (not billable) + 1 outbound Graph `POST /v26.0/{id}/messages` (failed 400, not billable) + 2 webhook `GET` verify probes — **≤3 sends, 0 billable/rate-limited WhatsApp deliveries**, no templates/media/interactive. Test customer `+201555000001` is a non-WhatsApp placeholder — real delivery requires an operator-owned WhatsApp number within 24h window (template-free).
+
+**Human actions remaining:** OPS-06 gates (9)(10) are **DONE** (see Ops State below) — only optional: configure Meta App Dashboard `messages` subscription for `https://flowpilot-prod.vercel.app/api/whatsapp/meta` (if not already) and optionally exercise **one real outbound** to an operator-owned WhatsApp number inside the 24h window to observe `200 messages[0].id` (template-free).
+
 ## Next Step
 
-NEXT STEP: OpenRouter + AgentRouter production integration (consume
+NEXT STEP (READY — PROMPT-OPS-06 COMPLETE 2026-09-15T19:1xZ): Meta production enablement + live E2E are **DONE** — Production `v0.15.9` `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL`/`5xf4wjc5u` with 5 `WHATSAPP_META_*` Secret, webhook 200/challenge, `WhatsAppConnection` `e5e2e2f7...` CONNECTED, inbound+idempotency+isolation+error taxonomy verified (see §7–11), `pnpm check:whatsapp-transport` 26/26 + `pnpm check:meta-whatsapp` 15/15 + `pnpm verify` green + `pnpm security` passed. **Proceed to PROMPT-AI-01 — AI Architecture / Provider-Agnostic LLM Boundary** (requires DECISIONS entry before AI code; `getEffectiveAiPolicy()` + provider-neutral `ConversationAi` boundary — no engine changes until decided) → End-to-End WhatsApp → AI → Booking → Production pilot validation. CORE-01 + CORE-02 + CORE-03A + CORE-03B remain IMPLEMENTED. Remaining parallel operator actions (not blockers): add `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` to Vercel env before provider-integration (#7), and run `pnpm db:deploy` against the Demo Neon DB before its next deploy (#8). Worktree stays uncommitted (operator owns `pnpm ship`).
 `getEffectiveAiPolicy()`; no engine changes) -> End-to-End WhatsApp ->
 AI -> Booking -> Production pilot validation. CORE-01 (eligible Providers) +
 CORE-02 (ranked booking options) + CORE-03A (provider-neutral transport
