@@ -152,6 +152,27 @@ export function matchProviderByName(
   return { status: "missing", reason: "ambiguous" };
 }
 
+/**
+ * Deterministic provider-NAME selection guard (PROMPT-AI-03B): true only
+ * when every token of the customer text appears in ONE real provider
+ * display name (normalized). This keeps ordinary short messages
+ * ("تمام", "عندكم دكتور؟") from being hijacked as provider selections
+ * while still accepting "سارة" for "د. سارة" and "د. أحمد علي".
+ */
+export function isProviderNameCandidate(
+  providerText: string,
+  providerDisplayNames: ReadonlyArray<string>,
+): boolean {
+  const tokens = normalizeArabicText(providerText).split(" ").filter(Boolean);
+  if (tokens.length === 0) return false;
+  return providerDisplayNames.some((displayName) => {
+    const nameTokens = new Set(
+      normalizeArabicText(displayName).split(" ").filter(Boolean),
+    );
+    return tokens.every((token) => nameTokens.has(token));
+  });
+}
+
 export type BookingMapperInput = {
   businessId: string;
   branchId: string | null;

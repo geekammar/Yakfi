@@ -14,7 +14,9 @@ import { join } from "node:path";
  *   4. same-Business send connection accepted;
  *   5. cross-Business connection rejected (no existence leak);
  *   6. optional Branch scope validated (own branch accepted / foreign
- *      branch refused / Business-shared → Default Branch fallback);
+ *      branch refused / Business-shared → Default Branch fallback) and
+ *      the provider-identity inbound mapping (recipientProviderId →
+ *      WhatsAppConnection.externalId) preferred over the display number;
  *   7. duplicate inbound external message deduplicated through the REAL
  *      conversation engine (one customer message, idempotent redelivery
  *      with the original ids);
@@ -88,6 +90,7 @@ async function main(): Promise<void> {
   const CONN_B = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
   const CONN_B_INACTIVE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4";
   const BUSINESS_INACTIVE = "44444444-4444-4444-8444-444444444445";
+  const PROVIDER_CONNECTION_ID = "meta-phone-number-id-a";
   const SECRET_REF = "env:WHATSAPP_TOKEN_REF";
   const PHONE_A = "+201001111111";
   const PHONE_A_SHARED = "+201005555555";
@@ -103,6 +106,7 @@ async function main(): Promise<void> {
     businessId: string;
     branchId: string | null;
     phoneNumber: string;
+    externalId?: string | null;
     status: string;
     isActive: boolean;
     credentialsRef: string;
@@ -139,6 +143,7 @@ async function main(): Promise<void> {
       businessId: BUSINESS_A,
       branchId: BRANCH_A,
       phoneNumber: PHONE_A,
+      externalId: PROVIDER_CONNECTION_ID,
       status: "CONNECTED",
       isActive: true,
       credentialsRef: SECRET_REF,
@@ -194,6 +199,8 @@ async function main(): Promise<void> {
         }
         return null;
       },
+      findById: async (id: string) =>
+        businessRows.find((row) => row.id === id) ?? null,
     },
     whatsappConnectionRepository: {
       findByPhone: async (businessId: string, phoneNumber: string) =>
@@ -206,6 +213,8 @@ async function main(): Promise<void> {
         connectionRows.find(
           (row) => row.id === id && row.businessId === businessId,
         ) ?? null,
+      findByExternalId: async (externalId: string) =>
+        connectionRows.find((row) => row.externalId === externalId) ?? null,
     },
     branchRepository: {
       findDefaultByBusiness: async (businessId: string) =>
@@ -335,6 +344,7 @@ async function main(): Promise<void> {
   };
   const sent = await fakeAdapter.send({
     to: CUSTOMER_PHONE,
+    businessId: BUSINESS_A,
     businessName: "منشأة أ",
     conversationId: "conversation-1",
     content: "رد تجريبي",
@@ -406,6 +416,28 @@ async function main(): Promise<void> {
       inboundOwnBranch.businessId === BUSINESS_A &&
       inboundOwnBranch.connectionId === CONN_A &&
       inboundOwnBranch.branchId === BRANCH_A,
+  );
+  // Provider identity (phone_number_id → externalId) is the PREFERRED
+  // inbound mapping: it resolves even when the display number differs
+  // from the stored one; an unknown identity + unknown number fails safe.
+  const providerIdentityResolved = await transport.resolveInboundConnection(
+    connectionDeps,
+    "+12025550123",
+    PROVIDER_CONNECTION_ID,
+  );
+  const unknownProviderIdentity = await transport.resolveInboundConnection(
+    connectionDeps,
+    "+12025559999",
+    "unknown-provider-id",
+  );
+  check(
+    "الوارد: هوية المزود المستقرة (recipientProviderId → externalId) تحسم المنشأة/الفرع مع رقم عرض مختلف؛ والمجهول يفشل بأمان",
+    providerIdentityResolved.ok &&
+      providerIdentityResolved.businessId === BUSINESS_A &&
+      providerIdentityResolved.connectionId === CONN_A &&
+      providerIdentityResolved.branchId === BRANCH_A &&
+      !unknownProviderIdentity.ok &&
+      unknownProviderIdentity.code === "INVALID_CONNECTION",
   );
   const foreignBranchResolution = await transport.resolveInboundConnection(
     {

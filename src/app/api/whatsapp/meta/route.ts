@@ -3,6 +3,7 @@ import {
   receiveInboundMessage,
 } from "@/features/conversations/server/conversation-engine";
 import { env } from "@/lib/env";
+import { createDefaultMetaWhatsAppTransport } from "@/server/integrations/whatsapp/meta-client";
 import {
   parseMetaWebhookPayload,
   verifyMetaSignature,
@@ -22,6 +23,17 @@ import {
 import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * The provider adapter owns its outbound transport: the Meta route
+ * supplies the Meta-backed `MessageTransport` (live Graph send) to the
+ * canonical engine. The engine's own default stays offline, so no
+ * non-Meta entry point gains a live WhatsApp sender.
+ */
+const metaEngineDeps = {
+  ...defaultConversationEngineDeps,
+  transport: createDefaultMetaWhatsAppTransport(),
+};
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -120,6 +132,7 @@ export async function POST(request: Request) {
     const resolution = await resolveInboundConnection(
       resolutionDeps,
       message.recipientExternalId,
+      message.recipientProviderId,
     );
 
     if (!resolution.ok) {
@@ -160,8 +173,13 @@ export async function POST(request: Request) {
     }
 
     const engineResult = await receiveInboundMessage(
-      defaultConversationEngineDeps,
+      metaEngineDeps,
       engineInput,
+      {
+        businessId: resolution.businessId,
+        branchId: resolution.branchId,
+        connectionId: resolution.connectionId,
+      },
     );
 
     if (engineResult.ok) {

@@ -12,9 +12,12 @@ import { createHmac } from "node:crypto";
  *   1. valid webhook verification (subscribe + matching token → challenge)
  *   2. invalid verification rejected (wrong token / wrong mode → 403)
  *   3. invalid signature rejected (bad HMAC → 403; missing secret skips)
- *   4. valid inbound TEXT normalization (Meta payload → normalized TEXT)
+ *   4. valid inbound TEXT normalization (Meta payload → normalized TEXT +
+ *      stable recipientProviderId = phone_number_id)
  *   5. malformed provider payload rejected (MALFORMED_PROVIDER_PAYLOAD)
- *   6. cross-business inbound rejected, inactive business rejected
+ *   6. cross-business inbound rejected, inactive business rejected, and
+ *      phone_number_id → connection → business resolution (unknown id
+ *      fails safe)
  *   7. duplicate wamid deduplicated through the real engine ledger
  *   8. no secret appears in the normalized contract
  *   9. raw provider payload never escapes into Core
@@ -154,6 +157,11 @@ async function main(): Promise<void> {
     textOk = false;
   }
   check("حمولة Meta صالحة (نص) → ظرف TEXT موحّد", textOk);
+  check(
+    "حمولة Meta: phone_number_id يُستخرج كهوية استقبال مستقرة (recipientProviderId)",
+    textParsed?.messages[0]?.recipientProviderId === "111" &&
+      textParsed?.messages[0]?.recipientExternalId === phoneA,
+  );
 
   // ── 5. malformed provider payload rejected ──────────────────────────────
   let malformedRejected = false;
@@ -218,6 +226,8 @@ async function main(): Promise<void> {
       findByWhatsappNumber: async (n: string) =>
         businessRows.find((r) => r.whatsappNumber === canonicalPhone(n)) ??
         null,
+      findById: async (id: string) =>
+        businessRows.find((r) => r.id === id) ?? null,
     },
     whatsappConnectionRepository: {
       findByPhone: async (bid: string, _phone: string) =>
@@ -233,6 +243,17 @@ async function main(): Promise<void> {
           : null,
       findByIdWithinBusiness: async (id: string, bid: string) =>
         id === "conn-a" && bid === BUSINESS_A
+          ? ({
+              id: "conn-a",
+              businessId: BUSINESS_A,
+              branchId: BRANCH_A,
+              phoneNumber: phoneA,
+              status: "CONNECTED",
+              isActive: true,
+            } as unknown as import("../src/types/domain").WhatsAppConnection)
+          : null,
+      findByExternalId: async (externalId: string) =>
+        externalId === "111"
           ? ({
               id: "conn-a",
               businessId: BUSINESS_A,
@@ -274,6 +295,25 @@ async function main(): Promise<void> {
       crossBiz.code === "INVALID_CONNECTION" &&
       !inactiveBiz.ok &&
       inactiveBiz.code === "INVALID_CONNECTION",
+  );
+  const providerResolved = await transport.resolveInboundConnection(
+    connectionDeps,
+    "+19990000000",
+    "111",
+  );
+  const unknownProviderId = await transport.resolveInboundConnection(
+    connectionDeps,
+    "+19990000001",
+    "unknown-phone-number-id",
+  );
+  check(
+    "الوارد: phone_number_id → اتصال → منشأة/فرع (حتى مع رقم عرض مختلف)؛ phone_number_id مجهول → INVALID_CONNECTION",
+    providerResolved.ok &&
+      providerResolved.businessId === BUSINESS_A &&
+      providerResolved.connectionId === "conn-a" &&
+      providerResolved.branchId === BRANCH_A &&
+      !unknownProviderId.ok &&
+      unknownProviderId.code === "INVALID_CONNECTION",
   );
 
   // ── 7. duplicate wamid deduplicated (real engine ledger) ─────────────

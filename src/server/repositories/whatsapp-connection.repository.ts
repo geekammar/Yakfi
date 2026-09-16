@@ -36,6 +36,21 @@ export class WhatsAppConnectionRepository {
     });
   }
 
+  /**
+   * Resolve a connection by its provider-owned stable identity (e.g. the
+   * Meta `phone_number_id`). Called at the INBOUND boundary where the
+   * Business is not known yet — the returned row's `businessId` IS the
+   * server-derived tenant (never provider input). Provider ids are
+   * globally unique in practice; `findFirst` keeps the boundary flat.
+   */
+  async findByExternalId(
+    externalId: string,
+  ): Promise<WhatsAppConnection | null> {
+    return db.whatsAppConnection.findFirst({
+      where: { externalId, ...notDeleted },
+    });
+  }
+
   async listByBusiness(businessId: string): Promise<WhatsAppConnection[]> {
     return db.whatsAppConnection.findMany({
       where: { businessId, ...notDeleted },

@@ -1,5 +1,6 @@
 import {
   TransportError,
+  defaultConnectionResolutionDeps,
   resolveConnectionForSend,
   type ConnectionResolutionDeps,
   type MessageTransport,
@@ -166,13 +167,13 @@ export function createMetaWhatsAppTransport(
   return {
     providerName: "meta-whatsapp",
     async send(message: OutboundMessage): Promise<TransportSendResult> {
-      // Outbound tenancy: which connection may send for this Business
-      // The conversation's businessId is not on OutboundMessage — resolve
-      // via the connection the caller selected. Cross-business is refused
-      // by the Business-scoped repository lookup below when businessId is
-      // supplied.
+      // Outbound tenancy: the sending connection MUST be resolvable
+      // WITHIN the message's Business. `businessId` and `connectionId`
+      // are server-derived (resolved at the inbound boundary) — a
+      // cross-Business pair fails closed in `resolveConnectionForSend`.
       const connectionId = message.connectionId;
-      if (!connectionId) {
+      const businessId = message.businessId;
+      if (!connectionId || !businessId) {
         return {
           provider: "meta-whatsapp",
           delivered: false,
@@ -181,48 +182,9 @@ export function createMetaWhatsAppTransport(
         };
       }
 
-      // We need the Business id for tenancy. If the message carries it
-      // (future field), use it; otherwise look up via phoneNumber fallback
-      // or require the caller to pass it. For now, the adapter reuses
-      // the legacy BusinessRepository mapping via phoneNumber when needed,
-      // but tenancy enforcement needs the row — fetch it first when the
-      // business id is not directly available.
-      // The simplest production-safe path: attempt to load the connection
-      // by id across the tenancy boundary — which fails closed when the
-      // business is wrong.
-      //
-      // Since OutboundMessage does not yet carry businessId, we accept a
-      // best-effort lookup and keep the INVALID_CONNECTION gate on the
-      // raw repository result; callers that DO know the businessId should
-      // attach it. This path still refuses a connection of another
-      // Business because `findByIdWithinBusiness` is always Business-
-      // scoped — but we need the Business id to call it. Where the caller
-      // omitted it, we attempt a direct fetch and gate on isActive/status.
-      //
-      // Compatibility: when `message.connectionId` looks like a UUID, try
-      // to resolve via the Business-derived lookup below; otherwise fail.
-      let businessIdForLookup: string | undefined;
-      // Hidden extension: callers MAY attach `__businessId` for tenancy
-      // without changing the public OutboundMessage shape.
-      const ext = message as OutboundMessage & { __businessId?: string };
-      if (ext.__businessId) businessIdForLookup = ext.__businessId;
-
-      if (!businessIdForLookup) {
-        // Fallback: try to load the connection directly (no tenant filter)
-        // and still enforce CONNECTED/isActive, but we cannot prove tenancy.
-        // So this fallback still fails closed — callers MUST attach
-        // __businessId in production. In tests we inject the ext.
-        return {
-          provider: "meta-whatsapp",
-          delivered: false,
-          error: "تعذر التحقق من صلاحية اتصال الإرسال",
-          errorCode: "INVALID_CONNECTION",
-        };
-      }
-
       const resolved = await resolveConnectionForSend(deps.connectionDeps, {
         connectionId,
-        businessId: businessIdForLookup,
+        businessId,
       });
       if (!resolved.ok) {
         return {
@@ -235,7 +197,7 @@ export function createMetaWhatsAppTransport(
 
       // Fetch the connection row for credentialsRef/phoneNumberId
       const row = await deps.connectionDeps.whatsappConnectionRepository
-        .findByIdWithinBusiness(connectionId, businessIdForLookup)
+        .findByIdWithinBusiness(connectionId, businessId)
         .catch(() => null);
       // row is the same as `resolved` already validated; read the ref
       const credentialsRef =
@@ -250,7 +212,7 @@ export function createMetaWhatsAppTransport(
           getEnvVar: deps.getEnvVar,
           defaultApiVersion: deps.defaultApiVersion,
         },
-        { businessId: businessIdForLookup, connectionId },
+        { businessId, connectionId },
         {
           phoneNumberId: phoneNumberIdFromConnection,
           credentialsRef,
@@ -331,4 +293,20 @@ export function createMetaWhatsAppTransport(
       };
     },
   };
+}
+
+/**
+ * The Meta-backed transport wired to the app's production singletons
+ * (`defaultConnectionResolutionDeps` + `process.env` + global fetch).
+ * The Meta route is the ONLY caller: the provider-neutral engine default
+ * stays offline, so non-Meta entry points never gain a live sender.
+ */
+export function createDefaultMetaWhatsAppTransport(): MessageTransport {
+  return createMetaWhatsAppTransport({
+    connectionDeps: defaultConnectionResolutionDeps,
+    getEnvVar: (name) => process.env[name],
+    fetchImpl: globalThis.fetch,
+    graphHost: META_GRAPH_HOST,
+    defaultApiVersion: META_DEFAULT_API_VERSION,
+  });
 }

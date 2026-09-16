@@ -157,6 +157,11 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
       const metaMessages = value.messages;
       if (!Array.isArray(metaMessages)) continue;
       const recipientNumber = value.metadata?.display_phone_number ?? "";
+      // The STABLE receiving identity (Meta phone_number_id) — the
+      // display number is only a label and may not match its stored
+      // format. Kept as a normalized lookup key for connection
+      // resolution; never trusted as tenant identity by itself.
+      const recipientProviderId = value.metadata?.phone_number_id ?? "";
       for (const meta of metaMessages) {
         rawMessageCount += 1;
         if (!meta.from || !meta.id || !meta.timestamp || !meta.type) {
@@ -192,6 +197,9 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
           timestamp: isoTimestamp,
           kind,
         };
+        if (recipientProviderId) {
+          normalizedInput.recipientProviderId = recipientProviderId;
+        }
         if (kind === "TEXT") {
           const body = meta.text?.body;
           if (!body || typeof body !== "string" || !body.trim()) {

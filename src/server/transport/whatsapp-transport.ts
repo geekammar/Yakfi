@@ -132,6 +132,15 @@ const normalizedInboundTransportSchema = z
     senderExternalId: phoneSchema,
     /** The receiving WhatsApp number. */
     recipientExternalId: phoneSchema,
+    /**
+     * Provider-side STABLE identity of the receiving account when the
+     * provider exposes one separately from its display number (e.g. a
+     * Meta Cloud API `phone_number_id`). Purely a lookup key: it maps to
+     * a persisted `WhatsAppConnection.externalId` server-side and is
+     * NEVER trusted as tenant identity by itself. Optional — providers
+     * without a separate identity keep the phone-number mapping.
+     */
+    recipientProviderId: z.string().trim().min(1).max(256).optional(),
     /** Transport-owned receive timestamp. */
     timestamp: z.iso.datetime(),
     kind: z.enum(inboundTransportKindValues).default("TEXT"),
@@ -264,6 +273,10 @@ export function toEngineInboundMessage(
 export type OutboundMessage = {
   /** Customer phone number (E.164-ish, as received inbound). */
   to: string;
+  /** The sending Business — REQUIRED for tenant-scoped send resolution:
+   *  an adapter must be able to prove the connection belongs to this
+   *  Business before reading any credential reference. */
+  businessId: string;
   /** Display name of the sending business. */
   businessName: string;
   /** Conversation the reply belongs to. */
@@ -306,10 +319,13 @@ function canonicalPhone(phone: string): string {
 }
 
 export type ConnectionResolutionDeps = {
-  businessRepository: Pick<BusinessRepository, "findByWhatsappNumber">;
+  businessRepository: Pick<
+    BusinessRepository,
+    "findByWhatsappNumber" | "findById"
+  >;
   whatsappConnectionRepository: Pick<
     WhatsAppConnectionRepository,
-    "findByPhone" | "findByIdWithinBusiness"
+    "findByPhone" | "findByIdWithinBusiness" | "findByExternalId"
   >;
   branchRepository: Pick<
     BranchRepository,
@@ -363,8 +379,37 @@ export type SendConnectionResolution =
 export async function resolveInboundConnection(
   deps: ConnectionResolutionDeps,
   recipientPhone: string,
+  providerIdentity?: string | null,
 ): Promise<InboundConnectionResolution> {
   const phone = canonicalPhone(recipientPhone);
+
+  // 1. Preferred: the provider's STABLE receiving identity maps to a
+  //    persisted, Business-owned connection (`WhatsAppConnection.externalId`
+  //    — e.g. the Meta `phone_number_id`). The display number is only a
+  //    label and may be formatted differently from the stored mapping.
+  if (providerIdentity) {
+    const connection =
+      await deps.whatsappConnectionRepository.findByExternalId(
+        providerIdentity,
+      );
+    if (connection) {
+      const business = await deps.businessRepository.findById(
+        connection.businessId,
+      );
+      if (!business || !business.isActive) {
+        return {
+          ok: false,
+          code: "INVALID_CONNECTION",
+          message: "المنشأة غير مفعّلة حالياً",
+        };
+      }
+      return finalizeInboundResolution(deps, business, connection);
+    }
+  }
+
+  // 2. Legacy phone mapping (Business.whatsappNumber) — used when the
+  //    provider exposes no stable identity or no connection is registered
+  //    for it yet.
   const business = await deps.businessRepository.findByWhatsappNumber(phone);
   if (!business) {
     return {
@@ -384,6 +429,15 @@ export async function resolveInboundConnection(
     business.id,
     phone,
   );
+  return finalizeInboundResolution(deps, business, connection);
+}
+
+/** Shared Branch validation + result shape for both resolution paths. */
+async function finalizeInboundResolution(
+  deps: ConnectionResolutionDeps,
+  business: { id: string; name: string },
+  connection: { id: string; branchId: string | null; status: string } | null,
+): Promise<InboundConnectionResolution> {
   let branchId: string | null = null;
   if (connection?.branchId) {
     const branch = await deps.branchRepository.findByIdWithinBusiness(
