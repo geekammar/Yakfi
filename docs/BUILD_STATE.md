@@ -6,8 +6,8 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-DOC-AI-BOOKING-DECISION — Real LLM Provider Adapter wired (effective runtime policy AgentRouter primary / OpenRouter secondary / fallback enabled via `getEffectiveAiPolicy()` + `createPolicyBackedAi`; `defaultConversationEngineDeps.ai` policy-backed, `bypassDeterministicAi` + `parseAiResponse` preserved, server-only secrets; zero schema/migration/prompt changes; worktree uncommitted, operator owns `pnpm ship`). Underlying code: PROMPT-CORE-03B — Meta adapter on CORE-03A (DECISIONS #42; 15/15 + 26/26) + PROMPT-AI-01 prompt/policy separation (DECISIONS #43; `docs/ai/`).
-> Product version: **v0.15.11** (package.json 0.15.11 worktree — Production `GET /api/health` remains v0.15.9 `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` until `pnpm ship`; see Ops State).
+> Last updated: PROMPT-AI-03 — Conversation → Booking seam wired (AiResponse mapper → CORE-01 eligibleProviders → CORE-02 bookingOptions, ANY_PROVIDER without fabricated providerId, zero appointment mutation, offline harness 16/16). Underlying: PROMPT-AI-02 policy-backed AI (`getEffectiveAiPolicy()` + `createPolicyBackedAi`) + PROMPT-CORE-03B Meta adapter on CORE-03A (DECISIONS #42; 15/15 + 26/26) + PROMPT-AI-01 prompt/policy separation (DECISIONS #43; `docs/ai/`); worktree uncommitted, operator owns `pnpm ship`.
+> Product version: **v0.16.0** (package.json 0.16.0 worktree — Production `GET /api/health` remains v0.15.9 `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` until `pnpm ship`; see Ops State).
 
 ## Current State (summary)
 
@@ -184,7 +184,7 @@ the PROMPT-OPS-02 row). The two real
 provider integrations (WhatsApp transport, LLM) remain pending operator
 decisions (DECISIONS #29).
 
-**Quality:** `PROMPT-AI-02` verified 2026-09-16 — `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`).
+**Quality:** `PROMPT-AI-03` verified 2026-09-16 — `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`).
 
 ## Completed Major Work
 
@@ -239,6 +239,8 @@ decisions (DECISIONS #29).
 
 | AI Prompt & Evaluation Separation | PROMPT-AI-01 (DECISIONS #43): provider-neutral, versioned, deterministic prompt artifacts separate from implementation — `docs/ai/README.md` + `docs/ai/ARCHITECTURE.md` (invariant `AI interprets → Domain decides → Conversation orchestrates`; structured `AiRequest`/`AiResponse` contract; minimal context; `PlatformAiPolicy` singleton boundary; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` stripping + provider-neutrality invariants) + `docs/ai/PROMPTS.md` (5 definitions `booking-intent@v1` / `faq-match@v1` / `availability-handoff@v1` / `reschedule-cancellation@v1` / `human-request@v1` — 7-section structure each: Purpose/Input/System instructions/Output contract/Constraints/Handoff policy/Version history; no Authorization/x-api-key/model/tool-call/secret syntax) + `docs/ai/EVALUATIONS.md` (15 deterministic fixtures 01–15: BOOKING 01–02, FAQ 03–04 verbatim, AVAILABILITY 05–06, CANCELLATION/RESCHEDULE 07–09, HUMAN_REQUEST/AMBIGUOUS 10–13, ordering 14–15 — all bound to `classifyCustomerMessage`/`bypassDeterministicAi`/`deterministicConversationAi` + `parseAiResponse` unknown-key stripping). Offline harness `scripts/check-ai-prompts.ts` (`pnpm check:ai-prompts` 106/106 passing: files present, structured definitions, strict deny-list on `docs/ai/` — no provider syntax, fixture intents/actions/reasons/summaries/extraction/content, deterministic replay 01–15, negative invariants, invocation boundary — `bypassDeterministicAi` before `ai.respond`, `parseAiResponse` present, minimal `AiRequest` without Prisma/booking invention, no secrets); `package.json` adds `check:ai-prompts`; `pnpm verify` green + `pnpm security` pass; ZERO schema/engine/domain changes; `docs/ai/` is canonical — not duplicated elsewhere | PROMPT-AI-01 |
 
+| Conversation → Booking Seam | PROMPT-AI-03 (DECISIONS #45 prerequisite satisfied; booking boundary DECISIONS #45): deterministic `Customer message → Conversation Engine → AiResponse → mapper → CORE-01 → CORE-02 → options/clarification/NEED_HUMAN` with zero appointment mutation — `src/features/conversations/server/booking-mapper.ts` pure mapper (`isAnyProviderPhrase`/`matchServiceByName`/`matchProviderByName`/`mapAiResponseToBookingInput`: `normalizeArabicText` vs `serviceRepository.listByBusiness`, server-derived `businessId`/`branchId`, `ANY_PROVIDER` → `providerId: undefined`/`preference: ANY`, hostile tenant keys stripped by `parseAiResponse`) + `src/features/conversations/server/conversation-engine.ts` BOOKING/AVAILABILITY branch (`bypassDeterministicAi` first, `parseAiResponse` then mapper → `needs_clarification` → `AI_REPLY` stays `AI_ACTIVE` else `ready` → CORE-01 `resolveEligibleProviders` → provider match → CORE-02 `resolveBookingOptions` reusing `resolveWorkingDay`/`weekdayOf`/`generateCandidateSlots`/`filterConflictingSlots`/`listBlockingByAssignees` verbatim including `SERVICE_NOT_FOUND`/`SERVICE_INACTIVE`/`PROVIDER_NOT_ELIGIBLE`/`BRANCH_NOT_FOUND`/`NO_BUSINESS`/`INVALID_INPUT` + empty reasons `NO_ELIGIBLE_PROVIDERS`/`BUSINESS_CLOSED`/`SERVICE_TOO_LONG`/`FULLY_BOOKED`; Arabic customer messages, typed `NEED_HUMAN`/`AI_REPLY`/`AI_HANDOFF`, no Prisma from Conversation layer, no new tables/migrations/queues/Redis/channel adapters); `ConversationEngineDeps` stays backward-compatible (`Partial<Pick<…>>` + optional `providerRepository`/`appointmentRepository` falling back to real singletons for existing harnesses `check-ai-provider`/`check-meta-whatsapp`/`check-whatsapp-transport`); offline harness `scripts/check-conversation-booking.ts` (`pnpm check:conversation-booking` 16/16: valid booking, ANY_PROVIDER, availability, missing/ambiguous service, ambiguous provider, CORE-01 rejection, CORE-02 empty, hostile injection strip, bypass, NEED_HUMAN typed, no mutation/no secrets; fixed date `2026-09-14` Monday; no DB/network/LLM/Meta); `package.json` adds `check:conversation-booking`; `pnpm verify` green + `pnpm security` pass; ZERO appointment write/mutation, ZERO schema changes, no prompt edits | PROMPT-AI-03 |
+
 ## Key Known Limitations (current; CORE-03B — Meta adapter live, CORE-03A note retired)
 
 - Smart Create has no notes entry: Step 6 submits without notes (PROMPT-14
@@ -281,10 +283,7 @@ decisions (DECISIONS #29).
   redelivery is deduped and the reply is not regenerated (the message
   is not lost — staff sees the thread; the next customer message
   re-engages the assistant).
-- The engine never books: booking-related intents hand off to staff
-  (NEED_HUMAN with an `aiSummary` intent note); the AI posts a polite
-  acknowledgment message on handoff turns, and threads in any
-  non-AI_ACTIVE state (or assigned) never receive AI interjections.
+- The engine never books (no appointment mutation): BOOKING/AVAILABILITY intents resolve deterministically via the mapper → CORE-01 `resolveEligibleProviders` → CORE-02 `resolveBookingOptions` (server-derived `businessId`/`branchId`, `ANY_PROVIDER` never fabricates `providerId`, reusing the existing availability layer; empty/rejection → Arabic `AI_HANDOFF` `NEED_HUMAN`); all other booking-adjacent intents and malformed/unsafe/unavailable cases still hand off to staff (`NEED_HUMAN`); the assistant posts the Domain-computed options/clarification/handoff message, and threads in any non-`AI_ACTIVE` state (or assigned) never receive AI interjections.
 - The Branch/WhatsAppConnection/usage foundations (ARCH-02) have NO
   management UI and NO consumer flows yet; the Provider eligibility
   relations gained their FIRST consumer in PROMPT-CORE-01 (the
@@ -378,8 +377,10 @@ schema details: `DATABASE.md`):
   `ai-contract.ts` (minimal bounded request / structured bounded
   response; facts-only extraction; chain-of-thought stripped by
   construction) + `bypassDeterministicAi` (deterministic turns skip the
-  AI entirely). AI still never queries Prisma, never decides
-  availability, never books.
+  AI entirely) + PROMPT-AI-03 booking seam (`booking-mapper.ts` →
+  CORE-01/CORE-02; `AI interprets → Domain decides → Conversation
+orchestrates`). AI still never queries Prisma, never decides
+  availability/eligibility/conflicts, never books/creates appointments.
 - **#34 Reliability prerequisites** — IMPLEMENTED: SERIALIZABLE
   conflict-checked booking writes with bounded retry + typed
   SLOT_CONFLICT; durable inbound-webhook idempotency ledger
@@ -393,9 +394,7 @@ schema details: `DATABASE.md`):
   Usage ≠ Cost ≠ Price ≠ Entitlement ≠ Billing preserved — no pricing
   logic, no billing.
 
-The two real provider integrations (WhatsApp transport, LLM behind
-`ConversationAi` — DECISIONS #29) remain pending operator decisions and
-are the next phase after this hardening.
+The two real provider integrations are now WIRED: WhatsApp via the Meta adapter (CORE-03B; DECISIONS #42) and LLM behind `ConversationAi` via the policy-backed adapter (PROMPT-AI-02); PROMPT-AI-03 booking seam is also WIRED (mapper → CORE-01/CORE-02, zero mutation). Remaining operator decisions: key provisioning / production pilot validation.
 
 ## Migration State
 
@@ -542,7 +541,7 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP (PROMPT-DOC-AI-BOOKING-DECISION RECORDED 2026-09-16 — effective runtime policy AgentRouter primary / OpenRouter secondary / fallback enabled via `getEffectiveAiPolicy()`; `defaultConversationEngineDeps` policy-backed; `bypassDeterministicAi` + `parseAiResponse` + Domain/Branch/Booking/WhatsApp preserved; server-only secrets; 29/29 + 106/106 + lint/typecheck/format/verify/security green; ZERO schema/migration/prompt changes; worktree uncommitted) — prior gate PROMPT-DOC-AI-DECISION-01 COMPLETE 2026-09-15T20:3xZ — DECISIONS #44): AI Runtime Provider Policy is **RECORDED**; PROMPT-DOC-AI-BOOKING-DECISION **RECORDED as DECISIONS #45** (AI -> Conversation -> Domain booking boundary, CORE-01/CORE-02 authorities, LLM no appointment write/no tenant choice, 15 invariants — doc-only, zero code/schema). **PROMPT-AI-03 prerequisite is now satisfied** — next implementation may wire Conversation to call CORE-01/CORE-02 deterministically on booking intents (no new AI authority) (documentation-only gate, zero code/schema) — OpenRouter primary / AgentRouter secondary / fallback enabled; model selection runtime-configurable; prompt vs policy strictly separated; `docs/ai/` canonical provider-neutral versioned (`…@v1`); Superadmin may configure provider/model/fallback but MUST NOT edit prompts; fallback deterministic 1) primary → 2) secondary on retryable failure/timeout when enabled → 3) safe handoff/error → 4) never silently change prompts → 5) never change Domain decisions → 6) never bypass Domain validation; secrets env-backed only (`OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`). **Gate PROMPT-DOC-AI-BOOKING-DECISION #45 RECORDED — prerequisite for PROMPT-AI-03 satisfied. Proceed to PROMPT-AI-03 (Conversation wiring to CORE-01/CORE-02) after PROMPT-AI-02 remains wired; PROMPT-AI-02 — Real LLM Provider Adapter** (`getEffectiveAiPolicy()` + provider-neutral `ConversationAi` adapter implementing the SAME `src/features/conversations/server/ai-contract.ts` — no engine/domain changes; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` preserved) → End-to-End WhatsApp → AI → Booking → Production pilot validation. PROMPT-AI-01 artifacts remain binding (DECISIONS #43; `docs/ai/` + `pnpm check:ai-prompts` 106/106); CORE-01 + CORE-02 + CORE-03A + CORE-03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42), AI still deterministic until adapter lands. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8). Worktree stays uncommitted (operator owns `pnpm ship`).
+NEXT STEP (PROMPT-AI-03 WIRED 2026-09-16 — mapper `booking-mapper.ts` → CORE-01 `resolveEligibleProviders` → CORE-02 `resolveBookingOptions`, `bypassDeterministicAi` + `parseAiResponse` + Domain/Branch/Booking/WhatsApp preserved, server-only secrets, zero mutation; 16/16 + 29/29 + 106/106 + 29/29 + 32/32 + lint/typecheck/format/verify/security green; ZERO schema/migration/prompt changes; worktree uncommitted — PROMPT-DOC-AI-BOOKING-DECISION DECISIONS #45 prerequisite satisfied): PROMPT-AI-03 is **WIRED** (BOOKING/AVAILABILITY deterministic seam, ANY_PROVIDER without fabricated providerId, Arabic clarification/handoff, `NEED_HUMAN`/`AI_REPLY`/`AI_HANDOFF` typed; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` preserved); PROMPT-AI-02 remains wired (policy-backed `ConversationAi` via `getEffectiveAiPolicy()` + `createPolicyBackedAi`); PROMPT-AI-01 binding (DECISIONS #43; `docs/ai/` + 106/106) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42). Next: end-to-end WhatsApp → AI → Booking pilot validation in Production. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8). Worktree stays uncommitted (operator owns `pnpm ship`).
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

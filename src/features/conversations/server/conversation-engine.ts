@@ -1,7 +1,8 @@
 /**
- * Conversation engine (PROMPT-19; hardened in PROMPT-ARCH-02) — the ONE
- * canonical inbound path that turns an incoming WhatsApp-style customer
- * message into a safe assistant response:
+ * Conversation engine (PROMPT-19; hardened in PROMPT-ARCH-02; wired for
+ * PROMPT-AI-03 booking seam) — the ONE canonical inbound path that turns
+ * an incoming WhatsApp-style customer message into a safe assistant
+ * response:
  *
  *   inbound message → resolve business (by receiving WhatsApp number)
  *   → claim the external message key (DURABLE idempotency, before any
@@ -9,16 +10,25 @@
  *   → find-or-create conversation (Branch-aware) → persist the CUSTOMER
  *   message (the claim's message ids recorded in the SAME transaction)
  *   → load the conversation's minimal business context → typed AI turn
- *   (deterministic turns may BYPASS the assistant entirely) → safe
- *   reply OR NEED_HUMAN → persist the assistant reply → deliver through
- *   the transport boundary → best-effort usage telemetry.
+ *   (deterministic turns may BYPASS the assistant entirely) → for
+ *   BOOKING/AVAILABILITY intents: mapper (AiResponse → domain, server-
+ *   derived businessId/branchId, ANY_PROVIDER→no fabricated providerId)
+ *   → CORE-01 eligibleProviders → provider-name match → CORE-02
+ *   bookingOptions (reusing resolveWorkingDay/weekdayOf/
+ *   generateCandidateSlots/filterConflictingSlots) → options/
+ *   clarification/NEED_HUMAN (zero appointment mutation) → otherwise
+ *   safe reply OR NEED_HUMAN → persist the assistant reply → deliver
+ *   through the transport boundary → best-effort usage telemetry.
  *
  * Product rules encoded here:
  * - The payload NEVER controls authority: no `businessId`, role,
  *   customer/conversation ids, assignment, or tenant identity can enter
  *   through the inbound contract — the Business is resolved server-side
  *   from the receiving WhatsApp number via the established
- *   `BusinessRepository.findByWhatsappNumber` mapping.
+ *   `BusinessRepository.findByWhatsappNumber` mapping. AiResponse
+ *   extraction never carries businessId/role/accountType/tenant — those
+ *   keys are stripped by `parseAiResponse`; the mapper uses only
+ *   server-derived ids.
  * - Idempotency (DECISIONS #34): a redelivered webhook is deduplicated
  *   on the durable (businessId, external key) ledger BEFORE any
  *   irreversible processing; a redelivery of an already-processed
@@ -32,9 +42,9 @@
  *   assistant never interjects into a human-owned conversation.
  * - AI output is never the source of truth (DECISIONS #33): it crosses
  *   the structured contract boundary (`ai-contract.ts`), is re-validated
- *   before persistence, and booking intents hand off to staff, who
- *   complete bookings through the EXISTING canonical booking flow. The
- *   engine never creates appointments.
+ *   before persistence, and booking intents are resolved through the
+ *   deterministic CORE-01/CORE-02 domain (mapper + eligibility +
+ *   booking-options). The engine never creates appointments.
  * - All writes go through `ConversationRepository.addMessage` — the
  *   single message write path (immutable messages, transactional
  *   `lastMessageAt` advance). No Prisma access outside repositories.
@@ -49,6 +59,8 @@
 
 import { createHash } from "node:crypto";
 
+import { resolveBookingOptions } from "@/features/appointments/server/booking-options-service";
+import { resolveEligibleProviders } from "@/features/appointments/server/provider-eligibility-service";
 import {
   inboundMessageSchema,
   type InboundMessageInput,
@@ -62,6 +74,10 @@ import {
   AI_RECENT_MESSAGE_LIMIT,
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
+import {
+  mapAiResponseToBookingInput,
+  matchProviderByName,
+} from "@/features/conversations/server/booking-mapper";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
@@ -71,20 +87,24 @@ import type { RecordUsageDto } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 import type {
+  AppointmentRepository,
   BranchRepository,
   BusinessRepository,
   ConversationRepository,
   CustomerRepository,
   InboundDedupeRepository,
+  ProviderRepository,
   ServiceRepository,
   UsageRepository,
 } from "@/server/repositories";
 import {
+  appointmentRepository,
   branchRepository,
   businessRepository,
   conversationRepository,
   customerRepository,
   inboundDedupeRepository,
+  providerRepository,
   serviceRepository,
   usageRepository,
 } from "@/server/repositories";
@@ -186,8 +206,10 @@ const policyBackedAi: ConversationAi = {
 } as unknown as ConversationAi & { getLastTelemetry(): AiTelemetry | null };
 
 export type ConversationEngineDeps = {
-  businessRepository: Pick<BusinessRepository, "findByWhatsappNumber">;
-  branchRepository: Pick<BranchRepository, "findDefaultByBusiness">;
+  businessRepository: Pick<BusinessRepository, "findByWhatsappNumber"> &
+    Partial<Pick<BusinessRepository, "findById">>;
+  branchRepository: Pick<BranchRepository, "findDefaultByBusiness"> &
+    Partial<Pick<BranchRepository, "findByIdWithinBusiness">>;
   customerRepository: Pick<
     CustomerRepository,
     "upsertByPhone" | "touchConversation"
@@ -202,9 +224,18 @@ export type ConversationEngineDeps = {
     | "update"
     | "updateWorkflow"
   >;
-  serviceRepository: Pick<ServiceRepository, "listByBusiness">;
+  serviceRepository: Pick<ServiceRepository, "listByBusiness"> &
+    Partial<Pick<ServiceRepository, "findById">>;
   inboundDedupeRepository: Pick<InboundDedupeRepository, "claim">;
   usageRepository: Pick<UsageRepository, "record">;
+  providerRepository?: Pick<
+    ProviderRepository,
+    "listEligibleForService" | "listAssignmentSeams"
+  >;
+  appointmentRepository?: Pick<
+    AppointmentRepository,
+    "listBlockingByAssignees"
+  >;
   ai: ConversationAi;
   transport: MessageTransport;
 };
@@ -218,6 +249,8 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   serviceRepository,
   inboundDedupeRepository,
   usageRepository,
+  providerRepository,
+  appointmentRepository,
   ai: policyBackedAi,
   transport: offlineMessageTransport,
 };
@@ -284,6 +317,55 @@ const BUSINESS_NOT_FOUND_MESSAGE = "تعذر تحديد المنشأة المس�
 const BUSINESS_INACTIVE_MESSAGE = "المنشأة غير مفعّلة حالياً";
 const PERSISTENCE_FAILED_MESSAGE = "تعذر حفظ الرسالة الآن";
 
+// Booking seam — Arabic customer-facing messages (no secrets, no chain-of-thought).
+function bookingEligibilityErrorMessage(code: string): string {
+  switch (code) {
+    case "SERVICE_NOT_FOUND":
+      return "الخدمة المطلوبة غير موجودة — يرجى التأكد من اسم الخدمة.";
+    case "SERVICE_INACTIVE":
+      return "الخدمة المطلوبة غير متاحة للحجز حالياً — سيتواصل معك أحد أعضاء الفريق.";
+    case "BRANCH_NOT_FOUND":
+      return "الفرع المطلوب غير موجود — سيتواصل معك أحد أعضاء الفريق.";
+    case "NO_BUSINESS":
+      return "أكمل إعداد المنشأة أولاً — سيتواصل معك أحد أعضاء الفريق.";
+    case "INVALID_INPUT":
+      return "بيانات الحجز غير مكتملة — سيتواصل معك أحد أعضاء الفريق.";
+    default:
+      return "تعذر إتمام الحجز حالياً — سيتواصل معك أحد أعضاء الفريق.";
+  }
+}
+function bookingOptionsErrorMessage(code: string): string {
+  if (code === "PROVIDER_NOT_ELIGIBLE")
+    return "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
+  return bookingEligibilityErrorMessage(code);
+}
+function bookingEmptyReasonMessage(reason: string, date: string): string {
+  switch (reason) {
+    case "NO_ELIGIBLE_PROVIDERS":
+      return "لا يوجد مزود متاح لهذه الخدمة حالياً — سيتواصل معك أحد أعضاء الفريق.";
+    case "BUSINESS_CLOSED":
+      return `المنشأة مغلقة يوم ${date} — يرجى اختيار تاريخ آخر.`;
+    case "SERVICE_TOO_LONG":
+      return "مدة الخدمة أطول من ساعات العمل في ذلك اليوم — يرجى اختيار خدمة أخرى أو تاريخ آخر.";
+    case "FULLY_BOOKED":
+      return `جميع المواعيد محجوزة يوم ${date} — يرجى اختيار تاريخ آخر أو سيتواصل معك الفريق.`;
+    default:
+      return "لا تتوفر مواعيد حالياً — سيتواصل معك أحد أعضاء الفريق.";
+  }
+}
+function formatBookingOptionsMessage(
+  serviceName: string,
+  date: string,
+  options: Array<{ displayName: string; startAt: string; endAt: string }>,
+): string {
+  const lines = options.map((opt, idx) => {
+    const start = opt.startAt.slice(11, 16);
+    const end = opt.endAt.slice(11, 16);
+    return `${idx + 1}. ${opt.displayName} — ${start} إلى ${end}`;
+  });
+  return `تتوفر المواعيد التالية لخدمة "${serviceName}" يوم ${date}:\n${lines.join("\n")}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
+}
+
 /** Canonical phone form for the number-mapping lookup (digits + leading +). */
 function canonicalPhone(phone: string): string {
   return phone.replace(/[\s-]/g, "");
@@ -348,6 +430,58 @@ function readAiTelemetry(ai: ConversationAi): AiTelemetry | null {
     return null;
   }
   return null;
+}
+
+async function persistAssistantReply(
+  deps: ConversationEngineDeps,
+  conversationId: string,
+  content: string,
+  status: ConversationStatus,
+): Promise<{ id: string }> {
+  return deps.conversationRepository.addMessage(
+    { conversationId, senderType: "AI", content },
+    { status },
+  ) as Promise<{ id: string }>;
+}
+async function deliverAssistantReply(
+  deps: ConversationEngineDeps,
+  customerPhone: string,
+  businessName: string,
+  conversationId: string,
+  content: string,
+  assistantMessageId: string,
+  businessId: string,
+): Promise<InboundSuccess["delivery"]> {
+  let delivery: InboundSuccess["delivery"] = null;
+  try {
+    const sent = await deps.transport.send({
+      to: customerPhone,
+      businessName,
+      conversationId,
+      content,
+    });
+    delivery = {
+      provider: sent.provider,
+      delivered: sent.delivered,
+      ...(sent.error ? { error: sent.error } : {}),
+    };
+  } catch (error) {
+    delivery = {
+      provider: deps.transport.providerName,
+      delivered: false,
+      error: error instanceof Error ? error.message : "transport error",
+    };
+  }
+  await recordUsage(deps, {
+    businessId,
+    kind: "OUTBOUND_MESSAGE",
+    conversationId,
+    messageId: assistantMessageId,
+    provider: delivery.provider,
+    status: delivery.delivered ? "SUCCESS" : "FAILURE",
+    occurredAt: new Date(),
+  });
+  return delivery;
 }
 
 // ─── The engine ──────────────────────────────────────────────────────────────
@@ -599,6 +733,353 @@ export async function receiveInboundMessage(
         conversationStatus: "NEED_HUMAN",
         assistantProvider: deps.ai.providerName,
         delivery: null,
+      };
+    }
+
+    // 9b. BOOKING/AVAILABILITY seam (PROMPT-AI-03): mapper → CORE-01 → CORE-02
+    // Only for booking-related intents; all other intents fall through to
+    // the generic reply/handoff path. No appointment mutation here.
+    if (validated.intent === "BOOKING" || validated.intent === "AVAILABILITY") {
+      const branchId = (conversation.branchId as string | null) ?? null;
+      const mapped = mapAiResponseToBookingInput({
+        businessId: business.id,
+        branchId,
+        services: services.map((s) => ({ id: s.id, name: s.name })),
+        aiResponse: validated,
+      });
+      if (mapped.kind === "needs_clarification") {
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          mapped.message,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          mapped.message,
+          assistantMessage.id,
+          business.id,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: validated.intent,
+          conversationStatus: "AI_ACTIVE",
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+
+      // CORE-01 — eligibility source of truth
+      const eligibilityDeps = {
+        serviceRepository: {
+          findById: async (id: string) => {
+            const byId = (
+              deps.serviceRepository as unknown as {
+                findById?: (id: string) => Promise<unknown>;
+              }
+            ).findById;
+            if (byId) return byId.call(deps.serviceRepository, id);
+            return serviceRepository.findById(id);
+          },
+        },
+        branchRepository: {
+          findByIdWithinBusiness: async (id: string, bId: string) => {
+            const fn = (
+              deps.branchRepository as unknown as {
+                findByIdWithinBusiness?: (
+                  id: string,
+                  bId: string,
+                ) => Promise<unknown>;
+              }
+            ).findByIdWithinBusiness;
+            if (fn) return fn.call(deps.branchRepository, id, bId);
+            return branchRepository.findByIdWithinBusiness(id, bId);
+          },
+        },
+        providerRepository: {
+          listEligibleForService: async (
+            bId: string,
+            sId: string,
+            opts?: { branchId?: string },
+          ) => {
+            const repo = deps.providerRepository ?? providerRepository;
+            return (
+              repo as unknown as {
+                listEligibleForService: (
+                  bId: string,
+                  sId: string,
+                  opts?: { branchId?: string },
+                ) => Promise<unknown[]>;
+              }
+            ).listEligibleForService(bId, sId, opts);
+          },
+        },
+      };
+      const eligibility = await resolveEligibleProviders(
+        eligibilityDeps as unknown as Parameters<
+          typeof resolveEligibleProviders
+        >[0],
+        { businessId: business.id },
+        {
+          serviceId: mapped.serviceId,
+          ...(mapped.branchId ? { branchId: mapped.branchId } : {}),
+        },
+      );
+      if (!eligibility.success) {
+        const msg = bookingEligibilityErrorMessage(eligibility.error.code);
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          msg,
+          "NEED_HUMAN",
+        );
+        if (!conversation.aiSummary) {
+          await deps.conversationRepository.update(conversation.id, {
+            aiSummary: validated.summary ?? `طلب حجز: ${mapped.serviceName}`,
+          });
+        }
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          msg,
+          assistantMessage.id,
+          business.id,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_HANDOFF",
+          intent: validated.intent,
+          conversationStatus: "NEED_HUMAN",
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+
+      // Provider preference matching against the CORE-01 eligible set
+      const providerMatch = matchProviderByName(
+        mapped.providerText,
+        eligibility.data.providers,
+      );
+      if (providerMatch.status === "missing") {
+        const msg =
+          providerMatch.reason === "ambiguous"
+            ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
+            : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          msg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          msg,
+          assistantMessage.id,
+          business.id,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: validated.intent,
+          conversationStatus: "AI_ACTIVE",
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+      const providerId =
+        providerMatch.status === "ok" ? providerMatch.providerId : undefined;
+
+      // CORE-02 — deterministic booking options (reuses CORE-01 + availability layer)
+      const bookingDeps = {
+        eligibility: eligibilityDeps,
+        businessRepository: {
+          findById: async (id: string) => {
+            const fn = (
+              deps.businessRepository as unknown as {
+                findById?: (id: string) => Promise<unknown>;
+              }
+            ).findById;
+            if (fn) return fn.call(deps.businessRepository, id);
+            return businessRepository.findById(id);
+          },
+        },
+        serviceRepository: {
+          findById: async (id: string) => {
+            const fn = (
+              deps.serviceRepository as unknown as {
+                findById?: (id: string) => Promise<unknown>;
+              }
+            ).findById;
+            if (fn) return fn.call(deps.serviceRepository, id);
+            return serviceRepository.findById(id);
+          },
+        },
+        providerRepository: {
+          listAssignmentSeams: async (bId: string, ids: string[]) => {
+            const repo = deps.providerRepository ?? providerRepository;
+            return (
+              repo as unknown as {
+                listAssignmentSeams: (
+                  bId: string,
+                  ids: string[],
+                ) => Promise<unknown[]>;
+              }
+            ).listAssignmentSeams(bId, ids);
+          },
+        },
+        appointmentRepository: {
+          listBlockingByAssignees: async (
+            bId: string,
+            date: string,
+            ids: string[],
+          ) => {
+            const repo = deps.appointmentRepository ?? appointmentRepository;
+            return (
+              repo as unknown as {
+                listBlockingByAssignees: (
+                  bId: string,
+                  date: string,
+                  ids: string[],
+                ) => Promise<unknown[]>;
+              }
+            ).listBlockingByAssignees(bId, date, ids);
+          },
+        },
+      };
+      const bookingResult = await resolveBookingOptions(
+        bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
+        { userId: customer.id, businessId: business.id },
+        {
+          serviceId: mapped.serviceId,
+          ...(mapped.branchId ? { branchId: mapped.branchId } : {}),
+          ...(providerId ? { providerId } : {}),
+          date: mapped.date!,
+        },
+      );
+      if (!bookingResult.success) {
+        const msg = bookingOptionsErrorMessage(bookingResult.error.code);
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          msg,
+          "NEED_HUMAN",
+        );
+        if (!conversation.aiSummary) {
+          await deps.conversationRepository.update(conversation.id, {
+            aiSummary: validated.summary ?? `طلب حجز: ${mapped.serviceName}`,
+          });
+        }
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          msg,
+          assistantMessage.id,
+          business.id,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_HANDOFF",
+          intent: validated.intent,
+          conversationStatus: "NEED_HUMAN",
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+      if (bookingResult.data.options.length === 0) {
+        const reason = bookingResult.reason ?? "FULLY_BOOKED";
+        const msg = bookingEmptyReasonMessage(reason, mapped.date!);
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          msg,
+          "NEED_HUMAN",
+        );
+        if (!conversation.aiSummary && reason !== "FULLY_BOOKED") {
+          await deps.conversationRepository.update(conversation.id, {
+            aiSummary: validated.summary ?? `طلب حجز: ${mapped.serviceName}`,
+          });
+        }
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          msg,
+          assistantMessage.id,
+          business.id,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_HANDOFF",
+          intent: validated.intent,
+          conversationStatus: "NEED_HUMAN",
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+      // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
+      const optionsMsg = formatBookingOptionsMessage(
+        mapped.serviceName,
+        mapped.date!,
+        bookingResult.data.options,
+      );
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        optionsMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        optionsMsg,
+        assistantMessage.id,
+        business.id,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: validated.intent,
+        conversationStatus: "AI_ACTIVE",
+        assistantProvider: deps.ai.providerName,
+        delivery,
       };
     }
     const content = validated.content;
