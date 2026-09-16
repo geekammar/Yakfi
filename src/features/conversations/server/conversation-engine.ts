@@ -63,14 +63,13 @@ import {
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
-import {
-  bypassDeterministicAi,
-  deterministicConversationAi,
-} from "@/features/conversations/server/conversation-ai";
+import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
 import { faqEntrySchema } from "@/lib/validation";
 import type { RecordUsageDto } from "@/lib/validation";
+import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
+import type { AiTelemetry } from "@/server/integrations/ai/types";
 import type {
   BranchRepository,
   BusinessRepository,
@@ -96,6 +95,95 @@ import { z } from "zod";
 
 /** Stored knowledge contract reuse (same shape the knowledge feature manages). */
 const storedFaqsSchema = z.array(faqEntrySchema);
+
+// ─── Policy-backed assistant (PROMPT-AI-02) ────────────────────────────────
+// Resolves the live Platform AI policy on every turn — no hard-coded
+// provider or model in the engine. Secrets stay server-only via
+// secretRef → getEnvVar (OPENROUTER_API_KEY / AGENTROUTER_API_KEY).
+// Fallback is retryable/timeout only (orchestrator); deterministic
+// bypass and parseAiResponse remain in the engine flow.
+function getEnvVar(name: string): string | undefined {
+  return process.env[name];
+}
+
+// Last telemetry from the most recent LLM turn — surfaced to the
+// engine's readAiTelemetry (AI_TURN rich record). Null when the last
+// turn used the deterministic fallback or had no telemetry.
+let lastTelemetryValue: AiTelemetry | null = null;
+let lastProviderNameInner = "policy-backed";
+
+const policyBackedAi: ConversationAi = {
+  get providerName() {
+    return lastProviderNameInner;
+  },
+  async respond(request: AiRequest) {
+    const liveAi = await createPolicyBackedAi({
+      getEnvVar,
+      fetchImpl: globalThis.fetch as unknown as typeof fetch,
+    });
+    // Keep providerName honest for deferred / handoff reporting
+    lastProviderNameInner = liveAi.providerName;
+    const maybe = liveAi as unknown as { getLastTelemetry?: () => unknown };
+    let result: AiResponse;
+    try {
+      result = await liveAi.respond(request);
+    } catch (error) {
+      // Preserve telemetry even on controlled failure (engine maps
+      // null → NEED_HUMAN). Capture before re-throwing.
+      if (typeof maybe.getLastTelemetry === "function") {
+        try {
+          const t = maybe.getLastTelemetry();
+          if (
+            t &&
+            typeof t === "object" &&
+            "finalProvider" in (t as Record<string, unknown>)
+          ) {
+            lastTelemetryValue = t as AiTelemetry;
+            if (lastTelemetryValue.finalProvider)
+              lastProviderNameInner = lastTelemetryValue.finalProvider;
+          }
+        } catch {
+          // telemetry is best-effort
+        }
+      }
+      throw error;
+    }
+    if (typeof maybe.getLastTelemetry === "function") {
+      try {
+        const t = maybe.getLastTelemetry();
+        if (
+          t &&
+          typeof t === "object" &&
+          "finalProvider" in (t as Record<string, unknown>)
+        ) {
+          lastTelemetryValue = t as AiTelemetry;
+          if (
+            lastTelemetryValue.finalProvider &&
+            lastTelemetryValue.finalProvider !== "deterministic-bypass"
+          ) {
+            lastProviderNameInner = lastTelemetryValue.finalProvider;
+          } else if (
+            lastTelemetryValue.finalProvider === "deterministic-bypass"
+          ) {
+            lastProviderNameInner = "deterministic-bypass";
+          }
+        } else {
+          lastTelemetryValue = null;
+        }
+      } catch {
+        lastTelemetryValue = null;
+      }
+    } else {
+      lastTelemetryValue = null;
+    }
+    return result;
+  },
+  // Exposed for the engine's readAiTelemetry (LLM path); deterministic
+  // fallback has no telemetry.
+  getLastTelemetry(): AiTelemetry | null {
+    return lastTelemetryValue;
+  },
+} as unknown as ConversationAi & { getLastTelemetry(): AiTelemetry | null };
 
 export type ConversationEngineDeps = {
   businessRepository: Pick<BusinessRepository, "findByWhatsappNumber">;
@@ -130,7 +218,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   serviceRepository,
   inboundDedupeRepository,
   usageRepository,
-  ai: deterministicConversationAi,
+  ai: policyBackedAi,
   transport: offlineMessageTransport,
 };
 
@@ -242,6 +330,24 @@ async function recordUsage(
   } catch {
     // Telemetry is observability, not a business action.
   }
+}
+
+function readAiTelemetry(ai: ConversationAi): AiTelemetry | null {
+  const maybe = ai as unknown as { getLastTelemetry?: () => unknown };
+  if (typeof maybe.getLastTelemetry !== "function") return null;
+  try {
+    const value = maybe.getLastTelemetry();
+    if (
+      value &&
+      typeof value === "object" &&
+      "finalProvider" in (value as Record<string, unknown>)
+    ) {
+      return value as AiTelemetry;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // ─── The engine ──────────────────────────────────────────────────────────────
@@ -438,14 +544,40 @@ export async function receiveInboundMessage(
       } catch {
         turn = null;
       }
-      await recordUsage(deps, {
-        businessId: business.id,
-        kind: "AI_TURN",
-        conversationId: conversation.id,
-        provider: deps.ai.providerName,
-        status: turn ? "SUCCESS" : "FAILURE",
-        occurredAt: new Date(),
-      });
+      // Rich AI_TURN telemetry when the adapter exposes it (LLM path);
+      // deterministic / non-telemetry adapters keep the lightweight record.
+      // The orchestrator's deterministic-bypass telemetry is still a bypass
+      // - no AI_TURN fact is recorded (no provider call was spent).
+      const telemetry = readAiTelemetry(deps.ai);
+      const isBypassTelemetry =
+        telemetry?.finalProvider === "deterministic-bypass";
+      if (!isBypassTelemetry) {
+        const lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
+        const successAttempt = telemetry
+          ? [...telemetry.attempts]
+              .reverse()
+              .find((a) => a.status === "SUCCESS")
+          : null;
+        await recordUsage(deps, {
+          businessId: business.id,
+          kind: "AI_TURN",
+          conversationId: conversation.id,
+          provider: telemetry?.finalProvider ?? deps.ai.providerName,
+          model: (successAttempt?.model ??
+            telemetry?.finalModel ??
+            undefined) as string | undefined,
+          inputTokens:
+            successAttempt?.inputTokens ??
+            lastAttempt?.inputTokens ??
+            undefined,
+          outputTokens:
+            successAttempt?.outputTokens ??
+            lastAttempt?.outputTokens ??
+            undefined,
+          status: turn ? "SUCCESS" : "FAILURE",
+          occurredAt: new Date(),
+        });
+      }
     }
 
     // 9. Validate the assistant output BEFORE persisting (AI is never
