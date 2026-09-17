@@ -188,6 +188,14 @@ pnpm deploy:preview     # full gate → preview deployment URL
 pnpm deploy             # full gate → production deployment URL (deploy:production = alias)
 ```
 
+> **Production is CLI-linked — pushes do not deploy it.** `flowpilot-prod`
+> (linked in `.vercel/project.json`) has **no Vercel Git connection**, so
+> `pnpm ship` / `git push` update GitHub only. Promote production after every
+> ship with `pnpm deploy:production`, then confirm `/api/health` reports the
+> new `package.json` version. Only Git-connected projects redeploy
+> automatically on push (this repo also has a legacy `flowpilot_v3`
+> connection — it is not the production URL).
+
 ## SECTION 5 — Validate Deployment
 
 1. **Liveness & readiness** — open `https://<your-app>.vercel.app/api/health`:

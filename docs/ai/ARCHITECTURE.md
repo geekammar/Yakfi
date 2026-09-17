@@ -55,10 +55,11 @@ AI interprets → Domain decides & executes → Conversation Engine orchestrates
          │
          ▼
   ConversationAi  (interface — provider-neutral)
-    deterministicConversationAi  ◀── today (NO LLM)
-    openrouterConversationAi     ◀── future operator decision
-    agentrouterConversationAi    ◀── future fallback
-         │  contract: src/features/conversations/server/ai-contract.ts
+    deterministicConversationAi  ◀── safe fallback (no LLM)
+    openrouter adapter           ◀── selectable via platform AI policy
+    agentrouter adapter          ◀── selectable (see AGENTROUTER_KNOWN_ISSUE.md)
+    atria adapter                ◀── selectable (see PROVIDERS.md)
+          │  contract: src/features/conversations/server/ai-contract.ts
          │  AiRequest → AiResponse  (unknown keys stripped; invariants refined)
          ▼
   Usage telemetry (append-only, ids+counters+machine keys; never content/secrets/chain-of-thought)
@@ -169,9 +170,10 @@ not scaffold them here.
 Deterministic today (`deterministicConversationAi`)
 │
 ▼ same AiRequest → AiResponse contract
-`ConversationAi` adapters (provider-neutral; future)
-├─ openrouterConversationAi (primary when operator sets `primaryProvider: openrouter`)
-└─ agentrouterConversationAi (secondary/fallback — when `fallbackEnabled`)
+`ConversationAi` adapters (provider-neutral)
+├─ openrouter adapter (primary when operator sets `primaryProvider: openrouter`)
+├─ agentrouter adapter (selectable — known issue, see AGENTROUTER_KNOWN_ISSUE.md)
+└─ atria adapter (selectable — see docs/ai/PROVIDERS.md)
 │
 ▼ same engine contract — no engine change
 No other layer needs to change: Domain/availability/booking/tenancy stay deterministic.

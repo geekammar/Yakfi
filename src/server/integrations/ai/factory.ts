@@ -17,6 +17,7 @@ import { getAiPolicy } from "@/features/platform/server/ai-policy-service";
 import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 
 import { createAgentRouterAdapter } from "./agentrouter";
+import { createAtriaAdapter } from "./atria";
 import { createLlmConversationAi } from "./conversation-ai";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
@@ -24,7 +25,11 @@ import type { AiProviderAdapter } from "./types";
 export type AiFactoryEnvDeps = {
   getEnvVar(name: string): string | undefined;
   fetchImpl: typeof fetch;
-  endpointOverrides?: { openrouter?: string; agentrouter?: string };
+  endpointOverrides?: {
+    openrouter?: string;
+    agentrouter?: string;
+    atria?: string;
+  };
   timeoutMs?: number;
 };
 
@@ -43,6 +48,15 @@ function adapterForProvider(
       getEnvVar: env.getEnvVar,
       fetchImpl: env.fetchImpl,
       endpoint: env.endpointOverrides?.openrouter,
+      timeoutMs: env.timeoutMs,
+    });
+  }
+  if (provider === "atria") {
+    return createAtriaAdapter({
+      model,
+      getEnvVar: env.getEnvVar,
+      fetchImpl: env.fetchImpl,
+      endpoint: env.endpointOverrides?.atria,
       timeoutMs: env.timeoutMs,
     });
   }

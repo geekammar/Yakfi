@@ -8,7 +8,7 @@ import { callOpenAiCompatible } from "./http";
 import type { AiProviderAdapter, AiProviderResult } from "./types";
 
 export const AGENTROUTER_ENDPOINT =
-  "https://api.agentrouter.ai/v1/chat/completions";
+  "https://agentrouter.org/v1/chat/completions";
 export const AGENTROUTER_SECRET_REF = "AGENTROUTER_API_KEY";
 export const AGENTROUTER_TIMEOUT_MS = 12000;
 

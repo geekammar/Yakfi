@@ -11,7 +11,7 @@ import type {
   AiResponse,
 } from "@/features/conversations/server/ai-contract";
 
-export type AiProviderId = "openrouter" | "agentrouter";
+export type AiProviderId = "openrouter" | "agentrouter" | "atria";
 
 /** Provider call outcome taxonomy (minimum spec). */
 export type AiProviderErrorCode =

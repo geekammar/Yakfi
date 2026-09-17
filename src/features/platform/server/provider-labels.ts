@@ -14,6 +14,7 @@ import { aiProviderValues } from "@/lib/validation";
 export const AI_PROVIDER_LABELS: Record<AiProviderId, string> = {
   openrouter: "OpenRouter",
   agentrouter: "AgentRouter",
+  atria: "Atria",
 };
 
 export const AI_PROVIDER_OPTIONS = aiProviderValues.map((value) => ({
@@ -24,10 +25,10 @@ export const AI_PROVIDER_OPTIONS = aiProviderValues.map((value) => ({
 /**
  * The deterministic secret reference (env var name) for a provider —
  * the NAME only, never a key. Keys stay environment-backed:
- * OPENROUTER_API_KEY / AGENTROUTER_API_KEY.
+ * OPENROUTER_API_KEY / AGENTROUTER_API_KEY / ATRIA_API_KEY.
  */
 export function secretRefFor(provider: AiProviderId): string {
-  return provider === "openrouter"
-    ? "OPENROUTER_API_KEY"
-    : "AGENTROUTER_API_KEY";
+  if (provider === "openrouter") return "OPENROUTER_API_KEY";
+  if (provider === "atria") return "ATRIA_API_KEY";
+  return "AGENTROUTER_API_KEY";
 }

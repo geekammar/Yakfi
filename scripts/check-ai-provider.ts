@@ -35,6 +35,7 @@ type OpenRouterModule =
   typeof import("../src/server/integrations/ai/openrouter");
 type AgentRouterModule =
   typeof import("../src/server/integrations/ai/agentrouter");
+type AtriaModule = typeof import("../src/server/integrations/ai/atria");
 type OrchestratorModule =
   typeof import("../src/server/integrations/ai/orchestrator");
 type FactoryModule = typeof import("../src/server/integrations/ai/factory");
@@ -119,6 +120,8 @@ async function main(): Promise<void> {
     await import("../src/server/integrations/ai/openrouter");
   const agentrouter: AgentRouterModule =
     await import("../src/server/integrations/ai/agentrouter");
+  const atria: AtriaModule =
+    await import("../src/server/integrations/ai/atria");
   const orchestrator: OrchestratorModule =
     await import("../src/server/integrations/ai/orchestrator");
   const factory: FactoryModule =
@@ -142,7 +145,9 @@ async function main(): Promise<void> {
   }
 
   const getEnvVar = (name: string) =>
-    name === "OPENROUTER_API_KEY" || name === "AGENTROUTER_API_KEY"
+    name === "OPENROUTER_API_KEY" ||
+    name === "AGENTROUTER_API_KEY" ||
+    name === "ATRIA_API_KEY"
       ? `test-${name.toLowerCase()}-value`
       : undefined;
 
@@ -662,6 +667,204 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── 14. Atria adapter (PROMPT-ARCH-AI-PROVIDER-ATRIA-07) ─────────────────
+  // Factory selects Atria correctly from the effective policy.
+  {
+    const effective: import("../src/lib/validation/platform").EffectiveAiPolicy =
+      {
+        primaryProvider: "atria",
+        primaryModel: "Atria-Dawn-Preview",
+        secondary: null,
+      };
+    const { primary, secondary, fallbackEnabled } =
+      factory.adaptersFromEffectivePolicy(effective, {
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      });
+    check(
+      "14a المصنع يختار Atria من السياسة (provider/model/secretRef)",
+      primary.providerId === "atria" &&
+        primary.model === "Atria-Dawn-Preview" &&
+        primary.secretRef === "ATRIA_API_KEY" &&
+        secondary === null &&
+        fallbackEnabled === false,
+    );
+  }
+  // Request construction: endpoint + model passthrough + auth by secret NAME.
+  {
+    const captured: { url?: string; auth?: string; model?: string } = {};
+    const adapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.auth =
+          (init?.headers as Record<string, string> | undefined)
+            ?.Authorization ?? undefined;
+        captured.model = (
+          JSON.parse(init?.body as string) as { model?: string }
+        ).model;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "14b بناء طلب Atria: endpoint الصحيح + النموذج كما هو + مصادقة Bearer",
+      res.ok === true &&
+        captured.url === atria.ATRIA_ENDPOINT &&
+        captured.model === "Atria-Dawn-Preview" &&
+        typeof captured.auth === "string" &&
+        captured.auth.startsWith("Bearer "),
+    );
+  }
+  // Authentication uses the configured secret reference; missing key is CONFIG_ERROR.
+  {
+    const adapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar: (name) => (name === "ATRIA_API_KEY" ? "value" : undefined),
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "14c المصادقة تستخدم مرجع ATRIA_API_KEY فقط (قيمة سرية لا تُخزّن)",
+      res.ok === true && adapter.secretRef === "ATRIA_API_KEY",
+    );
+    const noKey = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar: () => undefined,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const resNoKey = await noKey.call(baseRequest);
+    check(
+      "14d مفتاح Atria مفقود → CONFIG_ERROR (بلا طلب شبكة)",
+      resNoKey.ok === false &&
+        resNoKey.error.code === "CONFIG_ERROR" &&
+        resNoKey.error.retryable === false,
+    );
+  }
+  // Valid OpenAI-compatible JSON response is normalized into AiProviderSuccess.
+  {
+    const adapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(
+        200,
+        openAiEnvelope(validAiResponseJson(), {
+          prompt_tokens: 20,
+          completion_tokens: 7,
+        }),
+      ),
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "14e استجابة OpenAI متوافقة تُطبَّع إلى AiResponse (intent/provider/tokens)",
+      res.ok === true &&
+        res.provider === "atria" &&
+        res.model === "Atria-Dawn-Preview" &&
+        res.response.intent === "FAQ" &&
+        res.response.action === "reply" &&
+        res.inputTokens === 20 &&
+        res.outputTokens === 7,
+    );
+  }
+  // Invalid / empty response maps to existing INVALID_RESPONSE (non-retryable).
+  {
+    const empty = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, {
+        choices: [{ message: { content: "" } }],
+      }),
+    });
+    const resEmpty = await empty.call(baseRequest);
+    const malformed = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: (async () =>
+        new Response("not json", { status: 200 })) as unknown as typeof fetch,
+    });
+    const resMalformed = await malformed.call(baseRequest);
+    check(
+      "14f استجابة فارغة/غير صالحة من Atria → INVALID_RESPONSE بلا retry",
+      resEmpty.ok === false &&
+        resEmpty.error.code === "INVALID_RESPONSE" &&
+        resMalformed.ok === false &&
+        resMalformed.error.code === "INVALID_RESPONSE",
+    );
+  }
+  // Provider failure maps to the existing retry/fallback semantics.
+  {
+    const primary = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(500, { error: { message: "atria down" } }),
+    });
+    const orch = orchestrator.createAiOrchestrator({
+      primary,
+      secondary: null,
+      fallbackEnabled: false,
+    });
+    const res = await orch.callWithFallback(baseRequest);
+    check(
+      "14g فشل Atria (500) → RETRYABLE → فشل مُتحكَّم به (null) بلا احتياطي",
+      res.response === null &&
+        res.telemetry.attempts[0]?.errorCode === "RETRYABLE" &&
+        res.telemetry.finalStatus === "FAILURE" &&
+        res.telemetry.fallbackUsed === false,
+    );
+  }
+  {
+    const primary = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(500, { error: { message: "atria down" } }),
+    });
+    const secondary = agentrouter.createAgentRouterAdapter({
+      model: "auto",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const orch = orchestrator.createAiOrchestrator({
+      primary,
+      secondary,
+      fallbackEnabled: true,
+    });
+    const res = await orch.callWithFallback(baseRequest);
+    check(
+      "14h فشل Atria Retryable → التراجع للاحتياطي يعمل (دلالات موجودة)",
+      res.response !== null &&
+        res.telemetry.fallbackUsed === true &&
+        res.telemetry.finalProvider === "agentrouter",
+    );
+  }
+  // Selecting Atria does not affect AgentRouter (isolation).
+  {
+    const atriaAdapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const agentAdapter = agentrouter.createAgentRouterAdapter({
+      model: "deepseek-v4-flash",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    check(
+      "14i Atria معزول عن AgentRouter (provider/secretRef/endpoint مختلفة)",
+      atriaAdapter.providerId !== agentAdapter.providerId &&
+        atriaAdapter.secretRef !== agentAdapter.secretRef &&
+        (atria.ATRIA_ENDPOINT as string) !==
+          (agentrouter.AGENTROUTER_ENDPOINT as string) &&
+        agentrouter.AGENTROUTER_ENDPOINT ===
+          "https://agentrouter.org/v1/chat/completions" &&
+        agentAdapter.providerId === "agentrouter" &&
+        agentAdapter.secretRef === "AGENTROUTER_API_KEY",
+    );
+  }
+
   // ── 10. engine AI_TURN telemetry (real engine with fake repos) ───────────
   {
     const BUSINESS_ID = "11111111-1111-4111-8111-111111111111";
@@ -897,13 +1100,18 @@ async function main(): Promise<void> {
 
   // ── 11. secrets never leak ────────────────────────────────────────────────
   {
-    const secretRefNames = ["OPENROUTER_API_KEY", "AGENTROUTER_API_KEY"];
+    const secretRefNames = [
+      "OPENROUTER_API_KEY",
+      "AGENTROUTER_API_KEY",
+      "ATRIA_API_KEY",
+    ];
     const aiFiles = [
       "src/server/integrations/ai/types.ts",
       "src/server/integrations/ai/prompt.ts",
       "src/server/integrations/ai/http.ts",
       "src/server/integrations/ai/openrouter.ts",
       "src/server/integrations/ai/agentrouter.ts",
+      "src/server/integrations/ai/atria.ts",
       "src/server/integrations/ai/orchestrator.ts",
       "src/server/integrations/ai/conversation-ai.ts",
       "src/server/integrations/ai/factory.ts",
@@ -918,7 +1126,7 @@ async function main(): Promise<void> {
       })
       .join("\n");
     const hasProcessEnvSecret =
-      /process\.env\.(OPENROUTER|AGENTROUTER)_API_KEY/.test(aiSource);
+      /process\.env\.(OPENROUTER|AGENTROUTER|ATRIA)_API_KEY/.test(aiSource);
     // The adapter reads via getEnvVar(secretRef) — never hard-codes a key value
     check(
       "11a المهيئات لا تكشف مفاتيح (secretRef أسماء فقط، عبر getEnvVar)",

@@ -29,7 +29,10 @@ version bump → one conventional commit (pre-commit secret hook stays
 active) → annotated tag `vX.Y.Z` (always exactly matching package.json) →
 push `main` + tag → published GitHub Release. It does **not** re-run the
 full build gate — the prompt's `pnpm verify` is the gate — and never
-deploys or touches the database.
+deploys or touches the database. Production must be promoted separately:
+for the CLI-linked `flowpilot-prod` project, run `pnpm deploy:production`
+after ship and confirm `/api/health` reports the new version (see
+`VERCEL_DEPLOYMENT.md` Section 4).
 
 Safety: `main`-branch only; refuses existing tags (local + origin), major
 bumps, and non-fast-forward pushes; no force flags anywhere; failures
