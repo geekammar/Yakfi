@@ -23,7 +23,10 @@ export type ChatMessage = {
   content: string;
 };
 
-export function buildPromptMessages(request: AiRequest): ChatMessage[] {
+export function buildPromptMessages(
+  request: AiRequest,
+  extraSystemInstructions?: string,
+): ChatMessage[] {
   const recent =
     request.recentMessages
       .map((m) => `${m.senderType}: ${m.content}`)
@@ -56,8 +59,12 @@ export function buildPromptMessages(request: AiRequest): ChatMessage[] {
     `CURRENT message: ${request.message}`,
   ].join("\n\n");
 
+  const systemContent = extraSystemInstructions
+    ? `${AI_SYSTEM_INSTRUCTIONS} ${extraSystemInstructions}`
+    : AI_SYSTEM_INSTRUCTIONS;
+
   return [
-    { role: "system", content: AI_SYSTEM_INSTRUCTIONS },
+    { role: "system", content: systemContent },
     { role: "user", content: userContent },
   ];
 }

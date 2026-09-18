@@ -4,6 +4,7 @@
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
+import { OPENROUTER_NORMALIZATION_POLICY } from "./response-normalizer";
 import type { AiProviderAdapter, AiProviderResult } from "./types";
 
 export const OPENROUTER_ENDPOINT =
@@ -36,6 +37,9 @@ export function createOpenRouterAdapter(
         fetchImpl: deps.fetchImpl,
         timeoutMs: deps.timeoutMs ?? OPENROUTER_TIMEOUT_MS,
         request,
+        // Explicit EMPTY policy: OpenRouter stays on the strict parser +
+        // unchanged aiResponseSchema alone (byte-for-byte unchanged).
+        policy: OPENROUTER_NORMALIZATION_POLICY,
       });
     },
   };

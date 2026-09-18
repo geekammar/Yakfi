@@ -36,6 +36,8 @@ type OpenRouterModule =
 type AgentRouterModule =
   typeof import("../src/server/integrations/ai/agentrouter");
 type AtriaModule = typeof import("../src/server/integrations/ai/atria");
+type NormalizerModule =
+  typeof import("../src/server/integrations/ai/response-normalizer");
 type OrchestratorModule =
   typeof import("../src/server/integrations/ai/orchestrator");
 type FactoryModule = typeof import("../src/server/integrations/ai/factory");
@@ -122,6 +124,8 @@ async function main(): Promise<void> {
     await import("../src/server/integrations/ai/agentrouter");
   const atria: AtriaModule =
     await import("../src/server/integrations/ai/atria");
+  const normalizer: NormalizerModule =
+    await import("../src/server/integrations/ai/response-normalizer");
   const orchestrator: OrchestratorModule =
     await import("../src/server/integrations/ai/orchestrator");
   const factory: FactoryModule =
@@ -862,6 +866,413 @@ async function main(): Promise<void> {
           "https://agentrouter.org/v1/chat/completions" &&
         agentAdapter.providerId === "agentrouter" &&
         agentAdapter.secretRef === "AGENTROUTER_API_KEY",
+    );
+  }
+  // 14j: Atria-only structured-output hardening on the wire (request body).
+  {
+    const captured: {
+      responseFormat?: string;
+      system?: string;
+      orSystem?: string;
+    } = {};
+    const captureBody = (key: "system" | "orSystem"): typeof fetch =>
+      (async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(init?.body as string) as {
+          response_format?: { type?: string };
+          messages?: Array<{ role?: string; content?: string }>;
+        };
+        captured.responseFormat = body.response_format?.type;
+        captured[key] = body.messages?.find(
+          (m) => m.role === "system",
+        )?.content;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch;
+
+    const atriaAdapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: captureBody("system"),
+    });
+    await atriaAdapter.call(baseRequest);
+    const orAdapter = openrouter.createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar,
+      fetchImpl: captureBody("orSystem"),
+    });
+    await orAdapter.call(baseRequest);
+
+    check(
+      "14j طلب Atria يحمل response_format=json_object وتشدّيد JSON-only في system (بدون لمس المزودات الأخرى)",
+      captured.responseFormat === "json_object" &&
+        (captured.system ?? "").includes("exactly ONE JSON object") &&
+        (captured.system ?? "").includes(
+          "directly parseable by JSON.parse()",
+        ) &&
+        (captured.system ?? "").includes("Do not wrap JSON in ``` fences") &&
+        // shared baseline contract is preserved, not replaced
+        (captured.system ?? "").includes("intent: enum[") &&
+        // hardening is Atria-only: OpenRouter system message is untouched
+        !(captured.orSystem ?? "").includes("exactly ONE JSON object") &&
+        (captured.orSystem ?? "").includes("intent: enum["),
+    );
+  }
+
+  // ── 14k–14u: Atria bounded JSON repair (PROMPT-OPS-ATRIA-BOUNDED-JSON-REPAIR-07)
+  // Strict JSON.parse() stays the FIRST path; repair is fallback-only and the
+  // repaired output must still pass the UNCHANGED aiResponseSchema.
+  {
+    const contentFetch = (content: string): typeof fetch =>
+      mockFetchOnce(200, openAiEnvelope(content));
+    const validObj = JSON.parse(validAiResponseJson()) as Record<
+      string,
+      unknown
+    >;
+    const atriaWith = (content: string) =>
+      atria.createAtriaAdapter({
+        model: "Atria-Dawn-Preview",
+        getEnvVar,
+        fetchImpl: contentFetch(content),
+      });
+
+    // 1) Valid JSON → DIRECT_PARSE (strict path, no repair attempted).
+    const resValid = await atriaWith(validAiResponseJson()).call(baseRequest);
+    check(
+      "14k JSON صالح → DIRECT_PARSE (الصارم أولاً، بلا إصلاح)",
+      resValid.ok === true && resValid.parseMode === "DIRECT_PARSE",
+    );
+
+    // 2) Known extra-leading-brace artifact → BOUNDED_PROVIDER_REPAIR
+    //    (generic jsonrepair rejects `{{` outright; the Atria surplus-brace
+    //    rule normalizes it) + identical accepted value.
+    const artifact = `{${validAiResponseJson()}`;
+    const resRepaired = await atriaWith(artifact).call(baseRequest);
+    check(
+      "14l عيب القوس الزائد المعروف → BOUNDED_PROVIDER_REPAIR + قيمة مطابقة",
+      resRepaired.ok === true &&
+        resRepaired.parseMode === "BOUNDED_PROVIDER_REPAIR" &&
+        resRepaired.normalizerTrace?.providerRepairRule ===
+          "ATRIA_SURPLUS_BRACE" &&
+        JSON.stringify(resRepaired.response) === JSON.stringify(validObj),
+    );
+
+    // 3) Markdown fenced JSON → current intended behavior (DIRECT_PARSE).
+    const fenced = "```json\n" + validAiResponseJson() + "\n```";
+    const resFenced = await atriaWith(fenced).call(baseRequest);
+    check(
+      "14m JSON داخل سياج Markdown → DIRECT_PARSE كالسلوك الحالي",
+      resFenced.ok === true && resFenced.parseMode === "DIRECT_PARSE",
+    );
+
+    // 4) Empty response → INVALID_RESPONSE.
+    const resEmpty = await atriaWith("").call(baseRequest);
+    check(
+      "14n استجابة فارغة → INVALID_RESPONSE",
+      resEmpty.ok === false && resEmpty.error.code === "INVALID_RESPONSE",
+    );
+
+    // 5) Completely malformed response → INVALID_RESPONSE (nothing to repair).
+    const resMalformed = await atriaWith("not json at all").call(baseRequest);
+    check(
+      "14o استجابة مشوّهة تماماً → INVALID_RESPONSE",
+      resMalformed.ok === false &&
+        resMalformed.error.code === "INVALID_RESPONSE",
+    );
+
+    // 6) Schema-invalid JSON → INVALID_RESPONSE (parses, fails aiResponseSchema).
+    const resSchema = await atriaWith(
+      JSON.stringify({ ...validObj, intent: "NOT_AN_INTENT" }),
+    ).call(baseRequest);
+    check(
+      "14p JSON صالح التركيب لكن مخالف لـ aiResponseSchema → INVALID_RESPONSE",
+      resSchema.ok === false && resSchema.error.code === "INVALID_RESPONSE",
+    );
+
+    // 7) Repair output parses but still violates schema → INVALID_RESPONSE.
+    const resRepairSchema = await atriaWith(
+      `{${JSON.stringify({ ...validObj, intent: "NOT_AN_INTENT" })}`,
+    ).call(baseRequest);
+    check(
+      "14q إصلاح يُنتج JSON قابلاً للتحليل لكنه مخالف للـ schema → INVALID_RESPONSE",
+      resRepairSchema.ok === false &&
+        resRepairSchema.error.code === "INVALID_RESPONSE",
+    );
+
+    // 8) Valid input is never corrupted: the strict path accepts it verbatim
+    //    (DIRECT_PARSE, generic repair never runs) and both bounded Atria
+    //    rules DECLINE well-formed single-brace content.
+    const nrValid = normalizer.normalizeResponse({
+      content: validAiResponseJson(),
+      provider: "atria",
+      model: "Atria-Dawn-Preview",
+      policy: normalizer.ATRIA_NORMALIZATION_POLICY,
+    });
+    check(
+      "14r الاستجابة الصالحة لا تُفسَّد (DIRECT_PARSE + قواعد Atria ترفضها)",
+      resValid.ok === true &&
+        JSON.stringify(resValid.response) === JSON.stringify(validObj) &&
+        nrValid.ok === true &&
+        nrValid.mode === "DIRECT_PARSE" &&
+        nrValid.trace.genericRepairRan === false &&
+        nrValid.trace.providerRepairRan === false &&
+        normalizer.ATRIA_SURPLUS_BRACE_RULE.apply(validAiResponseJson(), {
+          provider: "atria",
+          model: "Atria-Dawn-Preview",
+        }) === null &&
+        normalizer.ATRIA_EMPTY_KEY_WRAPPER_RULE.apply(validAiResponseJson(), {
+          provider: "atria",
+          model: "Atria-Dawn-Preview",
+        }) === null,
+    );
+
+    // 9) Multiple-object response must NOT be blindly merged.
+    const multi = '{"a":1}{"b":2}';
+    const resMulti = await atriaWith(multi).call(baseRequest);
+    const resMultiBraced = await atriaWith(
+      `{${JSON.stringify({ ...validObj })},{"second":"obj"}}`,
+    ).call(baseRequest);
+    check(
+      "14s كائنات متعددة لا تُدمج عمياء → INVALID_RESPONSE",
+      resMulti.ok === false &&
+        resMulti.error.code === "INVALID_RESPONSE" &&
+        resMulti.normalizerTrace?.genericRepairProducedCandidate === false &&
+        normalizer.ATRIA_SURPLUS_BRACE_RULE.apply(multi, {
+          provider: "atria",
+          model: "Atria-Dawn-Preview",
+        }) === null &&
+        resMultiBraced.ok === false &&
+        resMultiBraced.error.code === "INVALID_RESPONSE",
+    );
+
+    // 10) Non-object response must NOT be coerced into an object.
+    const resArray = await atriaWith("[1,2,3]").call(baseRequest);
+    const resBrokenArray = await atriaWith("[[1,2]").call(baseRequest);
+    const resScalar = await atriaWith('"just text"').call(baseRequest);
+    check(
+      "14t الاستجابة غير الكائنية لا تُكره إلى كائن → INVALID_RESPONSE",
+      resArray.ok === false &&
+        resArray.error.code === "INVALID_RESPONSE" &&
+        resBrokenArray.ok === false &&
+        resBrokenArray.error.code === "INVALID_RESPONSE" &&
+        resScalar.ok === false &&
+        resScalar.error.code === "INVALID_RESPONSE",
+    );
+
+    // Non-Atria adapters remain UNCHANGED: identical artifact, no repair seam.
+    const resOr = await openrouter
+      .createOpenRouterAdapter({
+        model: "openrouter/auto",
+        getEnvVar,
+        fetchImpl: contentFetch(artifact),
+      })
+      .call(baseRequest);
+    const resAr = await agentrouter
+      .createAgentRouterAdapter({
+        model: "auto",
+        getEnvVar,
+        fetchImpl: contentFetch(artifact),
+      })
+      .call(baseRequest);
+    check(
+      "14u المزودات غير Atria تبقى صارمة (نفس العيب → INVALID_RESPONSE، بلا إصلاح)",
+      resOr.ok === false &&
+        resOr.error.code === "INVALID_RESPONSE" &&
+        resAr.ok === false &&
+        resAr.error.code === "INVALID_RESPONSE",
+    );
+
+    // ── 14v–14z: jsonrepair-backed repair coverage
+    // (PROMPT-OPS-ATRIA-JSONREPAIR-BOUNDED-08). Proves (a) corruption classes
+    // that are already valid JSON stay on the strict DIRECT_PARSE path and
+    // never invoke repair, and (b) corruption classes the old brace-only
+    // repair could NOT fix (trailing commas, truncation, unquoted/single-
+    // quoted keys, brace + restart combos) are now recovered — every one of
+    // them still re-parsed by strict JSON.parse and bound by the unchanged
+    // aiResponseSchema.
+
+    // 11) Restarted / duplicated JSON-key corruption. Duplicated keys are
+    //     syntactically VALID JSON, so the STRICT parser already absorbs
+    //     them (JSON.parse keeps the last value per key) and repair is never
+    //     invoked → DIRECT_PARSE. Documents that this corruption class
+    //     needs no repair and never weakens the strict path.
+    const restarted = `{"intent":"FAQ","action":"reply","content":"x","intent":"HUMAN_REQUEST","action":"handoff","handoffReason":"HUMAN_REQUEST","extraction":{"service":null,"provider":null,"date":null,"timePreference":null},"summary":null}`;
+    const resRestarted = await atriaWith(restarted).call(baseRequest);
+    check(
+      "14v restarted/duplicated keys صالحة تركيبياً → DIRECT_PARSE (آخر قيمة، بلا إصلاح)",
+      resRestarted.ok === true &&
+        resRestarted.parseMode === "DIRECT_PARSE" &&
+        resRestarted.response.intent === "HUMAN_REQUEST" &&
+        resRestarted.response.action === "handoff" &&
+        resRestarted.response.handoffReason === "HUMAN_REQUEST",
+    );
+
+    // 11b) The OBSERVED live failure shape: the surplus leading brace combined
+    //      with restarted keys. Strict parse fails → generic jsonrepair
+    //      rejects `{{` → the Atria surplus-brace rule normalizes and
+    //      repairs ONE object → BOUNDED_PROVIDER_REPAIR, schema-bound.
+    const restartedBraced = `{${restarted}`;
+    const resRestartedBraced =
+      await atriaWith(restartedBraced).call(baseRequest);
+    check(
+      "14v2 القوس الزائد + restarted keys (شكل الفشل الحي) → BOUNDED_PROVIDER_REPAIR",
+      resRestartedBraced.ok === true &&
+        resRestartedBraced.parseMode === "BOUNDED_PROVIDER_REPAIR" &&
+        resRestartedBraced.response.intent === "HUMAN_REQUEST" &&
+        resRestartedBraced.response.action === "handoff",
+    );
+
+    // 12) Trailing-comma corruption → GENERIC_REPAIRED_PARSE + identical
+    //     value. Derived from the canonical helper so the repaired value is
+    //     byte-equivalent to the accepted baseline.
+    const trailingComma = validAiResponseJson()
+      .replace(/"summary":null\}/, '"summary":null,}')
+      .replace(/"timePreference":null\}/, '"timePreference":null,}');
+    const resComma = await atriaWith(trailingComma).call(baseRequest);
+    check(
+      "14w فاصلة زائدة → GENERIC_REPAIRED_PARSE + قيمة مطابقة",
+      resComma.ok === true &&
+        resComma.parseMode === "GENERIC_REPAIRED_PARSE" &&
+        resComma.normalizerTrace?.genericRepairRan === true &&
+        JSON.stringify(resComma.response) === JSON.stringify(validObj),
+    );
+
+    // 13) Truncated JSON (provider cut mid-object) → GENERIC_REPAIRED_PARSE,
+    //     and the repaired value still must pass schema.
+    const truncated = `{"intent":"FAQ","action":"reply","content":"من 9 حتى 6","extraction":{"service":null,"provider":null,"date":null`;
+    const resTrunc = await atriaWith(truncated).call(baseRequest);
+    check(
+      "14x JSON مقطوع → GENERIC_REPAIRED_PARSE (الإصلاح يُغلق البنية، الـ schema يبقى حاكم)",
+      resTrunc.ok === true && resTrunc.parseMode === "GENERIC_REPAIRED_PARSE",
+    );
+
+    // 14) Unquoted / single-quoted keys → GENERIC_REPAIRED_PARSE.
+    const badQuotes = `{'intent': 'FAQ', 'action': 'reply', 'content': 'من 9 حتى 6', "extraction": {'service': null, 'provider': null, 'date': null, 'timePreference': null}, "handoffReason": null, "summary": null}`;
+    const resQuotes = await atriaWith(badQuotes).call(baseRequest);
+    check(
+      "14y مفاتيح غير محصورة/أحادية الاقتباس → GENERIC_REPAIRED_PARSE",
+      resQuotes.ok === true && resQuotes.parseMode === "GENERIC_REPAIRED_PARSE",
+    );
+
+    // 14y2) OBSERVED Atria object-restart corruption: the model opens an
+    //       object, emits a stray `"`, and restarts the payload. The generic
+    //       stage repairs it into an empty-string-key wrapper; the bounded
+    //       Atria rule then promotes the wrapped payload (ONE level) and the
+    //       unchanged schema validates it.
+    const objRestart = `{"{${validAiResponseJson().slice(1)}`;
+    const resObjRestart = await atriaWith(objRestart).call(baseRequest);
+    check(
+      "14y2 إعادة تشغيل الكائن المعروفة (مفتاح فارغ) → BOUNDED_PROVIDER_REPAIR",
+      resObjRestart.ok === true &&
+        resObjRestart.parseMode === "BOUNDED_PROVIDER_REPAIR" &&
+        resObjRestart.normalizerTrace?.providerRepairRule ===
+          "ATRIA_EMPTY_KEY_WRAPPER" &&
+        resObjRestart.normalizerTrace?.genericRepairProducedCandidate ===
+          true &&
+        resObjRestart.normalizerTrace?.genericRepairSchemaOk === false &&
+        JSON.stringify(resObjRestart.response) === JSON.stringify(validObj),
+    );
+
+    // 14y3) The empty-key promotion is REFUSED outside its strict bounds:
+    //       two keys, or a non-empty key, or a scalar wrapper value, or a
+    //       nested wrapper — all stay INVALID_RESPONSE (no coercion).
+    const twoKeys = JSON.stringify({
+      "": validObj,
+      other: 1,
+    });
+    const nonEmptyKey = JSON.stringify({ wrapped: validObj });
+    const scalarWrapper = JSON.stringify({ "": "not-an-object" });
+    const nestedWrapper = JSON.stringify({ "": { "": validObj } });
+    for (const [label, content] of [
+      ["keyCount≠1", twoKeys],
+      ['key≠""', nonEmptyKey],
+      ["scalarValue", scalarWrapper],
+      ["nested", nestedWrapper],
+    ] as Array<[string, string]>) {
+      const res = await atriaWith(content).call(baseRequest);
+      check(
+        `14y3 قاعدة المفتاح الفارغ ترفض الحالات خارج حدودها (${label}) → INVALID_RESPONSE`,
+        res.ok === false && res.error.code === "INVALID_RESPONSE",
+      );
+    }
+
+    // 15) Balanced multi-object content is never merged, even after repair.
+    const balancedMulti = `{{${JSON.stringify({ ...validObj, content: "أول" })}},{"second":"obj"}}`;
+    const resBalancedMulti = await atriaWith(balancedMulti).call(baseRequest);
+    check(
+      "14z كائنات متعددة متوازنة لا تُدمج → INVALID_RESPONSE",
+      resBalancedMulti.ok === false &&
+        resBalancedMulti.error.code === "INVALID_RESPONSE",
+    );
+  }
+
+  // ── 14aa: repair is NEVER attempted when the strict parse AND schema
+  // validation already succeed (the strict parser stays first and
+  // authoritative). Asserted on the engine's own trace, so the guarantee is
+  // provider-neutral-by-default and needs no instrumentation hook.
+  {
+    const resOk = await http.callOpenAiCompatible({
+      providerId: "atria",
+      model: "Atria-Dawn-Preview",
+      secretRef: "ATRIA_API_KEY",
+      endpoint: "https://probe.test/v1/chat/completions",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      timeoutMs: 8000,
+      request: baseRequest,
+      policy: normalizer.ATRIA_NORMALIZATION_POLICY,
+    });
+    check(
+      "14aa التحليل الصارم أولاً: JSON صالح → لا يُستدعى الإصلاح أبداً (DIRECT_PARSE)",
+      resOk.ok === true &&
+        resOk.parseMode === "DIRECT_PARSE" &&
+        resOk.normalizerTrace?.genericRepairRan === false &&
+        resOk.normalizerTrace?.providerRepairRan === false &&
+        resOk.normalizerTrace?.stage === "STRICT_PARSE",
+    );
+
+    // Schema-invalid content after a SUCCESSFUL strict parse: the generic
+    // stage now runs (a schema rejection is a normalization trigger), but
+    // jsonrepair is purely syntactic so it can never rescue a semantic
+    // violation — the outcome stays INVALID_RESPONSE, schema unchanged.
+    const resSchema = await http.callOpenAiCompatible({
+      providerId: "atria",
+      model: "Atria-Dawn-Preview",
+      secretRef: "ATRIA_API_KEY",
+      endpoint: "https://probe.test/v1/chat/completions",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(
+        200,
+        openAiEnvelope(
+          JSON.stringify({
+            intent: "NOT_AN_INTENT",
+            action: "reply",
+            content: "x",
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            handoffReason: null,
+            summary: null,
+          }),
+        ),
+      ),
+      timeoutMs: 8000,
+      request: baseRequest,
+      policy: normalizer.ATRIA_NORMALIZATION_POLICY,
+    });
+    check(
+      "14ab فشل الـ schema بعد تحليل صارم ناجح → الإصلاح العام يعجز → INVALID_RESPONSE",
+      resSchema.ok === false &&
+        resSchema.error.code === "INVALID_RESPONSE" &&
+        resSchema.normalizerTrace?.strictParseOk === true &&
+        resSchema.normalizerTrace?.schemaOk === false &&
+        resSchema.normalizerTrace?.genericRepairRan === true &&
+        resSchema.normalizerTrace?.genericRepairSchemaOk === false &&
+        resSchema.normalizerTrace?.outcome === "INVALID_RESPONSE",
     );
   }
 

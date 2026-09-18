@@ -34,11 +34,17 @@ export type OrchestratorResult = {
 };
 
 function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
+  // When the adapter ran a bounded internal retry via the Conversation
+  // Control Layer, the provider result's latencyMs covers only the LAST
+  // physical attempt. The logical AI turn's true wall-clock is the retry
+  // trace's total, so prefer it; results without a retry trace are
+  // byte-for-byte unchanged.
+  const logicalLatency = result.retryTrace?.totalElapsedMs ?? result.latencyMs;
   if (result.ok) {
     return {
       provider: result.provider,
       model: result.model,
-      latencyMs: result.latencyMs,
+      latencyMs: logicalLatency,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       status: "SUCCESS",
@@ -47,7 +53,7 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
   return {
     provider: result.provider,
     model: result.model,
-    latencyMs: result.latencyMs,
+    latencyMs: logicalLatency,
     status: "FAILURE",
     errorCode: result.error.code,
   };
@@ -75,6 +81,13 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
 
     const first = await primary.call(request);
     const firstAttempt = toAttempt(first);
+    // The Conversation Control Layer's bounded retry (if any) is one
+    // logical AI turn: surface its sanitized attempt trace and handoff/
+    // notification outcome exactly once here, so the engine's AI_TURN
+    // record can observe retry behaviour without any schema change and
+    // without double-counting a provider call.
+    const retryTrace = first.retryTrace;
+    const conversationControl = first.conversationControl;
     if (first.ok) {
       return {
         response: first.response,
@@ -84,6 +97,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: first.provider,
           finalModel: first.model,
           finalStatus: "SUCCESS",
+          retryTrace,
+          conversationControl,
         },
       };
     }
@@ -99,6 +114,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: first.provider,
           finalModel: first.model,
           finalStatus: "FAILURE",
+          retryTrace,
+          conversationControl,
         },
         lastErrorCode: first.error.code,
       };
@@ -115,6 +132,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: second.provider,
           finalModel: second.model,
           finalStatus: "SUCCESS",
+          retryTrace: retryTrace ?? second.retryTrace,
+          conversationControl:
+            conversationControl ?? second.conversationControl,
         },
       };
     }
@@ -126,6 +146,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         finalProvider: second.provider,
         finalModel: second.model,
         finalStatus: "FAILURE",
+        retryTrace: retryTrace ?? second.retryTrace,
+        conversationControl: conversationControl ?? second.conversationControl,
       },
       lastErrorCode: second.error.code,
     };

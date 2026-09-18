@@ -5,11 +5,17 @@
  * mapping of HTTP semantics to `AiProviderError` lives here so both
  * adapters share the same taxonomy.
  */
-import { parseAiResponse } from "@/features/conversations/server/ai-contract";
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { buildPromptMessages, buildRequestBody } from "./prompt";
-import type { AiProviderError, AiProviderId, AiProviderResult } from "./types";
+import { normalizeResponse } from "./response-normalizer";
+import type { NormalizerPolicy } from "./response-normalizer";
+import type {
+  AiParseMode,
+  AiProviderError,
+  AiProviderId,
+  AiProviderResult,
+} from "./types";
 import { isRetryableAiError } from "./types";
 
 export type CallOpenAiCompatibleParams = {
@@ -21,17 +27,18 @@ export type CallOpenAiCompatibleParams = {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   request: AiRequest;
+  /** Optional provider-specific system-message augmentation (Atria only). */
+  extraSystemInstructions?: string;
+  /**
+   * Optional provider/model-scoped BOUNDED normalization policy
+   * (PROMPT-OPS-AI-JSON-NORMALIZATION-ENGINE-09). The engine — not the
+   * wiring — decides whether the policy is in scope, and every candidate it
+   * produces must still pass strict `JSON.parse()` and the UNCHANGED
+   * `aiResponseSchema`. Absent a policy (all providers except Atria today),
+   * the shared strict path is byte-for-byte unchanged.
+   */
+  policy?: NormalizerPolicy;
 };
-
-function stripJsonFences(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("```")) {
-    const withoutOpen = trimmed.replace(/^```(?:json)?\s*/i, "");
-    const withoutClose = withoutOpen.replace(/\s*```$/g, "");
-    return withoutClose.trim();
-  }
-  return trimmed;
-}
 
 function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
   const b = body as {
@@ -99,6 +106,8 @@ export async function callOpenAiCompatible(
     fetchImpl,
     timeoutMs,
     request,
+    extraSystemInstructions,
+    policy,
   } = params;
   const started = Date.now();
   const apiKey = getEnvVar(secretRef);
@@ -116,7 +125,7 @@ export async function callOpenAiCompatible(
     };
   }
 
-  const messages = buildPromptMessages(request);
+  const messages = buildPromptMessages(request, extraSystemInstructions);
   const body = buildRequestBody(model, messages);
 
   const controller = new AbortController();
@@ -221,11 +230,27 @@ export async function callOpenAiCompatible(
     };
   }
 
-  const stripped = stripJsonFences(contentRaw);
-  let parsedContent: unknown;
-  try {
-    parsedContent = JSON.parse(stripped);
-  } catch {
+  // ── content normalization: ONE reusable engine, strict-first.
+  // Trivial fence stripping, strict JSON.parse(), ONE generic jsonrepair
+  // pass, then an optional in-scope bounded provider policy — every
+  // candidate is re-parsed by strict JSON.parse() and validated against the
+  // UNCHANGED aiResponseSchema. Absent a policy, byte-for-byte the strict
+  // path. See response-normalizer/pipeline.ts.
+  const normalized = normalizeResponse({
+    content: contentRaw,
+    provider: providerId,
+    model,
+    policy,
+  });
+  if (!normalized.ok) {
+    const t = normalized.trace;
+    const message = t.strictParseOk
+      ? "structured output failed validation"
+      : t.genericRepairRan && t.genericRepairProducedCandidate
+        ? "model did not return JSON (generic repair schema-invalid)"
+        : t.providerRepairRan
+          ? "model did not return JSON (bounded normalization rejected)"
+          : "model did not return JSON";
     return {
       ok: false,
       provider: providerId,
@@ -233,26 +258,14 @@ export async function callOpenAiCompatible(
       latencyMs,
       error: {
         code: "INVALID_RESPONSE",
-        message: "model did not return JSON",
+        message,
         retryable: false,
       },
+      normalizerTrace: t,
     };
   }
 
-  const validated = parseAiResponse(parsedContent);
-  if (!validated) {
-    return {
-      ok: false,
-      provider: providerId,
-      model,
-      latencyMs,
-      error: {
-        code: "INVALID_RESPONSE",
-        message: "structured output failed validation",
-        retryable: false,
-      },
-    };
-  }
+  const parseMode: AiParseMode = normalized.mode;
 
   const inputTokens =
     j.usage?.prompt_tokens ?? j.usage?.input_tokens ?? undefined;
@@ -264,9 +277,11 @@ export async function callOpenAiCompatible(
     provider: providerId,
     model,
     latencyMs,
-    response: validated,
+    response: normalized.value,
     inputTokens,
     outputTokens,
+    parseMode,
+    normalizerTrace: normalized.trace,
   };
 }
 

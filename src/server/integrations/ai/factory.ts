@@ -19,6 +19,8 @@ import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 import { createAgentRouterAdapter } from "./agentrouter";
 import { createAtriaAdapter } from "./atria";
 import { createLlmConversationAi } from "./conversation-ai";
+import { createConversationControl } from "./conversation-control";
+import type { ConversationControl } from "./conversation-control";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
 
@@ -77,7 +79,7 @@ export function adaptersFromEffectivePolicy(
   secondary: AiProviderAdapter | null;
   fallbackEnabled: boolean;
 } {
-  const primary = adapterForProvider(
+  const rawPrimary = adapterForProvider(
     effective.primaryProvider,
     effective.primaryModel,
     env,
@@ -89,6 +91,18 @@ export function adaptersFromEffectivePolicy(
         env,
       )
     : null;
+
+  // Conversation Control wraps the PRIMARY adapter: bounded retry +
+  // handoff + notification policy, provider-agnostic (Phase 14). One
+  // adapter invocation stays one provider attempt; the orchestrator and
+  // engine still receive exactly ONE result per logical turn.
+  const primary: ConversationControl = createConversationControl({
+    provider: rawPrimary,
+    // The route budget is passed as an attempt-timeout hint only; when
+    // absent the layer derives the same default as before.
+    attemptTimeoutMs: env.timeoutMs,
+  });
+
   return { primary, secondary, fallbackEnabled: !!effective.secondary };
 }
 

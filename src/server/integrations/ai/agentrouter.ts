@@ -5,6 +5,7 @@
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
+import { AGENTROUTER_NORMALIZATION_POLICY } from "./response-normalizer";
 import type { AiProviderAdapter, AiProviderResult } from "./types";
 
 export const AGENTROUTER_ENDPOINT =
@@ -37,6 +38,9 @@ export function createAgentRouterAdapter(
         fetchImpl: deps.fetchImpl,
         timeoutMs: deps.timeoutMs ?? AGENTROUTER_TIMEOUT_MS,
         request,
+        // Explicit EMPTY policy: AgentRouter stays on the strict parser +
+        // unchanged aiResponseSchema alone (byte-for-byte unchanged).
+        policy: AGENTROUTER_NORMALIZATION_POLICY,
       });
     },
   };
