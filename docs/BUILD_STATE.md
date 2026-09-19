@@ -6,8 +6,8 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 — the repeatable Business WhatsApp onboarding path landed (DECISIONS #47): a Business Admin can now connect/configure/verify/activate a WhatsApp number through `/settings/whatsapp` (new `src/features/whatsapp-connection` + settings sub-route, ADMIN-only, server-derived Business scope, `externalId`/`phone_number_id` authoritative, `credentialsRef` env-var-NAME only, read-only `ConnectionVerifier` verification that never sends a message, duplicate externalId protection, masked id display, TEST→REAL replacement through data only). Meta Embedded Signup is deliberately NOT implemented (operator prerequisite; boundary + prerequisites documented). `pnpm check:whatsapp-onboarding` 22/22 NEW; existing checks unchanged (`whatsapp-transport` 27/27, `meta-whatsapp` 17/17, `whatsapp-inbound` 13/13, eligibility 29/29, booking-options 32/32, booking-confirm 18/18, conversation-booking 16/16); `pnpm verify`/`security` green; ZERO schema/migration changes; removed 5 leftover untracked task-26 forensic scripts that broke the typecheck gate; worktree uncommitted, operator owns `pnpm ship`. Prior: PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01 inbound identity fix; PROMPT-AI-03B close-the-loop COMPLETE; PROMPT-AI-03/02/01 + CORE-01/02/03A/03B remain IMPLEMENTED.
-> Product version: **v0.16.0** (package.json 0.16.0 worktree — Production `GET /api/health` remains v0.15.9 `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` until `pnpm ship`; see Ops State).
+> Last updated: PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 — the repeatable Business WhatsApp onboarding path landed (DECISIONS #47): a Business Admin can now connect/configure/verify/activate a WhatsApp number through `/settings/whatsapp` (new `src/features/whatsapp-connection` + settings sub-route, ADMIN-only, server-derived Business scope, `externalId`/`phone_number_id` authoritative, `credentialsRef` env-var-NAME only, read-only `ConnectionVerifier` verification that never sends a message, duplicate externalId protection, masked id display, TEST→REAL replacement through data only). Meta Embedded Signup is deliberately NOT implemented (operator prerequisite; boundary + prerequisites documented). `pnpm check:whatsapp-onboarding` 22/22 NEW; existing checks unchanged (`whatsapp-transport` 27/27, `meta-whatsapp` 17/17, `whatsapp-inbound` 13/13, eligibility 29/29, booking-options 32/32, booking-confirm 18/18, conversation-booking 16/16); `pnpm verify`/`security` green; ZERO schema/migration changes; removed 5 leftover untracked task-26 forensic scripts that broke the typecheck gate. Subsequently shipped by the operator as **release v0.19.0** (`123dfaa`, tag `v0.19.0`). Prior: PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01 inbound identity fix; PROMPT-AI-03B close-the-loop COMPLETE; PROMPT-AI-03/02/01 + CORE-01/02/03A/03B remain IMPLEMENTED.
+> Product version: **v0.19.0** — released and committed (`123dfaa`, tag `v0.19.0`, working tree clean; HEAD == `origin/main`). Production `GET /api/health` verified live at **v0.19.0** (`deploymentReady:true`, `database:connected`, `missingEnvVars:[]`). The v0.16.0/v0.15.9 statements below in this ledger are the pre-release historical checkpoint and are superseded by the v0.19.0 release (see Ops State).
 
 ## Current State (summary)
 
@@ -458,16 +458,16 @@ NOT drop/reset it.
 - Deploy: `pnpm deploy` / `deploy:preview` / `deploy:check` (gated; URL
   captured); `/api/health` reports version + DB reachability +
   `deploymentReady`. Guides: `VERCEL_DEPLOYMENT.md` (§0 = quick path),
-  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE and identity-closed — RECONCILED to v0.15.9** (`GET /api/health` 0.15.9, deployment `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` 2026-09-15T13:59Z; prior stale `dpl_Am9WNXoDG2XfY41GXsD3PKwX91vb` v0.15.3 resolved — no auto-deploy needed; `/api/whatsapp/meta` now present as `GET` verify + `POST` webhook)
+  `ENVIRONMENT_VARIABLES.md`. **Production is LIVE and identity-closed — currently deployed at v0.19.0** (verified read-only `GET /api/health` → `version:"0.19.0"`, `deploymentReady:true`, `database:connected`, `missingEnvVars:[]`, 2026-09-19; the earlier v0.15.9 reconciliation was deployment `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` 2026-09-15T13:59Z, prior stale `dpl_Am9WNXoDG2XfY41GXsD3PKwX91vb` v0.15.3 resolved — no auto-deploy needed; `/api/whatsapp/meta` is present as `GET` verify + `POST` webhook)
   (PROMPT-OPS-01; PROMPT-OPS-04; OPS-05 build + live verification in
   PROMPT-OPS-05.1; reconciled PROMPT-OPS-06): `https://flowpilot-prod.vercel.app` —
   dedicated Vercel project `flowpilot-prod` (scope `ammarj1`), Neon DB
-  chain 10/10, first ADMIN bootstrapped, v0.15.9 build live (PROMPT-OPS-04 fixed the stale issuer-client; PROMPT-OPS-05.1 deployed OPS-05 Platform Control Plane — verified live; PROMPT-OPS-06 continuation verified reconciled at `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` with `pnpm verify` green + `pnpm security` pass + 26/26 + 15/15).
+  chain 10/10, first ADMIN bootstrapped, build live (v0.15.9 at the OPS-06 checkpoint; production has since been redeployed and verified at v0.19.0) (PROMPT-OPS-04 fixed the stale issuer-client; PROMPT-OPS-05.1 deployed OPS-05 Platform Control Plane — verified live; PROMPT-OPS-06 continuation verified reconciled at `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` with `pnpm verify` green + `pnpm security` pass + 26/26 + 15/15).
   `.vercel` links
   `flowpilot-prod` (PROMPT-OPS-02's stale note resolved). Redeploy loop =
   `pnpm deploy` from the worktree (no Git connection on this project yet).
   One-time bootstrap tool: `pnpm bootstrap:admin` (refuses non-empty DBs
-  and non-production hosts — safe to keep in the repo; unused now). **Vercel Production env still lacks all 5 `WHATSAPP_META_*`** (blocks live E2E until set + redeploy; see item 9 below).
+  and non-production hosts — safe to keep in the repo; unused now). ~~**Vercel Production env still lacks all 5 `WHATSAPP_META_*`**~~ — SUPERSEDED by item 9 below (9 vars set incl. all 5 `WHATSAPP_META_*`; live E2E completed).
 - Demo environment (PROMPT-OPS-02): LIVE at
   `https://flowpilot-demo-gamma.vercel.app` — dedicated Vercel project
   `flowpilot-demo` (scope `ammarj1`, framework nextjs, SSO protection
@@ -484,8 +484,10 @@ NOT drop/reset it.
   dev launchers and every deploy. Docs: `DEMO_GUIDE.md`, `DEMO_SCRIPT.md`,
   `CLIENT_DEMO.md`. Demo logins (demo DBs only): `admin@flowpilot.app` /
   `Admin@1234`, `staff@flowpilot.app` / `Staff@1234`.
-- Releases v0.1.0–v0.15.3 are published on GitHub (tags pushed; each has a
-  GitHub Release; newest = Latest). Local and origin `main` are in sync.
+- Releases are tagged through **`v0.19.0`** (annotated tags; `v0.19.0` == HEAD
+  `123dfaa` == `origin/main`, working tree clean). Historical releases
+  v0.1.0–v0.15.3 are published on GitHub (each has a GitHub Release). Local
+  and origin `main` are in sync.
 
 ## Unresolved User Actions (not code) — updated PROMPT-OPS-06 continuation
 
@@ -565,7 +567,7 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-NEXT STEP (PROMPT-AI-03B COMPLETE 2026-09-16 — deterministic selection parser + fresh CORE-01/CORE-02 re-validation + canonical `createWithConflictCheck` → `BOOKED` + authoritative confirmation via transport; duplicate replay idempotent; 18/18 + 16/16 + 29/29 + 106/106 + 29/29 + 32/32 + lint/typecheck/format/verify/security green; ZERO schema/migration/prompt/provider changes; worktree uncommitted — PROMPT-DOC-AI-BOOKING-DECISION DECISIONS #45 prerequisite satisfied): PROMPT-AI-03/03B deterministic booking seam is **WIRED AND CLOSED** (BOOKING/AVAILABILITY deterministic seam, ANY_PROVIDER without fabricated providerId, Arabic clarification/handoff, `NEED_HUMAN`/`AI_REPLY`/`AI_HANDOFF` typed; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` preserved); PROMPT-AI-02 remains wired (policy-backed `ConversationAi` via `getEffectiveAiPolicy()` + `createPolicyBackedAi`); PROMPT-AI-01 binding (DECISIONS #43; `docs/ai/` + 106/106) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42). Next: end-to-end WhatsApp → AI → Booking pilot validation in Production. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8). Worktree stays uncommitted (operator owns `pnpm ship`).
+NEXT STEP (release **v0.19.0** shipped — `123dfaa`, tag `v0.19.0`, working tree clean; production verified live at v0.19.0; includes PROMPT-AI-03B deterministic selection parser + fresh CORE-01/CORE-02 re-validation + canonical `createWithConflictCheck` → `BOOKED` + authoritative confirmation via transport, duplicate replay idempotent, 18/18 + 16/16 + 29/29 + 106/106 + 29/29 + 32/32 + lint/typecheck/format/verify/security green, ZERO schema/migration/prompt/provider changes; and the Business WhatsApp onboarding surface of PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 / DECISIONS #47): PROMPT-AI-03/03B deterministic booking seam is **WIRED AND CLOSED**; PROMPT-AI-02 policy-backed `ConversationAi` (`getEffectiveAiPolicy()` + `createPolicyBackedAi`, now including the `atria` adapter + the provider-agnostic Conversation Control / response-normalizer layers) is wired; PROMPT-AI-01 binding (DECISIONS #43; `docs/ai/` + 106/106) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42/#46). **Next: onboard the first REAL pilot Business end-to-end** (operator provisions Business + invitation → ADMIN onboards the WhatsApp number at `/settings/whatsapp` → operator stores the per-connection token in the deployment env under the `credentialsRef` name → ADMIN verifies read-only → CONNECTED → live messaging), then gather baseline/ROI evidence per `PRODUCT_STRATEGY.md`. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` to Vercel env + `pnpm db:deploy` Demo DB + optional Meta Embedded Signup dashboard configuration if self-serve token issuance is later wanted (documented operator prerequisite, NOT required for pilots).
 
 After each prompt: update this file (minimally) and append to
 `DECISIONS.md` when a decision was made.

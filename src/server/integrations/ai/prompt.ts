@@ -1,22 +1,19 @@
 /**
  * Prompt rendering for the AI provider adapter (PROMPT-AI-02).
  *
- * Provider-neutral instructions derived from `docs/ai/PROMPTS.md`
- * + the structured contract (`ai-contract.ts`). The adapter never
- * edits prompts — it renders `AiRequest` + these instructions into
- * the provider chat shape at call time, instructing JSON-only output
- * matching `aiResponseSchema`.
+ * The instruction BODY is not defined here — it lives in
+ * `prompts/system/booking-assistant.prompt` and reaches the runtime through
+ * the generated artifact (`src/generated/ai-prompts.generated.ts`) via
+ * `getPromptBody`. This module is the BUILDER only: it renders `AiRequest`
+ * + the compiled instructions into the provider chat shape and instructs
+ * JSON-only output matching `aiResponseSchema`. Editing prompt text belongs
+ * in the `.prompt` file, not here.
  */
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
-export const AI_SYSTEM_INSTRUCTIONS = [
-  "You are FlowPilot's Arabic booking assistant.",
-  "Classify the CURRENT customer message and extract bounded facts.",
-  "Emit JSON ONLY matching the AiResponse contract — never chain-of-thought, never reasoning, never markdown, never extra keys.",
-  "Contract: { intent: enum[FAQ,BOOKING,AVAILABILITY,RESCHEDULE,CANCELLATION,HUMAN_REQUEST,AMBIGUOUS], action: enum[reply,handoff,booking_handoff], content: string(1..4096 Arabic already phrased), extraction: { service:string|null, provider:string|null, date:string(YYYY-MM-DD)|null, timePreference:string|null }, handoffReason: enum[HUMAN_REQUEST,SENSITIVE,NO_KNOWLEDGE,AMBIGUOUS]|null, summary: string|null }.",
-  "Invariants: FAQ content is verbatim faqs[].answer when FAQ matches; booking/availability/reschedule/cancellation use booking_handoff; humanRequest/sensitive/unknown use handoff with reason; short/empty is AMBIGUOUS. Never invent slots, prices, or dates. Arabic content, English machine keys.",
-  "Output MUST be valid JSON that satisfies aiResponseSchema; handoff ⇒ handoffReason required; booking_handoff ⇒ summary required.",
-].join(" ");
+import { getPromptBody } from "./prompt-registry";
+
+export const AI_SYSTEM_INSTRUCTIONS = getPromptBody("system.booking-assistant");
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";

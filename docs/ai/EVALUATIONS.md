@@ -1,8 +1,9 @@
 # FlowPilot — Prompt Evaluations (deterministic fixtures)
 
-> Offline fixtures that guard `docs/ai/PROMPTS.md` against drift from
+> Offline fixtures that guard behavior against drift from
 > `src/features/conversations/server/conversation-ai.ts` (+ `ai-contract.ts`
-> invariants) and from the binding policy in `docs/ai/ARCHITECTURE.md`.
+> invariants) and from the binding policy in `docs/ai/ARCHITECTURE.md`. Prompt
+> BODIES live in `/prompts/*.prompt`; this file guards BEHAVIOR, not text.
 > Status: **offline** — `pnpm check:ai-prompts` proves them in-memory
 > (no DB, no network, no API keys). No live LLM call; no cost.
 >

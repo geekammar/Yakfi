@@ -2,42 +2,65 @@
 
 > Source-controlled, provider-neutral prompt artifacts and deterministic
 > evaluation harness. Implementation boundary: `ARCHITECTURE.md` in this
-> folder. Prompt definitions: `PROMPTS.md`. Evaluation fixtures: `EVALUATIONS.md`.
+> folder. Prompt catalog: `PROMPTS.md`. Evaluation fixtures: `EVALUATIONS.md`.
 >
-> Status: **SEPARATION ARTIFACTS ONLY** (no live LLM call, no real provider
-> SDK, no DB migration). Verified by `pnpm check:ai-prompts` — deterministic,
-> offline, in-memory (no DB, no network, no secrets). The real LLM adapter
-> remains a future operator decision (DECISIONS #29) and implements the SAME
+> Status: **the prompt BODY source of truth is `/prompts/**/*.prompt`.**
+> Bodies are compiled at build time
+> (`pnpm generate:ai-prompts`) into the committed runtime artifact
+> `src/generated/ai-prompts.generated.ts` and loaded by
+> `src/server/integrations/ai/prompt-registry.ts` — the runtime never touches
+> the filesystem. The provider adapters (`openrouter`, `agentrouter`,
+> `atria` — `src/server/integrations/ai/`) implement the SAME
 > `src/features/conversations/server/ai-contract.ts` without touching the
-> engine or domain.
+> engine or domain, and are wired as the engine default through the runtime
+> `PlatformAiPolicy` (DECISIONS #44; `createPolicyBackedAi` in
+> `conversation-engine.ts`), with `deterministicConversationAi` as the safe
+> fallback when the policy is unreadable. `PROMPTS.md` is now a catalog only
+> (id / purpose / file path / runtime consumer) — it carries no prompt
+> bodies; `pnpm check:ai-prompts` remains the deterministic, offline,
+> in-memory guard (no DB, no network, no secrets).
 
 ## What lives where
 
-| Artifact                      | Purpose                                                                                                                                                                                                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/ai/ARCHITECTURE.md`     | AI boundary (who owns what) — Engine orchestrates, AI interprets, Domain decides. Context budget, structured contract, invariants, upgrade path (deterministic → `ConversationAi` → real provider).                                                           |
-| `docs/ai/PROMPTS.md`          | **Provider-neutral prompt definitions** — the versioned source of truth (`booking-intent@v1`, `faq-match@v1`, `availability-handoff@v1`, `reschedule-cancellation@v1`, `human-request@v1`). No OpenRouter/AgentRouter syntax, no API keys, no provider hacks. |
-| `docs/ai/EVALUATIONS.md`      | Minimal deterministic fixtures that prove the artifacts don't drift from the implementation (`deterministicConversationAi` + `ai-contract.ts`). Passing fixtures are required before any prompt version bump.                                                 |
-| `scripts/check-ai-prompts.ts` | Offline harness that enforces the artifacts: provider-neutrality, structure (id/version/purpose/input/system/output/constraints/handoff), invocation boundary, and fixture coverage. No DB write, no API key needed.                                          |
+| Artifact                         | Purpose                                                                                                                                                                                                                                                        |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompts/**/*.prompt`            | **Provider-neutral prompt BODIES — the versioned source of truth** (`system.booking-assistant`, `providers.atria.json-output`). No OpenRouter/AgentRouter syntax, no API keys, no provider hacks. Each declares `# prompt id: <id>`.                           |
+| `docs/ai/ARCHITECTURE.md`        | AI boundary (who owns what) — Engine orchestrates, AI interprets, Domain decides. Context budget, structured contract, invariants, Prompt Workspace source-of-truth rules, upgrade path.                                                                       |
+| `docs/ai/PROMPTS.md`             | **Catalog only** — prompt ID, purpose, file path, runtime consumer. Plus the five code-owned deterministic classifier specs. No bodies.                                                                                                                        |
+| `docs/ai/EVALUATIONS.md`         | Minimal deterministic fixtures that prove behavior does not drift from the implementation (`deterministicConversationAi` + `ai-contract.ts`). Passing fixtures are required before any prompt change is released.                                              |
+| `scripts/check-ai-prompts.ts`    | Offline harness that enforces the workspace: registry↔files↔generated-artifact freshness, unique ids, variable contract, runtime consumes the generated artifact, no body re-inlined in TypeScript, no secrets, plus fixtures. No DB write, no API key needed. |
+| `scripts/generate-ai-prompts.ts` | Deterministic build-time compiler: `prompts/*.prompt` → `src/generated/ai-prompts.generated.ts`. `--check` mode fails on a stale artifact.                                                                                                                     |
 
 ## How to use
 
 ```sh
-pnpm check:ai-prompts   # deterministic fixtures (no DB, no network)
-pnpm verify              # full gate (lint + typecheck + format + build)
-pnpm security            # secret scan (no key-shaped content in artifacts)
+pnpm generate:ai-prompts   # compile prompt bodies into the runtime artifact
+pnpm check:ai-prompts      # drift guard + deterministic fixtures (no DB, no network)
+pnpm verify                # full gate (lint + typecheck + format + build)
+pnpm security              # secret scan (no key-shaped content in artifacts)
 ```
 
 ## Rules (binding)
 
-- Prompts are **versioned configuration artifacts** in `docs/ai/PROMPTS.md` — not DB rows, not Superadmin-editable at runtime, not generated by the LLM.
-- Runtime **Platform AI Policy** (`platform_ai_policies` — primary/secondary provider+model, fallback, secretRefs) is the SEPARATE concern that selects WHICH provider answers — it may be Superadmin-configured; prompt artifacts may not.
-- Prompts reference only `ai-contract.ts` (`AiRequest` → `AiResponse`) and the engine context shape — no Prisma, no booking writes, no invented slots, no chain-of-thought across the boundary.
-- Version bump (`…@v2`) requires updated fixtures in `EVALUATIONS.md` + a green `pnpm check:ai-prompts` + a `DECISIONS.md` appendix when semantic behavior changes.
-- A/B testing, prompt marketplace, and DB-backed prompt management are explicitly **deferred** — do not build them here.
+- Prompts are **source-controlled text files** under `/prompts/` — not DB
+  rows, not Markdown bodies, not Superadmin-editable at runtime, not
+  generated by the LLM, not inlined in TypeScript.
+- Runtime **Platform AI Policy** (`platform_ai_policies` — primary/secondary
+  provider+model, fallback, secretRefs) is the SEPARATE concern that selects
+  WHICH provider answers — it may be Superadmin-configured; prompt bodies
+  may not.
+- Prompts reference only `ai-contract.ts` (`AiRequest` → `AiResponse`) and
+  the engine context shape — no Prisma, no booking writes, no invented slots,
+  no chain-of-thought across the boundary.
+- A semantic change requires a **new prompt id** + updated fixtures in
+  `EVALUATIONS.md` + a green `pnpm check:ai-prompts` + a `DECISIONS.md`
+  appendix.
+- A/B testing, prompt marketplace, and DB-backed prompt management are
+  explicitly **deferred** — do not build them here.
 
 ## Reading order
 
 1. `ARCHITECTURE.md` — the boundary first (so prompts don't reinvent it).
-2. `PROMPTS.md` — only the prompts whose behavior you are changing.
-3. `EVALUATIONS.md` — the fixtures that guard them.
+2. `PROMPTS.md` — the catalog row for the prompt you are changing.
+3. The `.prompt` file itself — that is where the text lives.
+4. `EVALUATIONS.md` — the fixtures that guard them.

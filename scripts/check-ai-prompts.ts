@@ -1,20 +1,49 @@
 /* eslint-disable @typescript-eslint/consistent-type-imports */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import type { AiRequest } from "../src/features/conversations/server/ai-contract";
 
 /**
  * FlowPilot — AI PROMPT & EVALUATION SEPARATION check (PROMPT-ARCH-03).
  *
- * Verifies the provider-neutral, versioned prompt artifacts and their
- * deterministic fixtures — no DB, no network, no secrets.
- * Run: pnpm check:ai-prompts
+ * Verifies the Prompt Workspace Architecture
+ * (PROMPT-OPS-AI-PROMPT-WORKSPACE-ARCHITECTURE-01) and its deterministic
+ * fixtures — no DB, no network, no secrets. Run: pnpm check:ai-prompts
+ *
+ * Source-of-truth chain enforced here:
+ *
+ *   prompts/*.prompt  →  generator  →  src/generated/ai-prompts.generated.ts
+ *                                          ↓ loaded by prompt-registry.ts
+ *                                     buildPromptMessages / atria adapter
+ *
+ * Specifically: every registered prompt exists; no duplicate ids; the
+ * declared variable contract holds; the generated artifact is byte-fresh
+ * against the source prompt files; the runtime loads bodies from that
+ * artifact (never from a literal string in TypeScript); no secret shape
+ * and no provider-invocation syntax appears in a prompt body; and the
+ * existing evaluation fixtures still replay green.
  */
 
 export {};
 
 type Check = { label: string; pass: boolean };
+
+function listPromptFiles(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const abs = join(dir, name);
+      if (statSync(abs).isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (name.endsWith(".prompt")) out.push(abs);
+    }
+  };
+  walk(join(process.cwd(), "prompts"));
+  return out.sort();
+}
 
 async function main(): Promise<void> {
   process.env.DATABASE_URL ??=
@@ -63,12 +92,187 @@ async function main(): Promise<void> {
     readmeRaw.includes("check:ai-prompts"),
   );
 
-  const promptHeadings = [
-    ...promptsRaw.matchAll(/^###\s+(.+?)@v(\d+)\s*$/gm),
-  ].map((m) => ({
-    id: m[1]!.trim(),
-    version: `v${m[2]!}`,
-  }));
+  // ── Prompt Workspace: registry ↔ source files ↔ generated artifact ──────
+  const { compilePromptBody, parsePromptId } =
+    (await import("./generate-ai-prompts")) as typeof import("./generate-ai-prompts");
+  const { PROMPT_REGISTRY, listPromptIds } =
+    (await import("../src/server/integrations/ai/prompt-registry")) as typeof import("../src/server/integrations/ai/prompt-registry");
+  const generated = (await import("../src/generated/ai-prompts.generated"))
+    .AI_PROMPTS_GENERATED as ReadonlyArray<{
+    id: string;
+    sourcePath: string;
+    body: string;
+    sha256: string;
+  }>;
+
+  const promptFiles = listPromptFiles();
+  check("مجلد prompts/ موجود وغير فارغ", promptFiles.length > 0);
+  for (const abs of promptFiles) {
+    check(`ملف موجه موجود: ${relative(root, abs)}`, existsSync(abs));
+  }
+
+  // 1. every registered prompt exists (file present + id declared + matches)
+  const fileIds = new Set<string>();
+  for (const entry of PROMPT_REGISTRY) {
+    const abs = join(root, ...entry.sourcePath.split("/"));
+    const exists = existsSync(abs);
+    check(`ملف الموجه المسجل موجود: ${entry.sourcePath}`, exists);
+    if (!exists) continue;
+    const raw = readFileSync(abs, "utf8");
+    const declared = parsePromptId(raw);
+    check(
+      `${entry.id}: المعرف المعلن في الملف يطابق السجل`,
+      declared === entry.id,
+    );
+    fileIds.add(declared ?? "__missing__");
+  }
+
+  // no orphan prompt files (on disk but not registered)
+  for (const abs of promptFiles) {
+    const rel = relative(root, abs);
+    const registered = PROMPT_REGISTRY.some(
+      (e) => join(root, ...e.sourcePath.split("/")) === abs,
+    );
+    check(`ملف الموجه مُسجل: ${rel}`, registered);
+  }
+
+  // 2. no duplicate prompt ids (registry, files, and generated artifact)
+  const registryIds = PROMPT_REGISTRY.map((e) => e.id);
+  const generatedIds = generated.map((g) => g.id);
+  check(
+    "لا معرفات موجهات مكررة في السجل",
+    new Set(registryIds).size === registryIds.length,
+  );
+  check(
+    "لا معرفات مكررة في الأداة المولدة",
+    new Set(generatedIds).size === generatedIds.length,
+  );
+  check(
+    "معرفات السجل = معرفات الأداة المولدة",
+    JSON.stringify([...registryIds].sort()) ===
+      JSON.stringify([...generatedIds].sort()),
+  );
+
+  // 3. required variables/placeholders are valid
+  for (const entry of PROMPT_REGISTRY) {
+    const g = generated.find((x) => x.id === entry.id);
+    if (!g) continue;
+    const placeholders = [...g.body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(
+      (m) => m[1]!,
+    );
+    check(
+      `${entry.id}: لا عناصر نائبة غير معلنة`,
+      placeholders.every((p) => entry.variables.includes(p)),
+    );
+    check(
+      `${entry.id}: كل العناصر المعلنة موجودة في النص`,
+      entry.variables.every((v) => placeholders.includes(v)),
+    );
+  }
+
+  // 4. generated artifact matches the source prompt files (drift guard)
+  check(
+    "الأداة المولدة موجودة",
+    existsSync(join(root, "src/generated/ai-prompts.generated.ts")),
+  );
+  for (const entry of PROMPT_REGISTRY) {
+    const abs = join(root, ...entry.sourcePath.split("/"));
+    if (!existsSync(abs)) continue;
+    const compiled = compilePromptBody(readFileSync(abs, "utf8"));
+    const g = generated.find((x) => x.id === entry.id);
+    check(
+      `${entry.id}: النص المولد يطابق المصدر (byte-identical)`,
+      g?.body === compiled,
+    );
+  }
+
+  // 5. runtime consumes the generated artifact (not a literal string)
+  const promptSrc = readFileSync(
+    join(root, "src/server/integrations/ai/prompt.ts"),
+    "utf8",
+  );
+  const atriaSrc = readFileSync(
+    join(root, "src/server/integrations/ai/atria.ts"),
+    "utf8",
+  );
+  check(
+    "prompt.ts يحمل النص من الأداة المولدة (getPromptBody)",
+    promptSrc.includes("getPromptBody(") &&
+      !/\[\s*\n?\s*"[^"]+",\s*\n?\s*"/.test(promptSrc),
+  );
+  check(
+    "atria.ts يحمل تعليمات JSON من الأداة المولدة (getPromptBody)",
+    atriaSrc.includes("getPromptBody("),
+  );
+  {
+    const loadedSystem = (await import("../src/server/integrations/ai/prompt"))
+      .AI_SYSTEM_INSTRUCTIONS as string;
+    const loadedAtria = (await import("../src/server/integrations/ai/atria"))
+      .ATRIA_JSON_INSTRUCTIONS as string;
+    check(
+      "وقت التشغيل يقرأ النص من الأداة المولدة فعلياً",
+      loadedSystem ===
+        generated.find((g) => g.id === "system.booking-assistant")?.body &&
+        loadedAtria ===
+          generated.find((g) => g.id === "providers.atria.json-output")?.body,
+    );
+  }
+
+  // 6. known prompt bodies are not silently reintroduced into runtime TS
+  const runtimeDirs = [
+    join(root, "src/server/integrations/ai"),
+    join(root, "src/features/conversations/server"),
+  ];
+  const knownSentences = generated.flatMap((g) =>
+    g.body.split(". ").filter((s) => s.trim().length > 40),
+  );
+  for (const dir of runtimeDirs) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".ts")) continue;
+      const src = readFileSync(join(dir, name), "utf8");
+      const leaked = knownSentences.find((s) => {
+        const probe = s.slice(0, 60);
+        return src.includes(probe) && !src.includes("getPromptBody");
+      });
+      check(
+        `لا نص موجه يعاد حرفياً في ${dir === runtimeDirs[0] ? "ai/" : "conversations/"}${name}`,
+        !leaked,
+      );
+    }
+  }
+
+  // 7. no secret/token shape inside prompt files
+  for (const abs of promptFiles) {
+    const raw = readFileSync(abs, "utf8");
+    check(
+      `لا سر في ${relative(root, abs)}`,
+      !/\bsk-[A-Za-z0-9]{20,}\b/.test(raw) &&
+        !/Bearer/i.test(raw) &&
+        !/-----BEGIN.*PRIVATE KEY-----/.test(raw) &&
+        !/(?:api[_-]?key|secret|token|password)\s*[:=]/i.test(raw),
+    );
+  }
+
+  // Catalog (docs/ai/PROMPTS.md) is documentation only: it must list every
+  // runtime prompt id with its four catalog fields and must NOT carry bodies.
+  for (const id of listPromptIds()) {
+    check(`الكتالوج يذكر الموجه ${id}`, promptsRaw.includes(id));
+  }
+  check(
+    "الكتالوج لا يحمل أجسام الموجهات (لا نص كامل)",
+    !generated.some((g) => promptsRaw.includes(g.body.slice(0, 80))),
+  );
+  check(
+    "الكتالوج يشير إلى شجرة prompts/",
+    promptsRaw.includes("prompts/") && promptsRaw.includes(".prompt"),
+  );
+  check(
+    "الكتالوج يذكر أنه توثيق فقط (وليس المصدر)",
+    /catalog|documentation only|catalogue/i.test(promptsRaw),
+  );
+
+  // Deterministic classifier behavior specs — documented, code-owned. These
+  // are NOT LLM prompt bodies; the fixtures below prove them against code.
   const expectedIds = [
     "booking-intent",
     "faq-match",
@@ -76,89 +280,6 @@ async function main(): Promise<void> {
     "reschedule-cancellation",
     "human-request",
   ];
-  for (const id of expectedIds) {
-    check(
-      `تعريف ${id}@v1 موجود`,
-      promptHeadings.some((h) => h.id === id && h.version === "v1"),
-    );
-  }
-  check("عدد التعاريف = 5 (v1 لكل عائلة)", promptHeadings.length === 5);
-
-  const requiredSections = [
-    "\\*\\*Purpose:",
-    "\\*\\*Input context:",
-    "\\*\\*System instructions:",
-    "\\*\\*Output contract:",
-    "\\*\\*Constraints",
-    "\\*\\*Handoff policy:",
-    "\\*\\*Version history:",
-  ];
-  for (const heading of promptHeadings) {
-    const start = promptsRaw.indexOf(`### ${heading.id}@${heading.version}`);
-    const nextHead = promptsRaw.indexOf("\n### ", start + 1);
-    const block =
-      nextHead === -1
-        ? promptsRaw.slice(start)
-        : promptsRaw.slice(start, nextHead);
-    for (const sec of requiredSections) {
-      check(
-        `قسم ${sec.replace(/\\\*/g, "*")} في ${heading.id}@${heading.version}`,
-        new RegExp(sec).test(block),
-      );
-    }
-  }
-
-  const intentActionExpectations: Record<
-    string,
-    { intent: string; action: string }
-  > = {
-    "booking-intent": { intent: "BOOKING", action: "booking_handoff" },
-    "faq-match": { intent: "FAQ", action: "reply" },
-    "availability-handoff": {
-      intent: "AVAILABILITY",
-      action: "booking_handoff",
-    },
-  };
-  for (const [id, exp] of Object.entries(intentActionExpectations)) {
-    const start = promptsRaw.indexOf(`### ${id}@v1`);
-    const nextHead = promptsRaw.indexOf("\n### ", start + 1);
-    const block =
-      nextHead === -1
-        ? promptsRaw.slice(start)
-        : promptsRaw.slice(start, nextHead);
-    check(`${id}@v1 يذكر intent "${exp.intent}"`, block.includes(exp.intent));
-    check(`${id}@v1 يذكر action "${exp.action}"`, block.includes(exp.action));
-  }
-  {
-    const start = promptsRaw.indexOf("### reschedule-cancellation@v1");
-    const nextHead = promptsRaw.indexOf("\n### ", start + 1);
-    const block =
-      nextHead === -1
-        ? promptsRaw.slice(start)
-        : promptsRaw.slice(start, nextHead);
-    check(
-      "reschedule-cancellation@v1 يذكر CANCELLATION و RESCHEDULE",
-      block.includes("CANCELLATION") && block.includes("RESCHEDULE"),
-    );
-    check(
-      "reschedule-cancellation@v1 action booking_handoff",
-      block.includes("booking_handoff"),
-    );
-  }
-  {
-    const start = promptsRaw.indexOf("### human-request@v1");
-    const nextHead = promptsRaw.indexOf("\n### ", start + 1);
-    const block =
-      nextHead === -1
-        ? promptsRaw.slice(start)
-        : promptsRaw.slice(start, nextHead);
-    check(
-      "human-request@v1 يذكر HUMAN_REQUEST و AMBIGUOUS",
-      block.includes("HUMAN_REQUEST") && block.includes("AMBIGUOUS"),
-    );
-    check("human-request@v1 action handoff", block.includes("handoff"));
-  }
-
   check(
     "PROMPTS.md يذكر AiRequest و AiResponse و parseAiResponse",
     promptsRaw.includes("AiRequest") &&
@@ -170,9 +291,11 @@ async function main(): Promise<void> {
     promptsRaw.includes("reasoning") && promptsRaw.includes("stripped"),
   );
 
-  // Provider-neutrality: forbid invocation syntax, allow prose mentions
+  // Provider-neutrality: forbid invocation syntax in the real prompt bodies
+  // and in the docs. Bodies now live in /prompts, so they are the target.
   const allDocsRaw =
     promptsRaw + "\n" + archRaw + "\n" + evalRaw + "\n" + readmeRaw;
+  const promptBodiesJoined = generated.map((g) => g.body).join("\n");
   const invocationChecks: Array<{
     kind: string;
     re: RegExp;
@@ -210,13 +333,7 @@ async function main(): Promise<void> {
       scope: "promptBlocks",
     },
   ];
-  const promptBlocksJoined = promptHeadings
-    .map((h) => {
-      const s = promptsRaw.indexOf(`### ${h.id}@${h.version}`);
-      const n = promptsRaw.indexOf("\n### ", s + 1);
-      return n === -1 ? promptsRaw.slice(s) : promptsRaw.slice(s, n);
-    })
-    .join("\n");
+  const promptBlocksJoined = promptBodiesJoined;
   for (const c of invocationChecks) {
     const hay = c.scope === "promptBlocks" ? promptBlocksJoined : allDocsRaw;
     check(`لا نمط استدعاء مزود (${c.kind})`, !c.re.test(hay));
@@ -474,20 +591,21 @@ async function main(): Promise<void> {
     check("booking_handoff بلا ملخص مرفوض", bad === null);
   }
   {
+    const intentsHaystack = `${promptBodiesJoined}\n${promptsRaw}`;
     const promptIntents = [
-      ...promptsRaw.matchAll(/intent:\s*"([A-Z_]+)"/g),
+      ...intentsHaystack.matchAll(/intent:\s*"([A-Z_]+)"/g),
     ].map((m) => m[1]!);
     const allowedIntents = new Set(aiIntentValues as readonly string[]);
     check(
-      "كل intent مذكور في PROMPTS ضمن aiIntentValues",
+      "كل intent مذكور في الموجهات ضمن aiIntentValues",
       promptIntents.every((v) => allowedIntents.has(v)),
     );
     const promptReasons = [
-      ...promptsRaw.matchAll(/handoffReason:\s*"([A-Z_]+)"/g),
+      ...intentsHaystack.matchAll(/handoffReason:\s*"([A-Z_]+)"/g),
     ].map((m) => m[1]!);
     const allowedReasons = new Set(handoffReasonValues as readonly string[]);
     check(
-      "كل handoffReason في PROMPTS ضمن handoffReasonValues",
+      "كل handoffReason في الموجهات ضمن handoffReasonValues",
       promptReasons.length === 0 ||
         promptReasons.every((v) => allowedReasons.has(v)),
     );

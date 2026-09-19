@@ -41,5 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 # prisma generated client
-src/generated
+src/generated/*
+# committed AI prompt artifact (source: prompts/**, regenerate: pnpm generate:ai-prompts)
+!src/generated/ai-prompts.generated.ts
 !.env.example

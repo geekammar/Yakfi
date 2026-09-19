@@ -1,0 +1,22 @@
+# prompt id: providers.atria.json-output
+# Source of truth for the Atria-only JSON-output hardening instructions.
+#
+# This BODY is sent to the LLM (it is genuine instruction text), so it lives
+# under /prompts/providers/. The Atria EXECUTION/WIRING/VALIDATION stays in
+# the provider adapter (src/server/integrations/ai/atria.ts): endpoint,
+# secretRef, timeout, and the bounded response-normalizer policy.
+#
+# Compile rule (scripts/generate-ai-prompts.ts): lines that are blank or
+# start with "#" are dropped; every remaining line is joined with a single
+# space. Provider-neutral by construction: no model names, no auth syntax.
+Return exactly ONE JSON object.
+Return JSON only.
+Do not return Markdown.
+Do not wrap JSON in ``` fences.
+Do not add explanations before or after JSON.
+Do not return prose.
+Do not return multiple JSON objects.
+The JSON object must conform to the FlowPilot AI response contract.
+Use only the allowed enum values.
+Do not invent unknown fields.
+The output must be directly parseable by JSON.parse().

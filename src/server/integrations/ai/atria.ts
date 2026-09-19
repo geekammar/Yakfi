@@ -18,6 +18,7 @@
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
+import { getPromptBody } from "./prompt-registry";
 import { ATRIA_NORMALIZATION_POLICY } from "./response-normalizer";
 import type { NormalizerPolicy } from "./response-normalizer";
 import type { AiProviderAdapter, AiProviderResult } from "./types";
@@ -29,24 +30,20 @@ export const ATRIA_TIMEOUT_MS = 16000;
 /**
  * Atria-only JSON-output hardening (PROMPT-OPS-ATRIA-STRUCTURED-OUTPUT).
  *
+ * The instruction BODY lives in
+ * `prompts/providers/atria-json-output.prompt` and is loaded from the
+ * generated artifact — provider-specific instruction text is a prompt, so
+ * it is externalized like every other prompt body. Everything else here is
+ * wiring and stays in the adapter.
+ *
  * Augments — never replaces — the shared provider-neutral instructions.
  * The request body already carries `response_format: json_object` via the
  * shared `buildRequestBody`; this reinforces the output contract in the
  * SYSTEM message so the provider returns one directly-parseable object.
  */
-export const ATRIA_JSON_INSTRUCTIONS = [
-  "Return exactly ONE JSON object.",
-  "Return JSON only.",
-  "Do not return Markdown.",
-  "Do not wrap JSON in ``` fences.",
-  "Do not add explanations before or after JSON.",
-  "Do not return prose.",
-  "Do not return multiple JSON objects.",
-  "The JSON object must conform to the FlowPilot AI response contract.",
-  "Use only the allowed enum values.",
-  "Do not invent unknown fields.",
-  "The output must be directly parseable by JSON.parse().",
-].join(" ");
+export const ATRIA_JSON_INSTRUCTIONS = getPromptBody(
+  "providers.atria.json-output",
+);
 
 export type AtriaDeps = {
   model: string;

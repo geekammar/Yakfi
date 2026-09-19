@@ -1,5 +1,7 @@
 .next
 node_modules
 src/generated
+# prompt bodies are source-of-truth text — never reformatted by tooling
+prompts
 pnpm-lock.yaml
 next-env.d.ts

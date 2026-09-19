@@ -95,10 +95,13 @@ collect evidence.
 - Message transport (WhatsApp provider integration) kept behind an interface;
   UI reads/writes via repositories
 - **Implemented (PROMPT-19, DECISIONS #29):** the conversation engine slice
-  — provider-neutral inbound webhook → engine → deterministic AI turn →
+  — provider-neutral inbound webhook → engine → AI turn →
   reply or NEED_HUMAN, with `ConversationAi` + `MessageTransport` as the
-  only vendor seams. The REAL WhatsApp and LLM providers remain undecided
-  operator decisions.
+  only vendor seams. Both provider decisions have since been resolved and
+  implemented: WhatsApp = **Meta Cloud API** (DECISIONS #42, live) and the
+  AI runtime = **platform policy-backed adapters** openrouter/agentrouter/atria
+  with deterministic fallback (DECISIONS #44). The Business-side WhatsApp
+  connection onboarding surface is `/settings/whatsapp` (DECISIONS #47).
 
 ### 9. Appointments
 
@@ -152,6 +155,7 @@ collect evidence.
 | `(app)`     | `/services`           | Service catalog management                                                                                                 |
 | `(app)`     | `/settings`           | Business settings (PROMPT-09): identity + booking behavior                                                                 |
 | `(app)`     | `/settings/knowledge` | Business knowledge entries                                                                                                 |
+| `(app)`     | `/settings/whatsapp`  | WhatsApp connection onboarding (DECISIONS #47): connect / verify / activate                                                |
 | `(admin)`   | `/admin`              | Admin area shell (team mgmt entry)                                                                                         |
 | `(admin)`   | `/admin/team`         | Team management                                                                                                            |
 | `(staff)`   | `/staff`              | Staff area shell (own agenda/tasks)                                                                                        |

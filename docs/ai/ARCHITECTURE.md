@@ -9,10 +9,13 @@
 >   separation — do not duplicate `docs/ARCHITECTURE.md`.
 >
 > Decision record: DECISIONS #33/#38 (AI interprets → Domain decides →
-> Conversation orchestrates), DECISIONS #29 (WhatsApp `Meta` resolved,
-> AI transport intentionally NOT integrated). Production code today is
-> **deterministic** (`deterministicConversationAi`) — real LLM is a future
-> operator decision behind the SAME interface.
+> Conversation orchestrates), DECISIONS #42 (WhatsApp provider = Meta Cloud
+> API), DECISIONS #44 (runtime AI provider policy: openrouter primary /
+> agentrouter secondary, fallback enabled; `atria` added as a selectable
+> provider). The engine default is the **policy-backed** `ConversationAi`
+> (`createPolicyBackedAi` in `conversation-engine.ts`), which builds the
+> real adapters from the live policy and falls back to
+> `deterministicConversationAi` only when the policy cannot be read.
 
 ## Invariant (binding)
 
@@ -65,6 +68,72 @@ AI interprets → Domain decides & executes → Conversation Engine orchestrates
   Usage telemetry (append-only, ids+counters+machine keys; never content/secrets/chain-of-thought)
 ```
 
+## Prompt Workspace (source of truth for prompt BODIES)
+
+Prompt **content** and prompt **runtime/wiring** are separated. Only genuine
+LLM instruction text is a prompt; everything else stays code.
+
+```
+  prompts/*.prompt                          ← source of truth (BODIES only)
+        │  `# prompt id:` header declares the stable id
+        ▼
+  scripts/generate-ai-prompts.ts           ← deterministic build-time compiler
+        ▼
+  src/generated/ai-prompts.generated.ts    ← committed runtime artifact
+        ▼
+  src/server/integrations/ai/prompt-registry.ts   ← registry + loader
+        ▼
+  buildPromptMessages() / provider adapters         ← wiring, no bodies
+```
+
+| Layer                               | Owner                          | May contain prompt bodies?                                              |
+| ----------------------------------- | ------------------------------ | ----------------------------------------------------------------------- |
+| `/prompts/**/*.prompt`              | Prompt author (PR review)      | **YES — the only place.** Git is the version history.                   |
+| `prompt-registry.ts`                | AI runtime layer               | No. Stable id → source path + variable contract + consumer only.        |
+| `src/generated/…generated.ts`       | Generator (derived, committed) | No — derived byte-for-byte from `/prompts`. Regenerated on every build. |
+| `prompt.ts` / `atria.ts` / adapters | AI runtime layer               | No. Wiring only: loads via `getPromptBody`, renders chat shape.         |
+| `docs/ai/PROMPTS.md`                | Documentation                  | No. Catalog only: id / purpose / file path / runtime consumer.          |
+
+Rules (binding, enforced by `pnpm check:ai-prompts`):
+
+- **One authoritative location.** `/prompts/**/*.prompt` is the only source
+  of truth for an LLM instruction body. There is no second hidden source —
+  not a Markdown file, not a DB row, not a constant in TypeScript.
+- **No runtime filesystem access.** The runtime reads the generated
+  artifact, so this works on Vercel/serverless. A stale or missing artifact
+  is a build/check failure, never a silent fallback.
+- **Provider-specific instruction text is a prompt too.** The Atria
+  JSON-output instruction is genuinely sent to the LLM, so its BODY lives in
+  `prompts/providers/`; its execution/wiring/validation (endpoint,
+  `secretRef`, timeout, bounded normalization) stays in the adapter.
+- **Not prompts — stay code:** domain/business rules, booking algorithms,
+  CORE-01/CORE-02, tenant isolation, authorization, deterministic response
+  logic, SQL, validation, error enums, API payload construction.
+- **Deterministic classifier behavior** (`booking-intent@v1` and the other
+  four catalog entries) is code-owned (`conversation-ai.ts`) and is NOT
+  registered as a prompt — it is never sent to an LLM. Its fixtures stay in
+  `EVALUATIONS.md`.
+
+### Easy edit workflow
+
+1. Open the `.prompt` file.
+2. Edit prompt text only.
+3. `pnpm generate:ai-prompts` (regenerate the committed artifact).
+4. `pnpm check:ai-prompts` (registry ↔ files ↔ artifact + fixtures).
+5. Run the relevant AI/provider checks (`check:ai-provider`,
+   `check:atria-retry`, …).
+6. `pnpm verify`.
+7. Review `git diff`.
+8. Only then decide whether the change is release-worthy.
+
+### Build integration
+
+`pnpm dev` and `pnpm build` run `pnpm generate:ai-prompts` first, so a
+normal build cannot use a stale artifact. `pnpm check:ai-prompts` begins
+with a `--check` pass that fails when the committed artifact disagrees with
+the source prompt files. Vercel's `buildCommand` (`pnpm db:generate && pnpm
+build`) inherits this automatically.
+
 ## Structured contract (single source of truth)
 
 - **Request — `AiRequest` (`ai-contract.ts: aiRequestSchema`):**
@@ -101,14 +170,17 @@ The engine's `AiRequest` is the **prompt context** — nothing larger is sent:
 
 ## Invocation contract (prompt → adapter → engine)
 
-1. **Prompt definition lives in `docs/ai/PROMPTS.md`** — provider-neutral,
-   versioned `id@version` (e.g. `booking-intent@v1`), reviewed as configuration
-   in source control; never edited at runtime.
-2. **Adapter maps prompt → provider shape at call time** (future `src/server/ai/`
-   or `src/server/integrations/ai/` — not in this phase): the adapter renders
-   `AiRequest` + the prompt's `system instructions`/`output contract` into the
-   provider's chat shape, calls the provider, parses JSON, validates against
-   `aiResponseSchema`, re-parses via `parseAiResponse`, and returns `AiResponse`.
+1. **Prompt body lives in `/prompts/**/*.prompt`** — provider-neutral,
+   stable-id instruction text, compiled at build time into
+   `src/generated/ai-prompts.generated.ts` and loaded by
+   `prompt-registry.ts` (`getPromptBody`); reviewed as configuration in
+   source control, never edited at runtime, never inlined in TypeScript.
+   `docs/ai/PROMPTS.md` is the catalog only.
+2. **Adapter maps prompt → provider shape at call time** (`src/server/integrations/ai/`):
+   the adapter renders `AiRequest` + the prompt's `system instructions`/output
+   contract into the provider's chat shape, calls the provider, parses JSON,
+   validates against `aiResponseSchema`, re-parses via `parseAiResponse`, and
+   returns `AiResponse`.
 3. **Engine receives `AiResponse`** — re-validates it (`parseAiResponse`) and
    maps `action` → `conversation.status` (`reply → AI_ACTIVE`, others →
    `NEED_HUMAN`). Booking intents produce `booking_handoff` + `summary` for staff;
@@ -121,11 +193,12 @@ The engine's `AiRequest` is the **prompt context** — nothing larger is sent:
 
 ## Prompt vs. policy separation (binding)
 
-| Concern                                                            | Where it lives                                                                       | Who may change it                      | How it changes                                                              |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------- | --------------------------------------------------------------------------- |
-| Prompt definitions (`booking-intent@v1`, …)                        | `docs/ai/PROMPTS.md` (versioned artifacts)                                           | Code reviewer only (PR)                | Version bump `…@v1 → …@v2` + fixture update + `pnpm check:ai-prompts` green |
-| Runtime provider selection (primary/secondary/fallback/secretRefs) | `platform_ai_policies` singleton (`src/server/repositories/ai-policy.repository.ts`) | Platform Operator (Superadmin DB path) | `updateAiPolicy` (validated; secretRefs only, no key material)              |
-| Telemetry/policy observability                                     | `usage_records` (kind `AI_TURN` — provider/model/tokens/latency/handoff)             | Append-only; no write blocks the turn  | Engine best-effort `recordUsage` — see Economics boundary                   |
+| Concern                                                                   | Where it lives                                                                                                 | Who may change it                      | How it changes                                                                  |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------- |
+| Prompt bodies (`system.booking-assistant`, `providers.atria.json-output`) | `/prompts/**/*.prompt` → generated artifact (`src/generated/ai-prompts.generated.ts`)                          | Code reviewer only (PR)                | Edit the `.prompt` + `pnpm generate:ai-prompts` + `pnpm check:ai-prompts` green |
+| Deterministic classifier behavior (`booking-intent@v1`, …)                | `src/features/conversations/server/conversation-ai.ts` (code is the truth; catalogued in `docs/ai/PROMPTS.md`) | Code reviewer only (PR)                | Code change + `EVALUATIONS.md` fixtures stay green                              |
+| Runtime provider selection (primary/secondary/fallback/secretRefs)        | `platform_ai_policies` singleton (`src/server/repositories/ai-policy.repository.ts`)                           | Platform Operator (Superadmin DB path) | `updateAiPolicy` (validated; secretRefs only, no key material)                  |
+| Telemetry/policy observability                                            | `usage_records` (kind `AI_TURN` — provider/model/tokens/latency/handoff)                                       | Append-only; no write blocks the turn  | Engine best-effort `recordUsage` — see Economics boundary                       |
 
 Prompts are **not** DB rows, not Superadmin-editable, not A/B-testable in this
 phase. A/B testing and a prompt marketplace are explicitly **deferred** — do
@@ -142,11 +215,16 @@ not scaffold them here.
   `summary`). No tool-call JSON, no function-calling DSL, no provider SDK name.
 - One prompt maps to one `AiIntent` family + one `AiAction` — no invented intents.
 
-## Telemetry & cost boundary (no live LLM call now, but not blocked)
+## Telemetry & cost boundary
 
-- No live LLM call is made in this phase — `deterministicConversationAi` is the
-  only wired adapter (`defaultConversationEngineDeps.ai`). Cost-impacting work
-  stays deferred until a real provider decision lands (DECISIONS #29).
+- The engine default is the policy-backed `ConversationAi`
+  (`defaultConversationEngineDeps.ai` = `policyBackedAi` →
+  `createPolicyBackedAi`): real adapters when the policy is readable,
+  `deterministicConversationAi` as the safe fallback. `bypassDeterministicAi`
+  still short-circuits decidable turns before any provider call.
+- Cost-impacting telemetry is already implemented for the LLM path
+  (`conversation-engine.ts` `recordUsage(AI_TURN)` + `usageRepository`);
+  determinism is preserved by the Domain, not by withholding the boundary.
 - Artifacts must not block the future telemetry shape already implemented in
   `conversation-engine.ts` + `usageRepository` (+ `docs/ECONOMICS.md` —
   `Usage ≠ Cost ≠ Price ≠ Entitlement ≠ Billing`):
@@ -159,6 +237,11 @@ not scaffold them here.
 
 ## Files this boundary reuses (never duplicated)
 
+- `prompts/system/booking-assistant.prompt` + `prompts/providers/atria-json-output.prompt` — the prompt bodies (source of truth)
+- `src/generated/ai-prompts.generated.ts` — committed generated artifact (derived; regenerate with `pnpm generate:ai-prompts`)
+- `src/server/integrations/ai/prompt-registry.ts` — registry + loader (`PROMPT_REGISTRY`, `getPromptBody`)
+- `scripts/generate-ai-prompts.ts` — deterministic build-time generator
+- `src/server/integrations/ai/prompt.ts` — the builder (`buildPromptMessages` / `buildRequestBody`)
 - `src/features/conversations/server/ai-contract.ts` — the typed contract
 - `src/features/conversations/server/conversation-ai.ts` — `ConversationAi` + `deterministicConversationAi` + `classifyCustomerMessage`
 - `src/features/conversations/server/conversation-engine.ts` — orchestration + minimal context + `bypassDeterministicAi` call order + `recordUsage`
@@ -167,7 +250,7 @@ not scaffold them here.
 
 ## Upgrade path (without changing the engine)
 
-Deterministic today (`deterministicConversationAi`)
+Policy-backed today (`createPolicyBackedAi` → real adapters; deterministic is the fallback)
 │
 ▼ same AiRequest → AiResponse contract
 `ConversationAi` adapters (provider-neutral)
@@ -180,7 +263,7 @@ No other layer needs to change: Domain/availability/booking/tenancy stay determi
 
 ## Deferred (do NOT build in this phase)
 
-- Real LLM invocation, provider HTTP/signature/media handling, vector DB / RAG.
+- Media download/transcoding/storage, vector DB / RAG.
 - Prompt A/B testing, prompt marketplace, DB-backed prompt management UI.
 - Any Superadmin-write path for prompt artifacts (the policy write path already
   exists and stays platform-only).

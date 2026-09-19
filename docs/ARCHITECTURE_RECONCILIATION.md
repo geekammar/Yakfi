@@ -63,6 +63,9 @@ contract (`ai-contract.ts`) with deterministic bypass, and append-only
 usage telemetry (`usage_records`) — migration
 `20260910120000_architecture_hardening_foundation` (apply from
 desktop/CI: `pnpm db:deploy`). These foundations have NO management UI or
-consumer flows yet; the two real provider integrations (WhatsApp
-transport, LLM — DECISIONS #29) remain pending operator decisions. See
+consumer flows yet; both real provider integrations have since been RESOLVED
+and implemented — WhatsApp transport = Meta Cloud API (DECISIONS #42,
+live in production) and the AI runtime = policy-backed adapters
+(DECISIONS #44; `atria` added later) — and the Business WhatsApp connection
+onboarding surface `/settings/whatsapp` landed (DECISIONS #47). See
 `BUILD_STATE.md` for the authoritative ledger and next step.
