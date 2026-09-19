@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -24,6 +24,7 @@
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",
     "check:booking-confirm": "tsx scripts/check-booking-confirm.ts",
+    "check:owner-invitation": "dotenv -e .env.local -e .env -- tsx scripts/check-owner-invitation.ts",
     "probe:atria": "dotenv -e .env.local -e .env -- tsx scripts/probe-atria.ts",
     "release": "bash scripts/release.sh",
     "ship": "node scripts/ship.mjs",

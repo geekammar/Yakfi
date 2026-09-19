@@ -1,5 +1,6 @@
 import type { PlatformInvitation } from "@/generated/prisma/client";
 
+import { acceptInvitationInputSchema } from "@/features/invitations/schemas/invitation-schema";
 import {
   INVITATION_EXPIRY_DAYS,
   defaultCreateIdentity,
@@ -201,10 +202,13 @@ export async function getOwnerInvitationByToken(
   input: unknown,
   deps: OwnerInvitationServiceDeps = defaultDeps,
 ): Promise<PlatformServiceResult<GetOwnerInvitationByTokenSuccess>> {
-  const parsed = activateOwnerInputSchema.shape.token.safeParse(input);
+  // Token-only input ({ token }) — the shared token-object schema, as
+  // on the business/staff path. The activation schema's `.token` field
+  // is a STRING schema, so it cannot validate this object shape.
+  const parsed = acceptInvitationInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error.issues);
 
-  const tokenHash = hashInvitationToken(parsed.data);
+  const tokenHash = hashInvitationToken(parsed.data.token);
 
   let invitation: PlatformInvitation | null;
   try {
@@ -238,10 +242,12 @@ export async function acceptOwnerInvitation(
   input: unknown,
   deps: OwnerInvitationServiceDeps = defaultDeps,
 ): Promise<PlatformServiceResult<AcceptOwnerInvitationSuccess>> {
-  const parsed = activateOwnerInputSchema.shape.token.safeParse(input);
+  // Token-only input ({ token }) — same shared token-object schema as
+  // getOwnerInvitationByToken and the business/staff acceptance path.
+  const parsed = acceptInvitationInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error.issues);
 
-  const tokenHash = hashInvitationToken(parsed.data);
+  const tokenHash = hashInvitationToken(parsed.data.token);
 
   const invitation = await deps.invitations.findByTokenHash(tokenHash);
   if (!invitation) {
