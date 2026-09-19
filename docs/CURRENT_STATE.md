@@ -3,7 +3,24 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 — the repeatable Business WhatsApp onboarding path landed (DECISIONS #47): a Business Admin can now connect/configure/verify/activate a WhatsApp number through `/settings/whatsapp` (new `src/features/whatsapp-connection` + settings sub-route; ADMIN-only, server-derived Business scope; `externalId`/`phone_number_id` authoritative; `credentialsRef` env-var-NAME only; read-only `ConnectionVerifier` verification — never sends a customer message; duplicate externalId protection; masked id display). TEST→REAL connection replacement is now data-only (no code change, no booking/conversation-engine change). Meta Embedded Signup deliberately NOT implemented — operator prerequisites documented, nothing faked. `pnpm check:whatsapp-onboarding` 22/22 NEW; existing WhatsApp/booking checks unchanged; `pnpm verify`/`security` green; ZERO schema/migration changes; removed leftover untracked task-26 forensic scripts that broke the typecheck gate; subsequently SHIPPED by the operator as release **v0.19.0** (`123dfaa`, tag `v0.19.0`; production verified live at v0.19.0). Prior: PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01 inbound identity fix; PROMPT-AI-03B close-the-loop COMPLETE; PROMPT-AI-03/02/01 + CORE-01/02/03A/03B remain IMPLEMENTED.
+> PROMPT-OPS-AI-PROMPT-WORKSPACE-FINALIZE-29 — the Prompt Workspace
+> architecture is finalized and ledger-reconciled (DECISIONS #48, shipped as
+> release **v0.19.1**, `04856ae`): LLM prompt bodies live only in
+> `/prompts/**/*.prompt`, are compiled by `pnpm generate:ai-prompts` into the
+> committed `src/generated/ai-prompts.generated.ts`, and reach the runtime
+> only through `prompt-registry.ts` (`getPromptBody`) — no inline bodies in
+> TypeScript, no runtime filesystem read, no silent fallback, and the two
+> relocated bodies are byte-identical to the removed constants so no prompt
+> semantics changed. Production remains deployed at v0.19.0 (deploying
+> v0.19.1 is an operator action). Next major slice: Meta Embedded Signup
+> (gated on operator-owned Meta App Dashboard configuration). Prior:
+> PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 (v0.19.0, DECISIONS #47 —
+> repeatable Business WhatsApp onboarding at `/settings/whatsapp`;
+> `externalId`/`phone_number_id` authoritative; `credentialsRef` env-var-NAME
+> only; read-only `ConnectionVerifier` verification; TEST→REAL replacement
+> data-only; Meta Embedded Signup deliberately not implemented then);
+> PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01; PROMPT-AI-03B; PROMPT-AI-03/02/01 +
+> CORE-01/02/03A/03B remain IMPLEMENTED.
 
 - **Product:** WhatsApp Appointment Conversion System — "Book more, chase
   less." Arabic-first, RTL-first, mobile-first, vertical-agnostic during
@@ -176,6 +193,43 @@ check:whatsapp-onboarding` 22/22; ZERO schema/migration changes; NOT
   decision — guard surface verified at code + DB level) + **continuation 2 live E2E** (see WhatsApp bullet); dedicated Vercel
   project `flowpilot-prod` (framework nextjs, SSO protection off), **9 Production env vars** (5 `WHATSAPP_META_*` Secret + 4 core), `.vercel` links `flowpilot-prod`. Repository
   visibility: **PRIVATE** (verified via `gh`).
-- **Version:** **v0.19.0** — released and committed (`123dfaa`, tag `v0.19.0`; HEAD == `origin/main`, working tree clean). Production `GET /api/health` verified live at **v0.19.0** (`deploymentReady:true`, `database:connected`, `missingEnvVars:[]`, 2026-09-19). The v0.16.0/v0.15.9 mentions in this snapshot are the pre-release checkpoint and are superseded by the v0.19.0 release. Checks at release: `pnpm check:whatsapp-onboarding` 22/22 + `pnpm check:whatsapp-transport` 27/27 + `pnpm check:meta-whatsapp` 17/17 + `pnpm check:whatsapp-inbound` 13/13 + `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm verify` green + `pnpm security` pass · single `main` branch, tags through `v0.19.0` (released and committed by the operator). **PROMPT-AI-03 WIRED 2026-09-16 — mapper → CORE-01 → CORE-02, zero mutation** · **Production RECONCILED + LIVE E2E VERIFIED** — deploy `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL`/`5xf4wjc5u` 0.15.9; 5 `WHATSAPP_META_*` set, webhook 200, `WhatsAppConnection e5e2e2f7`, inbound+idempotency+isolation+error taxonomy live-verified (PROMPT-OPS-06 §3/5/6/7–11).
+- **PROMPT WORKSPACE ARCHITECTURE — FINALIZED + RECONCILED
+  (PROMPT-OPS-AI-PROMPT-WORKSPACE-ARCHITECTURE-01 + finalize; DECISIONS #48;
+  shipped as release v0.19.1):** LLM prompt bodies are source-controlled
+  artifacts, not inline TypeScript. Chain:
+  `prompts/**/*.prompt` → `pnpm generate:ai-prompts` (deterministic
+  build-time compiler) → committed
+  `src/generated/ai-prompts.generated.ts` → `prompt-registry.ts`
+  (`getPromptBody`) → `buildPromptMessages()` (every adapter) +
+  `createAtriaAdapter()` (Atria-only augmentation). Two real bodies only:
+  `system.booking-assistant`, `providers.atria.json-output`. Registry holds
+  no bodies and throws on unknown/ungenerated ids (no silent fallback);
+  `--check` + `pnpm check:ai-prompts` prove registry ↔ files ↔ committed
+  artifact agree; `pnpm dev`/`pnpm build` regenerate first. **Semantic
+  preservation PROVEN:** both bodies are byte-identical to the removed
+  inline `[...lines].join(" ")` constants (1065 + 396 chars,
+  character-for-character), so NO AI/booking/availability/conversation/
+  provider/transport/Meta behavior changed. Deterministic classifier rules
+  (`booking-intent@v1` … `human-request@v1`) REMAIN CODE-OWNED in
+  `conversation-ai.ts` — not `.prompt` files, not in `PROMPT_REGISTRY`;
+  `docs/ai/PROMPTS.md` is a body-free catalog. Gates: `generate:ai-prompts
+--check` fresh, `check:ai-prompts` 101/101, `check:ai-provider` 63/63,
+  `check:atria-retry` 17/17, `check:conversation-booking` 16/16,
+  `verify` + `security` green. ZERO schema/migration changes. Canonical
+  boundary doc: `docs/ai/ARCHITECTURE.md → Prompt Workspace`.
+- **Version:** **v0.19.1** — released and committed (`04856ae`, tag
+  `v0.19.1`; HEAD == `origin/main`). Production `GET /api/health` was
+  verified live at **v0.19.0** (2026-09-19) in the pre-refactor ledger
+  entry; the v0.19.1 Prompt Workspace release is committed but **NOT yet
+  deployed** — deploying it is an operator action (prompt-text relocation +
+  generator/registry/doc wiring only; no migration, no behavior change).
+  The v0.16.0/v0.15.9 mentions in this snapshot are the pre-release
+  checkpoint and are superseded by the v0.19.0/v0.19.1 releases. Single
+  `main` branch, tags through `v0.19.1`. **PROMPT-AI-03 WIRED 2026-09-16 —
+  mapper → CORE-01 → CORE-02, zero mutation** · **Production RECONCILED +
+  LIVE E2E VERIFIED** (at the v0.15.9 checkpoint) — 5 `WHATSAPP_META_*` set,
+  webhook 200, `WhatsAppConnection e5e2e2f7`,
+  inbound+idempotency+isolation+error taxonomy live-verified
+  (PROMPT-OPS-06 §3/5/6/7–11).
 
-**Current next step (PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 COMPLETE — Business WhatsApp onboarding surface + read-only verification + TEST→REAL data-only replacement; 22/22 NEW + 27/27 + 17/17 + 13/13 + 16/16 + 29/29 + 106/106 + 29/29 + 32/32 + 18/18 + lint/typecheck/format/verify/security green; ZERO schema/migration/prompt/provider/booking changes; shipped as release **v0.19.0**):** the pilot readiness bottleneck is now closed — a Business Admin self-serves WhatsApp connection setup at `/settings/whatsapp`, the operator stores the per-connection token in the deployment environment, and the connection becomes live after read-only verification. PROMPT-AI-03/03B deterministic booking seam remains wired AND CLOSED; PROMPT-AI-02 policy-backed `ConversationAi` wired; CORE-01/02/03A/03B and the inbound/outbound transport boundaries remain IMPLEMENTED; WhatsApp live (DECISIONS #42/#46). Next: onboard the first REAL pilot Business end-to-end (operator provisions Business + invitation → ADMIN onboards WhatsApp number → operator sets `credentialsRef` env → ADMIN verifies → live messaging), then gather baseline/ROI evidence per `PRODUCT_STRATEGY.md`. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8) + optional Meta Embedded Signup dashboard configuration if self-serve token issuance is later wanted (documented operator prerequisite, NOT required for pilots). Shipped by the operator as release **v0.19.0** (`123dfaa`); the working tree is clean and ready for the next implementation slice.
+**Current next step (Prompt Workspace architecture FINALIZED + RECONCILED — DECISIONS #48; shipped as release v0.19.1; the only uncommitted work is this documentation/ledger reconciliation, which the operator reviews then `pnpm ship patch`):** the prompt layer is now source-controlled, generated, and drift-guarded — `/prompts/**/*.prompt` is the only prompt-body source of truth, `prompt-registry.ts` is the only runtime lookup boundary, and prompt semantics are provably unchanged (byte-identical bodies). PROMPT-AI-03/03B deterministic booking seam remains wired AND CLOSED; PROMPT-AI-02 policy-backed `ConversationAi` wired; PROMPT-AI-01 binding (DECISIONS #43) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42/#46). **Next major implementation slice: Meta Embedded Signup** (deferred by DECISIONS #47 — the code-side: redirect handling + server-side code exchange + state/CSRF + persisting `phone_number_id`/`credentialsRef` through the EXISTING `/settings/whatsapp` surface and `ConnectionVerifier` port; it is GATED on operator-owned external Meta App Dashboard configuration — app approval for WhatsApp Business login + registered redirect URI + client id/secret in deployment env — which is exactly why #47 did not fake it; it is a paired operator+code task). Then: onboarding the first REAL pilot Business end-to-end + Spec A/UX/pilot-readiness work, then Spec B instrumentation/economics only after pilot evidence justifies it. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8) + deploy the released head (production remains at v0.19.0).

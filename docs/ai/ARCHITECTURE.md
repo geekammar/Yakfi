@@ -99,6 +99,18 @@ Rules (binding, enforced by `pnpm check:ai-prompts`):
 - **One authoritative location.** `/prompts/**/*.prompt` is the only source
   of truth for an LLM instruction body. There is no second hidden source —
   not a Markdown file, not a DB row, not a constant in TypeScript.
+- **Relocation is not a semantic change.** The compile rule (drop blank and
+  `#`-comment lines, trim, join with a single space) was chosen so a
+  multi-line `.prompt` file compiles to the exact string the legacy
+  `[...lines].join(" ")` TypeScript constants produced. When the workspace
+  was introduced this was _proven_, not assumed: both bodies were extracted
+  from the pre-refactor release and compared character-for-character against
+  the compiled `.prompt` output (identical — 1065 and 396 chars). The
+  architectural guarantee it establishes is that a prompt edit is the ONLY
+  way to change LLM behavior — moving, reformatting, or regenerating prompt
+  text never does. A semantic change (priority, constraint, extraction
+  shape, handoff reason) requires a **new prompt id**, not an in-place
+  rewrite of a shipped one.
 - **No runtime filesystem access.** The runtime reads the generated
   artifact, so this works on Vercel/serverless. A stale or missing artifact
   is a build/check failure, never a silent fallback.

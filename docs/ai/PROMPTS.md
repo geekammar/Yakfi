@@ -29,6 +29,14 @@ The runtime never reads `/prompts/` at request time (Vercel/serverless). A
 stale or missing generated artifact fails the build and the check, never a
 silent runtime fallback.
 
+The compiler's rule is deliberately lossless for instruction text: blank and
+`#`-comment lines are dropped, each surviving line is trimmed, and the
+result is joined with a single space. That is exactly what the retired
+inline `[...lines].join(" ")` constants produced, so a `.prompt` file and the
+code it replaced are byte-identical by construction — regenerating,
+reordering, or relocating prompt text cannot change LLM behavior; only
+editing the instruction text can.
+
 ## Runtime LLM prompt bodies (source of truth: `/prompts/`)
 
 These are the only instruction bodies actually sent to an LLM.
