@@ -28,6 +28,7 @@ import {
   CheckCircleIcon,
   ChevronLeftIcon,
   LoaderCircleIcon,
+  MessageCircleIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -94,25 +95,45 @@ export function SettingsScreen({
 
       {/* Knowledge lives at its own route (PROMPT-18): a link, not a
           second form inside this feature. */}
-      <Link
-        href="/settings/knowledge"
-        className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      >
-        <div className="bg-muted text-muted-foreground flex size-11 shrink-0 items-center justify-center rounded-full">
-          <BookOpenIcon aria-hidden className="size-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="font-semibold">معلومات للمساعد</h2>
-          <p className="text-muted-foreground mt-0.5 text-sm leading-6">
-            الأسعار والسياسات والإجابات المتكررة التي سيستخدمها المساعد الذكي في
-            الردود.
-          </p>
-        </div>
-        <ChevronLeftIcon
-          aria-hidden
-          className="text-muted-foreground size-5 shrink-0 transition-transform group-hover:-translate-x-0.5"
-        />
-      </Link>
+      <div className="space-y-3">
+        <Link
+          href="/settings/whatsapp"
+          className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <div className="bg-muted text-muted-foreground flex size-11 shrink-0 items-center justify-center rounded-full">
+            <MessageCircleIcon aria-hidden className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold">واتساب</h2>
+            <p className="text-muted-foreground mt-0.5 text-sm leading-6">
+              ربط رقم واتساب الخاص بمنشأتك والتحقق من الاتصال.
+            </p>
+          </div>
+          <ChevronLeftIcon
+            aria-hidden
+            className="text-muted-foreground size-5 shrink-0 transition-transform group-hover:-translate-x-0.5"
+          />
+        </Link>
+        <Link
+          href="/settings/knowledge"
+          className="group flex items-center gap-4 rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <div className="bg-muted text-muted-foreground flex size-11 shrink-0 items-center justify-center rounded-full">
+            <BookOpenIcon aria-hidden className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold">معلومات للمساعد</h2>
+            <p className="text-muted-foreground mt-0.5 text-sm leading-6">
+              الأسعار والسياسات والإجابات المتكررة التي سيستخدمها المساعد الذكي
+              في الردود.
+            </p>
+          </div>
+          <ChevronLeftIcon
+            aria-hidden
+            className="text-muted-foreground size-5 shrink-0 transition-transform group-hover:-translate-x-0.5"
+          />
+        </Link>
+      </div>
 
       <form onSubmit={submit} className="space-y-8" noValidate>
         {/* ─── Section 1: بيانات المنشأة ─── */}

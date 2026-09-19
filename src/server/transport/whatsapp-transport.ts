@@ -311,6 +311,46 @@ export interface MessageTransport {
   send(message: OutboundMessage): Promise<TransportSendResult>;
 }
 
+// ─── Connection verification boundary ────────────────────────────────────────
+
+/**
+ * Provider-neutral, READ-ONLY connection verification (the onboarding
+ * "is this connection usable?" check). A provider adapter probes its
+ * own provider with the connection's credential reference and reports
+ * the normalized outcome — it MUST NOT send any customer-facing
+ * message. Meta concepts (Graph endpoints, HTTP statuses) never cross
+ * this boundary; only the normalized result below does.
+ */
+export type ConnectionVerificationResult =
+  | {
+      ok: true;
+      /** The provider's own connection id echoed back (e.g. Meta
+       *  `phone_number_id`) — confirms the stored externalId is real. */
+      verifiedExternalId: string;
+      /** Provider-side display number for the connection (non-secret). */
+      displayPhoneNumber?: string;
+      /** Provider-side verified name (non-secret). */
+      verifiedName?: string;
+    }
+  | {
+      ok: false;
+      /** Normalized failure category — never an HTTP status. */
+      code: "INVALID_CREDENTIALS" | "INVALID_CONNECTION" | "UNREACHABLE";
+      message: string;
+    };
+
+export interface ConnectionVerifier {
+  readonly providerName: string;
+  verify(params: {
+    /** The connection's provider-side stable identity (Meta
+     *  `phone_number_id`). Required — identity is authoritative. */
+    externalId: string;
+    /** Credential REFERENCE (env-var name) — the adapter resolves the
+     *  secret server-side; the value itself never crosses this call. */
+    credentialsRef?: string | null;
+  }): Promise<ConnectionVerificationResult>;
+}
+
 // ─── Connection / tenant resolution boundary ─────────────────────────────────
 
 /** Canonical phone form for the number-mapping lookups (digits + leading +). */

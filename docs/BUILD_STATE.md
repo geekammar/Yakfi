@@ -6,10 +6,34 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01 — Production WhatsApp inbound break isolated to three layers and FIXED in the worktree (DECISIONS #46): (a) Production `POST /api/whatsapp/meta` received ZERO Meta deliveries in the retained log window and the Production DB has zero real inbound rows (the message never reached the endpoint); (b) the Meta adapter discarded `phone_number_id` and resolved the tenant by `display_phone_number` exact-match against `Business.whatsappNumber`, which cannot match the real connected identity; (c) `defaultConversationEngineDeps.transport` was `offlineMessageTransport` (Production `usage_records`: `OUTBOUND_MESSAGE provider=offline`), so no reply could ever leave FlowPilot. Fix: provider-identity inbound resolution (`recipientProviderId` → `WhatsAppConnection.externalId` → Business/Branch, phone-mapping fallback), server-resolved identity threaded into the engine (in-process only), `OutboundMessage.businessId` required, and the Meta transport wired for the Meta route only. Harnesses: `pnpm check:whatsapp-inbound` 13/13 (new), `check:whatsapp-transport` 27/27, `check:meta-whatsapp` 17/17; `pnpm verify`/`security` green; ZERO schema changes; worktree uncommitted, operator owns `pnpm ship`. Prior: PROMPT-AI-03B close-the-loop COMPLETE (`pnpm check:booking-confirm` 18/18); PROMPT-AI-03/02/01 + CORE-01/02/03A/03B remain IMPLEMENTED.
+> Last updated: PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27 — the repeatable Business WhatsApp onboarding path landed (DECISIONS #47): a Business Admin can now connect/configure/verify/activate a WhatsApp number through `/settings/whatsapp` (new `src/features/whatsapp-connection` + settings sub-route, ADMIN-only, server-derived Business scope, `externalId`/`phone_number_id` authoritative, `credentialsRef` env-var-NAME only, read-only `ConnectionVerifier` verification that never sends a message, duplicate externalId protection, masked id display, TEST→REAL replacement through data only). Meta Embedded Signup is deliberately NOT implemented (operator prerequisite; boundary + prerequisites documented). `pnpm check:whatsapp-onboarding` 22/22 NEW; existing checks unchanged (`whatsapp-transport` 27/27, `meta-whatsapp` 17/17, `whatsapp-inbound` 13/13, eligibility 29/29, booking-options 32/32, booking-confirm 18/18, conversation-booking 16/16); `pnpm verify`/`security` green; ZERO schema/migration changes; removed 5 leftover untracked task-26 forensic scripts that broke the typecheck gate; worktree uncommitted, operator owns `pnpm ship`. Prior: PROMPT-OPS-WHATSAPP-INBOUND-DEBUG-01 inbound identity fix; PROMPT-AI-03B close-the-loop COMPLETE; PROMPT-AI-03/02/01 + CORE-01/02/03A/03B remain IMPLEMENTED.
 > Product version: **v0.16.0** (package.json 0.16.0 worktree — Production `GET /api/health` remains v0.15.9 `dpl_BAVArqTcusNyPRj3PrTibSAhjuyL` until `pnpm ship`; see Ops State).
 
 ## Current State (summary)
+
+**Business WhatsApp Connection Onboarding is IMPLEMENTED
+(PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27; DECISIONS #47):** the
+repeatable pilot setup surface — a Business Admin connects/configures a
+WhatsApp number, verifies it read-only, and activates it, all through
+`/settings/whatsapp` (new feature `src/features/whatsapp-connection` +
+settings sub-route linked from `/settings`). ADMIN-only with the Business
+derived server-side from the authenticated actor (never client input);
+`externalId` (Meta `phone_number_id`) is the authoritative identity;
+`credentialsRef` is an environment-variable NAME only (raw-token shape
+rejected by Zod); the read-only `ConnectionVerifier` port (transport
+boundary) + Meta adapter `meta-verify.ts` prove the connection is usable
+via a single `GET /{apiVersion}/{phone_number_id}` — NO customer message
+is ever sent; duplicate `externalId` protection is service-layer
+(DECISIONS #23 check-then-create); the EXISTING status model is reused
+(PENDING/CONNECTED/DISCONNECTED + isActive — no parallel state system);
+the UI shows only non-secret identifiers with a MASKED `phone_number_id`.
+TEST→REAL replacement is data-only (Business Admin saves the real id +
+per-connection `credentialsRef`; operator stores the token in the
+deployment env; verify → CONNECTED → resolvable by the unchanged engine).
+Meta Embedded Signup is deliberately NOT implemented (needs external
+Meta dashboard/app config — operator prerequisites documented, nothing
+faked). Proven by `pnpm check:whatsapp-onboarding` 22/22; ZERO
+schema/migration changes.
 
 **Spec A — Discovery Foundation + Booking Core** (frozen scope: `SPEC_A.md`)
 is **implemented and verified through PROMPT-19**. All Spec A screens exist:
@@ -184,7 +208,7 @@ the PROMPT-OPS-02 row). The two real
 provider integrations (WhatsApp transport, LLM) remain pending operator
 decisions (DECISIONS #29).
 
-**Quality:** `PROMPT-AI-03` verified 2026-09-16 — `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`). `PROMPT-AI-03B` re-verified 2026-09-16 — `pnpm check:booking-confirm` 18/18 + `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema changes.
+**Quality:** `PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27` verified — `pnpm check:whatsapp-onboarding` 22/22 (NEW) + `check:whatsapp-transport` 27/27 + `check:meta-whatsapp` 17/17 + `check:whatsapp-inbound` 13/13 + `check:eligibility` 29/29 + `check:booking-options` 32/32 + `check:booking-confirm` 18/18 + `check:conversation-booking` 16/16 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema/migration changes. Prior `PROMPT-AI-03B` verified 2026-09-16 — `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`). `PROMPT-AI-03B` re-verified 2026-09-16 — `pnpm check:booking-confirm` 18/18 + `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema changes.
 
 ## Completed Major Work
 

@@ -75,6 +75,12 @@ export class WhatsAppConnectionRepository {
   ): Promise<WhatsAppConnection | null> {
     const existing = await this.findByIdWithinBusiness(id, businessId);
     if (!existing) return null;
-    return db.whatsAppConnection.update({ where: { id }, data: input });
+    // `branchId` is handled like `create` (null = leave untouched; a
+    // relation update needs an explicit value or omission, never null).
+    const { branchId, ...rest } = input;
+    return db.whatsAppConnection.update({
+      where: { id },
+      data: { ...rest, ...(branchId != null ? { branchId } : {}) },
+    });
   }
 }

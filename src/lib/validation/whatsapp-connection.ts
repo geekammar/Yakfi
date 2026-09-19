@@ -47,6 +47,8 @@ const updateWhatsAppConnectionSchema = z
   .object({
     branchId: uuidSchema.nullish(),
     displayName: z.string().trim().min(1).max(120).nullish(),
+    // Non-nullable column: optional (skip) but never null.
+    phoneNumber: phoneSchema.optional(),
     provider: z.string().trim().min(1).max(64).nullish(),
     externalId: z.string().trim().min(1).max(256).nullish(),
     status: whatsappConnectionStatusSchema,

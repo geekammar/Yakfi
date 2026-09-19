@@ -99,6 +99,49 @@ Notes:
 | `WHATSAPP_META_PHONE_NUMBER_ID` | unset   | Fallback Meta `phone_number_id` for outbound send URL (`/{version}/{phone_number_id}/messages`). Server-side. Optional — per-connection `WhatsAppConnection.externalId` is preferred when present.                                                                                                                                                                         |
 | `WHATSAPP_META_API_VERSION`     | `v21.0` | Graph API version (e.g. `v21.0`) — `https://graph.facebook.com/{version}/{phone_number_id}/messages`. Optional; `v21.0` when unset.                                                                                                                                                                                                                                        |
 
+## Per-Business WhatsApp Connections (pilot onboarding)
+
+A Business Admin connects a WhatsApp number at `/settings/whatsapp`
+(DECISIONS #47). The connection row stores a `credentialsRef` — the
+NAME of the environment variable holding that Business's permanent Meta
+access token (the raw token is NEVER stored in the database; the Zod
+input rejects anything that is not an env-var-name shape). Naming
+convention for per-connection secrets:
+
+| Variable (example name)              | Purpose                                                                                                                                                                                                                          |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WHATSAPP_META_TOKEN_<BUSINESS_KEY>` | A Business's own permanent Meta access token (`Bearer` for Graph API reads + sends). The Business Admin enters this NAME in `/settings/whatsapp`; the operator stores the VALUE in the deployment environment. Server-side only. |
+
+`WHATSAPP_META_ACCESS_TOKEN` remains the system-level fallback for the
+single TEST connection; a per-connection `credentialsRef` always wins.
+Replacing the TEST connection with a real Business connection is DATA
+ONLY — no code change, no booking/conversation-engine change:
+
+1. Business Admin saves the connection at `/settings/whatsapp` (display
+   number + real `phone_number_id` + `credentialsRef` name).
+2. Operator stores the Business's permanent access token in the
+   deployment environment under that exact name (Vercel → redeploy).
+3. Business Admin presses «تحقق من الاتصال» — a read-only
+   `GET /{apiVersion}/{phone_number_id}` (NO message is sent). On
+   success the connection becomes `CONNECTED` and is immediately
+   resolvable inbound/outbound by `phone_number_id`.
+
+### Operator-only Meta prerequisites (cannot be done from code)
+
+- A Meta App with the WhatsApp product enabled and a WhatsApp Business
+  Account; the phone number registered and verified.
+- A **permanent** access token with the `whatsapp_business_messaging`
+  permission (a temporary token expiry silently breaks the connection —
+  verification demotes it to `PENDING` rather than claiming connected).
+- Webhook subscription (`/api/whatsapp/meta`) with the App Secret and
+  the verify token set in the deployment environment.
+- **Meta Embedded Signup (in-app onboarding) is NOT implemented**: it
+  requires external Meta dashboard/application configuration (app review
+  state, redirect URIs, a server-side code-exchange step) that cannot be
+  safely completed from code alone. Only the application-side contract
+  (the `ConnectionVerifier` port + the `/settings/whatsapp` surface) is
+  implemented; nothing is faked and no unsupported API is invented.
+
 ## Optional Platform Variables (provided by Vercel, informational)
 
 | Variable     | Provided by Vercel        | FlowPilot usage                                              |
