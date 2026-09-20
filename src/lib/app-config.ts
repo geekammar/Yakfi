@@ -55,6 +55,7 @@ export const STAFF_NAV_ITEMS: NavItem[] = [
  */
 export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/platform", label: "نظرة عامة", icon: "home" },
+  { href: "/platform/businesses", label: "المنشآت", icon: "building" },
   { href: "/platform/invitations", label: "دعوات الملاك", icon: "mail" },
   { href: "/platform/ai-policy", label: "سياسة الذكاء", icon: "settings" },
 ];

@@ -19,10 +19,12 @@ import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
 import { PlatformInvitationRepository } from "./platform-invitation.repository";
 import { ProviderRepository } from "./provider.repository";
+import { RuntimeCredentialRepository } from "./runtime-credential.repository";
 import { ServiceRepository } from "./service.repository";
 import { UsageRepository } from "./usage.repository";
 import { UserRepository } from "./user.repository";
 import { WhatsAppConnectionRepository } from "./whatsapp-connection.repository";
+import { WhatsAppOnboardingAuthorizationRepository } from "./whatsapp-onboarding-authorization.repository";
 
 export const businessRepository = new BusinessRepository();
 export const userRepository = new UserRepository();
@@ -33,11 +35,14 @@ export const appointmentRepository = new AppointmentRepository();
 export const invitationRepository = new InvitationRepository();
 export const branchRepository = new BranchRepository();
 export const whatsAppConnectionRepository = new WhatsAppConnectionRepository();
+export const whatsAppOnboardingAuthorizationRepository =
+  new WhatsAppOnboardingAuthorizationRepository();
 export const providerRepository = new ProviderRepository();
 export const inboundDedupeRepository = new InboundDedupeRepository();
 export const usageRepository = new UsageRepository();
 export const platformInvitationRepository = new PlatformInvitationRepository();
 export const aiPolicyRepository = new AiPolicyRepository();
+export const runtimeCredentialRepository = new RuntimeCredentialRepository();
 
 export {
   AppointmentRepository,
@@ -50,8 +55,10 @@ export {
   InvitationRepository,
   PlatformInvitationRepository,
   ProviderRepository,
+  RuntimeCredentialRepository,
   ServiceRepository,
   UsageRepository,
   UserRepository,
   WhatsAppConnectionRepository,
+  WhatsAppOnboardingAuthorizationRepository,
 };

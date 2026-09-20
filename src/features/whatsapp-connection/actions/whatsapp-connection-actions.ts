@@ -12,9 +12,14 @@ import type {
   WhatsAppConnectionActionResult,
   WhatsAppVerificationResult,
 } from "@/features/whatsapp-connection/types";
+import { refreshWhatsAppOnboardingReadiness } from "@/features/whatsapp-onboarding/server/whatsapp-onboarding-service";
+import type { WhatsAppOnboardingActor } from "@/features/whatsapp-onboarding/types";
 import { requireUser } from "@/server/auth/guards";
 import { createDefaultMetaConnectionVerifier } from "@/server/integrations/whatsapp/meta-verify";
-import { userRepository } from "@/server/repositories";
+import {
+  userRepository,
+  whatsAppConnectionRepository,
+} from "@/server/repositories";
 
 import { revalidatePath } from "next/cache";
 
@@ -33,6 +38,17 @@ async function currentActor(): Promise<WhatsAppConnectionActor> {
     // with no Business can never touch a WhatsApp connection.
     role: user?.role ?? "STAFF",
     businessId: user?.businessId ?? null,
+  };
+}
+
+/** The same authenticated context, typed for the onboarding service. */
+function onboardingActor(
+  actor: WhatsAppConnectionActor,
+): WhatsAppOnboardingActor {
+  return {
+    userId: actor.userId,
+    role: actor.role,
+    businessId: actor.businessId,
   };
 }
 
@@ -65,12 +81,23 @@ export async function saveWhatsAppConnectionAction(
 export async function verifyWhatsAppConnectionAction(
   connectionId: string,
 ): Promise<WhatsAppVerificationResult> {
-  const result = await verifyConnection(
-    deps(),
-    await currentActor(),
-    connectionId,
-  );
-  if (result.success) revalidateConnectionSurfaces();
+  const actor = await currentActor();
+  const result = await verifyConnection(deps(), actor, connectionId);
+  if (result.success) {
+    // A successful read-only verification is the ONLY path that
+    // establishes operational readiness, so it also completes the
+    // onboarding lifecycle when a provider authorization exists. The
+    // onboarding write is guarded (CONNECTED + active + a
+    // post-authorization state) and never affects the runtime gate.
+    await refreshWhatsAppOnboardingReadiness(
+      {
+        connectionRepository: whatsAppConnectionRepository,
+        now: () => new Date(),
+      },
+      onboardingActor(actor),
+    );
+    revalidateConnectionSurfaces();
+  }
   return result;
 }
 

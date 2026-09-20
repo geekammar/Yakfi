@@ -7,9 +7,16 @@ import {
 } from "@/features/onboarding/schemas/onboarding-schema";
 import { getOnboardingProgress } from "@/features/onboarding/server/onboarding-progress";
 import type { ReviewSummary } from "@/features/onboarding/types";
+import { WhatsAppOnboardingStatus } from "@/features/whatsapp-onboarding/components/whatsapp-onboarding-status";
+import { getOnboardingStatus } from "@/features/whatsapp-onboarding/server/whatsapp-onboarding-service";
+import type { WhatsAppOnboardingActor } from "@/features/whatsapp-onboarding/types";
 import { VERTICAL_LABELS, verticalSchema } from "@/lib/validation";
 import { requireUser } from "@/server/auth/guards";
-import { businessRepository } from "@/server/repositories";
+import {
+  businessRepository,
+  userRepository,
+  whatsAppConnectionRepository,
+} from "@/server/repositories";
 
 import { redirect } from "next/navigation";
 
@@ -49,6 +56,20 @@ export default async function OnboardingReviewPage() {
     cancellationPolicy: business.cancellationPolicy ?? "",
   };
 
+  // NON-BLOCKING WhatsApp status/CTA (WHATSAPP-ONBOARDING-01): the
+  // lifecycle is surfaced here, but it NEVER gates onboarding completion
+  // — `/settings/whatsapp` stays the canonical connection surface.
+  const user = await userRepository.findById(session.user.id);
+  const onboardingActor: WhatsAppOnboardingActor = {
+    userId: session.user.id,
+    role: user?.role ?? "STAFF",
+    businessId: business.id,
+  };
+  const whatsappStatus = await getOnboardingStatus(
+    { connectionRepository: whatsAppConnectionRepository },
+    onboardingActor,
+  );
+
   return (
     <div className="animate-fade-in-up space-y-8">
       <StepHeader
@@ -56,6 +77,7 @@ export default async function OnboardingReviewPage() {
         description="راجع بياناتك قبل الانطلاق — يمكنك تعديل أي خطوة، ثم شغّل منشأتك."
       />
       <ReviewCard summary={summary} />
+      <WhatsAppOnboardingStatus status={whatsappStatus} />
     </div>
   );
 }

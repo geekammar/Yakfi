@@ -60,9 +60,46 @@ const serverEnvSchema = z.object({
     emptyToUndefined,
     z.string().min(1).optional(),
   ),
+  WHATSAPP_META_APP_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
+  /**
+   * Meta Embedded Signup configuration id (WHATSAPP-ONBOARDING-01;
+   * DECISIONS #47) — the `config_id` the Meta App's Embedded Signup
+   * configuration is launched against. Server-side CONFIGURATION
+   * METADATA: non-secret, but operator-owned (created in the Meta App
+   * Dashboard) and never embedded in a client bundle. Optional at boot
+   * — no code path requires it to start; it is a prerequisite of the
+   * real Meta adapter, which falls back to the deterministic stand-in
+   * while it is unset (never an invented value).
+   */
+  WHATSAPP_META_EMBEDDED_SIGNUP_CONFIG_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
   WHATSAPP_META_API_VERSION: z.preprocess(
     emptyToUndefined,
     z.string().min(1).optional(),
+  ),
+  /**
+   * RUNTIME credential store master encryption key (WHATSAPP-ONBOARDING-01;
+   * DECISIONS #49). OPTIONAL: while it is unset, the runtime credential
+   * store stays UNAVAILABLE (every store/resolve of a `fp:<id>` reference
+   * fails closed) and the existing ENV reference grammar is completely
+   * unaffected — so the app boots and runs without it.
+   *
+   * It is the ONLY place the plaintext-encryption key lives: never stored
+   * in the database, never logged, never returned by an API, never
+   * projected to the platform UI, and never prefixed with NEXT_PUBLIC_.
+   * Value = 32 random bytes encoded as hex (64 chars) or base64 (44 chars);
+   * the exact 32-byte decode is enforced lazily by the credential store
+   * (a malformed key reports a safe error and never echoes the value).
+   * Rotation is a later operational concern (see cipher `key_version`).
+   */
+  CREDENTIAL_MASTER_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32).optional(),
   ),
 });
 
@@ -81,7 +118,11 @@ const parsedServer = serverEnvSchema.safeParse({
   WHATSAPP_META_APP_SECRET: process.env.WHATSAPP_META_APP_SECRET,
   WHATSAPP_META_ACCESS_TOKEN: process.env.WHATSAPP_META_ACCESS_TOKEN,
   WHATSAPP_META_PHONE_NUMBER_ID: process.env.WHATSAPP_META_PHONE_NUMBER_ID,
+  WHATSAPP_META_APP_ID: process.env.WHATSAPP_META_APP_ID,
+  WHATSAPP_META_EMBEDDED_SIGNUP_CONFIG_ID:
+    process.env.WHATSAPP_META_EMBEDDED_SIGNUP_CONFIG_ID,
   WHATSAPP_META_API_VERSION: process.env.WHATSAPP_META_API_VERSION,
+  CREDENTIAL_MASTER_KEY: process.env.CREDENTIAL_MASTER_KEY,
 });
 
 if (!parsedServer.success) {

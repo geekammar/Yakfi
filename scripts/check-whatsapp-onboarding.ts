@@ -86,6 +86,21 @@ type StoredConnection = {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Onboarding lifecycle (separate from the operational gate)
+  onboardingState: string;
+  onboardingActor: string;
+  onboardingReasonCode: string | null;
+  onboardingReasonSummary: string | null;
+  onboardingRetryable: boolean | null;
+  onboardingStateChangedAt: Date | null;
+  onboardingCompletedAt: Date | null;
+  onboardingFailedAt: Date | null;
+  credentialKind: string | null;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  metaBusinessId: string | null;
+  wabaId: string | null;
+  metaReviewStatus: string | null;
 };
 
 async function main(): Promise<void> {
@@ -128,6 +143,23 @@ async function main(): Promise<void> {
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
+        onboardingState: (input.onboardingState as string) ?? "NOT_STARTED",
+        onboardingActor: (input.onboardingActor as string) ?? "NONE",
+        onboardingReasonCode:
+          (input.onboardingReasonCode as string | null) ?? null,
+        onboardingReasonSummary:
+          (input.onboardingReasonSummary as string | null) ?? null,
+        onboardingRetryable:
+          (input.onboardingRetryable as boolean | null) ?? null,
+        onboardingStateChangedAt: null,
+        onboardingCompletedAt: null,
+        onboardingFailedAt: null,
+        credentialKind: (input.credentialKind as string | null) ?? null,
+        displayPhoneNumber: null,
+        verifiedName: null,
+        metaBusinessId: null,
+        wabaId: null,
+        metaReviewStatus: null,
       };
       rows.set(id, row);
       return row;
@@ -157,6 +189,35 @@ async function main(): Promise<void> {
       [...rows.values()]
         .filter((row) => row.businessId === businessId && !row.deletedAt)
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    findPrimaryByBusiness: async (businessId: string) =>
+      [...rows.values()]
+        .filter((row) => row.businessId === businessId && !row.deletedAt)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] ??
+      null,
+    listByBusinessIds: async (businessIds: string[]) =>
+      [...rows.values()]
+        .filter((row) => businessIds.includes(row.businessId) && !row.deletedAt)
+        .sort((a, b) => a.businessId.localeCompare(b.businessId)),
+    // THE only path to onboarding READY — the fake mirrors the real
+    // conditional update so the invariant is proven here too.
+    markOnboardingReady: async (id: string, businessId: string) => {
+      const row = rows.get(id);
+      if (!row || row.businessId !== businessId || row.deletedAt) return null;
+      if (row.status !== "CONNECTED" || !row.isActive) return null;
+      const ready = new Date();
+      Object.assign(row, {
+        onboardingState: "READY",
+        onboardingActor: "FLOWPILOT",
+        onboardingReasonCode: null,
+        onboardingReasonSummary: null,
+        onboardingRetryable: null,
+        onboardingStateChangedAt: ready,
+        onboardingCompletedAt: ready,
+        onboardingFailedAt: null,
+        updatedAt: ready,
+      });
+      return row;
+    },
   };
 
   /**
@@ -643,6 +704,944 @@ async function main(): Promise<void> {
       hostileRow?.isActive === true,
   );
 
+  // ════════════════════════════════════════════════════════════════════
+  // WHATSAPP-ONBOARDING-01 — the separate onboarding lifecycle
+  // (NOT_STARTED → AUTHORIZING → PROVISIONING → READY / FAILED /
+  // ACTION_REQUIRED), the provider-neutral authorization port, the
+  // authorization ledger, the credentials reference boundary, and the
+  // Super Admin read projection. All deps stay in-memory: no DB, no
+  // network, no real provider call, no secret.
+  // ════════════════════════════════════════════════════════════════════
+
+  const onboardingFeature =
+    await import("../src/features/whatsapp-onboarding/server/whatsapp-onboarding-service");
+  const failureModule =
+    await import("../src/features/whatsapp-onboarding/server/onboarding-failure");
+  const deterministic =
+    await import("../src/features/whatsapp-onboarding/server/deterministic-connection-authorizer");
+  const credentialsModule =
+    await import("../src/server/credentials/credentials-resolver");
+  const platformService =
+    await import("../src/features/platform/server/business-onboarding-service");
+
+  const fixedNow = new Date("2026-09-19T10:00:00.000Z");
+  let stateRefSeq = 0;
+  const nextStateRef = () =>
+    `state-ref-${String(++stateRefSeq).padStart(3, "0")}`;
+
+  // ── in-memory authorization ledger + businesses/users fakes ───────
+  type StoredAuthorization = {
+    id: string;
+    businessId: string;
+    connectionId: string;
+    stateRef: string;
+    expiresAt: Date;
+    consumedAt: Date | null;
+  };
+  const authorizations = new Map<string, StoredAuthorization>();
+  type StoredBusiness = {
+    id: string;
+    name: string;
+    vertical: string | null;
+    city: string | null;
+    whatsappNumber: string;
+    timezone: string;
+    about: string | null;
+    workingHours: null;
+    slotDurationMinutes: number;
+    confirmationMode: string;
+    faqs: null;
+    cancellationPolicy: string | null;
+    onboardingCompletedAt: Date | null;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    deletedAt: Date | null;
+    defaultBranchId: string | null;
+  };
+  const makeBusiness = (input: {
+    id: string;
+    name: string;
+    whatsappNumber: string;
+  }): StoredBusiness => ({
+    id: input.id,
+    name: input.name,
+    vertical: "beauty",
+    city: "الرياض",
+    whatsappNumber: input.whatsappNumber,
+    timezone: "Asia/Riyadh",
+    about: null,
+    workingHours: null,
+    slotDurationMinutes: 30,
+    confirmationMode: "manual",
+    faqs: null,
+    cancellationPolicy: null,
+    onboardingCompletedAt: fixedNow,
+    isActive: true,
+    createdAt: fixedNow,
+    updatedAt: fixedNow,
+    deletedAt: null,
+    defaultBranchId: null,
+  });
+  const businesses = new Map<string, StoredBusiness>();
+  businesses.set(
+    BUSINESS_A,
+    makeBusiness({
+      id: BUSINESS_A,
+      name: "منشأة أ",
+      whatsappNumber: TEST_PHONE,
+    }),
+  );
+  businesses.set(
+    BUSINESS_B,
+    makeBusiness({
+      id: BUSINESS_B,
+      name: "منشأة ب",
+      whatsappNumber: "+201003344556",
+    }),
+  );
+  const users = new Map<
+    string,
+    {
+      id: string;
+      businessId: string;
+      name: string;
+      email: string;
+    }
+  >();
+  users.set("user-a", {
+    id: "user-a",
+    businessId: BUSINESS_A,
+    name: "مدير أ",
+    email: "admin-a@example.com",
+  });
+  users.set("user-b", {
+    id: "user-b",
+    businessId: BUSINESS_B,
+    name: "مدير ب",
+    email: "admin-b@example.com",
+  });
+
+  const authorizationRepo = {
+    create: async (input: {
+      businessId: string;
+      connectionId: string;
+      stateRef: string;
+      expiresAt: Date;
+    }) => {
+      const record: StoredAuthorization = {
+        id: newId(),
+        businessId: input.businessId,
+        connectionId: input.connectionId,
+        stateRef: input.stateRef,
+        expiresAt: input.expiresAt,
+        consumedAt: null,
+      };
+      authorizations.set(record.stateRef, record);
+      return record;
+    },
+    findActiveByConnection: async (connectionId: string) => {
+      for (const record of authorizations.values()) {
+        if (
+          record.connectionId === connectionId &&
+          !record.consumedAt &&
+          record.expiresAt.getTime() > fixedNow.getTime()
+        ) {
+          return record;
+        }
+      }
+      return null;
+    },
+    findByStateRef: async (stateRef: string) =>
+      authorizations.get(stateRef) ?? null,
+    consume: async (
+      stateRef: string,
+      businessId: string,
+      connectionId: string,
+    ) => {
+      const record = authorizations.get(stateRef);
+      if (
+        !record ||
+        record.businessId !== businessId ||
+        record.connectionId !== connectionId ||
+        record.consumedAt ||
+        record.expiresAt.getTime() <= fixedNow.getTime()
+      ) {
+        return false;
+      }
+      record.consumedAt = fixedNow;
+      return true;
+    },
+  };
+
+  const onboardingDeps = (options?: {
+    outcome?: "success" | "action_required" | "unreachable" | "declined";
+    credentialKind?: "ENV" | "RUNTIME";
+    externalId?: string;
+  }) => ({
+    connectionRepository: repo,
+    authorizationRepository: authorizationRepo,
+    businessRepository: {
+      findById: async (id: string) => businesses.get(id) ?? null,
+      listForPlatform: async (input: {
+        search?: string | null;
+        limit: number;
+        offset: number;
+      }) =>
+        [...businesses.values()]
+          .filter((business) => !business.deletedAt)
+          .filter((business) =>
+            input.search
+              ? business.name.includes(input.search) ||
+                business.whatsappNumber.includes(input.search)
+              : true,
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(input.offset, input.offset + input.limit),
+      countForPlatform: async (input: { search?: string | null }) =>
+        [...businesses.values()]
+          .filter((business) => !business.deletedAt)
+          .filter((business) =>
+            input.search
+              ? business.name.includes(input.search) ||
+                business.whatsappNumber.includes(input.search)
+              : true,
+          ).length,
+    },
+    authorizer: deterministic.createDeterministicConnectionAuthorizer({
+      outcome: options?.outcome ?? "success",
+      credentialKind: options?.credentialKind ?? "ENV",
+      externalId: options?.externalId,
+      generateStateRef: nextStateRef,
+    }),
+    generateStateRef: nextStateRef,
+    now: () => fixedNow,
+  });
+
+  const platformDeps = {
+    businesses: {
+      findById: async (id: string) => businesses.get(id) ?? null,
+      listForPlatform: async (input: {
+        search?: string | null;
+        limit: number;
+        offset: number;
+      }) =>
+        [...businesses.values()]
+          .filter((business) => !business.deletedAt)
+          .filter((business) =>
+            input.search
+              ? business.name.includes(input.search) ||
+                business.whatsappNumber.includes(input.search)
+              : true,
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(input.offset, input.offset + input.limit),
+      countForPlatform: async (input: { search?: string | null }) =>
+        [...businesses.values()]
+          .filter((business) => !business.deletedAt)
+          .filter((business) =>
+            input.search
+              ? business.name.includes(input.search) ||
+                business.whatsappNumber.includes(input.search)
+              : true,
+          ).length,
+    },
+    connections: {
+      listByBusinessIds: repo.listByBusinessIds,
+      findPrimaryByBusiness: repo.findPrimaryByBusiness,
+    },
+    users: {
+      findAdminsByBusinesses: async (businessIds: string[]) =>
+        [...users.values()].filter((user) =>
+          businessIds.includes(user.businessId),
+        ),
+      findAdminByBusiness: async (businessId: string) =>
+        [...users.values()].find((user) => user.businessId === businessId) ??
+        null,
+    },
+  };
+
+  /**
+   * Synchronous read of a Business's onboarding connection (the repo
+   * methods stay async because the service deps require Promises).
+   */
+  const rowOf = (businessId: string): StoredConnection | null =>
+    [...rows.values()]
+      .filter((row) => row.businessId === businessId && !row.deletedAt)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0] ?? null;
+
+  /**
+   * Narrows a BEGIN result to its launched variant (the ALREADY_READY
+   * variant carries no stateRef).
+   */
+  const launchedStateRef = (
+    result: import("../src/features/whatsapp-onboarding/types").BeginWhatsAppOnboardingResult,
+  ): string => (result.success && result.launched ? result.stateRef : "");
+
+  const PLATFORM_OPERATOR = { userId: "operator-1", accountType: "PLATFORM" };
+  const BUSINESS_ACTOR = { userId: "user-business", accountType: "BUSINESS" };
+
+  // A second Business with its own (not-yet-onboarded) connection: the
+  // neighbor that the isolation, gate, and duplicate-identity checks
+  // exercise. Established BEFORE the checks so those guards actually
+  // run instead of being silently skipped.
+  const businessBConnection = await repo.create({
+    businessId: BUSINESS_B,
+    branchId: null,
+    phoneNumber: "+201003344556",
+    provider: "meta-whatsapp",
+    externalId: null,
+    credentialsRef: null,
+    status: "PENDING",
+    onboardingState: "NOT_STARTED",
+    onboardingActor: "NONE",
+  });
+  void businessBConnection;
+
+  // NOTE: the lifecycle progression runs against BUSINESS_B. BUSINESS_A
+  // was already operationally CONNECTED by the manual-pilot checks above
+  // (that is what proves the operational gate); the onboarding lifecycle
+  // needs a connection that has NOT been verified yet, otherwise the
+  // AUTHORIZING → PROVISIONING → READY progression could be shortcut by
+  // an already-connected row.
+  const beginA = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const connectionA = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: BEGIN ينشئ اتصالاً للمنشأة وينقل الحالة إلى AUTHORIZING",
+    beginA.success &&
+      "launched" in beginA &&
+      beginA.launched === true &&
+      beginA.resumed === false &&
+      Boolean(beginA.authorizationUrl) &&
+      connectionA?.onboardingState === "AUTHORIZING" &&
+      connectionA?.onboardingActor === "CUSTOMER",
+  );
+  const ledgerRowAwaited = await authorizationRepo.findByStateRef(
+    launchedStateRef(beginA),
+  );
+  check(
+    "ONBOARDING: مسار التفويض مُسجّل خادمياً (stateRef → منشأة + اتصال)",
+    Boolean(ledgerRowAwaited) &&
+      ledgerRowAwaited?.businessId === BUSINESS_B &&
+      ledgerRowAwaited?.consumedAt === null,
+  );
+
+  // ── O2. authorization scope isolation ──────────────────────────────
+  const staffBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    STAFF_A,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const noBizBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    ADMIN_NO_BIZ,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  check(
+    "ONBOARDING: STAFF ومدير بلا منشأة لا يستطيعان بدء الربط",
+    !staffBegin.success && !noBizBegin.success,
+  );
+
+  // ── O1. NOT_STARTED → AUTHORIZING (BEGIN) ──────────────────────────
+  // (see the NOTE above: this is the AUTHORIZING entry point)
+
+  // ── O3. AUTHORIZING → PROVISIONING (CALLBACK) ──────────────────────
+  const callbackA = await onboardingFeature.handleWhatsAppAuthorizationCallback(
+    onboardingDeps(),
+    {
+      stateRef: launchedStateRef(beginA),
+      code: "fp-deterministic-authorization-code",
+      redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+    },
+  );
+  const provisionedA = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: CALLBACK يُفعّل التجهيز (PROVISIONING) ويُثبت هوية المزوّد",
+    callbackA.success &&
+      provisionedA?.onboardingState !== "AUTHORIZING" &&
+      Boolean(provisionedA?.externalId) &&
+      Boolean(provisionedA?.credentialsRef) &&
+      provisionedA?.provider === "meta-whatsapp" &&
+      provisionedA?.metaBusinessId !== null &&
+      provisionedA?.wabaId !== null &&
+      provisionedA?.metaReviewStatus === "approved",
+  );
+
+  // ── O4. READY only through the operational verification path ───────
+  // The callback must NOT write READY by itself: the connection is not
+  // operationally CONNECTED yet.
+  check(
+    "ONBOARDING: الـ CALLBACK لا يكتب READY بنفسه (البوابة التشغيلية أولاً)",
+    callbackA.success &&
+      callbackA.onboardingState === "ACTION_REQUIRED" &&
+      provisionedA?.onboardingState === "ACTION_REQUIRED" &&
+      provisionedA?.status === "PENDING" &&
+      provisionedA?.onboardingReasonCode === "VERIFICATION_REQUIRED",
+  );
+  // The read-only verification path establishes readiness.
+  const verifiedA = await service.verifyConnection(
+    deps,
+    ADMIN_B,
+    provisionedA!.id,
+  );
+  await onboardingFeature.refreshWhatsAppOnboardingReadiness(
+    { connectionRepository: repo, now: () => fixedNow },
+    ADMIN_B,
+  );
+  const readyA = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: PROVISIONING → READY فقط بعد التحقق التشغيلي (موصول + نشط)",
+    verifiedA.success &&
+      readyA?.onboardingState === "READY" &&
+      readyA?.status === "CONNECTED" &&
+      readyA?.isActive === true &&
+      readyA?.onboardingCompletedAt !== null &&
+      readyA?.onboardingFailedAt === null,
+  );
+
+  // ── O5. READY cannot exist without the operational gate ────────────
+  const gateProbe = rowOf(BUSINESS_B);
+  if (gateProbe) {
+    gateProbe.onboardingState = "PROVISIONING";
+    gateProbe.status = "PENDING";
+    gateProbe.isActive = true;
+    const notReady = await repo.markOnboardingReady(gateProbe.id, BUSINESS_B);
+    check(
+      "ONBOARDING: READY مستحيل ما لم يكن status === CONNECTED",
+      notReady === null && gateProbe.onboardingState === "PROVISIONING",
+    );
+    gateProbe.status = "CONNECTED";
+    gateProbe.isActive = false;
+    const notReadyInactive = await repo.markOnboardingReady(
+      gateProbe.id,
+      BUSINESS_B,
+    );
+    check(
+      "ONBOARDING: READY مستحيل ما لم يكن الاتصال نشطاً",
+      notReadyInactive === null && gateProbe.onboardingState === "PROVISIONING",
+    );
+    gateProbe.onboardingState = "NOT_STARTED";
+    gateProbe.onboardingActor = "NONE";
+    gateProbe.isActive = true;
+    gateProbe.status = "PENDING";
+    // Restore the pre-authorization identity too, so the remaining
+    // lifecycle checks start from a genuinely un-provisioned row.
+    gateProbe.externalId = null;
+    gateProbe.credentialsRef = null;
+    gateProbe.credentialKind = null;
+    gateProbe.displayPhoneNumber = null;
+    gateProbe.verifiedName = null;
+    gateProbe.metaBusinessId = null;
+    gateProbe.wabaId = null;
+    gateProbe.metaReviewStatus = null;
+    gateProbe.onboardingReasonCode = null;
+    gateProbe.onboardingReasonSummary = null;
+    gateProbe.onboardingRetryable = null;
+    gateProbe.onboardingStateChangedAt = null;
+    gateProbe.onboardingCompletedAt = null;
+    gateProbe.onboardingFailedAt = null;
+  }
+
+  // ── O6. onboardingState is never consumed by the runtime gates ────
+  const gateConnection = rowOf(BUSINESS_A)!;
+  const sendReady = await transport.resolveConnectionForSend(
+    {
+      businessRepository: {
+        findById: async () => ({ id: BUSINESS_A, name: "منشأة أ" }),
+        findByWhatsappNumber: async () => null,
+      },
+      whatsappConnectionRepository: {
+        findByIdWithinBusiness: repo.findByIdWithinBusiness,
+        findByPhone: async () => null,
+        findByExternalId: repo.findByExternalId,
+      },
+      branchRepository: {
+        findDefaultByBusiness: async () => ({
+          id: "branch-default",
+          businessId: BUSINESS_A,
+        }),
+        findByIdWithinBusiness: async () => null,
+      },
+    } as unknown as import("../src/server/transport/whatsapp-transport").ConnectionResolutionDeps,
+    { connectionId: gateConnection.id, businessId: BUSINESS_A },
+  );
+  check(
+    "ONBOARDING: بوابة الإرسال تقرأ status/isActive فقط — READY لا يكفي وحده",
+    sendReady.ok === true,
+  );
+  // A connection that is onboarding-READY but operationally disconnected
+  // is still refused by BOTH runtime gates (the lifecycle never leaks).
+  const readyRow = rowOf(BUSINESS_A)!;
+  const snapshot = { ...readyRow };
+  readyRow.status = "DISCONNECTED";
+  readyRow.isActive = false;
+  const sendBlocked = await transport.resolveConnectionForSend(
+    {
+      businessRepository: {
+        findById: async () => ({ id: BUSINESS_A, name: "منشأة أ" }),
+        findByWhatsappNumber: async () => null,
+      },
+      whatsappConnectionRepository: {
+        findByIdWithinBusiness: repo.findByIdWithinBusiness,
+        findByPhone: async () => null,
+        findByExternalId: repo.findByExternalId,
+      },
+      branchRepository: {
+        findDefaultByBusiness: async () => ({
+          id: "branch-default",
+          businessId: BUSINESS_A,
+        }),
+        findByIdWithinBusiness: async () => null,
+      },
+    } as unknown as import("../src/server/transport/whatsapp-transport").ConnectionResolutionDeps,
+    { connectionId: readyRow.id, businessId: BUSINESS_A },
+  );
+  Object.assign(readyRow, snapshot);
+  check(
+    "ONBOARDING: دورة الربط READY لا تفتح بوابة الإرسال وحدها (status هو البوابة)",
+    !sendBlocked.ok && sendBlocked.code === "INVALID_CONNECTION",
+  );
+
+  // ── O7. abandonment / resume ───────────────────────────────────────
+  // BUSINESS_B was reset to a pre-authorization state by the O5 probe,
+  // so a fresh launch mints a new attempt that a second launch RESUMES.
+  const resumeBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const secondBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  check(
+    "ONBOARDING: استئناف نفس الطلب يُعيد نفس stateRef (لا طلبان مفتوحان)",
+    resumeBegin.success &&
+      secondBegin.success &&
+      "stateRef" in resumeBegin &&
+      "stateRef" in secondBegin &&
+      secondBegin.resumed === true &&
+      secondBegin.stateRef === resumeBegin.stateRef,
+  );
+
+  // ── O9. hostile / unknown callback state ───────────────────────────
+  // Run BEFORE any provisioning of this connection so "nothing was
+  // written" is provable on the row itself.
+  const hostileState =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps(),
+      {
+        stateRef: "never-issued-state-ref",
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  // The in-flight (resumed) attempt carries a VALID stateRef, but a
+  // stolen / replayed provider code — the exchange must refuse it and
+  // no provider identity may be provisioned.
+  const hostileCode =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps(),
+      {
+        stateRef: launchedStateRef(resumeBegin),
+        code: "stolen-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  const hostileStateRow = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: حالة معادية/غير مُصدَرة → رفض; رمز مسروق → رفض (بلا كتابة)",
+    !hostileState.success &&
+      hostileState.code === "AUTHORIZATION_STATE_UNKNOWN" &&
+      !hostileCode.success &&
+      hostileCode.code === "INVALID_AUTHORIZATION_CODE" &&
+      // A refused exchange must not have provisioned an identity: the
+      // failure is recorded in the normalized shape instead.
+      hostileStateRow?.externalId === null &&
+      hostileStateRow?.credentialsRef === null &&
+      hostileStateRow?.onboardingState === "FAILED" &&
+      hostileStateRow?.onboardingReasonCode === "INVALID_AUTHORIZATION_CODE",
+  );
+
+  // An expired attempt is abandoned: the next launch mints a NEW state.
+  const expiredRef = nextStateRef();
+  await authorizationRepo.create({
+    businessId: BUSINESS_B,
+    connectionId: rowOf(BUSINESS_B)!.id,
+    stateRef: expiredRef,
+    expiresAt: new Date(fixedNow.getTime() - 60_000),
+  });
+  const expiredCallback =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps(),
+      {
+        stateRef: expiredRef,
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  check(
+    "ONBOARDING: الطلب المنتهي يُرفض (إهمال) — ويُطلق طلب جديد لاحقاً",
+    !expiredCallback.success &&
+      expiredCallback.code === "AUTHORIZATION_EXPIRED",
+  );
+
+  // ── O8. callback replay protection ────────────────────────────────
+  // A FRESH attempt: the first callback consumes (and provisions) it,
+  // the second is a deterministic rejection.
+  const replayBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps(),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const replay = await onboardingFeature.handleWhatsAppAuthorizationCallback(
+    onboardingDeps(),
+    {
+      stateRef: launchedStateRef(replayBegin),
+      code: "fp-deterministic-authorization-code",
+      redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+    },
+  );
+  const replay2 = await onboardingFeature.handleWhatsAppAuthorizationCallback(
+    onboardingDeps(),
+    {
+      stateRef: launchedStateRef(replayBegin),
+      code: "fp-deterministic-authorization-code",
+      redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+    },
+  );
+  check(
+    "ONBOARDING: إعادة تشغيل الـ callback محمية — الاستهلاك مرة واحدة فقط",
+    replay.success &&
+      !replay2.success &&
+      replay2.code === "AUTHORIZATION_ALREADY_CONSUMED",
+  );
+
+  // ── O10. cross-tenant authorization state rejection ────────────────
+  const crossTenantRef = nextStateRef();
+  await authorizationRepo.create({
+    businessId: BUSINESS_B, // the ledger says Business B...
+    connectionId: rowOf(BUSINESS_A)!.id, // ...but connection A
+    stateRef: crossTenantRef,
+    expiresAt: new Date(fixedNow.getTime() + 60_000),
+  });
+  const crossTenant =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps(),
+      {
+        stateRef: crossTenantRef,
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  check(
+    "ONBOARDING: حالة عابرة للمنشآات (اتصال لا يخص المنشأة المسجّلة) → رفض",
+    !crossTenant.success &&
+      crossTenant.code === "AUTHORIZATION_CONNECTION_MISMATCH",
+  );
+
+  // ── O11. duplicate phone_number_id rejection ───────────────────────
+  const claimedExternalId = rowOf(BUSINESS_A)!.externalId!;
+  const foreignConnection = rowOf(BUSINESS_B)!;
+  const dupRef = nextStateRef();
+  await authorizationRepo.create({
+    businessId: BUSINESS_B,
+    connectionId: foreignConnection.id,
+    stateRef: dupRef,
+    expiresAt: new Date(fixedNow.getTime() + 60_000),
+  });
+  // Pretend the provider reports Business A's identity to Business B.
+  // The authorizer is told to return A's externalId verbatim, so the
+  // duplicate guard has a real collision to reject.
+  const dupBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps({ externalId: claimedExternalId }),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const dupCallback =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps({ externalId: claimedExternalId }),
+      {
+        stateRef: launchedStateRef(dupBegin) || dupRef,
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  check(
+    "ONBOARDING: معرّف الرقم (phone_number_id) لا يصبح غامضاً بين منشأتين",
+    !dupCallback.success &&
+      dupCallback.code === "DUPLICATE_EXTERNAL_ID" &&
+      // The owning Business keeps its identity, and the attempt that
+      // tried to claim it ended FAILED without stealing it.
+      rowOf(BUSINESS_A)!.externalId === claimedExternalId &&
+      rowOf(BUSINESS_B)!.externalId !== claimedExternalId &&
+      rowOf(BUSINESS_B)!.onboardingState === "FAILED" &&
+      rowOf(BUSINESS_B)!.onboardingReasonCode === "DUPLICATE_EXTERNAL_ID",
+  );
+
+  // ── O12. customer-side ACTION_REQUIRED + FAILED diagnostics ────────
+  const actionBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps({ outcome: "action_required" }),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const actionCallback =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps({ outcome: "action_required" }),
+      {
+        stateRef: launchedStateRef(actionBegin),
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  const actionConnection = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: يحتاج إجراء (ACTION_REQUIRED) من جهة المزوّد — مفتوح وليس فشلاً",
+    actionCallback.success &&
+      actionCallback.onboardingState === "ACTION_REQUIRED" &&
+      actionConnection?.onboardingState === "ACTION_REQUIRED" &&
+      actionConnection?.onboardingReasonCode === "PROVIDER_REVIEW_PENDING" &&
+      actionConnection?.onboardingRetryable === false &&
+      actionConnection?.onboardingFailedAt === null,
+  );
+  const failedBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps({ outcome: "declined" }),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const failedCallback =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps({ outcome: "declined" }),
+      {
+        stateRef: launchedStateRef(failedBegin),
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  const failedConnection = rowOf(BUSINESS_B);
+  check(
+    "ONBOARDING: FAILED مع تشخيص طبيعي ومختصر (آخر فشل فقط)",
+    !failedCallback.success &&
+      failedCallback.code === "AUTHORIZATION_DECLINED" &&
+      failedConnection?.onboardingState === "FAILED" &&
+      failedConnection?.onboardingReasonCode === "AUTHORIZATION_DECLINED" &&
+      failedConnection?.onboardingRetryable === false &&
+      failedConnection?.onboardingFailedAt !== null,
+  );
+  check(
+    "ONBOARDING: التشخيص يرفض حمولة المزوّد الخام (لا رمز/لا token/لا header)",
+    Boolean(failedConnection) &&
+      !JSON.stringify(failedConnection).includes("EAA") &&
+      !JSON.stringify(failedConnection).includes("authorization_code") &&
+      !JSON.stringify(failedConnection).includes("Bearer"),
+  );
+  // The mapping is exhaustive over the provider-neutral error codes.
+  const mapped = new Set(
+    Object.values(failureModule).flatMap((value) =>
+      typeof value === "object" && value !== null && "reasonCode" in value
+        ? [(value as { reasonCode: string }).reasonCode]
+        : [],
+    ),
+  );
+  check(
+    "ONBOARDING: كل رموز أخطاء التفويض لها تصنيف طبيعي (لا رمز خام)",
+    [...transport.authorizationErrorCodeValues].every((code) => {
+      try {
+        return (
+          failureModule.describeAuthorizationFailure(code).reasonCode.length > 0
+        );
+      } catch {
+        return false;
+      }
+    }) && mapped.size > 0,
+  );
+
+  // ── O13. credentials reference boundary ────────────────────────────
+  const envRef = "WHATSAPP_META_TOKEN_BUSINESS_A";
+  const envResolution =
+    await credentialsModule.defaultCredentialsResolver.resolve(envRef);
+  const runtimeResolution =
+    await credentialsModule.defaultCredentialsResolver.resolve(
+      "fp:0123456789abcdef01234567",
+    );
+  check(
+    "CREDENTIALS: مرجع ENV يُحلّ (اسم متغيّر بيئة) — والمرجع RUNTIME يُحلّ من المخزن (غير المتاح = رفض صادق)",
+    envResolution.ok === false && // the env var is NOT set in this harness → honest UNRESOLVED
+      envResolution.code === "UNRESOLVED_REFERENCE" &&
+      !("value" in envResolution) &&
+      // The RUNTIME backend is no longer deferred: the reference routes to
+      // the encrypted store and, with no master key / no stored row in this
+      // harness, is refused with the same honest UNRESOLVED code — never a
+      // fake value and never a silent UNSUPPORTED placeholder.
+      runtimeResolution.ok === false &&
+      runtimeResolution.code === "UNRESOLVED_REFERENCE" &&
+      !("value" in runtimeResolution),
+  );
+  check(
+    "CREDENTIALS: تصنيف المرجع — NULL/القديم = ENV، fp:* = RUNTIME",
+    credentialsModule.classifyCredentialReference(null) === "ENV" &&
+      credentialsModule.classifyCredentialReference(envRef) === "ENV" &&
+      credentialsModule.classifyCredentialReference(
+        "fp:0123456789abcdef01234567",
+      ) === "RUNTIME",
+  );
+  const runtimeBegin = await onboardingFeature.beginWhatsAppOnboarding(
+    onboardingDeps({ credentialKind: "RUNTIME" }),
+    ADMIN_B,
+    { redirectUri: "http://localhost:3000/whatsapp-onboarding/callback" },
+  );
+  const runtimeCallback =
+    await onboardingFeature.handleWhatsAppAuthorizationCallback(
+      onboardingDeps({ credentialKind: "RUNTIME" }),
+      {
+        stateRef: launchedStateRef(runtimeBegin),
+        code: "fp-deterministic-authorization-code",
+        redirectUri: "http://localhost:3000/whatsapp-onboarding/callback",
+      },
+    );
+  const runtimeConnection = rowOf(BUSINESS_B);
+  check(
+    "CREDENTIALS: مرجع RUNTIME (fp:*) يُخزّن كمرجع فقط — القيمة لا تُخزّن أبداً",
+    runtimeCallback.success &&
+      runtimeConnection?.credentialKind === "RUNTIME" &&
+      runtimeConnection?.credentialsRef?.startsWith("fp:") === true &&
+      !JSON.stringify(runtimeConnection).includes("EAA"),
+  );
+
+  // ── O14. legacy / existing rows stay honest ────────────────────────
+  const legacy = await repo.create({
+    businessId: BUSINESS_B,
+    branchId: null,
+    phoneNumber: "+201009990000",
+    provider: "meta-whatsapp",
+    externalId: "LEGACY-EXISTING-ID",
+    credentialsRef: "WHATSAPP_META_ACCESS_TOKEN",
+    status: "CONNECTED",
+  });
+  check(
+    "ONBOARDING: الصفوف القديمة: NOT_STARTED افتراضياً — لا ادعاء READY كاذب",
+    legacy.onboardingState === "NOT_STARTED" &&
+      legacy.onboardingActor === "NONE" &&
+      legacy.credentialKind === null && // NULL = ENV (the existing grammar)
+      legacy.status === "CONNECTED", // operational meaning untouched
+  );
+
+  // ── O15. customer UI exposes only safe labels/fields ───────────────
+  const customerView = onboardingFeature.resolveOnboardingStatus(
+    rowOf(BUSINESS_A),
+  );
+  const customerKeys = Object.keys(customerView);
+  const customerLabels = new Set(
+    Object.values(onboardingFeature.ONBOARDING_STATUS_LABELS),
+  );
+  check(
+    "العرض: واجهة العميل تحوي الحقول الآمنة فقط (لا WABA/phone_number_id/توكن)",
+    customerKeys.length === 6 &&
+      customerKeys.includes("statusLabel") &&
+      customerKeys.includes("onboardingState") &&
+      customerKeys.includes("operationallyConnected") &&
+      customerKeys.includes("cta") &&
+      !customerKeys.some((key) =>
+        ["wabaId", "externalId", "metaBusinessId", "credentialsRef"].includes(
+          key,
+        ),
+      ),
+  );
+  check(
+    "العرض: تسميات دورة الحالة الستة المبسطة فقط (لغة العميل)",
+    customerLabels.size === 6 &&
+      customerLabels.has("جاهز") &&
+      customerLabels.has("غير متصل") &&
+      customerLabels.has("جاري الربط") &&
+      customerLabels.has("جاري التجهيز") &&
+      customerLabels.has("يحتاج إجراء") &&
+      customerLabels.has("تعذر إكمال الربط") &&
+      !customerView.statusLabel.includes("phone_number_id") &&
+      !customerView.statusLabel.includes("WABA"),
+  );
+
+  // ── O16. Super Admin sees only safe projections ────────────────────
+  const listResult = await platformService.listBusinessOnboardingOverviews(
+    PLATFORM_OPERATOR,
+    {},
+    platformDeps,
+  );
+  const overviewResult = await platformService.getBusinessOnboardingOverview(
+    PLATFORM_OPERATOR,
+    BUSINESS_A,
+    platformDeps,
+  );
+  const listJson = listResult.success ? JSON.stringify(listResult.data) : "";
+  const overviewJson = overviewResult.success
+    ? JSON.stringify(overviewResult.data)
+    : "";
+  check(
+    "PLATFORM: مشغل المنصة يرى الإسقاط الآمن فقط (لا قيمة credentialsRef)",
+    listResult.success &&
+      overviewResult.success &&
+      !listJson.includes("credentialsRef") &&
+      !overviewJson.includes("credentialsRef") &&
+      !("credentialsRef" in overviewResult.data.overview.whatsapp) &&
+      !overviewJson.includes("phone_number_id") &&
+      // The raw provider connection identity never appears — only the
+      // masked projection of it.
+      !overviewJson.includes(rowOf(BUSINESS_A)!.externalId ?? "no-such-id"),
+  );
+  // No token-shaped value anywhere in the operator view.
+  const tokenShaped = /[A-Za-z0-9_-]{64,}|EAA[A-Za-z0-9]+|Bearer\s/;
+  const maskedExternalId = overviewResult.success
+    ? overviewResult.data.overview.whatsapp.externalIdMasked
+    : null;
+  const maskedPhone = overviewResult.success
+    ? overviewResult.data.overview.whatsapp.displayPhoneMasked
+    : null;
+  check(
+    "PLATFORM: لا قيم بشكل رمز (token) في عرض المشغل — والمعرّفات مموّهة",
+    !tokenShaped.test(listJson) &&
+      !tokenShaped.test(overviewJson) &&
+      maskedExternalId?.includes("••") === true &&
+      maskedPhone?.includes("•") === true,
+  );
+  // The projection is derived, never a DB row spread.
+  check(
+    "PLATFORM: الإسقاط يُشتق صراحةً (business/whatsapp/metaProvenance/onboarding/operations)",
+    overviewResult.success &&
+      Object.keys(overviewResult.data.overview).length === 5 &&
+      Object.keys(overviewResult.data.overview.onboarding).length === 8 &&
+      Object.keys(overviewResult.data.overview.metaProvenance).length === 5,
+  );
+  const forbiddenList = await platformService.listBusinessOnboardingOverviews(
+    BUSINESS_ACTOR,
+    {},
+    platformDeps,
+  );
+  const forbiddenDetail = await platformService.getBusinessOnboardingOverview(
+    BUSINESS_ACTOR,
+    BUSINESS_A,
+    platformDeps,
+  );
+  check(
+    "PLATFORM: حساب الأعمال لا يصل إلى سطح قراءة المشغل (FORBIDDEN)",
+    !forbiddenList.success &&
+      forbiddenList.error.code === "FORBIDDEN" &&
+      !forbiddenDetail.success &&
+      forbiddenDetail.error.code === "FORBIDDEN",
+  );
+  const invalidTarget = await platformService.getBusinessOnboardingOverview(
+    PLATFORM_OPERATOR,
+    "not-a-uuid",
+    platformDeps,
+  );
+  check(
+    "PLATFORM: معرّف عشوائي من رابط → INVALID_INPUT (لا يصل المستودع)",
+    !invalidTarget.success && invalidTarget.error.code === "INVALID_INPUT",
+  );
+
   let failed = 0;
   for (const { label, pass } of checks) {
     if (pass) console.log(`✔ ${label}`);
@@ -661,6 +1660,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: Error) => {
-  console.error(`فشل غير متوقع: ${error.message}`);
+  console.error(`فشل غير متوقع: ${error.message}\n${error.stack}`);
   process.exit(1);
 });

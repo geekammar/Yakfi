@@ -1,5 +1,5 @@
 import { acceptInvitationInputSchema } from "@/features/invitations/schemas/invitation-schema";
-import { emailSchema } from "@/lib/validation";
+import { emailSchema, uuidSchema } from "@/lib/validation";
 import { updateAiPolicyDtoSchema } from "@/lib/validation/platform";
 
 import { z } from "zod";
@@ -42,3 +42,31 @@ export type CreateOwnerInvitationInput = z.infer<
 >;
 export type ActivateOwnerInput = z.infer<typeof activateOwnerInputSchema>;
 export type UpdateAiPolicyInput = z.infer<typeof updateAiPolicyInputSchema>;
+
+/**
+ * Platform Business list input (WHATSAPP-ONBOARDING-01) — search +
+ * pagination only. `businessId` is never accepted from this input: the
+ * list targets are server-derived.
+ */
+export const platformListBusinessInputSchema = z.object({
+  search: z.string().trim().max(120, "نص البحث طويل جداً").optional(),
+  page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export type PlatformListBusinessInput = z.infer<
+  typeof platformListBusinessInputSchema
+>;
+
+/**
+ * A drill-down target from a link — validated here, then re-resolved
+ * server-side. A well-formed id that matches no Business is a typed
+ * not-found; an arbitrary string never reaches the repository.
+ */
+export const platformBusinessIdentitySchema = z.object({
+  businessId: uuidSchema,
+});
+
+export type PlatformBusinessIdentityInput = z.infer<
+  typeof platformBusinessIdentitySchema
+>;

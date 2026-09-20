@@ -27,6 +27,7 @@ import type {
   WhatsAppConnectionView,
   WhatsAppVerificationResult,
 } from "@/features/whatsapp-connection/types";
+import { maskExternalId } from "@/lib/whatsapp-identity";
 import type { WhatsAppConnectionRepository } from "@/server/repositories";
 import { whatsAppConnectionRepository } from "@/server/repositories";
 import type {
@@ -69,17 +70,9 @@ function resolveScope(
   return { ok: true, businessId: actor.businessId };
 }
 
-/**
- * Mask the provider connection identity for safe display: the full
- * `phone_number_id` is never needed by a Business Admin, so only the
- * head and tail are shown.
- */
-export function maskExternalId(externalId: string | null): string | null {
-  if (!externalId) return null;
-  const trimmed = externalId.trim();
-  if (trimmed.length <= 8) return `${trimmed.slice(0, 2)}••`;
-  return `${trimmed.slice(0, 4)}••••${trimmed.slice(-4)}`;
-}
+// Canonical masking helper (`@/lib/whatsapp-identity` — one rule for
+// every surface that shows a provider connection identity).
+export { maskExternalId } from "@/lib/whatsapp-identity";
 
 function toView(connection: WhatsAppConnection): WhatsAppConnectionView {
   return {
@@ -182,6 +175,10 @@ export async function saveConnection(
       externalId: parsed.data.externalId,
       credentialsRef: parsed.data.credentialsRef,
       status: "PENDING", // verification is the only path to CONNECTED
+      // Manual configuration never went through the provider
+      // authorization flow — the onboarding lifecycle starts honest.
+      onboardingState: "NOT_STARTED",
+      onboardingActor: "NONE",
     });
     return { success: true, connection: toView(created) };
   } catch {

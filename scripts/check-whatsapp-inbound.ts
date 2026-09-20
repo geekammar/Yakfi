@@ -60,6 +60,8 @@ async function main(): Promise<void> {
     await import("../src/server/integrations/whatsapp/meta-webhook");
   const metaClient =
     await import("../src/server/integrations/whatsapp/meta-client");
+  const credentialsResolver =
+    await import("../src/server/credentials/credentials-resolver");
   const engine =
     await import("../src/features/conversations/server/conversation-engine");
   const engineSchema =
@@ -566,6 +568,13 @@ async function main(): Promise<void> {
     fetchImpl: failingFetch,
     graphHost: metaClient.META_GRAPH_HOST,
     defaultApiVersion: metaClient.META_DEFAULT_API_VERSION,
+    credentialsResolver: new credentialsResolver.EnvCredentialsResolver({
+      getEnvVar: (name: string) =>
+        ({
+          [CREDENTIALS_REF]: TEST_TOKEN,
+          WHATSAPP_META_API_VERSION: "v21.0",
+        })[name],
+    }),
   });
   const outboundFailureHarness = createEngineHarness({
     ai: makeAi(),
@@ -607,6 +616,13 @@ async function main(): Promise<void> {
     fetchImpl: succeedingFetch,
     graphHost: metaClient.META_GRAPH_HOST,
     defaultApiVersion: metaClient.META_DEFAULT_API_VERSION,
+    credentialsResolver: new credentialsResolver.EnvCredentialsResolver({
+      getEnvVar: (name: string) =>
+        ({
+          [CREDENTIALS_REF]: TEST_TOKEN,
+          WHATSAPP_META_API_VERSION: "v21.0",
+        })[name],
+    }),
   });
   const e2eHarness = createEngineHarness({
     ai: makeAi(),

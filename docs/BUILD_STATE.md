@@ -37,6 +37,57 @@
 
 ## Current State (summary)
 
+**Runtime Credential Backend — IMPLEMENTED
+(WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01; DECISIONS #49;
+additive, one new migration, ZERO behavior change to the ENV path or the
+operational gate):** the missing RUNTIME storage layer for the `fp:<id>`
+credential-reference grammar (the boundary was landed in #47; the backend
+was honestly deferred). A credential obtained at runtime can now be stored
+safely server-side, with only the opaque `credentialsRef` persisted on the
+connection — NO operator paste into Vercel Environment Variables and NO
+redeploy per customer. **Storage decision:** existing Neon Postgres (the
+smallest already-provisioned production-capable backend; there is NO
+Redis/KV/Vault/KMS dependency in the repo and none was added) with
+APPLICATION-SIDE authenticated encryption. **New table
+`runtime_credentials`** (migration `20260920140745_runtime_credentials`,
+additive) keyed by the opaque `credentialsRef` — never a phone number,
+business name, email, or provider-owned id — plus `business_id` (tenant
+isolation + cascade); the record holds ONLY ciphertext + safe metadata
+(`cipher_blob` / `algorithm` / `key_version`). **Crypto**
+(`src/server/credentials/credential-crypto.ts`): AES-256-GCM from Node's
+built-in `node:crypto` (ZERO new dependencies), unique 96-bit IV per
+credential, 128-bit auth tag inside the blob, versioned package (`v1:` +
+base64(iv‖ciphertext‖tag)); tampering/truncation/unknown-version/wrong-key
+all fail CLOSED — never a wrong plaintext. **Master key:** NEW optional
+server-only `CREDENTIAL_MASTER_KEY` (32 random bytes, hex or base64) —
+never in the DB/logs/API/projections, never `NEXT_PUBLIC_`; while unset the
+store is UNAVAILABLE and every `fp:<id>` store/resolve fails closed (the
+app boots and runs without it). Master-key rotation is a LATER operational
+concern (`key_version` is the hook); no KMS or key wrapping is built.
+**Layering:** `RuntimeCredentialRepository` is ciphertext-only by
+construction (decryption one layer up in the store), preserving the
+repository-only-DB-access rule. **Boundary:** `CredentialsResolver` gained
+additive `store`/`delete` (ENV answers an honest `UNSUPPORTED_KIND`);
+`DefaultCredentialsResolver` routes ENV→`process.env` (UNCHANGED) and
+RUNTIME→`RuntimeCredentialStore`; `mintRuntimeCredentialReference()` mints
+the grammar-validated opaque handle. The secret crosses the boundary
+EXACTLY once, at the server-side `resolve` an adapter consumes — never in
+logs, thrown/serialized errors, Prisma model fields, domain payloads, DB
+projections, Super Admin surfaces, or customer UI. **Adapter compatibility
+(strictly necessary only):** `resolveMetaClientConfig`/`resolveMetaVerifyConfig`
+resolve `credentialsRef` through `CredentialsResolver` (both became async;
+production factories pass `defaultCredentialsResolver`) so a RUNTIME
+reference can actually resolve at send/verify time. **Proven:** NEW
+`pnpm check:credentials-runtime` 36/36; existing checks UNCHANGED —
+`check:whatsapp-onboarding` 53/53 (one expectation updated from the old
+deferred `UNSUPPORTED_KIND` to the implemented honest `UNRESOLVED_REFERENCE`),
+`check:whatsapp-transport` 27/27, `check:meta-whatsapp` 17/17,
+`check:whatsapp-inbound` 13/13; `pnpm typecheck`/`pnpm lint`/`pnpm security`
+green. **NOT built (deferred):** Meta OAuth/code exchange, Embedded Signup,
+token rotation/refresh, any credential UI, Super Admin credential
+management, listing/rotation/admin endpoints, KMS. The operational gate
+`status === "CONNECTED" && isActive` is untouched.
+
 **Prompt Workspace Architecture — FINALIZED and RECONCILED
 (PROMPT-OPS-AI-PROMPT-WORKSPACE-ARCHITECTURE-01 + finalize; DECISIONS #48;
 shipped as release v0.19.1):** LLM prompt bodies are source-controlled
@@ -91,8 +142,34 @@ per-connection `credentialsRef`; operator stores the token in the
 deployment env; verify → CONNECTED → resolvable by the unchanged engine).
 Meta Embedded Signup is deliberately NOT implemented (needs external
 Meta dashboard/app config — operator prerequisites documented, nothing
-faked). Proven by `pnpm check:whatsapp-onboarding` 22/22; ZERO
-schema/migration changes.
+faked). Proven by `pnpm check:whatsapp-onboarding` 53/53; the WhatsApp
+onboarding lifecycle slice (WHATSAPP-ONBOARDING-01) is implemented
+against a DETERMINISTIC stand-in adapter — see below — while the real
+Meta adapter stays deferred behind the same `ConnectionAuthorizer`
+port. Schema/migration: ONE additive migration
+(`20260919120000_whatsapp_onboarding_lifecycle`) — the separate
+onboarding lifecycle surface + the authorization ledger.
+
+**WhatsApp Onboarding Lifecycle (WHATSAPP-ONBOARDING-01)** — the
+SEPARATE onboarding lifecycle of a Business-owned connection, beside
+the unchanged operational gate. `onboardingState`
+(NOT_STARTED/AUTHORIZING/PROVISIONING/ACTION_REQUIRED/READY/FAILED) +
+`onboardingActor` + normalized last-failure diagnostics + Meta
+provenance (reference-only) + `credentialKind` (ENV/RUNTIME) live on
+`whatsapp_connections`; the runtime send/inbound gate stays exactly
+`status === "CONNECTED" && isActive` and never reads the lifecycle.
+`READY` has ONE write path (`markOnboardingReady` — a conditional
+update guarded by the operational gate), so an onboarding-READY row is
+always operationally usable. The provider callback is server-resolved,
+single-use, and tenant-safe: the target Business comes ONLY from the
+persisted authorization ledger (`stateRef`), never from the query, the
+client, or the session; replay/expiry/cross-tenant all fail to match
+and write nothing. Super Admin gets a READ-ONLY projection
+(`toOverview()` — `/platform/businesses` + drill-down; no credential
+value, masked provider ids). A non-blocking WhatsApp card on
+onboarding review + `/settings/whatsapp` remains the canonical surface;
+no raw token, Graph payload, or provider text is persisted anywhere.
+Verified 53/53 offline (no DB, no network, no Meta call).
 
 **Spec A — Discovery Foundation + Booking Core** (frozen scope: `SPEC_A.md`)
 is **implemented and verified through PROMPT-19**. All Spec A screens exist:
@@ -267,7 +344,7 @@ the PROMPT-OPS-02 row). The two real
 provider integrations (WhatsApp transport, LLM) remain pending operator
 decisions (DECISIONS #29).
 
-**Quality:** `PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27` verified — `pnpm check:whatsapp-onboarding` 22/22 (NEW) + `check:whatsapp-transport` 27/27 + `check:meta-whatsapp` 17/17 + `check:whatsapp-inbound` 13/13 + `check:eligibility` 29/29 + `check:booking-options` 32/32 + `check:booking-confirm` 18/18 + `check:conversation-booking` 16/16 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema/migration changes. Prior `PROMPT-AI-03B` verified 2026-09-16 — `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`). `PROMPT-AI-03B` re-verified 2026-09-16 — `pnpm check:booking-confirm` 18/18 + `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema changes.
+**Quality:** `WHATSAPP-ONBOARDING-01` verified — `pnpm check:whatsapp-onboarding` 53/53 (onboarding lifecycle, authorization ledger, credentials boundary, operator projection; NEW) + `check:whatsapp-transport` 27/27 + `check:meta-whatsapp` 17/17 + `check:whatsapp-inbound` 13/13 + `check:conversation-control` 50/50 + `check:booking-confirm` 18/18 + `check:policy` 13/13 + `pnpm lint`/`typecheck`/`format:check`/`verify` green; ONE additive migration (`20260919120000_whatsapp_onboarding_lifecycle`, not yet applied to the dev database). Prior `PROMPT-OPS-PILOT-BUSINESS-WHATSAPP-ONBOARDING-27` verified — `pnpm check:whatsapp-onboarding` 22/22; ZERO schema/migration changes. Prior `PROMPT-AI-03B` verified 2026-09-16 — `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-provider` 29/29 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint` pass + `pnpm typecheck` pass + `pnpm format:check` pass + `pnpm verify` green (lint/typecheck/format/build) + `pnpm security` pass (with warnings — dual .env files); `pnpm db:generate` OK; historic `pnpm run doctor` NOT READY on device only (placeholder `DATABASE_URL`). `PROMPT-AI-03B` re-verified 2026-09-16 — `pnpm check:booking-confirm` 18/18 + `pnpm check:conversation-booking` 16/16 + `pnpm check:ai-prompts` 106/106 + `pnpm check:eligibility` 29/29 + `pnpm check:booking-options` 32/32 + `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema changes.
 
 ## Completed Major Work
 
@@ -498,7 +575,12 @@ platform_invitations + platform_ai_policies + the initial
 operator-approved policy row — OpenRouter primary / AgentRouter
 secondary; applied to Production, chain 10/10, `migrate diff` vs
 `schema.prisma` EMPTY; the Demo DB is at 9/9 and needs
-`pnpm db:deploy` before its next code deploy).
+`pnpm db:deploy` before its next code deploy) →
+`20260919120000_whatsapp_onboarding_lifecycle` (WHATSAPP-ONBOARDING-01;
+applied to the Dev DB) →
+`20260920140745_runtime_credentials` (DECISIONS #49; the RUNTIME secret
+backend — a NEW dedicated `runtime_credentials` table; ADDITIVE: no
+existing column/constraint/index altered; applied to the Dev DB).
 Chain end-state == `prisma/schema.prisma` (empty `migrate diff`).
 
 **Old Demo/Neon database (NOT touched by PROMPT-ARCH-03):** the one-time
@@ -635,24 +717,53 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
-ARCHITECTURE SLICE **COMPLETE — Prompt Workspace finalized and reconciled**
-(PROMPT-OPS-AI-PROMPT-WORKSPACE-ARCHITECTURE-01 + finalize; DECISIONS #48;
-shipped by the operator as release **v0.19.1**, `04856ae`, tag `v0.19.1`):
-the `/prompts/**/*.prompt` → generator → committed generated artifact →
-`prompt-registry.ts` → runtime consumer chain is implemented, verified, and
-documented (see Current State above). Validation/gates at release and
-re-verified at reconciliation: `pnpm generate:ai-prompts --check` FRESH
-(2 prompts, byte-identical to source) and regeneration is idempotent
-(working tree stays clean after `pnpm verify` and after an explicit
-regenerate); `pnpm check:ai-prompts` **101/101**, `check:ai-provider`
-**63/63**, `check:atria-retry` **17/17**, `check:conversation-booking`
-**16/16**, `check:conversation-control` **50/50**,
-`check:simulate-conversation-control` green, `check:response-normalizer`
-**78/78**, `check:booking-confirm` **18/18**, `pnpm verify` (lint +
-typecheck + format + build) and `pnpm security` green; `git diff --check`
-clean; no secrets introduced (`.env` untouched, no key material in the diff);
-no Prisma schema/migration changes; no WhatsAppConnection, Meta, transport,
-booking, availability, conversation-control, or provider-policy code change.
+RUNTIME CREDENTIAL BACKEND SLICE **COMPLETE**
+(WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01; DECISIONS #49): the
+RUNTIME backend for the `fp:<id>` credential-reference grammar is
+implemented, verified, and documented (see Current State above). Storage
+= existing Neon Postgres + application-side AES-256-GCM (no new vendor,
+no new dependency); new additive migration
+`20260920140745_runtime_credentials`; new optional server-only
+`CREDENTIAL_MASTER_KEY` (unset ⇒ store UNAVAILABLE, ENV path unaffected).
+The Meta adapters resolve `credentialsRef` through `CredentialsResolver`
+so a RUNTIME reference is resolvable at send/verify time. Validation:
+`pnpm check:credentials-runtime` **36/36** (crypto round-trip, unique IV,
+fail-closed on tamper/truncation/version/wrong-key, master-key accept/refuse
+without echoing the value, store/resolve/delete contract, ciphertext-only
+record, opaque-reference hygiene, ENV path unchanged via the composite);
+existing checks unchanged — `check:whatsapp-onboarding` **53/53**,
+`check:whatsapp-transport` **27/27**, `check:meta-whatsapp` **17/17**,
+`check:whatsapp-inbound` **13/13**; `pnpm typecheck`/`pnpm lint`/
+`pnpm security` green. The operational gate is untouched and NO Meta
+OAuth/Embedded Signup/rotation/credential-UI work was done (all deferred).
+
+1. **Operator (when RUNTIME credentials are used):** generate and set
+   `CREDENTIAL_MASTER_KEY` in the deployment env —
+   `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+   — for local `.env.local`, and Vercel → Settings → Environment Variables
+   (Production + Preview) for deploys. Until it is set, the RUNTIME path
+   stays honestly UNAVAILABLE and the ENV pilot path is unaffected. This is
+   the ONLY new operator action introduced by this slice.
+2. **Operator:** review this uncommitted diff (the onboarding lifecycle +
+   runtime credential work) and deploy when ready (`pnpm deploy`), then run
+   `pnpm db:deploy` against each target database so the migration chain
+   (`20260919120000_…` + `20260920140745_runtime_credentials`) is applied.
+3. **Next major implementation slice — Meta Embedded Signup** (DECISIONS #47
+   deliberately deferred it; the RUNTIME credential store this slice ships
+   is precisely the storage prerequisite it needs). Scope:
+   the code-side of self-serve WhatsApp number onboarding — OAuth-style
+   redirect handling + server-side code exchange, state/CSRF binding, and
+   persisting the resulting `phone_number_id` + a RUNTIME `credentialsRef`
+   (store the token via `CredentialsResolver.store`, persist the opaque
+   handle only) through the EXISTING `/settings/whatsapp` surface and
+   `ConnectionVerifier` port (no new status model, no raw token stored,
+   `externalId` stays authoritative). **Exact dependency that gates it:**
+   external Meta App Dashboard configuration owned by the operator — the
+   app must be approved for WhatsApp Business login and the redirect URI
+   must be registered, and the client id/secret must land in the deployment
+   env as references. The code slice cannot be honestly completed or
+   verified without that configuration (that is precisely why #47 did not
+   fake it), so it is a paired operator+code task, not a code-only task.
 
 **Semantic preservation result:** NO intentional and NO incidental change.
 The two relocated prompt bodies were extracted from the pre-refactor

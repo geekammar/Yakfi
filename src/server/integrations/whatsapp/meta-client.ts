@@ -1,4 +1,8 @@
 import {
+  defaultCredentialsResolver,
+  type CredentialsResolver,
+} from "@/server/credentials/credentials-resolver";
+import {
   TransportError,
   defaultConnectionResolutionDeps,
   resolveConnectionForSend,
@@ -36,13 +40,21 @@ export type ResolveMetaConfigDeps = {
   connectionDeps: ConnectionResolutionDeps;
   getEnvVar(name: string): string | undefined;
   defaultApiVersion: string;
+  /**
+   * The credential REFERENCE boundary (DECISIONS #49). A connection's
+   * `credentialsRef` is resolved through it: an ENV-var NAME reads the
+   * environment (the existing behavior); an opaque `fp:<id>` handle
+   * resolves the encrypted runtime store. The VALUE is returned here and
+   * never persisted or logged.
+   */
+  credentialsResolver: CredentialsResolver;
 };
 
-export function resolveMetaClientConfig(
+export async function resolveMetaClientConfig(
   deps: ResolveMetaConfigDeps,
   _params: { businessId: string; connectionId: string },
   connection: { phoneNumberId?: string | null; credentialsRef?: string | null },
-): MetaClientConfig | { error: TransportError } {
+): Promise<MetaClientConfig | { error: TransportError }> {
   const versionRaw =
     deps.getEnvVar("WHATSAPP_META_API_VERSION") ?? deps.defaultApiVersion;
   const apiVersion = versionRaw.startsWith("v") ? versionRaw : `v${versionRaw}`;
@@ -55,15 +67,13 @@ export function resolveMetaClientConfig(
   let accessToken: string | undefined;
   if (connection.credentialsRef) {
     const ref = connection.credentialsRef.trim();
-    accessToken = deps.getEnvVar(ref);
-    if (!accessToken) {
+    const resolved = await deps.credentialsResolver.resolve(ref);
+    if (!resolved.ok) {
       return {
-        error: new TransportError(
-          "UNAUTHORIZED_CREDENTIALS",
-          "مرجع بيانات اعتماد واتساب غير صالح",
-        ),
+        error: new TransportError("UNAUTHORIZED_CREDENTIALS", resolved.message),
       };
     }
+    accessToken = resolved.value;
   } else {
     accessToken = deps.getEnvVar("WHATSAPP_META_ACCESS_TOKEN");
   }
@@ -154,6 +164,7 @@ export type MetaTransportDeps = {
   fetchImpl: typeof fetch;
   graphHost: string;
   defaultApiVersion: string;
+  credentialsResolver: CredentialsResolver;
 };
 
 /**
@@ -206,11 +217,12 @@ export function createMetaWhatsAppTransport(
       const phoneNumberIdFromConnection =
         (row as { externalId?: string | null } | null)?.externalId ?? null;
 
-      const configOrError = resolveMetaClientConfig(
+      const configOrError = await resolveMetaClientConfig(
         {
           connectionDeps: deps.connectionDeps,
           getEnvVar: deps.getEnvVar,
           defaultApiVersion: deps.defaultApiVersion,
+          credentialsResolver: deps.credentialsResolver,
         },
         { businessId, connectionId },
         {
@@ -308,5 +320,6 @@ export function createDefaultMetaWhatsAppTransport(): MessageTransport {
     fetchImpl: globalThis.fetch,
     graphHost: META_GRAPH_HOST,
     defaultApiVersion: META_DEFAULT_API_VERSION,
+    credentialsResolver: defaultCredentialsResolver,
   });
 }

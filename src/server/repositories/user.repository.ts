@@ -43,6 +43,38 @@ export class UserRepository {
     return db.user.count({ where: { businessId } });
   }
 
+  /**
+   * The Business's first ADMIN (the owner the invitation-first flow
+   * attached) — a non-secret display REFERENCE for the platform read
+   * surface. Never an authorization subject: platform operators never
+   * act through it and the email is never exposed raw beyond the
+   * operator projection.
+   */
+  async findAdminByBusiness(businessId: string) {
+    return db.user.findFirst({
+      where: { businessId, role: "ADMIN", isActive: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, email: true },
+    });
+  }
+
+  /**
+   * Batched admin reference for the platform list (one query per page —
+   * no N+1). Missing rows are simply absent from the map.
+   */
+  async findAdminsByBusinesses(businessIds: string[]) {
+    if (businessIds.length === 0) return [];
+    return db.user.findMany({
+      where: {
+        businessId: { in: businessIds },
+        role: "ADMIN",
+        isActive: true,
+      },
+      orderBy: [{ businessId: "asc" }, { createdAt: "asc" }],
+      select: { id: true, name: true, email: true, businessId: true },
+    });
+  }
+
   /** Links an authenticated user to a business during onboarding. */
   async assignToBusiness(
     userId: string,

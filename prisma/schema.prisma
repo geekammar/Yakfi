@@ -44,35 +44,35 @@ enum AppointmentStatus {
 // ─── Core domain ─────────────────────────────────────────────
 
 model Business {
-  id                 String    @id @default(uuid())
-  name               String
+  id                    String    @id @default(uuid())
+  name                  String
   // Discovery metadata (operator PROMPT-07): the business's vertical as a
   // stable machine key validated by Zod (`VERTICALS` in lib/validation).
   // Metadata for Local Vertical Discovery ONLY — never permission for
   // vertical-specific UI (PRODUCT_VISION / DECISIONS #22 context).
-  vertical           String?
-  city               String?
-  whatsappNumber     String
-  timezone           String    @default("Asia/Riyadh")
-  about              String?
+  vertical              String?
+  city                  String?
+  whatsappNumber        String
+  timezone              String    @default("Asia/Riyadh")
+  about                 String?
   /// JSON working-hours structure, e.g. { "sun": { "open": "09:00", "close": "21:00", "closed": false }, ... }
-  workingHours       Json?
-  slotDurationMinutes Int      @default(30) @map("slot_duration_minutes")
+  workingHours          Json?
+  slotDurationMinutes   Int       @default(30) @map("slot_duration_minutes")
   // Booking confirmation mode (operator PROMPT-09): how new appointments
   // enter the agenda — "manual" (PENDING until the team confirms) or
   // "automatic" (CONFIRMED on creation). Stable machine key validated by
   // Zod (`CONFIRMATION_MODE_VALUES` in lib/validation) — no Prisma enum,
   // extending the list needs no migration. Default preserves the
   // pre-existing behavior (PENDING).
-  confirmationMode   String    @default("manual") @map("confirmation_mode")
+  confirmationMode      String    @default("manual") @map("confirmation_mode")
   /// JSON FAQ entries: [{ "question": "...", "answer": "..." }]
-  faqs               Json?
-  cancellationPolicy String?
+  faqs                  Json?
+  cancellationPolicy    String?
   onboardingCompletedAt DateTime? @map("onboarding_completed_at")
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt          DateTime? @map("deleted_at")
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt             DateTime? @map("deleted_at")
 
   // The Business's Default Branch (DECISIONS #30, PROMPT-ARCH-02): an
   // operational unit pointer — NOT the tenant boundary (businessId is).
@@ -80,20 +80,22 @@ model Business {
   // business-creation path (business + Default Branch + pointer in ONE
   // transaction) and the ARCH-02 backfill. Nullable only inside that
   // transaction; every existing Business row has it set.
-  defaultBranchId    String?   @unique @map("default_branch_id")
+  defaultBranchId String? @unique @map("default_branch_id")
 
-  users              User[]
-  branches           Branch[]
-  defaultBranch      Branch?   @relation("DefaultBranch", fields: [defaultBranchId], references: [id], onDelete: Restrict)
-  services           Service[]
-  customers          Customer[]
-  conversations      Conversation[]
-  appointments       Appointment[]
-  invitations        Invitation[]
-  whatsappConnections WhatsAppConnection[]
-  providerProfiles   ProviderProfile[]
-  inboundDedupe      InboundMessageDedupe[]
-  usageRecords       UsageRecord[]
+  users                            User[]
+  branches                         Branch[]
+  defaultBranch                    Branch?                           @relation("DefaultBranch", fields: [defaultBranchId], references: [id], onDelete: Restrict)
+  services                         Service[]
+  customers                        Customer[]
+  conversations                    Conversation[]
+  appointments                     Appointment[]
+  invitations                      Invitation[]
+  whatsappConnections              WhatsAppConnection[]
+  whatsappOnboardingAuthorizations WhatsAppOnboardingAuthorization[]
+  runtimeCredentials               RuntimeCredential[]
+  providerProfiles                 ProviderProfile[]
+  inboundDedupe                    InboundMessageDedupe[]
+  usageRecords                     UsageRecord[]
 
   @@index([isActive])
   @@map("businesses")
@@ -138,9 +140,9 @@ model Service {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  business          Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointments      Appointment[]
-  providerServices  ProviderService[]
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments     Appointment[]
+  providerServices ProviderService[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -148,17 +150,17 @@ model Service {
 }
 
 model Customer {
-  id                String    @id @default(uuid())
-  businessId        String    @map("business_id")
-  name              String
-  phone             String
-  email             String?
-  notes             String?
+  id                 String    @id @default(uuid())
+  businessId         String    @map("business_id")
+  name               String
+  phone              String
+  email              String?
+  notes              String?
   lastConversationAt DateTime? @map("last_conversation_at")
   lastAppointmentAt  DateTime? @map("last_appointment_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt         DateTime? @map("deleted_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
 
   business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
   conversations Conversation[]
@@ -188,11 +190,11 @@ model Conversation {
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?          @map("deleted_at")
 
-  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  branch      Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo  User?     @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  messages    Message[]
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo User?     @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages   Message[]
 
   @@index([businessId])
   @@index([businessId, status])
@@ -238,11 +240,11 @@ model Appointment {
   updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?         @map("deleted_at")
 
-  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  service    Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo User?     @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service    Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  branch     Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo User?    @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   @@index([businessId])
   @@index([businessId, date])
@@ -262,8 +264,21 @@ model Appointment {
 // enum, extending the list needs no migration (the confirmationMode /
 // vertical pattern). SECRETS: `credentialsRef` stores a REFERENCE to a
 // secret (env var name / secret-store pointer / encrypted-blob locator)
-// — NEVER raw provider credentials. No vendor is integrated; no
-// connection-management UI exists yet.
+// — NEVER raw provider credentials.
+//
+// TWO SEPARATE LIFECYCLE SURFACES (WHATSAPP-ONBOARDING-01):
+// 1. OPERATIONAL (`status` + `isActive`): the existing runtime gate
+//    consumed by `resolveConnectionForSend` / `resolveInboundConnection`.
+//    UNCHANGED in meaning and unchanged consumers.
+// 2. ONBOARDING (`onboardingState` + `onboardingActor` + the reason/
+//    timestamp fields below): a SEPARATE lifecycle that tracks the
+//    Business Admin's Meta authorization → provisioning → readiness
+//    flow. It is NEVER read by the transport runtime, the conversation
+//    engine, booking, or AI. `READY` is written ONLY through
+//    `markOnboardingReady`, which is guarded by the operational gate
+//    (status CONNECTED + isActive) — so an onboarding-READY row is
+//    always operationally usable, and the two surfaces can never drift
+//    apart. The Meta provenance fields are non-secret REFERENCES only.
 
 model WhatsAppConnection {
   id             String    @id @default(uuid())
@@ -286,13 +301,126 @@ model WhatsAppConnection {
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime? @map("deleted_at")
 
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  // ── ONBOARDING LIFECYCLE (WHATSAPP-ONBOARDING-01) ──────────────
+  // SEPARATE from the operational `status`/`isActive` gate above.
+  // Stable machine keys validated by the Zod unions in
+  // `lib/validation/whatsapp-connection` — no Prisma enum, extending
+  // the list needs no migration. The DEFAULT keeps every existing row
+  // honest: an pre-existing connection is NOT_STARTED (it never went
+  // through the Meta authorization flow), never a false READY.
+  onboardingState          String    @default("NOT_STARTED") @map("onboarding_state")
+  onboardingActor          String    @default("NONE") @map("onboarding_actor")
+  // LAST normalized failure only (see `onboardingFailureToView`):
+  // stable internal code + safe human summary — never a raw provider
+  // response, token, authorization code, or HTTP header.
+  onboardingReasonCode     String?   @map("onboarding_reason_code")
+  onboardingReasonSummary  String?   @map("onboarding_reason_summary")
+  onboardingRetryable      Boolean?  @map("onboarding_retryable")
+  onboardingStateChangedAt DateTime? @map("onboarding_state_changed_at")
+  onboardingCompletedAt    DateTime? @map("onboarding_completed_at")
+  onboardingFailedAt       DateTime? @map("onboarding_failed_at")
+
+  // ── CREDENTIAL REFERENCE KIND (WHATSAPP-ONBOARDING-01) ─────────
+  // `credentialsRef` stays a REFERENCE; this records WHICH reference
+  // grammar it uses. NULL on legacy rows = ENV (the existing behavior:
+  // an environment-variable NAME). RUNTIME = an opaque `fp:<id>` handle
+  // for a future runtime secret store (backend deferred).
+  credentialKind String? @map("credential_kind")
+
+  // ── META PROVENANCE (WHATSAPP-ONBOARDING-01) ───────────────────
+  // Non-secret, provider-reported REFERENCE data written ONLY by the
+  // onboarding callback. Provider-owned ids are provenance: they never
+  // authorize anything and are never trusted as tenant identity
+  // (`externalId` + server-derived Business scope stay authoritative).
+  metaBusinessId     String? @map("meta_business_id")
+  wabaId             String? @map("waba_id")
+  displayPhoneNumber String? @map("display_phone_number")
+  verifiedName       String? @map("verified_name")
+  metaReviewStatus   String? @map("meta_review_status")
+
+  business                 Business                          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch                   Branch?                           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  onboardingAuthorizations WhatsAppOnboardingAuthorization[]
 
   @@unique([businessId, phoneNumber])
   @@index([businessId])
   @@index([branchId])
+  @@index([onboardingState])
   @@map("whatsapp_connections")
+}
+
+// ─── WhatsApp onboarding authorization ledger ───────────────
+// (WHATSAPP-ONBOARDING-01; DECISIONS #23 check-then-act convention)
+// ONE row per launched provider authorization attempt. The callback
+// resolves the target Business + connection EXCLUSIVELY from this
+// server-persisted state (`stateRef` is opaque, unguessable, and
+// single-use) — never from a query parameter, a client payload, or the
+// session. Replay protection: `consumedAt` is set exactly once by a
+// conditional update, so a replayed callback is a deterministic
+// rejection. Cross-tenant rejection: the row's connection is validated
+// to belong to the row's Business before any write. Soft-delete is not
+// needed (these are short-lived operational records; the Business
+// cascade removes them).
+
+model WhatsAppOnboardingAuthorization {
+  id           String    @id @default(uuid())
+  businessId   String    @map("business_id")
+  connectionId String    @map("connection_id")
+  // Opaque single-use state reference (the OAuth `state` surrogate).
+  stateRef     String    @unique @map("state_ref")
+  expiresAt    DateTime  @map("expires_at")
+  // Set exactly once when the callback consumes this attempt.
+  consumedAt   DateTime? @map("consumed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  connection WhatsAppConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([connectionId])
+  @@map("whatsapp_onboarding_authorizations")
+}
+
+// ─── Runtime credentials (WHATSAPP-ONBOARDING-01; DECISIONS #49) ──
+// The server-side RUNTIME secret backend for the `fp:<id>` reference
+// grammar. A dedicated record — the ciphertext never sits on
+// `WhatsAppConnection` (tenant/credential lifecycle stays clean: this
+// row is created when a credential is obtained at runtime and removed by
+// the Business cascade).
+//
+// The opaque `credentialsRef` is BOTH the stable indirection the rest of
+// the system sees (`WhatsAppConnection.credentialsRef`) AND this table's
+// unique key. It is derived from the reference only — never from a phone
+// number, business name, email, Meta Business ID, WABA ID, or
+// phone_number_id — and it never contains the secret it points at.
+//
+// THIS TABLE HOLDS ONLY ENCRYPTED MATERIAL + SAFE METADATA. The raw
+// credential is encrypted application-side (AES-256-GCM, unique IV per
+// credential, auth tag preserved, versioned blob) BEFORE any write; the
+// master encryption key lives ONLY in the server environment
+// (`CREDENTIAL_MASTER_KEY`) — never in this table, never in a log, never
+// in a projection. Prisma query logs therefore can only ever contain
+// ciphertext. Master-key rotation is a later operational concern.
+
+model RuntimeCredential {
+  id String @id @default(uuid())
+  // The opaque `fp:<id>` handle — unique, unguessable, the ONLY thing the
+  // feature/adapter layer ever persists on a connection.
+  credentialsRef String @unique @map("credentials_ref")
+  businessId     String @map("business_id")
+  // Versioned AES-256-GCM package: `v1:` + base64(iv || ciphertext || authTag).
+  cipherBlob     String @map("cipher_blob")
+  // Safe metadata (never the key, never the plaintext).
+  algorithm  String @default("AES-256-GCM")
+  keyVersion Int    @default(1) @map("key_version")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("runtime_credentials")
 }
 
 // ─── Providers (DECISIONS #32, PROMPT-ARCH-02) ───────────────
@@ -530,34 +658,34 @@ model PlatformAiPolicy {
 // (business, role) extend the same `users` table.
 
 model User {
-  id            String    @id
+  id            String   @id
   name          String
-  email         String    @unique
-  emailVerified Boolean   @map("email_verified")
+  email         String   @unique
+  emailVerified Boolean  @map("email_verified")
   image         String?
   // FlowPilot domain fields
-  businessId    String?   @map("business_id")
-  role          UserRole  @default(STAFF)
-  isActive      Boolean   @default(true)
+  businessId    String?  @map("business_id")
+  role          UserRole @default(STAFF)
+  isActive      Boolean  @default(true)
   // Account scope (DECISIONS #22, PROMPT-ARCH-02): explicit platform-level
   // authorization marker — "BUSINESS" (default; every account the
   // invitation-first flows create) or "PLATFORM" (Platform Operator).
   // Platform access is NEVER inferred from businessId = null; the marker
   // is server-managed (Better Auth input:false) and unreachable from any
   // client input. NOT a role: business roles stay ADMIN/STAFF only.
-  accountType   String    @default("BUSINESS") @map("account_type")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  accountType   String   @default("BUSINESS") @map("account_type")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
 
-  business              Business?     @relation(fields: [businessId], references: [id], onDelete: SetNull)
-  sessions              Session[]
-  accounts              Account[]
-  providerProfile       ProviderProfile?
-  assignedConversations Conversation[] @relation("ConversationAssignee")
-  assignedAppointments  Appointment[]  @relation("AppointmentAssignee")
-  invitationsCreated    Invitation[]   @relation("InvitationCreator")
+  business                   Business?            @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  sessions                   Session[]
+  accounts                   Account[]
+  providerProfile            ProviderProfile?
+  assignedConversations      Conversation[]       @relation("ConversationAssignee")
+  assignedAppointments       Appointment[]        @relation("AppointmentAssignee")
+  invitationsCreated         Invitation[]         @relation("InvitationCreator")
   platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
-  aiPolicyUpdates       PlatformAiPolicy[] @relation("PlatformAiPolicyUpdater")
+  aiPolicyUpdates            PlatformAiPolicy[]   @relation("PlatformAiPolicyUpdater")
 
   @@index([businessId])
   @@index([accountType])

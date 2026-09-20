@@ -31,6 +31,7 @@
  */
 
 import { phoneSchema } from "@/lib/validation";
+import type { CredentialKind } from "@/lib/validation";
 import type {
   BranchRepository,
   BusinessRepository,
@@ -349,6 +350,132 @@ export interface ConnectionVerifier {
      *  secret server-side; the value itself never crosses this call. */
     credentialsRef?: string | null;
   }): Promise<ConnectionVerificationResult>;
+}
+
+// ─── Onboarding authorization boundary (WHATSAPP-ONBOARDING-01) ─────────────
+
+/**
+ * Provider-neutral connection AUTHORIZATION port — the onboarding
+ * "connect this number" step, sitting beside the read-only
+ * `ConnectionVerifier` above. The WhatsApp onboarding feature talks to
+ * this boundary only; a future Meta Embedded Signup adapter implements
+ * it (a deterministic stand-in is wired until then).
+ *
+ * Boundary rules:
+ * - Provider concepts (Embedded Signup, Graph endpoints, OAuth codes,
+ *   WABA ids, HTTP statuses) live ONLY inside the adapter — this port
+ *   carries normalized identity + opaque references, never a provider
+ *   model and never an HTTP status.
+ * - A raw access token NEVER crosses this boundary in either direction.
+ *   A credential comes back as an opaque REFERENCE (`credentialsRef`)
+ *   plus its KIND (ENV today; RUNTIME once a runtime secret store
+ *   exists) — the feature persists the reference only.
+ * - Tenancy is NOT this port's concern: the caller persists the
+ *   `stateRef` → Business/connection binding server-side (the
+ *   authorization ledger) and resolves the target Business ONLY from
+ *   that persisted state. `businessId` in the launch params is an
+ *   audit hint, never an authority.
+ * - This port provisions nothing on the provider side: no number
+ *   registration, no webhook subscription, no message of any kind.
+ */
+export type AuthorizationLaunchParams = {
+  /** The Business onboarding the number — audit hint, never authority. */
+  businessId: string;
+  /** The connection row being authorized. */
+  connectionId: string;
+  /** The Business's display number (E.164), a non-secret label. */
+  phoneNumber?: string | null;
+  /** The server-built callback URL the provider must return to. */
+  redirectUri: string;
+  /**
+   * The persisted state reference of an in-flight attempt the launch is
+   * RESUMING. The provider's `state` must be the server-persisted one,
+   * so a resumed attempt reuses the same reference (no second attempt).
+   */
+  existingStateRef?: string | null;
+};
+
+export type AuthorizationLaunchResult = {
+  /** Where the Business Admin's browser goes next (provider-owned URL). */
+  authorizationUrl: string;
+  /** Opaque single-use state reference — the ONLY callback credential. */
+  stateRef: string;
+};
+
+export type AuthorizationExchangeParams = {
+  /** The provider's authorization code (opaque outside the adapter). */
+  code: string;
+  /** The opaque state reference persisted at launch time. */
+  stateRef: string;
+  /** The same server-built callback URL used at launch. */
+  redirectUri: string;
+  /**
+   * The Business the authorization belongs to — an AUDIT hint taken from
+   * the persisted authorization ledger (never from the client). An
+   * adapter that persists a provider-issued secret uses ONLY this to
+   * tenant-scope that secret; it is never authority for which Business
+   * a callback belongs to (the ledger is).
+   */
+  businessId: string;
+};
+
+/**
+ * Provider-reported non-secret provenance with provider-OWNED keys. Only
+ * an allowlist is persisted (the feature maps the Meta keys it knows);
+ * unknown keys never reach the database.
+ */
+export type AuthorizationProvenance = Readonly<Record<string, string>>;
+
+export const authorizationErrorCodeValues = [
+  /** The Business Admin declined or the provider rejected the attempt. */
+  "AUTHORIZATION_DECLINED",
+  /** The authorization attempt expired before the callback arrived. */
+  "AUTHORIZATION_EXPIRED",
+  /** The provider rejected the returned code / it was already used. */
+  "INVALID_AUTHORIZATION_CODE",
+  /** The provider needs more steps (e.g. a pending review) — not ready. */
+  "PROVISIONING_INCOMPLETE",
+  /** Transient provider failure — retryable. */
+  "PROVIDER_UNREACHABLE",
+  /** The adapter could not map the provider response onto the contract. */
+  "PROVIDER_PAYLOAD_INVALID",
+] as const;
+
+export type AuthorizationErrorCode =
+  (typeof authorizationErrorCodeValues)[number];
+
+export type AuthorizationResult =
+  | {
+      ok: true;
+      /** The provider's STABLE connection identity (Meta
+       *  `phone_number_id`) — becomes `WhatsAppConnection.externalId`. */
+      externalId: string;
+      /** Opaque credential REFERENCE — never a raw token. */
+      credentialsRef: string;
+      /** The grammar of `credentialsRef` (ENV / RUNTIME). */
+      credentialKind: CredentialKind;
+      /** Provider-side display number (non-secret label). */
+      displayPhoneNumber?: string;
+      /** Provider-side verified name (non-secret label). */
+      verifiedName?: string;
+      /** Extra provider-owned non-secret reference fields. */
+      provenance?: AuthorizationProvenance;
+    }
+  | {
+      ok: false;
+      /** Normalized failure category — never an HTTP status. */
+      code: AuthorizationErrorCode;
+      message: string;
+    };
+
+export interface ConnectionAuthorizer {
+  readonly providerName: string;
+  launchAuthorization(
+    params: AuthorizationLaunchParams,
+  ): Promise<AuthorizationLaunchResult>;
+  exchangeCallback(
+    params: AuthorizationExchangeParams,
+  ): Promise<AuthorizationResult>;
 }
 
 // ─── Connection / tenant resolution boundary ─────────────────────────────────

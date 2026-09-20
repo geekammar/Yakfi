@@ -1,6 +1,7 @@
 import type { NavItem } from "@/lib/app-config";
 
 import {
+  Building2,
   CalendarDays,
   ClipboardList,
   House,
@@ -15,6 +16,7 @@ import {
 
 const ICONS: Record<string, LucideIcon> = {
   home: House,
+  building: Building2,
   calendar: CalendarDays,
   message: MessageCircle,
   users: Users,

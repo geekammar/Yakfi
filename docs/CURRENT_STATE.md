@@ -3,8 +3,20 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-OPS-AI-PROMPT-WORKSPACE-FINALIZE-29 — the Prompt Workspace
-> architecture is finalized and ledger-reconciled (DECISIONS #48, shipped as
+> WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01 — the RUNTIME backend for
+> the `fp:<id>` credential-reference grammar is implemented (DECISIONS #49,
+> uncommitted): credentials obtained at onboarding time are stored
+> server-side in existing Neon Postgres under APPLICATION-SIDE AES-256-GCM
+> (new additive migration `20260920140745_runtime_credentials`, ZERO new
+> dependencies/vendors), only the opaque `credentialsRef` is persisted, and
+> the ENV grammar + the operational gate are unchanged. New optional
+> server-only `CREDENTIAL_MASTER_KEY` (unset ⇒ store UNAVAILABLE, fail
+> closed). `pnpm check:credentials-runtime` 36/36; onboarding 53/53;
+> transport 27/27; Meta 17/17; inbound 13/13. Meta Embedded Signup itself
+> remains the next major slice (gated on operator-owned Meta App Dashboard
+> configuration). Prior: PROMPT-OPS-AI-PROMPT-WORKSPACE-FINALIZE-29 — the
+> Prompt Workspace architecture is finalized and ledger-reconciled
+> (DECISIONS #48, shipped as
 > release **v0.19.1**, `04856ae`): LLM prompt bodies live only in
 > `/prompts/**/*.prompt`, are compiled by `pnpm generate:ai-prompts` into the
 > committed `src/generated/ai-prompts.generated.ts`, and reach the runtime
@@ -76,8 +88,21 @@
   Embedded Signup is deliberately NOT implemented (external Meta
   dashboard/app configuration — operator prerequisites documented in
   the UI + `ENVIRONMENT_VARIABLES.md`; nothing faked). `pnpm
-check:whatsapp-onboarding` 22/22; ZERO schema/migration changes; NOT
-  deployed.
+check:whatsapp-onboarding` 53/53; ONE additive migration
+  (`20260919120000_whatsapp_onboarding_lifecycle`); NOT deployed.
+  WHATSAPP-ONBOARDING-01 (uncommitted): the SEPARATE onboarding
+  lifecycle + the provider-neutral `ConnectionAuthorizer` port
+  (launch/exchange, no Meta SDK in the port), the server-persisted
+  authorization ledger (callback Business resolved ONLY from the opaque
+  `stateRef` — single-use, replay/cross-tenant safe), the
+  `CredentialsResolver` reference boundary (ENV unchanged; RUNTIME
+  grammar only, backend deferred), the read-only Super Admin projection
+  (`/platform/businesses` + drill-down, masked ids, no credential
+  value), and a non-blocking WhatsApp card on onboarding review. The
+  wired adapter is a DETERMINISTIC stand-in — real Meta HTTP stays
+  deferred behind the DECISIONS #47 operator gate and implements the
+  same port. The operational gate `status === "CONNECTED" && isActive`
+  is UNCHANGED and the lifecycle is never consumed by it.
 - **PUBLIC SIGNUP CLOSED (PROMPT-OPS-05, DECISIONS #41):** the proxy
   refuses public `POST /api/auth/sign-up/email` (403 `SIGNUP_CLOSED`);
   the invitation-first lifecycle (business `/invite/[token]` + platform
@@ -232,4 +257,4 @@ check:whatsapp-onboarding` 22/22; ZERO schema/migration changes; NOT
   inbound+idempotency+isolation+error taxonomy live-verified
   (PROMPT-OPS-06 §3/5/6/7–11).
 
-**Current next step (Prompt Workspace architecture FINALIZED + RECONCILED — DECISIONS #48; shipped as release v0.19.1; the only uncommitted work is this documentation/ledger reconciliation, which the operator reviews then `pnpm ship patch`):** the prompt layer is now source-controlled, generated, and drift-guarded — `/prompts/**/*.prompt` is the only prompt-body source of truth, `prompt-registry.ts` is the only runtime lookup boundary, and prompt semantics are provably unchanged (byte-identical bodies). PROMPT-AI-03/03B deterministic booking seam remains wired AND CLOSED; PROMPT-AI-02 policy-backed `ConversationAi` wired; PROMPT-AI-01 binding (DECISIONS #43) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42/#46). **Next major implementation slice: Meta Embedded Signup** (deferred by DECISIONS #47 — the code-side: redirect handling + server-side code exchange + state/CSRF + persisting `phone_number_id`/`credentialsRef` through the EXISTING `/settings/whatsapp` surface and `ConnectionVerifier` port; it is GATED on operator-owned external Meta App Dashboard configuration — app approval for WhatsApp Business login + registered redirect URI + client id/secret in deployment env — which is exactly why #47 did not fake it; it is a paired operator+code task). Then: onboarding the first REAL pilot Business end-to-end + Spec A/UX/pilot-readiness work, then Spec B instrumentation/economics only after pilot evidence justifies it. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8) + deploy the released head (production remains at v0.19.0).
+**Current next step (Prompt Workspace architecture FINALIZED + RECONCILED — DECISIONS #48; shipped as release v0.19.1; the only uncommitted work is this documentation/ledger reconciliation, which the operator reviews then `pnpm ship patch`):** the prompt layer is now source-controlled, generated, and drift-guarded — `/prompts/**/*.prompt` is the only prompt-body source of truth, `prompt-registry.ts` is the only runtime lookup boundary, and prompt semantics are provably unchanged (byte-identical bodies). PROMPT-AI-03/03B deterministic booking seam remains wired AND CLOSED; PROMPT-AI-02 policy-backed `ConversationAi` wired; PROMPT-AI-01 binding (DECISIONS #43) and CORE-01/02/03A/03B remain IMPLEMENTED; WhatsApp live (DECISIONS #42/#46). **Next major implementation slice: Meta Embedded Signup** (deferred by DECISIONS #47 — the code-side seam is now LANDED (WHATSAPP-ONBOARDING-01, uncommitted): redirect handling + server-side code exchange + the single-use `stateRef` ledger + persisting `phone_number_id`/`credentialsRef` through the EXISTING `/settings/whatsapp` surface and `ConnectionVerifier` port, all behind the provider-neutral `ConnectionAuthorizer` port and driven by a DETERMINISTIC stand-in adapter; it is GATED on operator-owned external Meta App Dashboard configuration — app approval for WhatsApp Business login + registered redirect URI + client id/secret in deployment env — which is exactly why #47 did not fake it; it is a paired operator+code task, and the real adapter now only has to implement the existing port). Then: onboarding the first REAL pilot Business end-to-end + Spec A/UX/pilot-readiness work, then Spec B instrumentation/economics only after pilot evidence justifies it. Parallel operator actions (not blockers): add `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` to Vercel env (#7) + `pnpm db:deploy` Demo DB (#8) + deploy the released head (production remains at v0.19.0).

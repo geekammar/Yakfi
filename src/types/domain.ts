@@ -19,10 +19,12 @@ import type {
   ProviderBranch,
   ProviderProfile,
   ProviderService,
+  RuntimeCredential,
   Service,
   UsageRecord,
   UserRole,
   WhatsAppConnection,
+  WhatsAppOnboardingAuthorization,
 } from "@/generated/prisma/client";
 
 export type {
@@ -40,10 +42,12 @@ export type {
   ProviderBranch,
   ProviderProfile,
   ProviderService,
+  RuntimeCredential,
   Service,
   UsageRecord,
   UserRole,
   WhatsAppConnection,
+  WhatsAppOnboardingAuthorization,
 };
 
 /** Conversation with its messages (thread view). */

@@ -94,4 +94,53 @@ export class BusinessRepository {
       data: { onboardingCompletedAt: new Date() },
     });
   }
+
+  // ── Platform read surface (WHATSAPP-ONBOARDING-01) ────────────────
+  // The smallest platform-facing list capability necessary for
+  // `/platform/businesses` + drill-down. READ-ONLY: no platform write
+  // action exists. Search + pagination are validated by the service
+  // layer (`platformListBusinessInputSchema`) before reaching here, and
+  // the returned rows are never handed to the UI directly — the
+  // platform service projects them into a safe overview.
+
+  async listForPlatform(input: {
+    search?: string | null;
+    limit: number;
+    offset: number;
+  }): Promise<Business[]> {
+    const search = input.search?.trim() ?? "";
+    return db.business.findMany({
+      where: {
+        ...notDeleted,
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { whatsappNumber: { contains: search } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: "desc" }],
+      take: input.limit,
+      skip: input.offset,
+    });
+  }
+
+  async countForPlatform(input: { search?: string | null }): Promise<number> {
+    const search = input.search?.trim() ?? "";
+    return db.business.count({
+      where: {
+        ...notDeleted,
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { whatsappNumber: { contains: search } },
+              ],
+            }
+          : {}),
+      },
+    });
+  }
 }

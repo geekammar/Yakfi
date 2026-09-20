@@ -1,4 +1,8 @@
 import {
+  defaultCredentialsResolver,
+  type CredentialsResolver,
+} from "@/server/credentials/credentials-resolver";
+import {
   META_DEFAULT_API_VERSION,
   META_GRAPH_HOST,
   mapMetaError,
@@ -37,6 +41,13 @@ export type MetaVerifyDeps = {
   fetchImpl: typeof fetch;
   graphHost: string;
   defaultApiVersion: string;
+  /**
+   * The credential REFERENCE boundary (DECISIONS #49): resolves the
+   * connection's `credentialsRef` — an ENV-var NAME (existing behavior)
+   * or an opaque `fp:<id>` runtime handle — to the access token. The
+   * value stays in this module; the reference is the only thing logged.
+   */
+  credentialsResolver: CredentialsResolver;
 };
 
 export type MetaPhone_numberResponse = {
@@ -52,12 +63,16 @@ export type MetaPhone_numberResponse = {
  * identity is real, so the global env fallback is deliberately NOT used
  * for the id (only for the access token, the shared operator secret).
  */
-export function resolveMetaVerifyConfig(
-  deps: Pick<MetaVerifyDeps, "getEnvVar" | "defaultApiVersion">,
+export async function resolveMetaVerifyConfig(
+  deps: Pick<
+    MetaVerifyDeps,
+    "getEnvVar" | "defaultApiVersion" | "credentialsResolver"
+  >,
   params: { externalId: string; credentialsRef?: string | null },
-):
+): Promise<
   | { apiVersion: string; accessToken: string }
-  | { error: ConnectionVerificationResult } {
+  | { error: ConnectionVerificationResult }
+> {
   if (!params.externalId.trim()) {
     return {
       error: {
@@ -75,16 +90,17 @@ export function resolveMetaVerifyConfig(
   let accessToken: string | undefined;
   if (params.credentialsRef) {
     const ref = params.credentialsRef.trim();
-    accessToken = deps.getEnvVar(ref);
-    if (!accessToken) {
+    const resolved = await deps.credentialsResolver.resolve(ref);
+    if (!resolved.ok) {
       return {
         error: {
           ok: false,
           code: "INVALID_CREDENTIALS",
-          message: "مرجع بيانات اعتماد واتساب غير مُهيأ",
+          message: resolved.message,
         },
       };
     }
+    accessToken = resolved.value;
   } else {
     accessToken = deps.getEnvVar("WHATSAPP_META_ACCESS_TOKEN");
   }
@@ -117,7 +133,7 @@ export async function verifyMetaConnection(
   deps: MetaVerifyDeps,
   params: { externalId: string; credentialsRef?: string | null },
 ): Promise<ConnectionVerificationResult> {
-  const configOrError = resolveMetaVerifyConfig(deps, params);
+  const configOrError = await resolveMetaVerifyConfig(deps, params);
   if ("error" in configOrError) return configOrError.error;
   const { apiVersion, accessToken } = configOrError;
 
@@ -209,6 +225,7 @@ export function createDefaultMetaConnectionVerifier(): ConnectionVerifier {
           fetchImpl: globalThis.fetch,
           graphHost: META_GRAPH_HOST,
           defaultApiVersion: META_DEFAULT_API_VERSION,
+          credentialsResolver: defaultCredentialsResolver,
         },
         params,
       ),
