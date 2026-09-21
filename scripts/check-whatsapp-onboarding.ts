@@ -1642,6 +1642,45 @@ async function main(): Promise<void> {
     !invalidTarget.success && invalidTarget.error.code === "INVALID_INPUT",
   );
 
+  // ── O17. managed model: no customer-facing manual credential write ──
+  // The customer settings surface must never ask for or persist a
+  // phone_number_id, an environment-variable name, or any provider
+  // credential. Those are derived server-side by the authorization
+  // callback. The customer write path is gone by construction: the
+  // actions module exports only operational actions.
+  const actions =
+    await import("../src/features/whatsapp-connection/actions/whatsapp-connection-actions");
+  const actionExports = Object.keys(actions);
+  check(
+    "MANAGED: لا مسار حفظ يدوي لبيانات اعتماد في واجهة العميل",
+    !actionExports.includes("saveWhatsAppConnectionAction") &&
+      actionExports.includes("verifyWhatsAppConnectionAction") &&
+      actionExports.includes("disconnectWhatsAppConnectionAction") &&
+      actionExports.includes("reactivateWhatsAppConnectionAction"),
+  );
+  // The settings screen carries no credential inputs at all.
+  const screenModule =
+    await import("../src/features/whatsapp-connection/components/whatsapp-connection-screen");
+  const screenSource = screenModule.toString();
+  check(
+    "MANAGED: شاشة الإعدادات تحوي حقول حالة فقط — لا phone_number_id ولا credentialsRef",
+    !screenSource.includes("credentialsRef") &&
+      !screenSource.includes("saveWhatsAppConnectionAction") &&
+      !screenSource.includes("WHATSAPP_META_ACCESS_TOKEN"),
+  );
+
+  // ── O18. no-connection CTA is a launch, not a self-link ─────────────
+  // On `/settings/whatsapp` a CONFIGURE link would point at the page the
+  // customer is already on. The begin use case creates the connection,
+  // so BEGIN is the correct action from any surface.
+  const noConnectionView = onboardingFeature.resolveOnboardingStatus(null);
+  check(
+    "MANAGED: غياب اتصال → إجراء بدء الربط (لا رابط دائري للإعدادات)",
+    noConnectionView.cta === "BEGIN" &&
+      noConnectionView.onboardingState === "NOT_STARTED" &&
+      noConnectionView.operationallyConnected === false,
+  );
+
   let failed = 0;
   for (const { label, pass } of checks) {
     if (pass) console.log(`✔ ${label}`);

@@ -206,7 +206,11 @@ export function resolveOnboardingStatus(
       statusLabel: ONBOARDING_STATUS_LABELS.NOT_STARTED,
       onboardingState: "NOT_STARTED",
       operationallyConnected: false,
-      cta: "CONFIGURE",
+      // No connection yet: the managed launch is the correct next action
+      // from ANY surface (the begin use case creates the connection).
+      // A link CTA here would be a dead self-link on `/settings/whatsapp`
+      // — the canonical surface — so this is a launch action, not a link.
+      cta: "BEGIN",
       reasonSummary: null,
     };
   }

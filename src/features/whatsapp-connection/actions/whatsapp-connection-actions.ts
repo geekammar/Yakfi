@@ -4,7 +4,6 @@ import {
   defaultWhatsAppConnectionServiceDeps,
   disconnectConnection,
   reactivateConnection,
-  saveConnection,
   verifyConnection,
   type WhatsAppConnectionActor,
 } from "@/features/whatsapp-connection/server/whatsapp-connection-service";
@@ -68,14 +67,6 @@ function revalidateConnectionSurfaces() {
   revalidatePath("/settings");
   // Conversations depend on a resolvable connection for inbound/outbound.
   revalidatePath("/conversations");
-}
-
-export async function saveWhatsAppConnectionAction(
-  input: unknown,
-): Promise<WhatsAppConnectionActionResult> {
-  const result = await saveConnection(deps(), await currentActor(), input);
-  if (result.success) revalidateConnectionSurfaces();
-  return result;
 }
 
 export async function verifyWhatsAppConnectionAction(

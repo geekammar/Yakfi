@@ -3,42 +3,40 @@
 import {
   disconnectWhatsAppConnectionAction,
   reactivateWhatsAppConnectionAction,
-  saveWhatsAppConnectionAction,
   verifyWhatsAppConnectionAction,
 } from "@/features/whatsapp-connection/actions/whatsapp-connection-actions";
-import {
-  saveWhatsAppConnectionSchema,
-  type SaveWhatsAppConnectionInput,
-} from "@/features/whatsapp-connection/schemas/whatsapp-connection-schema";
 import type { WhatsAppConnectionView } from "@/features/whatsapp-connection/types";
-import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
-import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  CircleCheckIcon,
   LoaderCircleIcon,
   MessageCircleIcon,
   ShieldAlertIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
 
 /**
  * WhatsApp connection setup screen (Business Admin onboarding).
  *
- * Shows the clear lifecycle states (not connected / configured /
- * verified / disconnected) and NEVER displays a secret: only the
- * provider, the display number, the MASKED provider connection id
- * (phone_number_id), the status, and the last change time are shown.
- * The `credentialsRef` field accepts an environment-variable NAME
- * only — the raw access token is stored by the operator in the
- * deployment environment and never enters the database.
+ * MANAGED MODEL (WHATSAPP-ONBOARDING-01): the provider identity
+ * (`phone_number_id`) and the credential reference are provisioned
+ * SERVER-SIDE by the authorization callback. The customer never types a
+ * Meta technical identifier, an access token, an environment-variable
+ * name, or a webhook setting — FlowPilot derives everything from the
+ * provider authorization.
+ *
+ * This surface is therefore READ-ONLY + operational actions: it shows
+ * the connection state (provider, display number, MASKED provider
+ * connection id, status, last change time) and the lifecycle actions
+ * (verify / disconnect / reactivate). The managed launch ("Connect
+ * WhatsApp") is composed at the ROUTE layer
+ * (`WhatsAppOnboardingStatus`), keeping the feature boundary intact.
+ *
+ * Page chrome (the `PageHeader`) is owned by the route, not here: the
+ * card is composable alongside the managed lifecycle view.
  */
 type ConnectionState =
   | { kind: "none" }
@@ -72,17 +70,8 @@ export function WhatsAppConnectionScreen({
     : ({ kind: "none" } as ConnectionState);
 
   return (
-    <div className="animate-fade-in-up space-y-8">
-      <PageHeader
-        title="واتساب"
-        description="اربط رقم واتساب الخاص بمنشأتك لاستقبال رسائل العملاء والرد عليهم تلقائياً."
-      />
-
+    <div className="space-y-8">
       <ConnectionStateCard state={state} />
-
-      <ConnectionForm initial={primary} />
-
-      <OperatorNote />
     </div>
   );
 }
@@ -101,7 +90,8 @@ function ConnectionStateCard({ state }: { state: ConnectionState }) {
             className="size-5 shrink-0 text-muted-foreground"
           />
           <p className="text-sm leading-6 text-muted-foreground">
-            املأ البيانات بالأسفل لربط رقمك. لا يُرسل أي شيء للعملاء أثناء
+            ابدأ ربط رقمك من خلال زر «اربط رقم واتساب» — يتولّى النظام تهيئة
+            هوية الرقم وبيانات الاعتماد تلقائياً. لا يُرسل أي شيء للعملاء أثناء
             الإعداد أو التحقق.
           </p>
         </div>
@@ -239,176 +229,5 @@ function ConnectionActions({
         </Alert>
       ) : null}
     </div>
-  );
-}
-
-function ConnectionForm({ initial }: { initial?: WhatsAppConnectionView }) {
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const form = useForm<SaveWhatsAppConnectionInput>({
-    resolver: zodResolver(saveWhatsAppConnectionSchema),
-    defaultValues: {
-      connectionId: initial?.id,
-      displayName: initial?.displayName ?? "",
-      phoneNumber: initial?.phoneNumber ?? "",
-      externalId: initial?.externalId ?? "",
-      // The reference is shown only when already persisted — never
-      // echoed back typed secrets.
-      credentialsRef: "",
-    },
-    mode: "onChange",
-  });
-
-  const submit = form.handleSubmit(async (data) => {
-    setError(null);
-    setSaved(false);
-    setIsSubmitting(true);
-    const result = await saveWhatsAppConnectionAction(data);
-    setIsSubmitting(false);
-    if (!result.success) {
-      setError(result.message);
-      return;
-    }
-    setSaved(true);
-  });
-
-  const fieldError = (message?: string) =>
-    message ? (
-      <p className="text-xs text-destructive" role="alert">
-        {message}
-      </p>
-    ) : null;
-
-  return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
-      <section
-        aria-labelledby="whatsapp-connection-section"
-        className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
-      >
-        <SectionHeader
-          title={initial ? "تعديل بيانات الاتصال" : "ربط رقم واتساب"}
-          description="الهوية المعتمدة للاتصال هي معرّف الرقم (phone_number_id) — رقم العرض مجرد عنوان."
-        />
-        <div className="grid gap-5 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="whatsapp-display-name">اسم توضيحي للاتصال</Label>
-            <Input
-              id="whatsapp-display-name"
-              placeholder="مثال: رقم الاستقبال"
-              autoComplete="off"
-              aria-invalid={Boolean(form.formState.errors.displayName)}
-              {...form.register("displayName")}
-            />
-            {fieldError(form.formState.errors.displayName?.message)}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="whatsapp-phone">رقم العرض</Label>
-            <Input
-              id="whatsapp-phone"
-              type="tel"
-              dir="ltr"
-              autoComplete="tel"
-              className="text-start"
-              placeholder="+201000000000"
-              aria-invalid={Boolean(form.formState.errors.phoneNumber)}
-              {...form.register("phoneNumber")}
-            />
-            {fieldError(form.formState.errors.phoneNumber?.message)}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="whatsapp-external-id">
-              معرّف الرقم (phone_number_id)
-            </Label>
-            <Input
-              id="whatsapp-external-id"
-              dir="ltr"
-              className="text-start font-mono text-sm"
-              placeholder="1286861067846638"
-              autoComplete="off"
-              aria-invalid={Boolean(form.formState.errors.externalId)}
-              {...form.register("externalId")}
-            />
-            <p className="text-xs leading-5 text-muted-foreground">
-              تجده في لوحة تحكم واتساب (Meta) ضمن بيانات الرقم. هذا هو المعرّف
-              المعتمد للاتصال.
-            </p>
-            {fieldError(form.formState.errors.externalId?.message)}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="whatsapp-credentials-ref">
-              اسم متغيّر البيئة السري
-            </Label>
-            <Input
-              id="whatsapp-credentials-ref"
-              dir="ltr"
-              className="text-start font-mono text-sm"
-              placeholder="WHATSAPP_META_ACCESS_TOKEN"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={Boolean(form.formState.errors.credentialsRef)}
-              {...form.register("credentialsRef")}
-            />
-            <p className="text-xs leading-5 text-muted-foreground">
-              اسم متغيّر البيئة الذي يخزّن رمز الوصول — وليس الرمز نفسه. يضيفه
-              مشغّل النظام في بيئة التشغيل.
-            </p>
-            {fieldError(form.formState.errors.credentialsRef?.message)}
-          </div>
-        </div>
-      </section>
-
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {saved ? (
-        <p
-          role="status"
-          className="flex items-center gap-1.5 text-sm text-success"
-        >
-          <CircleCheckIcon aria-hidden className="size-4" />
-          تم حفظ بيانات الاتصال — تحقق منه لتشغيله.
-        </p>
-      ) : null}
-
-      <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">
-          لا تُحفظ رموز الوصول في قاعدة البيانات — تُخزّن كمتغيّرات بيئة سرّية.
-        </p>
-        <Button type="submit" size="lg" disabled={isSubmitting}>
-          {isSubmitting ? (
-            <LoaderCircleIcon aria-hidden className="animate-spin" />
-          ) : null}
-          حفظ بيانات الاتصال
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function OperatorNote() {
-  return (
-    <section className="rounded-xl border bg-muted/30 p-5 text-sm leading-7 sm:p-6">
-      <h2 className="mb-2 font-semibold">متطلّبات من مشغّل النظام</h2>
-      <ul className="list-inside list-disc space-y-1.5 text-muted-foreground">
-        <li>
-          تطبيق Meta مُفعّل مع منتج واتساب وحساب عمل (WhatsApp Business
-          Account).
-        </li>
-        <li>رقم مُسجّل ومُتحقق منه، مع رمز وصول دائم بصلاحية المراسلة.</li>
-        <li>
-          رمز الوصول مخزّن في بيئة التشغيل تحت اسم متغيّر البيئة المُدخل أعلاه.
-        </li>
-        <li>
-          ربط الويبهوك (Webhook) مع رمز التحقق وسر التطبيق في بيئة التشغيل.
-        </li>
-      </ul>
-    </section>
   );
 }

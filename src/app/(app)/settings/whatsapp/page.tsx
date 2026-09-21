@@ -5,10 +5,14 @@ import {
   type WhatsAppConnectionActor,
 } from "@/features/whatsapp-connection/server/whatsapp-connection-service";
 import type { WhatsAppConnectionView } from "@/features/whatsapp-connection/types";
+import { WhatsAppOnboardingStatus } from "@/features/whatsapp-onboarding/components/whatsapp-onboarding-status";
+import { getOnboardingStatus } from "@/features/whatsapp-onboarding/server/whatsapp-onboarding-service";
+import type { WhatsAppOnboardingActor } from "@/features/whatsapp-onboarding/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { requireRole } from "@/server/auth/guards";
 import { createDefaultMetaConnectionVerifier } from "@/server/integrations/whatsapp/meta-verify";
+import { whatsAppConnectionRepository } from "@/server/repositories";
 
 import { CircleAlertIcon } from "lucide-react";
 import type { Metadata } from "next";
@@ -25,6 +29,13 @@ export const metadata: Metadata = {
  * Business is ALWAYS the actor's own, derived from the authenticated
  * session; the service layer enforces the role + tenant scoping server-
  * side on every read and write.
+ *
+ * MANAGED MODEL: this route composes the managed authorization launch
+ * (`WhatsAppOnboardingStatus` — "Connect WhatsApp" → provider
+ * authorization → server-side provisioning) with the read-only
+ * connection surface (`WhatsAppConnectionScreen` — state + verify /
+ * disconnect / reactivate). The customer never types a Meta identifier,
+ * a token, an environment-variable name, or a webhook setting.
  */
 export default async function WhatsAppConnectionPage() {
   const session = await requireRole("ADMIN");
@@ -68,5 +79,28 @@ export default async function WhatsAppConnectionPage() {
   }
 
   const connections: WhatsAppConnectionView[] = result.connections;
-  return <WhatsAppConnectionScreen initialConnections={connections} />;
+
+  // The managed lifecycle view (simplified label + the single next
+  // action). Non-secret by construction; the connection surface below
+  // shows the operational detail.
+  const onboardingActor: WhatsAppOnboardingActor = {
+    userId: actor.userId,
+    role: actor.role,
+    businessId: actor.businessId,
+  };
+  const whatsappStatus = await getOnboardingStatus(
+    { connectionRepository: whatsAppConnectionRepository },
+    onboardingActor,
+  );
+
+  return (
+    <div className="animate-fade-in-up space-y-8">
+      <PageHeader
+        title="واتساب"
+        description="اربط رقم واتساب الخاص بمنشأتك لاستقبال رسائل العملاء والرد عليهم تلقائياً."
+      />
+      <WhatsAppOnboardingStatus status={whatsappStatus} hideLinkCta />
+      <WhatsAppConnectionScreen initialConnections={connections} />
+    </div>
+  );
 }

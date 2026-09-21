@@ -57,13 +57,21 @@ const DESCRIPTIONS: Record<WhatsAppOnboardingCta, string> = {
 
 export function WhatsAppOnboardingStatus({
   status,
+  hideLinkCta = false,
 }: {
   status: WhatsAppOnboardingView;
+  /**
+   * When this card is composed ON the canonical connection surface
+   * (`/settings/whatsapp`), the link CTAs (VERIFY/ACT/CONFIGURE) would
+   * be self-links. The operational actions live in the connection card
+   * on that page, so the card renders only its own launch actions.
+   */
+  hideLinkCta?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const actionLabel = ACTION_LABELS[status.cta];
-  const linkLabel = CTA_LINK_LABELS[status.cta];
+  const linkLabel = hideLinkCta ? undefined : CTA_LINK_LABELS[status.cta];
 
   const launch = () => {
     setError(null);

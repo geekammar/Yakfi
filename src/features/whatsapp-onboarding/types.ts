@@ -55,8 +55,8 @@ export type WhatsAppOnboardingView = {
 };
 
 export type WhatsAppOnboardingCta =
-  | "CONFIGURE" // no connection yet → /settings/whatsapp
-  | "BEGIN" // not started → launch the provider authorization
+  | "CONFIGURE" // the last attempt is not retryable → start over in settings
+  | "BEGIN" // no connection yet → launch the provider authorization
   | "RESUME" // authorization in flight → return to the provider
   | "VERIFY" // provider identity ready → verify the connection
   | "ACT" // the provider needs an action from the business
