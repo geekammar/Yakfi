@@ -1,7 +1,11 @@
 "use client";
 
-import { setServiceActiveAction } from "@/features/services/actions/service-actions";
+import {
+  removeServiceAction,
+  setServiceActiveAction,
+} from "@/features/services/actions/service-actions";
 import { ServiceFormDialog } from "@/features/services/components/service-form-dialog";
+import { ServiceRemoveDialog } from "@/features/services/components/service-remove-dialog";
 import type { ServiceListItem } from "@/features/services/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
@@ -10,20 +14,28 @@ import { Button } from "@/components/ui/button";
 import { SERVICE_NOUNS, arabicCount } from "@/lib/arabic";
 
 import {
+  CheckCircleIcon,
   Clock3Icon,
   LayersIcon,
   PauseCircleIcon,
   PencilIcon,
   PlayCircleIcon,
   PlusIcon,
+  TrashIcon,
 } from "lucide-react";
 import { useState } from "react";
 
 /**
  * Services management screen: what the business offers, how long each
  * service takes, and its active state. One primary action (إضافة
- * خدمة), one small create/edit dialog, and a simple explicit
- * activate/deactivate action per service.
+ * خدمة), one small create/edit dialog, an explicit activate/deactivate
+ * action per service, and a confirmed removal.
+ *
+ * The Service Catalog is canonical domain data, not a second Knowledge
+ * Base: the customer-facing identity (name/description) reaches the AI
+ * through the B-02 context builder under the B-01 policy, while
+ * `durationMinutes` stays an operational scheduling fact the owner
+ * sees here but the assistant never repeats (B-03).
  */
 export function ServicesScreen({
   initialServices,
@@ -34,7 +46,10 @@ export function ServicesScreen({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ServiceListItem | null>(null);
   const [dialogSession, setDialogSession] = useState(0);
+  const [removing, setRemoving] = useState<ServiceListItem | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -50,6 +65,11 @@ export function ServicesScreen({
     setDialogOpen(true);
   }
 
+  function openRemove(service: ServiceListItem) {
+    setRemoving(service);
+    setRemoveOpen(true);
+  }
+
   function handleSaved(service: ServiceListItem) {
     setServices((current) => {
       const exists = current.some((item) => item.id === service.id);
@@ -58,6 +78,13 @@ export function ServicesScreen({
         : [...current, service];
       return next.sort((a, b) => a.name.localeCompare(b.name, "ar"));
     });
+    setSuccess("تم حفظ الخدمة");
+  }
+
+  function handleRemoved(service: ServiceListItem) {
+    setServices((current) => current.filter((item) => item.id !== service.id));
+    setRemoving(null);
+    setSuccess("تم حذف الخدمة");
   }
 
   function toggleActive(service: ServiceListItem) {
@@ -85,11 +112,19 @@ export function ServicesScreen({
     );
   }
 
+  const submitRemove = () =>
+    removing
+      ? removeServiceAction({ id: removing.id })
+      : Promise.resolve({
+          success: false,
+          message: "لا توجد خدمة محددة للحذف",
+        } as const);
+
   return (
     <div className="animate-fade-in-up space-y-6">
       <PageHeader
         title="الخدمات"
-        description="قائمة خدمات منشأتك ومدة كل خدمة — تُعرض للعملاء عند الحجز."
+        description="قائمة خدمات منشأتك. أسماء الخدمات هي ما يراه العملاء عند الحجز، أما مدة كل خدمة فهي معلومة تشغيلية لحساب المواعيد لا تُعرض للعملاء تلقائياً."
         actions={
           <Button onClick={openCreate}>
             <PlusIcon />
@@ -103,6 +138,15 @@ export function ServicesScreen({
           <p className="text-xs text-muted-foreground" aria-live="polite">
             {arabicCount(services.length, SERVICE_NOUNS)}
           </p>
+          {success ? (
+            <p
+              role="status"
+              className="flex items-center gap-1.5 text-sm text-success"
+            >
+              <CheckCircleIcon aria-hidden className="size-4" />
+              {success}
+            </p>
+          ) : null}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -135,7 +179,7 @@ export function ServicesScreen({
                         </p>
                       ) : null}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -162,6 +206,16 @@ export function ServicesScreen({
                             تنشيط
                           </>
                         )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => openRemove(service)}
+                      >
+                        <TrashIcon />
+                        حذف
                       </Button>
                     </div>
                   </div>
@@ -193,6 +247,17 @@ export function ServicesScreen({
         onOpenChange={setDialogOpen}
         service={editing ?? undefined}
         onSaved={handleSaved}
+      />
+
+      <ServiceRemoveDialog
+        open={removeOpen}
+        onOpenChange={(open) => {
+          setRemoveOpen(open);
+          if (!open) setRemoving(null);
+        }}
+        service={removing}
+        submit={submitRemove}
+        onRemoved={handleRemoved}
       />
     </div>
   );

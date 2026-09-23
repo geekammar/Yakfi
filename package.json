@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -8,6 +8,7 @@
     "verify": "node scripts/verify.mjs",
     "security": "node scripts/security-check.mjs",
     "check:signup": "tsx scripts/check-signup-policy.ts",
+    "check:services": "tsx scripts/check-services.ts",
     "check:knowledge-faq": "tsx scripts/check-knowledge-faq.ts",
     "check:policy": "tsx scripts/check-ai-policy.ts",
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",

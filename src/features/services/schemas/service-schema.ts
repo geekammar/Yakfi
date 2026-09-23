@@ -30,4 +30,22 @@ export const setServiceActiveSchema = z.object({
   isActive: z.boolean(),
 });
 
+/**
+ * Removal is addressed by id (never by a client-supplied name); the
+ * service layer re-owns the row before touching it.
+ */
+export const removeServiceSchema = z.object({
+  id: uuidSchema,
+});
+
+/**
+ * Normalized identity key for the duplicate-name guard. Service names
+ * are matched on their TRIMMED form only — the owner's own catalog is
+ * a small list of distinct names, so a duplicate is a real conflict,
+ * not a storage constraint (DECISIONS #23's check-then-create).
+ */
+export function serviceIdentityKey(name: string): string {
+  return name.trim();
+}
+
 export type ServiceFormInput = z.infer<typeof serviceFormSchema>;

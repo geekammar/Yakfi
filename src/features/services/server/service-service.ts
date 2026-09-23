@@ -9,7 +9,9 @@
  */
 
 import {
+  removeServiceSchema,
   serviceFormSchema,
+  serviceIdentityKey,
   setServiceActiveSchema,
   updateServiceSchema,
 } from "@/features/services/schemas/service-schema";
@@ -31,7 +33,12 @@ export type ServiceActor = {
 export type ServiceServiceDeps = {
   serviceRepository: Pick<
     ServiceRepository,
-    "listByBusiness" | "create" | "update" | "setActive" | "findById"
+    | "listByBusiness"
+    | "create"
+    | "update"
+    | "setActive"
+    | "findById"
+    | "softDelete"
   >;
 };
 
@@ -43,6 +50,8 @@ export const defaultServiceServiceDeps: ServiceServiceDeps = {
 const FORBIDDEN_MESSAGE = "إدارة الخدمات متاحة للمدير فقط";
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
 const NOT_FOUND_MESSAGE = "الخدمة غير موجودة";
+const DUPLICATE_MESSAGE = "في خدمة بنفس الاسم موجودة بالفعل";
+const REMOVE_FAILED_MESSAGE = "تعذر حذف الخدمة الآن";
 
 function toListItem(service: Service): ServiceListItem {
   return {
@@ -107,6 +116,19 @@ export async function createService(
     );
   }
 
+  // Duplicate-name guard (check-then-create): two same-named services
+  // would make the deterministic booking matcher ambiguous, so the
+  // conflict is rejected here rather than at the DB. Soft-deleted
+  // (removed) names are free again — they are gone from the catalog.
+  const existing = await deps.serviceRepository.listByBusiness(
+    scope.businessId,
+    { includeInactive: true, rawPagination: { pageSize: 100 } },
+  );
+  const key = serviceIdentityKey(parsed.data.name);
+  if (existing.some((service) => serviceIdentityKey(service.name) === key)) {
+    return { success: false, message: DUPLICATE_MESSAGE };
+  }
+
   try {
     const service = await deps.serviceRepository.create({
       businessId: scope.businessId,
@@ -141,6 +163,25 @@ export async function updateService(
     parsed.data.id,
   );
   if (!existing) return { success: false, message: NOT_FOUND_MESSAGE };
+
+  // Renaming onto ANOTHER live service's name is the same conflict a
+  // duplicate create would create (the row always keeps its own name).
+  const key = serviceIdentityKey(parsed.data.service.name);
+  if (serviceIdentityKey(existing.name) !== key) {
+    const catalog = await deps.serviceRepository.listByBusiness(
+      scope.businessId,
+      { includeInactive: true, rawPagination: { pageSize: 100 } },
+    );
+    if (
+      catalog.some(
+        (service) =>
+          service.id !== parsed.data.id &&
+          serviceIdentityKey(service.name) === key,
+      )
+    ) {
+      return { success: false, message: DUPLICATE_MESSAGE };
+    }
+  }
 
   try {
     const service = await deps.serviceRepository.update(parsed.data.id, {
@@ -182,5 +223,47 @@ export async function setServiceActive(
     return { success: true, service: toListItem(service) };
   } catch {
     return { success: false, message: "تعذر تحديث حالة الخدمة الآن" };
+  }
+}
+
+/**
+ * Remove a service.
+ *
+ * Removal is a SOFT DELETE (`deletedAt`), never a hard row delete:
+ * `Appointment.service` is `onDelete: Restrict`, so a booked service
+ * row is the integrity anchor of every past appointment (its name and
+ * duration stay readable on history). Soft-deleting also keeps the
+ * operational contract the booking engine relies on — the row stops
+ * being catalog/bookable (`isActive: false` + `deletedAt` set, both
+ * honored by the repository's catalog reads) without orphaning history.
+ *
+ * An owner who needs the service bookable again re-creates it; the
+ * duplicate guard keeps removed names free for that.
+ */
+export async function removeService(
+  deps: ServiceServiceDeps,
+  actor: ServiceActor,
+  input: unknown,
+): Promise<ServiceActionResult> {
+  const scope = resolveBusiness(actor);
+  if (!scope.ok) return { success: false, message: scope.message };
+
+  const parsed = removeServiceSchema.safeParse(input);
+  if (!parsed.success) {
+    return invalidInput(parsed.error.issues[0]?.message ?? "الإجراء غير صالح");
+  }
+
+  const existing = await findOwnedService(
+    deps,
+    scope.businessId,
+    parsed.data.id,
+  );
+  if (!existing) return { success: false, message: NOT_FOUND_MESSAGE };
+
+  try {
+    const service = await deps.serviceRepository.softDelete(parsed.data.id);
+    return { success: true, service: toListItem(service) };
+  } catch {
+    return { success: false, message: REMOVE_FAILED_MESSAGE };
   }
 }

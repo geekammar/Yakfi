@@ -3,6 +3,7 @@
 import {
   createService,
   defaultServiceServiceDeps,
+  removeService,
   setServiceActive,
   updateService,
   type ServiceActor,
@@ -64,6 +65,18 @@ export async function setServiceActiveAction(
   input: unknown,
 ): Promise<ServiceActionResult> {
   const result = await setServiceActive(
+    defaultServiceServiceDeps,
+    await currentActor(),
+    input,
+  );
+  if (result.success) revalidateServices();
+  return result;
+}
+
+export async function removeServiceAction(
+  input: unknown,
+): Promise<ServiceActionResult> {
+  const result = await removeService(
     defaultServiceServiceDeps,
     await currentActor(),
     input,

@@ -110,7 +110,7 @@ export function ServiceFormDialog({
             <Textarea
               id="service-description"
               rows={3}
-              placeholder="تفاصيل تظهر للفريق عند إدارة الحجوزات…"
+              placeholder="تفاصيل تساعد العميل على فهم الخدمة عند الحجز…"
               aria-invalid={Boolean(form.formState.errors.description)}
               {...form.register("description")}
             />
@@ -118,7 +118,11 @@ export function ServiceFormDialog({
               <p className="text-xs text-destructive">
                 {form.formState.errors.description.message}
               </p>
-            ) : null}
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                يظهر للعملاء كجزء من بيانات الخدمة.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -141,7 +145,8 @@ export function ServiceFormDialog({
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                من 5 دقائق حتى 8 ساعات.
+                من 5 دقائق حتى 8 ساعات — تُستخدم لحساب أوقات الحجز فقط، ولا
+                تُعرض للعملاء تلقائياً.
               </p>
             )}
           </div>

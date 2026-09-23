@@ -5,18 +5,19 @@
 
 ## Command Map
 
-| Command             | What it is                                                                                                                                       | When to run                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `pnpm verify`       | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                 | Before finishing ANY work (binding)                       |
-| `pnpm run doctor`   | Project health: OS, node, pnpm, git, gh, env, Prisma, DB connection, deps, build readiness → READY / NOT READY                                   | After setup, after env changes, when anything feels off   |
-| `pnpm security`     | Secret scan: env-file hygiene, secret quality, secret-shaped content in committable files                                                        | Before pushing; runs automatically pre-commit             |
-| `pnpm vercel:check` | Deployment env validation (4 required vars, per-var fixes)                                                                                       | Before configuring Vercel / part of every deploy          |
-| `pnpm deploy:check` | Pre-deploy gate: env + database + Prisma + auth + demo data + build → READY / NOT READY                                                          | Before every deploy; `-- --fast` skips the build step     |
-| `pnpm deploy`       | Full pre-deploy gate → Vercel production deploy → deployment URL                                                                                 | Sharing a demo-able URL with a prospect                   |
-| `pnpm ship`         | Lightweight operator release: safety validation → version bump → commit → annotated tag → push → GitHub Release (does NOT re-run the build gate) | Human operator, after a prompt whose `pnpm verify` passed |
-| `pnpm lint`         | `eslint .`                                                                                                                                       | While coding (or `lint:fix`)                              |
-| `pnpm typecheck`    | `tsc --noEmit`                                                                                                                                   | While coding                                              |
-| `pnpm format:check` | `prettier --check .`                                                                                                                             | Before verify (or run `pnpm format`)                      |
+| Command               | What it is                                                                                                                                       | When to run                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `pnpm check:services` | Service Catalog + authoring boundary (offline, in-memory): list/create/edit/remove, tenant isolation, duplicate guard, duration-is-operational   | After touching `/services` or the service domain          |
+| `pnpm verify`         | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                 | Before finishing ANY work (binding)                       |
+| `pnpm run doctor`     | Project health: OS, node, pnpm, git, gh, env, Prisma, DB connection, deps, build readiness → READY / NOT READY                                   | After setup, after env changes, when anything feels off   |
+| `pnpm security`       | Secret scan: env-file hygiene, secret quality, secret-shaped content in committable files                                                        | Before pushing; runs automatically pre-commit             |
+| `pnpm vercel:check`   | Deployment env validation (4 required vars, per-var fixes)                                                                                       | Before configuring Vercel / part of every deploy          |
+| `pnpm deploy:check`   | Pre-deploy gate: env + database + Prisma + auth + demo data + build → READY / NOT READY                                                          | Before every deploy; `-- --fast` skips the build step     |
+| `pnpm deploy`         | Full pre-deploy gate → Vercel production deploy → deployment URL                                                                                 | Sharing a demo-able URL with a prospect                   |
+| `pnpm ship`           | Lightweight operator release: safety validation → version bump → commit → annotated tag → push → GitHub Release (does NOT re-run the build gate) | Human operator, after a prompt whose `pnpm verify` passed |
+| `pnpm lint`           | `eslint .`                                                                                                                                       | While coding (or `lint:fix`)                              |
+| `pnpm typecheck`      | `tsc --noEmit`                                                                                                                                   | While coding                                              |
+| `pnpm format:check`   | `prettier --check .`                                                                                                                             | Before verify (or run `pnpm format`)                      |
 
 > `pnpm run doctor` (not `pnpm doctor`) — the latter is pnpm's built-in.
 

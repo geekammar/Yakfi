@@ -3,6 +3,33 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
+> PROMPT-B06 — the **Service Catalog + Service Authoring surface is
+> complete (DECISIONS #53, uncommitted)**: the catalog is canonical
+> business/domain data — NOT a second Knowledge Base. `name`/
+> `description` are customer-facing under the B-01 policy and reach the
+> AI only as NAMES through the B-02 context builder; `durationMinutes`
+> is an operational scheduling fact (booking options, `endTime`,
+> CORE-02 slot math) that stays `INTERNAL` — it is NOT a customer
+> disclosure merely because it exists, and B-03 can never let it back
+> a reply. Removal is now wired: the repository's already-present
+> `softDelete` had ZERO callers, so a confirmed-removal dialog
+> (`ServiceRemoveDialog`, the established `KnowledgeRemoveDialog`
+> pattern) was added; soft delete is forced by `Appointment.service`
+> `onDelete: Restrict` (past-appointment history stays intact while
+> the service stops being catalog/bookable). A duplicate-name guard
+> (check-then-create, DECISIONS #23 convention) rejects same-named
+> live services and renames onto existing names, because the
+> deterministic `matchServiceByName` would otherwise go ambiguous.
+> Three UI copy corrections state the boundary honestly. NO schema
+> migration — the existing model already had every needed field.
+> `pnpm check:services` 50/50 (NEW — list/empty/create/reject/edit/
+> remove/tenant read+write isolation/unauthorized/duration preserved/
+> duration-not-disclosed/inactive/no-duplicates/booking intact);
+> `check:knowledge-visibility` 36/36, `check:ai-context-builder`
+> 39/39, `check:ai-disclosure` 32/32, `check:conversation-booking`
+> 16/16, `check:booking-options` 32/32, `check:booking-confirm`
+> 18/18, `check:eligibility` 29/29; WhatsApp checks unchanged;
+> `pnpm verify` green + `pnpm security` pass. Prior:
 > PROMPT-B02 — the **AI context builder is implemented (DECISIONS #51,
 > uncommitted)**: the explicit boundary that makes the B-01 visibility
 > policy operational at the AI boundary —
