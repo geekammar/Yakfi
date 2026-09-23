@@ -3,6 +3,36 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
+> PROMPT-B02 — the **AI context builder is implemented (DECISIONS #51,
+> uncommitted)**: the explicit boundary that makes the B-01 visibility
+> policy operational at the AI boundary —
+> `src/features/conversations/server/ai-context-builder/` classifies the
+> engine's already-loaded source facts through the B-01 pipeline, proves
+> tenant scope, gates CONDITIONAL facts on builder-derived task relevance,
+> omits INTERNAL operational facts the task does not require (service
+> `durationMinutes` and raw `workingHours` never enter context merely
+> because they exist; availability enters only as the CORE-02 result),
+> drops provenance, and composes the minimal `AiRequest`. The engine's
+> inline context construction is now `buildAiContext`; output keeps
+> "AI may know" (`request`) and "AI may mention" (disclosure ledger)
+> distinct. `serviceFactSchema.durationMinutes` became OPTIONAL
+> (backwards compatible) — the only contract change.
+> `pnpm check:ai-context-builder` 39/39 (offline, in-memory, no
+> DB/network/LLM/secrets); `check:knowledge-visibility` 36/36,
+> `check:ai-prompts` 101/101, `check:ai-provider` 63/63,
+> `check:conversation-booking` 16/16 all green. ZERO
+> prompt/provider/handoff/booking/tenant/UI change; no new knowledge
+> source. Prior:
+> PROMPT-B01 — the **AI knowledge-visibility policy is established
+> (DECISIONS #50, uncommitted, policy-only)**: the four levels
+> `PUBLIC`/`CONDITIONAL`/`INTERNAL`/`FORBIDDEN` that control what is
+> eligible to enter AI context and — separately — what the AI may mention
+> to a customer, with source+tenant provenance, structural safe defaults,
+> and the enumerated FORBIDDEN categories. Lives in
+> `src/lib/ai-knowledge-visibility/`; `pnpm check:knowledge-visibility`
+> 36/36 (offline, in-memory). It says WHAT may reach the AI; the Context
+> Builder that applies it is now implemented (B-02, above). ZERO
+> schema/migration/prompt/provider/handoff changes. Prior:
 > WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01 — the RUNTIME backend for
 > the `fp:<id>` credential-reference grammar is implemented (DECISIONS #49,
 > uncommitted): credentials obtained at onboarding time are stored
@@ -172,6 +202,97 @@ check:whatsapp-onboarding` 53/53; ONE additive migration
 - **AI PROVIDER ADAPTER (PROMPT-AI-02):** `defaultConversationEngineDeps.ai` now policy-backed via `createPolicyBackedAi({ getEnvVar: process.env, fetchImpl: globalThis.fetch })` + `getEffectiveAiPolicy()` (`toEffectivePolicy` boundary) — effective runtime policy AgentRouter primary / OpenRouter secondary / fallback enabled; no provider/model hard-coded in the engine; `INITIAL_AI_POLICY` retained as seed/default only; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` + `AiRequest`/`AiResponse` + Domain/Branch/Booking preserved; retryable/timeout fallback only, `CONFIG_ERROR`/`INVALID_RESPONSE` never retried, malformed → controlled `NEED_HUMAN`; secrets server-only via `secretRef` + `getEnvVar` (`OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`); `AiTelemetry` rich `AI_TURN` via `getLastTelemetry`; `src/server/integrations/ai/` 8 files + `pnpm check:ai-provider` 29/29; `pnpm lint`/`typecheck`/`format:check`/`verify`/`security` green; ZERO schema/migration/prompt changes.
 - **CONVERSATION → BOOKING SEAM (PROMPT-AI-03; DECISIONS #45 prerequisite):** deterministic `Customer message → Conversation Engine → AiResponse → mapper → CORE-01 → CORE-02 → options/clarification/NEED_HUMAN` with zero appointment mutation — `src/features/conversations/server/booking-mapper.ts` pure mapper + `src/features/conversations/server/conversation-engine.ts` BOOKING/AVAILABILITY branch (`bypassDeterministicAi` first, `parseAiResponse` then mapper → `needs_clarification` → `AI_REPLY` `AI_ACTIVE` else `ready` → CORE-01 `resolveEligibleProviders` → provider match → CORE-02 `resolveBookingOptions` reusing the existing availability layer verbatim; Arabic messages, typed `AI_HANDOFF`/`NEED_HUMAN`, no Prisma from Conversation layer); `ConversationEngineDeps` stays backward-compatible (existing harnesses pass); offline harness `scripts/check-conversation-booking.ts` (`pnpm check:conversation-booking` 16/16; fixed date `2026-09-14` Monday); `pnpm verify` green; ZERO appointment write, ZERO schema changes, no prompt edits. **PROMPT-AI-03B** completes the close-the-loop: `booking-selection.ts` deterministic offer-aware parser (option index / `HH:mm` / provider-name / Arabic-normalized; never fabricates ids) + engine `completeBookingSelection` (server-derived Business/Branch/Service → fresh CORE-01 → fresh CORE-02 → offered option still bookable verified → canonical `createWithConflictCheck` (SERIALIZABLE; `null` = `SLOT_CONFLICT` → retry-safe refreshed options) → `BOOKED` via `addMessage` → confirmation through `MessageTransport` only after creation; stale/ambiguous/invalid → Arabic clarification/`NEED_HUMAN` with zero write; deterministic path spends zero LLM calls; `pnpm check:booking-confirm` 18/18; ZERO schema/prompt/provider changes.
 - **AI PROMPT & EVALUATION SEPARATION (PROMPT-AI-01; DECISIONS #43):** provider-neutral, versioned, deterministic prompt artifacts **separate from implementation** — no live LLM call, no real provider SDK, no DB migration. `docs/ai/README.md` (rules) + `docs/ai/ARCHITECTURE.md` (invariant `AI interprets → Domain decides → Conversation orchestrates`; `AiRequest`/`AiResponse` structured contract; minimal context — message + conversationStatus + recentMessages ≤20 + businessName + services ≤100 + faqs ≤50 + optional providerPreference/availability ≤14×50; `bypassDeterministicAi` before `ai.respond` + `parseAiResponse` stripping + `PlatformAiPolicy` singleton boundary + telemetry boundary) + `docs/ai/PROMPTS.md` (5 definitions `booking-intent@v1`/`faq-match@v1`/`availability-handoff@v1`/`reschedule-cancellation@v1`/`human-request@v1` — each 7-section: Purpose/Input context/System instructions/Output contract/Constraints/Handoff policy/Version history; strict provider-neutrality — no Authorization/x-api-key/model/tool-call/secret syntax) + `docs/ai/EVALUATIONS.md` (15 fixtures 01–15: BOOKING 01–02 incl. verbatim service extraction, FAQ 03–04 verbatim `Business.faqs` answer, AVAILABILITY 05–06, CANCELLATION/RESCHEDULE 07–09, HUMAN_REQUEST/AMBIGUOUS 10–13 incl. `bypassDeterministicAi` short, ordering 14–15 booking>FAQ>availability — all bound to `classifyCustomerMessage`/`bypassDeterministicAi`/`deterministicConversationAi` + `parseAiResponse`). Offline harness `scripts/check-ai-prompts.ts` (`pnpm check:ai-prompts` 106/106: files present, structured prompts, deny-list on `docs/ai/`, fixture coverage, deterministic replay 01–15, negative invariants, invocation boundary — minimal `AiRequest`, no `prisma.` in engine AI path, no booking invention, no chain-of-thought persistence, no secrets); `package.json` adds `check:ai-prompts`; `pnpm verify` green + `pnpm security` pass; ZERO schema/engine/domain changes; `docs/ai/` is canonical — not duplicated elsewhere.
+- **AI KNOWLEDGE-VISIBILITY POLICY (PROMPT-B01; DECISIONS #50; uncommitted,
+  policy-only):** the enforceable policy for what information is ELIGIBLE
+  to enter AI context, established before the Context Builder (B-02).
+  `src/lib/ai-knowledge-visibility/` defines the four levels — `PUBLIC`
+  (AI knows + communicates: business name/about, the `Business.faqs`
+  store, service name/description, the customer's own message),
+  `CONDITIONAL` (only when the task makes it relevant: cancellation
+  policy, domain-computed availability, provider preference — relevance
+  comes from the Context Builder, NEVER from the AI), `INTERNAL` (AI may
+  know, never mention: working hours, slot duration, confirmation mode,
+  conversation status, discovery metadata), `FORBIDDEN` (never enters
+  context). It separates "AI may know this" (`isEligibleForAiContext`)
+  from "AI may mention this" (`isDisclosable`) — INTERNAL is eligible but
+  never customer-visible; CONDITIONAL is gated on task relevance. Safe
+  defaults are STRUCTURAL via `enrollFact`: unknown visibility ⇒ do not
+  expose to the customer; missing provenance ⇒ exclude; unproven tenant ⇒
+  exclude; FORBIDDEN candidates are refused outright. FORBIDDEN covers
+  the minimum set as an ENUMERATED policy (tokens, secrets, keys, raw
+  credential material, raw DB records, hidden prompts, cross-tenant data)
+  — NOT string redaction, NOT a word blacklist. Provenance (`source` +
+  server-derived `businessId` + `visibility`) is builder-side metadata,
+  never prompt content; there is still exactly ONE tenant-resolution
+  mechanism. Reuses the ONE canonical `Business.faqs` store (classified
+  `PUBLIC` as a whole — no per-entry metadata) and the credential-
+  reference boundary; duplicates nothing. `pnpm
+check:knowledge-visibility` 36/36 (offline, in-memory). Canonical:
+  `docs/ai/ARCHITECTURE.md → Knowledge visibility policy`.
+- **AI CONTEXT BUILDER (PROMPT-B02; DECISIONS #51; uncommitted):** the
+  explicit AI boundary that makes B-01 operational —
+  `src/features/conversations/server/ai-context-builder/` receives the
+  source facts the engine ALREADY loaded (Business record, service
+  catalog, conversation state, the customer message, and when resolved
+  domain-computed availability / a captured provider preference) plus the
+  server-derived tenant scope, and runs each candidate through the B-01
+  pipeline (`classify*` → `enrollFact` → `isWithinTenantScope` → budget +
+  task gate → `isEligibleForAiContext` / `isDisclosable`). It composes the
+  minimal `AiRequest` and DROPS provenance; it emits the DISCLOSURE LEDGER
+  (every candidate's `included`/`disclosable` verdicts + typed reason) so
+  "AI may know" and "AI may mention" stay distinct for the later B-03.
+  Operational/internal facts are NOT forwarded merely because they exist:
+  `workingHours` / `slotDurationMinutes` / `confirmationMode` / `timezone`
+  / discovery metadata are omitted unless the task requires them, and
+  service `durationMinutes` never enters merely because a service has one
+  (it became an OPTIONAL `serviceFactSchema` field — the only contract
+  change, backwards compatible; `buildPromptMessages` renders it only when
+  present). Availability enters ONLY as the CORE-02-derived result, never
+  as raw schedules. The ONE documented INTERNAL dependency is
+  `conversationStatus` (phrasing; stays non-disclosable). Task relevance
+  is derived by the builder (`deriveTaskRelevance`) — never the AI. Fail
+  closed: missing provenance / unproven tenant (incl. blank scope) /
+  unknown visibility / FORBIDDEN candidates are excluded with a typed
+  reason, never guessed. `conversation-engine.ts`'s inline construction is
+  replaced by `buildAiContext`; the emitted request is identical to before
+  MINUS the omitted duration. `pnpm check:ai-context-builder` 39/39
+  (offline, in-memory, no DB/network/LLM/secrets). No new knowledge source,
+  no prompt/provider/handoff/booking/tenant/UI change. The currently-absent
+  CONDITIONAL facts (`cancellationPolicy`, `whatsappNumber`) are classified
+  - ledgered but NOT yet wired into the request — that wiring, and the
+    customer-facing behavior of operational facts, is B-03. Canonical:
+    `docs/ai/ARCHITECTURE.md → AI context builder`.
+- **AI CUSTOMER DISCLOSURE BOUNDARY LIVE (PROMPT-B03; DECISIONS #52):**
+  `src/features/conversations/server/ai-disclosure/` is the enforcement gate
+  a validated `AiResponse` crosses on the generic reply path of
+  `conversation-engine.ts`, immediately before its text is persisted and
+  sent — the only place assistant-authored free text can reach a customer
+  (booking/availability content is domain-authored via CORE-01/CORE-02 and
+  never crosses the gate). "AI may know this" is no longer equivalent to
+  "AI may mention this": a routing action (`handoff`/`booking_handoff`) is
+  the fallback channel and passes through unchanged; a self-authored reply
+  is emitted only when its declared task is backed by a ledger fact that is
+  `included` AND `disclosable` AND carried in the request (`FAQ` →
+  `business.faqs`; `BOOKING`/`AVAILABILITY` → `domain.availability`;
+  `CANCELLATION`/`RESCHEDULE` → `business.cancellationPolicy`, which has NO
+  request channel today so those tasks stay on the staff path). The decision
+  is STRUCTURAL (action + intent + ledger verdicts) — no text inspection, no
+  redaction, no LLM judge; a refused reply is dropped wholesale (never
+  persisted, never sent) and the turn takes the SAME `NEED_HUMAN` /
+  `AI_HANDOFF` path an invalid/failed AI result already takes. INTERNAL
+  operational facts can never back a reply — service `durationMinutes` is
+  NOT disclosed merely because the service record contains it; customers see
+  domain-computed outcomes, never operational metadata. Typed decisions
+  `disclosed` / `requires-human` with operator-only reasons (never
+  customer-visible; no policy name, provenance, classification, provider or
+  Meta terminology ever surfaces). `pnpm check:ai-disclosure` 32/32
+  (offline, in-memory, no DB/network/LLM/secrets). No schema/migration, no
+  prompt body, no provider, no booking/availability authority, no transport,
+  no tenant resolution, no UI change. DELIBERATE deferrals (evidence
+  insufficient, behavior unchanged): the `cancellationPolicy` /
+  `whatsappNumber` request channels and the human-notification UX are later
+  slices. Canonical: `docs/ai/ARCHITECTURE.md → Customer disclosure
+boundary`.
 - **DEMO LIVE (PROMPT-OPS-02):** `https://flowpilot-demo-gamma.vercel.app`
   — dedicated Vercel project `flowpilot-demo` (framework nextjs, SSO
   protection off) + the isolated Demo Neon DB (`neondb` @

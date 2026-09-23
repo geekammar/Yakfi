@@ -170,7 +170,10 @@ RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`; `handoffReasonValues
 
 ## Context budget (minimal prompt context)
 
-The engine's `AiRequest` is the **prompt context** — nothing larger is sent:
+The engine's `AiRequest` is the **prompt context** — nothing larger is sent.
+Since PROMPT-B02 the Context Builder (`src/features/conversations/server/ai-context-builder/`)
+assembles it from the sources the engine already loaded (see the AI context
+builder section below):
 
 - Task-relevant facts only: `services` / `faqs` / provider preference /
   already-resolved `availability` — not every customer, not every appointment.
@@ -178,9 +181,333 @@ The engine's `AiRequest` is the **prompt context** — nothing larger is sent:
   (`conversation-engine.ts` takes the most recent ≤20 in chronological order).
 - Compact state: `conversationStatus` only — full DB/business context never sent.
 - Tenancy is engine-side (`Business` resolved from receiving WhatsApp number;
-  conversation scoped to `businessId` + `branchId`) — the LLM never resolves tenancy.
+  conversation scoped to `businessId` + `branchId`) — the LLM never resolves
+  tenancy, and the builder only RECORDS the engine's resolution as provenance.
 
-## Invocation contract (prompt → adapter → engine)
+## Knowledge visibility policy (PROMPT-B01 — binding)
+
+The context budget says how MUCH may reach the AI. The **knowledge
+visibility policy** says WHAT is eligible to reach it at all, and —
+separately — what the AI may then mention to a customer. It lives in
+`src/lib/ai-knowledge-visibility/` and is consumed by the future Context
+Builder (B-02). B-01 ships the policy only: no context aggregation, no
+prompt assembly, no LLM call.
+
+### The policy boundary (two distinct questions)
+
+1. **"AI may know this"** — eligibility to enter the `AiRequest` context.
+2. **"AI may mention this to the customer"** — permission to appear in a
+   customer-facing reply.
+
+These are NOT automatically identical. `INTERNAL` information may enter
+AI context (the assistant may reason about it) yet must never be put in a
+customer reply; `CONDITIONAL` information is only eligible/mentionable
+when the current task makes it relevant. This is what allows internal and
+conditional information to exist in the system without automatically
+becoming customer-visible.
+
+### The four levels
+
+| Level         | AI may know?             | AI may mention?          | Examples                                                                                                                                                |
+| ------------- | ------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC`      | yes, always              | yes, always              | business `name`/`about`, the `Business.faqs` store, service `name`/`description`, the customer's own message                                            |
+| `CONDITIONAL` | yes — task-relevant only | yes — task-relevant only | `cancellationPolicy` (cancellation/reschedule asks), domain-computed `availability` (booking/availability asks), `providerPreference`, `whatsappNumber` |
+| `INTERNAL`    | yes (inform reasoning)   | never                    | `workingHours`, `slotDurationMinutes`, `confirmationMode`, `conversationStatus`, discovery metadata (`vertical`/`city`), lifecycle timestamps           |
+| `FORBIDDEN`   | never                    | never                    | see FORBIDDEN categories below                                                                                                                          |
+
+- **`PUBLIC`** — facts that are safe for the AI to use and communicate to
+  customers normally.
+- **`CONDITIONAL`** — facts that are safe for the AI to use only when the
+  conversational request or task makes them relevant; they must not
+  automatically appear in normal responses. The relevance flag is
+  supplied by the Context Builder from the turn's intent — **never by the
+  AI itself**.
+- **`INTERNAL`** — operational information that may be useful to
+  FlowPilot's internal reasoning or future staff/operator tooling but
+  must NOT be disclosed to customers by the AI. Service duration is the
+  canonical case: the AI may know it (it is already in
+  `AiRequest.services`), but its customer-facing behavior is decided by
+  the later **B-03** policy, so it is `INTERNAL` here. Customers see
+  outcome-oriented facts (domain-computed slots), not operational
+  metadata.
+- **`FORBIDDEN`** — must never enter AI context.
+
+### FORBIDDEN categories (the minimum set — enumerated, never a scan)
+
+`ACCESS_TOKEN` · `APP_SECRET` · `CREDENTIAL` · `ENCRYPTION_KEY` ·
+`RAW_CREDENTIAL_MATERIAL` · `AUTHENTICATION_SECRET` · `SESSION_SECRET` ·
+`INTERNAL_SECURITY_MATERIAL` · `PRIVATE_INFRASTRUCTURE_DATA` ·
+`RAW_DATABASE_RECORD` · `HIDDEN_SYSTEM_PROMPT` ·
+`INTERNAL_IMPLEMENTATION_INSTRUCTION` · `CROSS_TENANT_DATA` ·
+`OUT_OF_SCOPE_PRIVATE_DATA`.
+
+These map to concrete FlowPilot locations in `FORBIDDEN_FIELDS`
+(`knowledge-visibility.ts`) — `WhatsAppConnection.credentialsRef`,
+`RuntimeCredential.encryptedValue`, the `PlatformAiPolicy` `secretRef`s,
+the credential-crypto key material, `process.env` secret values, the
+account password hash, `Invitation.tokenHash`, session/token material,
+the webhook verify token, raw non-task Prisma rows, another Business's
+data, private data outside the current tenant/customer scope, any
+injected hidden system prompt, and internal implementation instructions
+surfaced as facts.
+
+**Scope note (binding):** this policy governs KNOWLEDGE FACTS — the
+candidates a Context Builder may put into `AiRequest`. It does NOT govern
+the engine-wired system-instruction channel
+(`prompts/system/booking-assistant.prompt`), which is the instruction
+layer governed by the Prompt Workspace rules above and is never a
+knowledge fact. `HIDDEN_SYSTEM_PROMPT` forbids a _second_, injected
+prompt masquerading as knowledge — it does not touch the one canonical
+system instruction.
+
+**Not a redactor (binding):** the policy is STRUCTURAL — classification by
+source + field + provenance + visibility. It is NOT broad redaction by
+string matching and NOT an ad-hoc word blacklist. Forbidding is done by
+classification and enrollment refusal, never by scanning a value's text.
+
+### Provenance and tenant safety
+
+Every candidate fact carries lightweight provenance
+(`knowledge-provenance.ts`): `source` (where it came from), `businessId`
+(the owning Business), and `visibility`. The Context Builder proves
+tenant ownership, then DROPS provenance before composing the request —
+provenance is builder-side metadata and is never rendered into prompt
+content.
+
+- **Tenant scope is always server-derived** (the engine resolves the
+  Business from the receiving WhatsApp number; the knowledge service
+  derives it from the authenticated actor). Client-provided `businessId`
+  is never trusted, and **there is exactly ONE tenant-resolution
+  mechanism** — the existing one. This policy only RECORDS its outcome.
+- **AI context must never contain another Business's data.** A fact whose
+  tenant ownership cannot be proven is excluded.
+- When information conflicts, **the AI must never resolve
+  business-authoritative conflicts itself** — the domain stays
+  authoritative; the engine's existing handoff/`NEED_HUMAN` path is the
+  resolution route. The most restrictive classification wins when a fact
+  is reachable by several paths.
+
+### Safe defaults (binding, enforced structurally by `enrollFact`)
+
+- Visibility unknown → **DO NOT EXPOSE TO CUSTOMER** (default level
+  `INTERNAL`; unknown fields classify to `INTERNAL`, never `PUBLIC`).
+- Provenance missing → **EXCLUDE FROM AI CONTEXT** (`UNKNOWN_SOURCE`).
+- Tenant ownership unproven → **EXCLUDE** (`UNPROVEN_TENANT`).
+- A `FORBIDDEN` candidate → **refused outright**
+  (`FORBIDDEN_BY_POLICY`) — forbidden material can never even be
+  constructed as a context candidate.
+
+### How B-02 consumes this (the contract the Context Builder will satisfy)
+
+```
+classifyBusinessField / classifyServiceField / classifyConversationField
+        ↓  (level per source+field; unknown ⇒ INTERNAL)
+enrollFact({ source, businessId, visibility, value })
+        ↓  (FORBIDDEN / unproven / unknown ⇒ typed exclusion, never a fact)
+isWithinTenantScope(fact, { businessId })
+        ↓  (cross-tenant ⇒ excluded)
+isEligibleForAiContext(fact, { taskRelevant })   → "AI may know this?"
+isDisclosable(fact, { taskRelevant })            → "AI may mention this?"
+```
+
+The one convenience entry point is `decideFact(...)`, which returns the
+enrolled fact plus its `eligible` / `disclosable` verdicts and the typed
+exclusion reason when enrollment is refused. `decideFact` performs NO
+aggregation and NO prompt assembly — those belong to B-02, which is
+deliberately NOT implemented here.
+
+### Files this policy reuses (never duplicated)
+
+- `Business.faqs` — the ONE canonical knowledge store (DECISIONS #13).
+  The policy CLASSIFIES the store (`PUBLIC`); it does not copy it, add a
+  second store, or add per-entry metadata (the entry shape stays
+  question/answer only).
+- The existing tenant-resolution mechanism (`BusinessRepository`,
+  resolved from the receiving WhatsApp number) — no second resolution
+  path is created.
+- The existing credential-reference boundary (`credentials-resolver.ts`):
+  `credentialsRef` is a REFERENCE, never a value — the FORBIDDEN list
+  records that boundary as policy.
+
+Guard: `pnpm check:knowledge-visibility` (36/36, offline, in-memory, no
+DB/network/secrets).
+
+## AI context builder (PROMPT-B02 — binding)
+
+The context budget says how MUCH reaches the AI; the visibility policy says
+WHAT is eligible. The **context builder** makes that policy operational at
+the actual AI boundary — it is the explicit seam between conversation
+orchestration and the `AiRequest`:
+
+```
+conversation orchestration (conversation-engine.ts)
+     ↓  server-derived tenant scope + structured source facts
+CONTEXT BUILDER  (ai-context-builder/)
+     ↓  policy-filtered, provenance dropped
+AiRequest  (ai-contract.ts)
+     ↓
+AI Provider
+```
+
+It receives the sources the engine already loaded through the existing
+repositories — the `Business` record, the service catalog, conversation
+state, the customer message, and (when resolved) domain-computed
+availability / a captured provider preference. It loads nothing itself:
+there is still exactly ONE DB path and ONE tenant-resolution mechanism.
+
+For every candidate it runs the B-01 pipeline (`classify*` → `enrollFact`
+→ `isWithinTenantScope` → budget + task gate → `isEligibleForAiContext` /
+`isDisclosable`), composes the minimal request, and DROPS provenance —
+`businessId`, `source` and `visibility` are builder-side metadata and never
+become prompt content.
+
+### "AI may know this" ≠ "AI may mention this" (the output contract)
+
+The builder's output carries BOTH questions, kept distinct:
+
+- `request` — the provider-neutral `AiRequest`: only facts that passed the
+  policy (what the AI **may know** this turn).
+- `facts` — the **disclosure ledger**: every considered candidate with its
+  `included` / `disclosable` verdicts and the typed reason when it did not
+  enter. It is builder-side metadata (never prompt content, never sent to a
+  provider); a later slice (B-03) will enforce "AI may mention this" from it.
+
+An `INTERNAL` fact may enter context to inform reasoning yet must never be
+put in a customer reply; a `CONDITIONAL` fact is only eligible/mentionable
+when the current task makes it relevant. Relevance is derived by the builder
+from the turn's text (`deriveTaskRelevance`) — never by the AI.
+
+### Operational/internal facts are not forwarded merely because they exist
+
+`workingHours`, `slotDurationMinutes`, `confirmationMode`, `timezone`, and
+discovery metadata (`vertical`/`city`) are classified `INTERNAL` and
+**omitted from the request** unless the current task genuinely requires
+them. In particular:
+
+- Service `durationMinutes` is not included merely because a service has a
+  duration — it is `INTERNAL`, and its customer-facing behavior is decided
+  by the later B-03 policy. Since PROMPT-B02 it is an OPTIONAL field of
+  `serviceFactSchema` (backwards compatible): producers may still supply it,
+  and the prompt renderer shows it only when present.
+- Raw `workingHours` are never dumped into context — availability comes from
+  the authoritative CORE-02 resolver and may enter only as the derived
+  `DOMAIN_AVAILABILITY` result (`date` + `slots`), never as a schedule.
+- The one documented `INTERNAL` dependency is `conversationStatus`: the
+  assistant's phrasing task genuinely uses it, so it enters context — but it
+  stays non-disclosable (`INTERNAL`).
+
+### Fail-closed behavior (binding)
+
+A fact with missing provenance (`UNKNOWN_SOURCE`), an unproven tenant
+(`UNPROVEN_TENANT`), unknown visibility (`UNKNOWN_VISIBILITY`), or a
+`FORBIDDEN` classification (`FORBIDDEN_BY_POLICY`) is excluded with a typed
+reason — never guessed, never silently reinterpreted as public, and never
+replaced by raw source content. An empty/blank tenant scope is unproven:
+nothing enters context. The builder is pure and total — no I/O, no LLM, no
+`process.env`, no Prisma, no credential; safety is structural (source +
+field + provenance + visibility), never string redaction.
+
+Guard: `pnpm check:ai-context-builder` (39/39, offline, in-memory, no
+DB/network/LLM/secrets).
+
+## Customer disclosure boundary (PROMPT-B03 — binding)
+
+The visibility policy (B-01) states the rule and the context builder (B-02)
+records the verdicts; the **disclosure gate** makes the boundary real at the
+last moment before a reply becomes customer-visible:
+
+```
+AiResponse (validated by parseAiResponse)
+     ↓
+DISCLOSURE GATE   (ai-disclosure/)
+     ↓
+disclosed        → the existing reply path (persist + WhatsApp send)
+requires-human   → the existing NEED_HUMAN / AI_HANDOFF fallback
+```
+
+It sits on the _generic reply path_ of `conversation-engine.ts`, immediately
+before the assistant's text is persisted and sent. That is the only place
+assistant-authored free text can reach a customer: booking/availability
+intents are answered by the **domain** (`mapAiResponseToBookingInput` →
+CORE-01/CORE-02) with domain-authored messages, which never cross this gate.
+
+The gate consumes the disclosure ledger; it never re-classifies a field,
+never re-resolves tenant scope, and never re-derives task relevance. There is
+still exactly one policy (B-01), one builder (B-02) and one tenant-resolution
+mechanism (the engine's server-derived scope).
+
+### Structural, not textual (binding)
+
+The decision is made from the structured `AiResponse` (its `action` and
+`intent`) plus the ledger's typed per-fact verdicts. It never inspects,
+scores, or rewrites reply text — there is no word blacklist, no regex
+redaction and no leak detector. The gate is not an LLM and not a judge: it
+cannot invent, infer, or rephrase anything. It can only refuse to emit and
+defer to a human. A refused reply is dropped wholesale — never persisted,
+never sent.
+
+- A **routing action** (`handoff` / `booking_handoff`) IS the fallback
+  channel. It discloses no knowledge, so the gate passes it through and the
+  existing handoff semantics own the outcome. The AI-first default and the
+  human fallback both stay exactly as designed.
+- A **self-authored reply** (`action: "reply"`) is emitted only when its
+  declared task is backed by a ledger fact that is `included` AND
+  `disclosable` AND actually carried in the request:
+
+  | Intent                        | Support family (ledger key)                 | Request channel                         |
+  | ----------------------------- | ------------------------------------------- | --------------------------------------- |
+  | `FAQ`                         | `business.faqs` (PUBLIC as a whole)         | `request.faqs` non-empty                |
+  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)         | `request.availability` non-empty        |
+  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL) | **none today** ⇒ always routed to staff |
+  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                      | n/a                                     |
+
+  Consequences: an `INTERNAL` fact is never disclosable (B-01), so it can
+  never back a reply; a `CONDITIONAL` fact is disclosable only when B-02
+  found the task relevant; a `FORBIDDEN` fact is never even enrolled; and a
+  reply backed by nothing would have to be invented — it is routed to a human
+  instead.
+
+### Typed refusal decisions
+
+`disclosed` or `requires-human`, with a typed reason for diagnostics
+(operators/logs only — never customer-visible; the customer sees the existing
+human-handoff experience and no policy name, provenance, or classification is
+ever surfaced):
+
+- `FORBIDDEN_FACT_IN_CONTEXT` — a FORBIDDEN fact marked included. Impossible
+  by construction (B-01 refuses at enrollment); observed only if a deeper
+  invariant broke, so the gate fails closed.
+- `NOT_DISCLOSABLE` — included but unmentionable (`INTERNAL`, or a
+  `CONDITIONAL` fact outside its task).
+- `EXCLUDED_FROM_CONTEXT` — the family was refused at enrollment or omitted
+  by the builder (including missing provenance / unproven tenant / empty
+  scope); there is no knowledge behind the reply.
+- `UNAVAILABLE_IN_REQUEST` — disclosable in principle but the request carries
+  no data for it (an empty knowledge store, or a family with no request
+  channel today).
+
+Guard: `pnpm check:ai-disclosure` (32/32, offline, in-memory, no
+DB/network/LLM/secrets — including end-to-end engine runs that prove an AI
+failure and a refused reply take the same `NEED_HUMAN` / `AI_HANDOFF` path,
+and that a refused reply is neither persisted nor sent).
+
+### Operational facts and the deferred CONDITIONAL channels (product state)
+
+`workingHours`, `slotDurationMinutes`, `confirmationMode`, `timezone`,
+`vertical`, `city` and service `durationMinutes` are `INTERNAL`: they may
+inform reasoning where the architecture explicitly allows, but they can never
+back a customer reply. In particular **service duration is not disclosed
+merely because the service record contains it** — the customer sees
+domain-computed outcomes (available slots), never operational metadata.
+
+`cancellationPolicy` and `whatsappNumber` are classified `CONDITIONAL` and
+ledgered by B-02, but they carry **no `AiRequest` channel today**. Evidence
+does not yet justify wiring them: the current assistant routes
+cancellation/reschedule asks to staff (`booking_handoff`) with fixed, safe
+messages and never uses the policy text, and there is no contact/identity
+intent in the fixed family. Until a later product slice wires a channel AND
+its task-relevance rule, the boundary keeps these tasks on the human path by
+construction (`UNAVAILABLE_IN_REQUEST`). No catalog redesign, no new UX.
 
 1. **Prompt body lives in `/prompts/**/*.prompt`** — provider-neutral,
    stable-id instruction text, compiled at build time into
@@ -255,6 +582,7 @@ not scaffold them here.
 - `scripts/generate-ai-prompts.ts` — deterministic build-time generator
 - `src/server/integrations/ai/prompt.ts` — the builder (`buildPromptMessages` / `buildRequestBody`)
 - `src/features/conversations/server/ai-contract.ts` — the typed contract
+- `src/features/conversations/server/ai-context-builder/` — the B-02 context builder (assembles the policy-filtered `AiRequest`; disclosure ledger)
 - `src/features/conversations/server/conversation-ai.ts` — `ConversationAi` + `deterministicConversationAi` + `classifyCustomerMessage`
 - `src/features/conversations/server/conversation-engine.ts` — orchestration + minimal context + `bypassDeterministicAi` call order + `recordUsage`
 - `src/server/repositories/ai-policy.repository.ts` + `src/features/platform/server/ai-policy-service.ts` — runtime selection layer (`PlatformAiPolicy`, `toEffectivePolicy`)

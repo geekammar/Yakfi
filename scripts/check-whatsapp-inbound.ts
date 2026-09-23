@@ -87,6 +87,16 @@ async function main(): Promise<void> {
       name: "منشأة أ",
       whatsappNumber: PHONE_A,
       isActive: true,
+      // A knowledge store is required for an assistant-authored FAQ reply to
+      // be disclosable (PROMPT-B03): an empty store cannot source an answer,
+      // so the boundary routes such a reply to a human instead of letting the
+      // assistant invent one.
+      faqs: [
+        {
+          question: "ما هي مواعيد العمل؟",
+          answer: "نعمل من السبت إلى الخميس.",
+        },
+      ],
     },
   ];
   const connectionRows = [

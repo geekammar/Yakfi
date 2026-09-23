@@ -37,6 +37,97 @@
 
 ## Current State (summary)
 
+**AI Context Builder — IMPLEMENTED (PROMPT-B02; DECISIONS #51; ZERO
+prompt/provider/handoff/booking/tenant/UI change; ONE backwards-compatible
+schema relaxation):** the explicit AI boundary that makes the B-01
+knowledge-visibility policy operational where it matters — the seam between
+conversation orchestration and the `AiRequest`. Pipeline: Knowledge Sources
+→ B-01 visibility/provenance policy → **B-02 context builder** →
+`AiRequest` → AI provider. `src/features/conversations/server/ai-context-builder/`
+receives the source facts the engine ALREADY loaded (Business record,
+service catalog, conversation state, the customer message, and when
+resolved domain-computed availability / a captured provider preference)
+plus the server-derived tenant scope — it loads nothing: still exactly ONE
+DB path and ONE tenant-resolution mechanism (the engine's
+`BusinessRepository` resolution), which the builder only RECORDS as
+provenance. Per candidate: `classify*(source, field)` → `enrollFact` →
+`isWithinTenantScope` → context-budget + task gate →
+`isEligibleForAiContext` / `isDisclosable`; then it composes the minimal
+`AiRequest` and DROPS provenance (`businessId`/`source`/`visibility` never
+become prompt content). Output keeps the two questions distinct:
+`request` (what the AI may know) + `facts` (the DISCLOSURE LEDGER — every
+candidate's `included`/`disclosable` verdicts and typed reason; builder-side
+metadata, never prompt content, consumed by the later B-03 policy).
+**Operational/internal facts are not forwarded merely because they exist**
+(P3): `workingHours` / `slotDurationMinutes` / `confirmationMode` /
+`timezone` / discovery metadata are classified `INTERNAL` and omitted
+unless the task genuinely requires them; service `durationMinutes` never
+enters merely because a service has a duration (availability comes from
+CORE-02, not LLM schedule reasoning) — it became an OPTIONAL
+`serviceFactSchema` field (the ONLY contract change, backwards compatible:
+existing producers still validate; `buildPromptMessages` renders it only
+when present); raw `workingHours` never enter context — availability enters
+ONLY as the CORE-02-derived `DOMAIN_AVAILABILITY` result (`date`+`slots`).
+The ONE documented `INTERNAL` dependency is `conversationStatus` (the
+phrasing task genuinely uses it; it stays non-disclosable). CONDITIONAL
+facts are gated on task relevance derived BY THE BUILDER
+(`deriveTaskRelevance` — deterministic Arabic-normalized derivation from
+the turn's text, never the AI): `availability` and `providerPreference`
+enter only on relevant asks; `cancellationPolicy` and `whatsappNumber` are
+classified + ledgered but NOT yet wired into the request (their wiring is
+B-03). **Fail-closed:** missing provenance (`UNKNOWN_SOURCE`), unproven
+tenant (`UNPROVEN_TENANT` — including a blank scope), unknown visibility
+(`UNKNOWN_VISIBILITY`), and `FORBIDDEN` candidates (`FORBIDDEN_BY_POLICY`
+— ids-as-content) are excluded with a typed reason — never guessed, never
+reinterpreted as public, never replaced with raw source content. Pure and
+total: no I/O, no LLM, no `process.env`, no Prisma, no credential path;
+safety is STRUCTURAL (source+field+provenance+visibility), never string
+redaction. `conversation-engine.ts`'s inline construction is replaced by
+`buildAiContext`; the emitted request is identical to before MINUS the
+omitted `durationMinutes` (the deterministic classifier uses service NAMES
+only, so behavior is unchanged). Validation: `pnpm
+check:ai-context-builder` **39/39** (offline, in-memory, no
+DB/network/LLM/secrets); existing checks UNCHANGED —
+`check:knowledge-visibility` **36/36**, `check:ai-prompts` **101/101**,
+`check:ai-provider` **63/63**, `check:conversation-booking` **16/16**,
+`check:policy` **13/13**; `pnpm typecheck`/`lint`/`format:check` green.
+Canonical doc: `docs/ai/ARCHITECTURE.md → AI context builder`.
+
+**AI Knowledge-Visibility Policy — IMPLEMENTED (PROMPT-B01; DECISIONS
+#50; policy-only, ZERO schema/migration/prompt/provider/handoff/UI
+change):** the enforceable policy for what information is eligible to
+enter AI context, established before the Context Builder. Four levels —
+`PUBLIC` (AI knows + communicates: business name/about, the
+`Business.faqs` store, service name/description, the customer's own
+message), `CONDITIONAL` (only when task-relevant: cancellation policy,
+domain-computed availability, provider preference), `INTERNAL` (AI may
+know, never mention: working hours, slot duration, confirmation mode,
+conversation status, discovery metadata), `FORBIDDEN` (never enters
+context). It separates **"AI may know this"** (`isEligibleForAiContext`)
+from **"AI may mention this"** (`isDisclosable`) — INTERNAL is eligible
+but never customer-visible; CONDITIONAL is gated on task relevance
+supplied by the future Context Builder, never by the AI. Safe defaults
+are STRUCTURAL via `enrollFact` (unknown visibility ⇒ not exposed to the
+customer; missing provenance ⇒ excluded; unproven tenant ⇒ excluded;
+FORBIDDEN candidates refused outright). FORBIDDEN is an ENUMERATED policy
+over the minimum categories (tokens, secrets, keys, raw credential
+material, raw DB records, hidden prompts, cross-tenant data) — NOT
+string redaction, NOT a word blacklist. Provenance (`source` +
+server-derived `businessId` + `visibility`) is builder-side metadata,
+never prompt content; exactly ONE tenant-resolution mechanism remains.
+Reuses the ONE canonical `Business.faqs` store (classified `PUBLIC` as a
+whole, no per-entry metadata) and the credential-reference boundary;
+duplicates nothing. Location: `src/lib/ai-knowledge-visibility/` (in
+`@/lib` so the B-02 Context Builder in the conversations feature can
+import it under feature isolation; deliberately NOT named "ai policy" —
+that name is the provider-selection `PlatformAiPolicy`). Validation:
+`pnpm check:knowledge-visibility` **36/36** (offline, in-memory); all
+existing AI/conversation checks unchanged — `check:ai-prompts` **101/101**,
+`check:ai-provider` **63/63**, `check:conversation-booking` **16/16**,
+`check:policy` **13/13**; `pnpm verify` green. The Context Builder that
+consumes this policy is IMPLEMENTED (PROMPT-B02, see above). Canonical
+doc: `docs/ai/ARCHITECTURE.md → Knowledge visibility policy`.
+
 **Runtime Credential Backend — IMPLEMENTED
 (WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01; DECISIONS #49;
 additive, one new migration, ZERO behavior change to the ENV path or the
@@ -717,7 +808,92 @@ db:deploy` against Neon from desktop/CI~~ DONE for the new Production
 
 ## Next Step
 
+CUSTOMER DISCLOSURE BOUNDARY SLICE **COMPLETE** (PROMPT-B03; DECISIONS #52):
+the enforcement gate between a validated `AiResponse` and a customer-visible
+reply is implemented in
+`src/features/conversations/server/ai-disclosure/` and documented in
+`docs/ai/ARCHITECTURE.md → Customer disclosure boundary`. It consumes the
+B-02 disclosure ledger and decides, per turn, whether the assistant's reply
+may reach the customer: a routing action (`handoff`/`booking_handoff`) is the
+fallback channel and passes through unchanged; a self-authored reply
+(`action: "reply"`) is emitted only when its declared task is backed by a
+ledger fact that is `included` AND `disclosable` AND carried in the request
+(`FAQ` → `business.faqs`; `BOOKING`/`AVAILABILITY` → `domain.availability`;
+`CANCELLATION`/`RESCHEDULE` → `business.cancellationPolicy`, which has NO
+request channel today, so those tasks stay on the staff path by
+construction). The decision is STRUCTURAL (action + intent + ledger
+verdicts) — never text inspection, never redaction, never an LLM judge; a
+refused reply is dropped wholesale (never persisted, never sent) and the turn
+takes the SAME `NEED_HUMAN` / `AI_HANDOFF` path an invalid or failed AI
+result already takes. The gate sits on the generic reply path of
+`conversation-engine.ts` — booking/availability content is authored by the
+domain (`mapAiResponseToBookingInput` → CORE-01/CORE-02) and never crosses
+the gate. Service `durationMinutes` and every other INTERNAL operational
+fact can never back a reply: duration is NOT disclosed merely because the
+service record contains it. Validation: `pnpm check:ai-disclosure` **32/32**
+(offline, in-memory; includes end-to-end engine runs proving an AI failure
+and a refused reply take the same handoff path and that refused content is
+neither persisted nor sent); all prior suites stay green
+(`check:knowledge-visibility` **36/36**, `check:ai-context-builder`
+**39/39**, `check:ai-prompts` **101/101**, `check:ai-provider` **63/63**,
+`check:conversation-booking` **16/16**, `check:whatsapp-transport` **27/27**,
+`check:whatsapp-inbound` **13/13**, `check:whatsapp-onboarding` **56/56**,
+`check:credentials-runtime` **36/36**, `check:meta-whatsapp` **17/17**,
+`check:meta-embedded-signup` **27/27**); `pnpm verify` + `pnpm security`
+green. NOTHING else changed: no schema/migration, no prompt body, no
+provider, no booking/availability domain authority, no transport behavior,
+no tenant resolution, no UI, no new knowledge source. Two DELIBERATE,
+documented deferrals (evidence insufficient, behavior unchanged): wiring
+`cancellationPolicy` / `whatsappNumber` into the request needs a later
+product slice (a channel AND a task-relevance rule), and the
+human-notification UX is a separate later slice.
+
+AI CONTEXT BUILDER SLICE **COMPLETE** (PROMPT-B02; DECISIONS #51): the
+explicit AI boundary is implemented in
+`src/features/conversations/server/ai-context-builder/` and documented in
+`docs/ai/ARCHITECTURE.md → AI context builder`. It runs the B-01 pipeline
+over the engine's already-loaded source facts (`classify*` → `enrollFact`
+→ `isWithinTenantScope` → budget + task gate →
+`isEligibleForAiContext` / `isDisclosable`), omits INTERNAL operational
+facts the task does not require (service `durationMinutes`, raw
+`workingHours`), gates CONDITIONAL facts on builder-derived task
+relevance, refuses FORBIDDEN candidates, drops provenance, and composes
+the minimal `AiRequest` — plus the disclosure ledger that keeps
+"AI may know" and "AI may mention" distinct. The engine's inline
+construction is replaced by `buildAiContext`; the emitted request is
+identical to before MINUS the omitted `durationMinutes`
+(`serviceFactSchema.durationMinutes` is now OPTIONAL — the only contract
+change, backwards compatible). Validation: `pnpm check:ai-context-builder`
+**39/39** (offline, in-memory); `check:knowledge-visibility` **36/36**,
+`check:ai-prompts` **101/101**, `check:ai-provider` **63/63**,
+`check:conversation-booking` **16/16**, `check:policy` **13/13**;
+`pnpm typecheck`/`lint`/`format:check` green. NOTHING else changed: no
+prompt body, no provider, no handoff, no booking/tenant authority, no UI,
+no new knowledge source, no DB access from the builder. The NEXT slice is
+**B-03 — customer-facing behavior of operational facts**: wire the
+disclosure ledger into the reply path so an INTERNAL fact that entered
+context (e.g. `conversationStatus`, or a task-required duration) can never
+be repeated to the customer, and decide whether the currently-classified
+CONDITIONAL facts (`cancellationPolicy`, `whatsappNumber`) are wired into
+the request for their relevant tasks.
+
+AI KNOWLEDGE-VISIBILITY POLICY SLICE **COMPLETE** (PROMPT-B01;
+DECISIONS #50; policy-only): the four-level visibility model
+(`PUBLIC`/`CONDITIONAL`/`INTERNAL`/`FORBIDDEN`) plus source+tenant
+provenance, field classification, the enumerated FORBIDDEN categories,
+and the structural safe defaults are implemented in
+`src/lib/ai-knowledge-visibility/` and documented in
+`docs/ai/ARCHITECTURE.md → Knowledge visibility policy`. Validation:
+`pnpm check:knowledge-visibility` **36/36**; `check:ai-prompts`
+**101/101**, `check:ai-provider` **63/63**, `check:conversation-booking`
+**16/16**, `check:policy` **13/13**; `pnpm verify` + `pnpm security`
+green. NOTHING else changed: no schema/migration, no prompt body, no
+provider, no handoff, no UI; the engine's `AiRequest` construction is
+untouched. Its consuming Context Builder (B-02) is now IMPLEMENTED — see
+above.
+
 RUNTIME CREDENTIAL BACKEND SLICE **COMPLETE**
+
 (WHATSAPP-ONBOARDING-RUNTIME-CREDENTIAL-STORE-01; DECISIONS #49): the
 RUNTIME backend for the `fp:<id>` credential-reference grammar is
 implemented, verified, and documented (see Current State above). Storage

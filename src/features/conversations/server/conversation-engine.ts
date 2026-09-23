@@ -66,15 +66,16 @@ import {
   inboundMessageSchema,
   type InboundMessageInput,
 } from "@/features/conversations/schemas/conversation-schema";
+import { buildAiContext } from "@/features/conversations/server/ai-context-builder";
 import type {
   AiRequest,
   AiResponse,
 } from "@/features/conversations/server/ai-contract";
 import {
-  AI_KNOWLEDGE_ENTRY_LIMIT,
   AI_RECENT_MESSAGE_LIMIT,
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
+import { enforceDisclosure } from "@/features/conversations/server/ai-disclosure";
 import {
   isProviderNameCandidate,
   mapAiResponseToBookingInput,
@@ -93,7 +94,6 @@ import {
 } from "@/features/conversations/server/conversation-ai";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
-import { faqEntrySchema } from "@/lib/validation";
 import type { RecordUsageDto } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
@@ -121,11 +121,6 @@ import {
 } from "@/server/repositories";
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
 import type { Conversation, ConversationStatus } from "@/types/domain";
-
-import { z } from "zod";
-
-/** Stored knowledge contract reuse (same shape the knowledge feature manages). */
-const storedFaqsSchema = z.array(faqEntrySchema);
 
 // ─── Policy-backed assistant (PROMPT-AI-02) ────────────────────────────────
 // Resolves the live Platform AI policy on every turn — no hard-coded
@@ -436,12 +431,6 @@ function externalMessageKey(
 function inboundCustomerName(phone: string): string {
   const digits = phone.replace(/[^\d]/g, "");
   return `عميل ${digits.slice(-4) || phone}`;
-}
-
-/** Malformed stored FAQ JSON degrades to "no knowledge" — never crashes. */
-function safeFaqs(raw: unknown): Array<{ question: string; answer: string }> {
-  const parsed = storedFaqsSchema.safeParse(raw ?? []);
-  return parsed.success ? parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT) : [];
 }
 
 /** Best-effort usage telemetry — never fails the turn, never throws up. */
@@ -1209,17 +1198,27 @@ export async function receiveInboundMessage(
       );
       if (selectionResult) return selectionResult;
     }
-    const aiRequest: AiRequest = {
-      message: inbound.text,
-      conversationStatus: conversation.status,
-      recentMessages: recentChronological,
-      businessName: business.name,
-      services: services.map((service) => ({
-        name: service.name,
-        durationMinutes: service.durationMinutes,
-      })),
-      faqs: safeFaqs(business.faqs),
-    };
+    // 7c. B-02 — the Context Builder is the explicit AI boundary
+    //     (PROMPT-B02): it takes the structured source facts already loaded
+    //     above (Business record, services, conversation state, the
+    //     customer message), classifies every candidate through the B-01
+    //     knowledge-visibility policy, proves tenant scope against the
+    //     server-derived businessId, drops provenance, and composes the
+    //     minimal AiRequest. The engine keeps responsibility for
+    //     orchestration; the builder owns AI-safe context assembly.
+    const builtContext = buildAiContext({
+      scope: { businessId: business.id },
+      sources: {
+        business,
+        services,
+        conversation: {
+          status: conversation.status,
+          recentMessages: recentChronological,
+        },
+        message: inbound.text,
+      },
+    });
+    const aiRequest: AiRequest = builtContext.request;
 
     // 8. Deterministic bypass first (DECISIONS #33): turns safely
     //    decidable without an assistant never spend an AI call — and
@@ -1542,7 +1541,40 @@ export async function receiveInboundMessage(
         delivery,
       };
     }
-    const content = validated.content;
+    // 9d. B-03 — the customer disclosure boundary (PROMPT-B03). "AI may
+    //     know this" is not "AI may mention this": a fact the assistant was
+    //     given (it entered the AiRequest) is not automatically something it
+    //     may put in a reply. The gate reads the B-02 disclosure ledger and
+    //     refuses to emit a self-authored reply whose task is not backed by
+    //     an included + disclosable + carried fact — an INTERNAL fact can
+    //     never back it, a CONDITIONAL fact only when its task is relevant,
+    //     a FORBIDDEN fact never. A refused reply is dropped (never
+    //     persisted, never sent) and the turn takes the SAME handoff path
+    //     an invalid/failed AI result already takes. Booking-intent content
+    //     was authored by the domain above (CORE-01/CORE-02), so it never
+    //     reaches this gate; only assistant-authored text does.
+    const disclosure = enforceDisclosure({
+      response: validated,
+      context: { request: aiRequest, facts: builtContext.facts },
+    });
+    if (disclosure.kind !== "disclosed") {
+      await deps.conversationRepository.updateWorkflow(conversation.id, {
+        status: "NEED_HUMAN",
+      });
+      return {
+        ok: true,
+        duplicate: false,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_HANDOFF",
+        intent: null,
+        conversationStatus: "NEED_HUMAN",
+        assistantProvider: deps.ai.providerName,
+        delivery: null,
+      };
+    }
+    const content = disclosure.response.content;
 
     // 10. Persist the assistant reply through the single write path with
     //     the workflow the turn decided.

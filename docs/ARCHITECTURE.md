@@ -217,6 +217,23 @@ orchestrates.**
   (`bypassDeterministicAi` — the engine consults it before the assistant).
 - Never store chain-of-thought — the structured Conversation State stores
   useful facts only.
+- **What may enter AI context at all is governed by the knowledge
+  visibility policy (PROMPT-B01, DECISIONS #50)** — four levels
+  (`PUBLIC` / `CONDITIONAL` / `INTERNAL` / `FORBIDDEN`) that separate "AI
+  may know this" from "AI may mention this to the customer". **The Context
+  Builder (PROMPT-B02, DECISIONS #51) applies it at the AI boundary** —
+  orchestration → builder → `AiRequest` — classifying every candidate,
+  proving tenant scope, omitting operational facts the task does not
+  require, and dropping provenance. **The Disclosure Gate (PROMPT-B03,
+  DECISIONS #52) enforces it at the customer boundary** — a validated
+  `AiResponse` may be sent to the customer only when its task is backed by an
+  included + disclosable + carried fact; otherwise the turn takes the
+  existing `NEED_HUMAN` / `AI_HANDOFF` path. Canonical detail:
+  `docs/ai/ARCHITECTURE.md → Knowledge visibility policy`,
+  `→ AI context builder` and `→ Customer disclosure boundary`;
+  implementations `src/lib/ai-knowledge-visibility/`,
+  `src/features/conversations/server/ai-context-builder/` and
+  `src/features/conversations/server/ai-disclosure/`.
 
 ## Production Reliability Prerequisites (DECISIONS #34 — IMPLEMENTED, PROMPT-ARCH-02)
 

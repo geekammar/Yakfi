@@ -30,7 +30,13 @@ export function buildPromptMessages(
       .join("\n") || "(no history)";
   const services = request.services.length
     ? request.services
-        .map((s) => `${s.name} (${s.durationMinutes}m)`)
+        // Duration is INTERNAL (PROMPT-B02) and may be intentionally
+        // absent; render it only when the context builder passed it.
+        .map((s) =>
+          s.durationMinutes !== undefined
+            ? `${s.name} (${s.durationMinutes}m)`
+            : s.name,
+        )
         .join("; ")
     : "(none)";
   const faqs = request.faqs.length

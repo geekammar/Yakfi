@@ -108,11 +108,20 @@ const recentMessageSchema = z.object({
 
 const serviceFactSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  /**
+   * Service duration is OPTIONAL since PROMPT-B02: the context builder
+   * classifies it INTERNAL and omits it unless the current AI task
+   * genuinely requires it (availability is domain-computed by CORE-02,
+   * never LLM-reasoned from durations). Backwards compatible — producers
+   * that still supply it validate unchanged, and consumers that read it
+   * must tolerate its absence.
+   */
   durationMinutes: z
     .number()
     .int()
     .min(1)
-    .max(24 * 60),
+    .max(24 * 60)
+    .optional(),
 });
 
 const knowledgeEntrySchema = z.object({
