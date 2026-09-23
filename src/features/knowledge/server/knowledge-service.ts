@@ -18,6 +18,11 @@ import {
   removeKnowledgeSchema,
   updateKnowledgeSchema,
 } from "@/features/knowledge/schemas/knowledge-schema";
+import {
+  listFaqSuggestions,
+  suggestionGroupLabel,
+  type FaqSuggestionGroup,
+} from "@/features/knowledge/suggestions/faq-suggestions";
 import type {
   KnowledgeActionResult,
   KnowledgeEntryView,
@@ -101,6 +106,29 @@ export async function listKnowledge(
   const scope = resolveScope(actor);
   if (!scope.ok) return { message: scope.message };
   return loadEntries(deps, scope.businessId);
+}
+
+/**
+ * Starter FAQ suggestions for the actor's Business (ADMIN only, own
+ * Business only) — B-05. The vertical is derived from the actor's OWN
+ * business record (never client input), and the pairs are static drafts
+ * the owner must explicitly review and save. A suggestion never becomes
+ * a stored fact without an explicit create. (No DB write, no AI call.)
+ */
+export async function listKnowledgeSuggestions(
+  deps: KnowledgeServiceDeps,
+  actor: KnowledgeActor,
+): Promise<FaqSuggestionGroup | { message: string }> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) return { message: scope.message };
+
+  const business = await deps.businessRepository.findById(scope.businessId);
+  if (!business) return { message: BUSINESS_NOT_FOUND_MESSAGE };
+
+  return {
+    verticalLabel: suggestionGroupLabel(business.vertical),
+    suggestions: listFaqSuggestions(business.vertical),
+  };
 }
 
 export async function createKnowledgeEntry(

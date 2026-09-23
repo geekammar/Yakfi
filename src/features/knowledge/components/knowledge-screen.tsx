@@ -7,20 +7,25 @@ import {
 } from "@/features/knowledge/actions/knowledge-actions";
 import { KnowledgeFormDialog } from "@/features/knowledge/components/knowledge-form-dialog";
 import { KnowledgeRemoveDialog } from "@/features/knowledge/components/knowledge-remove-dialog";
-import type { KnowledgeEntryView } from "@/features/knowledge/types";
+import type {
+  KnowledgeEntryView,
+  KnowledgeSuggestionView,
+} from "@/features/knowledge/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { SectionHeader } from "@/components/shared/section-header";
 import { Button } from "@/components/ui/button";
 import { KNOWLEDGE_NOUNS, arabicCount } from "@/lib/arabic";
 
 import {
   BookOpenIcon,
   CheckCircleIcon,
+  LightbulbIcon,
   PencilIcon,
   PlusIcon,
   TrashIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 /**
  * Business Knowledge screen (PROMPT-18): what the future AI assistant
@@ -34,12 +39,18 @@ import { useState } from "react";
  */
 export function KnowledgeScreen({
   initialEntries,
+  initialSuggestions,
 }: {
   initialEntries: KnowledgeEntryView[];
+  initialSuggestions?: KnowledgeSuggestionView;
 }) {
   const [entries, setEntries] = useState(initialEntries);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<KnowledgeEntryView | null>(null);
+  const [preset, setPreset] = useState<{
+    question: string;
+    answer: string;
+  } | null>(null);
   const [formSession, setFormSession] = useState(0);
   const [removing, setRemoving] = useState<KnowledgeEntryView | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -47,12 +58,27 @@ export function KnowledgeScreen({
 
   function openCreate() {
     setEditing(null);
+    setPreset(null);
+    setFormSession((count) => count + 1);
+    setFormOpen(true);
+  }
+
+  /**
+   * B-05 — one tap on a suggested question opens the create form
+   * PREFILLED with the starter pair as an editable draft. The pair is
+   * NOT saved here: nothing reaches `Business.faqs` until the owner
+   * submits the form (a suggestion never becomes a verified fact).
+   */
+  function openSuggestion(suggestion: { question: string; answer: string }) {
+    setEditing(null);
+    setPreset(suggestion);
     setFormSession((count) => count + 1);
     setFormOpen(true);
   }
 
   function openEdit(entry: KnowledgeEntryView) {
     setEditing(entry);
+    setPreset(null);
     setFormSession((count) => count + 1);
     setFormOpen(true);
   }
@@ -90,6 +116,23 @@ export function KnowledgeScreen({
           success: false,
           message: "لا توجد معلومة محددة للحذف",
         } as const);
+
+  /**
+   * A suggested question the business already answers verbatim adds
+   * nothing — it is hidden instead of being offered twice. Matching is
+   * on the trimmed question (the natural key of an entry), same rule
+   * the service applies for duplicate rejection.
+   */
+  const existingQuestions = useMemo(
+    () =>
+      new Set(entries.map((entry) => entry.question.trim()).filter(Boolean)),
+    [entries],
+  );
+
+  const suggestions =
+    initialSuggestions?.suggestions.filter(
+      (suggestion) => !existingQuestions.has(suggestion.question.trim()),
+    ) ?? [];
 
   return (
     <div className="animate-fade-in-up space-y-6">
@@ -172,15 +215,61 @@ export function KnowledgeScreen({
       )}
 
       {/* key → the dialog remounts on every open, so create starts
-          blank and edit prefills the selected entry. */}
+          blank and edit prefills the selected entry. A suggestion
+          presets create mode with an editable draft answer. */}
       <KnowledgeFormDialog
         key={formSession}
         open={formOpen}
         onOpenChange={setFormOpen}
         entry={editing ?? undefined}
+        preset={preset ?? undefined}
         submit={submitForm}
         onSaved={handleSaved}
       />
+
+      {suggestions.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeader
+            title="أسئلة مقترحة"
+            description={
+              initialSuggestions?.verticalLabel
+                ? `أسئلة شائعة مناسبة لنشاطك (${initialSuggestions.verticalLabel}) — أضفها بضغطة وعدّل الإجابة قبل الحفظ.`
+                : "أسئلة شائعة مناسبة لنشاطك — أضفها بضغطة وعدّل الإجابة قبل الحفظ."
+            }
+          />
+          <ul className="space-y-2.5">
+            {suggestions.map((suggestion) => (
+              <li key={suggestion.question}>
+                <article className="flex flex-col gap-3 rounded-xl border border-dashed bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <h3 className="flex items-center gap-1.5 text-sm font-medium">
+                      <LightbulbIcon
+                        aria-hidden
+                        className="text-primary size-4 shrink-0"
+                      />
+                      {suggestion.question}
+                    </h3>
+                    <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
+                      مسودة: {suggestion.answer}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openSuggestion(suggestion)}
+                    >
+                      <PlusIcon aria-hidden className="size-4" />
+                      إضافة
+                    </Button>
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <KnowledgeRemoveDialog
         open={removeOpen}

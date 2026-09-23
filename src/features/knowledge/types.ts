@@ -13,6 +13,17 @@ export type KnowledgeEntryView = {
   answer: string;
 };
 
+/**
+ * Static starter suggestions shown in the authoring UI (B-05). The
+ * vertical label is display only; every suggestion is an editable
+ * DRAFT that becomes stored knowledge only through the explicit create
+ * path — it is never an automatically verified business fact.
+ */
+export type KnowledgeSuggestionView = {
+  verticalLabel: string;
+  suggestions: Array<{ question: string; answer: string }>;
+};
+
 export type KnowledgeActionResult =
   | { success: true; entries: KnowledgeEntryView[] }
   | { success: false; message: string };

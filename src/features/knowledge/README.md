@@ -33,17 +33,47 @@ copy guidance only, never data fields.
   inside: ADMIN-only, tenant-scoped to the actor's own Business (the
   trusted session → user record). Repository collaborators are
   injectable so the logic is verifiable without a live database.
+  `listKnowledgeSuggestions` derives the starter pairs from the ACTOR'S
+  OWN business vertical — a read-only affordance that writes nothing.
 - `actions/knowledge-actions.ts` — thin `"use server"` wrappers: build
   the actor from the authenticated session + DB user, run the
   operation, revalidate `/settings/knowledge`.
+- `suggestions/faq-suggestions.ts` — a static, typed catalog of
+  question/answer STARTER PAIRS keyed by the EXISTING `VerticalValue`
+  enum (no second business-type mechanism). Outside the domain model:
+  never persisted, never a DB table, no AI/embeddings/RAG/mining. The
+  answers are editable DRAFTS — a suggestion becomes stored knowledge
+  ONLY through the explicit create path (the UI opens the prefilled
+  form; nothing is saved until the owner hits save).
 - `components/knowledge-screen.tsx` — the list screen: one primary
   action (إضافة معلومة), entry cards (question + answer preview,
   تعديل / حذف), honest empty state, count line, calm success
-  confirmation; server-confirmed results replace the whole list.
+  confirmation; server-confirmed results replace the whole list; plus
+  the أسئلة مقترحة section (one-tap add into the prefilled create
+  form, already-answered suggestions hidden).
 - `components/knowledge-form-dialog.tsx` — small create/edit dialog
   (question + answer, prefilled for edit, Arabic inline validation).
+  `preset` = create mode prefilled with a suggested starter pair.
 - `components/knowledge-remove-dialog.tsx` — explicit remove
   confirmation (destructive action, never a silent delete).
+
+## Suggestion rules (B-05)
+
+- Suggestions cover ONLY explicit Q/A knowledge not naturally
+  represented elsewhere: booking policy, cancellation, preparation,
+  payment, what-to-bring. They deliberately never duplicate canonical
+  domain facts (location, price, service list, service duration,
+  opening hours, WhatsApp number).
+- A suggested answer NEVER silently becomes a business fact. One tap
+  opens the create form prefilled with the DRAFT; the entry is written
+  only when the owner explicitly submits it (the same create path and
+  the same duplicate/cap/validation rules as any manual entry).
+- A suggestion whose question the business already answers verbatim is
+  hidden, not offered twice.
+- Future-ready ("frequently asked by customers" — NOT implemented):
+  the consumer seam is a plain starter-pair list, so customer-derived
+  candidates can later be appended to the same shape without changing
+  the contract. No mining, clustering, analytics, or AI call exists.
 
 ## Semantics
 

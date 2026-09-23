@@ -31,11 +31,16 @@ import { useForm } from "react-hook-form";
  * serves both modes — the parent remounts it (key change) on every
  * open, so edit values are prefilled through mount-time defaults. The
  * submit operation (create or update) is bound by the parent screen.
+ *
+ * A suggested question (B-05) uses `preset`: create mode with the
+ * starter pair prefilled as an EDITABLE DRAFT — the owner must still
+ * hit save, so a suggestion never silently becomes a stored fact.
  */
 export function KnowledgeFormDialog({
   open,
   onOpenChange,
   entry,
+  preset,
   submit,
   onSaved,
 }: {
@@ -43,6 +48,8 @@ export function KnowledgeFormDialog({
   onOpenChange: (open: boolean) => void;
   /** Present → edit mode; absent → create mode. */
   entry?: KnowledgeEntryView;
+  /** Present → create mode prefilled with a suggested starter pair. */
+  preset?: { question: string; answer: string };
   /** Runs the actual server action (create, or update by current question). */
   submit: (input: KnowledgeFormInput) => Promise<KnowledgeActionResult>;
   onSaved: (entries: KnowledgeEntryView[]) => void;
@@ -53,8 +60,8 @@ export function KnowledgeFormDialog({
   const form = useForm<KnowledgeFormInput>({
     resolver: zodResolver(knowledgeFormSchema),
     defaultValues: {
-      question: entry?.question ?? "",
-      answer: entry?.answer ?? "",
+      question: entry?.question ?? preset?.question ?? "",
+      answer: entry?.answer ?? preset?.answer ?? "",
     },
   });
 

@@ -2,9 +2,13 @@ import { KnowledgeScreen } from "@/features/knowledge/components/knowledge-scree
 import {
   defaultKnowledgeServiceDeps,
   listKnowledge,
+  listKnowledgeSuggestions,
   type KnowledgeActor,
 } from "@/features/knowledge/server/knowledge-service";
-import type { KnowledgeEntryView } from "@/features/knowledge/types";
+import type {
+  KnowledgeEntryView,
+  KnowledgeSuggestionView,
+} from "@/features/knowledge/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { requireRole } from "@/server/auth/guards";
@@ -24,7 +28,9 @@ export const metadata: Metadata = {
  * assistant will use when replying to customers, stored in the
  * canonical `Business.faqs` JSON field. The Business is ALWAYS the
  * actor's own, derived from the authenticated session; the service
- * layer enforces the role + tenant scoping server-side.
+ * layer enforces the role + tenant scoping server-side on every read
+ * and write. Starter suggestions are derived from the SAME business
+ * record's vertical — never from client input.
  */
 export default async function KnowledgePage() {
   const session = await requireRole("ADMIN");
@@ -65,5 +71,23 @@ export default async function KnowledgePage() {
   }
 
   const entries: KnowledgeEntryView[] = result;
-  return <KnowledgeScreen initialEntries={entries} />;
+
+  // Suggestions are a non-critical affordance: a failure here must never
+  // block the owner from managing existing knowledge, so the screen
+  // degrades to "no suggestions" rather than failing the whole page.
+  const suggestionsResult = await listKnowledgeSuggestions(
+    defaultKnowledgeServiceDeps,
+    actor,
+  );
+  const suggestions: KnowledgeSuggestionView =
+    "suggestions" in suggestionsResult
+      ? suggestionsResult
+      : { verticalLabel: "", suggestions: [] };
+
+  return (
+    <KnowledgeScreen
+      initialEntries={entries}
+      initialSuggestions={suggestions}
+    />
+  );
 }
