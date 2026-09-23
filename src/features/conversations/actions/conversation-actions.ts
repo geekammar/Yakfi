@@ -8,7 +8,11 @@ import {
 } from "@/features/conversations/schemas/conversation-schema";
 import type { ConversationActionResult } from "@/features/conversations/types";
 import { requireUser } from "@/server/auth/guards";
-import { conversationRepository, userRepository } from "@/server/repositories";
+import {
+  conversationRepository,
+  operatorAttentionRepository,
+  userRepository,
+} from "@/server/repositories";
 
 import { revalidatePath } from "next/cache";
 
@@ -16,9 +20,13 @@ async function actionContext(conversationId: string) {
   const session = await requireUser();
   const user = await userRepository.findById(session.user.id);
   if (!user?.businessId) return null;
+  const businessId = user.businessId;
   const conversation = await conversationRepository.findById(conversationId);
-  if (!conversation || conversation.businessId !== user.businessId) return null;
-  return { user, conversation };
+  if (!conversation || conversation.businessId !== businessId) return null;
+  // `businessId` is narrowed to string here so callers (and the operator-
+  // attention seam) get a non-nullable tenant scope — still always the
+  // session's Business, never client input.
+  return { user, conversation, businessId };
 }
 
 function failure(message: string): ConversationActionResult {
@@ -88,6 +96,28 @@ export async function transitionConversation(
       parsed.data.id,
       transitions[parsed.data.transition],
     );
+
+    // PROMPT-B04 — keep the operator-attention marker consistent with the
+    // (server-authorized) lifecycle transition. The handoff itself is the
+    // conversation status; attention is only the notification layer:
+    //  - TAKE_OVER / RETURN_TO_AI / MARK_BOOKED: the operator acted, so the
+    //    NEW/unread alert is acknowledged (the thread may stay NEED_HUMAN
+    //    until the operator returns it to the assistant — that is unchanged).
+    //  - HANDOFF: an operator routed the thread to the team, so the alert is
+    //    (re)opened for everybody else — idempotent, one row per thread.
+    if (parsed.data.transition === "HANDOFF") {
+      await operatorAttentionRepository.open({
+        businessId: context.businessId,
+        conversationId: parsed.data.id,
+        reason: "DEFERRED_TO_STAFF",
+      });
+    } else {
+      await operatorAttentionRepository.resolve({
+        conversationId: parsed.data.id,
+        resolvedById: context.user.id,
+      });
+    }
+
     refreshConversation(parsed.data.id);
     return { success: true };
   } catch {

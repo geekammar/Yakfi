@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -26,6 +26,7 @@
     "check:response-normalizer": "tsx scripts/check-response-normalizer.ts",
     "check:atria-retry": "tsx scripts/check-atria-retry.ts",
     "check:conversation-control": "tsx scripts/check-conversation-control.ts",
+    "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",
     "check:booking-confirm": "tsx scripts/check-booking-confirm.ts",

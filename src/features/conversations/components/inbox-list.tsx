@@ -26,6 +26,20 @@ import {
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
+/**
+ * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
+ * UNACKNOWLEDGED handoff gets a visible marker so it stands out from
+ * ordinary threads. Operator-only; no AI internals are exposed.
+ */
+function AttentionDot() {
+  return (
+    <span
+      aria-hidden
+      className="bg-destructive inline-block size-2 shrink-0 rounded-full"
+    />
+  );
+}
+
 const STATUS_FILTERS = [
   { value: "ALL", label: "كل الحالات" },
   { value: "NEED_HUMAN", label: "تحتاج تدخلاً" },
@@ -185,6 +199,7 @@ export function InboxList({
               </div>
               <div className="min-w-0 space-y-1">
                 <div className="flex items-center gap-2">
+                  {conversation.hasAttention ? <AttentionDot /> : null}
                   <p className="truncate font-medium">
                     {conversation.customer.name}
                   </p>

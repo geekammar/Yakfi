@@ -10,9 +10,11 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { CONVERSATION_NOUNS, arabicCount } from "@/lib/arabic";
+import { ATTENTION_REASON_LABELS } from "@/lib/validation/operator-attention";
 import type { AppointmentStatus, ConversationStatus } from "@/types/domain";
 
 import {
+  AlertCircleIcon,
   CalendarDaysIcon,
   CheckCircle2Icon,
   LoaderCircleIcon,
@@ -85,6 +87,22 @@ function previewPrefix(senderType: "CUSTOMER" | "AI" | "STAFF") {
     : senderType === "AI"
       ? "المساعد: "
       : "";
+}
+
+/**
+ * The unacknowledged-attention marker (PROMPT-B04) — the operational
+ * "this one is still waiting for you" chip: why the assistant did not
+ * answer, in plain operator language. Carries no AI internals (no prompts,
+ * no chain-of-thought, no provider details). Shown to the operator only.
+ */
+function AttentionMarker({ item }: { item: StaffQueueItem }) {
+  if (!item.hasAttention || !item.attentionReason) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground">
+      <AlertCircleIcon aria-hidden className="size-3" />
+      {ATTENTION_REASON_LABELS[item.attentionReason]}
+    </span>
+  );
 }
 
 /** Assignment state indicator — server-derived, never client input. */
@@ -216,6 +234,7 @@ export function StaffWorkspace({
                         {item.customer.name}
                       </p>
                       <AssignmentIndicator item={item} />
+                      <AttentionMarker item={item} />
                     </div>
                     <MessagePreview lastMessage={item.lastMessage} />
                     <AppointmentContext appointment={item.latestAppointment} />

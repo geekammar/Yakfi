@@ -21,6 +21,12 @@ export type InboxConversation = {
     createdAt: string;
   } | null;
   lastActivityAt: string;
+  /**
+   * PROMPT-B04 — this thread has an UNACKNOWLEDGED operator attention: an
+   * unresolved NEED_HUMAN handoff the operator has not opened yet. Drives
+   * the visual "needs your attention" distinction in the inbox.
+   */
+  hasAttention: boolean;
 };
 
 export type ConversationDetailData = {

@@ -23,14 +23,20 @@ export function BottomNav({ items }: { items: NavItem[] }) {
             item.href === "/"
               ? pathname === "/"
               : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const count = item.attentionCount ?? 0;
 
           return (
             <li key={item.href}>
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
+                aria-label={
+                  count > 0
+                    ? `${item.label} — ${count} تحتاج انتباهك`
+                    : undefined
+                }
                 className={cn(
-                  "flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors duration-[var(--duration-fast)]",
+                  "relative flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors duration-[var(--duration-fast)]",
                   active
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground",
@@ -41,6 +47,14 @@ export function BottomNav({ items }: { items: NavItem[] }) {
                   className={cn("size-5", active && "stroke-[2.25]")}
                 />
                 {item.label}
+                {count > 0 ? (
+                  <span
+                    aria-hidden
+                    className="bg-destructive text-destructive-foreground absolute top-1.5 end-[calc(50%-1.4rem)] flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none tabular-nums"
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
+                ) : null}
               </Link>
             </li>
           );

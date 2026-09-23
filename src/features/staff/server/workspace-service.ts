@@ -20,10 +20,12 @@ import type {
 import type {
   AppointmentRepository,
   ConversationRepository,
+  OperatorAttentionRepository,
 } from "@/server/repositories";
 import {
   appointmentRepository,
   conversationRepository,
+  operatorAttentionRepository,
 } from "@/server/repositories";
 import type { UserRole } from "@/types/domain";
 
@@ -37,12 +39,15 @@ export type WorkspaceActor = {
 export type StaffWorkspaceDeps = {
   conversations: Pick<ConversationRepository, "listInbox">;
   appointments: Pick<AppointmentRepository, "listLatestByCustomers">;
+  /** PROMPT-B04 — the operator-attention marker on handoff queue rows. */
+  attention: Pick<OperatorAttentionRepository, "findOpenByConversations">;
 };
 
 /** Production dependencies (app singletons). */
 export const defaultStaffWorkspaceDeps: StaffWorkspaceDeps = {
   conversations: conversationRepository,
   appointments: appointmentRepository,
+  attention: operatorAttentionRepository,
 };
 
 const FORBIDDEN_MESSAGE = "مساحة العمل متاحة لأعضاء الفريق فقط";
@@ -131,34 +136,51 @@ export async function getStaffWorkspace(
       ]),
     );
 
+    // PROMPT-B04 — which queue threads are still UNACKNOWLEDGED (the operator
+    // has not opened them yet). One tenant-scoped lookup, then a boolean +
+    // the coarse reason per row. The reason is an operational category only
+    // (never prompts/chain-of-thought/provider internals) and is shown solely
+    // to the operator, never to the customer.
+    const attentionByConversation =
+      await deps.attention.findOpenByConversations(
+        actor.businessId,
+        [...queueRows, ...assignedRows].map((row) => row.id),
+      );
+
     const queue: StaffQueueItem[] = queueRows
       .map((row) => ({
         row,
         rank: queueRank(row, actor.userId),
       }))
       .sort((a, b) => a.rank - b.rank) // stable: keeps activity order
-      .map(({ row }) => ({
-        id: row.id,
-        assignment: !row.assignedUserId
-          ? ("unassigned" as const)
-          : row.assignedUserId === actor.userId
-            ? ("mine" as const)
-            : ("other" as const),
-        assignedUserName: row.assignedTo?.name ?? null,
-        customer: row.customer,
-        lastMessage: row.messages[0]
-          ? {
-              content: row.messages[0].content,
-              senderType: row.messages[0].senderType,
-              createdAt: row.messages[0].createdAt.toISOString(),
-            }
-          : null,
-        lastActivityAt: (row.lastMessageAt ?? row.createdAt).toISOString(),
-        latestAppointment: appointmentFor(
-          appointmentsByCustomer,
-          row.customerId,
-        ),
-      }));
+      .map(({ row }) => {
+        const attention = attentionByConversation.get(row.id) ?? null;
+        return {
+          id: row.id,
+          assignment: !row.assignedUserId
+            ? ("unassigned" as const)
+            : row.assignedUserId === actor.userId
+              ? ("mine" as const)
+              : ("other" as const),
+          assignedUserName: row.assignedTo?.name ?? null,
+          customer: row.customer,
+          lastMessage: row.messages[0]
+            ? {
+                content: row.messages[0].content,
+                senderType: row.messages[0].senderType,
+                createdAt: row.messages[0].createdAt.toISOString(),
+              }
+            : null,
+          lastActivityAt: (row.lastMessageAt ?? row.createdAt).toISOString(),
+          latestAppointment: appointmentFor(
+            appointmentsByCustomer,
+            row.customerId,
+          ),
+          hasAttention: Boolean(attention),
+          attentionReason: attention?.reason ?? null,
+          attentionCreatedAt: attention?.createdAt ?? null,
+        };
+      });
 
     const assigned: StaffAssignedItem[] = assignedRows.map((row) => ({
       id: row.id,

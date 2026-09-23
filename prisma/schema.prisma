@@ -96,6 +96,7 @@ model Business {
   providerProfiles                 ProviderProfile[]
   inboundDedupe                    InboundMessageDedupe[]
   usageRecords                     UsageRecord[]
+  operatorAttentions               OperatorAttention[]
 
   @@index([isActive])
   @@map("businesses")
@@ -190,11 +191,12 @@ model Conversation {
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?          @map("deleted_at")
 
-  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo User?     @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch     Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   messages   Message[]
+  attention  OperatorAttention?
 
   @@index([businessId])
   @@index([businessId, status])
@@ -218,6 +220,45 @@ model Message {
   @@index([conversationId])
   @@index([conversationId, createdAt])
   @@map("messages")
+}
+
+// ─── Operator attention (PROMPT-B04) ────────────────────────
+// The operator-facing notification layer on top of the EXISTING
+// NEED_HUMAN / AI_HANDOFF handoff. NOT a second handoff concept: the
+// handoff stays `ConversationStatus.NEED_HUMAN` (the authoritative,
+// unchanged lifecycle). This row is the "the operator has not looked at
+// this unresolved handoff yet" marker for ONE conversation.
+//
+// ONE row per conversation (`conversationId` is unique): opening
+// attention on an already-open handoff refreshes the SAME row, and
+// re-opening a resolved one resets it — structurally idempotent, so a
+// message storm on a stuck thread can never spawn a notification storm.
+// `resolvedAt IS NULL` means OPEN (unacknowledged); the operator
+// acknowledging the thread (opening its detail screen) or the thread
+// leaving NEED_HUMAN resolves it. Tenant isolation + cascade cleanup
+// come from `businessId`. `reason` is a stable machine key (validated by
+// the Zod union `attentionReasonValues`) — a COARSE operational category,
+// never prompts, chain-of-thought, provider payload, or disclosure
+// internals (see lib/validation/operator-attention).
+model OperatorAttention {
+  id             String    @id @default(uuid())
+  businessId     String    @map("business_id")
+  conversationId String    @unique @map("conversation_id")
+  reason         String
+  createdAt      DateTime  @default(now()) @map("created_at")
+  // Null while OPEN (the alert is live); set when the operator
+  // acknowledges the thread or it leaves NEED_HUMAN.
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedById   String?   @map("resolved_by_id")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  resolvedBy   User?        @relation("AttentionResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([businessId, resolvedAt])
+  @@map("operator_attentions")
 }
 
 // ─── Appointments ────────────────────────────────────────────
@@ -404,18 +445,18 @@ model WhatsAppOnboardingAuthorization {
 // ciphertext. Master-key rotation is a later operational concern.
 
 model RuntimeCredential {
-  id String @id @default(uuid())
+  id             String   @id @default(uuid())
   // The opaque `fp:<id>` handle — unique, unguessable, the ONLY thing the
   // feature/adapter layer ever persists on a connection.
-  credentialsRef String @unique @map("credentials_ref")
-  businessId     String @map("business_id")
+  credentialsRef String   @unique @map("credentials_ref")
+  businessId     String   @map("business_id")
   // Versioned AES-256-GCM package: `v1:` + base64(iv || ciphertext || authTag).
-  cipherBlob     String @map("cipher_blob")
+  cipherBlob     String   @map("cipher_blob")
   // Safe metadata (never the key, never the plaintext).
-  algorithm  String @default("AES-256-GCM")
-  keyVersion Int    @default(1) @map("key_version")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+  algorithm      String   @default("AES-256-GCM")
+  keyVersion     Int      @default(1) @map("key_version")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -686,6 +727,7 @@ model User {
   invitationsCreated         Invitation[]         @relation("InvitationCreator")
   platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
   aiPolicyUpdates            PlatformAiPolicy[]   @relation("PlatformAiPolicyUpdater")
+  resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
 
   @@index([businessId])
   @@index([accountType])

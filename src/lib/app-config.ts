@@ -22,6 +22,13 @@ export type NavItem = {
    * authorization boundary (server guards stay authoritative).
    */
   roles?: UserRole[];
+  /**
+   * PROMPT-B04 — the count of UNACKNOWLEDGED operator attentions (unresolved
+   * handoffs nobody has opened yet) rendered as a badge. Attached
+   * server-side by the layouts from the session's Business (never client
+   * input); consumers treat it as display-only.
+   */
+  attentionCount?: number;
 };
 
 /** Main authenticated app navigation (generic — no vertical terminology). */

@@ -6,6 +6,7 @@ import type {
 import {
   appointmentRepository,
   conversationRepository,
+  operatorAttentionRepository,
   userRepository,
 } from "@/server/repositories";
 
@@ -14,6 +15,15 @@ export async function getConversationInbox(businessId: string) {
     conversationRepository.listInbox(businessId),
     userRepository.listByBusiness({ businessId }, { pageSize: 100 }),
   ]);
+
+  // PROMPT-B04 — which threads still carry an UNACKNOWLEDGED attention.
+  // Tenant scope is the session's Business; the map marks inbox rows that
+  // need the operator's eyes.
+  const attentionByConversation =
+    await operatorAttentionRepository.findOpenByConversations(
+      businessId,
+      conversations.map((conversation) => conversation.id),
+    );
 
   const team: InboxUser[] = users
     .filter((user) => user.isActive)
@@ -34,6 +44,7 @@ export async function getConversationInbox(businessId: string) {
       lastActivityAt: (
         conversation.lastMessageAt ?? conversation.createdAt
       ).toISOString(),
+      hasAttention: attentionByConversation.has(conversation.id),
     };
   });
 
@@ -50,6 +61,17 @@ export async function getConversationDetail(
     businessId,
   );
   if (!conversation) return null;
+
+  // PROMPT-B04 — opening the thread acknowledges its operator attention:
+  // the operator has now SEEN this handoff, so the NEW/unread alert clears.
+  // The conversation keeps its NEED_HUMAN status (the handoff itself is
+  // unchanged) until the operator returns it to the assistant. Idempotent —
+  // a second load matches zero open rows. Server-authorized: `businessId`
+  // here is the session's Business, never client input.
+  await operatorAttentionRepository.resolve({
+    conversationId,
+    resolvedById: currentUserId,
+  });
 
   const [appointments, users] = await Promise.all([
     appointmentRepository.listRecentByCustomer(

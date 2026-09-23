@@ -1,3 +1,4 @@
+import type { AttentionReason } from "@/lib/validation";
 import type {
   AppointmentStatus,
   ConversationStatus,
@@ -112,6 +113,16 @@ export type StaffQueueItem = {
   } | null;
   lastActivityAt: string;
   latestAppointment: WorkspaceAppointment | null;
+  /**
+   * PROMPT-B04 — this handoff is still UNACKNOWLEDGED (no operator has
+   * opened the thread since the AI handed it off). The operational
+   * "needs your attention" marker; `attentionReason` is the coarse
+   * category of why the AI did not answer (operator-only, never
+   * customer-visible, never internal AI reasoning).
+   */
+  hasAttention: boolean;
+  attentionReason: AttentionReason | null;
+  attentionCreatedAt: string | null;
 };
 
 /** Serializable row of the "assigned to me" (non-handoff) section. */

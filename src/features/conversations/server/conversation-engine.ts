@@ -94,7 +94,7 @@ import {
 } from "@/features/conversations/server/conversation-ai";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
-import type { RecordUsageDto } from "@/lib/validation";
+import type { AttentionReason, RecordUsageDto } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 import type {
@@ -104,6 +104,7 @@ import type {
   ConversationRepository,
   CustomerRepository,
   InboundDedupeRepository,
+  OperatorAttentionRepository,
   ProviderRepository,
   ServiceRepository,
   UsageRepository,
@@ -115,6 +116,7 @@ import {
   conversationRepository,
   customerRepository,
   inboundDedupeRepository,
+  operatorAttentionRepository,
   providerRepository,
   serviceRepository,
   usageRepository,
@@ -234,6 +236,14 @@ export type ConversationEngineDeps = {
     Partial<Pick<ServiceRepository, "findById">>;
   inboundDedupeRepository: Pick<InboundDedupeRepository, "claim">;
   usageRepository: Pick<UsageRepository, "record">;
+  /**
+   * OPTIONAL (PROMPT-B04): the operator-attention seam. When present, a
+   * turn that ends in NEED_HUMAN records an idempotent attention row so the
+   * operator is informed. Offline engine harnesses that do not exercise the
+   * notification layer may omit it (the same optionality convention as
+   * `providerRepository` / `appointmentRepository`).
+   */
+  attentionRepository?: Pick<OperatorAttentionRepository, "open">;
   providerRepository?: Pick<
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
@@ -256,6 +266,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   serviceRepository,
   inboundDedupeRepository,
   usageRepository,
+  attentionRepository: operatorAttentionRepository,
   providerRepository,
   appointmentRepository,
   ai: policyBackedAi,
@@ -319,6 +330,8 @@ export type InboundSuccess = {
   ok: true;
   /** False — this delivery was processed (not a duplicate). */
   duplicate: false;
+  /** The tenant that owns this turn — server-derived, never client input. */
+  businessId: string;
   conversationId: string;
   customerId: string;
   /** The persisted CUSTOMER message id. */
@@ -740,6 +753,7 @@ async function selectionReply(
   return {
     ok: true,
     duplicate: false,
+    businessId: scope.business.id,
     conversationId: scope.conversation.id,
     customerId: scope.customer.id,
     customerMessageId: scope.customerMessageId,
@@ -997,12 +1011,67 @@ async function completeBookingSelection(
 // ─── The engine ──────────────────────────────────────────────────────────────
 
 /**
+ * Map a finished turn to the COARSE operator-attention reason (PROMPT-B04).
+ *
+ * Returns null when the turn did NOT end in a handoff (a safe AI reply, a
+ * successful booking, a clarification) — those turns create no operator
+ * attention. The reason is an operational category ONLY: it deliberately
+ * collapses every "the assistant could not safely answer" cause (AI failure,
+ * invalid output, a B-03 refused reply) into one jargon-free key, and never
+ * carries prompts, chain-of-thought, provider payload, or disclosure-policy
+ * internals. The operator sees the operational consequence, nothing else.
+ */
+function handoffAttentionReason(
+  result: InboundSuccess,
+): AttentionReason | null {
+  if (result.conversationStatus !== "NEED_HUMAN") return null;
+  if (result.assistantAction === "DEFERRED_TO_STAFF")
+    return "DEFERRED_TO_STAFF";
+  if (result.intent === "BOOKING") return "BOOKING_BLOCKED";
+  return "AI_HANDOFF";
+}
+
+/**
  * Process ONE inbound WhatsApp-style message end-to-end. Idempotent at
  * every level: durable external-key dedupe before irreversible
  * processing, customer upsert + latest-conversation reuse, and
  * claim-coupled message persistence for concurrent redeliveries.
+ *
+ * This public entry point is the single choke point for operator attention
+ * (PROMPT-B04): EVERY turn — whichever of the many handoff branches it took
+ * — funnels back here, so a NEED_HUMAN outcome always records exactly ONE
+ * idempotent attention row. The handoff itself is unchanged (status stays
+ * the authoritative lifecycle); attention is the notification layer on top.
+ * The write is best-effort, like usage telemetry: it can never fail the turn.
  */
 export async function receiveInboundMessage(
+  deps: ConversationEngineDeps,
+  input: unknown,
+  resolvedIdentity?: ResolvedInboundIdentity,
+): Promise<InboundResult> {
+  const result = await runInboundTurn(deps, input, resolvedIdentity);
+
+  if (result.ok && !result.duplicate) {
+    const reason = handoffAttentionReason(result);
+    if (reason && deps.attentionRepository) {
+      try {
+        await deps.attentionRepository.open({
+          businessId: result.businessId,
+          conversationId: result.conversationId,
+          reason,
+        });
+      } catch {
+        // Attention is a notification layer, not a business action — an
+        // attention write can never fail a customer turn (same contract as
+        // usage telemetry above).
+      }
+    }
+  }
+
+  return result;
+}
+
+async function runInboundTurn(
   deps: ConversationEngineDeps,
   input: unknown,
   resolvedIdentity?: ResolvedInboundIdentity,
@@ -1150,6 +1219,7 @@ export async function receiveInboundMessage(
       return {
         ok: true,
         duplicate: false,
+        businessId: business.id,
         conversationId: conversation.id,
         customerId: customer.id,
         customerMessageId: customerMessage.id,
@@ -1277,6 +1347,7 @@ export async function receiveInboundMessage(
       return {
         ok: true,
         duplicate: false,
+        businessId: business.id,
         conversationId: conversation.id,
         customerId: customer.id,
         customerMessageId: customerMessage.id,
@@ -1319,6 +1390,7 @@ export async function receiveInboundMessage(
         return {
           ok: true,
           duplicate: false,
+          businessId: business.id,
           conversationId: conversation.id,
           customerId: customer.id,
           customerMessageId: customerMessage.id,
@@ -1368,6 +1440,7 @@ export async function receiveInboundMessage(
         return {
           ok: true,
           duplicate: false,
+          businessId: business.id,
           conversationId: conversation.id,
           customerId: customer.id,
           customerMessageId: customerMessage.id,
@@ -1408,6 +1481,7 @@ export async function receiveInboundMessage(
         return {
           ok: true,
           duplicate: false,
+          businessId: business.id,
           conversationId: conversation.id,
           customerId: customer.id,
           customerMessageId: customerMessage.id,
@@ -1459,6 +1533,7 @@ export async function receiveInboundMessage(
         return {
           ok: true,
           duplicate: false,
+          businessId: business.id,
           conversationId: conversation.id,
           customerId: customer.id,
           customerMessageId: customerMessage.id,
@@ -1496,6 +1571,7 @@ export async function receiveInboundMessage(
         return {
           ok: true,
           duplicate: false,
+          businessId: business.id,
           conversationId: conversation.id,
           customerId: customer.id,
           customerMessageId: customerMessage.id,
@@ -1531,6 +1607,7 @@ export async function receiveInboundMessage(
       return {
         ok: true,
         duplicate: false,
+        businessId: business.id,
         conversationId: conversation.id,
         customerId: customer.id,
         customerMessageId: customerMessage.id,
@@ -1564,6 +1641,7 @@ export async function receiveInboundMessage(
       return {
         ok: true,
         duplicate: false,
+        businessId: business.id,
         conversationId: conversation.id,
         customerId: customer.id,
         customerMessageId: customerMessage.id,
@@ -1635,6 +1713,7 @@ export async function receiveInboundMessage(
     return {
       ok: true,
       duplicate: false,
+      businessId: business.id,
       conversationId: conversation.id,
       customerId: customer.id,
       customerMessageId: customerMessage.id,

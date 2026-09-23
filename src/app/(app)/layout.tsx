@@ -1,8 +1,14 @@
 import { UserMenu } from "@/features/auth/components/user-menu";
+import {
+  defaultAttentionDeps,
+  getOpenAttentionCount,
+  withAttentionCount,
+} from "@/features/conversations/server/operator-attention";
 import { AppShell } from "@/components/shared/layout/app-shell";
 import { InstallPrompt } from "@/components/shared/pwa/install-prompt";
 import { APP_NAV_ITEMS } from "@/lib/app-config";
 import { requireUser } from "@/server/auth/guards";
+import { userRepository } from "@/server/repositories";
 
 export default async function AppLayout({
   children,
@@ -18,8 +24,20 @@ export default async function AppLayout({
       !item.roles || item.roles.some((role) => role === session.user.role),
   );
 
+  // PROMPT-B04 — the live count of UNACKNOWLEDGED handoffs, attached to the
+  // navigation destination. Tenant scope is the session's Business (derived
+  // server-side; a client can never supply it). ADMIN has no staff workspace,
+  // so the badge lands on the shared inbox.
+  const operator = await userRepository.findById(session.user.id);
+  const attentionCount = operator?.businessId
+    ? await getOpenAttentionCount(defaultAttentionDeps, operator.businessId)
+    : 0;
+
   return (
-    <AppShell navItems={navItems} header={<UserMenu />}>
+    <AppShell
+      navItems={withAttentionCount(navItems, attentionCount)}
+      header={<UserMenu />}
+    >
       {children}
       <InstallPrompt />
     </AppShell>
