@@ -30,25 +30,33 @@ import { useForm } from "react-hook-form";
  * flow's Step 1 both render this dialog (composed at the route layer)
  * and submit through the canonical `createCustomerAction`. The
  * parent remounts it (key change) on every open so it always starts
- * blank.
+ * from the supplied prefill.
  */
 export function CustomerFormDialog({
   open,
   onOpenChange,
   onCreated,
+  prefill,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the created customer after a server-confirmed success. */
   onCreated: (customer: CustomerCreated) => void;
+  /**
+   * Optional initial values (e.g. the text the user already typed into a
+   * customer search). Applied as form defaults only — every value is
+   * re-validated on submit by the same schema the server enforces, so
+   * prefilling can never bypass validation.
+   */
+  prefill?: { name?: string; phone?: string };
 }) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const form = useForm<CustomerFormInput>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: {
-      name: "",
-      phone: "",
+      name: prefill?.name ?? "",
+      phone: prefill?.phone ?? "",
       notes: "",
     },
   });

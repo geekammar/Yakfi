@@ -161,3 +161,43 @@ export function formatArabicMonth(date: string): string {
     month: "short",
   }).format(new Date(`${date}T00:00:00.000Z`));
 }
+
+/** Compact Arabic day + month for a relative-choice caption (e.g. "٤ سبتمبر"). */
+export function formatArabicDayMonth(date: string): string {
+  return new Intl.DateTimeFormat("ar-EG", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+/**
+ * Relative choices that denote a PERIOD rather than one exact day (B-07
+ * polish): tapping one offers the days of that period as candidates so
+ * the user can fine-tune, with the deterministic resolved date selected
+ * by default. `today` / `tomorrow` name exact days and offer no window.
+ */
+export const RELATIVE_WINDOW_OPTIONS: ReadonlyArray<RelativeDateOption> = [
+  "this-week",
+  "next-week",
+  "after-1-week",
+  "after-2-weeks",
+  "after-1-month",
+];
+
+/**
+ * The candidate days of a relative period (B-07 polish) — the seven days
+ * starting at the period's resolved date. Deterministic,
+ * timezone-independent math ONLY: availability is deliberately NOT
+ * consulted here (Step 4 owns the availability authority, and no second
+ * engine may live in the client). The resolved date — the FIRST entry —
+ * is the default selection. Returns `null` for exact-day choices.
+ */
+export function relativeDateWindow(
+  anchor: string,
+  option: RelativeDateOption,
+): string[] | null {
+  if (!RELATIVE_WINDOW_OPTIONS.includes(option)) return null;
+  const start = resolveRelativeDate(anchor, option);
+  return Array.from({ length: 7 }, (_, index) => moveDate(start, index));
+}

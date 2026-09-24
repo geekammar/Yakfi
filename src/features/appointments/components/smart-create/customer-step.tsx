@@ -2,6 +2,7 @@
 
 import { searchBookingCustomersAction } from "@/features/appointments/actions/booking-flow-actions";
 import type { BookingCustomerOption } from "@/features/appointments/types";
+import { deriveCustomerFormDefaults } from "@/features/customers/customer-form-defaults";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SearchInput } from "@/components/shared/search-input";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,12 @@ export type CustomerCreateDialogComponent = React.ComponentType<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (customer: BookingCustomerOption) => void;
+  /**
+   * Initial values derived from the current search text (name/phone the
+   * user already typed). Optional and re-derived on every open because
+   * the parent remounts the dialog via `key`.
+   */
+  prefill?: { name?: string; phone?: string };
 }>;
 
 export function CustomerStep({
@@ -55,7 +62,16 @@ export function CustomerStep({
   const [searching, setSearching] = useState(!selected);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  // key → the dialog remounts on every open so it starts from the CURRENT
+  // search text (never a previous session's leftover values). Same
+  // pattern as the customers directory.
+  const [dialogSession, setDialogSession] = useState(0);
   const debouncedQuery = useDebouncedValue(query);
+
+  function openCreate() {
+    setDialogSession((count) => count + 1);
+    setCreateOpen(true);
+  }
 
   const search = useQuery({
     queryKey: ["booking-customers", debouncedQuery],
@@ -148,7 +164,7 @@ export function CustomerStep({
               }
               action={
                 CreateCustomerDialog ? (
-                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                  <Button size="sm" onClick={openCreate}>
                     <UserRoundPlusIcon aria-hidden className="size-4" />
                     إضافة عميل جديد
                   </Button>
@@ -173,11 +189,7 @@ export function CustomerStep({
               }
               action={
                 CreateCustomerDialog ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCreateOpen(true)}
-                  >
+                  <Button variant="outline" size="sm" onClick={openCreate}>
                     <UserRoundPlusIcon aria-hidden className="size-4" />
                     إضافة عميل جديد
                   </Button>
@@ -243,8 +255,10 @@ export function CustomerStep({
 
       {CreateCustomerDialog ? (
         <CreateCustomerDialog
+          key={dialogSession}
           open={createOpen}
           onOpenChange={setCreateOpen}
+          prefill={deriveCustomerFormDefaults(query)}
           onCreated={(customer) => {
             // A server-confirmed creation selects the customer right
             // away — the flow continues exactly as with a search pick.

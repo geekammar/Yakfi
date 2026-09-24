@@ -3,6 +3,19 @@ import { SidebarNav } from "@/components/shared/layout/sidebar-nav";
 import { APP_NAME, type NavItem } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
+import Link from "next/link";
+
+/**
+ * The canonical home of the current area — the first navigation item
+ * (الرئيسية / مهامي / لوحة الإدارة / نظرة عامة). Reusing the existing
+ * navigation model means the brand never adds a competing home route,
+ * and each area's brand stays inside its own surface (the (app) `/`
+ * entry also redirects STAFF to their own workspace).
+ */
+function areaHomeHref(navItems: NavItem[]): string {
+  return navItems[0]?.href ?? "/";
+}
+
 /**
  * Responsive application shell.
  *
@@ -22,14 +35,19 @@ export function AppShell({
   header?: React.ReactNode;
   className?: string;
 }) {
+  const homeHref = areaHomeHref(navItems);
+
   return (
     <div className="flex min-h-dvh">
       {/* Desktop sidebar — appears on the right in RTL */}
       <aside className="bg-sidebar sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-e md:flex">
         <div className="flex h-14 items-center px-6">
-          <span className="text-sm font-semibold tracking-tight">
+          <Link
+            href={homeHref}
+            className="text-sm font-semibold tracking-tight transition-colors hover:text-primary"
+          >
             {APP_NAME}
-          </span>
+          </Link>
         </div>
         <SidebarNav items={navItems} />
       </aside>
@@ -38,9 +56,12 @@ export function AppShell({
         {/* Mobile top bar / desktop page toolbar */}
         <header className="sticky top-0 z-[var(--z-header)] border-b bg-background/90 backdrop-blur-md">
           <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
-            <span className="text-sm font-semibold tracking-tight md:hidden">
+            <Link
+              href={homeHref}
+              className="text-sm font-semibold tracking-tight transition-colors hover:text-primary md:hidden"
+            >
               {APP_NAME}
-            </span>
+            </Link>
             <div className="ms-auto flex items-center gap-2">{header}</div>
           </div>
         </header>

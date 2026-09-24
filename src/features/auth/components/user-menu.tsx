@@ -46,7 +46,12 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2"
+          aria-label="قائمة الحساب"
+        >
           <Avatar className="size-8">
             <AvatarFallback className="text-xs">
               {user?.name?.trim().charAt(0) ?? "؟"}
