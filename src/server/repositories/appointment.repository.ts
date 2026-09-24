@@ -360,10 +360,22 @@ export class AppointmentRepository {
    * the time interval is returned, as business-local "HH:mm" strings
    * (epoch-based `@db.Time` values converted the same way the agenda
    * serializer derives wall-clock times).
+   *
+   * `excludeAppointmentId` (B-08): the appointment currently being
+   * rescheduled must not block its OWN slot. The write path
+   * (`rescheduleWithConflictCheck`) already excludes itself with
+   * `id: { not: id }`; this is the READ counterpart so availability
+   * guidance shows the appointment's own current slot as free while
+   * every OTHER appointment still blocks normally. The id is a
+   * server-derived row identity (the action resolved the appointment
+   * against the actor's own Business BEFORE calling), never a
+   * client-supplied value — a foreign tenant's id simply matches no
+   * row here, so it cannot widen availability across tenants.
    */
   async listBlockingForDate(
     businessId: string,
     date: string,
+    excludeAppointmentId?: string,
   ): Promise<Array<{ startTime: string; endTime: string }>> {
     const rows = await db.appointment.findMany({
       where: {
@@ -371,6 +383,7 @@ export class AppointmentRepository {
         ...notDeleted,
         date: toDate(date),
         status: { in: ["PENDING", "CONFIRMED"] as AppointmentStatus[] },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
       select: { startTime: true, endTime: true },
       orderBy: { startTime: "asc" },

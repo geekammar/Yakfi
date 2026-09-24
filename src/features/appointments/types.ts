@@ -20,6 +20,35 @@ export type AppointmentActionResult =
   | { success: false; message: string };
 
 /**
+ * `rescheduleAppointment` result contract (B-08): typed failure codes so
+ * the UI can react to domain failures honestly (a `SLOT_CONFLICT` offers
+ * "pick another time"; everything else is reported in place), and — on
+ * success — the values the SERVER actually persisted. The client never
+ * recomputes `endTime` or the date from its own inputs: the row is the
+ * authority, exactly like the create path's server-derived status.
+ */
+export type RescheduleErrorCode =
+  | "VALIDATION"
+  | "NOT_FOUND"
+  | "APPOINTMENT_NOT_ACTIVE"
+  | "END_OF_DAY"
+  | "SLOT_CONFLICT"
+  | "RESCHEDULE_FAILED";
+
+export type RescheduleAppointmentActionResult =
+  | {
+      success: true;
+      appointmentId: string;
+      /** Business-local "YYYY-MM-DD" the server persisted. */
+      date: string;
+      /** Business-local "HH:mm" the server persisted. */
+      startTime: string;
+      /** Server-derived endTime (startTime + the service's duration). */
+      endTime: string;
+    }
+  | { success: false; code: RescheduleErrorCode; message: string };
+
+/**
  * Smart Create Appointment flow (PROMPT-11 Steps 1–3 + PROMPT-12 Step 4 +
  * PROMPT-13 Step 5 + PROMPT-14 Step 6).
  *
@@ -216,7 +245,8 @@ export type AvailabilityErrorCode =
   | "FORBIDDEN"
   | "NO_BUSINESS"
   | "SERVICE_NOT_FOUND"
-  | "SERVICE_INACTIVE";
+  | "SERVICE_INACTIVE"
+  | "APPOINTMENT_NOT_ACTIVE";
 
 export type AvailabilityResult =
   | {

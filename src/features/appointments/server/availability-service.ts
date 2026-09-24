@@ -65,7 +65,10 @@ export type AvailabilityActor = {
 export type AvailabilityServiceDeps = {
   businessRepository: Pick<BusinessRepository, "findById">;
   serviceRepository: Pick<ServiceRepository, "findById">;
-  appointmentRepository: Pick<AppointmentRepository, "listBlockingForDate">;
+  appointmentRepository: Pick<
+    AppointmentRepository,
+    "findById" | "listBlockingForDate"
+  >;
 };
 
 /** Production dependencies (app singletons). */
@@ -252,6 +255,38 @@ export async function getAvailability(
     };
   }
 
+  // B-08 — self-exclusion tenancy: a client-supplied
+  // `excludeAppointmentId` is NEVER trusted as authorization. Only an
+  // appointment of THIS Business, not soft-deleted and still active
+  // (PENDING/CONFIRMED) may be excluded from its own conflict set;
+  // anything else (foreign tenant, deleted, already-finished) is
+  // "unauthorized" and widens nothing. The id is a row identity, not a
+  // scope hint — `businessId` stays the actor's own throughout.
+  const excludeAppointmentId = parsed.data.excludeAppointmentId ?? undefined;
+  if (excludeAppointmentId) {
+    const target =
+      await deps.appointmentRepository.findById(excludeAppointmentId);
+    // Same rule the create path enforces for customer/service scope.
+    if (!target || target.businessId !== business.id) {
+      return {
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "لا يمكن الوصول إلى الموعد",
+        },
+      };
+    }
+    if (target.status !== "PENDING" && target.status !== "CONFIRMED") {
+      return {
+        success: false,
+        error: {
+          code: "APPOINTMENT_NOT_ACTIVE",
+          message: "لا يمكن إعادة جدولة موعد منتهٍ",
+        },
+      };
+    }
+  }
+
   const workingDay = resolveWorkingDay(business, weekdayOf(parsed.data.date));
   if (!workingDay) {
     return {
@@ -291,6 +326,13 @@ export async function getAvailability(
   const blocking = await deps.appointmentRepository.listBlockingForDate(
     business.id,
     parsed.data.date,
+    // B-08 — self-exclusion for an availability-guided reschedule. The
+    // appointment being rescheduled is re-resolved against the actor's
+    // OWN Business first (below): only a same-Business, active
+    // appointment's id reaches here, so it can never widen another
+    // tenant's availability. A foreign / missing / inactive id is
+    // treated as unauthorized and excluded from nothing.
+    excludeAppointmentId ?? undefined,
   );
   const slots = filterConflictingSlots(candidates, blocking);
 

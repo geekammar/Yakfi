@@ -1,6 +1,10 @@
 import { AppointmentDetail } from "@/features/appointments/components/appointment-detail";
-import { getAppointmentDetail } from "@/features/appointments/server/appointment-queries";
+import {
+  getAppointmentDetail,
+  todayInTimezone,
+} from "@/features/appointments/server/appointment-queries";
 import { requireUser } from "@/server/auth/guards";
+import { businessRepository } from "@/server/repositories";
 
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -20,5 +24,17 @@ export default async function AppointmentDetailPage({
   const appointment = await getAppointmentDetail(session.user.businessId, id);
   if (!appointment) notFound();
 
-  return <AppointmentDetail initialData={appointment} />;
+  // `today` is business-local so the reschedule date step never counts
+  // days from the device timezone; the timezone travels as a
+  // server-derived display property (B-08 reuse of the B-07 pattern).
+  const business = await businessRepository.findById(session.user.businessId);
+  if (!business) redirect("/onboarding");
+
+  return (
+    <AppointmentDetail
+      initialData={appointment}
+      today={todayInTimezone(business.timezone)}
+      timezone={business.timezone}
+    />
+  );
 }

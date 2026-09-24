@@ -69,6 +69,7 @@ export function SlotStep({
   onSlotUnavailable,
   onGoToDate,
   onGoToService,
+  excludeAppointmentId,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -81,11 +82,28 @@ export function SlotStep({
   onSlotUnavailable: () => void;
   onGoToDate: () => void;
   onGoToService: () => void;
+  /**
+   * B-08 — the id of the appointment being rescheduled, so it is
+   * excluded from its OWN conflict set (the availability layer
+   * re-resolves it against the actor's Business). Absent for the
+   * create flow (unchanged behavior).
+   */
+  excludeAppointmentId?: string;
 }) {
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
   const availability = useQuery({
-    queryKey: ["booking-availability", serviceId, date],
-    queryFn: () => getAvailabilityAction({ date, serviceId }),
+    queryKey: [
+      "booking-availability",
+      serviceId,
+      date,
+      excludeAppointmentId ?? null,
+    ],
+    queryFn: () =>
+      getAvailabilityAction({
+        date,
+        serviceId,
+        ...(excludeAppointmentId ? { excludeAppointmentId } : {}),
+      }),
     enabled: dateIsValid,
     retry: 1,
   });

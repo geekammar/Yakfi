@@ -1,14 +1,10 @@
 "use client";
 
-import {
-  rescheduleAppointment,
-  updateAppointmentStatus,
-} from "@/features/appointments/actions/appointment-actions";
+import { updateAppointmentStatus } from "@/features/appointments/actions/appointment-actions";
 import { AppointmentStatusBadge } from "@/features/appointments/components/appointment-status";
+import { ReschedulePanel } from "@/features/appointments/components/reschedule-panel";
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 import {
   ArrowRightIcon,
@@ -43,19 +39,19 @@ function formatTime(time: string) {
   }).format(new Date(time));
 }
 
-function timeValue(time: string) {
-  return new Date(time).toISOString().slice(11, 16);
-}
-
 export function AppointmentDetail({
   initialData,
+  today,
+  timezone,
 }: {
   initialData: AppointmentDetailData;
+  /** Business-local "YYYY-MM-DD" today (server-derived). */
+  today: string;
+  /** Business timezone (server-derived) — display only. */
+  timezone: string;
 }) {
   const [data, setData] = useState(initialData);
   const [rescheduling, setRescheduling] = useState(false);
-  const [date, setDate] = useState(data.date);
-  const [startTime, setStartTime] = useState(timeValue(data.startTime));
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -75,35 +71,25 @@ export function AppointmentDetail({
     });
   }
 
-  function submitReschedule(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    startTransition(async () => {
-      setError(null);
-      const result = await rescheduleAppointment({
-        id: data.id,
-        date,
-        startTime,
-      });
-      if (!result.success) {
-        setError(result.message);
-        return;
-      }
-      const duration = Math.round(
-        (new Date(data.endTime).getTime() -
-          new Date(data.startTime).getTime()) /
-          60_000,
-      );
-      const [hours = 0, minutes = 0] = startTime.split(":").map(Number);
-      const endTotal = hours * 60 + minutes + duration;
-      const end = `${String(Math.floor(endTotal / 60)).padStart(2, "0")}:${String(endTotal % 60).padStart(2, "0")}`;
-      setData((current) => ({
-        ...current,
-        date,
-        startTime: `1970-01-01T${startTime}:00.000Z`,
-        endTime: `1970-01-01T${end}:00.000Z`,
-      }));
-      setRescheduling(false);
-    });
+  /**
+   * B-08 — a confirmed reschedule hands back the values the SERVER
+   * persisted. They are applied verbatim; the client never recomputes
+   * endTime or the date, and any optimistic drift is discarded in favor
+   * of the authoritative row.
+   */
+  function handleRescheduleDone(updated: {
+    date: string;
+    startTime: string;
+    endTime: string;
+  }) {
+    setData((current) => ({
+      ...current,
+      date: updated.date,
+      startTime: `1970-01-01T${updated.startTime}:00.000Z`,
+      endTime: `1970-01-01T${updated.endTime}:00.000Z`,
+    }));
+    setError(null);
+    setRescheduling(false);
   }
 
   const active = data.status === "PENDING" || data.status === "CONFIRMED";
@@ -180,115 +166,84 @@ export function AppointmentDetail({
         </section>
 
         <aside className="space-y-4">
-          <section className="rounded-xl border bg-card p-4 shadow-xs">
-            <h2 className="mb-3 font-semibold">إجراءات الموعد</h2>
-            <div className="grid gap-2">
-              {data.status === "PENDING" ? (
-                <Button
-                  onClick={() => changeStatus("CONFIRMED")}
-                  disabled={isPending}
-                >
-                  <CheckIcon />
-                  تأكيد الموعد
-                </Button>
-              ) : null}
-              {active ? (
-                <Button
-                  variant="outline"
-                  onClick={() => setRescheduling((value) => !value)}
-                  disabled={isPending}
-                >
-                  <RotateCwIcon />
-                  إعادة الجدولة
-                </Button>
-              ) : null}
-              {data.status === "CONFIRMED" ? (
-                <>
+          {!rescheduling ? (
+            <section className="rounded-xl border bg-card p-4 shadow-xs">
+              <h2 className="mb-3 font-semibold">إجراءات الموعد</h2>
+              <div className="grid gap-2">
+                {data.status === "PENDING" ? (
                   <Button
-                    variant="outline"
-                    onClick={() => changeStatus("COMPLETED")}
+                    onClick={() => changeStatus("CONFIRMED")}
                     disabled={isPending}
                   >
                     <CheckIcon />
-                    تحديد كمكتمل
+                    تأكيد الموعد
                   </Button>
+                ) : null}
+                {active ? (
                   <Button
                     variant="outline"
-                    onClick={() => changeStatus("NO_SHOW")}
+                    onClick={() => setRescheduling(true)}
                     disabled={isPending}
                   >
-                    <UserXIcon />
-                    تحديد كلم يحضر
+                    <RotateCwIcon />
+                    إعادة الجدولة
                   </Button>
-                </>
+                ) : null}
+                {data.status === "CONFIRMED" ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => changeStatus("COMPLETED")}
+                      disabled={isPending}
+                    >
+                      <CheckIcon />
+                      تحديد كمكتمل
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => changeStatus("NO_SHOW")}
+                      disabled={isPending}
+                    >
+                      <UserXIcon />
+                      تحديد كلم يحضر
+                    </Button>
+                  </>
+                ) : null}
+                {active ? (
+                  <Button
+                    variant="destructive"
+                    onClick={() => changeStatus("CANCELLED")}
+                    disabled={isPending}
+                  >
+                    <CircleXIcon />
+                    إلغاء الموعد
+                  </Button>
+                ) : null}
+              </div>
+              {isPending ? (
+                <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <LoaderCircleIcon className="size-3.5 animate-spin" />
+                  جارٍ الحفظ…
+                </p>
               ) : null}
-              {active ? (
-                <Button
-                  variant="destructive"
-                  onClick={() => changeStatus("CANCELLED")}
-                  disabled={isPending}
-                >
-                  <CircleXIcon />
-                  إلغاء الموعد
-                </Button>
+              {error ? (
+                <p role="alert" className="mt-3 text-sm text-destructive">
+                  {error}
+                </p>
               ) : null}
-            </div>
-            {isPending ? (
-              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <LoaderCircleIcon className="size-3.5 animate-spin" />
-                جارٍ الحفظ…
-              </p>
-            ) : null}
-            {error ? (
-              <p role="alert" className="mt-3 text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
-          </section>
-
-          {rescheduling ? (
-            <form
-              onSubmit={submitReschedule}
-              className="space-y-4 rounded-xl border bg-card p-4 shadow-xs"
-            >
-              <h2 className="font-semibold">إعادة جدولة الموعد</h2>
-              <div className="space-y-2">
-                <Label htmlFor="reschedule-date">التاريخ الجديد</Label>
-                <Input
-                  id="reschedule-date"
-                  type="date"
-                  dir="ltr"
-                  value={date}
-                  onChange={(event) => setDate(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="reschedule-time">الوقت الجديد</Label>
-                <Input
-                  id="reschedule-time"
-                  type="time"
-                  dir="ltr"
-                  value={startTime}
-                  onChange={(event) => setStartTime(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" size="sm" disabled={isPending}>
-                  حفظ الموعد
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setRescheduling(false)}
-                >
-                  إلغاء
-                </Button>
-              </div>
-            </form>
-          ) : null}
+            </section>
+          ) : (
+            <ReschedulePanel
+              appointment={data}
+              today={today}
+              timezone={timezone}
+              onDone={handleRescheduleDone}
+              onCancel={() => {
+                setError(null);
+                setRescheduling(false);
+              }}
+            />
+          )}
         </aside>
       </div>
     </div>

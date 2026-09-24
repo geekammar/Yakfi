@@ -13,6 +13,7 @@ import {
 import type {
   AppointmentActionResult,
   CreateAppointmentActionResult,
+  RescheduleAppointmentActionResult,
 } from "@/features/appointments/types";
 import { requireUser } from "@/server/auth/guards";
 import { appointmentRepository, userRepository } from "@/server/repositories";
@@ -109,26 +110,44 @@ export async function updateAppointmentStatus(
 
 export async function rescheduleAppointment(
   input: unknown,
-): Promise<AppointmentActionResult> {
+): Promise<RescheduleAppointmentActionResult> {
   const parsed = rescheduleAppointmentSchema.safeParse(input);
   if (!parsed.success) {
-    return failure(
-      parsed.error.issues[0]?.message ?? "بيانات الموعد غير صالحة",
-    );
+    return {
+      success: false,
+      code: "VALIDATION",
+      message: parsed.error.issues[0]?.message ?? "بيانات الموعد غير صالحة",
+    };
   }
   const user = await currentUser();
-  if (!user?.businessId) return failure("لا يمكن الوصول إلى الموعد");
+  if (!user?.businessId) {
+    return {
+      success: false,
+      code: "NOT_FOUND",
+      message: "لا يمكن الوصول إلى الموعد",
+    };
+  }
   const appointment = await appointmentRepository.findById(parsed.data.id);
   if (!appointment || appointment.businessId !== user.businessId) {
-    return failure("الموعد غير موجود");
+    return { success: false, code: "NOT_FOUND", message: "الموعد غير موجود" };
   }
   if (appointment.status !== "PENDING" && appointment.status !== "CONFIRMED") {
-    return failure("لا يمكن إعادة جدولة موعد منتهٍ");
+    return {
+      success: false,
+      code: "APPOINTMENT_NOT_ACTIVE",
+      message: "لا يمكن إعادة جدولة موعد منتهٍ",
+    };
   }
 
   const duration = storedDuration(appointment.startTime, appointment.endTime);
   const endTime = addMinutes(parsed.data.startTime, duration);
-  if (!endTime) return failure("الموعد يتجاوز نهاية اليوم");
+  if (!endTime) {
+    return {
+      success: false,
+      code: "END_OF_DAY",
+      message: "الموعد يتجاوز نهاية اليوم",
+    };
+  }
   try {
     const updated = await appointmentRepository.rescheduleWithConflictCheck(
       appointment.id,
@@ -138,10 +157,29 @@ export async function rescheduleAppointment(
         endTime,
       },
     );
-    if (!updated) return failure("يوجد موعد آخر متداخل في هذا الوقت");
+    if (!updated) {
+      return {
+        success: false,
+        code: "SLOT_CONFLICT",
+        message: "يوجد موعد آخر متداخل في هذا الوقت",
+      };
+    }
     refreshAppointments(appointment.id);
-    return { success: true };
+    // The SERVER's own row is the only source of truth for what was
+    // persisted — the client never recomputes endTime or a date from
+    // its own inputs (no duplicated domain math on the write result).
+    return {
+      success: true,
+      appointmentId: updated.id,
+      date: parsed.data.date,
+      startTime: parsed.data.startTime,
+      endTime,
+    };
   } catch {
-    return failure("تعذر إعادة جدولة الموعد");
+    return {
+      success: false,
+      code: "RESCHEDULE_FAILED",
+      message: "تعذر إعادة جدولة الموعد",
+    };
   }
 }

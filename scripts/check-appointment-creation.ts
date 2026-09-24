@@ -274,13 +274,22 @@ async function main(): Promise<void> {
           : null,
     },
     appointmentRepository: {
-      listBlockingForDate: async (businessId: string, date: string) =>
+      findById: async (id: string) => {
+        const row = appointments.find((item) => item.id === id);
+        return (row as never) ?? null;
+      },
+      listBlockingForDate: async (
+        businessId: string,
+        date: string,
+        excludeAppointmentId?: string,
+      ) =>
         appointments
           .filter(
             (row) =>
               row.businessId === businessId &&
               row.date === date &&
-              (row.status === "PENDING" || row.status === "CONFIRMED"),
+              (row.status === "PENDING" || row.status === "CONFIRMED") &&
+              row.id !== excludeAppointmentId,
           )
           .map((row) => ({
             startTime: row.startTime,
