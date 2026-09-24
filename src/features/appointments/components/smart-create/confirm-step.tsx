@@ -1,7 +1,10 @@
 "use client";
 
 import { AppointmentStatusBadge } from "@/features/appointments/components/appointment-status";
-import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
+import {
+  FOLLOW_UP_OPTIONS,
+  formatArabicDate,
+} from "@/features/appointments/components/smart-create/date-format";
 import { getMissingReviewFields } from "@/features/appointments/components/smart-create/review-step";
 import {
   formatSlotTime,
@@ -11,6 +14,7 @@ import type {
   BookingCustomerOption,
   BookingServiceOption,
   ConfirmSubmitState,
+  FollowUpState,
   SelectedSlot,
 } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
@@ -19,8 +23,11 @@ import type { AppointmentStatus } from "@/types/domain";
 import {
   AlertCircleIcon,
   CalendarCheck2Icon,
+  CalendarPlusIcon,
   CheckCircle2Icon,
+  LoaderCircleIcon,
 } from "lucide-react";
+import Link from "next/link";
 
 /**
  * Confirmation-behavior copy for the Business's booking setting
@@ -62,7 +69,12 @@ export function ConfirmStep({
   timezone,
   confirmationMode,
   submitState,
+  followUpState,
+  resolvedFollowUpDate,
   onChooseAnotherSlot,
+  onScheduleFollowUp,
+  onFollowUpChooseDate,
+  onFollowUpPickTime,
 }: {
   customer: BookingCustomerOption | null;
   service: BookingServiceOption | null;
@@ -73,32 +85,57 @@ export function ConfirmStep({
   timezone: string;
   confirmationMode: "automatic" | "manual";
   submitState: ConfirmSubmitState;
+  /** Follow-up scheduling state after a confirmed creation (B-07 §6). */
+  followUpState: FollowUpState;
+  /** The date a relative follow-up choice resolved to (display only —
+   * the container computed it from the created appointment's date). */
+  resolvedFollowUpDate: string | null;
   /** SLOT_CONFLICT recovery — back to Step 4 for a fresh slot. */
   onChooseAnotherSlot: () => void;
+  /** Schedule a follow-up at the relative offset (same customer +
+   * service, re-checked for availability before any write). */
+  onScheduleFollowUp: (
+    option: (typeof FOLLOW_UP_OPTIONS)[number]["option"],
+  ) => void;
+  /** Switch the wizard to date selection for a follow-up (custom date). */
+  onFollowUpChooseDate: () => void;
+  /** The original follow-up time was unavailable — switch to
+   * availability-first slot selection on the follow-up date. */
+  onFollowUpPickTime: () => void;
 }) {
   if (submitState.status === "success") {
     return (
-      <div
-        role="status"
-        aria-live="polite"
-        className="space-y-3 rounded-xl border border-success/30 bg-success/10 p-4"
-      >
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <CheckCircle2Icon
-            aria-hidden
-            className="size-5 shrink-0 text-success"
-          />
-          تم إنشاء الموعد بنجاح
-        </p>
-        <p className="flex flex-wrap items-center gap-2 text-sm">
-          <span>حالة الموعد:</span>
-          <AppointmentStatusBadge status={submitState.appointmentStatus} />
-        </p>
-        {SUCCESS_HINT[submitState.appointmentStatus] ? (
-          <p className="text-sm text-muted-foreground">
-            {SUCCESS_HINT[submitState.appointmentStatus]}
+      <div className="space-y-4">
+        <div
+          role="status"
+          aria-live="polite"
+          className="space-y-3 rounded-xl border border-success/30 bg-success/10 p-4"
+        >
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <CheckCircle2Icon
+              aria-hidden
+              className="size-5 shrink-0 text-success"
+            />
+            تم إنشاء الموعد بنجاح
           </p>
-        ) : null}
+          <p className="flex flex-wrap items-center gap-2 text-sm">
+            <span>حالة الموعد:</span>
+            <AppointmentStatusBadge status={submitState.appointmentStatus} />
+          </p>
+          {SUCCESS_HINT[submitState.appointmentStatus] ? (
+            <p className="text-sm text-muted-foreground">
+              {SUCCESS_HINT[submitState.appointmentStatus]}
+            </p>
+          ) : null}
+        </div>
+
+        <FollowUpPanel
+          followUpState={followUpState}
+          resolvedFollowUpDate={resolvedFollowUpDate}
+          onScheduleFollowUp={onScheduleFollowUp}
+          onFollowUpChooseDate={onFollowUpChooseDate}
+          onFollowUpPickTime={onFollowUpPickTime}
+        />
       </div>
     );
   }
@@ -230,5 +267,129 @@ export function ConfirmStep({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The follow-up panel (B-07 §6) — a lightweight, availability-first
+ * path after a server-confirmed creation. A relative choice re-checks
+ * the ORIGINAL time against the follow-up date and books it through
+ * the SAME `createAppointment` write path when it is free; when it is
+ * not, the user switches to slot selection instead of ever booking an
+ * unavailable time. There is no separate scheduling subsystem — a
+ * follow-up is an ordinary appointment.
+ */
+function FollowUpPanel({
+  followUpState,
+  resolvedFollowUpDate,
+  onScheduleFollowUp,
+  onFollowUpChooseDate,
+  onFollowUpPickTime,
+}: {
+  followUpState: FollowUpState;
+  resolvedFollowUpDate: string | null;
+  onScheduleFollowUp: (
+    option: (typeof FOLLOW_UP_OPTIONS)[number]["option"],
+  ) => void;
+  onFollowUpChooseDate: () => void;
+  onFollowUpPickTime: () => void;
+}) {
+  const busy = followUpState.status === "scheduling";
+
+  return (
+    <section
+      aria-label="موعد متابعة"
+      className="space-y-3 rounded-xl border bg-card p-4"
+    >
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <CalendarPlusIcon aria-hidden className="size-5 shrink-0" />
+        موعد متابعة؟
+      </p>
+
+      {followUpState.status === "scheduled" ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="space-y-2 rounded-lg border border-success/30 bg-success/10 p-3"
+        >
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <CheckCircle2Icon
+              aria-hidden
+              className="size-4 shrink-0 text-success"
+            />
+            تم إنشاء موعد المتابعة
+          </p>
+          <p className="flex flex-wrap items-center gap-2 text-sm">
+            <span>حالة الموعد:</span>
+            <AppointmentStatusBadge status={followUpState.appointmentStatus} />
+          </p>
+          <Button asChild type="button" size="sm" variant="outline">
+            <Link href={`/appointments/${followUpState.appointmentId}`}>
+              عرض موعد المتابعة
+            </Link>
+          </Button>
+        </div>
+      ) : null}
+
+      {followUpState.status === "unavailable" ? (
+        <div
+          role="alert"
+          className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+        >
+          <p className="text-sm">{followUpState.message}</p>
+          <Button type="button" size="sm" onClick={onFollowUpPickTime}>
+            اختيار وقت للمتابعة
+          </Button>
+        </div>
+      ) : null}
+
+      {followUpState.status === "error" ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+        >
+          <p className="text-sm">{followUpState.message}</p>
+        </div>
+      ) : null}
+
+      {busy ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircleIcon aria-hidden className="size-4 animate-spin" />
+          جارٍ التحقق من توفّر وقت المتابعة…
+        </p>
+      ) : null}
+
+      <ul className="flex list-none flex-wrap gap-2">
+        {FOLLOW_UP_OPTIONS.map((choice) => (
+          <li key={choice.option}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => onScheduleFollowUp(choice.option)}
+            >
+              {choice.label}
+              {resolvedFollowUpDate && followUpState.status === "scheduling" ? (
+                <span className="text-xs text-muted-foreground">
+                  {formatArabicDate(resolvedFollowUpDate)}
+                </span>
+              ) : null}
+            </Button>
+          </li>
+        ))}
+        <li>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={onFollowUpChooseDate}
+          >
+            اختيار تاريخ
+          </Button>
+        </li>
+      </ul>
+    </section>
   );
 }

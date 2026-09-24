@@ -37,6 +37,52 @@
 
 ## Current State (summary)
 
+**Appointment Creation + Scheduling UX — IMPLEMENTED (PROMPT-B07;
+DECISIONS #54; uncommitted; ZERO schema/migration/prompt/provider/
+AI-boundary change):** the booking domain is REUSED, not rebuilt — the
+6-step Smart Create flow, the PROMPT-10 availability layer, and the
+canonical `createAppointmentRecord` write path all pre-existed and
+remain the spine. Four genuine UX gaps closed by composition:
+**(1) Smart Context** — `resolveBookingContext` (booking-flow service)
+turns `?customerId=` / `?serviceId=` entry context into server-verified
+prefill against the actor's OWN Business (foreign/inactive ⇒ nothing
+prefilled, `bookingContextSchema` strips all other keys incl. hostile
+`businessId`/`role`); `deriveInitialBookingScreen` opens the flow past
+the known steps. Entry links: customer page (was a bare link forcing
+re-selection — the duplicate flow §A forbids), conversation header,
+each active service row. **(2) Relative Scheduling** — the NEW pure
+`resolveRelativeDate` (+ `addMonths`, `startOfBusinessWeek`) powers
+اليوم/غداً/هذا الأسبوع/الأسبوع القادم/بعد أسبوع/بعد أسبوعين/بعد شهر
+from server-derived business today; deterministic semantics with an
+end-of-week fallback and month-end clamping; the resolved date is always
+shown. No recurrence engine, no persisted linkage (explicitly deferred).
+**(3) Availability-first** — the NEW pure `earliestSlot` backs an
+«أقرب وقت متاح» one-tap action on the FIRST server-provided slot (the
+availability contract returns slots ascending — nothing invented).
+**(4) Follow-up** — after a server-confirmed creation, a relative
+follow-up (from the CREATED appointment's date) re-verifies the original
+time via the SAME `getAvailabilityAction`, then writes via the SAME
+`createAppointment` action (no second scheduling subsystem); when the
+time is not free the follow-up is handed to the SAME wizard for
+availability-first slot selection — an unavailable time is never booked.
+«إنشاء موعد آخر» preserves the customer (§5 STEP F). **Reschedule
+audit:** rescheduling already exists (`rescheduleAppointment` + detail
+form) and is UNCHANGED; availability-guided reschedule deferred to B-08
+(the moved appointment blocks its own current slot — guiding needs an
+availability-layer parameter, a domain change). **Service-duration
+policy honored:** `durationMinutes` stays internal (slot math +
+server-derived `endTime`), shown on operator surfaces only, never a
+customer-facing conversational requirement. Validation: NEW
+`pnpm check:appointment-creation` **53/53** (offline, in-memory); all
+existing checks UNCHANGED — `check:booking-options` 32/32,
+`check:booking-confirm` 18/18, `check:conversation-booking` 16/16,
+`check:eligibility` 29/29, `check:services` 50/50,
+`check:knowledge-visibility` 36/36, `check:ai-context-builder` 39/39,
+`check:ai-disclosure` 32/32, `check:ai-prompts` 101/101,
+`check:conversation-control` 50/50; `pnpm verify` (lint + typecheck +
+format + build) green; `pnpm security` pass (1 pre-existing env
+warning); `git diff --check` clean. Canonical: `src/features/appointments/README.md`.
+
 **AI Context Builder — IMPLEMENTED (PROMPT-B02; DECISIONS #51; ZERO
 prompt/provider/handoff/booking/tenant/UI change; ONE backwards-compatible
 schema relaxation):** the explicit AI boundary that makes the B-01

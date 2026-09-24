@@ -3,6 +3,49 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
+> PROMPT-B07 — **Appointment Creation + Scheduling UX is complete
+> (DECISIONS #54, uncommitted)**: the existing 6-step Smart Create flow
+> (`/appointments/new`), the PROMPT-10 availability layer, and the
+> canonical `createAppointment` write path are the REUSED spine — the
+> slice closed four genuine UX gaps by composition, never by a second
+> booking subsystem. (1) **Smart Context** — `?customerId=` /
+> `?serviceId=` entry context resolved server-side by the NEW
+> `resolveBookingContext` against the actor's own Business (foreign /
+> inactive ids prefill nothing; `bookingContextSchema` strips every
+> other key); a valid prefill opens the flow past the known step
+> (`deriveInitialBookingScreen`). Wired from the customer page (was a
+> bare link forcing re-selection), the conversation header, and each
+> active service row. (2) **Relative Scheduling** — the date step
+> offers اليوم/غداً/هذا الأسبوع/الأسبوع القادم/بعد أسبوع/بعد
+> أسبوعين/بعد شهر through the NEW pure `resolveRelativeDate` from
+> server-derived business today (this-week = earliest later day in the
+> Sat–Fri week with an end-of-week fallback; after-1-month = calendar
+> month with month-end clamp). NO recurrence engine, no persisted
+> linkage. (3) **Availability-first** — a NEW «أقرب وقت متاح» one-tap
+> action books the FIRST server-provided slot (`earliestSlot`, pure).
+> (4) **Follow-up** — after a server-confirmed creation, a relative
+> follow-up (measured from the CREATED appointment's date) re-verifies
+> the original time through the SAME `getAvailabilityAction` and writes
+> through the SAME `createAppointment` action; an unavailable time
+> hands the follow-up to the SAME wizard for slot selection instead of
+> booking it. «إنشاء موعد آخر» now preserves the customer. Reschedule
+> already exists and is UNCHANGED — availability-guided reschedule is
+> deferred to B-08 (the moved appointment blocks its own slot; guiding
+> it needs an availability-layer parameter = a domain change).
+> `pnpm check:appointment-creation` 53/53 (NEW — general path,
+> customer/service/conversation prefill incl. cross-tenant refusal,
+> all date choices + fallback + custom passthrough, earliest slot
+> end-to-end, unavailable-slot rejection, follow-up +1wk/+2wk/+1mo,
+> tenant isolation, authorization, no-DB structural assertions, intact
+> invariants); `check:booking-options` 32/32, `check:booking-confirm`
+> 18/18, `check:conversation-booking` 16/16, `check:eligibility` 29/29,
+> `check:services` 50/50, `check:knowledge-visibility` 36/36,
+> `check:ai-context-builder` 39/39, `check:ai-disclosure` 32/32,
+> `check:ai-prompts` 101/101, `check:conversation-control` 50/50 all
+> green; `pnpm verify` green + `pnpm security` pass. **NO database
+> migration required** (relative dates are pure computation, context is
+> resolved from existing rows, a follow-up is an ordinary appointment).
+> AI boundary untouched (B-01/B-02/B-03). Prior:
 > PROMPT-B06 — the **Service Catalog + Service Authoring surface is
 > complete (DECISIONS #53, uncommitted)**: the catalog is canonical
 > business/domain data — NOT a second Knowledge Base. `name`/

@@ -103,6 +103,33 @@ export type ConfirmSubmitState =
   | { status: "error"; code: CreateAppointmentErrorCode; message: string };
 
 /**
+ * Follow-up scheduling lifecycle after a server-confirmed creation
+ * (B-07 §6), owned by the wizard container. A follow-up is an ORDINARY
+ * appointment created through the SAME `createAppointment` write path
+ * — there is no separate scheduling subsystem and no persisted
+ * linkage (no recurrence engine in B-07).
+ *
+ * - `scheduling` — the relative choice was tapped; the original slot
+ *   is being re-checked against the follow-up date, then created.
+ * - `scheduled` — the follow-up WAS created; the id/status come only
+ *   from the server's own result (chained follow-ups stay possible).
+ * - `unavailable` — the original time is not free on the follow-up
+ *   date; the wizard switches to availability-first slot selection for
+ *   that date instead of booking an unavailable time.
+ * - `error` — a non-conflict create failure; retryable in place.
+ */
+export type FollowUpState =
+  | { status: "idle" }
+  | { status: "scheduling" }
+  | {
+      status: "scheduled";
+      appointmentId: string;
+      appointmentStatus: AppointmentStatus;
+    }
+  | { status: "unavailable"; message: string }
+  | { status: "error"; message: string };
+
+/**
  * Step 4 (الوقت) selection — the typed value handed to the review step
  * (PROMPT-13) and the confirmation step (PROMPT-14). It mirrors the
  * appointment domain's wall-clock conventions exactly: business-local
@@ -115,6 +142,18 @@ export type BookingCustomerOption = {
   id: string;
   name: string;
   phone: string;
+};
+
+/**
+ * Smart Context prefill (B-07 §A) — entry-context selections already
+ * resolved against the actor's OWN Business server-side. A `null`
+ * field means "not prefilled" (no entry context, or the supplied id
+ * was foreign/invalid/inactive — the wizard asks for it normally).
+ * The wizard never trusts client ids; this is the only prefill path.
+ */
+export type BookingContextPrefill = {
+  customer: BookingCustomerOption | null;
+  serviceId: string | null;
 };
 
 /** Active service option for the booking flow. */

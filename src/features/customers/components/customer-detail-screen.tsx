@@ -95,7 +95,10 @@ export function CustomerDetailScreen({
           </p>
         </div>
         <Button asChild>
-          <Link href="/appointments/new">
+          {/* B-07 §A — book FOR this customer: the context is already
+           * known, so the flow opens past العميل instead of asking
+           * the user to search for the customer again. */}
+          <Link href={`/appointments/new?customerId=${customer.id}`}>
             <PlusIcon />
             حجز موعد
           </Link>

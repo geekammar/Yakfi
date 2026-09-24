@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { SERVICE_NOUNS, arabicCount } from "@/lib/arabic";
 
 import {
+  CalendarPlusIcon,
   CheckCircleIcon,
   Clock3Icon,
   LayersIcon,
@@ -23,6 +24,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 /**
@@ -180,6 +182,21 @@ export function ServicesScreen({
                       ) : null}
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      {/* B-07 §A — the service is already known context:
+                       * book it directly; the flow prefills الخطوة 2
+                       * and asks only for العميل والتاريخ. Inactive
+                       * services are not bookable, so the action is
+                       * offered for active services only. */}
+                      {service.isActive ? (
+                        <Button asChild variant="outline" size="sm">
+                          <Link
+                            href={`/appointments/new?serviceId=${service.id}`}
+                          >
+                            <CalendarPlusIcon aria-hidden className="size-4" />
+                            حجز
+                          </Link>
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="outline"

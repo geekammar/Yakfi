@@ -3,6 +3,7 @@
 import { getAvailabilityAction } from "@/features/appointments/actions/availability-actions";
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import {
+  earliestSlot,
   formatSlotTime,
   groupSlotsByPeriod,
   slotExistsIn,
@@ -25,6 +26,7 @@ import {
   CalendarXIcon,
   CheckCircle2Icon,
   HourglassIcon,
+  ZapIcon,
 } from "lucide-react";
 import { useEffect } from "react";
 
@@ -108,6 +110,8 @@ export function SlotStep({
   const slotsResult =
     result && result.success && result.data.slots.length > 0 ? result : null;
   const slots = slotsResult ? slotsResult.data.slots : null;
+  // B-07 §C — the earliest server-provided slot (null when none).
+  const earliest = slots ? earliestSlot(slots) : null;
   // Zero-slot success always carries an explicit reason by contract;
   // FULLY_BOOKED is the defensive fallback for a reasonless empty list.
   const emptyReason: AvailabilityNoSlotsReason | null =
@@ -199,6 +203,20 @@ export function SlotStep({
             {arabicCount(slotsResult.data.slots.length, SLOT_NOUNS)} · بتوقيت{" "}
             {timezoneLabel(slotsResult.data.timezone)}
           </p>
+          {/* B-07 §C — the availability-first fast path: one tap books
+           * the earliest valid time. The availability contract returns
+           * slots ascending, so this is always the FIRST server-provided
+           * slot — nothing invented on the client. */}
+          {earliest ? (
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => onSelectSlot(earliest)}
+            >
+              <ZapIcon aria-hidden />
+              أقرب وقت متاح · {formatSlotTime(earliest.startTime)}
+            </Button>
+          ) : null}
           {groupSlotsByPeriod(slotsResult.data.slots).map((group) => (
             <section
               key={group.period}

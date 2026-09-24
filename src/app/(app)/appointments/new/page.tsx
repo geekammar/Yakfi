@@ -2,13 +2,15 @@ import { SmartCreateAppointment } from "@/features/appointments/components/smart
 import { todayInTimezone } from "@/features/appointments/server/appointment-queries";
 import {
   defaultBookingFlowServiceDeps,
+  deriveInitialBookingScreen,
   listBookingServices,
+  resolveBookingContext,
   searchBookingCustomers,
   type BookingFlowActor,
 } from "@/features/appointments/server/booking-flow-service";
 import { CustomerFormDialog } from "@/features/customers/components/customer-form-dialog";
 import { PageHeader } from "@/components/shared/page-header";
-import { appointmentDateSchema } from "@/lib/validation";
+import { appointmentDateSchema, uuidSchema } from "@/lib/validation";
 import { requireUser } from "@/server/auth/guards";
 import { businessRepository } from "@/server/repositories";
 
@@ -21,19 +23,30 @@ export const metadata: Metadata = {
 
 /**
  * Smart Create Appointment flow (PROMPT-11 Steps 1–3 + PROMPT-12
- * Step 4 + PROMPT-13 Step 5 + PROMPT-14 Step 6). The Business is
- * derived from the authenticated session (never client input), the
- * initial customers + active services are read through the
- * booking-flow service (tenant-scoped), `today` is business-local,
- * and the Business timezone / confirmation mode travel to Step 6 as
- * server-derived display properties. The route composes the
- * customers feature's create dialog into Step 1 (PROMPT-15) so a
- * customer can be created when no existing one is available.
+ * Step 4 + PROMPT-13 Step 5 + PROMPT-14 Step 6 + B-07 smart context /
+ * relative scheduling / follow-up). The Business is derived from the
+ * authenticated session (never client input), the initial customers +
+ * active services are read through the booking-flow service
+ * (tenant-scoped), `today` is business-local, and the Business
+ * timezone / confirmation mode travel to Step 6 as server-derived
+ * display properties. The route composes the customers feature's
+ * create dialog into Step 1 (PROMPT-15) so a customer can be created
+ * when no existing one is available.
+ *
+ * B-07 §A — the entry context (`?customerId=` from a customer page or
+ * conversation, `?serviceId=` from a service page) is resolved through
+ * `resolveBookingContext` against the actor's OWN Business: a foreign
+ * or inactive id prefills nothing (the wizard asks for it normally),
+ * and a valid one opens the flow already past that step.
  */
 export default async function NewAppointmentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{
+    date?: string;
+    customerId?: string;
+    serviceId?: string;
+  }>;
 }) {
   const session = await requireUser();
   if (!session.user.businessId) redirect("/onboarding");
@@ -54,9 +67,19 @@ export default async function NewAppointmentPage({
     role,
     businessId: business.id,
   };
-  const [customerResult, serviceResult] = await Promise.all([
+  const [customerResult, serviceResult, prefill] = await Promise.all([
     searchBookingCustomers(defaultBookingFlowServiceDeps, actor, { query: "" }),
     listBookingServices(defaultBookingFlowServiceDeps, actor),
+    resolveBookingContext(defaultBookingFlowServiceDeps, actor, {
+      // Zod re-validates shape at the service boundary; the optional
+      // ids are only ever prefilled after a same-Business re-check.
+      customerId: uuidSchema.safeParse(params.customerId).success
+        ? params.customerId
+        : undefined,
+      serviceId: uuidSchema.safeParse(params.serviceId).success
+        ? params.serviceId
+        : undefined,
+    }),
   ]);
 
   return (
@@ -78,6 +101,9 @@ export default async function NewAppointmentPage({
           confirmationMode={
             business.confirmationMode === "automatic" ? "automatic" : "manual"
           }
+          initialCustomer={prefill.customer}
+          initialServiceId={prefill.serviceId}
+          initialScreen={deriveInitialBookingScreen(prefill)}
           CustomerCreateDialog={CustomerFormDialog}
         />
       </div>

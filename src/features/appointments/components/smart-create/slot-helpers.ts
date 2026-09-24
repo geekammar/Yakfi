@@ -97,6 +97,19 @@ export function slotExistsIn(
   );
 }
 
+/**
+ * The earliest (first) slot of a server-provided list — the
+ * "أقرب وقت متاح" quick pick (B-07 §C). The availability contract
+ * returns slots ascending, chronologically ordered, so the first entry
+ * IS the earliest valid time; this helper invents nothing and is null
+ * when the day has no bookable slot.
+ */
+export function earliestSlot(
+  slots: AvailabilitySlot[],
+): AvailabilitySlot | null {
+  return slots.at(0) ?? null;
+}
+
 /** Arabic label for a stored Business timezone (fallback for unknown
  * IANA values). */
 export function timezoneLabel(timezone: string): string {

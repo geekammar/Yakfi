@@ -17,10 +17,15 @@
  * database — the established invitations/services/availability pattern.
  */
 
-import { bookingCustomerSearchSchema } from "@/features/appointments/schemas/booking-flow-schema";
+import {
+  bookingContextSchema,
+  bookingCustomerSearchSchema,
+} from "@/features/appointments/schemas/booking-flow-schema";
 import type {
+  BookingContextPrefill,
   BookingCustomerOption,
   BookingCustomerSearchResult,
+  BookingFlowScreen,
   BookingServiceOption,
 } from "@/features/appointments/types";
 import type {
@@ -38,8 +43,8 @@ export type BookingFlowActor = {
 };
 
 export type BookingFlowServiceDeps = {
-  customerRepository: Pick<CustomerRepository, "listByBusiness">;
-  serviceRepository: Pick<ServiceRepository, "listByBusiness">;
+  customerRepository: Pick<CustomerRepository, "findById" | "listByBusiness">;
+  serviceRepository: Pick<ServiceRepository, "findById" | "listByBusiness">;
 };
 
 /** Production dependencies (app singletons). */
@@ -128,4 +133,63 @@ export async function listBookingServices(
   } catch {
     return { message: "تعذر تحميل الخدمات الآن، حاول مرة أخرى" };
   }
+}
+
+/**
+ * Smart Context resolution (B-07 §A) — turn optional entry-context ids
+ * (from a customer page, a service page, or a conversation) into the
+ * wizard's prefilled selections, WITHOUT asking the user to re-enter
+ * what the system already knows.
+ *
+ * The ids are NEVER trusted: a customer/service is only prefilled when
+ * it belongs to the actor's OWN Business (cross-tenant ids are
+ * indistinguishable from missing ones — the same rule every other read
+ * path enforces) and a service must additionally be ACTIVE to be
+ * bookable. An absent or foreign id yields `null`, and the wizard then
+ * asks for that input normally — no fabricated selections, no
+ * cross-tenant leak.
+ */
+export async function resolveBookingContext(
+  deps: BookingFlowServiceDeps,
+  actor: BookingFlowActor,
+  input: unknown,
+): Promise<BookingContextPrefill> {
+  const parsed = bookingContextSchema.safeParse(input);
+  if (!parsed.success || !actor.businessId) {
+    return { customer: null, serviceId: null };
+  }
+  const [customer, service] = await Promise.all([
+    parsed.data.customerId
+      ? deps.customerRepository.findById(parsed.data.customerId)
+      : Promise.resolve(null),
+    parsed.data.serviceId
+      ? deps.serviceRepository.findById(parsed.data.serviceId)
+      : Promise.resolve(null),
+  ]);
+  return {
+    customer:
+      customer && customer.businessId === actor.businessId
+        ? toCustomerOption(customer)
+        : null,
+    serviceId:
+      service && service.businessId === actor.businessId && service.isActive
+        ? service.id
+        : null,
+  };
+}
+
+/**
+ * Which wizard screen a prefilled context opens on (B-07 §A). Pure
+ * derivation over the resolved (server-trusted) prefill: a known
+ * customer skips العميل; a known customer AND service skips to
+ * التاريخ. A service alone never skips العميل — the customer is
+ * still required, so the flow never starts past what it can honestly
+ * fill.
+ */
+export function deriveInitialBookingScreen(
+  prefill: BookingContextPrefill,
+): BookingFlowScreen {
+  if (prefill.customer && prefill.serviceId) return "date";
+  if (prefill.customer) return "service";
+  return "customer";
 }

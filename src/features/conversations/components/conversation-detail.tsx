@@ -233,6 +233,15 @@ export function ConversationDetail({
             </p>
           </div>
           <ConversationStatusBadge status={data.status} />
+          {/* B-07 §A — the conversation's customer is already known
+           * context; booking from here prefills العميل and opens the
+           * flow past that step (no re-search). */}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/appointments/new?customerId=${data.customer.id}`}>
+              <CalendarDaysIcon aria-hidden className="size-4" />
+              حجز موعد
+            </Link>
+          </Button>
         </header>
 
         <div className="flex flex-wrap gap-2 border-b px-4 py-2.5">

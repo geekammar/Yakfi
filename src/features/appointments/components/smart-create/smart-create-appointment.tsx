@@ -8,6 +8,11 @@ import {
   CustomerStep,
   type CustomerCreateDialogComponent,
 } from "@/features/appointments/components/smart-create/customer-step";
+import {
+  formatArabicDate,
+  resolveRelativeDate,
+  type RelativeDateOption,
+} from "@/features/appointments/components/smart-create/date-format";
 import { DateStep } from "@/features/appointments/components/smart-create/date-step";
 import {
   ReviewStep,
@@ -22,6 +27,7 @@ import type {
   BookingServiceOption,
   ConfirmSubmitState,
   CreateAppointmentActionResult,
+  FollowUpState,
   ReviewCheckState,
   SelectedSlot,
 } from "@/features/appointments/types";
@@ -67,8 +73,9 @@ const STALE_SLOT_MESSAGE =
   "لم يعد الوقت الذي اخترته متاحاً — ربما حُجز في هذه الأثناء. اختر وقتاً آخر للموعد.";
 
 /**
- * Smart Create Appointment flow (PROMPT-11 Steps 1–3 + PROMPT-12 Step 4 +
- * PROMPT-13 Step 5 + PROMPT-14 Step 6).
+ * Smart Create Appointment flow (PROMPT-11 Steps 1–3 + PROMPT-12
+ * Step 4 + PROMPT-13 Step 5 + PROMPT-14 Step 6 + B-07 smart context /
+ * relative scheduling / availability-first / follow-up).
  *
  * العميل → الخدمة → التاريخ → الوقت → المراجعة → التأكيد, with all
  * six steps active. Selections live in this container only — moving
@@ -84,6 +91,19 @@ const STALE_SLOT_MESSAGE =
  * cleared only after success is known. Changing the service or the
  * date clears the slot selection — a stale slot can never survive an
  * input change it was not computed for.
+ *
+ * B-07 additions (all reusing the existing domain authority — no new
+ * write path, no second availability engine, no persisted linkage):
+ * - Smart Context: a server-resolved customer/service prefill opens
+ *   the flow past the already-known steps (§A).
+ * - the date step offers relative choices whose dates this container
+ *   derives from the server-derived business today (§B).
+ * - after a confirmed creation, a follow-up is scheduled at a
+ *   relative offset from the CREATED appointment's date — the original
+ *   time is re-checked for availability first, and the SAME
+ *   `createAppointment` path writes it; an unavailable time hands the
+ *   follow-up back to slot selection instead of ever booking it (§6).
+ * - "create another" preserves the customer (§5 STEP F).
  */
 export function SmartCreateAppointment({
   initialCustomers,
@@ -93,6 +113,9 @@ export function SmartCreateAppointment({
   canManageServices,
   businessTimezone,
   confirmationMode,
+  initialCustomer,
+  initialServiceId,
+  initialScreen,
   CustomerCreateDialog,
 }: {
   initialCustomers: BookingCustomerOption[];
@@ -107,6 +130,18 @@ export function SmartCreateAppointment({
    * post-confirmation behavior copy. */
   confirmationMode: "automatic" | "manual";
   /**
+   * Smart Context prefill (B-07 §A): a customer (from a customer page
+   * or conversation) and/or a service (from a service page) ALREADY
+   * resolved against the actor's own Business by the route — the
+   * wizard never trusts a client id. Prefilled inputs are shown as
+   * selected and never asked again.
+   */
+  initialCustomer?: BookingCustomerOption | null;
+  initialServiceId?: string | null;
+  /** Where the flow opens after prefill (derived by the route through
+   * the booking-flow service). */
+  initialScreen?: BookingFlowScreen;
+  /**
    * Optional create-customer dialog (PROMPT-15): composed at the
    * route layer from the customers feature so Step 1 can create a
    * customer when no existing one is available. Absent → Step 1
@@ -114,9 +149,15 @@ export function SmartCreateAppointment({
    */
   CustomerCreateDialog?: CustomerCreateDialogComponent;
 }) {
-  const [screen, setScreen] = useState<BookingFlowScreen>("customer");
-  const [customer, setCustomer] = useState<BookingCustomerOption | null>(null);
-  const [serviceId, setServiceId] = useState<string | null>(null);
+  const [screen, setScreen] = useState<BookingFlowScreen>(
+    initialScreen ?? "customer",
+  );
+  const [customer, setCustomer] = useState<BookingCustomerOption | null>(
+    initialCustomer ?? null,
+  );
+  const [serviceId, setServiceId] = useState<string | null>(
+    initialServiceId ?? null,
+  );
   const [date, setDate] = useState(defaultDate);
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
   const [reviewCheck, setReviewCheck] = useState<ReviewCheckState>({
@@ -125,10 +166,15 @@ export function SmartCreateAppointment({
   const [submitState, setSubmitState] = useState<ConfirmSubmitState>({
     status: "idle",
   });
+  const [followUp, setFollowUp] = useState<FollowUpState>({ status: "idle" });
+  /** The date a relative follow-up choice resolved to (display only). */
+  const [followUpDate, setFollowUpDate] = useState<string | null>(null);
   const queryClient = useQueryClient();
   /** Re-entrancy guard: a second click during an in-flight create
    * must never issue a second write. */
   const submitInFlight = useRef(false);
+  /** Same guard for the follow-up create. */
+  const followUpInFlight = useRef(false);
 
   const service = services.find((item) => item.id === serviceId) ?? null;
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
@@ -329,16 +375,119 @@ export function SmartCreateAppointment({
 
   /**
    * Start a fresh booking after a server-confirmed success — the
-   * wizard is cleared only now that success is known.
+   * wizard is cleared only now that success is known. Useful context
+   * is preserved (B-07 §5 STEP F): the CUSTOMER stays selected (a
+   * second appointment for the same person is the common case), so
+   * the flow reopens on the service step; everything that a new
+   * appointment would legitimately differ on is cleared.
    */
   function handleCreateAnother() {
-    setCustomer(null);
     setServiceId(null);
     setDate(defaultDate);
     setSelectedSlot(null);
     resetReviewCheck();
     setSubmitState({ status: "idle" });
-    setScreen("customer");
+    setFollowUp({ status: "idle" });
+    setFollowUpDate(null);
+    setScreen(customer ? "service" : "customer");
+  }
+
+  /**
+   * Schedule a follow-up after a server-confirmed creation (B-07 §6).
+   * The relative offset is measured from the CREATED appointment's
+   * date (a follow-up "after 1 week" means one week after that
+   * appointment), the SAME customer + service are reused, and the
+   * ORIGINAL time is re-checked for availability on the follow-up
+   * date BEFORE any write — an unavailable time is never booked. When
+   * the time is free, the follow-up is created through the EXACT SAME
+   * `createAppointment` write path (there is no separate scheduling
+   * subsystem); when it is not, the user switches to availability-first
+   * slot selection on that date.
+   */
+  async function handleScheduleFollowUp(option: RelativeDateOption) {
+    if (followUpInFlight.current) return;
+    if (submitState.status !== "success" || !customer || !service) return;
+    if (!selectedSlot) return;
+    const resolved = resolveRelativeDate(date, option);
+    followUpInFlight.current = true;
+    setFollowUpDate(resolved);
+    setFollowUp({ status: "scheduling" });
+
+    let availability;
+    try {
+      availability = await getAvailabilityAction({
+        date: resolved,
+        serviceId: service.id,
+      });
+    } catch {
+      followUpInFlight.current = false;
+      setFollowUp({
+        status: "error",
+        message: "تعذر التحقق من وقت المتابعة الآن. حاول مرة أخرى.",
+      });
+      return;
+    }
+    const stillFree =
+      availability.success &&
+      slotExistsIn(selectedSlot, availability.data.slots);
+    if (!stillFree) {
+      followUpInFlight.current = false;
+      setFollowUp({
+        status: "unavailable",
+        message: `وقت الموعد الأصلي غير متاح في ${formatArabicDate(resolved)} — اختر وقتاً متاحاً للتابعة.`,
+      });
+      return;
+    }
+
+    let result: CreateAppointmentActionResult;
+    try {
+      result = await createAppointment({
+        customerId: customer.id,
+        serviceId: service.id,
+        date: resolved,
+        startTime: selectedSlot.startTime,
+        notes: "",
+      });
+    } catch {
+      followUpInFlight.current = false;
+      setFollowUp({
+        status: "error",
+        message: "تعذر إنشاء موعد المتابعة الآن. حاول مرة أخرى.",
+      });
+      return;
+    }
+    followUpInFlight.current = false;
+    if (result.success) {
+      setFollowUp({
+        status: "scheduled",
+        appointmentId: result.appointmentId,
+        appointmentStatus: result.status,
+      });
+    } else if (result.code === "SLOT_CONFLICT") {
+      setFollowUp({
+        status: "unavailable",
+        message: `وقت الموعد الأصلي غير متاح في ${formatArabicDate(resolved)} — اختر وقتاً متاحاً للتابعة.`,
+      });
+    } else {
+      setFollowUp({ status: "error", message: result.message });
+    }
+  }
+
+  /**
+   * The follow-up's original time was unavailable (or the user wants a
+   * different day): hand the follow-up to the SAME wizard — customer +
+   * service preserved, the resolved date applied, slot cleared — and
+   * let availability-first slot selection pick a valid time. No second
+   * flow and no new write path; the existing review → confirm guards
+   * re-apply verbatim.
+   */
+  function handFollowUpToWizard(target: "date" | "slot") {
+    if (target === "slot" && followUpDate) setDate(followUpDate);
+    setSelectedSlot(null);
+    resetReviewCheck();
+    setSubmitState({ status: "idle" });
+    setFollowUp({ status: "idle" });
+    setScreen(target);
   }
 
   const heading = STEP_HEADINGS[screen];
@@ -451,7 +600,12 @@ export function SmartCreateAppointment({
             timezone={businessTimezone}
             confirmationMode={confirmationMode}
             submitState={submitState}
+            followUpState={followUp}
+            resolvedFollowUpDate={followUpDate}
             onChooseAnotherSlot={handleChooseAnotherSlot}
+            onScheduleFollowUp={(option) => void handleScheduleFollowUp(option)}
+            onFollowUpChooseDate={() => handFollowUpToWizard("date")}
+            onFollowUpPickTime={() => handFollowUpToWizard("slot")}
           />
         ) : null}
       </section>
