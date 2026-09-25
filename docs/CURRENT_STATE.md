@@ -3,7 +3,49 @@
 > 30-second snapshot for a cold start (Tier 0, with `AGENT_RULES.md`).
 > NOT a source of truth — canonical documents always override it.
 > Reading policy: the context tiers in `AGENT_RULES.md`. Last updated:
-> PROMPT-B07 — **Appointment Creation + Scheduling UX is complete
+> PROMPT-B09 — **Appointments + Availability UX Coherence is complete
+> (DECISIONS #55, uncommitted; presentation layer only, ZERO
+> schema/migration/prompt/provider/AI-boundary change)**: (1) **ROOT
+> CAUSE — the appointments day view showed the wrong day.**
+> `AppointmentAgenda` mirrored the server list into `useState`, and a
+> client-side day navigation (`router.push('/appointments?date=…')`)
+> re-renders with fresh searchParams WITHOUT resetting client state in
+> this framework version — so the header showed the NEW day while the
+> list, count, filter and empty state still described the PREVIOUS day.
+> The query layer was never at fault; fixed at the correct layer — the
+> route now keys the agenda by its `date`, so the whole subtree (list,
+> count, filter, error) resets per day. (2) **Full/unavailable days are
+> now visibly distinct** on the booking date step: it CONSULTS the ONE
+> availability authority per rendered day (`useQueries` over
+> `getAvailabilityAction`, sharing the slot step's query key) and a NEW
+> pure `day-capacity.ts` derives the chip state — «مغلق» /
+> «ممتلئ» / «غير متاح»; unavailable days are muted, labelled and inert
+> (`aria-disabled`, never color alone, no wasted tap). `date-format.ts`
+> stays availability-FREE (the #54 pure-date-math invariant, still
+> tested). (3) **Date-format consolidation + selected-day clarity** —
+> the agenda reuses the shared `date-format`/`slot-helpers` primitives
+> and now shows the appointment count for EVERY day incl. today.
+> (4) Reschedule self-exclusion is carried into day capacity so the
+> moved appointment's own day is not falsely muted. **Verified,
+> intentionally NOT changed:** full SLOTS — the slot step renders ONLY
+> authority-returned slots, so blocked slots are non-clickable by
+> construction, and DESIGN_SYSTEM #10 binds displayed times to server
+> availability results only. `pnpm check:appointments-day-view` 43/43
+> (NEW — the 12 required areas: selected-day exactness, empty day,
+> full/closed/too-long day, blocked slot, selectable + earliest slot,
+> date persistence, stale-state prevention, RTL/logical-CSS structural
+> invariants, create + conflict invariants, reschedule self-exclusion,
+> tenant isolation); `check:booking-ux` 18/18 (guard 8b sharpened),
+> `check:appointment-creation` 53/53, `check:reschedule` 66/66,
+> `check:booking-options` 32/32, `check:booking-confirm` 18/18,
+> `check:conversation-booking` 16/16, `check:eligibility` 29/29,
+> `check:services` 50/50, `check:ai-context-builder` 39/39,
+> `check:ai-disclosure` 32/32, `check:ai-prompts` 101/101,
+> `check:conversation-control` 50/50 green; `pnpm verify` green + `pnpm
+security` pass. **NO database migration required.** Real-browser
+> verification NOT performed (documented framework behavior, structurally
+> asserted in the harness); production NOT touched. Prior: PROMPT-B07 —
+> **Appointment Creation + Scheduling UX is complete
 > (DECISIONS #54, uncommitted)**: the existing 6-step Smart Create flow
 > (`/appointments/new`), the PROMPT-10 availability layer, and the
 > canonical `createAppointment` write path are the REUSED spine — the

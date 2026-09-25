@@ -5,6 +5,11 @@ import {
   APPOINTMENT_STATUS_LABELS,
   AppointmentStatusBadge,
 } from "@/features/appointments/components/appointment-status";
+import {
+  formatArabicDate,
+  moveDate,
+} from "@/features/appointments/components/smart-create/date-format";
+import { formatSlotTime } from "@/features/appointments/components/smart-create/slot-helpers";
 import type { AppointmentAgendaItem } from "@/features/appointments/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
@@ -39,28 +44,11 @@ const FILTERS: Array<{ value: "ALL" | AppointmentStatus; label: string }> = [
   { value: "COMPLETED", label: "مكتمل" },
 ];
 
-function moveDate(date: string, days: number) {
-  const value = new Date(`${date}T00:00:00.000Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    timeZone: "UTC",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00.000Z`));
-}
-
 function formatTime(time: string) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    timeZone: "UTC",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(time));
+  // Stored `@db.Time` values are epoch-anchored
+  // ("1970-01-01THH:mm:00.000Z"); the wall-clock "HH:mm" is the shared
+  // slot helper's input format, so one formatter serves every surface.
+  return formatSlotTime(time.slice(11, 16));
 }
 
 export function AppointmentAgenda({
@@ -121,11 +109,13 @@ export function AppointmentAgenda({
             <ChevronRightIcon />
           </Button>
           <div className="min-w-0 text-center">
-            <h2 className="truncate font-semibold">{formatDate(date)}</h2>
+            <h2 className="truncate font-semibold">{formatArabicDate(date)}</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {date === today
-                ? "اليوم"
-                : arabicCount(items.length, APPOINTMENT_NOUNS)}
+              {/* The count answers "how many appointments?" for EVERY day
+               * — including today, which additionally carries the
+               * «اليوم» marker so the viewed day is always obvious. */}
+              {date === today ? "اليوم · " : ""}
+              {arabicCount(items.length, APPOINTMENT_NOUNS)}
             </p>
           </div>
           <Button

@@ -211,6 +211,8 @@ export function ReschedulePanel({
             selectedDate={date}
             today={today}
             onSelect={handleSelectDate}
+            serviceId={appointment.service.id}
+            excludeAppointmentId={appointment.id}
           />
           <div className="flex gap-2 border-t pt-4">
             <Button type="button" variant="ghost" onClick={onCancel}>
@@ -218,7 +220,7 @@ export function ReschedulePanel({
             </Button>
             <Button
               type="button"
-              className="mr-auto"
+              className="ms-auto"
               disabled={!dateIsValid}
               onClick={() => setStage("slot")}
             >
@@ -291,7 +293,7 @@ export function ReschedulePanel({
             </Button>
             <Button
               type="button"
-              className="mr-auto"
+              className="ms-auto"
               disabled={
                 !resolvedSlot || submitState.status === "submitting" || conflict
               }

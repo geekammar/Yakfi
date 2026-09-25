@@ -183,21 +183,31 @@ async function main(): Promise<void> {
       slotExistsIn(authoritySlots[1] ?? null, authoritySlots) === true,
   );
 
-  // The date step must not host a second availability engine: its modules
-  // contain no availability action import (structural, like check 17a of
-  // the creation suite).
+  // The date step's DATE MATH must stay pure (DECISIONS #54): no
+  // availability coupling in `date-format.ts`. The step may now CONSULT
+  // the one server authority to paint a day's capacity (DECISIONS #55),
+  // but no client-side slot engine may exist anywhere in the date
+  // modules — slots are never generated or filtered client-side.
   const dateFormatSource = await readModuleSource(
     "../src/features/appointments/components/smart-create/date-format.ts",
   );
   const dateStepSource = await readModuleSource(
     "../src/features/appointments/components/smart-create/date-step.tsx",
   );
+  const dayCapacitySource = await readModuleSource(
+    "../src/features/appointments/components/smart-create/day-capacity.ts",
+  );
   check(
     "8b the date modules contain no client-side availability engine",
     !dateFormatSource.includes("getAvailability") &&
       !dateFormatSource.includes("availability-actions") &&
-      !dateStepSource.includes("getAvailability") &&
-      !dateStepSource.includes("availability-actions"),
+      !dateFormatSource.includes("generateCandidateSlots") &&
+      !dateStepSource.includes("generateCandidateSlots") &&
+      !dateStepSource.includes("filterConflictingSlots") &&
+      !dayCapacitySource.includes("generateCandidateSlots") &&
+      !dayCapacitySource.includes("filterConflictingSlots") &&
+      !dayCapacitySource.includes("prisma") &&
+      !dayCapacitySource.includes("@/server/db"),
   );
 
   // ─── The canonical write path + conflict invariant ───────────────────

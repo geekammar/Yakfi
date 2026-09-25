@@ -6,7 +6,13 @@
 > completed work, known issues, next step — not a historical diary.
 > Historical implementation detail lives in Git history (`git log --oneline`,
 > `git show <commit>`, release tags) and `DECISIONS.md`.
-> Last updated: PROMPT-OPS-AI-PROMPT-WORKSPACE-FINALIZE-29 — the Prompt
+> Last updated: PROMPT-B09 — the Appointments + Availability UX Coherence
+> slice (DECISIONS #55): the day-view correctness fix (agenda state reset
+> per selected day), day-capacity visibility on the booking date step
+> (closed/full days muted, labelled, non-actionable via the ONE
+> availability authority), and date-format consolidation. Presentation
+> layer only; ZERO schema/migration/prompt/provider/AI-boundary change.
+> See "Current State (summary)" below. Prior: PROMPT-OPS-AI-PROMPT-WORKSPACE-FINALIZE-29 — the Prompt
 > Workspace architecture is finalized and reconciled (DECISIONS #48): LLM
 > prompt bodies live only in `/prompts/**/*.prompt`
 > (`system.booking-assistant`, `providers.atria.json-output`), a deterministic
@@ -36,6 +42,63 @@
 > (see Ops State).
 
 ## Current State (summary)
+
+**Appointments + Availability UX Coherence — IMPLEMENTED (PROMPT-B09;
+DECISIONS #55; uncommitted; ZERO schema/migration/prompt/provider/
+AI-boundary change):** a presentation-layer correctness + coherence
+slice over the EXISTING booking authority (availability, the write path,
+conflict and tenant invariants are untouched). Three evidence-backed
+defects and one gap: **(1) ROOT CAUSE — the day view showed the wrong
+day's appointments.** `AppointmentAgenda` mirrored the server list into
+`useState(initialItems)`; a client-side day navigation
+(`router.push('/appointments?date=…')`) re-renders the page with fresh
+searchParams but, per documented framework state-preservation, does NOT
+reset `useState` — so the header showed the NEW day while the list,
+count, filter result and empty-state branch still described the
+PREVIOUS day. The query layer was never at fault (`listAgenda` matches
+the exact business-local `@db.Date`, tenant-scoped, timezone-independent
+normalization). Fixed at the correct layer: the route keys
+`AppointmentAgenda` by its `date` (React resets the subtree per day) and
+the component seeds its list from the server props only. **(2) Day-
+capacity visibility** — the booking date step offered day chips with no
+capacity signal, so an operator could spend a tap on a closed/full day.
+It now CONSULTS the ONE availability authority per rendered day
+(`useQueries` over `getAvailabilityAction`) and a NEW pure module
+`day-capacity.ts` derives the chip state from the authority's answer:
+«مغلق» (BUSINESS_CLOSED), «ممتلئ» (FULLY_BOOKED), «غير متاح»
+(SERVICE_TOO_LONG); unavailable days are muted, labelled and inert
+(`aria-disabled` + no handler; never color alone), and the query key is
+the slot step's so both read ONE cached result per day. **(3) Date-
+format consistency + selected-day clarity** — the agenda's private
+`moveDate`/date/time formatters were consolidated onto the shared
+`date-format`/`slot-helpers` primitives, and the header now shows the
+appointment count for EVERY day («اليوم · ٣ مواعيد»). **(4) Reschedule
+self-exclusion carried into day capacity** (`serviceId` +
+`excludeAppointmentId`), so the moved appointment's own day is not
+falsely muted as full. **Verified, intentionally NOT changed:** full
+SLOTS — the slot step renders only authority-returned slots, so a
+blocked slot is absent and non-clickable by construction, and
+DESIGN_SYSTEM #10 binds displayed times to server availability results
+only (striking-through blocked slots would need an availability-contract
+change and contradict that rule). **#54 invariant preserved:** the date
+MATH stays pure — `date-format.ts` has no availability code; only the
+rendered chips consult the authority, and no slot is generated or
+filtered client-side. Guard: NEW `pnpm check:appointments-day-view`
+**43/43** (the 12 required areas); `check:booking-ux` 18/18 (guard 8b
+sharpened to the precise "no client-side slot engine" invariant),
+`check:appointment-creation` 53/53, `check:reschedule` 66/66,
+`check:booking-options` 32/32, `check:booking-confirm` 18/18,
+`check:conversation-booking` 16/16, `check:eligibility` 29/29,
+`check:services` 50/50, `check:ai-context-builder` 39/39,
+`check:ai-disclosure` 32/32, `check:ai-prompts` 101/101,
+`check:conversation-control` 50/50 green; `pnpm verify` green; `pnpm
+security` pass (1 pre-existing env warning); `git diff --check` clean.
+NO DB migration. Real-browser verification of the navigation fix was NOT
+performed (documented framework behavior + structurally asserted in the
+harness); production NOT touched. Known doc-lag: availability-guided
+RESCHEDULE (B-08) shipped in v0.28.0 without a DECISIONS/ledger entry —
+it is implemented and guarded by `check:reschedule` 66/66; this entry
+does not duplicate it. Prior:
 
 **Appointment Creation + Scheduling UX — IMPLEMENTED (PROMPT-B07;
 DECISIONS #54; uncommitted; ZERO schema/migration/prompt/provider/

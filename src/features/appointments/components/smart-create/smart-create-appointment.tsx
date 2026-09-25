@@ -568,6 +568,7 @@ export function SmartCreateAppointment({
             selectedDate={date}
             today={today}
             onSelect={handleSelectDate}
+            serviceId={serviceId ?? undefined}
           />
         ) : screen === "slot" && service ? (
           <SlotStep

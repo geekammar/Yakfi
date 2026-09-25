@@ -49,6 +49,15 @@ export default async function AppointmentsPage({
         }
       />
       <AppointmentAgenda
+        // A client-side day navigation (router.push to a new ?date=)
+        // re-renders this page with fresh `initialItems` but — per the
+        // framework's state-preservation model — does NOT reset the
+        // client component's useState, so the previous day's list would
+        // otherwise outlive the date change (stale agenda under a new
+        // date header). Keying the agenda by its date makes React reset
+        // the whole subtree per day: list, count, filter and error all
+        // belong to the day actually shown.
+        key={date}
         initialItems={appointments}
         date={date}
         today={today}
