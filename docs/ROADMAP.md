@@ -13,7 +13,7 @@ business at a time.
 **Status:** implementation COMPLETE — all Spec A screens, the conversation
 engine, the P0 architecture-hardening foundations (DECISIONS #30–#36,
 implemented as #38), and the owner-facing UX surfaces released through
-**v0.29.0** (services, knowledge/FAQ authoring, appointment creation,
+**v0.29.1** (services, knowledge/FAQ authoring, appointment creation,
 reschedule, appointments/availability coherence, slot presentation). The two
 former operator decisions that gated production booking are RESOLVED and
 implemented: the WhatsApp transport provider is Meta Cloud API (DECISIONS

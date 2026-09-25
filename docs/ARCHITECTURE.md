@@ -3,15 +3,16 @@
 > Current technical architecture and dependency boundaries. Read together
 > with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
 > `ARCHITECTURE_RECONCILIATION.md`. Last updated: DOC-NORMALIZE-V029 —
-> Spec A is complete through release **v0.29.0**: the Meta WhatsApp adapter
+> Spec A is complete through release **v0.29.1**: the Meta WhatsApp adapter
 > (CORE-03B, `src/server/integrations/whatsapp/`) is the live provider, the
 > conversation → booking seam consumes CORE-01/CORE-02, Meta Embedded Signup
-> + the runtime credential store are implemented (#49), and the owner-facing
-> UX surfaces (services, knowledge, appointment creation, reschedule,
-> day-view coherence, slot presentation #56) are released. The P0 hardening
-> foundations of DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS
-> #38; schema: `DATABASE.md`), and the migration chain stays a complete
-> empty-database bootstrap path (DECISIONS #40).
+>
+> - the runtime credential store are implemented (#49), and the owner-facing
+>   UX surfaces (services, knowledge, appointment creation, reschedule,
+>   day-view coherence, slot presentation #56) are released. The P0 hardening
+>   foundations of DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS
+>   #38; schema: `DATABASE.md`), and the migration chain stays a complete
+>   empty-database bootstrap path (DECISIONS #40).
 
 ## Stack
 

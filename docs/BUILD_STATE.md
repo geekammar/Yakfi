@@ -9,19 +9,46 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.29.0** — released and committed (`b34e61a`, tag
-`v0.29.0`; HEAD == `origin/main`). Releases v0.20.0–v0.29.0 ship the
+**Product version: v0.29.1** — released and committed (`bd91e2f`, tag
+`v0.29.1`; HEAD == `origin/main`). Releases v0.20.0–v0.29.1 ship the
 AI-trust boundary (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ,
 services, appointment creation, reschedule), appointments/availability
-coherence, and Meta Embedded Signup.
+coherence, and Meta Embedded Signup. A **post-v0.29.1 WhatsApp E2E failure
+fix** is present in the worktree (uncommitted, DECISIONS #58 — see below).
 
 ## Current State (summary)
 
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
-conversation engine are implemented and released. The only uncommitted work is
-the last presentation slice:
+conversation engine are implemented and released. **Post-v0.29.1 audit
+(evidence-backed, no code change):** the real LLM runtime answered a live
+`BOOKING` turn (`atria / Atria-Dawn-Preview`, policy-resolved from the live
+DB — `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` are all
+present in the local dev env); the Meta Embedded Signup configuration seam
+resolves `ready: true` locally (all four names present); the RUNTIME
+credential store round-trips exactly against the local dev DB with
+`CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
+executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
 
-- **Slot presentation (DECISIONS #56) — IMPLEMENTED, UNCOMMITTED:** the slot
+- **WhatsApp E2E failure fix (DECISIONS #58) — UNCOMMITTED in the worktree:**
+  forensically proven and fixed the exact runtime blocker that stopped a real
+  inbound WhatsApp message from receiving any reply. A live customer message
+  ("اهلا") on an AI_ACTIVE thread made the live `atria` model return a
+  schema-valid self-authored `AMBIGUOUS` reply; the B-03 disclosure gate
+  correctly refused it (this Business's `Business.faqs` store is empty), but
+  #52's refusal path was a SILENT handoff — no reply persisted, no outbound
+  Graph request, and the thread stuck in NEED_HUMAN so every later message
+  was `DEFERRED_TO_STAFF` too. Booking turns kept working because their
+  replies are domain-authored and never cross the gate (why earlier live
+  BOOKING verification missed it). **Fix:** on refusal the engine now
+  delivers the SAME deterministic safe handoff acknowledgment the
+  deterministic assistant produces (`classifyCustomerMessage`), still
+  escalating to NEED_HUMAN + operator attention; the gate itself, the
+  dropped refused content, tenant isolation, idempotency, and the AI/domain
+  separation are all unchanged. Real Graph send verified `delivered:true`.
+  No migration. **Operator action before the next release:** none beyond the
+  normal review + `pnpm release`/`pnpm ship` + deploy.
+
+- **Slot presentation (DECISIONS #56) — SHIPPED in v0.29.1:** the slot
   step renders the known candidate time grid; a candidate the authority did NOT
   return is visibly muted + disabled + non-clickable + labelled «غير متاح»; no
   reason is ever inferred (never «مشغول»/Busy). One shared pure module
@@ -56,30 +83,30 @@ the last presentation slice:
 Condensed ledger; full per-slice record in
 `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 
-| Area | Highlights | Release / Decision |
-| --- | --- | --- |
-| Foundation | Next.js 16 + TS strict + Tailwind v4 + shadcn/ui, Better Auth, Prisma 7 / Neon, feature-based modular monolith, env fail-fast, PWA | v0.1–v0.13 |
-| Design system / RTL / PWA | Arabic-first RTL tokens, AppShell, status system, PNG PWA icons | v0.2 |
-| Database layer | Full Spec A domain model + Invitation, repositories (only Prisma consumers), Zod DTOs, Arabic demo seed | v0.5–v0.8 |
-| Onboarding wizard | 4-step operational foundation, smart resume, step guards, `Business.vertical` discovery metadata | v0.9 |
-| Dashboard / Conversations / Appointments / Customers / Team / Staff workspace | All Spec A screens incl. NEED_HUMAN handoff queue, takeover, role-aware nav | through v0.19.x |
-| Smart availability + Smart Create 1–6 | Deterministic `getAvailability`; 6-step booking flow; candidate time grid per #56 | v0.13–v0.29 / #56 |
-| Architecture hardening (P0) | Branch model, WhatsAppConnection, Provider relations, `users.accountType`, SERIALIZABLE booking concurrency, durable inbound idempotency, AI contract, usage telemetry | v0.18 / #38 |
-| Migration-chain repair | `0_init` root baseline + `migration_lock.toml`; empty DB bootstraps via `pnpm db:deploy` | ARCH-03 / #40 |
-| Platform control plane | Public signup closed (403 `SIGNUP_CLOSED`), Platform Operator guards, platform owner invitations, Platform AI policy singleton | OPS-05 / #41 |
-| Meta WhatsApp adapter | `GET`\|`POST /api/whatsapp/meta`, HMAC verify, Graph outbound, `phone_number_id` authoritative inbound key, tenant-scoped resolution | CORE-03B / #42, #46 |
-| Real LLM provider adapter | Policy-backed `ConversationAi` (OpenRouter primary / AgentRouter secondary / fallback); secrets via `secretRef` only | AI-02 / #44 |
-| Prompt Workspace | `/prompts/**/*.prompt` → `generate:ai-prompts` → committed generated artifact → `prompt-registry.ts`; no inline bodies, no silent fallback | v0.19.1 / #48 |
-| Meta Embedded Signup + runtime credentials | OAuth redirect + code exchange, single-use `stateRef` ledger, AES-256-GCM `runtime_credentials` (env grammar unchanged); `CREDENTIAL_MASTER_KEY` optional | v0.20.0 / #49 |
-| AI knowledge visibility + context builder + disclosure gate | Four-level policy (PUBLIC/CONDITIONAL/INTERNAL/FORBIDDEN); "AI may know" ≠ "AI may mention"; structural reply gate | v0.22.0 / #50–#52 |
-| Human Handoff + Operator Attention | Attention signal derived server-side; visually-hidden label; staff/inbox surfacing | v0.23.0 |
-| Knowledge/FAQ authoring UX | Suggested-FAQ authoring over the ONE `Business.faqs` store; confirmed removal | v0.24.0 |
-| Service Catalog + Authoring | Catalog is domain data (not a 2nd KB); soft-delete + duplicate-name guard; `durationMinutes` is INTERNAL | v0.25.0 / #53 |
-| Appointment Creation UX | `?customerId=`/`?serviceId=` smart context, relative dates, «أقرب وقت متاح», relative follow-up | v0.26.0 / #54 |
-| Booking UX + customer prefill | Date-step coherence; customer-create prefill from the typed query | v0.27.0 |
-| Reschedule UX | Availability-guided reschedule with self-exclusion (`excludeAppointmentId`) | v0.28.0 |
-| Appointments/Availability coherence | Day-view state reset per selected day; day-capacity chips (مغلق/ممتلئ/غير متاح); date-format consolidation | v0.29.0 / #55 |
-| Slot presentation | Known candidate grid; non-returned candidates visible-but-disabled «غير متاح»; no reason inference | uncommitted / #56 |
+| Area                                                                          | Highlights                                                                                                                                                             | Release / Decision  |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| Foundation                                                                    | Next.js 16 + TS strict + Tailwind v4 + shadcn/ui, Better Auth, Prisma 7 / Neon, feature-based modular monolith, env fail-fast, PWA                                     | v0.1–v0.13          |
+| Design system / RTL / PWA                                                     | Arabic-first RTL tokens, AppShell, status system, PNG PWA icons                                                                                                        | v0.2                |
+| Database layer                                                                | Full Spec A domain model + Invitation, repositories (only Prisma consumers), Zod DTOs, Arabic demo seed                                                                | v0.5–v0.8           |
+| Onboarding wizard                                                             | 4-step operational foundation, smart resume, step guards, `Business.vertical` discovery metadata                                                                       | v0.9                |
+| Dashboard / Conversations / Appointments / Customers / Team / Staff workspace | All Spec A screens incl. NEED_HUMAN handoff queue, takeover, role-aware nav                                                                                            | through v0.19.x     |
+| Smart availability + Smart Create 1–6                                         | Deterministic `getAvailability`; 6-step booking flow; candidate time grid per #56                                                                                      | v0.13–v0.29 / #56   |
+| Architecture hardening (P0)                                                   | Branch model, WhatsAppConnection, Provider relations, `users.accountType`, SERIALIZABLE booking concurrency, durable inbound idempotency, AI contract, usage telemetry | v0.18 / #38         |
+| Migration-chain repair                                                        | `0_init` root baseline + `migration_lock.toml`; empty DB bootstraps via `pnpm db:deploy`                                                                               | ARCH-03 / #40       |
+| Platform control plane                                                        | Public signup closed (403 `SIGNUP_CLOSED`), Platform Operator guards, platform owner invitations, Platform AI policy singleton                                         | OPS-05 / #41        |
+| Meta WhatsApp adapter                                                         | `GET`\|`POST /api/whatsapp/meta`, HMAC verify, Graph outbound, `phone_number_id` authoritative inbound key, tenant-scoped resolution                                   | CORE-03B / #42, #46 |
+| Real LLM provider adapter                                                     | Policy-backed `ConversationAi` (OpenRouter primary / AgentRouter secondary / fallback); secrets via `secretRef` only                                                   | AI-02 / #44         |
+| Prompt Workspace                                                              | `/prompts/**/*.prompt` → `generate:ai-prompts` → committed generated artifact → `prompt-registry.ts`; no inline bodies, no silent fallback                             | v0.19.1 / #48       |
+| Meta Embedded Signup + runtime credentials                                    | OAuth redirect + code exchange, single-use `stateRef` ledger, AES-256-GCM `runtime_credentials` (env grammar unchanged); `CREDENTIAL_MASTER_KEY` optional              | v0.20.0 / #49       |
+| AI knowledge visibility + context builder + disclosure gate                   | Four-level policy (PUBLIC/CONDITIONAL/INTERNAL/FORBIDDEN); "AI may know" ≠ "AI may mention"; structural reply gate                                                     | v0.22.0 / #50–#52   |
+| Human Handoff + Operator Attention                                            | Attention signal derived server-side; visually-hidden label; staff/inbox surfacing                                                                                     | v0.23.0             |
+| Knowledge/FAQ authoring UX                                                    | Suggested-FAQ authoring over the ONE `Business.faqs` store; confirmed removal                                                                                          | v0.24.0             |
+| Service Catalog + Authoring                                                   | Catalog is domain data (not a 2nd KB); soft-delete + duplicate-name guard; `durationMinutes` is INTERNAL                                                               | v0.25.0 / #53       |
+| Appointment Creation UX                                                       | `?customerId=`/`?serviceId=` smart context, relative dates, «أقرب وقت متاح», relative follow-up                                                                        | v0.26.0 / #54       |
+| Booking UX + customer prefill                                                 | Date-step coherence; customer-create prefill from the typed query                                                                                                      | v0.27.0             |
+| Reschedule UX                                                                 | Availability-guided reschedule with self-exclusion (`excludeAppointmentId`)                                                                                            | v0.28.0             |
+| Appointments/Availability coherence                                           | Day-view state reset per selected day; day-capacity chips (مغلق/ممتلئ/غير متاح); date-format consolidation                                                             | v0.29.0 / #55       |
+| Slot presentation                                                             | Known candidate grid; non-returned candidates visible-but-disabled «غير متاح»; no reason inference                                                                     | v0.29.1 / #56       |
 
 ## Key Known Limitations (current)
 
@@ -136,7 +163,7 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
   (2026-09-19, `GET /api/health` `deploymentReady:true`,
   `database:connected`, `missingEnvVars:[]`). Live inbound E2E was proven at
   the earlier v0.15.9 checkpoint (signed webhook → 200, dedupe replay,
-  tenant isolation). **Deploys of v0.20.0–v0.29.0 are operator actions not
+  tenant isolation). **Deploys of v0.20.0–v0.29.1 are operator actions not
   performed yet — production version must be treated as unknown until probed.**
 - **Demo:** `https://flowpilot-demo-gamma.vercel.app` — isolated Demo Neon DB,
   dedicated project, `DEMO_MODE=true`, seeded deterministic/idempotent (1
@@ -152,14 +179,20 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Unresolved User Actions (not code)
 
-1. **Operator:** review the uncommitted #56 slice, then `pnpm ship patch`.
+1. **Operator:** review the uncommitted **#58** WhatsApp E2E disclosure-silence
+   fix (the only code change in the tree), then release it as the next patch
+   (`pnpm release`/`pnpm ship`) and deploy (see below). The #56 slice it sits
+   on is already shipped as **v0.29.1**.
 2. **Operator:** deploy the released head to production (`pnpm deploy`) and
    probe `/api/health` to confirm the production version; run `pnpm db:deploy`
    so migrations through `20260923120000_operator_attention` are applied.
 3. **Operator (only if RUNTIME credentials are used):** generate and set
    `CREDENTIAL_MASTER_KEY` in the deployment env. Until set, the RUNTIME
    credential path stays honestly UNAVAILABLE and the ENV pilot path is
-   unaffected.
+   unaffected. (Live evidence, post-v0.29.1: against the local dev DB the
+   RUNTIME store round-trips exactly with `CREDENTIAL_MASTER_KEY` set —
+   store/resolve/delete all succeed. A real Meta round-trip still has
+   never run — see `docs/INTEGRATION_CHECKPOINTS.md`.)
 4. **Operator (optional):** add `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` /
    `ATRIA_API_KEY` to Vercel env; `pnpm db:deploy` against the Demo DB.
 5. **Operator (optional):** exercise one real outbound to an operator-owned
@@ -167,9 +200,12 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
-1. **Ship + deploy the current head** (operator): the #56 slot-presentation
-   slice is the only uncommitted work; `pnpm ship patch` then `pnpm deploy`,
-   then `pnpm db:deploy` against production.
+1. **Release + deploy the current head** (operator): the worktree carries ONE
+   uncommitted fix — the WhatsApp E2E disclosure-silence fix (DECISIONS #58,
+   verified: focused checks green, `pnpm verify` + `pnpm security` pass, no
+   migration). Review it, then run `pnpm release`/`pnpm ship` to land v0.29.2
+   and `pnpm deploy` + `pnpm db:deploy` against production, then probe
+   `/api/health` to confirm the production version.
 2. **Onboard the first REAL pilot Business end-to-end** — operator provisions
    the Business + invitation → ADMIN connects the WhatsApp number via Meta
    Embedded Signup at `/settings/whatsapp` → CONNECTED → live messaging →

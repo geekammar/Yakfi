@@ -5,7 +5,7 @@
 > stale assumptions that older prompts and documents carried. Full binding
 > text: `DECISIONS.md` #30–#36 (implemented by #38). Current architecture:
 > `ARCHITECTURE.md`. NOTE: the frontier has since moved to release
-> **v0.29.0** (B-series UX slices, Meta Embedded Signup, operator
+> **v0.29.1** (B-series UX slices, Meta Embedded Signup, operator
 > attention) — this bridge covers only the #30–#36 era; for everything
 > after it, read `BUILD_STATE.md` + `DECISIONS_INDEX.md`. Last updated:
 > DOC-NORMALIZE-V029.

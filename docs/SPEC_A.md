@@ -4,7 +4,7 @@
 > "Included" is out of scope. The spec sequence (A → B → C) and exit
 > criteria live in `ROADMAP.md`. Implementation status lives in
 > `BUILD_STATE.md` (never here). Last updated: DOC-NORMALIZE-V029 — scope is
-> frozen and fully implemented through release v0.29.0.
+> frozen and fully implemented through release v0.29.1.
 
 ## Scope Definition
 

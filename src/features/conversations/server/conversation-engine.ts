@@ -90,6 +90,7 @@ import { tryParseBookingSelection } from "@/features/conversations/server/bookin
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import {
   bypassDeterministicAi,
+  classifyCustomerMessage,
   normalizeArabicText,
 } from "@/features/conversations/server/conversation-ai";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
@@ -1625,19 +1626,46 @@ async function runInboundTurn(
     //     refuses to emit a self-authored reply whose task is not backed by
     //     an included + disclosable + carried fact — an INTERNAL fact can
     //     never back it, a CONDITIONAL fact only when its task is relevant,
-    //     a FORBIDDEN fact never. A refused reply is dropped (never
-    //     persisted, never sent) and the turn takes the SAME handoff path
-    //     an invalid/failed AI result already takes. Booking-intent content
-    //     was authored by the domain above (CORE-01/CORE-02), so it never
-    //     reaches this gate; only assistant-authored text does.
+    //     a FORBIDDEN fact never. Booking-intent content was authored by the
+    //     domain above (CORE-01/CORE-02), so it never reaches this gate;
+    //     only assistant-authored text does.
     const disclosure = enforceDisclosure({
       response: validated,
       context: { request: aiRequest, facts: builtContext.facts },
     });
     if (disclosure.kind !== "disclosed") {
-      await deps.conversationRepository.updateWorkflow(conversation.id, {
-        status: "NEED_HUMAN",
-      });
+      // The refused self-authored reply is dropped — B-03 never persists or
+      // sends a reply it cannot justify from the disclosure ledger. But the
+      // customer is NOT left in silence: the turn delivers the SAME safe,
+      // deterministic handoff acknowledgment the deterministic assistant
+      // produces for this message (`classifyCustomerMessage` never invents
+      // business data — no FAQ match means a typed handoff reply), then
+      // takes the existing NEED_HUMAN + operator-attention handoff path.
+      // This keeps the E2E WhatsApp reply path alive for conversational
+      // turns a business has no knowledge store for (a greeting, a question
+      // with no stored FAQ) without ever emitting an unbacked reply. The
+      // refusal reason stays an operator-side diagnostic (never customer-
+      // visible): the customer sees only the safe acknowledgment.
+      const safeHandoff = classifyCustomerMessage(
+        inbound.text,
+        builtContext.request.faqs,
+      );
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        safeHandoff.content,
+        "NEED_HUMAN",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        safeHandoff.content,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
       return {
         ok: true,
         duplicate: false,
@@ -1649,7 +1677,7 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         assistantProvider: deps.ai.providerName,
-        delivery: null,
+        delivery,
       };
     }
     const content = disclosure.response.content;

@@ -580,8 +580,11 @@ async function main(): Promise<void> {
 
   // ── 6. B-03 refused reply → handoff + attention (boundary intact) ────────
   // BUSINESS_C carries NO knowledge store, so a self-authored FAQ reply has
-  // no backing fact: B-03 refuses it and the turn takes the SAME handoff path
-  // an AI failure takes (never persisted, never sent).
+  // no backing fact: B-03 refuses it — the fabricated content is never
+  // persisted and never sent. The customer still receives the SAME safe,
+  // deterministic handoff acknowledgment the deterministic assistant would
+  // send for this message (never silence), and the turn keeps the existing
+  // NEED_HUMAN + operator-attention handoff semantics.
   const refused = await run({
     businessId: BUSINESS_C,
     text: "كم سعر تنظيف الأسنان؟",
@@ -602,13 +605,24 @@ async function main(): Promise<void> {
       (await inMemoryAttention.countOpen(BUSINESS_C)) === 1,
   );
   check(
-    "6b. المحتوى المرفوض لا يُحفظ ولا يُرسل للعميل (delivery فارغ)",
+    "6b. المحتوى المرفوض لا يُحفظ ولا يُرسل، و Acknowledgment آمن يصل العميل",
     isSuccess(refused.result) &&
-      refused.result.delivery === null &&
+      refused.result.delivery !== null &&
+      refused.result.delivery.delivered === true &&
+      // The fabricated, unbacked reply never reaches the customer…
       !refused.messages.some(
         (message) =>
           message.senderType === "AI" && message.content.includes("١٠٠٠"),
-      ),
+      ) &&
+      // …but a safe deterministic handoff acknowledgment was persisted…
+      refused.messages.some(
+        (message) =>
+          message.senderType === "AI" &&
+          message.content.includes("سيرد عليك أحد أعضاء الفريق"),
+      ) &&
+      // …and it is the ONLY assistant message on the turn.
+      refused.messages.filter((message) => message.senderType === "AI")
+        .length === 1,
   );
 
   // ── 7. Booking-domain clarification → NO handoff, NO attention ───────────

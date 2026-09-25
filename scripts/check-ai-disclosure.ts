@@ -791,8 +791,11 @@ async function main(): Promise<void> {
   );
 
   // (b) A fabricated reply on a store that carries no knowledge → refused by
-  //     the boundary → the SAME handoff, and the invented content is neither
-  //     persisted nor sent.
+  //     the boundary: the invented content is neither persisted nor sent.
+  //     The customer is not left in silence — the turn delivers the SAME
+  //     safe, deterministic handoff acknowledgment the deterministic
+  //     assistant produces for this message, then keeps the existing
+  //     NEED_HUMAN handoff semantics.
   const refused = await runTurn({
     text: "كم سعر تنظيف الأسنان؟",
     faqs: [],
@@ -802,10 +805,15 @@ async function main(): Promise<void> {
     "13b. رد مُخترَع بدون دعم قابل للإفصاح يُرفض (نفس مسار التحويل، لا تسريب)",
     eq(refused.assistantAction, "AI_HANDOFF") &&
       eq(refused.conversationStatus, "NEED_HUMAN") &&
-      eq(refused.aiMessages.length, 0) &&
-      eq(refused.sent.length, 0) &&
+      // The fabricated reply never reaches the customer…
       !refused.sent.includes(LEAKY_REPLY) &&
-      !refused.aiMessages.includes(LEAKY_REPLY),
+      !refused.aiMessages.includes(LEAKY_REPLY) &&
+      // …but exactly one safe deterministic acknowledgment is persisted…
+      eq(refused.aiMessages.length, 1) &&
+      refused.aiMessages[0]!.includes("سيرد عليك أحد أعضاء الفريق") &&
+      // …and delivered (never silence).
+      eq(refused.sent.length, 1) &&
+      refused.sent[0] === refused.aiMessages[0],
   );
 
   // (c) A safe, backed AI answer is emitted unchanged and delivered.

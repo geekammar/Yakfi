@@ -202,9 +202,9 @@ pnpm deploy             # full gate → production deployment URL (deploy:produc
 
    ```json
    {
-      "status": "ok",
-      "version": "0.29.0",
-      "environment": "production",
+     "status": "ok",
+     "version": "0.29.1",
+     "environment": "production",
      "timestamp": "2026-08-29T…Z",
      "deploymentReady": true,
      "database": "connected",
