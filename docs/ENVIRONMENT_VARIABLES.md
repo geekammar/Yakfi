@@ -13,7 +13,9 @@
 | `BETTER_AUTH_URL`     | server          | `https://flowpilot-demo.vercel.app`                        | Better Auth `baseURL` (redirects, callback URLs)         |
 | `NEXT_PUBLIC_APP_URL` | server + client | `https://flowpilot-demo.vercel.app`                        | Root layout `metadataBase`, Better Auth `trustedOrigins` |
 
-There is one optional variable (PROMPT-19):
+The first optional variable was `INBOUND_WEBHOOK_TOKEN` (PROMPT-19); the
+full optional set (WhatsApp/Meta, AI provider keys, demo mode, credential
+master key) is tabled below under "Optional Variables":
 
 | Variable                | Scope  | Example                | Used by                                                                   |
 | ----------------------- | ------ | ---------------------- | ------------------------------------------------------------------------- |
@@ -90,11 +92,11 @@ Notes:
 | Variable                                  | Default | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DEMO_MODE`                               | unset   | `"true"` → the dev launcher scripts (`scripts/dev.sh` / `dev.ps1` / `dev-termux.sh`) **and** the deploy gate (`scripts/pre-deploy.mjs`, run by every `pnpm deploy:*` command) re-seed the Arabic demo business first — deployed demos never show empty dashboards. Idempotent, demo-business-scoped wipe; requires a real `DATABASE_URL`. Never used by production builds.                                                                         |
-| `OPENROUTER_API_KEY`                      | unset   | AI provider secret (PROMPT-OPS-05) — the OpenRouter API key, environment-backed. NEVER in the DB/UI/logs: the platform AI policy stores only this NAME as the secret reference. Local: `.env.local`; production: Vercel Environment Variables (a key change requires redeploy). Optional until the provider-integration phase.                                                                                                                     |
+| `OPENROUTER_API_KEY`                      | unset   | AI provider secret (PROMPT-OPS-05) — the OpenRouter API key, environment-backed. NEVER in the DB/UI/logs: the platform AI policy stores only this NAME as the secret reference. Local: `.env.local`; production: Vercel Environment Variables (a key change requires redeploy). Optional at boot; while unset the policy-backed adapter fails safe to a deterministic turn — set it for live LLM turns (DECISIONS #44).            |
 | `AGENTROUTER_API_KEY`                     | unset   | AI provider secret (PROMPT-OPS-05) — the AgentRouter API key. Same rules as `OPENROUTER_API_KEY`.                                                                                                                                                                                                                                                                                                                                                  |
 | `ATRIA_API_KEY`                           | unset   | AI provider secret (PROMPT-OPS-05) — the Atria API key. Same rules as `OPENROUTER_API_KEY`. Resolved only when the platform AI policy selects `atria` as primary/secondary.                                                                                                                                                                                                                                                                        |
 | `WHATSAPP_META_VERIFY_TOKEN`              | unset   | Meta webhook verify token (`hub.verify_token` for `GET /api/whatsapp/meta`). Server-side only; compared constant-time. Optional until a Business connects a real number — `GET` verification returns 403 while unset.                                                                                                                                                                                                                              |
-| `WHATSAPP_META_APP_SECRET`                | unset   | Meta App Secret — server-side only, used for BOTH `X-Hub-Signature-256` HMAC validation on `POST /api/whatsapp/meta` AND the future Embedded Signup server-side code exchange (OAuth `client_secret`). NEVER in the DB/UI/logs; only its env-var NAME is ever reported. Optional until Embedded Signup — while unset, signature check is skipped in local/dev (tenancy + idempotency still protect Core); MUST be set in production.               |
+| `WHATSAPP_META_APP_SECRET`                | unset   | Meta App Secret — server-side only, used for BOTH `X-Hub-Signature-256` HMAC validation on `POST /api/whatsapp/meta` AND the Meta Embedded Signup server-side code exchange (OAuth `client_secret`, DECISIONS #49). NEVER in the DB/UI/logs; only its env-var NAME is ever reported. While unset, signature check is skipped in local/dev (tenancy + idempotency still protect Core); MUST be set in production.               |
 | `WHATSAPP_META_APP_ID`                    | unset   | Meta App ID — the non-secret identifier of the Meta App (Embedded Signup `app_id` / JS SDK `appId`). Server-side only. PREREQUISITE for the real Meta Embedded Signup adapter; optional at boot and no code path requires it to start. No default is supplied and no value is ever invented — the operator sets it from the Meta App Dashboard. Readiness is checkable via `describeMetaOnboardingReadiness()`.                                    |
 | `WHATSAPP_META_EMBEDDED_SIGNUP_CONFIG_ID` | unset   | Meta Embedded Signup **`config_id`** — non-secret server-side CONFIGURATION METADATA identifying the Embedded Signup configuration created in the Meta App Dashboard (the configuration the OAuth dialog / JS SDK launches against). PREREQUISITE for the real adapter alongside `WHATSAPP_META_APP_ID`; optional at boot. While unset, the adapter seam falls back to the deterministic stand-in and never invents a value. Never `NEXT_PUBLIC_`. |
 | `WHATSAPP_META_ACCESS_TOKEN`              | unset   | System/fallback WhatsApp access token (`Bearer` for `graph.facebook.com`). Server-side only; resolved via `WhatsAppConnection.credentialsRef` (env-var NAME) per-connection when set, else this fallback. Optional until send.                                                                                                                                                                                                                     |
@@ -139,7 +141,7 @@ knowing which backend serves it:
 | Kind      | Shape                         | Backend                                                 | When it is used                                                                                                                                                                                                   |
 | --------- | ----------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENV`     | env-var NAME (`[A-Z_]{3,64}`) | `process.env` (existing behavior — UNCHANGED)           | The current pilot path: the operator stores the token in the deployment environment under that NAME (a change requires a redeploy). This remains the default for legacy rows (`credential_kind` NULL).            |
-| `RUNTIME` | opaque `fp:<id>` handle       | `runtime_credentials` table + AES-256-GCM (server-side) | A credential obtained at onboarding time (the future Meta code exchange). The raw secret is stored encrypted server-side; only the opaque handle is persisted on the connection — NO operator paste, NO redeploy. |
+| `RUNTIME` | opaque `fp:<id>` handle       | `runtime_credentials` table + AES-256-GCM (server-side) | A credential obtained at onboarding time (the Meta Embedded Signup code exchange, DECISIONS #49). The raw secret is stored encrypted server-side; only the opaque handle is persisted on the connection — NO operator paste, NO redeploy. |
 
 RUNTIME storage path (the store is the only code that ever holds the
 plaintext next to the master key):
@@ -181,14 +183,15 @@ adapter / feature  ──store(businessId, secret)──▶  CredentialsResolver
   verification demotes it to `PENDING` rather than claiming connected).
 - Webhook subscription (`/api/whatsapp/meta`) with the App Secret and
   the verify token set in the deployment environment.
-- **Meta Embedded Signup (in-app onboarding) is NOT implemented**: it
-  requires external Meta dashboard/application configuration (app review
-  state, redirect URIs, a server-side code-exchange step) that cannot be
-  safely completed from code alone. Only the application-side contract
-  (the `ConnectionVerifier` port + the `/settings/whatsapp` surface) is
-  implemented; nothing is faked and no unsupported API is invented.
+- **Meta Embedded Signup (in-app onboarding) is IMPLEMENTED and
+  operator-gated**: the redirect-based flow (OAuth dialog launch +
+  server-side code exchange + opaque runtime credential persistence) is
+  landed behind the provider-neutral `ConnectionAuthorizer` port
+  (`meta-embedded-signup-authorizer.ts`, DECISIONS #49). It activates ONLY
+  when the operator-owned Meta dashboard configuration below resolves;
+  otherwise the deterministic stand-in stays wired and nothing is faked.
 
-### Meta Embedded Signup — operator prerequisites (future adapter)
+### Meta Embedded Signup — operator prerequisites (adapter is landed; activates only when these resolve)
 
 The application-side contract for the real Meta Embedded Signup adapter
 is landed (the provider-neutral `ConnectionAuthorizer` port, the

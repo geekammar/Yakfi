@@ -3,6 +3,7 @@
 import { getAvailabilityAction } from "@/features/appointments/actions/availability-actions";
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import {
+  derivePresentSlots,
   earliestSlot,
   formatSlotTime,
   groupSlotsByPeriod,
@@ -17,6 +18,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SLOT_NOUNS, arabicCount } from "@/lib/arabic";
+import { generateCandidateGrid } from "@/lib/scheduling/slot-grid";
 import { cn } from "@/lib/utils";
 import { appointmentDateSchema } from "@/lib/validation";
 
@@ -28,7 +30,7 @@ import {
   HourglassIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 /** Copy for the explicit no-slots reasons from the availability layer. */
 const NO_SLOTS_CONTENT = {
@@ -48,18 +50,37 @@ const NO_SLOTS_CONTENT = {
   FULLY_BOOKED: {
     icon: CalendarXIcon,
     title: "لا توجد أوقات متاحة",
-    description: "اليوم محجوز بالكامل في هذا التاريخ. جرّب تاريخاً آخر.",
+    description: "لا يمكن حجز أي وقت في هذا التاريخ حالياً. جرّب تاريخاً آخر.",
     showServiceAction: false,
   },
 } as const;
 
+/** The only label an unselectable candidate ever gets — never a reason. */
+const UNAVAILABLE_LABEL = "غير متاح";
+
 /**
- * Step 4 — الوقت. Real available-slot selection: every displayed time
- * comes from the EXISTING availability layer (`getAvailabilityAction`
- * → `getAvailability`, PROMPT-10) — nothing is invented on the client.
- * The request runs only while the step is mounted with a valid date +
- * the service chosen in Step 2, and the query key carries both inputs
- * so a change to either refetches instead of showing stale times.
+ * Step 4 — الوقت. Real available-slot selection (DECISIONS #56):
+ *
+ * The step renders the KNOWN candidate time grid for the chosen day —
+ * derived from the business's stored working-hours week + slot
+ * granularity through the ONE grid rule (`@/lib/scheduling/slot-grid`,
+ * the same one the availability authority uses) — and derives only a
+ * PRESENTATIONAL state per candidate against the authority's single
+ * result:
+ *
+ *   candidate exists in the available set  → AVAILABLE / selectable
+ *   candidate is not returned              → UNAVAILABLE / disabled /
+ *                                             muted / non-clickable,
+ *                                             labelled «غير متاح»
+ *
+ * The authority itself still returns ONLY genuinely selectable slots
+ * (the contract is unchanged); the frontend never infers WHY a
+ * candidate is missing — it never labels one «مشغول» or assigns a
+ * reason. One `getAvailabilityAction` request serves the whole step (no
+ * per-candidate requests), and selecting still funnels through the
+ * wizard into the canonical write path. When the grid inputs are absent
+ * the step honestly falls back to showing the authority's selectable
+ * slots only — nothing is invented.
  */
 export function SlotStep({
   serviceId,
@@ -70,6 +91,8 @@ export function SlotStep({
   onGoToDate,
   onGoToService,
   excludeAppointmentId,
+  workingHours,
+  slotDurationMinutes,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -89,6 +112,20 @@ export function SlotStep({
    * create flow (unchanged behavior).
    */
   excludeAppointmentId?: string;
+  /**
+   * The candidate time grid (DECISIONS #56 — Spec A slot presentation):
+   * the business's stored working-hours week + slot granularity, both
+   * server-derived. When both are present, the step renders the KNOWN
+   * candidate times for the chosen day and derives only a
+   * PRESENTATIONAL state per candidate — present in the authority's
+   * available set → selectable; absent → visibly muted, disabled and
+   * labelled «غير متاح» (never a reason — the authority returns
+   * selectable slots only and the frontend infers nothing from
+   * absence). Absent inputs → the step falls back to showing the
+   * authority's selectable slots only (nothing is invented).
+   */
+  workingHours?: unknown;
+  slotDurationMinutes?: number | null;
 }) {
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
   const availability = useQuery({
@@ -140,6 +177,48 @@ export function SlotStep({
   // or date changes; membership in the CURRENT result is the backstop.
   const currentSlot =
     slots && slotExistsIn(selectedSlot, slots) ? selectedSlot : null;
+
+  /**
+   * The candidate time grid for the chosen day, derived from the SAME
+   * rule the availability authority uses (`@/lib/scheduling/slot-grid`)
+   * over the server-derived working-hours week + slot granularity and
+   * the AUTHORITY's own `serviceDurationMinutes`. This is pure
+   * presentation: a candidate is bookable ONLY when the authority's
+   * result contains it (`available`), and every other candidate is
+   * shown disabled — the frontend never decides WHY a candidate is
+   * missing, and never invents candidates.
+   */
+  const serviceDurationMinutes = result?.success
+    ? result.data.serviceDurationMinutes
+    : null;
+  const candidateGrid = useMemo(() => {
+    if (!serviceDurationMinutes || !slotDurationMinutes) return null;
+    return generateCandidateGrid({
+      workingHours,
+      date,
+      durationMinutes: serviceDurationMinutes,
+      slotDurationMinutes,
+    });
+  }, [workingHours, date, serviceDurationMinutes, slotDurationMinutes]);
+
+  /**
+   * What the step renders as chips (DECISIONS #56): the candidate grid
+   * when it can be derived — each candidate flagged by its authority
+   * membership — or the authority's selectable slots when the grid
+   * cannot be derived (the honest fallback). null → no chips. Pure
+   * derivation (`derivePresentSlots`), so the behavior is unit-verified.
+   */
+  const presentSlots = useMemo(
+    () => derivePresentSlots({ candidateGrid, availableSlots: slots }),
+    [candidateGrid, slots],
+  );
+  const availableCount = presentSlots
+    ? presentSlots.filter((slot) => slot.available).length
+    : 0;
+  const unavailableCount = presentSlots
+    ? presentSlots.length - availableCount
+    : 0;
+  const timezone = result?.success ? result.data.timezone : null;
 
   // A fresh successful result that lost the preserved slot (booked by
   // someone else meanwhile) clears it in the wizard's own state too —
@@ -215,12 +294,36 @@ export function SlotStep({
             </Button>
           </div>
         </div>
-      ) : slotsResult ? (
+      ) : presentSlots ? (
         <>
           <p className="text-xs text-muted-foreground" aria-live="polite">
-            {arabicCount(slotsResult.data.slots.length, SLOT_NOUNS)} · بتوقيت{" "}
-            {timezoneLabel(slotsResult.data.timezone)}
+            {arabicCount(availableCount, SLOT_NOUNS)}
+            {unavailableCount > 0 ? (
+              <span className="text-muted-foreground/80">
+                {" · "}
+                {unavailableCount} {UNAVAILABLE_LABEL}
+              </span>
+            ) : null}
+            {timezone ? ` · بتوقيت ${timezoneLabel(timezone)}` : null}
           </p>
+          {/* A day whose candidates are all unselectable: the grid is
+           * still shown (everything disabled) so the user sees what the
+           * day looks like, with one honest recovery action. The state
+           * is never explained with a reason the backend did not give. */}
+          {availableCount === 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3">
+              <p className="text-sm">لا توجد أوقات متاحة في هذا اليوم.</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={onGoToDate}
+              >
+                تغيير التاريخ
+              </Button>
+            </div>
+          ) : null}
           {/* B-07 §C — the availability-first fast path: one tap books
            * the earliest valid time. The availability contract returns
            * slots ascending, so this is always the FIRST server-provided
@@ -235,7 +338,7 @@ export function SlotStep({
               أقرب وقت متاح · {formatSlotTime(earliest.startTime)}
             </Button>
           ) : null}
-          {groupSlotsByPeriod(slotsResult.data.slots).map((group) => (
+          {groupSlotsByPeriod(presentSlots).map((group) => (
             <section
               key={group.period}
               aria-label={group.label}
@@ -244,31 +347,54 @@ export function SlotStep({
               <h3 className="text-sm font-medium">{group.label}</h3>
               <ul className="flex list-none flex-wrap gap-2">
                 {group.slots.map((slot) => {
-                  const isSelected = currentSlot?.startTime === slot.startTime;
+                  const isSelected =
+                    slot.available && currentSlot?.startTime === slot.startTime;
                   return (
                     <li key={slot.startTime}>
-                      <button
-                        type="button"
-                        onClick={() => onSelectSlot(slot)}
-                        aria-pressed={isSelected}
-                        aria-label={`حجز من ${formatSlotTime(slot.startTime)} إلى ${formatSlotTime(slot.endTime)}`}
-                        className={cn(
-                          "flex h-11 min-w-[5.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
-                          isSelected
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-card text-foreground hover:bg-accent/60",
-                        )}
-                      >
-                        <span className="tabular-nums">
-                          {formatSlotTime(slot.startTime)}
-                        </span>
-                        {isSelected ? (
-                          <CheckCircle2Icon
-                            aria-hidden
-                            className="size-4 shrink-0"
-                          />
-                        ) : null}
-                      </button>
+                      {slot.available ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelectSlot(slot)}
+                          aria-pressed={isSelected}
+                          aria-label={`حجز من ${formatSlotTime(slot.startTime)} إلى ${formatSlotTime(slot.endTime)}`}
+                          className={cn(
+                            "flex h-11 min-w-[5.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-card text-foreground hover:bg-accent/60",
+                          )}
+                        >
+                          <span className="tabular-nums">
+                            {formatSlotTime(slot.startTime)}
+                          </span>
+                          {isSelected ? (
+                            <CheckCircle2Icon
+                              aria-hidden
+                              className="size-4 shrink-0"
+                            />
+                          ) : null}
+                        </button>
+                      ) : (
+                        /* A candidate the authority did NOT return. It
+                         * stays visible and visibly NOT selectable —
+                         * muted, inert and labelled «غير متاح» — but no
+                         * reason is ever inferred (never «مشغول»), and
+                         * `aria-disabled` keeps it announced rather than
+                         * erased from the accessibility tree. */
+                        <button
+                          type="button"
+                          aria-disabled
+                          aria-label={`${formatSlotTime(slot.startTime)} — ${UNAVAILABLE_LABEL}`}
+                          className="flex h-11 min-w-[5.25rem] cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground"
+                        >
+                          <span className="text-sm tabular-nums line-through">
+                            {formatSlotTime(slot.startTime)}
+                          </span>
+                          <span className="text-[10px] leading-none">
+                            {UNAVAILABLE_LABEL}
+                          </span>
+                        </button>
+                      )}
                     </li>
                   );
                 })}

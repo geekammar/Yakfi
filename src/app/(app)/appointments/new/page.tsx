@@ -105,6 +105,8 @@ export default async function NewAppointmentPage({
           initialServiceId={prefill.serviceId}
           initialScreen={deriveInitialBookingScreen(prefill)}
           CustomerCreateDialog={CustomerFormDialog}
+          workingHours={business.workingHours}
+          slotDurationMinutes={business.slotDurationMinutes}
         />
       </div>
     </div>

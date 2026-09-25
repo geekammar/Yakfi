@@ -122,9 +122,9 @@ gh release create v0.1.0 --verify-tag --title "FlowPilot v0.1.0" \
 
 ## Versioning
 
-- `v0.1.x` — Spec A pilot iterations (current)
+- `v0.x.x` — Spec A pilot iterations (current line: **v0.29.0**)
 - Bump MINOR when a roadmap milestone completes (e.g., Spec A exit criteria
-  met → `v0.2.0`); PATCH for fixes within a milestone.
+  met → `v1.0.0`); PATCH for fixes within a milestone.
 - No semver ceremony while pre-1.0 — the tag notes carry the narrative.
 
 ## Rollback / Recovery

@@ -21,6 +21,45 @@
 
 > `pnpm run doctor` (not `pnpm doctor`) — the latter is pnpm's built-in.
 
+## Domain check suites (offline, in-memory)
+
+Every suite is a deterministic `tsx` harness under `scripts/check-*.ts` — no
+DB, no network, no LLM, no secrets. Run the suite that matches the surface you
+touched; a green suite is the evidence that belongs in `BUILD_STATE.md`. All
+scripts are listed in `package.json`.
+
+| Surface | Command | Run after touching |
+| --- | --- | --- |
+| Appointments day view | `pnpm check:appointments-day-view` | the agenda, day-capacity chips, day navigation |
+| Booking UX invariants | `pnpm check:booking-ux` | Smart Create flow, client-side slot rules |
+| Appointment creation | `pnpm check:appointment-creation` | booking context prefill, relative dates, follow-up |
+| Reschedule | `pnpm check:reschedule` | reschedule panel, self-exclusion, conflict path |
+| Booking options (CORE-02) | `pnpm check:booking-options` | options resolver, empty reasons, ranking |
+| Booking confirm | `pnpm check:booking-confirm` | offer selection, `createWithConflictCheck` path |
+| Eligibility (CORE-01) | `pnpm check:eligibility` | provider eligibility resolver |
+| Services | `pnpm check:services` | `/services`, service domain, removal, duplicates |
+| Knowledge / FAQ | `pnpm check:knowledge-faq` | `/settings/knowledge`, FAQ authoring + suggestions |
+| Knowledge visibility | `pnpm check:knowledge-visibility` | the B-01 four-level policy |
+| AI context builder | `pnpm check:ai-context-builder` | the B-02 pipeline + disclosure ledger |
+| AI disclosure gate | `pnpm check:ai-disclosure` | the B-03 reply gate |
+| AI prompts | `pnpm check:ai-prompts` | any prompt artifact, registry, or `docs/ai/` rule |
+| AI provider | `pnpm check:ai-provider` | provider adapters, policy, fallback, telemetry |
+| Atria retry | `pnpm check:atria-retry` | the Atria adapter retry/JSON contract |
+| Conversation booking seam | `pnpm check:conversation-booking` | the mapper → CORE-01/CORE-02 path |
+| Conversation control | `pnpm check:conversation-control` | conversation-control + JSON normalization |
+| Operator attention | `pnpm check:operator-attention` | attention signal, inbox/staff surfacing |
+| Signup policy | `pnpm check:signup` | the proxy signup block, public-path policy |
+| Platform AI policy | `pnpm check:policy` | `platform_ai_policies`, `getEffectiveAiPolicy` |
+| WhatsApp transport | `pnpm check:whatsapp-transport` | the provider-neutral transport seam |
+| WhatsApp inbound | `pnpm check:whatsapp-inbound` | inbound normalization + idempotency |
+| Meta WhatsApp | `pnpm check:meta-whatsapp` | the Meta adapter, HMAC verify, error taxonomy |
+| Meta Embedded Signup | `pnpm check:meta-embedded-signup` | the authorizer, `stateRef` ledger, code exchange |
+| WhatsApp onboarding | `pnpm check:whatsapp-onboarding` | `/settings/whatsapp` lifecycle + verification |
+| Runtime credentials | `pnpm check:credentials-runtime` | AES-256-GCM store, resolver, fail-closed |
+
+> Suit counts live in `BUILD_STATE.md → Current State`; a suite's count only
+> matters relative to its own last run, not across suites.
+
 ## verify — the gate
 
 `scripts/verify.mjs` runs, in order, stopping at the first failure with a

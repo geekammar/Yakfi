@@ -117,6 +117,8 @@ export function SmartCreateAppointment({
   initialServiceId,
   initialScreen,
   CustomerCreateDialog,
+  workingHours,
+  slotDurationMinutes,
 }: {
   initialCustomers: BookingCustomerOption[];
   services: BookingServiceOption[];
@@ -148,6 +150,13 @@ export function SmartCreateAppointment({
    * behaves exactly as before.
    */
   CustomerCreateDialog?: CustomerCreateDialogComponent;
+  /**
+   * The candidate-grid inputs for Step 4 (DECISIONS #56): the business's
+   * stored working-hours week + slot granularity, both server-derived.
+   * Passed through untouched; the grid rule lives in the slot step.
+   */
+  workingHours?: unknown;
+  slotDurationMinutes?: number | null;
 }) {
   const [screen, setScreen] = useState<BookingFlowScreen>(
     initialScreen ?? "customer",
@@ -579,6 +588,8 @@ export function SmartCreateAppointment({
             onSlotUnavailable={handleSlotUnavailable}
             onGoToDate={() => setScreen("date")}
             onGoToService={() => setScreen("service")}
+            workingHours={workingHours}
+            slotDurationMinutes={slotDurationMinutes}
           />
         ) : screen === "review" ? (
           <ReviewStep

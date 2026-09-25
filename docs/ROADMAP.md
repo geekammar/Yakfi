@@ -3,19 +3,23 @@
 > The plan sequence ONLY: Spec A → Spec B → Spec C. Scope detail lives in
 > `SPEC_A.md`; implementation status lives in `BUILD_STATE.md` (never
 > here). Each spec is frozen before the next begins.
-> Last updated: PROMPT-ARCH-01.
+> Last updated: DOC-NORMALIZE-V029 (DECISIONS #57).
 
 ## Spec A — Discovery Foundation + Booking Core (CURRENT)
 
 **Goal:** a pilot-ready generic engine that proves daily usefulness for one
 business at a time.
 
-**Status:** implementation COMPLETE through PROMPT-19 (all screens + the
-conversation engine slice). The operational exit criteria additionally
-require the two pending operator decisions (real WhatsApp transport
-provider, real AI/LLM provider — DECISIONS #29) and the accepted
-architecture-hardening phase (DECISIONS #30–#36) before real production
-booking.
+**Status:** implementation COMPLETE — all Spec A screens, the conversation
+engine, the P0 architecture-hardening foundations (DECISIONS #30–#36,
+implemented as #38), and the owner-facing UX surfaces released through
+**v0.29.0** (services, knowledge/FAQ authoring, appointment creation,
+reschedule, appointments/availability coherence, slot presentation). The two
+former operator decisions that gated production booking are RESOLVED and
+implemented: the WhatsApp transport provider is Meta Cloud API (DECISIONS
+#42/#46) and the AI/LLM provider is the policy-backed adapter (DECISIONS #44).
+The remaining operational exit gate is REAL PILOT OPERATION (see below), not
+code.
 
 **Exit criteria:**
 

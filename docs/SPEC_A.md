@@ -3,7 +3,8 @@
 > The complete, frozen scope of the current build. Anything not listed under
 > "Included" is out of scope. The spec sequence (A → B → C) and exit
 > criteria live in `ROADMAP.md`. Implementation status lives in
-> `BUILD_STATE.md` (never here). Last updated: PROMPT-ARCH-01.
+> `BUILD_STATE.md` (never here). Last updated: DOC-NORMALIZE-V029 — scope is
+> frozen and fully implemented through release v0.29.0.
 
 ## Scope Definition
 
@@ -43,8 +44,8 @@ collect evidence.
 - Resumable: `/onboarding` routes to the first incomplete step (completed
   accounts go straight to the dashboard); progress is server-authoritative
   on the Business record; completion re-validates all step data
-  server-side and never requires services/knowledge (those screens arrive
-  in later prompts)
+  server-side and never requires services/knowledge as wizard inputs
+  (both screens exist separately: `/services`, `/settings/knowledge`)
 - The onboarding wizard is implemented and connected with the
   invitation-based lifecycle (PROMPT-06: activation hands off through
   sign-in to the wizard; the wizard area is ADMIN-only)

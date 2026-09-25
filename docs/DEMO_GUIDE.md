@@ -93,10 +93,12 @@ IDs/phones are deterministic, so the demo state is identical every time.
 
 - The dataset is dental **because the demo business is** — the product UI copy
   stays vertical-agnostic (a salon demo would seed its own dataset).
-- WhatsApp transport is NOT live: outbound replies persist as STAFF messages
-  in the database (offline logging adapter behind `MessageTransport`,
-  DECISIONS #29); the inbound webhook is provider-neutral and token-gated. A
-  real WhatsApp provider is an operator decision.
+- WhatsApp transport is provider-neutral by construction; the **Meta Cloud
+  API adapter is the implemented, production-live provider** (DECISIONS
+  #42/#46). In THIS demo environment outbound delivery depends on the demo
+  project's `WHATSAPP_META_*` env configuration — while those are unset the
+  seam stays offline and outbound replies persist as STAFF messages in the
+  database; the inbound webhook is provider-neutral and token-gated.
 - The Customers directory (`/customers` + `/customers/[id]`) is implemented
   (PROMPT-15); customer profiles are also reachable from conversation detail
   pages.

@@ -5,14 +5,17 @@
 > context loss. Every prompt runs in a FRESH OpenCode session with NO
 > prior conversation memory — recover context through the tier model
 > below and read as FEW lines as possible. Token efficiency is a hard
-> requirement, not a preference. Last updated: PROMPT-ARCH-02.1.
+> requirement, not a preference. Last updated: DOC-NORMALIZE-V029
+> (DECISIONS #57).
 
 ## Context Tiers (the reading policy)
 
-**TIER 0 — COLD START (always, every session):**
-read `docs/CURRENT_STATE.md` + `docs/AGENT_RULES.md` (this file).
-Purpose: identify what FlowPilot is, the current strategic/architectural
-state, the hard rules, and where to continue. Nothing else by default.
+**TIER 0 — COLD START (always, every session):** read `docs/AGENT_RULES.md`
+(this file) + `docs/CURRENT_STATE.md` + `docs/DECISIONS_INDEX.md` (the
+one-line decision routing index — read it INSTEAD of the full `DECISIONS.md`).
+Purpose: identify what FlowPilot is, the current strategic/architectural state,
+the hard rules, which decisions exist, and where to continue. Nothing else by
+default.
 
 **TIER 1 — IMPLEMENTATION ROUTING (only when implementation work
 begins):** read `docs/BUILD_STATE.md` (the authoritative implementation
@@ -32,24 +35,56 @@ plus ONE canonical topic document matching the task:
 
 **TIER 2 — DECISION DEEP DIVE (only when a current decision is
 involved, an architectural conflict is found, or the topic cannot be
-resolved from Tier 0 + Tier 1):** `docs/DECISIONS.md` (append-only
-authority) plus the relevant canonical topic document.
+resolved from Tier 0 + Tier 1):** the specific `docs/DECISIONS.md` entry
+identified by `docs/DECISIONS_INDEX.md` (append-only authority) plus the
+relevant canonical topic document. Never read the whole log.
 
 **TIER 3 — HISTORICAL (never read automatically):** Git history, tags,
-and release notes — only when historical implementation detail is
-explicitly required.
+release notes, and `docs/archive/IMPLEMENTATION_HISTORY.md` (the superseded
+per-slice implementation + verification narrative) — only when historical
+implementation detail, forensics, or migration reasoning is explicitly
+required.
 
 There is NO `DOCS_INDEX.md`, NO `CORE_CONTEXT.md`, NO
 `CONTEXT_RECOVERY.md` — do not recreate them; this tier model IS the
-navigation layer. Never read all memory documents in a session.
+navigation layer. `DECISIONS_INDEX.md` is the ONE exception: a narrow
+decision-routing index re-introduced by DECISIONS #57 to keep the cold start
+cheap. Never read all memory documents in a session.
+
+## How Agents Read the Docs (the loading protocol)
+
+The objective is **minimal sufficient context, not maximal context.** Follow
+these steps in order and stop as soon as the task is actionable:
+
+- **STEP 1 — orient:** read the Tier 0 triple — `AGENT_RULES.md` +
+  `CURRENT_STATE.md` + `DECISIONS_INDEX.md`. Nothing else.
+- **STEP 2 — route to the ledger:** read `docs/BUILD_STATE.md` (the
+  `Current State` summary + `Next Step` only, not the reference tables).
+- **STEP 3 — load ONLY task-specific canonical docs:** pick at most ONE
+  canonical topic document matching the task (the Tier 1 table below).
+- **STEP 4 — go deep only on real need:** load a full `DECISIONS.md` entry,
+  deep architecture docs, or Tier 3 history ONLY if the task actually requires
+  it (a decision is being changed, documents conflict, or historical
+  comparison is needed).
+
+**NEVER (context discipline):**
+
+- ❌ Load all documentation by default, or "to be safe".
+- ❌ Read duplicate continuity snapshots or the Tier 3 archive at cold start.
+- ❌ Read historical prompts / old release narratives as current state.
+- ❌ Re-read the entire `DECISIONS.md` when `DECISIONS_INDEX.md` answers the
+  question.
+- ❌ Treat a `Last updated: PROMPT-*` marker or an old release narrative as
+  truth — the repository is the truth; a stale doc never overrides the code.
 
 ## Before Making Any Changes
 
-1. Read the Tier 0 pair above. That is the complete cold-start set.
-2. Route to Tier 1 by task; Tier 2 only on conflict/decision; Tier 3
-   only on explicit historical need.
-3. Read `docs/BUILD_STATE.md → Next Step` and do exactly that. Never
-   rebuild completed work recorded there.
+1. Read the Tier 0 triple above (`AGENT_RULES.md` + `CURRENT_STATE.md` +
+   `DECISIONS_INDEX.md`). That is the complete cold-start set.
+2. Follow the loading protocol ("How Agents Read the Docs"): Tier 1 by task;
+   Tier 2 only on conflict/decision; Tier 3 only on explicit historical need.
+3. Read `docs/BUILD_STATE.md → Current State + Next Step` and do exactly that.
+   Never rebuild completed work recorded there.
 4. If documents conflict, authority order is: latest `DECISIONS.md`
    entry → `BUILD_STATE.md` → canonical topic docs → derived
    summaries. If a conflict is unclear, escalate instead of guessing.
@@ -87,7 +122,9 @@ navigation layer. Never read all memory documents in a session.
 - ❌ Recreate duplicate documentation: no second current-state doc
   (`BUILD_STATE.md` is the only implementation ledger, `CURRENT_STATE.md`
   the only snapshot), no per-prompt reports, no competing summaries of
-  canonical files
+  canonical files, no second decision log (`DECISIONS_INDEX.md` routes the
+  ONE `DECISIONS.md`; historical narrative goes to `docs/archive/`, not a
+  new current-state doc)
 - ❌ Commit, tag, push, or run GitHub publishing operations (`pnpm ship`,
   `pnpm release`) — the human operator owns all shipping/versioning/
   release actions unless the prompt explicitly instructs otherwise

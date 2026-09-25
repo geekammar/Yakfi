@@ -2,12 +2,15 @@
 
 > Current technical architecture and dependency boundaries. Read together
 > with `SPEC_A.md` and `BUILD_STATE.md`; recent-change bridge:
-> `ARCHITECTURE_RECONCILIATION.md`. Last updated: PROMPT-CORE-03B —
-> Meta WhatsApp adapter on the CORE-03A foundation (`src/server/integrations/whatsapp/`;
-> 15/15 + 26/26; ZERO schema changes); PROMPT-CORE-02's Any-Provider Booking Options Resolver
-> (DECISIONS #32; consumes CORE-01) and the P0 hardening foundations of
-> DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS #38; schema:
-> `DATABASE.md`), and the migration chain stays a complete
+> `ARCHITECTURE_RECONCILIATION.md`. Last updated: DOC-NORMALIZE-V029 —
+> Spec A is complete through release **v0.29.0**: the Meta WhatsApp adapter
+> (CORE-03B, `src/server/integrations/whatsapp/`) is the live provider, the
+> conversation → booking seam consumes CORE-01/CORE-02, Meta Embedded Signup
+> + the runtime credential store are implemented (#49), and the owner-facing
+> UX surfaces (services, knowledge, appointment creation, reschedule,
+> day-view coherence, slot presentation #56) are released. The P0 hardening
+> foundations of DECISIONS #30–#36 remain IMPLEMENTED (record: DECISIONS
+> #38; schema: `DATABASE.md`), and the migration chain stays a complete
 > empty-database bootstrap path (DECISIONS #40).
 
 ## Stack
@@ -153,8 +156,10 @@ listBlockingByAssignees`, the read counterpart of the booking write
   path's existing `assignedUserId` scoping, with `ProviderRepository.
 listAssignmentSeams` as the ONE batched ProviderProfile.id → userId
   projection; ranking by earliest slot then the stable CORE-01 order, a
-  small 2–3 option result, explicit empty reasons, READ-ONLY. Neither
-  resolver is exposed in any UI/conversation turn yet.)
+  small 2–3 option result, explicit empty reasons, READ-ONLY. Both resolvers
+  are CONSUMED: CORE-01/CORE-02 serve the deterministic conversation →
+  booking seam (`conversation-engine.ts` → `booking-mapper.ts`) and the
+  availability layer, with zero appointment mutation from the AI path.)
 
 ## Scheduling (DECISIONS #35 — scope unchanged)
 
@@ -173,12 +178,16 @@ listAssignmentSeams` as the ONE batched ProviderProfile.id → userId
 - Provider-neutral by construction: `provider`/`externalId` are opaque
   machine keys; `status` is a Zod-validated machine key; `credentialsRef`
   stores a REFERENCE to a secret (env var / secret-store pointer / blob
-  locator) — NEVER raw credentials. No vendor is integrated; no
-  connection-management UI exists.
+  locator) — NEVER raw credentials. The vendor is Meta (WhatsApp Cloud API,
+  DECISIONS #42 — adapter in `src/server/integrations/whatsapp/`) and the
+  connection-management UI exists: `/settings/whatsapp` plus the Meta
+  Embedded Signup callback (`/whatsapp-onboarding/callback`, #49).
 - Do NOT hard-code "one Business = one WhatsApp number" as a permanent
   domain assumption, and do NOT tie Conversation Core to a specific
-  WhatsApp provider. `Business.whatsappNumber` remains the inbound
-  business mapping until a real provider decision lands.
+  WhatsApp provider. Inbound identity resolution PREFERS the provider's
+  stable id: Meta `phone_number_id` → `WhatsAppConnection.externalId` →
+  `findByExternalId` (DECISIONS #46); `Business.whatsappNumber` is the
+  retained FALLBACK mapping, not the primary key.
 - PROMPT-CORE-03A: the transport foundation's canonical seams live in
   `src/server/transport/whatsapp-transport.ts` (`NormalizedInbound
 TransportMessage` / `OutboundMessage` / `MessageTransport` /
@@ -255,12 +264,14 @@ orchestrates.**
 
 ## Authentication & Authorization Model
 
-> Locked in Prompt 09; binding decisions: `DECISIONS.md` #22–#25, #27.
-> Implementation is complete for the BUSINESS scope: invitation model,
+> Locked in Prompt 09; binding decisions: `DECISIONS.md` #22–#25, #27, #41.
+> Implementation is complete for BOTH scopes: BUSINESS (invitation model,
 > creation, acceptance, ADMIN/STAFF activation, activation UI
 > (`/invite/[token]`), role-aware sign-in handoff, onboarding handoff, and
-> STAFF invitation via team management. The Platform Operator identity /
-> platform-level authorization marker remains planned (no code).
+> STAFF invitation via team management) and PLATFORM (operator marker,
+> guards, the `(platform)` control plane, and platform owner invitations
+> `/owner-invite/[token]` — DECISIONS #41). The Founder Side UI remains
+> Spec B.
 
 **One authentication system.** Better Auth is the single authentication
 layer for ALL human users — Platform Operators, Business ADMINs, and
@@ -283,9 +294,11 @@ BUSINESS) — server-managed (Better Auth `input: false`), unreachable from
 any client input, and never inferred from `businessId = null`. Server
 primitives: `isPlatformOperator(user)` and `requirePlatformOperator()`
 (`src/server/auth/guards.ts`); Business-role guards (`requireRole`,
-`requireApiUser({role})`) refuse platform operators. No operator account is
-provisioned by any flow yet (direct-DB operator action); the Founder Side
-UI remains Spec B.
+`requireApiUser({role})`) refuse platform operators. The first operator
+identity is created by the one-time `pnpm bootstrap:operator` tool; further
+platform identities are provisioned by the platform owner invitation flow
+(`platform_invitations` → `/owner-invite/[token]` → pre-Business ADMIN,
+DECISIONS #41). The Founder Side UI remains Spec B.
 
 **Business roles remain `ADMIN` and `STAFF` only** (DECISIONS #02):
 

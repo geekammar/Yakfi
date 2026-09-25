@@ -2,7 +2,9 @@
 
 > Canonical reference for usage, cost attribution, pricing separation, and
 > the pricing hypothesis. Current-vs-deferred status is explicit.
-> Decision record: DECISIONS #36. Last updated: PROMPT-ARCH-01.
+> Decision record: DECISIONS #36. Last updated: DOC-NORMALIZE-V029 (content
+> current: metering foundation implemented; billing/pricing remain deferred
+> pending pilot evidence).
 
 ## Hard separation (binding)
 

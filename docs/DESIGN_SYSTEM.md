@@ -38,10 +38,27 @@
    until a winning vertical is chosen (hard product rule).
 10. **Booking UX direction** — the Smart Create flow is the canonical
     booking UX: العميل → الخدمة → التاريخ → الوقت → المراجعة → التأكيد
-    (6 steps); selections never reset on back-navigation; displayed times
-    come ONLY from server availability results; stale slots are cleared and
-    revalidated server-side. Appointments use the Agenda View (list by
-    day), never calendar grids (DECISIONS #01).
+    (6 steps); selections never reset on back-navigation; **a SELECTABLE
+    time comes ONLY from the server availability result** (the authority
+    returns genuinely selectable slots only, and stale slots are cleared
+    and revalidated server-side). The slot step MAY additionally render
+    the KNOWN candidate time grid (derived from the business's stored
+    working-hours week + slot granularity through the one shared grid
+    rule) and mark every candidate the authority did NOT return as
+    visibly UNAVAILABLE — muted, disabled, non-clickable, labelled
+    «غير متاح» — WITHOUT inferring a reason (never «مشغول»/Busy; a
+    future explicit unavailable-reason state is a separate domain
+    decision). Appointments use the Agenda View (list by day), never
+    calendar grids (DECISIONS #01); slot presentation per DECISIONS #56.
+11. **State is never color-only** — every status/attention signal carries a
+    text label or accessible name (e.g. the inbox attention dot carries a
+    visually-hidden «تحتاج انتباهك»); non-interactive elements use
+    `aria-disabled` and stay inert (no wasted tap, no color-only meaning).
+12. **Shared date/time primitives** — every rendered date/time goes through
+    the ONE shared `date-format` / `slot-helpers` primitives (Smart Create,
+    agenda, detail, reschedule). Date MATH stays PURE: the formatting modules
+    contain NO availability code, and availability is consulted only where a
+    capacity/state signal is actually rendered (DECISIONS #54/#55).
 
 ## Design Philosophy
 

@@ -29,14 +29,19 @@ import { useDeferredValue, useMemo, useState } from "react";
 /**
  * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
  * UNACKNOWLEDGED handoff gets a visible marker so it stands out from
- * ordinary threads. Operator-only; no AI internals are exposed.
+ * ordinary threads. Operator-only; no AI internals are exposed. The
+ * state is never conveyed by color/shape alone: a visually-hidden label
+ * carries the same meaning to assistive technology.
  */
 function AttentionDot() {
   return (
-    <span
-      aria-hidden
-      className="bg-destructive inline-block size-2 shrink-0 rounded-full"
-    />
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <span
+        aria-hidden
+        className="bg-destructive inline-block size-2 rounded-full"
+      />
+      <span className="sr-only">تحتاج انتباهك</span>
+    </span>
   );
 }
 

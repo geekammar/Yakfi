@@ -8,6 +8,7 @@
  */
 
 import type { AvailabilitySlot } from "@/features/appointments/types";
+import type { CandidateSlot } from "@/lib/scheduling/slot-grid";
 import { TIMEZONES } from "@/lib/validation";
 
 /** Business-local wall-clock times anchor on the UTC epoch date so the
@@ -50,19 +51,24 @@ function periodOf(time: string): SlotPeriodKey {
   return "evening";
 }
 
-export type SlotGroup = {
+export type SlotGroup<T extends AvailabilitySlot = AvailabilitySlot> = {
   period: SlotPeriodKey;
   label: string;
-  slots: AvailabilitySlot[];
+  slots: T[];
 };
 
 /**
  * Group server-provided slots into morning / afternoon / evening for
  * scannability. Empty groups are omitted; within a group the server's
- * chronological order is preserved untouched.
+ * chronological order is preserved untouched. Generic over the slot
+ * shape so the presentational candidate grid (a candidate + its
+ * availability flag) groups through the SAME helper without a second
+ * grouping implementation.
  */
-export function groupSlotsByPeriod(slots: AvailabilitySlot[]): SlotGroup[] {
-  const grouped = new Map<SlotPeriodKey, AvailabilitySlot[]>();
+export function groupSlotsByPeriod<T extends AvailabilitySlot>(
+  slots: T[],
+): SlotGroup<T>[] {
+  const grouped = new Map<SlotPeriodKey, T[]>();
   for (const slot of slots) {
     const period = periodOf(slot.startTime);
     const bucket = grouped.get(period);
@@ -77,6 +83,54 @@ export function groupSlotsByPeriod(slots: AvailabilitySlot[]): SlotGroup[] {
       label: SLOT_PERIOD_LABELS[period],
       slots: grouped.get(period) ?? [],
     }));
+}
+
+/**
+ * One candidate time carrying its PRESENTATIONAL availability state
+ * (DECISIONS #56): `available` is true ONLY when the authority's
+ * current result contains the candidate. An unavailable candidate is
+ * still rendered (visibly muted, disabled, non-clickable) — it is never
+ * dropped, and no reason is ever attached to it.
+ */
+export type PresentSlot = AvailabilitySlot & {
+  available: boolean;
+};
+
+/**
+ * Derive what the slot step renders as chips (DECISIONS #56), pure and
+ * unit-verified:
+ *
+ * - when the candidate grid can be derived (the business's working-hours
+ *   week + slot granularity + the authority's service duration), every
+ *   candidate is shown, flagged by its EXACT membership in the
+ *   authority's available set — selectable when returned, visibly
+ *   unavailable otherwise;
+ * - when the grid source is absent, the step honestly falls back to the
+ *   authority's selectable slots only (available slots are never hidden
+ *   because the grid could not be built, and nothing is invented);
+ * - `null` when neither exists — the step's empty state answers.
+ *
+ * The authority contract is untouched: it still returns only genuinely
+ * selectable slots, and this layer infers no reason from absence.
+ */
+export function derivePresentSlots(params: {
+  candidateGrid: CandidateSlot[] | null;
+  availableSlots: AvailabilitySlot[] | null;
+}): PresentSlot[] | null {
+  const { candidateGrid, availableSlots } = params;
+  if (candidateGrid && candidateGrid.length > 0) {
+    return candidateGrid.map((candidate) => ({
+      startTime: candidate.startTime,
+      endTime: candidate.endTime,
+      available: availableSlots
+        ? slotExistsIn(candidate, availableSlots)
+        : false,
+    }));
+  }
+  if (availableSlots && availableSlots.length > 0) {
+    return availableSlots.map((slot) => ({ ...slot, available: true }));
+  }
+  return null;
 }
 
 /**

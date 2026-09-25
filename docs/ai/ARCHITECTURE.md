@@ -189,8 +189,8 @@ builder section below):
 The context budget says how MUCH may reach the AI. The **knowledge
 visibility policy** says WHAT is eligible to reach it at all, and —
 separately — what the AI may then mention to a customer. It lives in
-`src/lib/ai-knowledge-visibility/` and is consumed by the future Context
-Builder (B-02). B-01 ships the policy only: no context aggregation, no
+`src/lib/ai-knowledge-visibility/` and is consumed by the Context Builder
+(B-02, implemented). B-01 is the policy only: no context aggregation, no
 prompt assembly, no LLM call.
 
 ### The policy boundary (two distinct questions)
@@ -297,7 +297,7 @@ content.
   (`FORBIDDEN_BY_POLICY`) — forbidden material can never even be
   constructed as a context candidate.
 
-### How B-02 consumes this (the contract the Context Builder will satisfy)
+### How B-02 consumes this (the contract the Context Builder satisfies)
 
 ```
 classifyBusinessField / classifyServiceField / classifyConversationField
@@ -313,8 +313,8 @@ isDisclosable(fact, { taskRelevant })            → "AI may mention this?"
 The one convenience entry point is `decideFact(...)`, which returns the
 enrolled fact plus its `eligible` / `disclosable` verdicts and the typed
 exclusion reason when enrollment is refused. `decideFact` performs NO
-aggregation and NO prompt assembly — those belong to B-02, which is
-deliberately NOT implemented here.
+aggregation and NO prompt assembly — those belong to B-02
+(`src/features/conversations/server/ai-context-builder/`, implemented).
 
 ### Files this policy reuses (never duplicated)
 
@@ -370,7 +370,9 @@ The builder's output carries BOTH questions, kept distinct:
 - `facts` — the **disclosure ledger**: every considered candidate with its
   `included` / `disclosable` verdicts and the typed reason when it did not
   enter. It is builder-side metadata (never prompt content, never sent to a
-  provider); a later slice (B-03) will enforce "AI may mention this" from it.
+  provider); the B-03 disclosure gate (implemented,
+  `src/features/conversations/server/ai-disclosure/`) enforces "AI may mention
+  this" from it on the generic reply path.
 
 An `INTERNAL` fact may enter context to inform reasoning yet must never be
 put in a customer reply; a `CONDITIONAL` fact is only eligible/mentionable

@@ -2,6 +2,7 @@
 
 import { searchCustomersAction } from "@/features/customers/actions/customer-actions";
 import { CustomerFormDialog } from "@/features/customers/components/customer-form-dialog";
+import { deriveCustomerFormDefaults } from "@/features/customers/customer-form-defaults";
 import type { CustomerListItem } from "@/features/customers/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
@@ -236,12 +237,16 @@ export function CustomersDirectory({
       ) : null}
 
       {/* key → the dialog remounts on every open, so it always starts
-          blank (same pattern as the services form dialog). */}
+       * from the current prefill: the name/phone the operator ALREADY
+       * typed into the search box are carried into the create form
+       * (re-validated on submit — invalid candidates are dropped, never
+       * fabricated), so a no-results search becomes one tap to add. */}
       <CustomerFormDialog
         key={dialogSession}
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={handleCreated}
+        prefill={deriveCustomerFormDefaults(query)}
       />
     </div>
   );

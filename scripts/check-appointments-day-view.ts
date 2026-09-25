@@ -55,10 +55,12 @@ async function main(): Promise<void> {
     RELATIVE_DATE_OPTIONS,
   } =
     await import("../src/features/appointments/components/smart-create/date-format");
-  const { earliestSlot, slotExistsIn } =
+  const { earliestSlot, slotExistsIn, derivePresentSlots } =
     await import("../src/features/appointments/components/smart-create/slot-helpers");
   const { getAvailability, weekdayOf } =
     await import("../src/features/appointments/server/availability-service");
+  const { generateCandidateGrid } =
+    await import("../src/lib/scheduling/slot-grid");
   const { createAppointmentRecord } =
     await import("../src/features/appointments/server/appointment-create-service");
   const { arabicCount, APPOINTMENT_NOUNS } = await import("../src/lib/arabic");
@@ -70,6 +72,13 @@ async function main(): Promise<void> {
   }
   function eq<T>(actual: T, expected: T): boolean {
     return actual === expected;
+  }
+  /** Strip `//` line comments and `/* … *​/` blocks so source-level
+   * assertions judge CODE ONLY — never a doc line quoting a word. */
+  function stripComments(source: string): string {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
   }
 
   // ─── 1. The selected day displays that day's appointments ───────────
@@ -448,6 +457,140 @@ async function main(): Promise<void> {
     withBlock.success === true &&
       eq(earliestSlot(withBlock.data.slots)?.startTime, "09:00") &&
       eq(earliestSlot([]), null),
+  );
+
+  // ─── 5.2 Slot presentation (DECISIONS #56) ──────────────────────────
+  //
+  // The authority returns ONLY genuinely selectable slots; the frontend
+  // renders the KNOWN candidate grid and derives a presentational state
+  // per candidate — selectable when returned, visibly muted + disabled
+  // when not. No reason is ever inferred from absence.
+
+  const GRID_HOURS = weekSatOnly; // 09:00–17:00 Saturday, 30-min step
+  const SAT_GRID = generateCandidateGrid({
+    workingHours: GRID_HOURS,
+    date: SAT,
+    durationMinutes: 30,
+    slotDurationMinutes: 30,
+  });
+  check(
+    "5c the candidate grid covers every start the day can contain",
+    SAT_GRID !== null &&
+      eq(SAT_GRID[0]?.startTime, "09:00") &&
+      // 09:00..16:30 inclusive (16:30 + 30 fits before 17:00) = 16
+      eq(SAT_GRID.length, 16) &&
+      eq(SAT_GRID[SAT_GRID.length - 1]?.startTime, "16:30"),
+  );
+  check(
+    "5d the candidate grid the client derives equals the authority's own",
+    openDay.success === true &&
+      eq(
+        JSON.stringify(SAT_GRID),
+        JSON.stringify(
+          generateCandidateGrid({
+            workingHours: GRID_HOURS,
+            date: SAT,
+            durationMinutes: openDay.data.serviceDurationMinutes,
+            slotDurationMinutes: 30,
+          }),
+        ),
+      ),
+  );
+
+  // The exact scenario of the confirmed decision: one blocked candidate
+  // stays VISIBLE but disabled, never dropped and never booked.
+  const presentWithBlock = derivePresentSlots({
+    candidateGrid: SAT_GRID,
+    availableSlots: withBlock.success ? withBlock.data.slots : null,
+  });
+  const blockedPresentation = presentWithBlock?.find(
+    (slot) => slot.startTime === "10:00",
+  );
+  check(
+    "5e an unavailable candidate slot stays visible (not dropped)",
+    presentWithBlock !== null &&
+      presentWithBlock.length === 16 &&
+      blockedPresentation !== undefined,
+  );
+  check(
+    "5f an unavailable candidate slot is flagged unavailable",
+    blockedPresentation?.available === false,
+  );
+  check(
+    "5g an available candidate slot is flagged selectable",
+    presentWithBlock?.some(
+      (slot) => slot.startTime === "09:00" && slot.available === true,
+    ) === true,
+  );
+  check(
+    "5h an unavailable slot carries no reason attribute (presentational state only)",
+    blockedPresentation !== undefined &&
+      !("reason" in blockedPresentation) &&
+      !("code" in blockedPresentation),
+  );
+  check(
+    "5i a fully-booked day still renders every candidate, all disabled",
+    fullDay.success === true &&
+      derivePresentSlots({
+        candidateGrid: SAT_GRID,
+        availableSlots: fullDay.data.slots,
+      })?.every((slot) => slot.available === false) === true,
+  );
+  check(
+    "5j a closed day derives no candidate grid (nothing fabricated)",
+    generateCandidateGrid({
+      workingHours: GRID_HOURS,
+      date: SUN,
+      durationMinutes: 30,
+      slotDurationMinutes: 30,
+    }) === null,
+  );
+  check(
+    "5k a missing grid source falls back to the authority's selectable slots",
+    derivePresentSlots({
+      candidateGrid: null,
+      availableSlots: withBlock.success ? withBlock.data.slots : null,
+    })?.every((slot) => slot.available === true) === true,
+  );
+  check(
+    "5l no grid input yields no chips (the empty state answers)",
+    derivePresentSlots({ candidateGrid: null, availableSlots: null }) === null,
+  );
+
+  // The slot step's own contract: ONE availability request serves the
+  // whole step, the disabled state is exposed to assistive technology
+  // through semantics + an explicit label, and no reason is ever shown.
+  // Assertions run against CODE ONLY (comments stripped) so a doc line
+  // that quotes a forbidden word for clarity cannot mask a real label.
+  const slotStepPresentationSource = stripComments(
+    await readModuleSource(
+      "../src/features/appointments/components/smart-create/slot-step.tsx",
+    ),
+  );
+  check(
+    "5m the unavailable candidate is labelled «غير متاح» and never «مشغول»",
+    slotStepPresentationSource.includes("غير متاح") &&
+      !slotStepPresentationSource.includes("مشغول") &&
+      !slotStepPresentationSource.includes("Busy") &&
+      !slotStepPresentationSource.includes("محجوز") &&
+      !slotStepPresentationSource.includes("خارج ساعات"),
+  );
+  check(
+    "5n the unavailable candidate is disabled through semantics, not color alone",
+    slotStepPresentationSource.includes("aria-disabled") &&
+      slotStepPresentationSource.includes("cursor-not-allowed") &&
+      slotStepPresentationSource.includes("line-through"),
+  );
+  check(
+    "5o the step issues ONE availability request (no per-candidate calls)",
+    slotStepPresentationSource.includes("getAvailabilityAction") &&
+      slotStepPresentationSource.includes("useQuery(") &&
+      !slotStepPresentationSource.includes("useQueries") &&
+      // the import + the single queryFn call — exactly one request path
+      eq(
+        slotStepPresentationSource.split("getAvailabilityAction").length - 1,
+        2,
+      ),
   );
 
   // ─── 6. Selected-date persistence across the wizard steps ───────────

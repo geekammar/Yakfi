@@ -3,6 +3,8 @@
 import { updateAppointmentStatus } from "@/features/appointments/actions/appointment-actions";
 import { AppointmentStatusBadge } from "@/features/appointments/components/appointment-status";
 import { ReschedulePanel } from "@/features/appointments/components/reschedule-panel";
+import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
+import { formatSlotTime } from "@/features/appointments/components/smart-create/slot-helpers";
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
 
@@ -21,34 +23,28 @@ import {
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    timeZone: "UTC",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00.000Z`));
-}
-
+/** Stored epoch-anchored time → the ONE shared business-local formatter
+ * (the value's "HH:mm" IS the business-local wall clock, so slicing and
+ * reusing the slot helper keeps every appointment surface identical). */
 function formatTime(time: string) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    timeZone: "UTC",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(time));
+  return formatSlotTime(time.slice(11, 16));
 }
 
 export function AppointmentDetail({
   initialData,
   today,
   timezone,
+  workingHours,
+  slotDurationMinutes,
 }: {
   initialData: AppointmentDetailData;
   /** Business-local "YYYY-MM-DD" today (server-derived). */
   today: string;
   /** Business timezone (server-derived) — display only. */
   timezone: string;
+  /** The candidate-grid inputs for the reschedule slot step (DECISIONS #56). */
+  workingHours?: unknown;
+  slotDurationMinutes?: number | null;
 }) {
   const [data, setData] = useState(initialData);
   const [rescheduling, setRescheduling] = useState(false);
@@ -135,7 +131,7 @@ export function AppointmentDetail({
             <Detail
               icon={CalendarClockIcon}
               label="التاريخ"
-              value={formatDate(data.date)}
+              value={formatArabicDate(data.date)}
             />
             <Detail
               icon={Clock3Icon}
@@ -237,6 +233,8 @@ export function AppointmentDetail({
               appointment={data}
               today={today}
               timezone={timezone}
+              workingHours={workingHours}
+              slotDurationMinutes={slotDurationMinutes}
               onDone={handleRescheduleDone}
               onCancel={() => {
                 setError(null);

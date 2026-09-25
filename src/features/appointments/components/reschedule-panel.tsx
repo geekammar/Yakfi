@@ -59,15 +59,24 @@ export function ReschedulePanel({
   appointment,
   today,
   timezone,
+  workingHours,
+  slotDurationMinutes,
   onDone,
   onCancel,
 }: {
   /** The appointment being rescheduled (server-resolved, tenant-scoped). */
   appointment: AppointmentDetailData;
-  /** Business-local "YYYY-MM-DD" today (server-derived). */
+  /** Business-local "YYYY-MM-DD" today (server derived). */
   today: string;
   /** Business timezone (server-derived) — display only. */
   timezone: string;
+  /**
+   * The candidate-grid inputs for the slot step (DECISIONS #56): the
+   * business's stored working-hours week + slot granularity, both
+   * server-derived and passed through untouched.
+   */
+  workingHours?: unknown;
+  slotDurationMinutes?: number | null;
   /** Called with the SERVER-persisted values after a confirmed success. */
   onDone: (updated: {
     date: string;
@@ -256,6 +265,8 @@ export function ReschedulePanel({
             onGoToDate={() => setStage("date")}
             onGoToService={() => setStage("date")}
             excludeAppointmentId={appointment.id}
+            workingHours={workingHours}
+            slotDurationMinutes={slotDurationMinutes}
           />
           {resolvedSlot ? (
             <div

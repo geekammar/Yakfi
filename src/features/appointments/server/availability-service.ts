@@ -43,6 +43,13 @@ import type {
   AvailabilityResult,
   AvailabilitySlot,
 } from "@/features/appointments/types";
+import {
+  generateCandidateSlots,
+  resolveWorkingHoursForWeekday,
+  toMinutes,
+  weekdayOfDate,
+} from "@/lib/scheduling/slot-grid";
+import type { Weekday } from "@/lib/scheduling/slot-grid";
 import type {
   AppointmentRepository,
   BusinessRepository,
@@ -54,6 +61,19 @@ import {
   serviceRepository,
 } from "@/server/repositories";
 import type { Business, UserRole } from "@/types/domain";
+
+/**
+ * The slot-grid rule is OWNED by `@/lib/scheduling/slot-grid` (the one
+ * canonical derivation) and re-exported here so the authority's existing
+ * consumers keep their imports. `weekdayOf` is the date → weekday key
+ * the working-hours week is indexed by; `generateCandidateSlots` is the
+ * pre-conflict candidate grid. The client presentational grid imports
+ * the SAME module — never a second engine.
+ */
+export {
+  generateCandidateSlots,
+  weekdayOfDate as weekdayOf,
+} from "@/lib/scheduling/slot-grid";
 
 /** Authorization context derived from the authenticated session. */
 export type AvailabilityActor = {
@@ -78,95 +98,21 @@ export const defaultAvailabilityServiceDeps: AvailabilityServiceDeps = {
   appointmentRepository,
 };
 
-/** English weekday keys, in `workingHours` JSON order. */
-const WEEK_DAYS = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"] as const;
-
-type WeekDay = (typeof WEEK_DAYS)[number];
-
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
 const SERVICE_NOT_FOUND_MESSAGE = "الخدمة غير موجودة";
 const SERVICE_INACTIVE_MESSAGE = "الخدمة غير متاحة للحجز";
 
-/** "HH:mm" → minutes since midnight. */
-function toMinutes(time: string): number {
-  const [hours = 0, minutes = 0] = time.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-/** Minutes since midnight → "HH:mm". */
-function toWallClock(minutes: number): string {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-}
-
 /**
- * Weekday key for a calendar date. A "YYYY-MM-DD" string maps to one
- * exact weekday — timezone-independent by construction, so the
- * Business timezone never changes which working-hours entry applies.
- * Exported for CORE-02 (the same business-weekday logic, never
+ * Working-hours entry for a weekday, resolved from the stored
+ * `Business.workingHours` JSON week through the ONE shared grid module
+ * (kept exported for CORE-02 — the same business-hours logic, never
  * duplicated).
- */
-export function weekdayOf(date: string): WeekDay {
-  // 1970-01-03 (epoch day 2) was a Saturday.
-  const daysSinceEpoch = Math.floor(
-    Date.parse(`${date}T00:00:00.000Z`) / 86_400_000,
-  );
-  return WEEK_DAYS[(daysSinceEpoch - 2 + 7) % 7] ?? "sat";
-}
-
-/**
- * Working-hours entry for the requested weekday. Returns null when the
- * business is closed that day or has no working-hours data yet (an
- * onboarded business always has the full week persisted; a missing
- * week is treated as closed, never as 24h availability). Exported for
- * CORE-02 (the same business-hours logic, never duplicated).
  */
 export function resolveWorkingDay(
   business: Business,
-  weekday: WeekDay,
+  weekday: Weekday,
 ): { openMinutes: number; closeMinutes: number } | null {
-  const raw = business.workingHours as unknown;
-  if (!raw || typeof raw !== "object") return null;
-  const entry = (raw as Record<string, unknown>)[weekday];
-  if (!entry || typeof entry !== "object") return null;
-  const { open, close, closed } = entry as {
-    open?: unknown;
-    close?: unknown;
-    closed?: unknown;
-  };
-  if (closed !== false) return null;
-  if (typeof open !== "string" || typeof close !== "string") return null;
-  const openMinutes = toMinutes(open);
-  const closeMinutes = toMinutes(close);
-  if (closeMinutes <= openMinutes) return null;
-  return { openMinutes, closeMinutes };
-}
-
-/**
- * Generate candidate slots inside the working interval. A candidate is
- * valid only when its complete duration fits before closing.
- */
-export function generateCandidateSlots(params: {
-  openMinutes: number;
-  closeMinutes: number;
-  durationMinutes: number;
-  slotDurationMinutes: number;
-}): AvailabilitySlot[] {
-  const { openMinutes, closeMinutes, durationMinutes } = params;
-  // The step is the Business's canonical slot granularity; never zero
-  // (schema floor is 5, but a defensive guard keeps the loop finite).
-  const step = Math.max(1, params.slotDurationMinutes);
-  const slots: AvailabilitySlot[] = [];
-  for (
-    let start = openMinutes;
-    start + durationMinutes <= closeMinutes;
-    start += step
-  ) {
-    slots.push({
-      startTime: toWallClock(start),
-      endTime: toWallClock(start + durationMinutes),
-    });
-  }
-  return slots;
+  return resolveWorkingHoursForWeekday(business.workingHours, weekday);
 }
 
 /** True when [slotStart, slotEnd) overlaps [blockStart, blockEnd). */
@@ -287,7 +233,10 @@ export async function getAvailability(
     }
   }
 
-  const workingDay = resolveWorkingDay(business, weekdayOf(parsed.data.date));
+  const workingDay = resolveWorkingDay(
+    business,
+    weekdayOfDate(parsed.data.date),
+  );
   if (!workingDay) {
     return {
       success: true,

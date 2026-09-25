@@ -35,6 +35,8 @@ export default async function AppointmentDetailPage({
       initialData={appointment}
       today={todayInTimezone(business.timezone)}
       timezone={business.timezone}
+      workingHours={business.workingHours}
+      slotDurationMinutes={business.slotDurationMinutes}
     />
   );
 }

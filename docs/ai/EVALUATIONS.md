@@ -11,8 +11,10 @@
 >
 > - One row ↔ one expectation against the deterministic classifier
 >   (`classifyCustomerMessage` / `bypassDeterministicAi`). Real provider
->   adapters are future work (DECISIONS #29); fixtures here are the cheapest
->   proof that prompt artifacts remain consistent with the typed contract.
+>   adapters are implemented and policy-backed (DECISIONS #44; see
+>   `docs/ai/PROVIDERS.md`); fixtures here remain the cheapest proof that the
+>   prompt artifacts stay consistent with the typed contract without a live
+>   LLM call.
 > - Every prompt version (`…@v1`) has at least one fixture below; a version
 >   bump requires fixture updates that keep the harness green.
 > - Harness invariants beyond these rows: provider-neutrality, structured

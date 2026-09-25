@@ -4,7 +4,11 @@
 > AFTER the PROMPT-19 conversation-engine slice, and explicitly supersedes
 > stale assumptions that older prompts and documents carried. Full binding
 > text: `DECISIONS.md` #30–#36 (implemented by #38). Current architecture:
-> `ARCHITECTURE.md`. Last updated: PROMPT-ARCH-02.
+> `ARCHITECTURE.md`. NOTE: the frontier has since moved to release
+> **v0.29.0** (B-series UX slices, Meta Embedded Signup, operator
+> attention) — this bridge covers only the #30–#36 era; for everything
+> after it, read `BUILD_STATE.md` + `DECISIONS_INDEX.md`. Last updated:
+> DOC-NORMALIZE-V029.
 
 ## What changed (accepted decisions — P0 foundations IMPLEMENTED in PROMPT-ARCH-02)
 
@@ -62,8 +66,12 @@ inbound-webhook idempotency (`inbound_message_dedupe`), the structured AI
 contract (`ai-contract.ts`) with deterministic bypass, and append-only
 usage telemetry (`usage_records`) — migration
 `20260910120000_architecture_hardening_foundation` (apply from
-desktop/CI: `pnpm db:deploy`). These foundations have NO management UI or
-consumer flows yet; both real provider integrations have since been RESOLVED
+desktop/CI: `pnpm db:deploy`). Consumer/UI status has since diverged:
+WhatsAppConnection has BOTH a management UI (`/settings/whatsapp` + Meta
+Embedded Signup, DECISIONS #47/#49) and a live provider; the ProviderProfile
+relations gained their first consumers (CORE-01 eligibility, the booking
+seam) but still have no management UI, and usage telemetry is recorded but
+not surfaced. Both real provider integrations have been RESOLVED
 and implemented — WhatsApp transport = Meta Cloud API (DECISIONS #42,
 live in production) and the AI runtime = policy-backed adapters
 (DECISIONS #44; `atria` added later) — and the Business WhatsApp connection
