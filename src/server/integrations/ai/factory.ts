@@ -18,6 +18,7 @@ import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 
 import { createAgentRouterAdapter } from "./agentrouter";
 import { createAtriaAdapter } from "./atria";
+import { createCodeCraftAdapter } from "./codecraft";
 import { createLlmConversationAi } from "./conversation-ai";
 import { createConversationControl } from "./conversation-control";
 import type { ConversationControl } from "./conversation-control";
@@ -31,6 +32,7 @@ export type AiFactoryEnvDeps = {
     openrouter?: string;
     agentrouter?: string;
     atria?: string;
+    codecraft?: string;
   };
   timeoutMs?: number;
 };
@@ -59,6 +61,15 @@ function adapterForProvider(
       getEnvVar: env.getEnvVar,
       fetchImpl: env.fetchImpl,
       endpoint: env.endpointOverrides?.atria,
+      timeoutMs: env.timeoutMs,
+    });
+  }
+  if (provider === "codecraft") {
+    return createCodeCraftAdapter({
+      model,
+      getEnvVar: env.getEnvVar,
+      fetchImpl: env.fetchImpl,
+      endpoint: env.endpointOverrides?.codecraft,
       timeoutMs: env.timeoutMs,
     });
   }

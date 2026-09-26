@@ -9,12 +9,13 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.29.1** — released and committed (`bd91e2f`, tag
-`v0.29.1`; HEAD == `origin/main`). Releases v0.20.0–v0.29.1 ship the
-AI-trust boundary (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ,
-services, appointment creation, reschedule), appointments/availability
-coherence, and Meta Embedded Signup. A **post-v0.29.1 WhatsApp E2E failure
-fix** is present in the worktree (uncommitted, DECISIONS #58 — see below).
+**Product version: v0.29.2** — released and committed (`5e70b6e`, tag `v0.29.2`;
+HEAD == `origin/main`). Releases v0.20.0–v0.29.2 ship the AI-trust boundary
+(B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ, services,
+appointment creation, reschedule), appointments/availability coherence, Meta
+Embedded Signup, and the #58 WhatsApp E2E disclosure-silence fix. The
+worktree now carries ONE uncommitted post-v0.29.2 slice: the **CodeCraft
+Discovery provider adapter (DECISIONS #59 — see below)**.
 
 ## Current State (summary)
 
@@ -29,7 +30,30 @@ credential store round-trips exactly against the local dev DB with
 `CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
 executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
 
-- **WhatsApp E2E failure fix (DECISIONS #58) — UNCOMMITTED in the worktree:**
+- **CodeCraft Discovery provider adapter (DECISIONS #59) — UNCOMMITTED in the worktree:**
+  CodeCraft API (`https://codecraftapi.com/v1`, OpenAI-compatible, Bearer)
+  added as a completely isolated provider through the EXISTING boundary only —
+  one thin adapter over the ONE shared `callOpenAiCompatible`, plus the 8-file
+  registration (allowlist, union, factory branch, label/secretRef, EMPTY
+  normalization policy, tests, probe, env docs). It replaces Atria for current
+  AI experiments WITHOUT rewriting the AI architecture; Atria is NOT deleted
+  and is NOT required for CodeCraft to function. ZERO schema/migration/prompt/
+  booking/WhatsApp/engine change. The adapter owns only endpoint + secret
+  reference + provider id + timeout. **Provider selection stays policy-backed:**
+  the operator sets `codecraft` + a model in `platform_ai_policies` via
+  `updateAiPolicy` (runtime; switching back is a policy change only). **Model
+  discovery:** no model catalog is hard-coded; `GET /v1/models` is the source of
+  truth (endpoint verified reachable — 401 unauthenticated), and the sanitized
+  `pnpm probe:codecraft` records only safe metadata, never the key, with no DB
+  write and no model-registry feature. Removal map verified: 8 files, nothing
+  else touched (`docs/ai/PROVIDERS.md` §8). **NOT a permanent strategic
+  provider choice** — provider quality/reliability remains an empirical
+  Discovery question. **Operator actions before Discovery testing:**
+  (1) put `CODECRAFT_API_KEY` in `.env.local` (server-side only, never DB/UI);
+  (2) run `pnpm probe:codecraft` to discover the account's models and confirm
+  JSON-mode + Arabic + `AiResponse` compatibility (live stages were NOT run in
+  this session — no key was present in the environment);
+  (3) set the policy's `primaryModel` to a model the probe proves available.
   forensically proven and fixed the exact runtime blocker that stopped a real
   inbound WhatsApp message from receiving any reply. A live customer message
   ("اهلا") on an AI_ACTIVE thread made the live `atria` model return a
@@ -69,12 +93,15 @@ executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
   `check:conversation-booking` 16/16, `check:eligibility` 29/29,
   `check:services` 50/50, `check:knowledge-faq` 32/32,
   `check:knowledge-visibility` 36/36, `check:ai-context-builder` 39/39,
-  `check:ai-disclosure` 32/32, `check:ai-prompts` 101/101,
+  `check:ai-disclosure` 32/32, `check:ai-prompts` 102/102,
   `check:conversation-control` 50/50, `check:operator-attention` 15/15,
   `check:policy` 13/13, `check:signup` 13/13, `check:whatsapp-transport` 27/27,
   `check:whatsapp-onboarding` 56/56, `check:meta-whatsapp` 17/17,
   `check:meta-embedded-signup` 27/27, `check:whatsapp-inbound` 13/13,
-  `check:credentials-runtime` 36/36. `pnpm verify` + `pnpm security` green at
+  `check:credentials-runtime` 36/36, `check:atria-retry` 17/17. The CodeCraft
+  slice (DECISIONS #59, uncommitted) additionally records `check:ai-provider`
+  74/74 (11 new CodeCraft checks incl. provider isolation) and
+  `check:response-normalizer` 78/78. `pnpm verify` + `pnpm security` green at
   each release. Real-browser verification NOT performed (structurally asserted
   in the harnesses).
 
@@ -200,17 +227,22 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
-1. **Release + deploy the current head** (operator): the worktree carries ONE
-   uncommitted fix — the WhatsApp E2E disclosure-silence fix (DECISIONS #58,
-   verified: focused checks green, `pnpm verify` + `pnpm security` pass, no
-   migration). Review it, then run `pnpm release`/`pnpm ship` to land v0.29.2
-   and `pnpm deploy` + `pnpm db:deploy` against production, then probe
-   `/api/health` to confirm the production version.
-2. **Onboard the first REAL pilot Business end-to-end** — operator provisions
+1. **Release + deploy the current head** (operator): the worktree carries the
+   CodeCraft Discovery provider adapter (DECISIONS #59; verified: focused
+   checks green, `pnpm verify` + `pnpm security` pass, no migration). The #58
+   WhatsApp E2E fix already shipped in v0.29.2. Review the #59 diff, then run
+   `pnpm release`/`pnpm ship` to land the next version and `pnpm deploy` +
+   `pnpm db:deploy` against production, then probe `/api/health`.
+2. **CodeCraft Discovery testing** (operator, optional): set `CODECRAFT_API_KEY`
+   in `.env.local` → `pnpm probe:codecraft` (discovers models + verifies
+   JSON/Arabic/contract compatibility) → set `codecraft` + a proven model in
+   `platform_ai_policies`. Switching back to another provider is a policy
+   change only.
+3. **Onboard the first REAL pilot Business end-to-end** — operator provisions
    the Business + invitation → ADMIN connects the WhatsApp number via Meta
    Embedded Signup at `/settings/whatsapp` → CONNECTED → live messaging →
    gather baseline/ROI evidence per `PRODUCT_STRATEGY.md`.
-3. **Only after pilot evidence justifies it:** Spec B instrumentation /
+4. **Only after pilot evidence justifies it:** Spec B instrumentation /
    economics (usage → cost → price → entitlement; `ECONOMICS.md`). Not before
    pilot evidence exists.
 

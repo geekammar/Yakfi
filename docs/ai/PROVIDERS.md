@@ -17,6 +17,7 @@ AI Provider Interface / Factory
 Selected Provider Adapter  (AiProviderAdapter)
       ├── AgentRouter adapter
       ├── Atria adapter
+      ├── CodeCraft adapter
       └── OpenRouter adapter
       ↓  AiProviderResult → AiResponse (provider-neutral)
 ```
@@ -79,15 +80,52 @@ duplicate `OUTBOUND_MESSAGE` rows, no duplicate Meta sends, no duplicate
 conversation state transitions. Any retried response still passes the
 unchanged `aiResponseSchema` through the unchanged normalization engine.
 
-## 4. Super Admin provider selection
+## 4. CodeCraft adapter (Discovery provider)
+
+- File: `src/server/integrations/ai/codecraft.ts`
+- Endpoint: `https://codecraftapi.com/v1/chat/completions` (OpenAI-compatible)
+- Secret reference: `CODECRAFT_API_KEY` (env name only — never in DB/UI/logs)
+- Timeout: 16000 ms (matches the Atria bound; revise only on observed evidence)
+- Model is policy-supplied; the adapter passes it through unchanged. Model
+  availability is discovered from the provider's own `GET /v1/models`
+  (see below) — FlowPilot hard-codes NO model catalog and the runtime policy
+  keeps storing provider + model.
+- ONE adapter invocation = ONE provider attempt; the adapter owns NO
+  conversation policy (identical contract to the other adapters, §9).
+- Normalization posture: an explicit EMPTY policy, so CodeCraft content is
+  held to the strict parser + unchanged `aiResponseSchema` alone. A bounded
+  provider rule may be added later ONLY for a proven, reproducible
+  serialization defect — never speculatively, and never by weakening the
+  shared parser.
+
+**Discovery status (binding):** CodeCraft is a **Discovery provider**, not a
+permanent strategic provider choice. It was added to replace Atria for
+current AI experiments without rewriting the AI architecture. Provider
+quality/reliability remains an **empirical Discovery question** — latency,
+JSON-mode conformance, Arabic output quality and availability are observed,
+not assumed. See `scripts/probe-codecraft.ts` (`pnpm probe:codecraft`) for
+the sanitized two-stage probe: (1) `GET /v1/models` records only safe
+metadata (model id, and when the provider exposes them context window /
+capabilities / pricing — never the key, never the whole payload, never
+written to the DB), and (2) compatibility through the REAL adapter path
+(chat completion, Arabic, JSON-object mode, `parseAiResponse`/schema
+conformance, malformed/timeout/error mapping, token usage).
+
+Isolation guarantee: the CodeCraft adapter owns only its endpoint, secret
+name, timeout and normalization posture, sharing `callOpenAiCompatible`
+for request/response/error semantics. Selecting CodeCraft changes nothing
+about Atria, OpenRouter, AgentRouter, the prompt, the engine, booking, or
+WhatsApp transport. Removal map: §8.
+
+## 5. Super Admin provider selection
 
 - Model: `PlatformAiPolicy` singleton (`platform_ai_policies`) — already carries
   `primaryProvider`/`primaryModel`, `secondaryProvider`/`secondaryModel`,
   `fallbackEnabled`, `primarySecretRef`/`secondarySecretRef`. **No schema change
   was needed to add Atria.**
 - Allowlist: `aiProviderValues` (`src/lib/validation/platform.ts`) is the single
-  validation gate — `["openrouter", "agentrouter", "atria"]`. The Zod enum
-  rejects any unlisted provider on write, and `toEffectivePolicy` re-validates the
+  validation gate — `["openrouter", "agentrouter", "atria", "codecraft"]`. The Zod
+  enum rejects any unlisted provider on write, and `toEffectivePolicy` re-validates the
   stored row before any caller trusts it (invalid row → fail-safe `null`).
 - UI: `ai-policy-form.tsx` renders primary/secondary `<Select>` dropdowns from
   `AI_PROVIDER_OPTIONS`, a model input, and the fallback checkbox. Selecting
@@ -95,11 +133,11 @@ unchanged `aiResponseSchema` through the unchanged normalization engine.
 - Policy changes are DB-backed and apply at runtime (no redeploy). Changing an API
   _key_ is an environment change and requires redeploy.
 
-## 5. Secret-reference handling
+## 6. Secret-reference handling
 
 - A credential is referenced by **name** only. `secretRefFor(provider)` maps
   `atria → ATRIA_API_KEY`, `agentrouter → AGENTROUTER_API_KEY`,
-  `openrouter → OPENROUTER_API_KEY`.
+  `openrouter → OPENROUTER_API_KEY`, `codecraft → CODECRAFT_API_KEY`.
 - The DB persists these **names**; `secretRefSchema` enforces `UPPER_SNAKE_CASE`
   so a raw key value can never be stored as config.
 - The adapter resolves the value at call time via `getEnvVar(secretRef)`; the value
@@ -107,7 +145,7 @@ unchanged `aiResponseSchema` through the unchanged normalization engine.
   and never exposed to the client. The UI shows the reference **name** only.
 - Local: `.env.local`; production: Vercel Environment Variables.
 
-## 6. Provider-neutral conversation-engine contract
+## 7. Provider-neutral conversation-engine contract
 
 The engine depends only on `ConversationAi.respond(AiRequest) → AiResponse` and
 the orchestrator's telemetry (`provider`/`model`/tokens/latency/fallback). It is
@@ -115,26 +153,52 @@ unaware of endpoints, headers, or vendor names. Provider output is re-validated 
 `parseAiResponse` (Zod) before anything is persisted; unknown keys such as
 `reasoning` are stripped at the boundary.
 
-## 7. Adding or removing a provider later
+## 8. Adding or removing a provider later
 
-Adding (Atria is the worked example):
+Adding (Atria is the worked example; CodeCraft — DECISIONS #59 — was added
+by exactly this recipe, plus one explicit EMPTY normalization policy file):
 
 1. `src/lib/validation/platform.ts` — append the id to `aiProviderValues`.
 2. `src/server/integrations/ai/types.ts` — add the id to the `AiProviderId` union.
 3. `src/server/integrations/ai/<provider>.ts` — new adapter: endpoint constant,
    `SECRET_REF`, timeout, and a factory over `callOpenAiCompatible`.
-4. `src/server/integrations/ai/factory.ts` — one branch in `adapterForProvider` +
+4. `src/server/integrations/ai/response-normalizer/policies/<provider>.ts` —
+   an explicit normalization policy (EMPTY unless a proven defect needs a rule),
+   exported from `response-normalizer/index.ts`.
+5. `src/server/integrations/ai/factory.ts` — one branch in `adapterForProvider` +
    the `endpointOverrides` key.
-5. `src/features/platform/server/provider-labels.ts` — display label +
+6. `src/features/platform/server/provider-labels.ts` — display label +
    `secretRefFor` branch.
-6. `.env.example` + `docs/ENVIRONMENT_VARIABLES.md` — document the secret name.
-7. `scripts/check-ai-provider.ts` — adapter/factory/isolation coverage.
+7. `.env.example` + `docs/ENVIRONMENT_VARIABLES.md` — document the secret name.
+8. `scripts/check-ai-provider.ts` — adapter/factory/isolation coverage.
 
 No engine, booking, WhatsApp, or Meta change is ever required. Removing a provider
 is the reverse: drop the allowlist entry and the factory branch (the adapter file
 can stay dormant). Neither operation touches the prompt boundary.
 
-## 8. Conversation Control Layer (provider-agnostic policy)
+**CodeCraft removal map (verified, CODECRAFT-DISCOVERY-PROVIDER-58).**
+Removing CodeCraft requires touching ONLY these files and NOTHING else:
+
+| #   | File                                                                                       | Change                                                             |
+| --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| 1   | `src/server/integrations/ai/codecraft.ts`                                                  | delete (adapter)                                                   |
+| 2   | `src/server/integrations/ai/response-normalizer/policies/codecraft.ts`                     | delete (EMPTY policy) + drop its `index.ts` re-export              |
+| 3   | `src/lib/validation/platform.ts`                                                           | remove `"codecraft"` from `aiProviderValues`                       |
+| 4   | `src/server/integrations/ai/types.ts`                                                      | remove `"codecraft"` from the `AiProviderId` union                 |
+| 5   | `src/server/integrations/ai/factory.ts`                                                    | drop the `codecraft` branch + `endpointOverrides` key + the import |
+| 6   | `src/features/platform/server/provider-labels.ts`                                          | drop the label + the `secretRefFor` branch                         |
+| 7   | `scripts/check-ai-provider.ts` + `scripts/probe-codecraft.ts` (+ `probe:codecraft` script) | drop the CodeCraft coverage/probe                                  |
+| 8   | `.env.example` + `docs/ENVIRONMENT_VARIABLES.md` + this section                            | drop the documented secret name                                    |
+
+Confirmed UNTOUCHED by removal: Conversation Engine, Booking, Availability,
+WhatsApp, Telegram, Prompts (`/prompts/**` + the generated artifact),
+Disclosure Policy, Human Handoff, the Database schema, and Prisma migrations
+(`platform_ai_policies.provider` is a plain `String` — CodeCraft needed NO
+migration). The platform policy row simply stops offering `codecraft`; the
+`updateAiPolicy` write path re-validates against the trimmed allowlist and
+rejects it thereafter.
+
+## 9. Conversation Control Layer (provider-agnostic policy)
 
 `src/server/integrations/ai/conversation-control/` owns the conversation-level
 policy that used to live inside the Atria adapter

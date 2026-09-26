@@ -14,7 +14,7 @@ import type {
 import type { ConversationControlOutcome } from "./conversation-control/types";
 import type { NormalizerTrace } from "./response-normalizer/types";
 
-export type AiProviderId = "openrouter" | "agentrouter" | "atria";
+export type AiProviderId = "openrouter" | "agentrouter" | "atria" | "codecraft";
 
 /** Provider call outcome taxonomy (minimum spec). */
 export type AiProviderErrorCode =

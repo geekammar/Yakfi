@@ -6,11 +6,13 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.29.1** — released and committed (`bd91e2f`, tag `v0.29.1`;
-HEAD == `origin/main`; tags through `v0.29.1`). The #56 slot-presentation
-slice shipped in this patch release. The worktree carries ONE uncommitted
-post-v0.29.1 fix: **the WhatsApp E2E disclosure-silence fix (DECISIONS #58)**
-— proven root cause of a real inbound message receiving no reply; see below.
+**Version: v0.29.2** — released and committed (`5e70b6e`, tag `v0.29.2`;
+HEAD == `origin/main`; tags through `v0.29.2`). The #58 WhatsApp E2E
+disclosure-silence fix shipped in this patch release. The worktree now carries
+ONE uncommitted post-v0.29.2 slice: **the CodeCraft Discovery provider adapter
+(DECISIONS #59)** — a completely isolated, OpenAI-compatible AI provider added
+through the existing boundary, replacing Atria for current experiments without
+rewriting the AI architecture.
 
 **Last shipped slice (v0.29.1):** the Spec A **cross-surface UX coherence +
 slot-presentation audit** (DECISIONS #56) — presentation layer only: the slot
@@ -79,17 +81,22 @@ second engine, no schema change.
 
 ## 4. What remains unverified at real-browser/production level?
 
-- **The WhatsApp E2E reply path is now FIXED and live-verified outbound
-  (DECISIONS #58, post-v0.29.1, uncommitted):** a real inbound message on an
-  AI_ACTIVE thread that the B-03 disclosure gate refuses no longer leaves the
-  customer in silence — the turn delivers the deterministic safe handoff
-  acknowledgment (real Graph send `delivered:true` proven) and still
-  escalates to NEED_HUMAN + operator attention. One external dependency
-  observed during the fix window: the live `atria` endpoint answered one
-  real conversational turn (proven: it returned the exact self-authored
-  `AMBIGUOUS` reply the fix targets) but was intermittently TIMING OUT
-  (~16s×2) on subsequent probes — a transient provider condition, not an
-  application defect.
+- **The WhatsApp E2E reply path is FIXED, live-verified outbound, and SHIPPED
+  (DECISIONS #58, v0.29.2):** a real inbound message on an AI_ACTIVE thread
+  that the B-03 disclosure gate refuses no longer leaves the customer in
+  silence — the turn delivers the deterministic safe handoff acknowledgment
+  (real Graph send `delivered:true` proven) and still escalates to NEED_HUMAN +
+  operator attention. One external dependency observed during the fix window:
+  the live `atria` endpoint answered one real conversational turn (proven: it
+  returned the exact self-authored `AMBIGUOUS` reply the fix targets) but was
+  intermittently TIMING OUT (~16s×2) on subsequent probes — a transient
+  provider condition, not an application defect.
+- **The CodeCraft live compatibility probe was NOT run in this session
+  (DECISIONS #59, uncommitted):** no `CODECRAFT_API_KEY` was present in the
+  environment, so Phases 5–7 (model discovery, JSON-mode, Arabic, contract
+  conformance) are offline-covered only. The endpoint itself is verified
+  REACHABLE (`GET /v1/models` → 401 unauthenticated, ~0.7s). The operator
+  must set the key and run `pnpm probe:codecraft` before Discovery testing.
 - Real-browser verification of the presentation-layer UX slices (#54–#56) was
   NOT performed — they are structurally asserted in offline harnesses only.
 - **Production deployment state is not live-verified in this pass.** The last
@@ -118,12 +125,17 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-1. **Operator:** deploy the v0.29.1 head (`pnpm deploy`) and probe
+1. **Operator:** deploy the v0.29.2 head (`pnpm deploy`) and probe
    `/api/health` to move production off the v0.19.0-era checkpoint; run
    `pnpm db:deploy` so migrations through
    `20260923120000_operator_attention` are applied.
-2. **Onboard the first REAL pilot Business end-to-end** (operator provisions
+2. **CodeCraft Discovery testing** (operator, optional): set
+   `CODECRAFT_API_KEY` in `.env.local` → `pnpm probe:codecraft` (discovers
+   models + verifies JSON/Arabic/contract compatibility) → set `codecraft` +
+   a proven model in `platform_ai_policies` via the platform UI. Switching
+   back is a policy change only.
+3. **Onboard the first REAL pilot Business end-to-end** (operator provisions
    Business + invitation → ADMIN connects the WhatsApp number via Meta Embedded
    Signup at `/settings/whatsapp` → CONNECTED → live messaging), then gather
    baseline/ROI evidence per `PRODUCT_STRATEGY.md`.
-3. **Only after pilot evidence:** Spec B instrumentation/economics.
+4. **Only after pilot evidence:** Spec B instrumentation/economics.

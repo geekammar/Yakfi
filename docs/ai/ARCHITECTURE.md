@@ -12,7 +12,9 @@
 > Conversation orchestrates), DECISIONS #42 (WhatsApp provider = Meta Cloud
 > API), DECISIONS #44 (runtime AI provider policy: openrouter primary /
 > agentrouter secondary, fallback enabled; `atria` added as a selectable
-> provider). The engine default is the **policy-backed** `ConversationAi`
+> provider), DECISIONS #59 (`codecraft` added as a Discovery provider,
+> isolated and independently removable — see `docs/ai/PROVIDERS.md`). The
+> engine default is the **policy-backed** `ConversationAi`
 > (`createPolicyBackedAi` in `conversation-engine.ts`), which builds the
 > real adapters from the live policy and falls back to
 > `deterministicConversationAi` only when the policy cannot be read.
@@ -62,6 +64,7 @@ AI interprets → Domain decides & executes → Conversation Engine orchestrates
     openrouter adapter           ◀── selectable via platform AI policy
     agentrouter adapter          ◀── selectable (see AGENTROUTER_KNOWN_ISSUE.md)
     atria adapter                ◀── selectable (see PROVIDERS.md)
+    codecraft adapter            ◀── selectable — Discovery (see PROVIDERS.md)
           │  contract: src/features/conversations/server/ai-contract.ts
          │  AiRequest → AiResponse  (unknown keys stripped; invariants refined)
          ▼
@@ -598,7 +601,8 @@ Policy-backed today (`createPolicyBackedAi` → real adapters; deterministic is 
 `ConversationAi` adapters (provider-neutral)
 ├─ openrouter adapter (primary when operator sets `primaryProvider: openrouter`)
 ├─ agentrouter adapter (selectable — known issue, see AGENTROUTER_KNOWN_ISSUE.md)
-└─ atria adapter (selectable — see docs/ai/PROVIDERS.md)
+├─ atria adapter (selectable — see docs/ai/PROVIDERS.md)
+├─ codecraft adapter (selectable — Discovery; see docs/ai/PROVIDERS.md)
 │
 ▼ same engine contract — no engine change
 No other layer needs to change: Domain/availability/booking/tenancy stay deterministic.

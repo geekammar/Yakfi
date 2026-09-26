@@ -51,3 +51,4 @@ export {
   ATRIA_SURPLUS_BRACE_RULE,
 } from "./policies/atria";
 export { OPENROUTER_NORMALIZATION_POLICY } from "./policies/openrouter";
+export { CODECRAFT_NORMALIZATION_POLICY } from "./policies/codecraft";

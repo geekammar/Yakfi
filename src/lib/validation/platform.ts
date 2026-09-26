@@ -14,7 +14,12 @@ import { z } from "zod";
  * shape so an actual credential can never be persisted as config.
  */
 
-export const aiProviderValues = ["openrouter", "agentrouter", "atria"] as const;
+export const aiProviderValues = [
+  "openrouter",
+  "agentrouter",
+  "atria",
+  "codecraft",
+] as const;
 
 export type AiProviderId = (typeof aiProviderValues)[number];
 

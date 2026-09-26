@@ -36,6 +36,7 @@ type OpenRouterModule =
 type AgentRouterModule =
   typeof import("../src/server/integrations/ai/agentrouter");
 type AtriaModule = typeof import("../src/server/integrations/ai/atria");
+type CodeCraftModule = typeof import("../src/server/integrations/ai/codecraft");
 type NormalizerModule =
   typeof import("../src/server/integrations/ai/response-normalizer");
 type OrchestratorModule =
@@ -124,6 +125,8 @@ async function main(): Promise<void> {
     await import("../src/server/integrations/ai/agentrouter");
   const atria: AtriaModule =
     await import("../src/server/integrations/ai/atria");
+  const codecraft: CodeCraftModule =
+    await import("../src/server/integrations/ai/codecraft");
   const normalizer: NormalizerModule =
     await import("../src/server/integrations/ai/response-normalizer");
   const orchestrator: OrchestratorModule =
@@ -151,7 +154,8 @@ async function main(): Promise<void> {
   const getEnvVar = (name: string) =>
     name === "OPENROUTER_API_KEY" ||
     name === "AGENTROUTER_API_KEY" ||
-    name === "ATRIA_API_KEY"
+    name === "ATRIA_API_KEY" ||
+    name === "CODECRAFT_API_KEY"
       ? `test-${name.toLowerCase()}-value`
       : undefined;
 
@@ -1207,7 +1211,272 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── 14aa: repair is NEVER attempted when the strict parse AND schema
+  // ── 15. CodeCraft adapter (CODECRAFT-DISCOVERY-PROVIDER-58) ────────────────
+  // Factory selects CodeCraft correctly from the effective policy.
+  {
+    const effective: import("../src/lib/validation/platform").EffectiveAiPolicy =
+      {
+        primaryProvider: "codecraft",
+        primaryModel: "probe-model",
+        secondary: null,
+      };
+    const { primary, secondary, fallbackEnabled } =
+      factory.adaptersFromEffectivePolicy(effective, {
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      });
+    check(
+      "15a المصنع يختار CodeCraft من السياسة (provider/model/secretRef)",
+      primary.providerId === "codecraft" &&
+        primary.model === "probe-model" &&
+        primary.secretRef === "CODECRAFT_API_KEY" &&
+        secondary === null &&
+        fallbackEnabled === false,
+    );
+  }
+  // Request construction: endpoint + model passthrough + auth by secret NAME
+  // + the shared response_format/temperature contract (unchanged for every
+  // provider — CodeCraft gets no special request shape).
+  {
+    const captured: {
+      url?: string;
+      auth?: string;
+      model?: string;
+      responseFormat?: string;
+      temperature?: number;
+    } = {};
+    const adapter = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        captured.url = url;
+        captured.auth =
+          (init?.headers as Record<string, string> | undefined)
+            ?.Authorization ?? undefined;
+        const body = JSON.parse(init?.body as string) as {
+          model?: string;
+          response_format?: { type?: string };
+          temperature?: number;
+        };
+        captured.model = body.model;
+        captured.responseFormat = body.response_format?.type;
+        captured.temperature = body.temperature;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "15b بناء طلب CodeCraft: endpoint الصحيح + النموذج كما هو + Bearer + العقد المشترك",
+      res.ok === true &&
+        captured.url === codecraft.CODECRAFT_ENDPOINT &&
+        captured.model === "probe-model" &&
+        typeof captured.auth === "string" &&
+        captured.auth.startsWith("Bearer ") &&
+        captured.responseFormat === "json_object" &&
+        captured.temperature === 0.2,
+    );
+  }
+  // Authentication uses the configured secret reference only; a missing key
+  // is CONFIG_ERROR without any network call.
+  {
+    const adapter = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar: (name) => (name === "CODECRAFT_API_KEY" ? "value" : undefined),
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "15c المصادقة تستخدم مرجع CODECRAFT_API_KEY فقط (قيمة سرية لا تُخزّن)",
+      res.ok === true && adapter.secretRef === "CODECRAFT_API_KEY",
+    );
+    const noKey = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar: () => undefined,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const resNoKey = await noKey.call(baseRequest);
+    check(
+      "15d مفتاح CodeCraft مفقود → CONFIG_ERROR (بلا طلب شبكة)",
+      resNoKey.ok === false &&
+        resNoKey.error.code === "CONFIG_ERROR" &&
+        resNoKey.error.retryable === false,
+    );
+  }
+  // Valid OpenAI-compatible JSON response normalizes into AiProviderSuccess
+  // through the SAME shared path (parseAiResponse + aiResponseSchema).
+  {
+    const adapter = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(
+        200,
+        openAiEnvelope(validAiResponseJson(), {
+          prompt_tokens: 20,
+          completion_tokens: 7,
+        }),
+      ),
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "15e استجابة OpenAI متوافقة تُطبَّع إلى AiResponse (intent/provider/tokens/DIRECT_PARSE)",
+      res.ok === true &&
+        res.provider === "codecraft" &&
+        res.model === "probe-model" &&
+        res.response.intent === "FAQ" &&
+        res.response.action === "reply" &&
+        res.inputTokens === 20 &&
+        res.outputTokens === 7 &&
+        res.parseMode === "DIRECT_PARSE",
+    );
+  }
+  // Invalid / empty responses map to the existing INVALID_RESPONSE taxonomy.
+  {
+    const empty = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, {
+        choices: [{ message: { content: "" } }],
+      }),
+    });
+    const resEmpty = await empty.call(baseRequest);
+    const malformed = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: (async () =>
+        new Response("not json", { status: 200 })) as unknown as typeof fetch,
+    });
+    const resMalformed = await malformed.call(baseRequest);
+    check(
+      "15f استجابة فارغة/غير صالحة من CodeCraft → INVALID_RESPONSE بلا retry",
+      resEmpty.ok === false &&
+        resEmpty.error.code === "INVALID_RESPONSE" &&
+        resMalformed.ok === false &&
+        resMalformed.error.code === "INVALID_RESPONSE",
+    );
+  }
+  // A schema-invalid but syntactically valid payload is refused — the
+  // parser is never weakened for a new provider.
+  {
+    const adapter = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(
+        200,
+        openAiEnvelope(
+          JSON.stringify({
+            intent: "NOT_AN_INTENT",
+            action: "reply",
+            content: "x",
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            handoffReason: null,
+            summary: null,
+          }),
+        ),
+      ),
+    });
+    const res = await adapter.call(baseRequest);
+    check(
+      "15g JSON صالح التركيب لكن مخالف لـ aiResponseSchema → INVALID_RESPONSE (الـ schema حاكم)",
+      res.ok === false && res.error.code === "INVALID_RESPONSE",
+    );
+  }
+  // Provider failure maps to the existing retry/fallback semantics.
+  {
+    const primary = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(500, { error: { message: "codecraft down" } }),
+    });
+    const secondary = agentrouter.createAgentRouterAdapter({
+      model: "auto",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const orch = orchestrator.createAiOrchestrator({
+      primary,
+      secondary,
+      fallbackEnabled: true,
+    });
+    const res = await orch.callWithFallback(baseRequest);
+    check(
+      "15h فشل CodeCraft Retryable (500) → التراجع للاحتياطي يعمل (دلالات موجودة)",
+      res.response !== null &&
+        res.telemetry.fallbackUsed === true &&
+        res.telemetry.finalProvider === "agentrouter",
+    );
+  }
+  // Isolation: selecting CodeCraft changes nothing about the other providers.
+  {
+    const ccAdapter = codecraft.createCodeCraftAdapter({
+      model: "probe-model",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const atriaAdapter = atria.createAtriaAdapter({
+      model: "Atria-Dawn-Preview",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const orAdapter = openrouter.createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    check(
+      "15i CodeCraft معزول عن كل مزود آخر (provider/secretRef/endpoint مختلفة)",
+      ccAdapter.providerId !== atriaAdapter.providerId &&
+        ccAdapter.providerId !== orAdapter.providerId &&
+        ccAdapter.secretRef !== atriaAdapter.secretRef &&
+        ccAdapter.secretRef !== orAdapter.secretRef &&
+        (codecraft.CODECRAFT_ENDPOINT as string) !==
+          (atria.ATRIA_ENDPOINT as string) &&
+        (codecraft.CODECRAFT_ENDPOINT as string) !==
+          (openrouter.OPENROUTER_ENDPOINT as string) &&
+        orAdapter.providerId === "openrouter" &&
+        orAdapter.secretRef === "OPENROUTER_API_KEY",
+    );
+  }
+  // The allowlist + secret mapping know CodeCraft (registration is complete).
+  {
+    const labels: typeof import("../src/features/platform/server/provider-labels") =
+      await import("../src/features/platform/server/provider-labels");
+    const validation: typeof import("../src/lib/validation/platform") =
+      await import("../src/lib/validation/platform");
+    check(
+      "15j التسجيل: allowlist + label + secretRefFor تعرف CodeCraft",
+      validation.aiProviderValues.includes("codecraft") &&
+        validation.aiProviderValues.includes("atria") &&
+        (labels.AI_PROVIDER_LABELS.codecraft as string) === "CodeCraft" &&
+        labels.secretRefFor("codecraft") === "CODECRAFT_API_KEY" &&
+        labels.secretRefFor("atria") === "ATRIA_API_KEY" &&
+        labels.secretRefFor("openrouter") === "OPENROUTER_API_KEY",
+    );
+  }
+  // The CodeCraft policy is EMPTY, so CodeCraft content is held to the strict
+  // parser + schema alone — identical to the pre-existing shared path.
+  {
+    const artifact = `{${validAiResponseJson()}`;
+    const res = await codecraft
+      .createCodeCraftAdapter({
+        model: "probe-model",
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(artifact)),
+      })
+      .call(baseRequest);
+    check(
+      "15k سياسة CodeCraft فارغة → العائق نفسه يُرفض (لا إصلاح خاص بالمزود)",
+      res.ok === false && res.error.code === "INVALID_RESPONSE",
+    );
+  }
+
   // validation already succeed (the strict parser stays first and
   // authoritative). Asserted on the engine's own trace, so the guarantee is
   // provider-neutral-by-default and needs no instrumentation hook.
@@ -1515,6 +1784,7 @@ async function main(): Promise<void> {
       "OPENROUTER_API_KEY",
       "AGENTROUTER_API_KEY",
       "ATRIA_API_KEY",
+      "CODECRAFT_API_KEY",
     ];
     const aiFiles = [
       "src/server/integrations/ai/types.ts",
@@ -1523,6 +1793,7 @@ async function main(): Promise<void> {
       "src/server/integrations/ai/openrouter.ts",
       "src/server/integrations/ai/agentrouter.ts",
       "src/server/integrations/ai/atria.ts",
+      "src/server/integrations/ai/codecraft.ts",
       "src/server/integrations/ai/orchestrator.ts",
       "src/server/integrations/ai/conversation-ai.ts",
       "src/server/integrations/ai/factory.ts",
@@ -1537,7 +1808,9 @@ async function main(): Promise<void> {
       })
       .join("\n");
     const hasProcessEnvSecret =
-      /process\.env\.(OPENROUTER|AGENTROUTER|ATRIA)_API_KEY/.test(aiSource);
+      /process\.env\.(OPENROUTER|AGENTROUTER|ATRIA|CODECRAFT)_API_KEY/.test(
+        aiSource,
+      );
     // The adapter reads via getEnvVar(secretRef) — never hard-codes a key value
     check(
       "11a المهيئات لا تكشف مفاتيح (secretRef أسماء فقط، عبر getEnvVar)",
