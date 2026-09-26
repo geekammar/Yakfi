@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.29.4",
+  "version": "0.30.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -14,6 +14,8 @@
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",
     "check:ai-context-builder": "tsx scripts/check-ai-context-builder.ts",
     "check:ai-disclosure": "tsx scripts/check-ai-disclosure.ts",
+    "check:greeting": "tsx scripts/check-greeting.ts",
+    "check:assistant-style": "tsx scripts/check-assistant-style.ts",
     "check:eligibility": "tsx scripts/check-provider-eligibility.ts",
     "check:booking-options": "tsx scripts/check-booking-options.ts",
     "check:whatsapp-transport": "tsx scripts/check-whatsapp-transport.ts",
@@ -28,6 +30,8 @@
     "check:response-normalizer": "tsx scripts/check-response-normalizer.ts",
     "check:atria-retry": "tsx scripts/check-atria-retry.ts",
     "check:conversation-control": "tsx scripts/check-conversation-control.ts",
+    "check:conversation-handoff": "tsx scripts/check-conversation-handoff.ts",
+    "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",

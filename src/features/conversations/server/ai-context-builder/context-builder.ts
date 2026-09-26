@@ -61,6 +61,7 @@ import {
   AI_KNOWLEDGE_ENTRY_LIMIT,
   AI_RECENT_MESSAGE_LIMIT,
 } from "@/features/conversations/server/ai-contract";
+import { ASSISTANT_STYLE_DIRECTIVE } from "@/features/conversations/server/assistant-style";
 import { normalizeArabicText } from "@/features/conversations/server/conversation-ai";
 import {
   FACT_EXCLUSION_REASONS,
@@ -715,6 +716,10 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     businessName: nameVerdict.included ? sources.business.name : "",
     services: includedServices,
     faqs: faqVerdict.included ? faqs : [],
+    // The resident voice (DECISIONS #62) — a phrasing directive, not
+    // knowledge: it comes from no source, carries no business facts, and
+    // the budget ledger has nothing to classify for it.
+    assistantStyle: ASSISTANT_STYLE_DIRECTIVE,
     ...(providerPreferenceIncluded
       ? { providerPreference: sources.providerPreference ?? undefined }
       : {}),

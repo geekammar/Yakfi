@@ -51,6 +51,7 @@ import type {
 import * as disclosureModule from "../src/features/conversations/server/ai-disclosure";
 import {
   DISCLOSURE_REFUSAL_REASONS,
+  KNOWLEDGE_FREE_REPLY_INTENTS,
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
 } from "../src/features/conversations/server/ai-disclosure";
@@ -239,10 +240,20 @@ async function main(): Promise<void> {
         "BOOKING",
         "CANCELLATION",
         "FAQ",
+        "GREETING",
         "HUMAN_REQUEST",
         "RESCHEDULE",
       ].sort(),
     ),
+  );
+  check(
+    "GREETING نيّة حرة من المعرفة: تُفصح عنها بلا عائلة دعم (لا حقيقة تسندها)",
+    deepEq(TASK_SUPPORT_FAMILIES["GREETING"], {
+      family: null,
+      channel: null,
+    }) &&
+      KNOWLEDGE_FREE_REPLY_INTENTS.length === 1 &&
+      KNOWLEDGE_FREE_REPLY_INTENTS[0] === "GREETING",
   );
 
   // ── 1 / 14 / 20. PUBLIC disclosure, unchanged answer, message preserved ───
@@ -853,6 +864,51 @@ async function main(): Promise<void> {
     "13d. نيّة الحجز تذهب للمسار النطاقي (نص المزود لا يُرسل — الباقي كما هو)",
     bookingHandoff.assistantAction !== undefined &&
       !bookingHandoff.sent.includes("سأحجز لك."),
+  );
+
+  // (e) GREETING (DECISIONS #61) — a knowledge-free social protocol. The
+  //     gate passes it by DECLARED INTENT, never by inspecting text: even
+  //     on an EMPTY knowledge store the turn stays AI_ACTIVE and answers
+  //     with the fixed acknowledgment (no invention, no handoff). The
+  //     engine's deterministic bypass produced it, so ZERO LLM calls were
+  //     spent and no AI_TURN usage fact exists.
+  const greeting = await runTurn({
+    text: "السلام عليكم",
+    faqs: [], // no knowledge store at all — still safe to greet
+    ai: { kind: "reply", content: "رد ترحيبي", intent: "GREETING" },
+  });
+  check(
+    "13e. GREETING تُفصح بلا معرفة مساندة — AI_REPLY + AI_ACTIVE ولا تحويل",
+    eq(greeting.assistantAction, "AI_REPLY") &&
+      eq(greeting.conversationStatus, "AI_ACTIVE") &&
+      greeting.aiMessages.length === 1 &&
+      greeting.aiCalls === 0, // deterministic bypass: no provider call
+  );
+  check(
+    "13f. ترحيب GREETING لا يدّعي البشرية ولا يخترع معلومات",
+    greeting.aiMessages.length === 1 &&
+      !/بشري|إنسان|موظف|سعر|موعد متاح|السعر/.test(greeting.aiMessages[0]!) &&
+      greeting.aiMessages[0]!.includes("أهلاً") &&
+      greeting.sent[0] === greeting.aiMessages[0],
+  );
+  // The gate made its decision from the intent alone — an UNKNOWN intent
+  // declaring a reply on the same empty store is still refused (the closed
+  // list cannot be widened by a provider).
+  const unknownIntent = enforceDisclosure({
+    response: { ...replyOf("GREETING", "رد"), intent: "FAQ" },
+    context: {
+      request: { ...faqTurn.request, faqs: [] },
+      facts: buildAiContext({
+        scope: { businessId: TENANT_A },
+        sources: makeSources("اهلا", {
+          business: businessSources({ faqs: [] }),
+        }),
+      }).facts,
+    },
+  });
+  check(
+    "13g. نيّة غير ترحيبية على مخزن فارغ تُرفض (القائمة المغلقة لا تتوسع)",
+    eq(unknownIntent.kind, "requires-human"),
   );
 
   // ── 15 / 16. jargon-free customer output + determinism ──────────────────

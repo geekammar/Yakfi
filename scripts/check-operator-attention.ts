@@ -710,6 +710,175 @@ async function main(): Promise<void> {
       ),
   );
 
+  // ── 11. DECISIONS #62 — duplicate inbound + safe payloads + navigation ────
+  // The notification path's remaining contract: a DUPLICATE inbound (the
+  // durable dedupe ledger) never reaches the attention layer; every typed
+  // notification payload is safe; the operator can reach the conversation;
+  // and the attention state is never color-only.
+  {
+    const control =
+      await import("../src/server/integrations/ai/conversation-control");
+    const { aiProviderValues } = await import("../src/lib/validation/platform");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const read = (rel: string) =>
+      fs.readFileSync(path.join(process.cwd(), rel), "utf8");
+
+    // 11a. A redelivered message is deduped BEFORE any attention write.
+    // The durable ledger answers "duplicate" for an already-processed
+    // (business, externalKey) — proven end-to-end by `check:whatsapp-inbound`
+    // (dedupe replay). What THIS check proves is the engine's half: on that
+    // answer the turn becomes a no-op with ZERO attention writes. The two
+    // turns share ONE harness; after the first completes, the ledger is
+    // switched to answer "duplicate" for the redelivery.
+    const dupHarness = buildHarness({
+      businessId: BUSINESS_A,
+      aiResponse: undefined,
+      aiFails: true,
+      resetConversation: true,
+    });
+    let ledgerAnswersDuplicate = false;
+    let dupConversationId: string | null = null;
+    const realClaim = dupHarness.deps.inboundDedupeRepository.claim.bind(
+      dupHarness.deps.inboundDedupeRepository,
+    );
+    dupHarness.deps.inboundDedupeRepository.claim = async (
+      bid: string,
+      key: string,
+    ) => {
+      if (ledgerAnswersDuplicate && dupConversationId) {
+        return {
+          status: "duplicate" as const,
+          claimId: "claim-redeliver",
+          conversationId: dupConversationId,
+          customerMessageId: "msg-redeliver",
+        };
+      }
+      const claimed = await realClaim(bid, key);
+      ledgerAnswersDuplicate = true;
+      return claimed;
+    };
+    const dupTurn = (externalId: string) =>
+      engine.receiveInboundMessage(
+        dupHarness.deps,
+        {
+          to: businesses.get(BUSINESS_A)!.whatsappNumber,
+          from: "+201234567890",
+          text: "عايز أسأل سؤال معقد",
+          receivedAt: now().toISOString(),
+          externalId,
+        },
+        undefined,
+      );
+    const firstDup = await dupTurn("msg-dedup-1");
+    if (firstDup.ok) dupConversationId = firstDup.conversationId;
+    const openAfterFirst = await inMemoryAttention.countOpen(BUSINESS_A);
+    const secondDup = await dupTurn("msg-dedup-1"); // exact redelivery
+    check(
+      "11a. الرسالة المكرّرة (دفتر التكرار) → صفر انتباه إضافي (قبل أي كتابة)",
+      isSuccess(firstDup) &&
+        firstDup.assistantAction === "AI_HANDOFF" &&
+        secondDup.ok &&
+        secondDup.duplicate === true &&
+        (await inMemoryAttention.countOpen(BUSINESS_A)) === openAfterFirst,
+    );
+
+    // 11b. ALL five notification events build SAFE payloads (the sanitized
+    // seam — check:conversation-control S3b proves one outcome payload;
+    // this proves the whole event vocabulary).
+    const events = [
+      "HUMAN_HANDOFF_REQUESTED",
+      "AI_UNAVAILABLE",
+      "AI_RETRY_EXHAUSTED",
+      "AI_QUOTA_EXHAUSTED",
+      "AI_CONFIGURATION_FAILURE",
+    ] as const;
+    const secretish = [
+      "Bearer",
+      "Authorization",
+      "sk-",
+      "api_key",
+      "DATABASE_URL",
+      "secretRef",
+    ];
+    const allSafe = events.every((event) => {
+      const payload = control.buildNotification(event, {
+        businessId: BUSINESS_A,
+        conversationId: refusedConvId ?? undefined,
+        handoffReason: "AI_REQUESTED_HANDOFF",
+        provider: aiProviderValues[0]!,
+        failureClass: "TIMEOUT",
+        retryCount: 1,
+        now: Date.now(),
+      });
+      return (
+        control.isSanitized(payload) &&
+        !secretish.some((token) =>
+          JSON.stringify(payload).toLowerCase().includes(token.toLowerCase()),
+        )
+      );
+    });
+    check(
+      "11b. كل أحداث التنبيه الخمسة آمنة (isSanitized، لا مفاتيح/ترويسات/حمعة خام)",
+      allSafe,
+    );
+
+    // 11c. The operator can REACH the conversation: the inbox row is a link
+    // and the staff takeover navigates to the detail page.
+    const inbox = read("src/features/conversations/components/inbox-list.tsx");
+    const staff = read("src/features/staff/components/staff-workspace.tsx");
+    check(
+      "11c. الوصول السريع: صف الصندوق رابط + استلام الموظف ينقل لتفاصيل المحادثة",
+      inbox.includes("`/conversations/${conversation.id}`") &&
+        staff.includes("handleTakeOver") &&
+        staff.includes("router.push(`/conversations/${id}`)"),
+    );
+
+    // 11d. Attention state is never color-only: the inbox dot carries an
+    // sr-only Arabic label, and the detail page's reason chip carries an
+    // icon + Arabic text + an accessible name — captured BEFORE the
+    // acknowledge-on-open resolve.
+    const detail = read(
+      "src/features/conversations/components/conversation-detail.tsx",
+    );
+    const queries = read(
+      "src/features/conversations/server/conversation-queries.ts",
+    );
+    check(
+      "11d. الانتباه ليس لوناً فقط: نقطة الصندوق نص مخفي + شارة السبب أيقونة ونص واسم متاح",
+      inbox.includes('className="sr-only"') &&
+        inbox.includes("تحتاج انتباهك") &&
+        detail.includes("AttentionReasonChip") &&
+        detail.includes("ATTENTION_REASON_LABELS") &&
+        detail.includes("AlertCircleIcon") &&
+        detail.includes("aria-label={`سبب انتباه المشغل:") &&
+        // formatting-robust: the line may be reflowed by the formatter
+        /const openAttention =\s*await operatorAttentionRepository\.findOpen\(/.test(
+          queries,
+        ) &&
+        /attentionReason: openAttention\?\.reason \?\? null/.test(queries),
+    );
+
+    // 11e. Structural guards on the live mechanism: the engine is the one
+    // writer, gated on a non-duplicate turn; the repository upserts on the
+    // unique conversation; the schema enforces it at the DB level.
+    const engineSrc = read(
+      "src/features/conversations/server/conversation-engine.ts",
+    );
+    const repoSrc = read(
+      "src/server/repositories/operator-attention.repository.ts",
+    );
+    const schemaSrc = read("prisma/schema.prisma");
+    check(
+      "11e. الهيكل: المحرك الكاتب الوحيد + upsert على conversationId فريد (قيد DB)",
+      /if \(result\.ok && !result\.duplicate\)/.test(engineSrc) &&
+        /attentionRepository\.open\(/.test(engineSrc) &&
+        /db\.operatorAttention\.upsert\(\{/.test(repoSrc) &&
+        /where: \{ conversationId: parsed\.conversationId \}/.test(repoSrc) &&
+        /conversationId\s+String\s+@unique/.test(schemaSrc),
+    );
+  }
+
   // ── Report ───────────────────────────────────────────────────────────────
   let failedCount = 0;
   for (const { label, pass } of checks) {

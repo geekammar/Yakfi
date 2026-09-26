@@ -154,7 +154,8 @@ build`) inherits this automatically.
 - **Request — `AiRequest` (`ai-contract.ts: aiRequestSchema`):**
   `message` (1–4096) + `conversationStatus` + `recentMessages` (≤20) +
   `businessName` + `services[]` (≤100) + `faqs[]` (≤50) +
-  optional `providerPreference` + optional `availability[]` (≤14 × ≤50 slots).
+  optional `providerPreference` + optional `availability[]` (≤14 × ≤50 slots) +
+  optional `assistantStyle` (a bounded Arabic phrasing directive — DECISIONS #62).
   Never the whole DB, never complete history.
 - **Response — `AiResponse` (`aiResponseSchema`):** `intent` (fixed family) +
   `action` (`reply` | `handoff` | `booking_handoff`) + `content` (1–4096, already
@@ -162,14 +163,40 @@ build`) inherits this automatically.
   `handoffReason` (required for `handoff`) + `summary` (required for
   `booking_handoff`). Unknown keys (provider `reasoning` / chain-of-thought)
   are **stripped** by Zod in `parseAiResponse` and never persisted downstream.
-- **Enums — code truth:** `aiIntentValues = FAQ | BOOKING | AVAILABILITY |
-RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`; `handoffReasonValues
-= HUMAN_REQUEST | SENSITIVE | NO_KNOWLEDGE | AMBIGUOUS` (`ai-contract.ts`).
+- **Enums — code truth:** `aiIntentValues = GREETING | FAQ | BOOKING |
+AVAILABILITY | RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`;
+  `handoffReasonValues = HUMAN_REQUEST | SENSITIVE | NO_KNOWLEDGE | AMBIGUOUS`
+  (`ai-contract.ts`).
+- **GREETING (DECISIONS #61) — the one knowledge-free intent:** a pure Arabic
+  social opening («السلام عليكم»، «أهلاً»، «صباح الخير»، «ازيك») is classified
+  **deterministically** in `classifyCustomerMessage` / `bypassDeterministicAi`
+  and answered with a FIXED acknowledgment that stays `AI_ACTIVE`. It crosses
+  the disclosure boundary by its declared intent (`KNOWLEDGE_FREE_REPLY_INTENTS`
+  — a closed, exhaustive list) and never by a fact the assistant was given.
+  It is `action: reply` + `intent: GREETING`, so the turn needs **no LLM call**
+  and **no `AI_TURN` usage fact**.
 - **Bypass — `bypassDeterministicAi(AiRequest)`:** returns a complete `AiResponse`
-  when the turn is decidable without any provider (today: too-short → `AMBIGUOUS`).
+  when the turn is decidable without any provider (today: a pure Arabic greeting →
+  `GREETING`, and too-short → `AMBIGUOUS`).
   The engine consults it **before** `ConversationAi.respond`, so those turns emit
   no `AI_TURN` telemetry. The bypass is part of the prompt boundary — future
   adapters inherit it.
+- **Assistant voice (DECISIONS #62) — `assistantStyle`, phrasing only:** the
+  assistant's tone/register/language/emoji/role live in ONE structured module
+  (`src/features/conversations/server/assistant-style.ts`) as validated closed-enum
+  values with a single resident default, NOT in the prompt body and NOT in a
+  per-provider prompt copy (DECISIONS #43/#48 keep prompt bodies Git-only and
+  forbid a prompt editor UI). The context builder embeds the rendered directive
+  into `AiRequest.assistantStyle`, and `buildPromptMessages` renders it into the
+  shared user-context block — exactly like `businessName` ("for phrasing only").
+  It is provider-neutral and channel-agnostic by construction (the module imports
+  no adapter, names no provider, names no channel), so swapping providers — or
+  adding a future Telegram inbound — needs **no style rewrite**. It can never
+  override disclosure or safety: the disclosure gate never reads it (its input
+  type has no style field), the closed `KNOWLEDGE_FREE_REPLY_INTENTS` list cannot
+  be widened by it, and the directive expressly forbids claiming to be human.
+  Per-business persistence (one nullable column + a nested Zod object) is a
+  deferred domain decision pending pilot evidence — **no migration, no UI today**.
 
 ## Context budget (minimal prompt context)
 
@@ -461,6 +488,7 @@ never sent.
 
   | Intent                        | Support family (ledger key)                 | Request channel                         |
   | ----------------------------- | ------------------------------------------- | --------------------------------------- |
+  | `GREETING`                    | **none — knowledge-free social protocol**   | n/a (passed by declared intent)         |
   | `FAQ`                         | `business.faqs` (PUBLIC as a whole)         | `request.faqs` non-empty                |
   | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)         | `request.availability` non-empty        |
   | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL) | **none today** ⇒ always routed to staff |

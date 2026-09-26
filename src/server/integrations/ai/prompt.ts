@@ -10,6 +10,7 @@
  * in the `.prompt` file, not here.
  */
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
+import { ASSISTANT_STYLE_DIRECTIVE } from "@/features/conversations/server/assistant-style";
 
 import { getPromptBody } from "./prompt-registry";
 
@@ -54,6 +55,10 @@ export function buildPromptMessages(
   const userContent = [
     `businessName: ${request.businessName}`,
     `conversationStatus: ${request.conversationStatus}`,
+    // DECISIONS #62 — the assistant's voice rides with the request context
+    // (phrasing only, like businessName), so every provider follows ONE
+    // style and no provider-specific prompt copy exists.
+    `assistantStyle: ${request.assistantStyle ?? ASSISTANT_STYLE_DIRECTIVE}`,
     `recentMessages:\n${recent}`,
     `services: ${services}`,
     `faqs:\n${faqs}`,

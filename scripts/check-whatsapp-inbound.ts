@@ -548,7 +548,10 @@ async function main(): Promise<void> {
   // The AI-authored content is never trusted, but the customer is not left
   // in silence: exactly one deterministic safe handoff acknowledgment is
   // persisted and delivered (DECISIONS #60 — the #58 invariant extended to
-  // the AI-failure path).
+  // the AI-failure path). NOTE: the probe must NOT be an Arabic greeting —
+  // a pure greeting is answered by the deterministic GREETING bypass BEFORE
+  // the assistant runs (DECISIONS #61), so the provider would never be
+  // called and this failure path would go unexercised.
   const failureHarness = createEngineHarness({
     ai: makeAi({ fail: true }),
     transport: noopTransport,
@@ -558,7 +561,7 @@ async function main(): Promise<void> {
     failureHarness.deps as unknown as Parameters<
       typeof engine.receiveInboundMessage
     >[0],
-    buildEngineInput("wamid.AIFAIL-1", "مرحبا"),
+    buildEngineInput("wamid.AIFAIL-1", "استفسار عام"),
     identity,
   );
   check(
@@ -621,6 +624,10 @@ async function main(): Promise<void> {
   );
 
   // ── 12. successful mocked end-to-end → exact Graph request ────────────────
+  // The probe is a non-greeting message so the turn reaches the assistant
+  // (a pure greeting is answered deterministically with no provider call,
+  // DECISIONS #61) — this test proves the AI-authored reply is the payload
+  // Graph receives.
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const succeedingFetch: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init: init ?? {} });
@@ -653,7 +660,7 @@ async function main(): Promise<void> {
     findById: async (id) => businessRows.find((row) => row.id === id) ?? null,
   });
   const payloadRaw = JSON.stringify(
-    metaPayload({ wamid: "wamid.E2E-FULL-1", text: "مرحبا" }),
+    metaPayload({ wamid: "wamid.E2E-FULL-1", text: "استفسار عام" }),
   );
   const signature = `sha256=${createHmac("sha256", APP_SECRET).update(payloadRaw).digest("hex")}`;
   const signatureOk = metaWebhook.verifyMetaSignature(
@@ -669,7 +676,7 @@ async function main(): Promise<void> {
     parsedE2e.messages[0]!.recipientExternalId,
     parsedE2e.messages[0]!.recipientProviderId,
   );
-  const e2eInput = buildEngineInput("wamid.E2E-FULL-1", "مرحبا");
+  const e2eInput = buildEngineInput("wamid.E2E-FULL-1", "استفسار عام");
   const e2eResult =
     signatureOk && e2eResolution.ok
       ? await engine.receiveInboundMessage(

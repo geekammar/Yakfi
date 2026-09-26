@@ -9,13 +9,16 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.29.3** — released and committed (`96785ec`, tag `v0.29.3`;
-HEAD == `origin/main`). Releases v0.20.0–v0.29.3 ship the AI-trust boundary
+**Product version: v0.29.4** — released and committed (`7559ead`, tag `v0.29.4`;
+HEAD == `origin/main`). Releases v0.20.0–v0.29.4 ship the AI-trust boundary
 (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ, services,
 appointment creation, reschedule), appointments/availability coherence, Meta
-Embedded Signup, the #58 disclosure-silence fix, and the CodeCraft Discovery
-provider. The worktree now carries ONE uncommitted post-v0.29.3 slice: the
-**AI-failure acknowledgment fix (DECISIONS #60 — see below)**.
+Embedded Signup, the #58 disclosure-silence fix, the CodeCraft Discovery
+provider, and the #60 AI-failure acknowledgment fix (v0.29.4). The worktree
+now carries TWO uncommitted post-v0.29.4 slices: **the shared
+conversation-layer UX (DECISIONS #61 — GREETING + verified handoff/resume)**
+and **the AI personality / operator-notification / conversation-UX slice
+(DECISIONS #62 — see below)**.
 
 ## Current State (summary)
 
@@ -30,7 +33,92 @@ credential store round-trips exactly against the local dev DB with
 `CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
 executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
 
-- **AI-failure WhatsApp acknowledgment (DECISIONS #60) — UNCOMMITTED in the worktree:**
+- **AI personality / operator notification / conversation UX (DECISIONS #62) — UNCOMMITTED in the worktree (on top of #61):**
+  the smallest evidence-backed surface for the three concerns, with ZERO
+  schema/migration/booking/availability/transport change.
+  **(A) Personality** — NEW `src/features/conversations/server/assistant-style.ts`:
+  the assistant's voice is ONE structured module of validated closed-enum values
+  over the six candidate dimensions (language / arabicStyle / tone / detail /
+  emoji / role) with a SINGLE resident default (Arabic, Egyptian-flavored MSA,
+  friendly-professional, concise, no emoji, booking-assistant) — because
+  DECISIONS #43/#48 forbid a prompt editor UI and lock prompt bodies to Git,
+  and no pilot evidence yet picks a per-business voice. It reaches the assistant
+  as REQUEST CONTEXT, never as a prompt body: `renderAssistantStyleDirective()`
+  is embedded by the B-02 builder into the NEW optional `AiRequest.assistantStyle`
+  field (parallel to `businessName`, "phrasing only") and rendered by
+  `buildPromptMessages` into the shared user-context block. Provider- and
+  channel-neutral by construction (the module imports no adapter and names no
+  provider or channel), so a provider swap or a future Telegram channel needs
+  NO style rewrite. **It can never override disclosure/safety/authority:** the
+  disclosure gate never reads it (no import, no field in its input type — so the
+  closed `KNOWLEDGE_FREE_REPLY_INTENTS` list cannot be widened by a style, proven
+  behaviorally too), and the directive expressly forbids claiming to be human.
+  The deterministic voice (`REPLIES`) is asserted to CONFORM to the style
+  (Arabic-only, no emoji, concise, greeting self-identifies) rather than moved —
+  determinism (#61) is untouched. **Persistence deliberately NOT added** (one
+  nullable column + nested Zod object — a domain decision deferred to pilot
+  evidence; NO migration, NO UI).
+  **(B) Operator attention — audited correct; one genuine gap closed.** All 8
+  required properties verified (single engine choke point; idempotent via the
+  unique-conversationId `upsert`; duplicate inbound stopped by the durable
+  dedupe ledger BEFORE any attention write; all 5 notification payloads safe;
+  one-link operator reach; mobile usable; attention never color-only). The ONE
+  gap: opening a flagged conversation did not show WHY (only the generic status
+  badge; the alert was acknowledged server-side before render). FIXED:
+  `getConversationDetail` reads the open attention `reason` BEFORE resolving it
+  and returns it as `attentionReason`; the detail header renders a new
+  `AttentionReasonChip` (icon + the existing operational Arabic
+  `ATTENTION_REASON_LABELS` + a full accessible name) next to the status badge —
+  present only on the first load of an unacknowledged handoff. NO second
+  notification architecture: the typed `NotificationSink` stays a documented
+  in-memory port; the live mechanism is still the ONE `operator_attentions` row.
+  **(C) Conversation UX — audited.** The previously-observed identity issue is
+  ALREADY SOLVED structurally: the detail screen is a fixed-height panel whose
+  message log is the only scroll container, so the header (customer `<h1>` +
+  `dir="ltr"` phone + status badge + reason chip + actions) stays pinned while a
+  long thread scrolls — NO sticky UI was added (the prompt warned it could
+  conflict with the mobile shell + safe-area). Two small gaps closed: the
+  operator's primary actions were 32px → now `min-h-11` (44px) on mobile only
+  (desktop compact height preserved via `md:` resets; no shared-primitive
+  change), and the "جارٍ الإرسال…" indicator was not announced → now
+  `role="status"`. Verified clean and unchanged: RTL (logical properties only),
+  360px layout (`dvh`-sized panel fits the mobile shell), loading/empty/error
+  states, keyboard access. **(D) Naturalness** — no code change; already
+  delivered by #61 + the new directive; the assistant never fakes being human.
+  **(E) Intent taxonomy** — unchanged: exactly the 8 documented intents;
+  SMALL_TALK/THANKS/GOODBYE/CHITCHAT/CONFIRMATION stay documented future
+  observations. **Channel impact:** the personality and the notification
+  behavior are BOTH shared/reusable by a future Telegram (or any) channel.
+  Guards: NEW `check:assistant-style` 27/27, NEW `check:conversation-ux` 18/18,
+  `check:operator-attention` extended 15 → 20/20.
+
+- **Shared conversation-layer UX — GREETING + verified handoff/resume (DECISIONS #61) — UNCOMMITTED in the worktree:**
+  the ONE new intent `GREETING` is answered deterministically in the shared
+  `classifyCustomerMessage` / `bypassDeterministicAi` seam, so a pure Arabic
+  social opening («السلام عليكم» / «أهلاً» / «صباح الخير» / «ازيك») spends
+  ZERO LLM calls and stays `AI_ACTIVE` (the engine consults the bypass BEFORE
+  the assistant). It crosses the B-03 disclosure boundary by DECLARED INTENT
+  only — `KNOWLEDGE_FREE_REPLY_INTENTS` is a closed single-member list, so a
+  greeting needs no backing fact, and the gate still never inspects text.
+  Purity is structural: any booking/availability/cancellation/reschedule/human/
+  sensitive word, or a question mark, disqualifies the greeting reading, so a
+  real intent is never swallowed («السلام عليكم، عايز أحجز موعد» → BOOKING).
+  The handoff/resume half deliberately changed NOTHING functional: the explicit
+  Resume AI control ALREADY EXISTED as `transitionConversation`'s `RETURN_TO_AI`
+  transition (→ `AI_ACTIVE` + `assignedUserId: null` + attention resolved) wired
+  to the operator UI button «إعادة للمساعد»; it was VERIFIED end-to-end and
+  guarded against drift, not recreated. The human-ownership invariant STANDS: a
+  message on a NEED_HUMAN thread is `DEFERRED_TO_STAFF` with zero provider calls
+  until the operator explicitly resumes the AI. Preserved byte-for-byte:
+  `aiResponseSchema` / `parseAiResponse`, the disclosure gate's fail-closed
+  rules (the closed list cannot be widened by a provider), booking/availability
+  authority, tenant isolation, idempotency, provider neutrality, and the
+  AI/domain separation. Only the intent enum gained one value; the prompt
+  artifact was re-generated (sha256 updated) so a live provider can also emit
+  `GREETING`. NO migration. Guard: NEW `check:greeting` 57/57, NEW
+  `check:conversation-handoff` 21/21, extended `check:ai-disclosure` 36/36.
+
+- **AI-failure WhatsApp acknowledgment (DECISIONS #60) — SHIPPED in v0.29.4:**
   live forensics against the production Neon DB proved the real failure
   boundary after the CodeCraft policy switch. On thread `5b06bb77…` (Business
   «مركز أفنان», `Business.faqs` EMPTY), a real inbound produced an `AI_TURN`
@@ -120,17 +208,28 @@ probe:codecraft` (3 runs) → `GET /v1/models` 200 with the exact model
   `check:conversation-booking` 16/16, `check:eligibility` 29/29,
   `check:services` 50/50, `check:knowledge-faq` 32/32,
   `check:knowledge-visibility` 36/36, `check:ai-context-builder` 39/39,
-  `check:ai-disclosure` 32/32, `check:ai-prompts` 102/102,
-  `check:conversation-control` 50/50, `check:operator-attention` 15/15,
+  `check:ai-disclosure` 36/36, `check:ai-prompts` 102/102,
+  `check:conversation-control` 50/50, `check:conversation-handoff` 21/21,
+  `check:conversation-ux` 18/18, `check:assistant-style` 27/27,
+  `check:greeting` 57/57, `check:operator-attention` 20/20 (extended by #62
+  with the duplicate-inbound / safe-payload / navigation / never-color-only /
+  structural-choke-point guards),
   `check:policy` 13/13, `check:signup` 13/13, `check:whatsapp-transport` 27/27,
   `check:whatsapp-onboarding` 56/56, `check:meta-whatsapp` 17/17,
   `check:meta-embedded-signup` 27/27, `check:whatsapp-inbound` 13/13,
   `check:credentials-runtime` 36/36, `check:atria-retry` 17/17. The CodeCraft
   slice (DECISIONS #59, shipped v0.29.3) additionally records
   `check:ai-provider` 74/74 (11 CodeCraft checks incl. provider isolation) and
-  `check:response-normalizer` 78/78. The #60 slice (uncommitted) re-records
-  `check:ai-disclosure` 32/32 (13a updated) and `check:whatsapp-inbound` 13/13
-  (test 10 updated) to assert the new acknowledgment-on-failure contract.
+  `check:response-normalizer` 78/78. The #60 slice (shipped v0.29.4) re-records
+  `check:ai-disclosure` (13a updated) and `check:whatsapp-inbound` 13/13
+  (test 10 updated) to assert the new acknowledgment-on-failure contract. The
+  #61 slice (uncommitted) extends `check:ai-disclosure` to 36/36 (GREETING
+  discloses by declared intent; the closed list cannot be widened by a
+  provider), re-probes two `check:whatsapp-inbound` tests that used a
+  greeting as their engine probe (a greeting is now answered before the
+  assistant runs, so the probe must be a non-greeting to still exercise the
+  AI-success / AI-failure paths — 13/13), and adds the two NEW focused
+  checks above.
   `pnpm verify` + `pnpm security` green at each release. Real-browser
   verification NOT performed (structurally asserted in the harnesses).
 
@@ -173,7 +272,8 @@ Condensed ledger; full per-slice record in
 - Unassigned appointments block the whole business day
   (staff-assignment-aware availability is a later decision).
 - The AI assistant's deterministic path avoids LLM calls when safely possible;
-  phrasings outside the keyword/FAQ vocabulary land on NEED_HUMAN.
+  Arabic greetings are now covered by it (DECISIONS #61); phrasings outside the
+  keyword/FAQ vocabulary still land on NEED_HUMAN.
 - The Branch/ProviderProfile/usage foundations have partial management UI only
   (`/settings/whatsapp` covers WhatsAppConnection); usage telemetry is recorded
   but not surfaced; `estimatedCostMicros` is never computed by the codebase.
@@ -235,11 +335,13 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Unresolved User Actions (not code)
 
-1. **Operator:** review the uncommitted **#60** AI-failure acknowledgment fix
-   (the only functional change in the tree — one engine branch + two updated
-   harness assertions), then release it as the next patch
-   (`pnpm release`/`pnpm ship`) and deploy (see below). The #59 CodeCraft
-   slice and the #58 disclosure fix already shipped as v0.29.3 / v0.29.2.
+1. **Operator:** review the uncommitted **#61** shared conversation-layer UX
+   slice (GREETING intent + verified handoff/resume — the only functional
+   changes are the deterministic greeting branch in `conversation-ai.ts`, the
+   closed `KNOWLEDGE_FREE_REPLY_INTENTS` list in the disclosure gate, one enum
+   value, and the re-generated prompt artifact), then release it as the next
+   patch (`pnpm release`/`pnpm ship`) and deploy (see below). The #60
+   AI-failure acknowledgment fix already shipped as v0.29.4.
 2. **Operator:** deploy the released head to production (`pnpm deploy`) and
    probe `/api/health` to confirm the production version; run `pnpm db:deploy`
    so migrations through `20260923120000_operator_attention` are applied.
@@ -258,11 +360,16 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 ## Next Step
 
 1. **Release + deploy the current head** (operator): the worktree carries the
-   AI-failure acknowledgment fix (DECISIONS #60; verified: focused checks
-   green, `pnpm verify` passes, no migration). The CodeCraft Discovery
-   provider (#59) already shipped in v0.29.3. Review the #60 diff, then run
-   `pnpm release`/`pnpm ship` to land the next version and `pnpm deploy` +
-   `pnpm db:deploy` against production, then probe `/api/health`.
+   shared conversation-layer UX slice (DECISIONS #61; verified: focused checks
+   green — `check:greeting` 57/57, `check:conversation-handoff` 21/21,
+   `check:ai-disclosure` 36/36) AND the personality / operator-notification /
+   conversation-UX slice (DECISIONS #62; verified: `check:assistant-style`
+   27/27, `check:conversation-ux` 18/18, `check:operator-attention` 20/20 —
+   `pnpm verify` passes, no migration in either). Review the #61 + #62 diffs,
+   then run `pnpm release`/`pnpm ship` to land the next version and
+   `pnpm deploy` + `pnpm db:deploy` against production, then probe
+   `/api/health`. The #60 AI-failure acknowledgment fix already shipped in
+   v0.29.4.
 2. **Fresh live WhatsApp E2E** (operator, REQUIRED): send one real inbound
    message on an AI_ACTIVE thread with the policy still on `codecraft` /
    `deepseek-v4-flash-0731` and confirm the customer receives a reply even if

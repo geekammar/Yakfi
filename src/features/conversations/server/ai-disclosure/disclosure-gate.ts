@@ -144,9 +144,40 @@ export type TaskSupportFamily = {
  *   intents. They reach the customer only as handoff actions (the fallback
  *   channel), never as self-authored replies.
  */
+/**
+ * Intents whose self-authored reply is a KNOWLEDGE-FREE social protocol —
+ * a closed, exhaustive list. A reply declaring one of these needs no
+ * backing fact because it can disclose nothing: the phrasing is a fixed
+ * acknowledgment that never names a service, price, slot, policy, provider,
+ * or business fact. The gate passes it by the DECLARED INTENT ONLY — it
+ * still never inspects, scores, or rewrites the reply text.
+ *
+ * `GREETING` (DECISIONS #61) is the single member. The deterministic
+ * classifier emits it only for a message that carries NO other intent
+ * vocabulary (`isPureGreeting`), so a booking/FAQ/human-request turn can
+ * never be answered by it. Extending this list is a disclosure-policy
+ * decision, not an implementation detail.
+ */
+export const KNOWLEDGE_FREE_REPLY_INTENTS: ReadonlyArray<AiIntent> = [
+  "GREETING",
+];
+
+function isKnowledgeFreeReply(response: AiResponse): boolean {
+  return (
+    response.action === "reply" &&
+    KNOWLEDGE_FREE_REPLY_INTENTS.includes(response.intent)
+  );
+}
+
 export const TASK_SUPPORT_FAMILIES: Readonly<
   Record<AiIntent, TaskSupportFamily>
 > = {
+  /**
+   * A greeting discloses no knowledge by construction (a fixed social
+   * acknowledgment), so it crosses the boundary on its declared intent —
+   * never on a fact the assistant was given.
+   */
+  GREETING: { family: null, channel: null },
   FAQ: { family: "business.faqs", channel: "faqs" },
   BOOKING: { family: "domain.availability", channel: "availability" },
   AVAILABILITY: { family: "domain.availability", channel: "availability" },
@@ -235,6 +266,14 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
 
   // ── A self-authored reply must be backed by disclosable knowledge.
   const support = TASK_SUPPORT_FAMILIES[response.intent];
+
+  // The one knowledge-free social protocol (DECISIONS #61): a GREETING
+  // reply is a fixed acknowledgment that can disclose nothing, so it
+  // needs no backing fact. Everything else still requires a ledger fact
+  // or it is routed to a human.
+  if (isKnowledgeFreeReply(response)) {
+    return { kind: "disclosed", response, support: [] };
+  }
 
   // A routing intent declaring a `reply` discloses nothing it may stand
   // behind — there is no knowledge channel for it. Hand it to a human.

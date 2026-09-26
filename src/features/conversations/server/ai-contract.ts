@@ -25,6 +25,7 @@ import { z } from "zod";
 // ─── Intent family (no invented intents) ─────────────────────────────────────
 
 export const aiIntentValues = [
+  "GREETING",
   "FAQ",
   "BOOKING",
   "AVAILABILITY",
@@ -166,6 +167,15 @@ export const aiRequestSchema = z.object({
   faqs: z.array(knowledgeEntrySchema).max(AI_KNOWLEDGE_ENTRY_LIMIT).default([]),
   /** Previously captured provider preference, when one exists. */
   providerPreference: z.string().trim().min(1).max(120).nullish(),
+  /**
+   * The assistant's VOICE — a bounded Arabic phrasing directive rendered by
+   * `renderAssistantStyleDirective` (DECISIONS #62). PHRASING ONLY, exactly
+   * like `businessName`: it carries no knowledge, no slots, and no prices,
+   * and it can never relax the disclosure gate (the gate never reads it).
+   * Optional so a minimal request still validates; the context builder
+   * always embeds the resident style.
+   */
+  assistantStyle: z.string().trim().min(1).max(400).optional(),
   /** Domain-computed availability results, when already resolved. */
   availability: z.array(availabilityResultSchema).max(14).nullish(),
 });

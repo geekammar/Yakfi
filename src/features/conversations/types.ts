@@ -1,3 +1,4 @@
+import type { AttentionReason } from "@/lib/validation";
 import type {
   AppointmentStatus,
   ConversationStatus,
@@ -33,6 +34,15 @@ export type ConversationDetailData = {
   id: string;
   status: ConversationStatus;
   aiSummary: string;
+  /**
+   * WHY the thread needs the operator (DECISIONS #62): the attention reason
+   * captured at the moment the thread is opened. Present only on the FIRST
+   * load of an unacknowledged handoff — opening the thread acknowledges it,
+   * so a reload legitimately shows `null`. The NEED_HUMAN status badge stays
+   * regardless; this is the "understand why" affordance, rendered as icon +
+   * Arabic text (never color-only).
+   */
+  attentionReason: AttentionReason | null;
   customer: {
     id: string;
     name: string;

@@ -223,6 +223,55 @@ const AVAILABILITY_PHRASES = [
   "متى ممكن",
 ];
 
+// GREETING (DECISIONS #61) — Arabic social openings. A greeting is the
+// one conversational turn that is safely answerable WITHOUT any business
+// knowledge: the reply acknowledges the customer and invites them to
+// continue. It never names a service, price, slot, policy, or fact, so it
+// crosses the disclosure boundary as a declared knowledge-free social
+// protocol (the gate passes it by intent, never by inspecting text).
+const GREETING_WORDS = [
+  "اهلا",
+  "أهلا",
+  "مرحبا",
+  "أهلاً",
+  "السلام",
+  "سلام",
+  "صباح",
+  "مساء",
+  "هاي",
+  "هلا",
+  "ازيك",
+  "اخبارك",
+  "كيفك",
+  "كيف حالك",
+  "عامل",
+];
+
+const GREETING_PHRASES = [
+  "السلام عليكم",
+  "سلام عليكم",
+  "صباح الخير",
+  "مساء الخير",
+  "صباح النور",
+  "مساء النور",
+  "اهلا وسهلا",
+  "أهلاً وسهلاً",
+  "ازيك يا",
+  "عامل ايه",
+  "عامل إيه",
+  "اخبارك ايه",
+  "كيف حالك",
+  "كيفك يا",
+];
+
+/**
+ * Egyptian/MSA greetings that ALSO carry a closed question (صباح/مساء +
+ * الخير are the canonical forms). A bare "صباح" or "مساء" alone is NOT a
+ * greeting — it is the start of a time-of-day question the classifier must
+ * not swallow ("صباح الخير" yes, "صباح" alone no).
+ */
+const GREETING_TIME_WORDS = ["صباح", "مساء"];
+
 /** Small Egyptian/MSA stopword set (normalized) for FAQ token scoring. */
 const STOPWORDS = new Set(
   [
@@ -291,6 +340,9 @@ const BOOKING_WORDS_N = tokenizedKeywords(BOOKING_WORDS);
 const BOOKING_PHRASES_N = BOOKING_PHRASES.map(normalizeArabicText);
 const AVAILABILITY_WORDS_N = tokenizedKeywords(AVAILABILITY_WORDS);
 const AVAILABILITY_PHRASES_N = AVAILABILITY_PHRASES.map(normalizeArabicText);
+const GREETING_WORDS_N = tokenizedKeywords(GREETING_WORDS);
+const GREETING_PHRASES_N = GREETING_PHRASES.map(normalizeArabicText);
+const GREETING_TIME_WORDS_N = tokenizedKeywords(GREETING_TIME_WORDS);
 
 // ─── Reply / summary templates (assistant voice, vertical-agnostic) ─────────
 
@@ -306,6 +358,14 @@ const REPLIES = {
   NO_KNOWLEDGE: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
   AMBIGUOUS:
     "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+  /**
+   * A knowledge-free social protocol (DECISIONS #61): acknowledges the
+   * customer, states that the assistant is ready, and invites them to
+   * continue. It never claims to be human, never invents business
+   * information, and stays AI_ACTIVE so the next message is handled by
+   * the normal classification path.
+   */
+  GREETING: "أهلاً بك!  أنا مساعدك للحجز والمواعيد — كيف يمكنني مساعدتك اليوم؟",
 } as const;
 
 const BOOKING_SUMMARIES = {
@@ -316,6 +376,62 @@ const BOOKING_SUMMARIES = {
 } as const;
 
 // ─── FAQ matching ────────────────────────────────────────────────────────────
+
+/**
+ * A whole message is a GREETING only when it carries no other intent
+ * vocabulary (DECISIONS #61). This is what keeps the greeting path from
+ * swallowing real turns: "عايز أحجز" and "كم سعر التنظيف" contain no
+ * greeting token at all (verified below), while "السلام عليكم، عايز أحجز"
+ * keeps its booking intent because a booking word is present.
+ *
+ * A bare time-of-day noun (صباح / مساء) is deliberately NOT a greeting —
+ * the canonical forms are the phrases (صباح الخير / مساء الخير), so a
+ * one-word "صباح" falls through to the normal path rather than being
+ * answered as a greeting.
+ */
+function isPureGreeting(
+  message: string,
+  normalized: string,
+  tokens: string[],
+): boolean {
+  const hasGreetingPhrase = GREETING_PHRASES_N.some((phrase) =>
+    normalized.includes(phrase),
+  );
+  const hasGreetingWord = hasWord(tokens, GREETING_WORDS_N);
+  if (!hasGreetingPhrase && !hasGreetingWord) return false;
+  // The greeting vocabulary is the ONLY intent vocabulary in the message.
+  // Any booking / availability / cancellation / reschedule / human /
+  // sensitive word disqualifies the pure-greeting reading.
+  if (
+    hasWord(tokens, BOOKING_WORDS_N) ||
+    hasPhrase(normalized, BOOKING_PHRASES_N) ||
+    hasWord(tokens, AVAILABILITY_WORDS_N) ||
+    hasPhrase(normalized, AVAILABILITY_PHRASES_N) ||
+    hasWord(tokens, CANCELLATION_WORDS_N) ||
+    hasPhrase(normalized, CANCELLATION_PHRASES_N) ||
+    hasWord(tokens, RESCHEDULE_MUTATION_N) ||
+    hasPhrase(normalized, RESCHEDULE_PHRASES_N) ||
+    hasWord(tokens, HUMAN_WORDS_N) ||
+    hasPhrase(normalized, HUMAN_PHRASES_N) ||
+    hasWord(tokens, SENSITIVE_WORDS_N) ||
+    hasPhrase(normalized, SENSITIVE_PHRASES_N)
+  ) {
+    return false;
+  }
+  // A question mark means the turn is asking something, not opening a
+  // conversation — never answer it as a greeting. (The normalized form
+  // strips punctuation, so the RAW message is the only reliable signal.)
+  if (message.includes("؟") || message.includes("?")) return false;
+  // A lone time-of-day noun is not a greeting on its own.
+  if (
+    !hasGreetingPhrase &&
+    tokens.length === 1 &&
+    GREETING_TIME_WORDS_N.includes(tokens[0]!)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /** Distinctive-token overlap score between a message and an FAQ question. */
 function faqMatchScore(
@@ -396,6 +512,24 @@ export function classifyCustomerMessage(
       content: REPLIES.AMBIGUOUS,
       extraction: emptyAiExtraction,
       handoffReason: "AMBIGUOUS",
+      summary: null,
+    };
+  }
+
+  // GREETING (DECISIONS #61) — a pure social opening is answered
+  // deterministically and stays AI_ACTIVE. It must run AFTER the safety
+  // intents (an explicit human request or a sensitive message is never
+  // swallowed by a greeting) and BEFORE booking/FAQ: a real booking or
+  // knowledge turn carries its own keywords and does not match a pure
+  // greeting (see isPureGreeting — a message with any other intent
+  // vocabulary is not a greeting). This branch never spends an LLM call.
+  if (isPureGreeting(message, normalized, tokens)) {
+    return {
+      action: "reply",
+      intent: "GREETING",
+      content: REPLIES.GREETING,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: null,
     };
   }
@@ -538,8 +672,13 @@ export function classifyCustomerMessage(
  * COMPLETE structured response when the turn is safely decidable
  * without any AI provider call, else null. The engine consults this
  * BEFORE calling the assistant, so deterministic turns never spend an
- * LLM call. Currently covers the one case that is provider-independent
- * by nature: a message too short to understand (→ ambiguous handoff).
+ * LLM call. Covers two provider-independent cases:
+ *  - a pure Arabic social opening (→ GREETING reply, DECISIONS #61),
+ *  - a message too short to understand (→ ambiguous handoff).
+ *
+ * Both are classified from the request's own text through the shared
+ * `classifyCustomerMessage` classifier, so the deterministic path and
+ * the provider path can never diverge on the same message.
  */
 export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
   const normalized = normalizeArabicText(request.message);
@@ -550,6 +689,17 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
       content: REPLIES.AMBIGUOUS,
       extraction: emptyAiExtraction,
       handoffReason: "AMBIGUOUS",
+      summary: null,
+    };
+  }
+  const tokens = tokenize(request.message);
+  if (isPureGreeting(request.message, normalized, tokens)) {
+    return {
+      action: "reply",
+      intent: "GREETING",
+      content: REPLIES.GREETING,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: null,
     };
   }

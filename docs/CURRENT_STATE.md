@@ -6,15 +6,26 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.29.3** — released and committed (`96785ec`, tag `v0.29.3`;
-HEAD == `origin/main`; tags through `v0.29.3`). The #58 WhatsApp E2E
+**Version: v0.29.4** — released and committed (`7559ead`, tag `v0.29.4`;
+HEAD == `origin/main`; tags through `v0.29.4`). The #58 WhatsApp E2E
 disclosure-silence fix shipped in v0.29.2; the CodeCraft Discovery provider
-adapter (DECISIONS #59) shipped in v0.29.3. The worktree now carries ONE
-uncommitted post-v0.29.3 slice: **the AI-failure acknowledgment fix
-(DECISIONS #60)** — a real WhatsApp turn whose AI provider fails no longer
-leaves the customer in silence; the engine delivers the same deterministic
-safe handoff acknowledgment #58 introduced, still escalating to NEED_HUMAN +
-operator attention.
+adapter (DECISIONS #59) shipped in v0.29.3; the #60 AI-failure
+acknowledgment fix shipped in v0.29.4. The worktree now carries TWO
+uncommitted post-v0.29.4 slices: **the shared conversation-layer UX
+(DECISIONS #61)** and **the AI personality / operator-notification /
+conversation-UX slice (DECISIONS #62)**. #62's smallest-surface findings: the
+assistant's voice is now ONE structured provider-neutral/channel-agnostic
+module carried as request context (no prompt editor, no persistence, no
+migration — per-business style is deferred to pilot evidence); the
+operator-attention path was audited correct on all 8 required properties and
+closed for its one genuine gap (opening a flagged conversation now shows WHY
+— an icon + Arabic reason chip with an accessible name, captured before the
+acknowledge-on-open resolve); and the previously-observed long-scroll
+identity issue was verified to be ALREADY SOLVED by the internal-scroll
+layout, so no sticky UI was added (the two real gaps — 44px mobile touch
+targets and the sending-indicator announcement — were fixed). The
+personality and the notification behavior are both reusable by a future
+Telegram channel by construction.
 
 **Last shipped slice (v0.29.1):** the Spec A **cross-surface UX coherence +
 slot-presentation audit** (DECISIONS #56) — presentation layer only: the slot
@@ -103,7 +114,7 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   proven REACHABLE, the selected model AVAILABLE, and the FlowPilot contract
   satisfiable. The probe records only safe metadata (never the key).
 - **The AI-failure WhatsApp silence is FIXED, but live-verified only against
-  the offline + live-probe path (DECISIONS #60, uncommitted):** live DB
+  the offline + live-probe path (DECISIONS #60, SHIPPED v0.29.4):** live DB
   forensics proved a real CodeCraft `AI_TURN` FAILURE (fast, non-timeout)
   produced no assistant message and no `OUTBOUND_MESSAGE`, while the live
   probe proved the provider itself healthy — so the root cause was the
@@ -115,7 +126,7 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
 - **Production deployment state is not live-verified in this pass.** The last
   live-verified production checkpoint in the ledger was v0.19.0
   (2026-09-19, `deploymentReady:true`, `database:connected`). Releases
-  v0.20.0–v0.29.3 are committed but their deployment is an operator action;
+  v0.20.0–v0.29.4 are committed but their deployment is an operator action;
   treat production version as unknown until the operator deploys + probes.
   **Note:** the live-forensics DB IS the production Neon DB, so the failing
   CodeCraft `AI_TURN` row and the stuck thread are REAL production evidence —
@@ -142,11 +153,15 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-1. **Operator:** review + release the uncommitted **#60** AI-failure
-   acknowledgment fix, then deploy (`pnpm deploy`) and probe `/api/health`.
-   The live evidence that a real CodeCraft `AI_TURN` FAILURE produced no
-   customer reply is in `BUILD_STATE.md`; the fix is one engine branch + two
-   updated harness assertions.
+1. **Operator:** review + release the uncommitted **#61** (shared
+   conversation-layer UX) and **#62** (AI personality / operator-notification /
+   conversation-UX) slices, then deploy (`pnpm deploy`) and probe
+   `/api/health`. The #60 AI-failure acknowledgment fix already shipped in
+   v0.29.4; the #61 diff is the deterministic greeting branch, one closed
+   disclosure list, one enum value, and the re-generated prompt artifact; the
+   #62 diff is the style module + one optional request field + the
+   attention-reason surfacing + two small conversation-UX fixes (no migration
+   in either).
 2. **Fresh live WhatsApp E2E (operator, required):** send ONE real inbound
    message on an AI_ACTIVE thread with the policy still on
    `codecraft` / `deepseek-v4-flash-0731` and confirm the customer now

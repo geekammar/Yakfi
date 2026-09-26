@@ -68,6 +68,14 @@ export async function getConversationDetail(
   // unchanged) until the operator returns it to the assistant. Idempotent —
   // a second load matches zero open rows. Server-authorized: `businessId`
   // here is the session's Business, never client input.
+  //
+  // DECISIONS #62 — capture WHY first: the reason is read BEFORE the
+  // resolve so the operator sees the handoff's operational cause on the
+  // first load ("understand why"), then the alert clears. `findOpen` is
+  // keyed by conversationId only, but tenancy was already proven above by
+  // `findDetailByBusiness` returning this business's thread.
+  const openAttention =
+    await operatorAttentionRepository.findOpen(conversationId);
   await operatorAttentionRepository.resolve({
     conversationId,
     resolvedById: currentUserId,
@@ -85,6 +93,7 @@ export async function getConversationDetail(
     id: conversation.id,
     status: conversation.status,
     aiSummary: conversation.aiSummary ?? "",
+    attentionReason: openAttention?.reason ?? null,
     customer: {
       id: conversation.customer.id,
       name: conversation.customer.name,

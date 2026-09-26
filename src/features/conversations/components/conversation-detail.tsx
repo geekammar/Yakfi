@@ -18,8 +18,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ATTENTION_REASON_LABELS } from "@/lib/validation/operator-attention";
 
 import {
+  AlertCircleIcon,
   ArrowRightIcon,
   BotIcon,
   CalendarDaysIcon,
@@ -55,6 +57,30 @@ function formatAppointmentTime(date: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(date));
+}
+
+/**
+ * WHY the thread reached the operator (DECISIONS #62). Shown only on the
+ * first load of an unacknowledged handoff — opening the thread acknowledges
+ * the alert, so a reload legitimately renders nothing. Paired with the
+ * persistent NEED_HUMAN status badge: the badge says the thread is human-
+ * owned, this says the operational cause. Icon + Arabic text + a full
+ * accessible name — the state is never color-only (DESIGN_SYSTEM §11).
+ */
+function AttentionReasonChip({
+  reason,
+}: {
+  reason: NonNullable<ConversationDetailData["attentionReason"]>;
+}) {
+  return (
+    <span
+      aria-label={`سبب انتباه المشغل: ${ATTENTION_REASON_LABELS[reason]}`}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"
+    >
+      <AlertCircleIcon aria-hidden className="size-3" />
+      {ATTENTION_REASON_LABELS[reason]}
+    </span>
+  );
 }
 
 function senderLabel(senderType: "CUSTOMER" | "AI" | "STAFF") {
@@ -218,7 +244,12 @@ export function ConversationDetail({
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
       <section className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]">
         <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
-          <Button asChild variant="ghost" size="icon-sm" className="lg:hidden">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-sm"
+            className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden"
+          >
             <Link href="/conversations" aria-label="العودة إلى المحادثات">
               <ArrowRightIcon />
             </Link>
@@ -233,10 +264,18 @@ export function ConversationDetail({
             </p>
           </div>
           <ConversationStatusBadge status={data.status} />
+          {data.attentionReason ? (
+            <AttentionReasonChip reason={data.attentionReason} />
+          ) : null}
           {/* B-07 §A — the conversation's customer is already known
            * context; booking from here prefills العميل and opens the
            * flow past that step (no re-search). */}
-          <Button asChild variant="outline" size="sm">
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            className="min-h-11 md:min-h-8"
+          >
             <Link href={`/appointments/new?customerId=${data.customer.id}`}>
               <CalendarDaysIcon aria-hidden className="size-4" />
               حجز موعد
@@ -250,6 +289,7 @@ export function ConversationDetail({
             <Button
               type="button"
               size="sm"
+              className="min-h-11 md:min-h-8"
               onClick={() => handleTransition("TAKE_OVER")}
               disabled={isPending}
             >
@@ -261,6 +301,7 @@ export function ConversationDetail({
               type="button"
               size="sm"
               variant="outline"
+              className="min-h-11 md:min-h-8"
               onClick={() => handleTransition("RETURN_TO_AI")}
               disabled={isPending}
             >
@@ -273,6 +314,7 @@ export function ConversationDetail({
               type="button"
               size="sm"
               variant="outline"
+              className="min-h-11 md:min-h-8"
               onClick={() => handleTransition("MARK_BOOKED")}
               disabled={isPending}
             >
@@ -285,6 +327,7 @@ export function ConversationDetail({
               type="button"
               size="sm"
               variant="ghost"
+              className="min-h-11 md:min-h-8"
               onClick={() => handleTransition("HANDOFF")}
               disabled={isPending}
             >
@@ -329,7 +372,9 @@ export function ConversationDetail({
                       <div className="flex items-center gap-2 text-[11px] opacity-70">
                         <span>{senderLabel(message.senderType)}</span>
                         {sending ? (
-                          <span aria-label="جارٍ الإرسال">جارٍ الإرسال…</span>
+                          <span role="status" aria-label="جارٍ الإرسال">
+                            جارٍ الإرسال…
+                          </span>
                         ) : (
                           <time dateTime={message.createdAt}>
                             {formatMessageTime(message.createdAt)}
@@ -361,6 +406,7 @@ export function ConversationDetail({
               <Button
                 type="submit"
                 size="icon-lg"
+                className="min-h-11 min-w-11 md:min-h-10 md:min-w-10"
                 aria-label="إرسال الرد"
                 disabled={isPending || !reply.trim()}
               >
