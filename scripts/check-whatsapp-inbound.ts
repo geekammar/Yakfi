@@ -231,6 +231,7 @@ async function main(): Promise<void> {
       }>,
       customerMessages: 0,
       assistantMessages: 0,
+      assistantContents: [] as string[],
       sends: [] as Array<Record<string, unknown>>,
     };
     const ledger = new Map<
@@ -323,7 +324,10 @@ async function main(): Promise<void> {
           };
           state.messages.push(message);
           if (input.senderType === "CUSTOMER") state.customerMessages += 1;
-          if (input.senderType === "AI") state.assistantMessages += 1;
+          if (input.senderType === "AI") {
+            state.assistantMessages += 1;
+            state.assistantContents.push(input.content);
+          }
           if (row) {
             row.conversationId = input.conversationId;
             row.customerMessageId = message.id;
@@ -540,7 +544,11 @@ async function main(): Promise<void> {
       bypassHarness.state.assistantMessages === 1,
   );
 
-  // ── 10. AI provider failure → controlled NEED_HUMAN, no outbound ─────────
+  // ── 10. AI provider failure → controlled NEED_HUMAN + safe acknowledgment ─
+  // The AI-authored content is never trusted, but the customer is not left
+  // in silence: exactly one deterministic safe handoff acknowledgment is
+  // persisted and delivered (DECISIONS #60 — the #58 invariant extended to
+  // the AI-failure path).
   const failureHarness = createEngineHarness({
     ai: makeAi({ fail: true }),
     transport: noopTransport,
@@ -554,12 +562,17 @@ async function main(): Promise<void> {
     identity,
   );
   check(
-    "فشل مزود الذكاء الاصطناعي → NEED_HUMAN متحكَّم به بلا رد مختلق وبلا إرسال",
+    "فشل مزود الذكاء الاصطناعي → NEED_HUMAN متحكَّم به مع إقرار آمن واحد (لا صمت)",
     failureResult.ok &&
       failureResult.duplicate === false &&
       failureResult.conversationStatus === "NEED_HUMAN" &&
-      failureResult.delivery === null &&
-      failureHarness.state.sends.length === 0,
+      failureResult.assistantAction === "AI_HANDOFF" &&
+      // no fabricated AI content, but exactly ONE deterministic safe
+      // acknowledgment persisted and delivered
+      failureHarness.state.assistantMessages === 1 &&
+      failureHarness.state.sends.length === 1 &&
+      failureHarness.state.sends[0]!.content ===
+        failureHarness.state.assistantContents[0],
   );
 
   // ── 11. outbound Meta transport failure → truthful failure ────────────────

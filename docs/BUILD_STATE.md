@@ -9,13 +9,13 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.29.2** — released and committed (`5e70b6e`, tag `v0.29.2`;
-HEAD == `origin/main`). Releases v0.20.0–v0.29.2 ship the AI-trust boundary
+**Product version: v0.29.3** — released and committed (`96785ec`, tag `v0.29.3`;
+HEAD == `origin/main`). Releases v0.20.0–v0.29.3 ship the AI-trust boundary
 (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ, services,
 appointment creation, reschedule), appointments/availability coherence, Meta
-Embedded Signup, and the #58 WhatsApp E2E disclosure-silence fix. The
-worktree now carries ONE uncommitted post-v0.29.2 slice: the **CodeCraft
-Discovery provider adapter (DECISIONS #59 — see below)**.
+Embedded Signup, the #58 disclosure-silence fix, and the CodeCraft Discovery
+provider. The worktree now carries ONE uncommitted post-v0.29.3 slice: the
+**AI-failure acknowledgment fix (DECISIONS #60 — see below)**.
 
 ## Current State (summary)
 
@@ -30,7 +30,34 @@ credential store round-trips exactly against the local dev DB with
 `CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
 executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
 
-- **CodeCraft Discovery provider adapter (DECISIONS #59) — UNCOMMITTED in the worktree:**
+- **AI-failure WhatsApp acknowledgment (DECISIONS #60) — UNCOMMITTED in the worktree:**
+  live forensics against the production Neon DB proved the real failure
+  boundary after the CodeCraft policy switch. On thread `5b06bb77…` (Business
+  «مركز أفنان», `Business.faqs` EMPTY), a real inbound produced an `AI_TURN`
+  usage row `provider:"codecraft" model:"deepseek-v4-flash-0731"
+status:"FAILURE"` (tokens null) ~2.5s after inbound — a FAST failure, not a
+  16s timeout — followed by NO assistant message and NO `OUTBOUND_MESSAGE`;
+  the thread stuck NEED_HUMAN so later messages were `DEFERRED_TO_STAFF`. The
+  live probe simultaneously proved the provider HEALTHY: `pnpm
+probe:codecraft` (3 runs) → `GET /v1/models` 200 with the exact model
+  present (ctx=1048576, `json_mode`), 3/3 chat SUCCESS, `DIRECT_PARSE`,
+  `parseAiResponse` conforming, max latency 7.9s < the 16000ms bound. **Root
+  cause was therefore NOT CodeCraft** but the engine's AI-failure branch
+  (`turn == null` / `parseAiResponse` rejects), which #58 had explicitly left
+  as a silent `updateWorkflow(NEED_HUMAN)` + `delivery:null` handoff — the
+  same silence #58 removed from the disclosure-refusal branch. **Fix:** on a
+  failed/invalid AI turn the engine now emits the SAME deterministic safe
+  handoff acknowledgment #58 uses (`classifyCustomerMessage`), persists +
+  delivers it, and still escalates to NEED_HUMAN + operator attention.
+  Preserved byte-for-byte: `parseAiResponse`/`aiResponseSchema`, the
+  disclosure gate, Conversation Control retry/handoff semantics, the
+  provider-neutral architecture (no provider branching), tenant isolation,
+  idempotency, and the AI/domain separation — no AI-authored content is ever
+  trusted on failure. No migration, no prompt change. Harness assertions that
+  codified the old silent contract were updated to assert the fix
+  (`check:ai-disclosure` 13a, `check:whatsapp-inbound` 10).
+
+- **CodeCraft Discovery provider adapter (DECISIONS #59) — SHIPPED in v0.29.3:**
   CodeCraft API (`https://codecraftapi.com/v1`, OpenAI-compatible, Bearer)
   added as a completely isolated provider through the EXISTING boundary only —
   one thin adapter over the ONE shared `callOpenAiCompatible`, plus the 8-file
@@ -99,11 +126,13 @@ executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
   `check:whatsapp-onboarding` 56/56, `check:meta-whatsapp` 17/17,
   `check:meta-embedded-signup` 27/27, `check:whatsapp-inbound` 13/13,
   `check:credentials-runtime` 36/36, `check:atria-retry` 17/17. The CodeCraft
-  slice (DECISIONS #59, uncommitted) additionally records `check:ai-provider`
-  74/74 (11 new CodeCraft checks incl. provider isolation) and
-  `check:response-normalizer` 78/78. `pnpm verify` + `pnpm security` green at
-  each release. Real-browser verification NOT performed (structurally asserted
-  in the harnesses).
+  slice (DECISIONS #59, shipped v0.29.3) additionally records
+  `check:ai-provider` 74/74 (11 CodeCraft checks incl. provider isolation) and
+  `check:response-normalizer` 78/78. The #60 slice (uncommitted) re-records
+  `check:ai-disclosure` 32/32 (13a updated) and `check:whatsapp-inbound` 13/13
+  (test 10 updated) to assert the new acknowledgment-on-failure contract.
+  `pnpm verify` + `pnpm security` green at each release. Real-browser
+  verification NOT performed (structurally asserted in the harnesses).
 
 ## Completed Major Work
 
@@ -206,10 +235,11 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Unresolved User Actions (not code)
 
-1. **Operator:** review the uncommitted **#58** WhatsApp E2E disclosure-silence
-   fix (the only code change in the tree), then release it as the next patch
-   (`pnpm release`/`pnpm ship`) and deploy (see below). The #56 slice it sits
-   on is already shipped as **v0.29.1**.
+1. **Operator:** review the uncommitted **#60** AI-failure acknowledgment fix
+   (the only functional change in the tree — one engine branch + two updated
+   harness assertions), then release it as the next patch
+   (`pnpm release`/`pnpm ship`) and deploy (see below). The #59 CodeCraft
+   slice and the #58 disclosure fix already shipped as v0.29.3 / v0.29.2.
 2. **Operator:** deploy the released head to production (`pnpm deploy`) and
    probe `/api/health` to confirm the production version; run `pnpm db:deploy`
    so migrations through `20260923120000_operator_attention` are applied.
@@ -228,16 +258,17 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 ## Next Step
 
 1. **Release + deploy the current head** (operator): the worktree carries the
-   CodeCraft Discovery provider adapter (DECISIONS #59; verified: focused
-   checks green, `pnpm verify` + `pnpm security` pass, no migration). The #58
-   WhatsApp E2E fix already shipped in v0.29.2. Review the #59 diff, then run
+   AI-failure acknowledgment fix (DECISIONS #60; verified: focused checks
+   green, `pnpm verify` passes, no migration). The CodeCraft Discovery
+   provider (#59) already shipped in v0.29.3. Review the #60 diff, then run
    `pnpm release`/`pnpm ship` to land the next version and `pnpm deploy` +
    `pnpm db:deploy` against production, then probe `/api/health`.
-2. **CodeCraft Discovery testing** (operator, optional): set `CODECRAFT_API_KEY`
-   in `.env.local` → `pnpm probe:codecraft` (discovers models + verifies
-   JSON/Arabic/contract compatibility) → set `codecraft` + a proven model in
-   `platform_ai_policies`. Switching back to another provider is a policy
-   change only.
+2. **Fresh live WhatsApp E2E** (operator, REQUIRED): send one real inbound
+   message on an AI_ACTIVE thread with the policy still on `codecraft` /
+   `deepseek-v4-flash-0731` and confirm the customer receives a reply even if
+   the provider fails. The live probe proved the CodeCraft path healthy
+   (3/3, `DIRECT_PARSE`, max 7.9s), so the prior `AI_TURN` FAILURE is
+   non-deterministic — but any failure must no longer produce silence.
 3. **Onboard the first REAL pilot Business end-to-end** — operator provisions
    the Business + invitation → ADMIN connects the WhatsApp number via Meta
    Embedded Signup at `/settings/whatsapp` → CONNECTED → live messaging →

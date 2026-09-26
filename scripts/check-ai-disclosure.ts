@@ -589,7 +589,10 @@ async function main(): Promise<void> {
   // ── 13. AI failure + refused reply → the EXISTING human handoff ─────────
   // A compact in-memory engine run: an AI failure and a boundary refusal
   // must take the SAME NEED_HUMAN / AI_HANDOFF path, and a refused reply
-  // must be neither persisted nor sent.
+  // must be neither persisted nor sent. In BOTH cases the customer is NOT
+  // left in silence: exactly one deterministic safe handoff acknowledgment
+  // is persisted and delivered (the #58 invariant, extended to the
+  // AI-failure path by DECISIONS #60).
   process.env.DATABASE_URL ??=
     "postgresql://user:password@localhost:5432/placeholder";
   process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
@@ -783,11 +786,18 @@ async function main(): Promise<void> {
     ai: { kind: "throw" },
   });
   check(
-    "13a. فشل الذكاء يتحول إلى التحويل البشري الموجود (AI_HANDOFF + NEED_HUMAN)",
+    "13a. فشل الذكاء يتحول إلى التحويل البشري الموجود (AI_HANDOFF + NEED_HUMAN) مع إقرار آمن للعميل",
     eq(failed.assistantAction, "AI_HANDOFF") &&
       eq(failed.conversationStatus, "NEED_HUMAN") &&
-      eq(failed.aiMessages.length, 0) &&
-      eq(failed.sent.length, 0),
+      // No AI-authored content is trusted/persisted/sent on failure…
+      !failed.sent.includes("fake") &&
+      // …but exactly ONE deterministic safe acknowledgment IS persisted…
+      eq(failed.aiMessages.length, 1) &&
+      // …and delivered (never silence — DECISIONS #60). The
+      // acknowledgment is the deterministic classifier's output for this
+      // message, never the failed AI's content.
+      eq(failed.sent.length, 1) &&
+      failed.sent[0] === failed.aiMessages[0],
   );
 
   // (b) A fabricated reply on a store that carries no knowledge → refused by

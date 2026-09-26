@@ -6,13 +6,15 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.29.2** — released and committed (`5e70b6e`, tag `v0.29.2`;
-HEAD == `origin/main`; tags through `v0.29.2`). The #58 WhatsApp E2E
-disclosure-silence fix shipped in this patch release. The worktree now carries
-ONE uncommitted post-v0.29.2 slice: **the CodeCraft Discovery provider adapter
-(DECISIONS #59)** — a completely isolated, OpenAI-compatible AI provider added
-through the existing boundary, replacing Atria for current experiments without
-rewriting the AI architecture.
+**Version: v0.29.3** — released and committed (`96785ec`, tag `v0.29.3`;
+HEAD == `origin/main`; tags through `v0.29.3`). The #58 WhatsApp E2E
+disclosure-silence fix shipped in v0.29.2; the CodeCraft Discovery provider
+adapter (DECISIONS #59) shipped in v0.29.3. The worktree now carries ONE
+uncommitted post-v0.29.3 slice: **the AI-failure acknowledgment fix
+(DECISIONS #60)** — a real WhatsApp turn whose AI provider fails no longer
+leaves the customer in silence; the engine delivers the same deterministic
+safe handoff acknowledgment #58 introduced, still escalating to NEED_HUMAN +
+operator attention.
 
 **Last shipped slice (v0.29.1):** the Spec A **cross-surface UX coherence +
 slot-presentation audit** (DECISIONS #56) — presentation layer only: the slot
@@ -91,19 +93,34 @@ second engine, no schema change.
   returned the exact self-authored `AMBIGUOUS` reply the fix targets) but was
   intermittently TIMING OUT (~16s×2) on subsequent probes — a transient
   provider condition, not an application defect.
-- **The CodeCraft live compatibility probe was NOT run in this session
-  (DECISIONS #59, uncommitted):** no `CODECRAFT_API_KEY` was present in the
-  environment, so Phases 5–7 (model discovery, JSON-mode, Arabic, contract
-  conformance) are offline-covered only. The endpoint itself is verified
-  REACHABLE (`GET /v1/models` → 401 unauthenticated, ~0.7s). The operator
-  must set the key and run `pnpm probe:codecraft` before Discovery testing.
+- **The CodeCraft live compatibility probe was run (DECISIONS #59, v0.29.3 +
+  post-v0.29.3 forensics):** with `CODECRAFT_API_KEY` present, `pnpm
+probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
+  `PROBE_RUNS=3` returned 5/5 stages — `GET /v1/models` 200 with the exact
+  model present (ctx=1048576, `json_mode`), 3/3 chat-completion SUCCESS,
+  `parseMode=DIRECT_PARSE`, `parseAiResponse` conforming, latency p95 7.9s
+  max 7.9s (well inside the 16000ms adapter bound). CodeCraft is therefore
+  proven REACHABLE, the selected model AVAILABLE, and the FlowPilot contract
+  satisfiable. The probe records only safe metadata (never the key).
+- **The AI-failure WhatsApp silence is FIXED, but live-verified only against
+  the offline + live-probe path (DECISIONS #60, uncommitted):** live DB
+  forensics proved a real CodeCraft `AI_TURN` FAILURE (fast, non-timeout)
+  produced no assistant message and no `OUTBOUND_MESSAGE`, while the live
+  probe proved the provider itself healthy — so the root cause was the
+  engine's AI-failure branch, now fixed to deliver the #58 safe
+  acknowledgment. A **fresh live WhatsApp E2E** is required to confirm the
+  customer-visible reply on the real thread (see §6).
 - Real-browser verification of the presentation-layer UX slices (#54–#56) was
   NOT performed — they are structurally asserted in offline harnesses only.
 - **Production deployment state is not live-verified in this pass.** The last
   live-verified production checkpoint in the ledger was v0.19.0
   (2026-09-19, `deploymentReady:true`, `database:connected`). Releases
-  v0.20.0–v0.29.1 are committed but their deployment is an operator action;
+  v0.20.0–v0.29.3 are committed but their deployment is an operator action;
   treat production version as unknown until the operator deploys + probes.
+  **Note:** the live-forensics DB IS the production Neon DB, so the failing
+  CodeCraft `AI_TURN` row and the stuck thread are REAL production evidence —
+  the deployed build must be at least v0.29.3 (the row records
+  `provider:"codecraft"`, which only that release's code can emit).
 - The Meta Embedded Signup code path is implemented and offline-harnessed
   (`check:meta-embedded-signup`) but has never been exercised against a real
   operator-owned Meta App Dashboard configuration. It is on a documented
@@ -125,17 +142,25 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-1. **Operator:** deploy the v0.29.2 head (`pnpm deploy`) and probe
+1. **Operator:** review + release the uncommitted **#60** AI-failure
+   acknowledgment fix, then deploy (`pnpm deploy`) and probe `/api/health`.
+   The live evidence that a real CodeCraft `AI_TURN` FAILURE produced no
+   customer reply is in `BUILD_STATE.md`; the fix is one engine branch + two
+   updated harness assertions.
+2. **Fresh live WhatsApp E2E (operator, required):** send ONE real inbound
+   message on an AI_ACTIVE thread with the policy still on
+   `codecraft` / `deepseek-v4-flash-0731` and confirm the customer now
+   receives the deterministic safe handoff acknowledgment (the probe proves
+   the provider path is healthy, so a failure should now be rare — but any
+   failure that does occur must no longer be silent).
+3. **Production config (operator):** production state is unknown; verify
+   `CODECRAFT_API_KEY` is set in the Vercel env (presence check only) and
+   that the deployed version matches the released head, then probe
    `/api/health` to move production off the v0.19.0-era checkpoint; run
-   `pnpm db:deploy` so migrations through
-   `20260923120000_operator_attention` are applied.
-2. **CodeCraft Discovery testing** (operator, optional): set
-   `CODECRAFT_API_KEY` in `.env.local` → `pnpm probe:codecraft` (discovers
-   models + verifies JSON/Arabic/contract compatibility) → set `codecraft` +
-   a proven model in `platform_ai_policies` via the platform UI. Switching
-   back is a policy change only.
-3. **Onboard the first REAL pilot Business end-to-end** (operator provisions
+   `pnpm db:deploy` so migrations through `20260923120000_operator_attention`
+   are applied.
+4. **Onboard the first REAL pilot Business end-to-end** (operator provisions
    Business + invitation → ADMIN connects the WhatsApp number via Meta Embedded
    Signup at `/settings/whatsapp` → CONNECTED → live messaging), then gather
    baseline/ROI evidence per `PRODUCT_STRATEGY.md`.
-4. **Only after pilot evidence:** Spec B instrumentation/economics.
+5. **Only after pilot evidence:** Spec B instrumentation/economics.

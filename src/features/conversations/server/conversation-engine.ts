@@ -1339,12 +1339,39 @@ async function runInboundTurn(
 
     // 9. Validate the assistant output BEFORE persisting (AI is never
     //    the source of truth — invalid/absent output fails safe to a
-    //    silent handoff).
+    //    handoff). The customer is NOT left in silence: the turn delivers
+    //    the SAME safe, deterministic handoff acknowledgment the #58
+    //    disclosure-refusal path produces (`classifyCustomerMessage`
+    //    never invents business data — no FAQ match means a typed handoff
+    //    reply), then takes the existing NEED_HUMAN + operator-attention
+    //    handoff path. This keeps the E2E WhatsApp reply path alive when
+    //    the provider fails, times out, or returns an invalid response —
+    //    without weakening parseAiResponse or bypassing Conversation
+    //    Control. The AI/domain separation is unchanged: the
+    //    acknowledgment is deterministic, and no AI-authored content is
+    //    trusted, persisted, or sent.
     const validated = turn ? parseAiResponse(turn) : null;
     if (!validated) {
-      await deps.conversationRepository.updateWorkflow(conversation.id, {
-        status: "NEED_HUMAN",
-      });
+      const safeHandoff = classifyCustomerMessage(
+        inbound.text,
+        builtContext.request.faqs,
+      );
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        safeHandoff.content,
+        "NEED_HUMAN",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        safeHandoff.content,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
       return {
         ok: true,
         duplicate: false,
@@ -1356,7 +1383,7 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         assistantProvider: deps.ai.providerName,
-        delivery: null,
+        delivery,
       };
     }
 
