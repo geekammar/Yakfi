@@ -92,6 +92,8 @@ model Business {
   invitations                      Invitation[]
   whatsappConnections              WhatsAppConnection[]
   whatsappOnboardingAuthorizations WhatsAppOnboardingAuthorization[]
+  telegramConnections              TelegramConnection[]
+  telegramProvisioningLedgers      TelegramProvisioningLedger[]
   runtimeCredentials               RuntimeCredential[]
   providerProfiles                 ProviderProfile[]
   inboundDedupe                    InboundMessageDedupe[]
@@ -124,6 +126,7 @@ model Branch {
   conversations       Conversation[]
   appointments        Appointment[]
   whatsappConnections WhatsAppConnection[]
+  telegramConnections TelegramConnection[]
   providerBranches    ProviderBranch[]
 
   @@index([businessId])
@@ -421,6 +424,147 @@ model WhatsAppOnboardingAuthorization {
   @@index([businessId])
   @@index([connectionId])
   @@map("whatsapp_onboarding_authorizations")
+}
+
+// ─── Telegram second channel (DECISIONS #63/#64) ──────────────────────
+// Telegram is a TRANSPORT SIBLING of WhatsApp, not a second product: it
+// reuses the provider-neutral transport seams (MessageTransport /
+// ConnectionVerifier / the normalized inbound envelope) and the same
+// Conversation Engine. It is deliberately a SEPARATE entity — not a
+// polymorphic `Connection` table and not a column on
+// `WhatsAppConnection`: the WhatsApp identity is a required phone number
+// with Meta-specific provenance, and generalizing either would be
+// premature omnichannel infrastructure (forbidden by ARCHITECTURE.md).
+// Two concrete siblings are the smaller, honest step.
+
+model TelegramConnection {
+  id            String    @id @default(uuid())
+  businessId    String    @map("business_id")
+  branchId      String?   @map("branch_id")
+  displayName   String?   @map("display_name")
+  // The managed bot's STABLE Telegram identity (the numeric bot id). The
+  // authoritative provider key for this connection — inbound webhook
+  // routing resolves this row server-side, never from a client payload.
+  botExternalId String    @map("bot_external_id")
+  // The bot's @username — a non-secret, provider-reported label.
+  botUsername   String?   @map("bot_username")
+  // Provider machine key: "telegram_managed" (the only approved
+  // provisioning model — Telegram Managed Bots; the customer never pastes
+  // a token and never visits BotFather; DECISIONS #63).
+  provider      String    @default("telegram_managed")
+  status        String    @default("PENDING")
+  // REFERENCE to the managed bot's token — an opaque `fp:<id>` RUNTIME
+  // handle (DECISIONS #49) resolved ONLY inside the Telegram adapter.
+  // NEVER the raw token, never an ENV name: managed-bot tokens are
+  // obtained at provisioning time and must not require a redeploy.
+  credentialsRef String?  @map("credentials_ref")
+  credentialKind String?  @map("credential_kind")
+  // SHA-256 hex digest of the per-connection webhook `secret_token`
+  // (DECISIONS #63 (E)). A NON-SECRET, non-reversible INDEX: inbound
+  // webhook routing looks the connection up by the digest of the
+  // `X-Telegram-Bot-Api-Secret-Token` header. The plaintext secret is
+  // generated at provisioning, handed to Telegram ONCE via `setWebhook`,
+  // and NEVER persisted anywhere.
+  webhookSecretHash String? @unique @map("webhook_secret_hash")
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  // ── ONBOARDING LIFECYCLE ────────────────────────────────────────
+  // SEPARATE from the operational `status`/`isActive` gate above, exactly
+  // like `WhatsAppConnection`. Stable machine keys validated by the Zod
+  // unions in `lib/validation/telegram-connection` — no Prisma enum, so
+  // extending the list needs no migration. The DEFAULT keeps every row
+  // honest: a connection that never completed provisioning is
+  // NOT_STARTED, never a false READY.
+  onboardingState          String    @default("NOT_STARTED") @map("onboarding_state")
+  onboardingActor          String    @default("NONE") @map("onboarding_actor")
+  // LAST normalized failure only: stable internal code + safe human
+  // summary — never a raw provider response, token, or HTTP header.
+  onboardingReasonCode     String?   @map("onboarding_reason_code")
+  onboardingReasonSummary  String?   @map("onboarding_reason_summary")
+  onboardingRetryable      Boolean?  @map("onboarding_retryable")
+  onboardingStateChangedAt DateTime? @map("onboarding_state_changed_at")
+  onboardingCompletedAt    DateTime? @map("onboarding_completed_at")
+  onboardingFailedAt       DateTime? @map("onboarding_failed_at")
+
+  // ── TELEGRAM PROVENANCE (DECISIONS #63 (D)) ─────────────────────
+  // The FlowPilot Manager Bot that provisioned this bot — operator-level
+  // and non-secret. Retained so a `ManagedBotUpdated` owner/token event
+  // can be correlated to its provisioning bot.
+  managerBotId          String? @map("manager_bot_id")
+  // The Telegram `user.id` that created this managed bot (the Admin who
+  // confirmed creation in Telegram's native UI). Single-use-bound to the
+  // provisioning ledger row: a forged provisioning callback cannot claim
+  // another Business because the `managed_bot` creator `user.id` must
+  // equal the ledger's bound creator. Telegram fires `ManagedBotUpdated`
+  // on an owner change; a mismatch vs this bound creator is a SECURITY
+  // EVENT (→ DISCONNECTED / ACTION_REQUIRED, never silent trust).
+  creatorTelegramUserId String? @map("creator_telegram_user_id")
+
+  business             Business                    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch               Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  provisioningLedgers  TelegramProvisioningLedger[]
+
+  @@unique([businessId, botExternalId])
+  @@index([businessId])
+  @@index([branchId])
+  @@index([onboardingState])
+  @@map("telegram_connections")
+}
+
+// ─── Telegram provisioning ledger (DECISIONS #63 (D)) ─────────────────
+// The single-use provisioning ledger — the exact analogue of
+// `WhatsAppOnboardingAuthorization` for the managed-bot path. One row per
+// LAUNCHED provisioning attempt; the deep-link `start` payload carries
+// ONLY the opaque `startToken`, and the target Business + bound creator
+// are resolved from THIS server-persisted row — never from a client
+// payload, a query parameter, or the webhook body.
+
+model TelegramProvisioningLedger {
+  id           String    @id @default(uuid())
+  businessId   String    @map("business_id")
+  // Set once the `managed_bot` event creates the connection row (the bot
+  // id is unknown before Telegram delivers that event) — provenance only.
+  connectionId String?   @map("connection_id")
+  // Opaque single-use start token (the deep-link `?start=<token>` value).
+  // The ONLY thing the customer-facing link carries; unguessable, and the
+  // raw token is stored ONLY here as a unique lookup key.
+  startToken   String    @unique @map("start_token")
+  // The Telegram `user.id` that opened the deep link and STARTed the
+  // Manager Bot — bound at that moment. The later `managed_bot` event's
+  // creator `user.id` MUST equal this value, or the callback matches no
+  // row and nothing is provisioned (cross-tenant forgery protection).
+  creatorTelegramUserId String? @map("creator_telegram_user_id")
+  expiresAt    DateTime  @map("expires_at")
+  // TERMINAL marker: set exactly once when this attempt leaves the
+  // in-flight state — either by a successful `managed_bot` completion
+  // (`outcomeCode = "PROVISIONED"` + `connectionId` set) or by a
+  // normalized provisioning failure (`outcomeCode` = the typed failure
+  // code, `connectionId` stays null). While null the attempt is in
+  // flight and the UI's honest state is "waiting on the Admin's Telegram
+  // confirmation". A null `consumedAt` with a past `expiresAt` is an
+  // abandoned attempt (the Admin never confirmed) — the UI surfaces that
+  // as an actionable, retryable state, never a permanent spinner.
+  consumedAt   DateTime? @map("consumed_at")
+  // The typed OUTCOME of this attempt once terminal (machine key from the
+  // provisioning boundary's result taxonomy; null while in flight). The
+  // ONLY failure signal the pre-connection phase has — there is no
+  // `TelegramConnection` row to carry an onboarding failure until the bot
+  // id is known, so the honest reason lives HERE. The feature layer maps
+  // it to a safe Arabic summary + a retryable flag; a raw provider
+  // response never reaches this column or the UI.
+  outcomeCode  String?   @map("outcome_code")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  business    Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  connection  TelegramConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([connectionId])
+  @@map("telegram_provisioning_ledgers")
 }
 
 // ─── Runtime credentials (WHATSAPP-ONBOARDING-01; DECISIONS #49) ──

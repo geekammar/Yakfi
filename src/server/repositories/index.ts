@@ -22,6 +22,8 @@ import { PlatformInvitationRepository } from "./platform-invitation.repository";
 import { ProviderRepository } from "./provider.repository";
 import { RuntimeCredentialRepository } from "./runtime-credential.repository";
 import { ServiceRepository } from "./service.repository";
+import { TelegramConnectionRepository } from "./telegram-connection.repository";
+import { TelegramProvisioningLedgerRepository } from "./telegram-provisioning-ledger.repository";
 import { UsageRepository } from "./usage.repository";
 import { UserRepository } from "./user.repository";
 import { WhatsAppConnectionRepository } from "./whatsapp-connection.repository";
@@ -38,6 +40,9 @@ export const branchRepository = new BranchRepository();
 export const whatsAppConnectionRepository = new WhatsAppConnectionRepository();
 export const whatsAppOnboardingAuthorizationRepository =
   new WhatsAppOnboardingAuthorizationRepository();
+export const telegramConnectionRepository = new TelegramConnectionRepository();
+export const telegramProvisioningLedgerRepository =
+  new TelegramProvisioningLedgerRepository();
 export const providerRepository = new ProviderRepository();
 export const inboundDedupeRepository = new InboundDedupeRepository();
 export const usageRepository = new UsageRepository();
@@ -60,6 +65,8 @@ export {
   ProviderRepository,
   RuntimeCredentialRepository,
   ServiceRepository,
+  TelegramConnectionRepository,
+  TelegramProvisioningLedgerRepository,
   UsageRepository,
   UserRepository,
   WhatsAppConnectionRepository,

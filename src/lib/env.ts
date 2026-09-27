@@ -101,6 +101,22 @@ const serverEnvSchema = z.object({
     emptyToUndefined,
     z.string().min(32).optional(),
   ),
+  /**
+   * FlowPilot TELEGRAM MANAGER BOT token (DECISIONS #63 — the second
+   * channel; Telegram Managed Bots). Server-side SECRET, optional until a
+   * Business provisions a Telegram bot: the ONE-TIME operator setup
+   * creates the Manager Bot via @BotFather, enables "Bot Management Mode",
+   * and sets this value. It is the ONLY token that may call
+   * `getManagedBotToken` / `replaceManagedBotToken`, and it is an
+   * operator-level secret — it is NEVER stored in the database, NEVER
+   * returned by any API, NEVER logged, NEVER exposed to the browser, and
+   * NEVER prefixed with NEXT_PUBLIC_. Managed customer bot tokens are
+   * stored only as opaque `fp:<id>` RUNTIME references (DECISIONS #49).
+   */
+  TELEGRAM_MANAGER_BOT_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional(),
+  ),
 });
 
 const clientEnvSchema = z.object({
@@ -123,6 +139,7 @@ const parsedServer = serverEnvSchema.safeParse({
     process.env.WHATSAPP_META_EMBEDDED_SIGNUP_CONFIG_ID,
   WHATSAPP_META_API_VERSION: process.env.WHATSAPP_META_API_VERSION,
   CREDENTIAL_MASTER_KEY: process.env.CREDENTIAL_MASTER_KEY,
+  TELEGRAM_MANAGER_BOT_TOKEN: process.env.TELEGRAM_MANAGER_BOT_TOKEN,
 });
 
 if (!parsedServer.success) {

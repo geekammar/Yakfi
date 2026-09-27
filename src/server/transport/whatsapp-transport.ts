@@ -30,7 +30,7 @@
  * normalization + tenant resolution.
  */
 
-import { phoneSchema } from "@/lib/validation";
+import { externalHandleSchema } from "@/lib/validation";
 import type { CredentialKind } from "@/lib/validation";
 import type {
   BranchRepository,
@@ -129,10 +129,12 @@ const normalizedInboundTransportSchema = z
   .object({
     /** Provider message id — the inbound idempotency key when present. */
     externalMessageId: z.string().trim().min(1).max(256),
-    /** The customer's phone identifier. */
-    senderExternalId: phoneSchema,
-    /** The receiving WhatsApp number. */
-    recipientExternalId: phoneSchema,
+    /** The customer's provider-neutral external handle (E.164 phone for
+     *  the WhatsApp path; a Telegram chat id for the Telegram path —
+     *  DECISIONS #64). */
+    senderExternalId: externalHandleSchema,
+    /** The receiving identity's provider-neutral external handle. */
+    recipientExternalId: externalHandleSchema,
     /**
      * Provider-side STABLE identity of the receiving account when the
      * provider exposes one separately from its display number (e.g. a

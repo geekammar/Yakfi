@@ -86,10 +86,10 @@ prisma/                     # schema.prisma + seed.ts
    `@/server` deliberately and stays small.
 6. No giant barrels or mega-utils.
 
-## Channel Boundary (WhatsApp-first)
+## Channel Boundary (WhatsApp-first; Telegram as a transport sibling)
 
-- WhatsApp is the **current product channel**; additional channels are
-  future possibilities only.
+- WhatsApp is the **current product channel**; a second channel is now
+  implemented as a TRANSPORT SIBLING, not a product (DECISIONS #63/#64/#65).
 - The boundary is **thin and channel-agnostic**: the Conversation Engine
   works against provider-neutral seams — `MessageTransport` /
   `ConversationAi` (DECISIONS #29) plus the transport foundation
@@ -97,8 +97,31 @@ prisma/                     # schema.prisma + seed.ts
   normalized inbound envelope + `normalizeInboundTransportMessage` →
   `resolveInboundConnection` → `toEngineInboundMessage`, outbound
   `OutboundMessage` → `MessageTransport`, `WhatsAppTransportErrorCode` /
-  `TransportError`) — and never embeds vendor specifics (no Meta
+  `TransportError`) — and never embeds vendor specifics (no Meta or Telegram
   SDK/HTTP/signature/media-download in the boundary).
+- **Telegram (DECISIONS #65 — IMPLEMENTED):** the adapter lives in
+  `src/server/integrations/telegram/` and implements the SAME ports the Meta
+  adapter implements — a single HTTP boundary (Bot API URL + token in path +
+  vendor error bodies mapped onto the existing transport taxonomy), an
+  `Update` parser → the SAME `NormalizedInboundTransportMessage`,
+  `sendMessage` → `MessageTransport`, and `getMe` → `ConnectionVerifier`.
+  The webhook `POST /api/telegram/webhook` authenticates the
+  `X-Telegram-Bot-Api-Secret-Token` header with a constant-time digest
+  comparison, resolves the connection (hence the tenant) server-side, and
+  returns 200 PROMPTLY (Next 16 `after()`) while the turn is deferred. The
+  engine holds NO channel logic; inbound identity is the provider-neutral
+  external handle, and `update_id` (namespaced per bot) is the dedupe key.
+- **Telegram onboarding (DECISIONS #66/#67 — IMPLEMENTED, offline-verified):**
+  the managed-bot provisioning state machine is live at
+  `POST /api/telegram/manager/webhook` (`/start` creator binding + the
+  `managed_bot` event → `fp:<id>` → `setWebhook` → `getMe` → CONNECTED,
+  with typed outcomes terminating every attempt), and the customer-facing
+  surface is `/settings/telegram` (ADMIN-only): ONE server-derived UI state
+  machine — EMPTY / PROVISIONING (with the retained open/redirect action)
+  / CONNECTED / ACTION_REQUIRED / DISCONNECTED — that polls the
+  server-derived state only and stops at the terminal state. The customer
+  never sees a token, BotFather, a webhook setting, or a technical
+  identifier. Canonical detail: `docs/TELEGRAM.md`.
 - Do NOT build omnichannel infrastructure: no channel registry, no generic
   event bus, no channel capability matrix, no multi-channel UI.
 

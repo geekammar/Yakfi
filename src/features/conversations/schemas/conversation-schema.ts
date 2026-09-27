@@ -1,6 +1,6 @@
 import {
   conversationStatusValues,
-  phoneSchema,
+  externalHandleSchema,
   uuidSchema,
 } from "@/lib/validation";
 
@@ -31,20 +31,26 @@ export const summarySchema = z.object({
 export const inboxStatusSchema = z.enum(conversationStatusValues);
 
 /**
- * Canonical INBOUND WhatsApp-style message contract (PROMPT-19).
+ * Canonical INBOUND message contract (PROMPT-19; widened DECISIONS #64).
  *
  * Only what the transport legitimately owns may appear here. The payload
  * can NEVER control authority: `businessId`, `role`, internal customer or
  * conversation ids, assignment, or tenant identity are not part of the
  * contract — unknown keys are stripped by Zod, and the Business is always
- * resolved server-side from the receiving WhatsApp number (`to`) through
- * the established `BusinessRepository.findByWhatsappNumber` mapping.
+ * resolved server-side from the receiving connection through the
+ * transport's `resolveInboundConnection` boundary.
+ *
+ * `to`/`from` are PROVIDER-NEUTRAL EXTERNAL HANDLES (DECISIONS #64): an
+ * E.164 phone number for the WhatsApp path (unchanged — a strict subset
+ * of `externalHandleSchema`) or a Telegram chat id for the Telegram path.
+ * The Conversation Engine holds NO channel logic; the adapters normalize
+ * their provider identity into this handle.
  */
 export const inboundMessageSchema = z.object({
-  /** The business WhatsApp number the customer messaged. */
-  to: phoneSchema,
-  /** The customer's phone number. */
-  from: phoneSchema,
+  /** The receiving business identity's external handle (WhatsApp E.164 / Telegram bot id). */
+  to: externalHandleSchema,
+  /** The customer's external handle (WhatsApp E.164 / Telegram chat id). */
+  from: externalHandleSchema,
   /** Message text. */
   text: z
     .string()

@@ -9,29 +9,238 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.29.4** — released and committed (`7559ead`, tag `v0.29.4`;
-HEAD == `origin/main`). Releases v0.20.0–v0.29.4 ship the AI-trust boundary
-(B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ, services,
-appointment creation, reschedule), appointments/availability coherence, Meta
-Embedded Signup, the #58 disclosure-silence fix, the CodeCraft Discovery
-provider, and the #60 AI-failure acknowledgment fix (v0.29.4). The worktree
-now carries TWO uncommitted post-v0.29.4 slices: **the shared
-conversation-layer UX (DECISIONS #61 — GREETING + verified handoff/resume)**
-and **the AI personality / operator-notification / conversation-UX slice
-(DECISIONS #62 — see below)**.
+**Product version: v0.30.0** — released and committed (`8571a4a`, tag `v0.30.0`;
+HEAD == `origin/main`; the worktree carries uncommitted post-v0.30.0 Telegram
+second-channel work — the identity/data foundation (DECISIONS #64), the
+adapter + webhook + Conversation-Engine bridge (DECISIONS #65), the
+manager-bot provisioning state machine (DECISIONS #66), and the
+customer onboarding surface + live-E2E preparation (DECISIONS #67, this
+slice); no release cut).
+Releases v0.20.0–v0.30.0 ship the
+AI-trust boundary (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ,
+services, appointment creation, reschedule), appointments/availability
+coherence, Meta Embedded Signup, the #58 disclosure-silence fix, the CodeCraft
+Discovery provider, the #60 AI-failure acknowledgment fix (v0.29.4), and the
+#61 shared conversation-layer UX + #62 AI personality / operator-notification /
+conversation-UX slices (both released in v0.30.0 — the two slices this ledger
+previously described as uncommitted). A post-v0.30.0 **Telegram channel
+discovery pass** (DECISIONS #63) mapped the exact second-channel seams and
+confirmed the Telegram Managed Bot provisioning path; **the identity/data
+foundation it identified is now BUILT (DECISIONS #64): the provider-neutral
+external-handle identity seam + the `TelegramConnection` and single-use
+`TelegramProvisioningLedger` tables + repository-only access + one additive
+migration (WhatsApp behavior unchanged), and the Telegram transport sibling —
+adapter, webhook, and Conversation-Engine bridge — is now BUILT too
+(DECISIONS #65 — this slice; see `Current State` and `Next Step` for the
+boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
-conversation engine are implemented and released. **Post-v0.29.1 audit
-(evidence-backed, no code change):** the real LLM runtime answered a live
-`BOOKING` turn (`atria / Atria-Dawn-Preview`, policy-resolved from the live
-DB — `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` are all
-present in the local dev env); the Meta Embedded Signup configuration seam
-resolves `ready: true` locally (all four names present); the RUNTIME
-credential store round-trips exactly against the local dev DB with
-`CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
-executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
+conversation engine are implemented and released.
+
+- **Telegram CUSTOMER ONBOARDING SURFACE + LIVE E2E PREPARATION (DECISIONS
+  #67) — UNCOMMITTED in the worktree (post-v0.30.0, on top of the #66
+  provisioning state machine):** the minimum customer-facing surface
+  realizing the approved low-friction experience is now BUILT and
+  **behaviorally wired + offline-verified**. The customer NEVER enters a
+  bot token, NEVER copies/pastes one, NEVER visits BotFather, NEVER
+  understands webhook setup, and NEVER chooses a Business id, a connection
+  id, or any infrastructure — the ONE customer action stays the single
+  Telegram-side confirmation. **(A) The five UI states, ONE server-derived
+  state machine (no second machine — the existing
+  `TelegramConnectionUiState` represents them):** `EMPTY` (a clear
+  explanation + ONE primary action «اربط تيليجرام») → `PENDING` +
+  `PROVISIONING` (the session EXISTS server-side, so the redirect/open
+  action stays available as «افتح رابط تيليجرام» — an idempotent RESUME of
+  the same single-use attempt: the same token, the same deep link, no
+  orphaned attempt; plus the honest progress state with a bounded live poll
+  that reads ONLY the server-derived status and STOPS the moment the state
+  leaves `PROVISIONING` — never a fake success, never a client-side
+  assumption of completion) → `CONNECTED` (the bot's display name +
+  @username + status + «فصل تيليجرام») → `ACTION_REQUIRED`/`FAILED` (a
+  concise safe Arabic reason mapped from the typed outcome code + «أعد
+  المحاولة» — never a credential, never provider text). `DISCONNECTED` is
+  RETAINED (the verified disconnect/reconnect lifecycle's honest home;
+  removing it would rework #66). The precedence is unchanged. **(B) The
+  display name — the one small completion:** the connection's `displayName`
+  is now populated from the `getMe` `first_name` the identity check ALREADY
+  fetches (provider-reported, NON-SECRET, no extra API call) — the
+  `managed_bot` event carries no display name, so this is the only honest
+  source. **(C) Security — the approved model intact, verified again:**
+  the deep link carries ONLY the opaque single-use token; the Business is
+  ALWAYS server-derived (the screen's payload carries NO identity); the bot
+  token is stored ONLY as an `fp:<id>` RUNTIME reference and appears in no
+  response, log, DB projection, UI, or domain payload; ADMIN-only with role
+  - tenant scoping re-checked server-side on every read and write. **(D)
+    LIVE E2E PREPARATION — the smallest focused surface, NO fabricated
+    result:** NEW `pnpm check:telegram-onboarding` **22/22** walks the exact
+    customer journey through the REAL settings service + the REAL
+    manager-webhook handler with in-memory fakes — EMPTY → the launch + the
+    token-only deep link → the poll observing PROVISIONING → the idempotent
+    re-open → `/start` binding + the keyboard (safe copy only) → the
+    `managed_bot` completion → the poll observing CONNECTED (display name +
+    @username, no secret) → single-use replay refusal → the typed-FAILURE
+    loop (ACTION_REQUIRED + a retryable label + a FRESH attempt with a NEW
+    token — the failed row is never resumed, no half-provisioned connection)
+    → the authorization boundaries. NEW canonical `docs/TELEGRAM.md`
+    (the managed model, the five UI states, the seams, the security model,
+    the operator one-time setup, the ONE real live E2E procedure with an
+    explicit "what must NOT happen" list) + a NEW `INTEGRATION_CHECKPOINTS.md`
+    entry holding the Telegram checkpoint at **LIVE E2E PENDING** with the
+    exact completion condition. **(E) UNTOUCHED — verified:** AI unchanged;
+    WhatsApp impact NONE (the Meta Embedded Signup HOLD was NOT touched and
+    is recorded as untouched); the #63 (F)(1) non-text decision STAYS OPEN.
+    Guard: `pnpm check:telegram` re-run **96/96** (the `displayName` addition
+    is backward-compatible), NEW `check:telegram-onboarding` **22/22**;
+    `pnpm verify` + `pnpm security` green. **Boundary of this slice's claim:**
+    NO real BotFather manager bot has ever been exercised — the whole
+    customer path is offline-proven only; the ONE real live E2E is an
+    operator action (`docs/TELEGRAM.md → The ONE live E2E`), and
+    owner-change/`ManagedBotUpdated` handling + token rotation + the open
+    #63 (F)(1) non-text decision remain the next slice.
+
+- **Telegram MANAGER-BOT provisioning (DECISIONS #66) — UNCOMMITTED in the
+  worktree (post-v0.30.0, on top of the #65 transport):** the whole
+  managed-bot provisioning state machine is now LIVE server-side at
+  **`POST /api/telegram/manager/webhook`**. The Admin's
+  `/start <opaque-single-use-token>` BINDS the Telegram `user.id` to the
+  in-flight ledger row (the Business comes ONLY from that row) and replies
+  with the `KeyboardButtonRequestManagedBot` keyboard (the ONE unavoidable
+  customer action); the `managed_bot` event completes provisioning
+  server-side — `getManagedBotToken` via the manager bot → the token stored
+  ONLY as an opaque `fp:<id>` RUNTIME reference → `setWebhook` with a fresh
+  per-connection secret → `getMe` identity check → the ledger consumed
+  exactly once → the connection written CONNECTED → `markOnboardingReady`.
+  **Every failure TERMINATES the attempt with a typed outcome on the
+  ledger**, so the polling surface shows `ACTION_REQUIRED` + a safe Arabic
+  reason + a re-launch CTA — never a permanent spinner and never a
+  half-provisioned connection (the provider calls run BEFORE the
+  single-use consume). **THREE REAL DEFECTS the focused harness found and
+  fixed in place (no re-architecture):** (1) the manager webhook secret
+  verification DOUBLE-DERIVED (it HMAC'd the incoming header before
+  comparing it to the HMAC of the manager token — no delivery could
+  authenticate; now both sides are hashed with the plain SHA-256 the
+  per-connection route uses, constant-time over fixed-length digests);
+  (2) `bindCreator` could RE-BIND an already-bound token to a DIFFERENT
+  chat — a shared deep link let a second account steal the attempt and
+  attach a bot to a Business it was never launched for (now the
+  conditional update matches unbound-or-already-bound-to-THIS-creator, so
+  the one legitimate replay stays idempotent and a second account matches
+  no row); (3) a FAILED completion never terminated the attempt — the row
+  stayed in flight forever, a permanent spinner (the boundary now records
+  the typed outcome; best-effort, race-safe on the unique `startToken`).
+  The manager endpoint's own webhook is self-wired by `ensureManagerWebhook`
+  at launch (secret DERIVED from the manager token with a fixed-label HMAC
+  — no extra operator config, no persisted secret, rotates with the token).
+  **AI impact: UNCHANGED and WhatsApp impact: NONE** — verified by grep:
+  no Telegram conditional exists in any AI prompt, provider selection, the
+  Conversation Engine, the disclosure gate, personality, booking,
+  availability, handoff, or operator attention; every Telegram concern
+  stays inside `src/server/integrations/telegram/` + the two Telegram
+  repositories. Guard: `pnpm check:telegram` extended **47 → 96/96** (NEW
+  sections L/M/N/O — the full manager-webhook lifecycle, typed failures,
+  disconnect/reconnect, and every rejection boundary + provider failure +
+  the CONNECTED transition guard); WhatsApp + credential + engine
+  regression guards re-run green; `pnpm verify` + `pnpm security` green.
+  **Boundary of this slice's claim:** the customer-facing `/settings/telegram`
+  surface (which EXISTS in the worktree from the interrupted session and
+  compiles + builds) was NOT behaviorally verified — wiring its polling to
+  the state machine + live E2E against a real BotFather manager bot +
+  owner-change/`ManagedBotUpdated` handling + token rotation + the open
+  #63 (F)(1) non-text decision remain the next slice.
+
+- **Telegram adapter + webhook + Conversation-Engine bridge (DECISIONS #65) — UNCOMMITTED in the
+  worktree (post-v0.30.0, on top of the #64 foundation):** the thin Telegram
+  adapter under `src/server/integrations/telegram/` owns Telegram protocol
+  details ONLY — a single HTTP boundary (`telegram-client.ts`: the Bot API
+  URL, the bot token in the path, `error_code`/`description` bodies, HTTP
+  statuses mapped onto the EXISTING provider-neutral transport taxonomy),
+  an Update parser (`telegram-webhook.ts`: a Telegram `Update` → the
+  provider-neutral `NormalizedInboundTransportMessage` the WhatsApp path
+  already uses), an outbound client (`telegram-transport.ts`:
+  `sendMessage` → the existing `MessageTransport` boundary), and a
+  `getMe`-backed `ConnectionVerifier` (`telegram-verify.ts`).
+  **`POST /api/telegram/webhook`** validates `X-Telegram-Bot-Api-Secret-Token`
+  with a CONSTANT-TIME comparison over fixed-length SHA-256 digests (401 on
+  invalid/missing, BEFORE any parsing), validates the Telegram Update
+  payload, extracts `update_id`, accepts private text messages only,
+  resolves the connection server-side from the digest (the Business comes
+  ONLY from the resolved connection row — never from the payload), invokes
+  the EXISTING durable inbound dedupe (the namespaced `update_id` is the
+  external key), normalizes the message, and hands it to
+  `receiveInboundMessage` through the SAME `toEngineInboundMessage` seam as
+  WhatsApp. **Returns HTTP 200 PROMPTLY** via Next 16 `after()` (backed by
+  `waitUntil` on Vercel) — the approved DECISIONS #63 (E) behavior (Telegram
+  retries on non-2xx then gives up), and the durable dedupe ledger keeps a
+  redelivery idempotent if the deferred work is lost. The whole POST logic
+  lives in `telegram-webhook-handler.ts` (adapter layer, injected deps) so
+  the security path is offline-assertable; the route file is the thin
+  composition point that wires the production singletons + the
+  Telegram-backed `MessageTransport` (the engine default stays offline, so
+  no non-Telegram entry point gains a live Telegram sender). No long
+  polling, no polling fallback, no client-supplied Business selection, no
+  tenant ids from the Telegram payload, and NO second messaging
+  abstraction. **AI impact: UNCHANGED** — the engine, the AI contract, the
+  context builder, the disclosure gate, handoff, operator attention, and
+  usage telemetry are reused byte-for-byte (proven by the REAL engine
+  turning a Telegram-handle inbound into a reply in `check:telegram` G).
+  **WhatsApp impact: NONE** — re-run guards `whatsapp-inbound` 13/13,
+  `whatsapp-transport` 27/27, `meta-whatsapp` 17/17; the Meta Embedded
+  Signup HOLD in `INTEGRATION_CHECKPOINTS.md` was NOT touched. Guard:
+  `pnpm check:telegram` extended **35 → 47/47** (new section H: route-level
+  security + routing through the real handler — valid/invalid/missing
+  secret, per-bot routing + cross-secret isolation, hostile-payload tenant
+  injection refused, non-private/non-text ignored, malformed Update 400,
+  `update_id` dedupe key stability, `managed_bot` acknowledged-not-dropped,
+  and the 200-prompt + deferred-turn contract); `pnpm verify` +
+  `pnpm security` green. **Boundary of this slice's claim:** the
+  `managed_bot` completion is still deliberately DEFERRED at the route (it
+  is acknowledged explicitly, never silently dropped), and the
+  customer-facing provisioning surface (`/settings/telegram`, deep-link
+  minting, the manager-bot `/start` creator binding), owner-change/token
+  rotation handling, and the open non-text drop-vs-persist-and-defer
+  decision (#63 (F)(1)) remain OUT of scope — see `Next Step`.
+
+- **Telegram identity/data foundation (DECISIONS #64) — UNCOMMITTED in the
+  worktree (post-v0.30.0):** the provider-neutral EXTERNAL HANDLE identity **Post-v0.29.1 audit
+  (evidence-backed, no code change):** the real LLM runtime answered a live
+  `BOOKING` turn (`atria / Atria-Dawn-Preview`, policy-resolved from the live
+  DB — `OPENROUTER_API_KEY`/`AGENTROUTER_API_KEY`/`ATRIA_API_KEY` are all
+  present in the local dev env); the Meta Embedded Signup configuration seam
+  resolves `ready: true` locally (all four names present); the RUNTIME
+  credential store round-trips exactly against the local dev DB with
+  `CREDENTIAL_MASTER_KEY` set; a real Meta round-trip has still never been
+  executed (see `docs/INTEGRATION_CHECKPOINTS.md`).
+
+- **Telegram identity/data foundation (DECISIONS #64) — UNCOMMITTED in the
+  worktree (post-v0.30.0):** the provider-neutral EXTERNAL HANDLE identity
+  seam replaces the phone-shaped inbound contract (`externalHandleSchema`;
+  E.164 is a strict subset, so every existing WhatsApp payload is
+  unchanged — proven by the re-run WhatsApp guards), plus two NEW
+  additive tables and the ONLY Prisma consumers for them:
+  `telegram_connections` (a transport SIBLING of `whatsapp_connections` —
+  businessId required / branchId optional / `botExternalId` authoritative /
+  `credentialsRef` = an opaque `fp:<id>` RUNTIME reference, never the raw
+  bot token / `webhookSecretHash` = a non-secret SHA-256 digest used as the
+  inbound routing index / the same two-surface operational + onboarding
+  lifecycle / `managerBotId` + `creatorTelegramUserId` provenance) and
+  `telegram_provisioning_ledgers` (the single-use ledger whose
+  `startToken` is the ONLY thing the deep link carries). Migration
+  `20260926120000_telegram_connection` is ADDITIVE — `migrate diff` is
+  exactly the two tables + indexes/FKs, ZERO ALTERs on existing tables;
+  chain 13 → 14 (apply is an operator action). All single-use / replay /
+  tenant-isolation / creator-binding / duplicate-bot guarantees are
+  STRUCTURAL (in the SQL WHERE clauses of the conditional updates).
+  WhatsApp compatibility: `check:whatsapp-inbound` 13/13,
+  `check:whatsapp-transport` 27/27, `check:meta-whatsapp` 17/17,
+  `check:meta-embedded-signup` 27/27, `check:credentials-runtime` 36/36,
+  `check:conversation-control` 50/50, `check:ai-disclosure` 36/36,
+  `check:greeting` 57/57, `check:conversation-handoff` 21/21 all re-run
+  green. Guard: NEW `pnpm check:telegram` **35/35** (offline, in-memory);
+  `pnpm verify` + `pnpm security` green. **Boundary of this slice's
+  claim:** the webhook + HTTP-adapter + provisioning-wiring + customer
+  provisioning UI are NOT part of it — see `Next Step`.
 
 - **AI personality / operator notification / conversation UX (DECISIONS #62) — UNCOMMITTED in the worktree (on top of #61):**
   the smallest evidence-backed surface for the three concerns, with ZERO
@@ -202,6 +411,15 @@ probe:codecraft` (3 runs) → `GET /v1/models` 200 with the exact model
   ONLY genuinely selectable slots; server-authoritative booking; no per-slot
   availability requests; no Busy/reason inference (DECISIONS #55/#56).
 - **Verification state (as recorded by each slice, offline harnesses):**
+  `check:telegram` 96/96 (DECISIONS #66 — the manager-bot provisioning
+  completion; extended from 47/47 by the new sections L/M/N/O; re-run
+  green by #67 after the `displayName` addition),
+  `check:telegram-onboarding` 22/22 (DECISIONS #67 — the customer
+  onboarding journey through the REAL service + REAL manager handler:
+  EMPTY → launch → token-only deep link → PROVISIONING observed by the
+  poll → `/start` binding + keyboard → `managed_bot` completion → CONNECTED
+  observed by the poll → single-use replay refusal → the typed-failure
+  retry loop → the authorization boundaries),
   `check:appointments-day-view` 56/56, `check:booking-ux` 18/18,
   `check:reschedule` 66/66, `check:appointment-creation` 53/53,
   `check:booking-options` 32/32, `check:booking-confirm` 18/18,
@@ -302,8 +520,17 @@ marker, SERIALIZABLE booking concurrency with bounded retry, durable
 ## Migration State
 
 Chain is **complete and clean**, rooted at `0_init` + `migration_lock.toml`
-(provider postgresql). **13 migrations**, ending at
-`20260923120000_operator_attention`. A genuinely EMPTY database bootstraps
+(provider postgresql). **15 migrations**, ending at
+`20260927120000_telegram_provisioning_outcome` (the two Telegram
+migrations: `20260926120000_telegram_connection` — DECISIONS #64, ADDITIVE:
+two new dedicated tables only, verified by `prisma migrate diff` = exactly
+those tables + indexes/FKs, zero ALTERs on existing tables; and
+`20260927120000_telegram_provisioning_outcome` — DECISIONS #66, ADDITIVE:
+one new NULLABLE `outcome_code` column on the ledger table introduced by
+the previous migration, which has NOT been applied to any database yet, so
+no existing column/constraint/index/table is renamed, reinterpreted, or
+dropped). NOT yet applied to any database — the operator runs `pnpm
+db:deploy`. A genuinely EMPTY database bootstraps
 fully via `pnpm db:deploy` (verified 8/8 at repair time; deploy count grows
 with each additive migration — re-run to reconcile). The old Demo/Neon DB
 needed a one-time HUMAN-ONLY baseline reconciliation
@@ -359,28 +586,58 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
-1. **Release + deploy the current head** (operator): the worktree carries the
-   shared conversation-layer UX slice (DECISIONS #61; verified: focused checks
-   green — `check:greeting` 57/57, `check:conversation-handoff` 21/21,
-   `check:ai-disclosure` 36/36) AND the personality / operator-notification /
-   conversation-UX slice (DECISIONS #62; verified: `check:assistant-style`
-   27/27, `check:conversation-ux` 18/18, `check:operator-attention` 20/20 —
-   `pnpm verify` passes, no migration in either). Review the #61 + #62 diffs,
-   then run `pnpm release`/`pnpm ship` to land the next version and
-   `pnpm deploy` + `pnpm db:deploy` against production, then probe
-   `/api/health`. The #60 AI-failure acknowledgment fix already shipped in
-   v0.29.4.
-2. **Fresh live WhatsApp E2E** (operator, REQUIRED): send one real inbound
+1. **Release + deploy the current head** (operator): the #61 + #62 slices landed
+   in **v0.30.0** (`8571a4a`, tree clean, synced to `origin/main`). Remaining
+   operator actions: `pnpm deploy` + `pnpm db:deploy` against production, then
+   probe `/api/health` to move production off the v0.19.0-era checkpoint.
+2. **Telegram second channel — the foundation, transport sibling, manager-bot
+   provisioning state machine, AND the customer onboarding surface are all
+   BUILT and VERIFIED offline** (DECISIONS #63 discovery → #64 foundation →
+   #65 adapter/webhook → #66 manager-bot provisioning → #67 customer
+   onboarding surface + live-E2E preparation): the ONE core change is DONE —
+   the inbound identity seam is widened from `phoneSchema` to a
+   provider-neutral `externalHandleSchema` (E.164 is a strict subset, so
+   WhatsApp is unchanged — proven by the re-run WhatsApp guards). Two NEW
+   additive tables with repository-only access (migrations
+   `20260926120000_telegram_connection` + `20260927120000_telegram_provisioning_outcome`
+   — zero ALTERs on existing tables), and `TELEGRAM_MANAGER_BOT_TOKEN` is an
+   env secret. The thin adapter under `src/server/integrations/telegram/`
+   (HTTP client, Update parser, outbound `MessageTransport`, `getMe`
+   `ConnectionVerifier`, webhook handler) + `POST /api/telegram/webhook` are
+   BUILT; the manager-bot provisioning path
+   (`POST /api/telegram/manager/webhook`: `/start` creator binding +
+   keyboard, `managed_bot` → `fp:<id>` → `setWebhook` → `getMe` →
+   CONNECTED, with typed failure outcomes) is BUILT and covered by
+   `pnpm check:telegram` **96/96**; the `/settings/telegram` customer
+   surface is BUILT + behaviorally wired + covered by the NEW
+   `pnpm check:telegram-onboarding` **22/22** (the customer journey through
+   the REAL service + REAL manager handler; DECISIONS #67). `pnpm verify` +
+   `pnpm security` green. **Remaining for Telegram:** the ONE real live E2E
+   against a REAL BotFather manager bot (operator — the exact procedure is
+   `docs/TELEGRAM.md → The ONE live E2E`; the checkpoint sits at LIVE E2E
+   PENDING in `docs/INTEGRATION_CHECKPOINTS.md` and a simulated success must
+   never be reported), owner-change/`ManagedBotUpdated` handling + token
+   rotation, and the open decision #63 (F)(1) — non-text inbound routing
+   (drop vs persist-and-defer) is still open; the MVP private-chats-only
+   scope is implemented at both parsers (non-private/non-text are
+   acknowledged 200 and not processed). One-time operator setup still due
+   (`docs/TELEGRAM.md → Operator one-time setup`): create the FlowPilot
+   Manager Bot via @BotFather, enable "Bot Management Mode", set
+   `TELEGRAM_MANAGER_BOT_TOKEN` + the public `TELEGRAM_MANAGER_BOT_USERNAME`,
+   set `CREDENTIAL_MASTER_KEY`, then `pnpm db:deploy`. **Migration apply
+   is an operator action** (`pnpm db:deploy`); the chain grew 13 → 15 and
+   has NOT been applied to any database.
+3. **Fresh live WhatsApp E2E** (operator, REQUIRED): send one real inbound
    message on an AI_ACTIVE thread with the policy still on `codecraft` /
    `deepseek-v4-flash-0731` and confirm the customer receives a reply even if
    the provider fails. The live probe proved the CodeCraft path healthy
    (3/3, `DIRECT_PARSE`, max 7.9s), so the prior `AI_TURN` FAILURE is
    non-deterministic — but any failure must no longer produce silence.
-3. **Onboard the first REAL pilot Business end-to-end** — operator provisions
+4. **Onboard the first REAL pilot Business end-to-end** — operator provisions
    the Business + invitation → ADMIN connects the WhatsApp number via Meta
    Embedded Signup at `/settings/whatsapp` → CONNECTED → live messaging →
    gather baseline/ROI evidence per `PRODUCT_STRATEGY.md`.
-4. **Only after pilot evidence justifies it:** Spec B instrumentation /
+5. **Only after pilot evidence justifies it:** Spec B instrumentation /
    economics (usage → cost → price → entitlement; `ECONOMICS.md`). Not before
    pilot evidence exists.
 

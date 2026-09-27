@@ -1,0 +1,24 @@
+-- Telegram provisioning ledger — the attempt OUTCOME column
+-- (DECISIONS #63/#66 — the TELEGRAM 03 provisioning slice).
+--
+-- ADDITIVE ONLY: one new NULLABLE column on the table introduced by the
+-- previous migration (20260926120000_telegram_connection, which has NOT
+-- been applied to any database yet — the table does not exist anywhere
+-- outside this worktree). No existing column, constraint, index, or
+-- table is renamed, reinterpreted, or dropped; no data is backfilled;
+-- WhatsApp, the Conversation Engine, the AI boundary, and the customer
+-- model are completely untouched.
+--
+-- WHY: until Telegram delivers the `managed_bot` event, the bot id is
+-- unknown and NO `TelegramConnection` row can exist yet — so the
+-- onboarding lifecycle (failure reason / retryable / terminal state)
+-- cannot live on the connection during the pre-connection phase. The
+-- single-use ledger row is the only server-persisted record of the
+-- in-flight attempt, so it carries the typed outcome too. `consumedAt`
+-- marks the attempt terminal (success OR normalized failure) and
+-- `outcome_code` says which; the feature layer maps the code to a safe
+-- Arabic summary + retryable flag. A raw provider response, a token, or
+-- any secret never reaches this column.
+
+-- AlterTable
+ALTER TABLE "telegram_provisioning_ledgers" ADD COLUMN "outcome_code" TEXT;

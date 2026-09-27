@@ -9,4 +9,5 @@ export * from "./appointment";
 export * from "./user";
 export * from "./invitation";
 export * from "./whatsapp-connection";
+export * from "./telegram-connection";
 export * from "./usage";

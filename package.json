@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -20,6 +20,8 @@
     "check:booking-options": "tsx scripts/check-booking-options.ts",
     "check:whatsapp-transport": "tsx scripts/check-whatsapp-transport.ts",
     "check:whatsapp-inbound": "tsx scripts/check-whatsapp-inbound.ts",
+    "check:telegram": "tsx scripts/check-telegram.ts",
+    "check:telegram-onboarding": "tsx scripts/check-telegram-onboarding.ts",
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
     "check:meta-embedded-signup": "tsx scripts/check-meta-embedded-signup.ts",
     "check:whatsapp-onboarding": "tsx scripts/check-whatsapp-onboarding.ts",
