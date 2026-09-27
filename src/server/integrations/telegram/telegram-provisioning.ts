@@ -233,18 +233,39 @@ function generateWebhookSecret(): string {
  * The Manager Bot's reply to `/start <token>`: the managed-bot keyboard
  * (DECISIONS #63 (B)) — the ONE customer action the model requires (the
  * bot's owner must approve creation in Telegram's own UI). The button's
- * `request_managed_bot` object is empty on purpose: FlowPilot does NOT
- * prefill the bot's name/username into a Telegram API field it cannot
- * verify — the suggestion is carried in the reply TEXT (the safe place
- * for Arabic copy), and the Admin edits the final values in Telegram.
+ * `request_managed_bot` object carries ONLY the REQUIRED `request_id`
+ * (a stable, per-attempt signed 32-bit identifier Telegram needs to
+ * correlate the resulting `managed_bot` event back to this button tap);
+ * FlowPilot does NOT prefill the bot's name/username into a Telegram API
+ * field it cannot verify — the suggestion is carried in the reply TEXT
+ * (the safe place for Arabic copy), and the Admin edits the final values
+ * in Telegram. The id is derived from the ledger row so a replayed
+ * attempt re-opens the same request, while a fresh attempt gets a fresh
+ * id (Telegram requires uniqueness within the message only, but a stable
+ * per-attempt value keeps redeliveries coherent).
  */
+/**
+ * The `request_id` Telegram requires on the `request_managed_bot` button
+ * (Bot API: a signed 32-bit identifier, unique within the message). A
+ * FIXED value is correct and safest here: the keyboard is the only
+ * button in the only message this endpoint ever sends per attempt, so
+ * uniqueness-within-the-message is trivially satisfied, and a constant
+ * (rather than a random per-send value) keeps a legitimate replay of the
+ * SAME attempt coherent — the keyboard the Admin re-opens after an
+ * app restart or a redeploy carries the same request id as the one
+ * their button tap already produced. It carries no security meaning: it
+ * is a provider correlation key, not a FlowPilot secret (the auth is the
+ * ledger's single-use `startToken` + creator binding).
+ */
+export const MANAGED_BOT_REQUEST_ID = 1;
+
 export const MANAGED_BOT_KEYBOARD_TITLE = "إنشاء بوت المنشأة على تيليجرام";
 
 export function buildManagedBotKeyboard(): {
   keyboard: Array<
     Array<{
       text: string;
-      request_managed_bot: Record<string, never>;
+      request_managed_bot: { request_id: number };
     }>
   >;
   resize_keyboard?: boolean;
@@ -255,7 +276,7 @@ export function buildManagedBotKeyboard(): {
       [
         {
           text: MANAGED_BOT_KEYBOARD_TITLE,
-          request_managed_bot: {},
+          request_managed_bot: { request_id: MANAGED_BOT_REQUEST_ID },
         },
       ],
     ],

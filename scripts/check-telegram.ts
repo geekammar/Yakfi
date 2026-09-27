@@ -1513,6 +1513,7 @@ async function main(): Promise<void> {
     suggestBotUsername,
     deriveManagerWebhookSecret,
     buildManagerWebhookUrl,
+    MANAGED_BOT_REQUEST_ID,
   } = await import("@/server/integrations/telegram/telegram-provisioning");
 
   const managerCalls: Array<{ url: string; body: Record<string, unknown> }> =
@@ -2028,14 +2029,18 @@ async function main(): Promise<void> {
   );
   const keyboard = keyboardReply!.body.reply_markup as {
     keyboard: Array<
-      Array<{ text: string; request_managed_bot: Record<string, never> }>
+      Array<{
+        text: string;
+        request_managed_bot: { request_id: number };
+      }>
     >;
   };
   check(
     "L4. لوحة الإنشاء تحوي زراً واحداً يطلب بوتاً مُداراً (الإجراء الوحيد المطلوب)",
     keyboard.keyboard.length === 1 &&
       keyboard.keyboard[0]!.length === 1 &&
-      Object.keys(keyboard.keyboard[0]![0]!.request_managed_bot).length === 0 &&
+      keyboard.keyboard[0]![0]!.request_managed_bot.request_id ===
+        MANAGED_BOT_REQUEST_ID &&
       typeof keyboardReply!.body.text === "string" &&
       keyboardReply!.body.text.includes(BUSINESS_NAME) &&
       !keyboardReply!.body.text.includes(BOT_TOKEN_VALUE),
@@ -2045,6 +2050,28 @@ async function main(): Promise<void> {
     !JSON.stringify(keyboardReply!.body).includes(BUSINESS_A) &&
       !JSON.stringify(keyboardReply!.body).includes(startTokenL),
   );
+
+  // L4b. REGRESSION GUARD for the live-proved defect (DECISIONS #69):
+  //      Telegram REJECTS a `request_managed_bot` button with no
+  //      `request_id` — the live E2E saw `400 Bad Request: can't parse
+  //      KeyboardButton: Can't find field "request_id"`, so the reply with
+  //      the creation keyboard never reached the Admin while the ledger
+  //      binding had already succeeded (a permanent, silent no-keyboard
+  //      state no UI could recover from). The guard asserts the wire shape
+  //      directly: the sent body's reply_markup button MUST carry a
+  //      numeric request_id. It fails loudly if the field is ever dropped.
+  {
+    const sentKeyboard = keyboardReply!.body.reply_markup as {
+      keyboard: Array<Array<{ request_managed_bot?: { request_id?: number } }>>;
+    };
+    const button = sentKeyboard.keyboard[0]?.[0];
+    check(
+      "L4b. زر request_managed_bot يحمل request_id رقمياً (البوت يرفض بدونه)",
+      typeof button?.request_managed_bot?.request_id === "number" &&
+        Number.isFinite(button.request_managed_bot.request_id) &&
+        Number.isInteger(button.request_managed_bot.request_id),
+    );
+  }
 
   // L6. A replayed / an already-bound deep link from a DIFFERENT chat is
   //     refused (the token is single-use + creator-bound).

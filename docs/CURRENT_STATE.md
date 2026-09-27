@@ -6,51 +6,56 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.31.0** — released and committed (`b70caac`, tag `v0.31.0`;
-HEAD == `origin/main`; tags through `v0.31.0`). v0.31.0 carries the whole
-Telegram second channel committed (DECISIONS #63 → #67), and the **first
-REAL live Telegram verification pass** (DECISIONS #68) ran against that
-deployment: it LIVE-VERIFIED the real Manager Bot (`getMe` 200 →
-`@FlowPilotManagerBot`, id `8603565570`, **`can_manage_bots: true`**) and
-LIVE-PROVED one genuine blocking defect no offline harness could see — the
-route proxy session-gated both Telegram webhook endpoints, so every real
-delivery answered **307 → `/sign-in`** and never reached a handler. FIXED
-in place + guarded (NEW `check:telegram` section P + `check:signup`) +
-proven locally (401 instead of 307, no auth regression), **but NOT yet
-deployed**, so the Telegram checkpoint stays at **LIVE E2E PENDING** with
-four exact operator actions: deploy → `pnpm db:deploy` (both Telegram
-migrations are UNAPPLIED — live-confirmed by `prisma migrate status` + a
-`P2021 The table public.telegram_connections does not exist` error) → set
-the public `TELEGRAM_MANAGER_BOT_USERNAME` in production (presently
-**ABSENT**; the token + `CREDENTIAL_MASTER_KEY` ARE present) → perform the
-human steps inside Telegram. The #58 WhatsApp E2E
-disclosure-silence fix shipped in v0.29.2; the CodeCraft Discovery provider
-adapter (DECISIONS #59) shipped in v0.29.3; the #60 AI-failure
-acknowledgment fix shipped in v0.29.4; the #61 shared conversation-layer UX
-and the #62 AI personality / operator-notification / conversation-UX slices
-shipped in v0.30.0. The post-v0.30.0 **Telegram second channel** is
-COMPLETE and committed: the discovery pass (DECISIONS #63) mapped the exact
-seams, the identity/data foundation is BUILT (DECISIONS #64), the thin
-Telegram adapter + `POST /api/telegram/webhook` + the Conversation-Engine
-bridge are BUILT (DECISIONS #65), the managed-bot provisioning state
-machine is BUILT (DECISIONS #66 — three security defects the focused
-harness surfaced were fixed in place), and the customer-facing
-`/settings/telegram` surface is BUILT + behaviorally WIRED +
-offline-verified (DECISIONS #67) — Telegram is only a transport
-implementation over the unchanged engine.
-#62's smallest-surface findings: the
-assistant's voice is now ONE structured provider-neutral/channel-agnostic
-module carried as request context (no prompt editor, no persistence, no
-migration — per-business style is deferred to pilot evidence); the
-operator-attention path was audited correct on all 8 required properties and
-closed for its one genuine gap (opening a flagged conversation now shows WHY
-— an icon + Arabic reason chip with an accessible name, captured before the
-acknowledge-on-open resolve); and the previously-observed long-scroll
-identity issue was verified to be ALREADY SOLVED by the internal-scroll
-layout, so no sticky UI was added (the two real gaps — 44px mobile touch
-targets and the sending-indicator announcement — were fixed). The
-personality and the notification behavior are both reusable by a future
-Telegram channel by construction.
+**Version: v0.31.2** — released and committed (`04260a1`, tag `v0.31.2`;
+HEAD == `origin/main`; tags through `v0.31.2`). v0.31.1/v0.31.2 carry the
+whole Telegram second channel committed (DECISIONS #63 → #67) + the #68
+route-proxy routing fix. **The second REAL live Telegram verification pass
+(DECISIONS #69) ran against that deployment:** it LIVE-VERIFIED that all
+four #68 operator blockers are now RESOLVED (the routing fix IS live — both
+webhooks 401 fail-closed with no 307; both Telegram migrations are APPLIED
+to production; `TELEGRAM_MANAGER_BOT_USERNAME` IS present; health reports
+v0.31.2 + `database:"connected"`) and that the whole server-side launch →
+`ensureManagerWebhook` → real `/start` → `bindCreator` chain runs for REAL —
+then **LIVE-PROVED a SECOND blocking defect no offline harness can see**:
+the creation keyboard was sent with `request_managed_bot: {}` and the real
+Bot API rejects it (`400 can't parse KeyboardButton: Can't find field
+"request_id"`), so the ONE customer action never reached the Admin and no
+`managed_bot` event could ever be produced. FIXED in place (`request_id:
+MANAGED_BOT_REQUEST_ID`) + guarded on three regression surfaces
+(`check:telegram` 100/100 incl. NEW L4b, `check:telegram-onboarding` 22/22,
+`check:signup` 18/18), **but NOT deployed**, so the Telegram checkpoint
+stays at **LIVE E2E PENDING** with ONE remaining operator action: **deploy
+the current head → re-run the ONE live E2E from a fresh launch.** The #58
+WhatsApp E2E disclosure-silence fix shipped in v0.29.2; the CodeCraft
+Discovery provider adapter (DECISIONS #59) shipped in v0.29.3; the #60
+AI-failure acknowledgment fix shipped in v0.29.4; the #61 shared
+conversation-layer UX and the #62 AI personality /
+operator-notification / conversation-UX slices shipped in v0.30.0. The
+post-v0.30.0 **Telegram second channel** is COMPLETE and committed: the
+discovery pass (DECISIONS #63) mapped the exact seams, the identity/data
+foundation is BUILT (DECISIONS #64), the thin Telegram adapter + `POST
+/api/telegram/webhook` + the Conversation-Engine bridge are BUILT
+(DECISIONS #65), the managed-bot provisioning state machine is BUILT
+(DECISIONS #66 — three security defects the focused harness surfaced were
+fixed in place), the customer-facing `/settings/telegram` surface is BUILT
+
+- behaviorally WIRED + offline-verified (DECISIONS #67), and the two
+  live-found delivery defects are fixed + guarded (DECISIONS #68 routing,
+  #69 keyboard) — Telegram is only a transport implementation over the
+  unchanged engine.
+  #62's smallest-surface findings: the
+  assistant's voice is now ONE structured provider-neutral/channel-agnostic
+  module carried as request context (no prompt editor, no persistence, no
+  migration — per-business style is deferred to pilot evidence); the
+  operator-attention path was audited correct on all 8 required properties and
+  closed for its one genuine gap (opening a flagged conversation now shows WHY
+  — an icon + Arabic reason chip with an accessible name, captured before the
+  acknowledge-on-open resolve); and the previously-observed long-scroll
+  identity issue was verified to be ALREADY SOLVED by the internal-scroll
+  layout, so no sticky UI was added (the two real gaps — 44px mobile touch
+  targets and the sending-indicator announcement — were fixed). The
+  personality and the notification behavior are both reusable by a future
+  Telegram channel by construction.
 
 **Last shipped slice (v0.29.1):** the Spec A **cross-surface UX coherence +
 slot-presentation audit** (DECISIONS #56) — presentation layer only: the slot
@@ -148,20 +153,24 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   customer-visible reply on the real thread (see §6).
 - Real-browser verification of the presentation-layer UX slices (#54–#56) was
   NOT performed — they are structurally asserted in offline harnesses only.
-- **Production deployment state IS now live-verified at v0.31.0** (DECISIONS
-  #68, 2026-09-27): `GET /api/health` → `version:"0.31.0"`,
+- **Production deployment state IS live-verified at v0.31.2** (DECISIONS
+  #69, 2026-09-27): `GET /api/health` → `version:"0.31.2"`,
   `deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]` at
-  `https://flowpilot-prod.vercel.app`. This supersedes the v0.19.0-era
-  checkpoint that had stood since 2026-09-19. **Production env PRESENCE
+  `https://flowpilot-prod.vercel.app`. **Production env PRESENCE
   verified without reading any value:** `TELEGRAM_MANAGER_BOT_TOKEN` ✓,
-  `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓, `CODECRAFT_API_KEY` ✓
-  — but **`TELEGRAM_MANAGER_BOT_USERNAME` ABSENT**, which blocks the
-  Telegram deep link. **Production is NOT yet re-deployed with the #68
-  public-path fix**, so both Telegram webhook endpoints still answer 307 to
-  real Telegram deliveries. (The live-forensics DB IS the production Neon
-  DB, so the failing CodeCraft `AI_TURN` row and the stuck thread are REAL
-  production evidence — the deployed build must be at least v0.29.3, since
-  the row records `provider:"codecraft"`, which only that release emits.)
+  `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓,
+  **`TELEGRAM_MANAGER_BOT_USERNAME` ✓ (now present — the last #68
+  blocker)**. **The #68 routing fix IS live:** both Telegram webhook
+  endpoints return 401 fail-closed with NO 307 and no `/sign-in` redirect.
+  **Both Telegram migrations ARE applied** (`prisma migrate status` →
+  "Database schema is up to date!", all 15; production-DB read confirms
+  both tables + `outcome_code`). **BUT production is NOT yet re-deployed
+  with the DECISIONS #69 `request_id` fix**, so the deployed build still
+  rejects the creation keyboard and the live E2E still cannot complete.
+  (The live-forensics DB IS the production Neon DB, so the failing
+  CodeCraft `AI_TURN` row and the stuck thread are REAL production
+  evidence — the deployed build must be at least v0.29.3, since the row
+  records `provider:"codecraft"`, which only that release emits.)
 - The Meta Embedded Signup code path is implemented and offline-harnessed
   (`check:meta-embedded-signup`) but has never been exercised against a real
   operator-owned Meta App Dashboard configuration. It is on a documented
@@ -169,26 +178,29 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   silently reopen it during unrelated work). The Telegram work did NOT
   touch it.
 - **The Telegram customer onboarding path is BUILT + offline-verified but
-  NOT live-verified** (DECISIONS #67/#68): `pnpm check:telegram` **99/99**
-  (NEW section P — the live-found route-proxy reachability guard) +
+  NOT live-verified** (DECISIONS #67/#68/#69): `pnpm check:telegram`
+  **100/100** (section P — the live-found route-proxy reachability guard;
+  NEW **L4b** — the live-found `request_id` wire-shape guard) +
   `pnpm check:telegram-onboarding` 22/22 prove the whole journey
   (EMPTY → launch → token-only deep link → the poll observing PROVISIONING
   → `/start` binding + the keyboard → the `managed_bot` completion → the
   poll observing CONNECTED → single-use replay refusal → the typed-failure
   retry loop) through the REAL service + REAL manager-webhook handler with
-  in-memory fakes. **The real Manager Bot IS now LIVE-VERIFIED** (a REAL
+  in-memory fakes. **The real Manager Bot IS LIVE-VERIFIED** (a REAL
   `getMe`: `@FlowPilotManagerBot`, id `8603565570`, `can_manage_bots: true`
-  — do NOT recreate or replace it), but **no real managed bot has ever been
-  created, no `setWebhook`/`getMe` has run for a managed bot, no connection
-  has reached CONNECTED, and no customer message has been received or
-  answered.** Four operator actions stand open (deploy the #68 fix →
-  `pnpm db:deploy` — both Telegram migrations are UNAPPLIED, live-confirmed
-  by `prisma migrate status` + a `P2021 … telegram_connections does not
-exist` error → set `TELEGRAM_MANAGER_BOT_USERNAME` in production →
-  perform the human steps inside Telegram). The exact procedure + the
-  "what must NOT happen" list are in `docs/TELEGRAM.md → The ONE live E2E`
-  - §6.1; the checkpoint sits at **LIVE E2E PENDING** in
-    `docs/INTEGRATION_CHECKPOINTS.md`. Do NOT report a simulated success.
+  — do NOT recreate or replace it), and the second live pass (DECISIONS
+  #69) verified the real launch → `ensureManagerWebhook` (installed at the
+  production URL) → the real `/start` DELIVERED → `bindCreator` bound the
+  real Telegram user id (all observed in production). **But NO real
+  managed bot has ever been created, no `setWebhook`/`getMe` has run for a
+  managed bot, no connection has reached CONNECTED, and no customer
+  message has been received or answered** — the deployed build still sends
+  the invalid empty `request_managed_bot` object (live-proved:
+  `400 … Can't find field "request_id"`), so the creation keyboard never
+  reaches the Admin. ONE operator action stands open: **deploy the current
+  head → re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh
+  launch**; the checkpoint sits at **LIVE E2E PENDING** in
+  `docs/INTEGRATION_CHECKPOINTS.md`. Do NOT report a simulated success.
 
 ## 5. What is the current product/architecture direction?
 
@@ -211,15 +223,18 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-1. **Operator — unblock the ONE Telegram live E2E (DECISIONS #68):** four
-   actions, none of them code — (a) deploy the current head so the
-   public-path fix is live (production still 307s both Telegram webhooks);
-   (b) `pnpm db:deploy` (both Telegram migrations UNAPPLIED — live-confirmed);
-   (c) set `TELEGRAM_MANAGER_BOT_USERNAME` in production (presently ABSENT —
-   the live `getMe` already reported `FlowPilotManagerBot`); (d) run
-   `docs/TELEGRAM.md → The ONE live E2E` (the human steps inside Telegram).
-   Then record the outcome in `BUILD_STATE.md` + a `DECISIONS.md` entry if a
-   defect surfaces.
+1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69):** two
+   actions, neither code — (a) **deploy the current head** (the deployed
+   v0.31.2 still sends the invalid empty `request_managed_bot` object, so
+   the real Bot API rejects the creation keyboard with `400 … Can't find
+field "request_id"` and the ONE customer action can never appear);
+   (b) **re-run `docs/TELEGRAM.md → The ONE live E2E`** from a FRESH launch
+   (the `/start` tap, the native bot-creation confirmation, and the first
+   customer message are Telegram-hosted human actions). Everything else
+   #68 required is already live-verified RESOLVED (routing fix live,
+   migrations applied, `TELEGRAM_MANAGER_BOT_USERNAME` present). Then
+   record the outcome in `BUILD_STATE.md` + a `DECISIONS.md` entry if a
+   further defect surfaces.
 2. **Fresh live WhatsApp E2E (operator, required):** send ONE real inbound
    message on an AI_ACTIVE thread with the policy still on
    `codecraft` / `deepseek-v4-flash-0731` and confirm the customer now

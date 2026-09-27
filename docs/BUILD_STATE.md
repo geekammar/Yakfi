@@ -9,24 +9,25 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.31.0** — released and committed (`b70caac`, tag `v0.31.0`;
-HEAD == `origin/main`; tags through `v0.31.0`). v0.31.0 carries the whole
-Telegram second channel (DECISIONS #63 → #67) committed, and the first REAL
-live Telegram verification pass (DECISIONS #68, this slice) ran against that
-deployment: it **LIVE-VERIFIED the real Manager Bot** (`getMe` 200 →
-`@FlowPilotManagerBot`, id `8603565570`, **`can_manage_bots: true`**) and
-**LIVE-PROVED one genuine blocking defect** that no offline harness could see
-— the route proxy session-gated both Telegram webhook endpoints, so every
-real Telegram delivery answered **307 → /sign-in** (`location:
-/sign-in?redirect=%2Fapi%2Ftelegram%2Fmanager%2Fwebhook`, reproduced live).
-The defect is FIXED in place (the public-path policy now carries
-`/api/telegram`, guarded by NEW regression assertions in `check:telegram` P
-and `check:signup`) and proven locally: `POST
-/api/telegram/manager/webhook` now returns **401** (the handler's own
-constant-time secret gate) instead of 307, while `/settings/telegram` stays
-307-protected. **The fix is NOT yet deployed**, so the checkpoint stays at
-LIVE E2E PENDING with the operator's exact remaining actions
-(DECISIONS #68 + `docs/TELEGRAM.md → The ONE live E2E`). See `Current State`.
+**Product version: v0.31.2** — released and committed (`04260a1`, tag `v0.31.2`;
+HEAD == `origin/main`; tags through `v0.31.2`). v0.31.1/v0.31.2 carry the
+whole Telegram second channel (DECISIONS #63 → #67) committed + the #68
+route-proxy routing fix, and v0.31.2 is what production now serves. **The
+second REAL live Telegram verification pass (DECISIONS #69, this slice) ran
+against that deployment:** it LIVE-VERIFIED that all four #68 operator
+blockers are now RESOLVED (the routing fix IS live, both Telegram migrations
+are APPLIED, `TELEGRAM_MANAGER_BOT_USERNAME` IS present, health reports
+v0.31.2 + `database:"connected"`) and that the whole server-side launch →
+`ensureManagerWebhook` → real `/start` → `bindCreator` chain runs for REAL —
+then **LIVE-PROVED a SECOND blocking defect no offline harness can see**:
+the creation keyboard was sent with `request_managed_bot: {}`, and the real
+Bot API rejects that wire shape (`400 can't parse KeyboardButton: Can't find
+field "request_id"`), so the ONE customer action never reached the Admin and
+no `managed_bot` event could ever be produced. FIXED in place (`request_id:
+MANAGED_BOT_REQUEST_ID`) + guarded on three regression surfaces, **but NOT
+deployed** — so the Telegram checkpoint stays at **LIVE E2E PENDING** with
+ONE remaining operator action: deploy the current head, then re-run the ONE
+live E2E from a fresh launch. See `Current State`.
 Releases v0.20.0–v0.30.0 ship the
 AI-trust boundary (B-01–B-03), the owner-facing UX surfaces (knowledge/FAQ,
 services, appointment creation, reschedule), appointments/availability
@@ -50,8 +51,83 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **Telegram SECOND LIVE E2E PASS (DECISIONS #69) — all four #68 blockers
+  RESOLVED live; a SECOND blocking defect LIVE-PROVED + FIXED + GUARDED, NOT
+  YET DEPLOYED:** the real attempt against the deployed v0.31.2 + the real
+  Telegram Bot API. **LIVE-VERIFIED:** (a) production IS v0.31.2 (`GET
+/api/health` → `version:"0.31.2"`, `deploymentReady:true`,
+  `database:"connected"`, `missingEnvVars:[]`); (b) the #68 routing fix IS
+  LIVE — both `POST /api/telegram/webhook` and `POST
+/api/telegram/manager/webhook` return **401 UNAUTHENTICATED** (missing
+  secret → «سر الويبهوك مفقود»; invalid secret → «سر الويبهوك غير صالح»)
+  with **NO 307 and no /sign-in redirect**, while `/settings/telegram`
+  stays 307-protected (no auth regression); (c) `prisma migrate status` →
+  **"Database schema is up to date!"** — all 15 migrations applied, and a
+  direct production-DB read confirms both `telegram_connections` +
+  `telegram_provisioning_ledgers` exist with the `outcome_code` column (0
+  rows each — the EMPTY precondition held); (d) production env PRESENCE
+  verified without reading any value: `TELEGRAM_MANAGER_BOT_TOKEN` ✓,
+  **`TELEGRAM_MANAGER_BOT_USERNAME` ✓ (newly added — the last #68
+  blocker)**, `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓. **(e) The
+  whole server-side launch + binding chain ran for REAL:** «اربط تيليجرام»
+  persisted the single-use ledger row (Business server-derived; deep link
+  token-only) → `ensureManagerWebhook` installed the Manager Bot's webhook
+  at the production URL (`getWebhookInfo` →
+  `url:"https://flowpilot-prod.vercel.app/api/telegram/manager/webhook"`,
+  `allowed_updates:["message","managed_bot"]`, `pending_update_count:0`,
+  `last_error:null`) → the deep link opened @FlowPilotManagerBot → the real
+  `/start <token>` was DELIVERED (visible as `POST
+/api/telegram/manager/webhook` in production logs) → `bindCreator` bound
+  the real Telegram `user.id` to the ledger row (verified in the production
+  DB) → the settings surface's bounded poll observed the honest
+  PROVISIONING state. **(f) The honest failure path is correct live:** the
+  first attempt's 15-minute window elapsed with no `managed_bot` event and
+  the UI surfaced **ACTION_REQUIRED** + a retryable «أعد المحاولة»; the
+  retry then minted a FRESH single-use token + re-bound on the real
+  `/start` — the typed-failure loop #66/#67 designed, verified live. **(g)
+  THE LIVE-PROVED DEFECT — the manager bot's reply NEVER reached the
+  Admin.** The ledger binding had succeeded, but Telegram never delivered
+  the welcome message or the creation keyboard, so the Admin stared at a
+  bot that said nothing and the `managed_bot` event could never be
+  produced. **Root cause, reproduced exactly against the real Bot API:**
+  the `KeyboardButtonRequestManagedBot` was sent with
+  `request_managed_bot: {}` → `POST …/sendMessage` → **`400 Bad Request:
+can't parse KeyboardButton: Can't find field "request_id"`**. The Bot
+  API REQUIRES `request_id` on that object; the empty object is invalid,
+  so every `/start` reply failed as a PERMANENT transport failure and the
+  keyboard silently never appeared. No offline harness can see this: they
+  assert the button's EXISTENCE and the closed payload surface (no token,
+  no identifier), but the harness's FAKE Telegram API accepts whatever
+  object is sent, so a schema-required field the real provider mandates
+  was invisible offline. **FIX — the smallest isolated change, no
+  re-architecture:** `buildManagedBotKeyboard()` now sends
+  `request_managed_bot: { request_id: MANAGED_BOT_REQUEST_ID }` (a NEW
+  exported constant = `1`). A FIXED value is correct and safest (the
+  keyboard is the ONLY button in the ONLY message per attempt, so
+  uniqueness-within-the-message is trivially satisfied, and a constant
+  keeps a legitimate replay of the same attempt coherent across a restart
+  or redeploy); it carries NO security meaning — the auth is the ledger's
+  single-use `startToken` + creator binding. The deliberate non-prefill
+  decision is UNCHANGED: `suggested_name`/`suggested_username` are still
+  NOT sent. **GUARDED:** `check:telegram` **100/100** (L4 now asserts the
+  numeric `request_id`; NEW **L4b** asserts the wire shape directly —
+  `typeof request_id === "number" && finite && integer`, reproducing the
+  live failure so the class is caught offline),
+  `check:telegram-onboarding` **22/22** (check 7), `check:signup` **18/18**;
+  `pnpm verify` + `pnpm security` + `git diff --check` green. **WhatsApp /
+  AI / Meta Embedded Signup HOLD all untouched.** **Boundary of this
+  slice's claim — the live E2E could NOT complete, and the reason is
+  recorded exactly:** the `request_id` fix is committed but NOT deployed
+  (the deployed v0.31.2 still sends the invalid empty object, so the
+  creation keyboard still cannot appear); NO real managed bot was created,
+  NO `getManagedBotToken`/`setWebhook`/`getMe` for a managed bot ran, NO
+  connection reached CONNECTED, and NO customer message was received or
+  answered. The ONE real live E2E remains an operator action: **deploy the
+  current head → re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh
+  launch.**
+
 - **Telegram FIRST LIVE E2E PASS (DECISIONS #68) — LIVE-VERIFIED boundary,
-  one blocking defect FOUND + FIXED + GUARDED, NOT YET DEPLOYED:** the first
+  one blocking defect FOUND + FIXED + GUARDED, NOW DEPLOYED in v0.31.1/.2:** the first
   real attempt against the deployed v0.31.0 + the real Telegram Bot API.
   **LIVE-VERIFIED:** (a) production IS v0.31.0 (`GET /api/health` →
   `version:"0.31.0"`, `deploymentReady:true`, `database:"connected"`,
@@ -597,15 +673,11 @@ those tables + indexes/FKs, zero ALTERs on existing tables; and
 one new NULLABLE `outcome_code` column on the ledger table introduced by
 the previous migration, which has NOT been applied to any database yet, so
 no existing column/constraint/index/table is renamed, reinterpreted, or
-dropped). NOT yet applied to any database — the operator runs `pnpm
-db:deploy`. **LIVE-CONFIRMED by the first real E2E attempt (DECISIONS
-#68):** `prisma migrate status` against the production Neon DB reports BOTH
-Telegram migrations "have not yet been applied", and a live `POST
-/api/telegram/webhook` against the local dev server raised
-`PrismaClientKnownRequestError P2021: The table public.telegram_connections
-does not exist in the current database` — so provisioning CANNOT be
-attempted until `pnpm db:deploy` runs (an operator action, recorded in
-`Unresolved User Actions`). A genuinely EMPTY database bootstraps
+dropped). **APPLIED to the production Neon DB as of 2026-09-27
+(live-verified by DECISIONS #69):** `prisma migrate status` → "Database
+schema is up to date!" (all 15), and a direct production-DB read confirms
+both `telegram_connections` + `telegram_provisioning_ledgers` exist with
+the `outcome_code` column. A genuinely EMPTY database bootstraps
 fully via `pnpm db:deploy` (verified 8/8 at repair time; deploy count grows
 with each additive migration — re-run to reconcile). The old Demo/Neon DB
 needed a one-time HUMAN-ONLY baseline reconciliation
@@ -617,18 +689,21 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 - **Production:** `https://flowpilot-prod.vercel.app` — Neon production DB
   (`ep-tiny-grass-a5e63jev-pooler` pooler), dedicated Vercel project
   `flowpilot-prod`, repository PRIVATE. **Last live-verified checkpoint:
-  v0.31.0** (2026-09-27, DECISIONS #68 — `GET /api/health` →
-  `version:"0.31.0"`, `deploymentReady:true`, `database:"connected"`,
+  v0.31.2** (2026-09-27, DECISIONS #69 — `GET /api/health` →
+  `version:"0.31.2"`, `deploymentReady:true`, `database:"connected"`,
   `missingEnvVars:[]`; production env PRESENCE verified without reading any
-  value: `TELEGRAM_MANAGER_BOT_TOKEN` ✓, `CREDENTIAL_MASTER_KEY` ✓,
-  `NEXT_PUBLIC_APP_URL` ✓, `CODECRAFT_API_KEY` ✓ — but
-  **`TELEGRAM_MANAGER_BOT_USERNAME` ABSENT**, which blocks the deep link).
-  This supersedes the v0.19.0-era probe. Live inbound E2E was proven at the
-  earlier v0.15.9 checkpoint (signed webhook → 200, dedupe replay, tenant
-  isolation). **Production carries v0.31.0 but is NOT yet re-deployed with
-  the DECISIONS #68 public-path fix** — the live 307 on both Telegram
-  webhook endpoints is still reproducible until the operator deploys the
-  current head.
+  value: `TELEGRAM_MANAGER_BOT_TOKEN` ✓, `TELEGRAM_MANAGER_BOT_USERNAME` ✓
+  (now present), `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓.
+  **The #68 routing fix IS live** — both Telegram webhooks return 401
+  fail-closed with no 307. **The whole launch + binding chain ran for
+  real** and the manager webhook is installed on the Manager Bot at the
+  production URL. **Production carries v0.31.2 but is NOT yet re-deployed
+  with the DECISIONS #69 `request_id` fix** — the deployed build still
+  sends the invalid empty `request_managed_bot` object, so the creation
+  keyboard is still rejected and the live E2E still cannot complete until
+  the operator deploys the current head.
+  Live inbound E2E was proven at the earlier v0.15.9 checkpoint (signed
+  webhook → 200, dedupe replay, tenant isolation).
 - **Demo:** `https://flowpilot-demo-gamma.vercel.app` — isolated Demo Neon DB,
   dedicated project, `DEMO_MODE=true`, seeded deterministic/idempotent (1
   business, 1 Default Branch, 2 team users, 6 services, 36 customers, 22
@@ -643,25 +718,20 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Unresolved User Actions (not code)
 
-1. **Operator — the Telegram live E2E unblock (4 exact steps, DECISIONS
-   #68).** All four are operator-owned; none is a code task:
-   (a) **deploy the current head** (`pnpm deploy`) — production still serves
-   v0.31.0 WITHOUT the public-path fix, so both Telegram webhook endpoints
-   still answer 307 → /sign-in to real Telegram deliveries;
-   (b) **`pnpm db:deploy`** — the two Telegram migrations
-   (`20260926120000_telegram_connection` +
-   `20260927120000_telegram_provisioning_outcome`) are UNAPPLIED on the
-   production Neon DB (live-confirmed: `prisma migrate status` + a local
-   `POST /api/telegram/webhook` raising `P2021 … telegram_connections does
-not exist`);
-   (c) **add `TELEGRAM_MANAGER_BOT_USERNAME` to the production Vercel env**
-   (presence-only check: it is currently ABSENT; the value is the public
-   @username the real `getMe` already reported — `FlowPilotManagerBot`).
-   Without it `beginTelegramProvisioning` honestly refuses before minting a
-   deep link;
-   (d) **run the ONE live E2E** (`docs/TELEGRAM.md → The ONE live E2E`) —
-   the `/start` tap, the native bot-creation confirmation, and the first
-   real customer message are Telegram-hosted human actions.
+1. **Operator — the ONE remaining Telegram live-E2E unblock (DECISIONS
+   #69).** Three of the four #68 blockers are already live-verified
+   RESOLVED (deployed routing fix, applied migrations, present
+   `TELEGRAM_MANAGER_BOT_USERNAME`). Exactly two operator-owned items
+   remain, neither a code task:
+   (a) **deploy the current head** (`pnpm deploy`) — the deployed v0.31.2
+   still sends the invalid empty `request_managed_bot` object, so the
+   creation keyboard is rejected by the real Bot API and the ONE customer
+   action can never appear; deploy to make the #69 `request_id` fix live;
+   (b) **re-run the ONE live E2E** (`docs/TELEGRAM.md → The ONE live E2E`)
+   from a FRESH launch — the `/start` tap, the native bot-creation
+   confirmation, and the first customer message are Telegram-hosted
+   human actions. Then record the outcome here + a `DECISIONS.md` entry if
+   a further defect surfaces.
 2. **Operator:** review + release the uncommitted **#61** shared conversation-layer UX
    slice (GREETING intent + verified handoff/resume — the only functional
    changes are the deterministic greeting branch in `conversation-ai.ts`, the
@@ -683,14 +753,18 @@ not exist`);
 
 ## Next Step
 
-1. **Operator — unblock the ONE Telegram live E2E (DECISIONS #68).** The
-   code is now correct; four operator actions stand between BUILT and
-   LIVE-VERIFIED, listed in `Unresolved User Actions` (1): deploy the
-   public-path fix → `pnpm db:deploy` → set `TELEGRAM_MANAGER_BOT_USERNAME`
-   in production → run `docs/TELEGRAM.md → The ONE live E2E`. Then record
-   the outcome here + a new `DECISIONS.md` entry if a defect surfaces. **Do
-   not report a simulated success** — the offline harnesses prove code paths
-   only.
+1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69).** The
+   code is now correct after the second live-found fix; exactly two
+   operator actions stand between BUILT and LIVE-VERIFIED, listed in
+   `Unresolved User Actions` (1): **deploy the current head** so the
+   `request_id` fix is live (the routing fix, the migrations, and
+   `TELEGRAM_MANAGER_BOT_USERNAME` are already done — live-verified), then
+   **re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh launch**.
+   Then record the outcome here + a new `DECISIONS.md` entry if a further
+   defect surfaces. **Do not report a simulated success** — the offline
+   harnesses prove code paths only, and two consecutive real attempts have
+   now each surfaced a distinct blocking defect that every offline guard
+   was green for.
 2. **Telegram second channel — the foundation, transport sibling, manager-bot
    provisioning state machine, AND the customer onboarding surface are all
    BUILT and VERIFIED offline** (DECISIONS #63 discovery → #64 foundation →

@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     await import("@/features/telegram-connection/server/telegram-connection-service");
   const { handleTelegramManagerWebhook } =
     await import("@/server/integrations/telegram/telegram-manager-webhook-handler");
-  const { deriveManagerWebhookSecret } =
+  const { deriveManagerWebhookSecret, MANAGED_BOT_REQUEST_ID } =
     await import("@/server/integrations/telegram/telegram-provisioning");
 
   // ── In-memory fakes (mirror check-telegram.ts; no Prisma, no fetch) ──────
@@ -509,14 +509,22 @@ async function main(): Promise<void> {
     },
   });
   const startKeyboard = sentManager[0]?.markup as
-    | { keyboard: Array<Array<{ text: string; request_managed_bot: unknown }>> }
+    | {
+        keyboard: Array<
+          Array<{
+            text: string;
+            request_managed_bot: { request_id: number };
+          }>
+        >;
+      }
     | undefined;
   check(
     "7. /start بالرمز الصحيح → 200 + ربط المنشئ + لوحة إنشاء البوت",
     startReply.status === 200 &&
       eq(startReply.body.start, "BOUND") &&
       startKeyboard !== undefined &&
-      startKeyboard.keyboard[0]?.[0]?.request_managed_bot !== undefined,
+      startKeyboard.keyboard[0]?.[0]?.request_managed_bot?.request_id ===
+        MANAGED_BOT_REQUEST_ID,
   );
   check(
     "8. رد المدير آمن فقط: لا توكن ولا معرّف تقني ولا إعداد ويبهوك",

@@ -264,17 +264,120 @@ no `setWebhook`/`getMe` ran for a managed bot, no connection reached
 CONNECTED, and no customer message was received or answered. Those remain
 **LIVE E2E PENDING**.
 
+### 6.2 The second real attempt — what it proved (DECISIONS #69)
+
+The second real pass ran against the deployed **v0.31.2** (which already
+carries the #68 routing fix + both applied migrations + the now-present
+`TELEGRAM_MANAGER_BOT_USERNAME`). It got ONE stage further and then hit a
+second, completely different blocking defect.
+
+**LIVE-VERIFIED (real production, real Bot API):**
+
+- **All four #68 operator blockers are RESOLVED** — `GET /api/health` →
+  `version:"0.31.2"`, `deploymentReady:true`, `database:"connected"`,
+  `missingEnvVars:[]`; `prisma migrate status` → "Database schema is up to
+  date!" (all 15 migrations applied, live-confirmed by a direct
+  production-DB read of both Telegram tables + the `outcome_code` column);
+  production env PRESENCE (no value read): `TELEGRAM_MANAGER_BOT_TOKEN` ✓,
+  `TELEGRAM_MANAGER_BOT_USERNAME` ✓, `CREDENTIAL_MASTER_KEY` ✓,
+  `NEXT_PUBLIC_APP_URL` ✓.
+- **The #68 fix IS live** — both webhook endpoints return **401
+  UNAUTHENTICATED** (missing secret → «سر الويبهوك مفقود»; invalid secret →
+  «سر الويبهوك غير صالح»), with **no 307 and no `/sign-in` redirect**, while
+  `/settings/telegram` stays 307-protected.
+- **The whole server-side launch + binding chain ran for REAL:** «اربط
+  تيليجرام» persisted the single-use ledger row (Business server-derived,
+  deep link token-only) → `ensureManagerWebhook` installed the Manager Bot's
+  webhook at the production URL (`getWebhookInfo` →
+  `url:"https://flowpilot-prod.vercel.app/api/telegram/manager/webhook"`,
+  `allowed_updates:["message","managed_bot"]`, `pending_update_count:0`,
+  `last_error:null`) → the deep link opened @FlowPilotManagerBot → the real
+  `/start <token>` WAS DELIVERED (visible as `POST
+/api/telegram/manager/webhook` in production logs) → `bindCreator` bound
+  the real Telegram `user.id` to the ledger row (verified in the production
+  DB) → the settings surface's bounded poll observed the honest PROVISIONING
+  state.
+- **The honest failure path is correct live** — the first attempt's
+  15-minute window elapsed with no `managed_bot` event and the UI correctly
+  surfaced **ACTION_REQUIRED** + a retryable «أعد المحاولة»; the retry then
+  minted a FRESH single-use token + re-bound on the real `/start` (the
+  typed-failure loop #66/#67 designed, observed live).
+
+**LIVE-PROVED SECOND BLOCKING DEFECT (found + fixed + guarded, NOT yet
+deployed):** the manager bot's reply **never reached the Admin**. The
+ledger binding had succeeded, but Telegram never delivered the welcome
+message or the creation keyboard, so the Admin stared at a bot that said
+nothing and the `managed_bot` event could never be produced.
+
+**Root cause, reproduced exactly against the real Bot API:** the
+`KeyboardButtonRequestManagedBot` was sent with `request_managed_bot: {}`,
+and Telegram rejects that wire shape — `POST …/sendMessage` → **`400 Bad
+Request: can't parse KeyboardButton: Can't find field "request_id"`**. The
+Bot API's `KeyboardButtonRequestManagedBot` type REQUIRES `request_id` (a
+signed 32-bit identifier unique within the message); the empty object is
+invalid, so every `/start` reply failed as a PERMANENT transport failure and
+the keyboard silently never appeared.
+
+**Why no offline harness could see it:** the harnesses assert the button's
+EXISTENCE and the closed payload surface (no token, no technical identifier)
+— exactly the right security properties — but their FAKE Telegram API
+accepts whatever object is sent. A schema-required field the real provider
+mandates is structurally invisible offline. This is the second consecutive
+live attempt to surface a distinct defect every offline guard was green for
+(after #68's route-proxy 307), which is precisely why the live run must
+never be skipped or simulated.
+
+**Fix (smallest isolated change, no re-architecture):**
+`buildManagedBotKeyboard()` now sends `request_managed_bot: { request_id:
+MANAGED_BOT_REQUEST_ID }` (a NEW exported constant = `1`). A FIXED value is
+correct and safest: the keyboard is the ONLY button in the ONLY message this
+endpoint sends per attempt, so uniqueness-within-the-message is trivially
+satisfied, and a constant (rather than a random per-send value) keeps a
+legitimate replay of the SAME attempt coherent across an app restart or a
+redeploy. It carries NO security meaning — it is a provider correlation
+key, not a FlowPilot secret (the auth is the ledger's single-use
+`startToken` + the creator binding). The deliberate non-prefill decision is
+UNCHANGED: `suggested_name`/`suggested_username` are still NOT sent
+(unverifiable API fields); the Arabic suggestion still rides in the reply
+text.
+
+**Guarded on three regression surfaces:** `check:telegram` **100/100** (L4
+now asserts the numeric `request_id`; NEW **L4b** asserts the wire shape
+directly — `typeof request_id === "number" && finite && integer`, so the
+class of defect is now caught offline); `check:telegram-onboarding` 22/22
+(check 7); `check:signup` 18/18. `pnpm verify` + `pnpm security` +
+`git diff --check` green. WhatsApp / AI / the Meta Embedded Signup HOLD all
+untouched.
+
+**The exact remaining boundary — ONE operator action:**
+
+| #   | Action                                            | Live evidence it is still open                                                                                                                               |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Deploy the current head (`pnpm deploy`)           | the deployed v0.31.2 still sends `request_managed_bot: {}` → the real Bot API still rejects the creation keyboard with `400 … Can't find field "request_id"` |
+| 2   | Re-run the ONE live E2E above from a FRESH launch | the `/start` tap + the native creation confirmation + the first customer message are Telegram-hosted **human** actions                                       |
+
+Everything else #68 required is already live-verified RESOLVED (the routing
+fix, the migrations, `TELEGRAM_MANAGER_BOT_USERNAME`).
+
+**Explicitly NOT claimed by that pass:** no real managed bot was created,
+no `setWebhook`/`getMe` ran for a managed bot, no connection reached
+CONNECTED, and no customer message was received or answered. Those remain
+**LIVE E2E PENDING**.
+
 ## 7. Offline verification (the code paths, no network)
 
-- `pnpm check:telegram` — **99/99**: the identity seam, Update parsing,
+- `pnpm check:telegram` — **100/100**: the identity seam, Update parsing,
   webhook secrets, the outbound transport, the provisioning ledger
   invariants, engine reuse, the per-connection webhook route, the launch,
   single-use consumption, the UI state machine, the whole manager-webhook
   lifecycle, typed failures, disconnect/reconnect, and every rejection
   boundary + provider failure + the CONNECTED transition guard. **Section P
-  (NEW, DECISIONS #68) guards the live-found defect: both webhook routes
+  (DECISIONS #68) guards the first live-found defect: both webhook routes
   must stay reachable through the route proxy's public-path policy — it
-  fails loudly if a session gate is ever re-applied.**
+  fails loudly if a session gate is ever re-applied. Section L4b
+  (DECISIONS #69) guards the second live-found defect: the
+  `request_managed_bot` button MUST carry a numeric `request_id` (the real
+  Bot API rejects the empty object with `400 Can't parse KeyboardButton`)**.
 - `pnpm check:telegram-onboarding` — **22/22** (DECISIONS #67): the
   customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing
@@ -305,10 +408,14 @@ is now caught offline.
   (`INTEGRATION_CHECKPOINTS.md`). Telegram has NO dependency on it; adding
   Telegram must not reopen the Meta authorization surface.
 - **Live E2E against a real BotFather manager bot has not been run.** The
-  whole customer-facing path is offline-proven only, and the first real
-  pass (DECISIONS #68) proved the Manager Bot real + capable but could not
-  complete the journey — 4 operator actions stand open (§6.1). See the
-  checkpoint entry in `INTEGRATION_CHECKPOINTS.md`.
+  whole customer-facing path is offline-proven only. Two consecutive real
+  passes each proved one blocking defect and got one stage further: #68
+  live-verified the Manager Bot + live-proved the route-proxy 307; #69
+  live-verified that fix deployed + the whole launch/bind chain running
+  for real + live-proved the rejected creation keyboard (`request_id`).
+  **ONE operator action stands open (§6.2): deploy the current head →
+  re-run the ONE live E2E from a fresh launch.** See the checkpoint entry
+  in `docs/INTEGRATION_CHECKPOINTS.md`.
 - **Open decision #63 (F)(1):** non-text inbound (media) routing — drop
   vs persist-and-defer. The MVP scope (private chats, text) acknowledges
   non-text 200 and does not process it. Do not guess this; it is a flagged
