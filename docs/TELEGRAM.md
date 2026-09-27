@@ -214,14 +214,67 @@ Business.
 the live run surfaces a defect or a decision (e.g. the open non-text
 decision #63 (F)(1)).
 
+### 6.1 The first real attempt — what it proved (DECISIONS #68)
+
+The first real pass ran against the deployed **v0.31.0** + the real Telegram
+Bot API. It did NOT complete the journey, and the reason is recorded exactly
+here so the next pass starts from a known boundary.
+
+**LIVE-VERIFIED:**
+
+- **Production lineage** — `GET /api/health` → `version:"0.31.0"`,
+  `deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`.
+- **The real Manager Bot** — a REAL `getMe` (no token ever printed, logged,
+  or returned): **200**, id **8603565570**, `is_bot:true`, first name
+  «FlowPilot Manager», username **`@FlowPilotManagerBot`**, and
+  **`can_manage_bots: true`** — the required managed-bot capability IS
+  present, so `getManagedBotToken` is authorizable. **Do NOT recreate or
+  replace this bot.**
+- **No webhook is installed on the Manager Bot** (`getWebhookInfo` → empty
+  url, `pending_update_count: 0`) — expected, because
+  `ensureManagerWebhook` self-wires it at the FIRST provisioning launch, and
+  no launch has ever run.
+
+**LIVE-PROVED BLOCKING DEFECT (found + fixed + guarded, NOT yet deployed):**
+both Telegram webhook routes were session-gated by the route proxy
+(`src/proxy.ts`), so every real Telegram delivery — the `/start` binding,
+the `managed_bot` completion, every customer message — answered
+**HTTP 307 → `/sign-in?redirect=…`** and never reached the handler.
+Reproduced live against production; `setWebhook` would have returned success
+while every delivery silently failed. No offline harness can see this: the
+harnesses invoke the handler directly, bypassing the proxy. Fixed by adding
+`/api/telegram` to the public-path prefixes (`src/lib/public-paths.ts`) —
+**not a security widening**: the request credential is Telegram's own
+`X-Telegram-Bot-Api-Secret-Token`, verified constant-time with **401 before
+any parsing**. Proven locally: the manager webhook now returns **401**, and
+`/settings/telegram` still redirects anonymous users. Guarded by
+`check:telegram` section P (fails without the fix) + `check:signup`.
+
+**The exact remaining boundary — 4 operator actions, none of them code:**
+
+| #   | Action                                                                                                 | Live evidence it is still open                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Deploy the current head (`pnpm deploy`)                                                                | production still answers **307** on `POST /api/telegram/manager/webhook` (reproducible now)                                                                              |
+| 2   | `pnpm db:deploy`                                                                                       | `prisma migrate status`: both Telegram migrations **UNAPPLIED**; a live `POST /api/telegram/webhook` raised `P2021 The table public.telegram_connections does not exist` |
+| 3   | Add `TELEGRAM_MANAGER_BOT_USERNAME` to the production env (presence-only check — currently **ABSENT**) | `beginTelegramProvisioning` refuses with «بوت الإدارة غير مُهيأ بعد — سيقوم المشغّل بإعداده» before minting a deep link                                                  |
+| 4   | Perform the 6 steps above in Telegram                                                                  | the `/start` tap + the native creation confirmation + the first customer message are Telegram-hosted **human** actions                                                   |
+
+**Explicitly NOT claimed by that pass:** no real managed bot was created,
+no `setWebhook`/`getMe` ran for a managed bot, no connection reached
+CONNECTED, and no customer message was received or answered. Those remain
+**LIVE E2E PENDING**.
+
 ## 7. Offline verification (the code paths, no network)
 
-- `pnpm check:telegram` — **96/96**: the identity seam, Update parsing,
+- `pnpm check:telegram` — **99/99**: the identity seam, Update parsing,
   webhook secrets, the outbound transport, the provisioning ledger
   invariants, engine reuse, the per-connection webhook route, the launch,
   single-use consumption, the UI state machine, the whole manager-webhook
   lifecycle, typed failures, disconnect/reconnect, and every rejection
-  boundary + provider failure + the CONNECTED transition guard.
+  boundary + provider failure + the CONNECTED transition guard. **Section P
+  (NEW, DECISIONS #68) guards the live-found defect: both webhook routes
+  must stay reachable through the route proxy's public-path policy — it
+  fails loudly if a session gate is ever re-applied.**
 - `pnpm check:telegram-onboarding` — **22/22** (DECISIONS #67): the
   customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing
@@ -230,10 +283,21 @@ decision #63 (F)(1)).
   secret) → single-use replay refusal → the typed-failure loop
   (ACTION_REQUIRED + a retryable label + a fresh attempt) → the
   authorization boundaries.
+- `pnpm check:signup` — **18/18**: the public-path policy, now including
+  the provider-webhook reachability assertions (DECISIONS #68).
 
 WhatsApp regression guards stay green (`whatsapp-inbound` 13/13,
 `whatsapp-transport` 27/27, `meta-whatsapp` 17/17,
-`whatsapp-onboarding` 56/56, `credentials-runtime` 36/36).
+`whatsapp-onboarding` 56/56, `credentials-runtime` 36/36,
+`meta-embedded-signup` 27/27 — all re-run after the #68 fix).
+
+**Why the offline harnesses could not catch the #68 defect:** they invoke
+the handler functions directly with injected deps (that is precisely what
+makes the security path assertable offline), so the route proxy — which
+runs BEFORE the route handler — is never traversed. The 307 was invisible
+to every offline check and only a real HTTP delivery could surface it. The
+NEW section P asserts the routing policy directly, so the class of defect
+is now caught offline.
 
 ## 8. Boundaries + holds (do NOT silently reopen)
 
@@ -241,12 +305,25 @@ WhatsApp regression guards stay green (`whatsapp-inbound` 13/13,
   (`INTEGRATION_CHECKPOINTS.md`). Telegram has NO dependency on it; adding
   Telegram must not reopen the Meta authorization surface.
 - **Live E2E against a real BotFather manager bot has not been run.** The
-  whole customer-facing path is offline-proven only. See the checkpoint
-  entry in `INTEGRATION_CHECKPOINTS.md`.
+  whole customer-facing path is offline-proven only, and the first real
+  pass (DECISIONS #68) proved the Manager Bot real + capable but could not
+  complete the journey — 4 operator actions stand open (§6.1). See the
+  checkpoint entry in `INTEGRATION_CHECKPOINTS.md`.
 - **Open decision #63 (F)(1):** non-text inbound (media) routing — drop
   vs persist-and-defer. The MVP scope (private chats, text) acknowledges
   non-text 200 and does not process it. Do not guess this; it is a flagged
   candidate decision.
 - **Deferred:** owner-change / `ManagedBotUpdated` handling, token
   rotation, groups/channels, and any multi-connection UI. One bot per
-  Business is the approved pilot model.
+  Business is the approved pilot model. **Inspected in DECISIONS #68 and
+  confirmed deliberately deferred, NOT a silent defect:** no
+  `managed_bot_updated` subscription (`ensureManagerWebhook` requests only
+  `["message","managed_bot"]`), no `replaceManagedBotToken` call, and no
+  owner-change handler exists; an unknown update shape is acknowledged 200
+  and ignored with no state change, and an already-CONNECTED re-delivery
+  terminates with the typed `BOT_ALREADY_PROVISIONED`. The schema already
+  persists `managerBotId` + `creatorTelegramUserId` provenance, so the
+  lifecycle is structurally ready — it needs its own slice (the smallest
+  shape would be: subscribe to the owner-change update, verify the creator
+  still matches, and rotate the `fp:<id>` reference via
+  `replaceManagedBotToken`). Do not invent a second lifecycle here.

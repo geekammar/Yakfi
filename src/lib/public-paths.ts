@@ -24,6 +24,17 @@ const PUBLIC_PATH_PREFIXES = [
   "/owner-invite/",
   "/api/auth",
   "/api/whatsapp/meta",
+  // The Telegram webhook endpoints (DECISIONS #63 (E)/#66). Telegram's
+  // servers POST here with NO FlowPilot session cookie, so leaving these
+  // behind the session gate made `src/proxy.ts` answer every delivery with a
+  // 307 redirect to /sign-in (proven live against v0.31.0) — which silently
+  // killed the `/start` binding, the `managed_bot` completion, and every
+  // inbound customer message. Public here does NOT mean unauthenticated: the
+  // request credential is Telegram's own `X-Telegram-Bot-Api-Secret-Token`,
+  // which each handler verifies with a constant-time compare and answers 401
+  // BEFORE any parsing or processing (the same model as `/invite/<token>`,
+  // where the token in the path is the credential).
+  "/api/telegram",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

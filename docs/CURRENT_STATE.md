@@ -6,33 +6,37 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.30.0** — released and committed (`8571a4a`, tag `v0.30.0`;
-HEAD == `origin/main`; tags through `v0.30.0`; the worktree carries
-uncommitted post-v0.30.0 Telegram second-channel work — the identity/data
-foundation (DECISIONS #64) plus the thin adapter, `POST /api/telegram/webhook`,
-and the Conversation-Engine bridge (DECISIONS #65), plus the Manager Bot
-provisioning completion — `/start` creator binding + the `managed_bot` event
-→ `fp:<id>` → `setWebhook` → `getMe` → CONNECTED at
-`POST /api/telegram/manager/webhook` (DECISIONS #66), plus the
-customer-facing onboarding surface `/settings/telegram` behaviorally wired
-to that state machine with the focused journey harness + the canonical
-operator live-E2E procedure (DECISIONS #67 — see `docs/TELEGRAM.md` and
-the TELEGRAM checkpoint in `INTEGRATION_CHECKPOINTS.md`: BUILT +
-offline-verified, **live E2E against a real BotFather manager bot is the
-ONE remaining operator action**). The #58 WhatsApp E2E
+**Version: v0.31.0** — released and committed (`b70caac`, tag `v0.31.0`;
+HEAD == `origin/main`; tags through `v0.31.0`). v0.31.0 carries the whole
+Telegram second channel committed (DECISIONS #63 → #67), and the **first
+REAL live Telegram verification pass** (DECISIONS #68) ran against that
+deployment: it LIVE-VERIFIED the real Manager Bot (`getMe` 200 →
+`@FlowPilotManagerBot`, id `8603565570`, **`can_manage_bots: true`**) and
+LIVE-PROVED one genuine blocking defect no offline harness could see — the
+route proxy session-gated both Telegram webhook endpoints, so every real
+delivery answered **307 → `/sign-in`** and never reached a handler. FIXED
+in place + guarded (NEW `check:telegram` section P + `check:signup`) +
+proven locally (401 instead of 307, no auth regression), **but NOT yet
+deployed**, so the Telegram checkpoint stays at **LIVE E2E PENDING** with
+four exact operator actions: deploy → `pnpm db:deploy` (both Telegram
+migrations are UNAPPLIED — live-confirmed by `prisma migrate status` + a
+`P2021 The table public.telegram_connections does not exist` error) → set
+the public `TELEGRAM_MANAGER_BOT_USERNAME` in production (presently
+**ABSENT**; the token + `CREDENTIAL_MASTER_KEY` ARE present) → perform the
+human steps inside Telegram. The #58 WhatsApp E2E
 disclosure-silence fix shipped in v0.29.2; the CodeCraft Discovery provider
 adapter (DECISIONS #59) shipped in v0.29.3; the #60 AI-failure
 acknowledgment fix shipped in v0.29.4; the #61 shared conversation-layer UX
 and the #62 AI personality / operator-notification / conversation-UX slices
-shipped in v0.30.0. The post-v0.30.0 **Telegram second channel** is now
-UNDER WAY: the discovery pass (DECISIONS #63) mapped the exact seams, the
-identity/data foundation is BUILT (DECISIONS #64), the thin Telegram
-adapter + `POST /api/telegram/webhook` + the Conversation-Engine bridge are
-BUILT and VERIFIED offline (DECISIONS #65), the managed-bot provisioning
-state machine is BUILT and VERIFIED offline (DECISIONS #66 — three security
-defects the focused harness surfaced were fixed in place), and the
-customer-facing `/settings/telegram` surface is now BUILT + behaviorally
-WIRED + offline-verified (DECISIONS #67) — Telegram is only a transport
+shipped in v0.30.0. The post-v0.30.0 **Telegram second channel** is
+COMPLETE and committed: the discovery pass (DECISIONS #63) mapped the exact
+seams, the identity/data foundation is BUILT (DECISIONS #64), the thin
+Telegram adapter + `POST /api/telegram/webhook` + the Conversation-Engine
+bridge are BUILT (DECISIONS #65), the managed-bot provisioning state
+machine is BUILT (DECISIONS #66 — three security defects the focused
+harness surfaced were fixed in place), and the customer-facing
+`/settings/telegram` surface is BUILT + behaviorally WIRED +
+offline-verified (DECISIONS #67) — Telegram is only a transport
 implementation over the unchanged engine.
 #62's smallest-surface findings: the
 assistant's voice is now ONE structured provider-neutral/channel-agnostic
@@ -144,15 +148,20 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   customer-visible reply on the real thread (see §6).
 - Real-browser verification of the presentation-layer UX slices (#54–#56) was
   NOT performed — they are structurally asserted in offline harnesses only.
-- **Production deployment state is not live-verified in this pass.** The last
-  live-verified production checkpoint in the ledger was v0.19.0
-  (2026-09-19, `deploymentReady:true`, `database:connected`). Releases
-  v0.20.0–v0.29.4 are committed but their deployment is an operator action;
-  treat production version as unknown until the operator deploys + probes.
-  **Note:** the live-forensics DB IS the production Neon DB, so the failing
-  CodeCraft `AI_TURN` row and the stuck thread are REAL production evidence —
-  the deployed build must be at least v0.29.3 (the row records
-  `provider:"codecraft"`, which only that release's code can emit).
+- **Production deployment state IS now live-verified at v0.31.0** (DECISIONS
+  #68, 2026-09-27): `GET /api/health` → `version:"0.31.0"`,
+  `deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]` at
+  `https://flowpilot-prod.vercel.app`. This supersedes the v0.19.0-era
+  checkpoint that had stood since 2026-09-19. **Production env PRESENCE
+  verified without reading any value:** `TELEGRAM_MANAGER_BOT_TOKEN` ✓,
+  `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓, `CODECRAFT_API_KEY` ✓
+  — but **`TELEGRAM_MANAGER_BOT_USERNAME` ABSENT**, which blocks the
+  Telegram deep link. **Production is NOT yet re-deployed with the #68
+  public-path fix**, so both Telegram webhook endpoints still answer 307 to
+  real Telegram deliveries. (The live-forensics DB IS the production Neon
+  DB, so the failing CodeCraft `AI_TURN` row and the stuck thread are REAL
+  production evidence — the deployed build must be at least v0.29.3, since
+  the row records `provider:"codecraft"`, which only that release emits.)
 - The Meta Embedded Signup code path is implemented and offline-harnessed
   (`check:meta-embedded-signup`) but has never been exercised against a real
   operator-owned Meta App Dashboard configuration. It is on a documented
@@ -160,19 +169,26 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   silently reopen it during unrelated work). The Telegram work did NOT
   touch it.
 - **The Telegram customer onboarding path is BUILT + offline-verified but
-  NOT live-verified** (DECISIONS #67): `pnpm check:telegram` 96/96 +
+  NOT live-verified** (DECISIONS #67/#68): `pnpm check:telegram` **99/99**
+  (NEW section P — the live-found route-proxy reachability guard) +
   `pnpm check:telegram-onboarding` 22/22 prove the whole journey
   (EMPTY → launch → token-only deep link → the poll observing PROVISIONING
   → `/start` binding + the keyboard → the `managed_bot` completion → the
   poll observing CONNECTED → single-use replay refusal → the typed-failure
   retry loop) through the REAL service + REAL manager-webhook handler with
-  in-memory fakes. **No real BotFather manager bot has ever been
-  exercised** — the manager webhook secret is derived from
-  `TELEGRAM_MANAGER_BOT_TOKEN`, so without a real token not even a local
-  delivery authenticates. The ONE real live E2E is an operator action with
-  the exact procedure + the "what must NOT happen" list in
-  `docs/TELEGRAM.md`; the checkpoint sits at **LIVE E2E PENDING** in
-  `docs/INTEGRATION_CHECKPOINTS.md`. Do NOT report a simulated success.
+  in-memory fakes. **The real Manager Bot IS now LIVE-VERIFIED** (a REAL
+  `getMe`: `@FlowPilotManagerBot`, id `8603565570`, `can_manage_bots: true`
+  — do NOT recreate or replace it), but **no real managed bot has ever been
+  created, no `setWebhook`/`getMe` has run for a managed bot, no connection
+  has reached CONNECTED, and no customer message has been received or
+  answered.** Four operator actions stand open (deploy the #68 fix →
+  `pnpm db:deploy` — both Telegram migrations are UNAPPLIED, live-confirmed
+  by `prisma migrate status` + a `P2021 … telegram_connections does not
+exist` error → set `TELEGRAM_MANAGER_BOT_USERNAME` in production →
+  perform the human steps inside Telegram). The exact procedure + the
+  "what must NOT happen" list are in `docs/TELEGRAM.md → The ONE live E2E`
+  - §6.1; the checkpoint sits at **LIVE E2E PENDING** in
+    `docs/INTEGRATION_CHECKPOINTS.md`. Do NOT report a simulated success.
 
 ## 5. What is the current product/architecture direction?
 
@@ -182,8 +198,11 @@ Local Vertical Discovery (Kafr El Sheikh, Egypt): one identical generic engine
 across appointment-driven verticals; evidence picks the winner. WhatsApp-first
 (Meta Cloud API); Telegram is the second channel — its identity/data
 foundation, transport sibling, manager-bot provisioning state machine, and
-customer onboarding surface are all BUILT + offline-verified (DECISIONS
-#64 → #67); the ONE remaining step is the real live E2E. Architecture:
+customer onboarding surface are all BUILT + offline-verified + COMMITTED in
+v0.31.0 (DECISIONS #64 → #67), and the first real live pass (DECISIONS
+#68) live-verified the Manager Bot and fixed the one live-proved delivery
+defect; the remaining step is the real live E2E once the four operator
+actions run. Architecture:
 feature-based modular monolith on Next.js 16 + Prisma 7/Neon + Vercel only.
 Invariants that must never regress: **availability authority returns only
 genuinely selectable slots; server-authoritative booking; visible-but-disabled
@@ -192,29 +211,27 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-1. **Operator:** review + release the uncommitted **#61** (shared
-   conversation-layer UX) and **#62** (AI personality / operator-notification /
-   conversation-UX) slices, then deploy (`pnpm deploy`) and probe
-   `/api/health`. The #60 AI-failure acknowledgment fix already shipped in
-   v0.29.4; the #61 diff is the deterministic greeting branch, one closed
-   disclosure list, one enum value, and the re-generated prompt artifact; the
-   #62 diff is the style module + one optional request field + the
-   attention-reason surfacing + two small conversation-UX fixes (no migration
-   in either).
+1. **Operator — unblock the ONE Telegram live E2E (DECISIONS #68):** four
+   actions, none of them code — (a) deploy the current head so the
+   public-path fix is live (production still 307s both Telegram webhooks);
+   (b) `pnpm db:deploy` (both Telegram migrations UNAPPLIED — live-confirmed);
+   (c) set `TELEGRAM_MANAGER_BOT_USERNAME` in production (presently ABSENT —
+   the live `getMe` already reported `FlowPilotManagerBot`); (d) run
+   `docs/TELEGRAM.md → The ONE live E2E` (the human steps inside Telegram).
+   Then record the outcome in `BUILD_STATE.md` + a `DECISIONS.md` entry if a
+   defect surfaces.
 2. **Fresh live WhatsApp E2E (operator, required):** send ONE real inbound
    message on an AI_ACTIVE thread with the policy still on
    `codecraft` / `deepseek-v4-flash-0731` and confirm the customer now
    receives the deterministic safe handoff acknowledgment (the probe proves
    the provider path is healthy, so a failure should now be rare — but any
    failure that does occur must no longer be silent).
-3. **Production config (operator):** production state is unknown; verify
-   `CODECRAFT_API_KEY` is set in the Vercel env (presence check only) and
-   that the deployed version matches the released head, then probe
-   `/api/health` to move production off the v0.19.0-era checkpoint; run
-   `pnpm db:deploy` so migrations through `20260923120000_operator_attention`
-   are applied.
+3. **Production config (operator):** production IS live-verified at v0.31.0
+   (DECISIONS #68); `CODECRAFT_API_KEY` is present (presence check only).
+   Run `pnpm db:deploy` so the chain — including both Telegram migrations —
+   is applied.
 4. **Onboard the first REAL pilot Business end-to-end** (operator provisions
-   Business + invitation → ADMIN connects the WhatsApp number via Meta Embedded
-   Signup at `/settings/whatsapp` → CONNECTED → live messaging), then gather
-   baseline/ROI evidence per `PRODUCT_STRATEGY.md`.
-5. **Only after pilot evidence:** Spec B instrumentation/economics.
+
+Business + invitation → ADMIN connects the WhatsApp number via Meta Embedded
+Signup at `/settings/whatsapp` → CONNECTED → live messaging), then gather
+baseline/ROI evidence per `PRODUCT_STRATEGY.md`. 5. **Only after pilot evidence:** Spec B instrumentation/economics.

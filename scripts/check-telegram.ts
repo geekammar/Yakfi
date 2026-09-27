@@ -45,7 +45,11 @@
  *   O. the provisioning state machine's every rejection boundary
  *      (malformed / missing / expired / consumed / wrong-creator
  *      payloads), every typed provider failure (setWebhook, getMe), and
- *      the CONNECTED transition guard.
+ *      the CONNECTED transition guard;
+ *   P. WEBHOOK ROUTE REACHABILITY through the route proxy's public-path
+ *      policy — the defect the live v0.31.0 E2E surfaced: both Telegram
+ *      endpoints sat behind the session gate, so the proxy answered every
+ *      Telegram delivery with a 307 to /sign-in and nothing ever arrived.
  *
  * Run: pnpm check:telegram
  */
@@ -2660,6 +2664,27 @@ async function main(): Promise<void> {
     pendingAfter?.onboardingState === "NOT_STARTED" &&
       pendingAfter?.status === "PENDING" &&
       pendingAfter?.isActive === false,
+  );
+
+  // ── P. Webhook route reachability (the live v0.31.0 defect).
+  //    Telegram's servers POST with NO FlowPilot session cookie, so a
+  //    session-gated route makes `src/proxy.ts` answer 307 → /sign-in and
+  //    the delivery never reaches the handler. Public here is safe: each
+  //    handler verifies `X-Telegram-Bot-Api-Secret-Token` and answers 401
+  //    before any parsing (asserted in sections C and H above).
+  const { isPublicPath } = await import("@/lib/public-paths");
+  check(
+    "P1. /api/telegram/webhook متاح لتيليجرام (لا إعادة توجيه 307)",
+    isPublicPath("/api/telegram/webhook") === true,
+  );
+  check(
+    "P2. /api/telegram/manager/webhook متاح لتيليجرام (binding + managed_bot)",
+    isPublicPath("/api/telegram/manager/webhook") === true,
+  );
+  check(
+    "P3. بقية المسارات تبقى محمية (لا تسريب من البوابة)",
+    isPublicPath("/api/conversations") === false &&
+      isPublicPath("/settings/telegram") === false,
   );
 
   let failed = 0;

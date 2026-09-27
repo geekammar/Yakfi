@@ -72,6 +72,34 @@ check("GET /api/health عام", isPublicPath("/api/health") === true);
 check("GET /platform غير عام (محمي)", isPublicPath("/platform") === false);
 check("GET / غير عام (محمي)", isPublicPath("/") === false);
 
+// 6. Provider webhooks must stay REACHABLE. Telegram's servers carry no
+//    FlowPilot session cookie, so a session-gated webhook route makes the
+//    route proxy answer 307 → /sign-in and the delivery never arrives
+//    (proven live on v0.31.0). Public here is not "unauthenticated": each
+//    handler still verifies the provider's secret-token header first and
+//    answers 401 before any parsing.
+check(
+  "POST /api/telegram/webhook يصل (تسليم تيليجرام غير محجوب بجلسة)",
+  isPublicPath("/api/telegram/webhook") === true,
+);
+check(
+  "POST /api/telegram/manager/webhook يصل (binding + managed_bot)",
+  isPublicPath("/api/telegram/manager/webhook") === true,
+);
+check(
+  "مسارات تيليجرام الفرعية تتبع نفس البوابة العامة",
+  isPublicPath("/api/telegram/webhook") === true &&
+    isPublicPath("/api/telegram/manager/webhook") === true,
+);
+check(
+  "GET /api/conversations غير عام (محمي)",
+  isPublicPath("/api/conversations") === false,
+);
+check(
+  "GET /settings/telegram غير عام (محمي بجلسة)",
+  isPublicPath("/settings/telegram") === false,
+);
+
 let failed = 0;
 for (const { label, pass } of checks) {
   if (pass) console.log(`✔ ${label}`);
