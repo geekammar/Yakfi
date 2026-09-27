@@ -209,6 +209,23 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   head → re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh
   launch**; the checkpoint sits at **LIVE E2E PENDING** in
   `docs/INTEGRATION_CHECKPOINTS.md`. Do NOT report a simulated success.
+- **Telegram managed-bot creation — official deep-link fallback added
+  (DECISIONS #71, code-proven, NOT deployed):** production is now
+  **v0.31.4** (the #69 `request_id` + #70 G-1/G-2 fixes ARE live), so the
+  creation keyboard APPEARS — but a new live symptom (Android) is that
+  tapping «Create the bot» opens nothing. Root cause (official docs): the
+  `request_managed_bot` native creation-UI launch is a Telegram CLIENT
+  capability, not a Bot API payload, so a client lacking the very-new
+  handler renders the button but emits no `managed_bot` event — CLIENT-SIDE,
+  not a FlowPilot/Telegram defect. Fix: the `/start` reply now ALSO carries
+  the OFFICIAL documented deep link
+  `https://t.me/newbot/{manager}/{new_username}?name={new_name}`, KEEPING
+  the keyboard; creator/tenant binding is preserved with no new rule (the
+  link is only shown after `/start <token>` bound the creator to the ledger,
+  so the `managed_bot` event still resolves the Business ONLY from that
+  row) and there is no second lifecycle. Guarded by NEW `check:telegram`
+  L4c/L4d; `check:telegram` **109/109**. Whether the Android link path
+  reaches CONNECTED live remains **LIVE E2E PENDING** (operator).
 
 ## 5. What is the current product/architecture direction?
 

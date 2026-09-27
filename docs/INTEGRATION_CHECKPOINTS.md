@@ -56,12 +56,20 @@ NOT a hold on the code: the entire server-side state machine and the
 customer-facing `/settings/telegram` surface are implemented and proven
 offline. The open boundary is ONE real round-trip against a real
 BotFather manager bot — an external party's surface (Telegram's own
-creation UI + the `managed_bot` delivery). **Two consecutive real passes
-each LIVE-PROVED a distinct blocking defect that no offline harness could
-see** (DECISIONS #68 — the route-proxy 307; DECISIONS #69 — the missing
-`request_id` on the creation keyboard). Both are fixed in place + guarded
-on three regression surfaces; **neither fix is deployed yet**, so the
-deployed build still cannot complete the journey. See the
+creation UI + the `managed_bot` delivery). **Three consecutive real passes
+each LIVE-PROVED a distinct blocking issue** (DECISIONS #68 — the
+route-proxy 307; DECISIONS #69 — the missing `request_id` on the creation
+keyboard; DECISIONS #71 — with v0.31.4 live and the keyboard now appearing,
+tapping «Create the bot» opens nothing on the reported Android client
+because the `request_managed_bot` NATIVE creation-UI launch is a Telegram
+CLIENT capability, not a Bot API payload — CLIENT-SIDE, not a FlowPilot
+defect). #68/#69 are fixed + deployed (production is now **v0.31.4**);
+DECISIONS #71 adds the OFFICIAL documented creation deep link
+(`https://t.me/newbot/{manager}/{new_username}?name={new_name}`) as a
+client-compatible fallback in the `/start` reply while KEEPING the
+keyboard, reusing the existing ledger + creator binding (no second
+lifecycle, tenant isolation preserved) — guarded by NEW `check:telegram`
+L4c/L4d (**109/109**) but **NOT yet deployed**. See the
 "Last known successful step (live, real Telegram)" row below.
 
 | Field                                            | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |

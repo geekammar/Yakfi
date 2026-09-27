@@ -51,6 +51,44 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **Telegram OFFICIAL CREATION DEEP-LINK FALLBACK (DECISIONS #71) —
+  client-compatibility fix, code-proven + guarded, NOT deployed:**
+  production is now **v0.31.4** (`GET /api/health` →
+  `version:"0.31.4"`, `deploymentReady:true`, `database:"connected"`,
+  `missingEnvVars:[]`), so the #69 `request_id` fix + #70 G-1/G-2 ARE
+  live and the creation keyboard now APPEARS. A NEW live symptom
+  (reported on Android): tapping «Create the bot» opens nothing.
+  Root-caused against the official Telegram docs — the
+  `request_managed_bot` button is sent correctly (`request_id` present)
+  and Telegram accepts it, but **launching the native creation UI is a
+  Telegram CLIENT capability, not a Bot API payload**; a client without
+  the very-new `request_managed_bot` handler renders the button but
+  produces no `managed_bot` event. CLIENT-SIDE — not a FlowPilot server
+  defect, not a Telegram rejection, not a claim that Android is buggy.
+  **FIX (smallest, additive, keyboard KEPT):** the Manager Bot's
+  `/start` reply now leads with the OFFICIAL documented deep link
+  `https://t.me/newbot/{manager}/{new_username}?name={new_name}` (Bot
+  Features → Managed Bots) via NEW `buildManagedBotCreationLink()`
+  (strips `@`, percent-encodes the display name), and STILL attaches the
+  `request_managed_bot` keyboard — graceful degradation, both routes
+  ending in the SAME `managed_bot` event, NO second lifecycle. **Creator/
+  tenant binding preserved with NO new rule:** the link is only ever
+  shown after a valid `/start <token>` bound the Admin's `user.id` to the
+  single-use ledger, so the event still resolves the Business ONLY from
+  that row. **GUARDED:** NEW `check:telegram` L4c (link + keyboard both
+  present, no token/business id/start token leaked) + L4d (escaping);
+  `check:telegram` **109/109**, `check:telegram-onboarding` 22/22,
+  `check:signup` 18/18; `pnpm verify` + `pnpm security` + `git diff
+--check` green. Files: `telegram-provisioning.ts`,
+  `telegram-manager-webhook-handler.ts`, `scripts/check-telegram.ts`.
+  **WhatsApp / AI / Meta Embedded Signup HOLD untouched. NOT deployed** —
+  the operator ships via the existing GitHub → Vercel workflow. **Still
+  LIVE E2E PENDING:** that tapping the official link on the real Android
+  client opens the native creation window → `managed_bot` → CONNECTED →
+  a real customer round-trip is UNVERIFIED (operator: deploy the head,
+  then re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh launch
+  using the official-link path).
+
 - **Telegram `getManagedBotToken` WIRE-SHAPE FIX (DECISIONS #70) — two
   code-proven completion-path defects fixed + guarded, NOT deployed:** on
   the managed-bot completion path (downstream of the `managed_bot` event,

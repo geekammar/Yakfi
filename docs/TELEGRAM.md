@@ -193,9 +193,11 @@ reachable at a public origin (Telegram must deliver webhooks);
    «اربط تيليجرام» action.
 2. Tap **«اربط تيليجرام»**. Confirm the browser opens
    `https://t.me/<manager>?start=<token>` — the Manager Bot chat.
-3. Tap **START**, then tap the **«إنشاء بوت المنشأة على تيليجرام»** button
-   the manager bot replies with, and confirm inside Telegram's native
-   creation UI.
+3. Tap **START**, then EITHER tap the official creation link the manager
+   bot replies with (**«إنشاء بوت المنشأة على تيليجرام»**, the reliable
+   path on every client) OR tap the **«إنشاء بوت المنشأة على تيليجرام»**
+   reply-keyboard button if your client launches it, and confirm inside
+   Telegram's native creation UI.
 4. Watch the settings surface: it must leave the honest progress state and
    reach **CONNECTED** (display name + @username) on its own — the poll
    observing the server-side transition. If the tab was closed, reopening
@@ -392,9 +394,78 @@ no `setWebhook`/`getMe` ran for a managed bot, no connection reached
 CONNECTED, and no customer message was received or answered. Those remain
 **LIVE E2E PENDING**.
 
+### 6.4 The official creation deep-link fallback (DECISIONS #71)
+
+After v0.31.4 deployed (the #69 `request_id` fix + #70 G-1/G-2 are live —
+`GET /api/health` → `version:"0.31.4"`), a THIRD live symptom appeared,
+downstream of #69: the creation keyboard now appears (Telegram accepts the
+button), but on the reported **Android** client tapping «Create the bot»
+opens nothing.
+
+**Root cause (official docs, verified):** the Bot API's
+`KeyboardButtonRequestManagedBot` / `request_managed_bot` are real and
+FlowPilot sends them correctly (`request_id` present). But the docs state
+that pressing the button "will ask the user to create and share a bot" —
+i.e. **launching the native creation UI is a Telegram CLIENT
+responsibility, not a Bot API payload**. A client without the very-new
+`request_managed_bot` handler renders the button but never opens the
+creation window, so no `managed_bot` event is ever produced. This is a
+CLIENT-SIDE limitation; a server-side FlowPilot change cannot add a
+handler to the customer's Telegram app. It is NOT a FlowPilot server
+defect, NOT a Telegram rejection, and NOT evidence that "Android is
+buggy".
+
+**The fallback — an official, documented alternative.** Telegram Bot
+Features → Managed Bots → "Sharing Your Management Bot" documents the deep
+link:
+
+```
+https://t.me/newbot/{manager_bot_username}/{new_username}?name={new_name}
+```
+
+Opening it shows the NATIVE bot-creation window with the @username +
+display name pre-filled (editable), and on confirmation "Your @ManagerBot
+receives a `managed_bot` update" — the SAME event the keyboard button
+produces. It is resolved by the client's universally-supported deep-link
+handler (the same mechanism as the existing `?start=` link), so it does
+NOT depend on the newest reply-keyboard rendering path.
+
+**What changed (smallest, additive, keyboard KEPT):** the Manager Bot's
+`/start` reply now LEADS with this official link (built by
+`buildManagedBotCreationLink()` — strips a leading `@`, percent-encodes the
+display name) when `TELEGRAM_MANAGER_BOT_USERNAME` is set, and STILL
+attaches the `request_managed_bot` reply keyboard unchanged. Graceful
+degradation: clients that launch the native UI from the keyboard keep
+working; every other client uses the link. Both routes end in the same
+`managed_bot` event, so there is NO second provisioning lifecycle.
+
+**Security / creator-tenant binding — preserved with NO new rule.** The
+`newbot` link carries no FlowPilot state parameter, but it is only ever
+shown as the reply to a valid `/start <token>`, which already bound the
+Admin's Telegram `user.id` to the single-use ledger row. The resulting
+`managed_bot` event's creator `user.id` resolves the attempt through
+`findActiveByCreator`, and the Business still comes ONLY from the ledger
+row — the same binding as the keyboard path. Tenant isolation, single-use
+provisioning, replay resistance, no token visibility, no BotFather visit,
+and no manual token entry are all intact.
+
+**Guarded:** `check:telegram` **109/109** (NEW L4c — the `/start` reply
+carries the official `t.me/newbot/…?name=…` link AND the keyboard AND
+leaks no token/business id/start token; NEW L4d — link escaping),
+`check:telegram-onboarding` 22/22, `check:signup` 18/18.
+
+**Still LIVE-ONLY (not fabricated):** OFFLINE VERIFIED — the link is
+constructed, escaped, and sent correctly with the keyboard preserved and
+the binding/tenant invariants intact. NOT LIVE VERIFIED — that tapping the
+official link on the real Android client opens the native creation window,
+yields a `managed_bot` event, reaches CONNECTED, and answers a real
+customer message. Operator action: deploy the current head, then re-run
+§6 "The ONE live E2E" from a FRESH launch using the official-link path on
+the Android client.
+
 ## 7. Offline verification (the code paths, no network)
 
-- `pnpm check:telegram` — **107/107**: the identity seam, Update parsing,
+- `pnpm check:telegram` — **109/109**: the identity seam, Update parsing,
   webhook secrets, the outbound transport, the provisioning ledger
   invariants, engine reuse, the per-connection webhook route, the launch,
   single-use consumption, the UI state machine, the whole manager-webhook
@@ -409,7 +480,11 @@ CONNECTED, and no customer message was received or answered. Those remain
   Section Q (DECISIONS #70) guards the two code-proven `getManagedBotToken`
   wire-shape defects: the request sends `user_id` (never `managed_bot_id`)
   and the token response is parsed as a bare string (a `{ token }` object
-  or an empty/non-string value fails safely).**
+  or an empty/non-string value fails safely). Sections L4c/L4d
+  (DECISIONS #71) guard the official creation deep-link fallback: the
+  `/start` reply carries the `t.me/newbot/…?name=…` link AND still the
+  keyboard AND leaks no token/business id/start token, and the link
+  escaping strips `@` + percent-encodes the display name.**
 - `pnpm check:telegram-onboarding` — **22/22** (DECISIONS #67): the
   customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing

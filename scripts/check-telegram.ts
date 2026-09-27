@@ -911,7 +911,11 @@ async function main(): Promise<void> {
             : null,
     },
     getEnvVar: (name: string) =>
-      name === "TELEGRAM_MANAGER_BOT_TOKEN" ? MANAGER_TOKEN_VALUE : undefined,
+      name === "TELEGRAM_MANAGER_BOT_TOKEN"
+        ? MANAGER_TOKEN_VALUE
+        : name === "TELEGRAM_MANAGER_BOT_USERNAME"
+          ? MANAGER_USERNAME
+          : undefined,
     webhookBaseUrl: "https://flowpilot.example.com",
     managerBotId: MANAGER_BOT_ID,
     now: () => new Date(),
@@ -1514,6 +1518,7 @@ async function main(): Promise<void> {
     await import("@/features/telegram-connection/server/telegram-connection-service");
   const {
     buildManagedBotDeepLink,
+    buildManagedBotCreationLink,
     ensureManagerWebhook,
     suggestBotUsername,
     deriveManagerWebhookSecret,
@@ -2075,6 +2080,64 @@ async function main(): Promise<void> {
       typeof button?.request_managed_bot?.request_id === "number" &&
         Number.isFinite(button.request_managed_bot.request_id) &&
         Number.isInteger(button.request_managed_bot.request_id),
+    );
+  }
+
+  // L4c. OFFICIAL DEEP-LINK FALLBACK (client-compatibility fix): the live
+  //      Android report proved the `request_managed_bot` reply-keyboard
+  //      button renders but its native creation UI never launches on some
+  //      clients (a Telegram CLIENT capability a server change cannot fix).
+  //      The `/start` reply now ALSO carries the OFFICIAL managed-bot
+  //      creation deep link (`t.me/newbot/<manager>/<username>?name=<name>`,
+  //      Telegram Bot Features → Managed Bots), which resolves via the
+  //      universally-supported deep-link handler and ends in the SAME
+  //      `managed_bot` event (no second lifecycle). The keyboard is KEPT.
+  {
+    const welcome = keyboardReply!.body.text as string;
+    const expectedLink = buildManagedBotCreationLink(
+      MANAGER_USERNAME,
+      suggestBotUsername(BUSINESS_NAME, () => "aaaaaa"),
+      BUSINESS_NAME,
+    );
+    // The exact suggested username has a random tail, so assert the stable
+    // prefix + the presence of the newbot link, not the whole URL.
+    const linkPrefix = `https://t.me/newbot/${MANAGER_USERNAME}/`;
+    check(
+      "L4c. رد /start يحمل رابط إنشاء البوت الرسمي (بديل يعمل على كل العملاء) + الكيبورد باقٍ",
+      welcome.includes(linkPrefix) &&
+        welcome.includes("?name=") &&
+        keyboardReply!.body.reply_markup !== undefined &&
+        // still no secret / no tenant identifier leaked in the reply
+        !JSON.stringify(keyboardReply!.body).includes(BUSINESS_A) &&
+        !JSON.stringify(keyboardReply!.body).includes(startTokenL) &&
+        !JSON.stringify(keyboardReply!.body).includes(BOT_TOKEN_VALUE),
+    );
+    void expectedLink;
+  }
+
+  // L4d. buildManagedBotCreationLink escaping (pure): the manager + new
+  //      usernames strip a leading `@`, and the display name is
+  //      percent-encoded so an Arabic name or a name with spaces is a
+  //      valid query value (no raw space, no stray `@`).
+  {
+    const link = buildManagedBotCreationLink(
+      "@ManagerBot",
+      "@cool_bot",
+      "Cool AI Agent",
+    );
+    const arabicLink = buildManagedBotCreationLink(
+      MANAGER_USERNAME,
+      "fp_clinic_1",
+      BUSINESS_NAME,
+    );
+    check(
+      "L4d. رابط الإنشاء: يزيل @ + يرمّز الاسم (لا مسافة/لا @ خام)",
+      link ===
+        "https://t.me/newbot/ManagerBot/cool_bot?name=Cool%20AI%20Agent" &&
+        arabicLink ===
+          `https://t.me/newbot/${MANAGER_USERNAME}/fp_clinic_1?name=${encodeURIComponent(BUSINESS_NAME)}` &&
+        !arabicLink.includes(" ") &&
+        !arabicLink.slice("https://t.me/newbot/".length).includes("@"),
     );
   }
 

@@ -125,6 +125,47 @@ export function buildManagedBotDeepLink(
 }
 
 /**
+ * The OFFICIAL Telegram managed-bot creation deep link (Telegram Bot
+ * Features → Managed Bots → "Sharing Your Management Bot"):
+ *
+ *   https://t.me/newbot/{manager_bot_username}/{new_username}?name={new_name}
+ *
+ * Opening it shows Telegram's NATIVE bot-creation window with the
+ * @username + display name PRE-FILLED (editable). On confirmation the
+ * MANAGER bot receives the SAME `managed_bot` update the reply-keyboard
+ * `request_managed_bot` button produces — so this reuses the existing
+ * provisioning ledger, creator binding, and `completeManagedBotProvisioning`
+ * completion path with NO second lifecycle.
+ *
+ * Why it is a SAFE fallback (no weakened tenant isolation, no new binding
+ * rule): the link is only ever shown as the Manager Bot's reply to a valid
+ * `/start <token>`, which already bound the Admin's Telegram `user.id` to
+ * the single-use ledger row. The link therefore needs NO FlowPilot state
+ * parameter — the `managed_bot` event's creator `user.id` matches the
+ * already-bound ledger row exactly as it does for the keyboard path, and
+ * the Business still comes ONLY from that row. It is the smallest reliable
+ * alternative to the `request_managed_bot` reply-keyboard button, whose
+ * native-creation-UI launch is a Telegram CLIENT capability (older clients
+ * render the button but do not open the creation window — a server-side
+ * FlowPilot change cannot fix that; a plain t.me deep link is resolved by
+ * the client's universally-supported deep-link handler instead).
+ *
+ * Escaping: the manager + new-bot usernames are Telegram usernames
+ * (`[A-Za-z0-9_]`, `@` stripped), and the display name is percent-encoded
+ * so an Arabic business name or a name with spaces is a valid query value.
+ */
+export function buildManagedBotCreationLink(
+  managerBotUsername: string,
+  suggestedUsername: string,
+  suggestedName: string,
+): string {
+  const manager = managerBotUsername.replace(/^@/, "");
+  const username = suggestedUsername.replace(/^@/, "");
+  const name = encodeURIComponent(suggestedName);
+  return `https://t.me/newbot/${manager}/${username}?name=${name}`;
+}
+
+/**
  * The Manager Bot's OWN webhook secret (DECISIONS #66). Telegram's
  * `X-Telegram-Bot-Api-Secret-Token` is the proof a delivery really came
  * from Telegram, and the Manager Bot has NO connection row to carry a

@@ -3,6 +3,8 @@ import {
   telegramSendMessage,
 } from "@/server/integrations/telegram/telegram-client";
 import {
+  MANAGED_BOT_KEYBOARD_TITLE,
+  buildManagedBotCreationLink,
   buildManagedBotKeyboard,
   completeManagedBotProvisioning,
   deriveManagerWebhookSecret,
@@ -189,7 +191,24 @@ export function parseTelegramManagerUpdate(raw: unknown): ParsedManagerUpdate {
 // ─── Safe Arabic copy (the ONLY thing the manager bot ever says) ────────────
 
 const START_WELCOME = (businessName: string, usernameHint: string) =>
-  `أهلاً بك. ستفعّل الآن بوت تيليجرام الخاص بـ «${businessName}».\nاضغط الزر بالأسفل لإنشاء البوت داخل تيليجرام — لن يُطلب منك أي رمز أو إعداد يدويل، وكل الخطوات تتم بشكل آمن.\n(اقتراح لاسم المستخدم: ${usernameHint})`;
+  `أهلاً بك. ستفعّل الآن بوت تيليجرام الخاص بـ «${businessName}».\nاضغط الزر بالأسفل لإنشاء البوت داخل تيليجرام — لن يُطلب منك أي رمز أو إعداد يدوي، وكل الخطوات تتم بشكل آمن.\n(اقتراح لاسم المستخدم: ${usernameHint})`;
+
+/**
+ * The same welcome, but leading with the OFFICIAL managed-bot creation
+ * deep link (the reliable primary path). The `request_managed_bot`
+ * reply keyboard is STILL attached for clients that launch the native
+ * creation UI from it; the link is a tappable fallback that works on any
+ * client whose deep-link handler resolves `t.me/newbot/...` (which the
+ * live Android report proved the reply-keyboard button alone does not do
+ * — tapping it opened nothing). Both routes end in the SAME `managed_bot`
+ * event, so there is no second provisioning lifecycle.
+ */
+const START_WELCOME_WITH_LINK = (
+  businessName: string,
+  usernameHint: string,
+  creationLink: string,
+) =>
+  `أهلاً بك. ستفعّل الآن بوت تيليجرام الخاص بـ «${businessName}».\nاضغط الرابط التالي لإنشاء البوت داخل تيليجرام — ستفتح نافذة تيليجرام لإنشاء البوت باسم مقترح يمكنك تعديله، دون أي رمز أو إعداد يدوي:\n${creationLink}\n\nأو استخدم زر «${MANAGED_BOT_KEYBOARD_TITLE}» بالأسفل إن ظهر لديك.\n(اقتراح لاسم المستخدم: ${usernameHint})`;
 
 const START_INVALID =
   "انتهت صلاحية هذا الرابط أو أنه غير صالح. ابدأ تفعيل تيليجرام من جديد داخل FlowPilot للحصول على رابط جديد.";
@@ -328,12 +347,26 @@ export async function handleTelegramManagerWebhook(
       : null;
     const businessName = business?.name ?? "منشأتي";
     const usernameHint = suggestBotUsername(businessName);
-    await reply(
-      deps,
-      parsed.chatId,
-      START_WELCOME(businessName, usernameHint),
-      buildManagedBotKeyboard(),
-    );
+    // The OFFICIAL managed-bot creation deep link (the reliable primary
+    // path — see buildManagedBotCreationLink). Built only when the public
+    // manager @username is configured; otherwise we fall back to the
+    // reply-keyboard-only welcome (the native-button path). The link needs
+    // NO FlowPilot state parameter: creator identity was already bound by
+    // this very /start, so the resulting `managed_bot` event still resolves
+    // the Business ONLY from the ledger row.
+    const managerUsername = deps.getEnvVar("TELEGRAM_MANAGER_BOT_USERNAME");
+    const welcomeText = managerUsername
+      ? START_WELCOME_WITH_LINK(
+          businessName,
+          usernameHint,
+          buildManagedBotCreationLink(
+            managerUsername,
+            usernameHint,
+            businessName,
+          ),
+        )
+      : START_WELCOME(businessName, usernameHint);
+    await reply(deps, parsed.chatId, welcomeText, buildManagedBotKeyboard());
     return Response.json({
       success: true,
       accepted: true,
