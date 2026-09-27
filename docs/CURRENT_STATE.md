@@ -25,7 +25,15 @@ MANAGED_BOT_REQUEST_ID`) + guarded on three regression surfaces
 (`check:telegram` 100/100 incl. NEW L4b, `check:telegram-onboarding` 22/22,
 `check:signup` 18/18), **but NOT deployed**, so the Telegram checkpoint
 stays at **LIVE E2E PENDING** with ONE remaining operator action: **deploy
-the current head → re-run the ONE live E2E from a fresh launch.** The #58
+the current head → re-run the ONE live E2E from a fresh launch.**
+**Additionally (DECISIONS #70, code-proven, NOT deployed):** two
+`getManagedBotToken` completion-path wire-shape defects were fixed against
+the authoritative Bot API — G-1 now sends `user_id` (not `managed_bot_id`;
+the managed bot's own `User.id`), G-2 now parses the token as a BARE STRING
+(not `{ token }`) with a non-empty-string guard — both DOWNSTREAM of the
+`managed_bot` event (so unrelated to the #69 keyboard symptom), guarded by
+NEW `check:telegram` section Q (`check:telegram` **107/107**); credential
+model unchanged (`fp:<id>` only, no token logging/return). The #58
 WhatsApp E2E disclosure-silence fix shipped in v0.29.2; the CodeCraft
 Discovery provider adapter (DECISIONS #59) shipped in v0.29.3; the #60
 AI-failure acknowledgment fix shipped in v0.29.4; the #61 shared

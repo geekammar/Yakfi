@@ -51,6 +51,34 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **Telegram `getManagedBotToken` WIRE-SHAPE FIX (DECISIONS #70) — two
+  code-proven completion-path defects fixed + guarded, NOT deployed:** on
+  the managed-bot completion path (downstream of the `managed_bot` event,
+  so UNRELATED to the #69 keyboard symptom and the still-unresolved
+  managed-bot creation boundary), **G-1** — `telegramGetManagedBotToken`
+  sent `managed_bot_id`; the authoritative Bot API requires `user_id` (the
+  managed bot's own Telegram `User.id`, carried on the event as `bot.id` →
+  `botExternalId`) — now sends `user_id`; **G-2** — the code assumed the
+  response is `{ token: string }`; the API returns the token as a BARE
+  STRING — `telegramGetManagedBotToken` now returns
+  `TelegramApiResult<string>`, validates a non-empty string (any other
+  shape → `MALFORMED_PROVIDER_PAYLOAD` → typed `PROVISIONING_FAILED`, no
+  half-provisioned connection), and the caller hands the bare string to
+  `setWebhook`. Credential model UNCHANGED (token server-side only, stored
+  ONLY as `fp:<id>`, never logged/returned/in an error message); the
+  completion sequence, typed outcomes, tenant isolation, and
+  duplicate/replay protection all preserved. **GUARDED:** NEW
+  `check:telegram` section Q (Q1–Q7 — `user_id` sent, `managed_bot_id`
+  absent, bare-string parsed → CONNECTED, `setWebhook` gets the real token,
+  object/empty response fails safely, token never crosses an outward
+  boundary); `check:telegram` **107/107**, `check:telegram-onboarding`
+  22/22, `check:signup` 18/18; `pnpm verify` + `pnpm security` +
+  `git diff --check` green. Files: `telegram-client.ts`,
+  `telegram-provisioning.ts`, `scripts/check-telegram.ts` (+
+  `scripts/check-telegram-onboarding.ts` fixture). **WhatsApp / AI / Meta
+  Embedded Signup HOLD untouched. NOT deployed** — the operator ships via
+  the existing GitHub → Vercel workflow.
+
 - **Telegram SECOND LIVE E2E PASS (DECISIONS #69) — all four #68 blockers
   RESOLVED live; a SECOND blocking defect LIVE-PROVED + FIXED + GUARDED, NOT
   YET DEPLOYED:** the real attempt against the deployed v0.31.2 + the real
@@ -753,11 +781,14 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
-1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69).** The
-   code is now correct after the second live-found fix; exactly two
-   operator actions stand between BUILT and LIVE-VERIFIED, listed in
+1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69/#70).** The
+   code is now correct after the second live-found fix (#69) AND the two
+   code-proven `getManagedBotToken` wire-shape fixes (#70 — G-1 `user_id`,
+   G-2 bare-string token); exactly two operator actions stand between BUILT
+   and LIVE-VERIFIED, listed in
    `Unresolved User Actions` (1): **deploy the current head** so the
-   `request_id` fix is live (the routing fix, the migrations, and
+   `request_id` fix AND the `getManagedBotToken` wire fixes are live (the
+   routing fix, the migrations, and
    `TELEGRAM_MANAGER_BOT_USERNAME` are already done — live-verified), then
    **re-run `docs/TELEGRAM.md → The ONE live E2E` from a fresh launch**.
    Then record the outcome here + a new `DECISIONS.md` entry if a further

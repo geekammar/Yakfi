@@ -395,7 +395,10 @@ export async function completeManagedBotProvisioning(
   }
   const tokenResult = await telegramGetManagedBotToken(deps.api, {
     managerToken,
-    managedBotId: event.botExternalId,
+    // The `getManagedBotToken` request field is `user_id` — the managed
+    // bot's own Telegram User.id, which the `managed_bot` event carries as
+    // `bot.id` (parsed into `botExternalId`). NOT `managed_bot_id`.
+    userId: event.botExternalId,
   });
   if (!tokenResult.ok) {
     return await terminate(
@@ -407,7 +410,10 @@ export async function completeManagedBotProvisioning(
       tokenResult.error.message,
     );
   }
-  const botToken = tokenResult.result.token;
+  // The Bot API returns the token as a BARE STRING (validated in the
+  // client). It stays in the adapter — encrypted into an `fp:<id>`
+  // reference below and never logged or returned.
+  const botToken = tokenResult.result;
 
   // 4. Set the webhook with a FRESH per-connection secret (webhook, never
   //    polling — DECISIONS #63 (E)); private-chats text scope per the

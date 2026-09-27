@@ -47,7 +47,9 @@ FlowPilot /settings/telegram
    → the Admin taps the button + confirms in Telegram's native creation UI
    → Telegram delivers the managed_bot event to the MANAGER bot
    → FlowPilot completes provisioning server-side:
-       getManagedBotToken (via the manager bot)
+       getManagedBotToken (via the manager bot; request field `user_id`
+         = the managed bot's own Telegram User.id; the API returns the
+         token as a BARE STRING — DECISIONS #70)
        → token stored ONLY as an opaque fp:<id> RUNTIME reference
        → setWebhook with a fresh per-connection secret
        → getMe identity check (the reported bot id MUST match the event's)
@@ -359,6 +361,32 @@ untouched.
 Everything else #68 required is already live-verified RESOLVED (the routing
 fix, the migrations, `TELEGRAM_MANAGER_BOT_USERNAME`).
 
+### 6.3 The `getManagedBotToken` wire shape (DECISIONS #70)
+
+Two code-proven wire-shape defects on the managed-bot completion path (the
+step that runs AFTER a real `managed_bot` event) were corrected against the
+authoritative Telegram Bot API. They are DOWNSTREAM of the `managed_bot`
+event, so they are unrelated to the #69 creation-keyboard symptom and did
+NOT touch the managed-bot creation UX (that boundary is still externally
+unresolved — §6.2).
+
+- **G-1 (request param):** `getManagedBotToken` now sends `user_id` (the
+  managed bot's own Telegram `User.id`, carried on the event as `bot.id` →
+  `botExternalId`), NOT the previous `managed_bot_id`.
+- **G-2 (response shape):** the API returns the managed bot token as a
+  **bare string**, not a `{ token }` object. `telegramGetManagedBotToken`
+  now validates that the result is a non-empty string (any other shape →
+  `MALFORMED_PROVIDER_PAYLOAD` → the typed `PROVISIONING_FAILED` outcome, no
+  half-provisioned connection) and hands the bare string to `setWebhook`.
+
+The credential model is unchanged: the token is server-side only, stored
+ONLY as an `fp:<id>` RUNTIME reference, and never logged, returned, or
+placed in an error message. Guarded by NEW `check:telegram` section Q
+(Q1–Q7): `user_id` is sent, `managed_bot_id` is not, a bare-string response
+advances to CONNECTED, `setWebhook` receives the actual token, an
+object/empty response fails safely, and the token never crosses an outward
+boundary. `check:telegram` **107/107**. NOT deployed.
+
 **Explicitly NOT claimed by that pass:** no real managed bot was created,
 no `setWebhook`/`getMe` ran for a managed bot, no connection reached
 CONNECTED, and no customer message was received or answered. Those remain
@@ -366,7 +394,7 @@ CONNECTED, and no customer message was received or answered. Those remain
 
 ## 7. Offline verification (the code paths, no network)
 
-- `pnpm check:telegram` — **100/100**: the identity seam, Update parsing,
+- `pnpm check:telegram` — **107/107**: the identity seam, Update parsing,
   webhook secrets, the outbound transport, the provisioning ledger
   invariants, engine reuse, the per-connection webhook route, the launch,
   single-use consumption, the UI state machine, the whole manager-webhook
@@ -377,7 +405,11 @@ CONNECTED, and no customer message was received or answered. Those remain
   fails loudly if a session gate is ever re-applied. Section L4b
   (DECISIONS #69) guards the second live-found defect: the
   `request_managed_bot` button MUST carry a numeric `request_id` (the real
-  Bot API rejects the empty object with `400 Can't parse KeyboardButton`)**.
+  Bot API rejects the empty object with `400 Can't parse KeyboardButton`).
+  Section Q (DECISIONS #70) guards the two code-proven `getManagedBotToken`
+  wire-shape defects: the request sends `user_id` (never `managed_bot_id`)
+  and the token response is parsed as a bare string (a `{ token }` object
+  or an empty/non-string value fails safely).**
 - `pnpm check:telegram-onboarding` — **22/22** (DECISIONS #67): the
   customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing

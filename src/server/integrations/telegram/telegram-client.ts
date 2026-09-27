@@ -205,8 +205,6 @@ export type TelegramSendMessageResult = {
 
 export type TelegramSetWebhookResult = { ok?: true };
 
-export type TelegramManagedBotTokenResult = { token: string };
-
 /**
  * `getMe` — the connection's own identity. Used by the verifier (a
  * READ-ONLY check that proves the stored `botExternalId` is real) and by
@@ -296,19 +294,45 @@ export async function telegramDeleteWebhook(
 
 /**
  * `getManagedBotToken` — the Managed Bot provisioning primitive. Only the
- * FlowPilot MANAGER Bot (Bot Management Mode enabled) may call it; the
- * returned token is stored ONLY as an `fp:<id>` RUNTIME reference and
- * never returned to any caller or UI.
+ * FlowPilot MANAGER Bot (Bot Management Mode enabled) may call it.
+ *
+ * WIRE SHAPE (authoritative Telegram Bot API):
+ * - REQUEST: the method takes `user_id` — the managed bot's own Telegram
+ *   User.id (the value carried on the `managed_bot` event's `bot.id`).
+ *   It is NOT `managed_bot_id` (a field the API does not recognise).
+ * - RESPONSE: the `result` is the token as a BARE STRING — NOT a
+ *   `{ token: string }` object. It is validated here (a non-empty string)
+ *   and any other shape fails safely as `MALFORMED_PROVIDER_PAYLOAD`.
+ *
+ * The returned token is stored ONLY as an `fp:<id>` RUNTIME reference and
+ * never returned to any caller or UI, never logged, and never placed in an
+ * error message.
  */
 export async function telegramGetManagedBotToken(
   deps: TelegramApiDeps,
-  params: { managerToken: string; managedBotId: string },
-): Promise<TelegramApiResult<TelegramManagedBotTokenResult>> {
-  return callTelegramApi<TelegramManagedBotTokenResult>(deps, {
+  params: { managerToken: string; userId: string },
+): Promise<TelegramApiResult<string>> {
+  const response = await callTelegramApi<unknown>(deps, {
     token: params.managerToken,
     method: "getManagedBotToken",
-    body: { managed_bot_id: params.managedBotId },
+    body: { user_id: params.userId },
   });
+  if (!response.ok) return response;
+  // The Bot API returns the token as a bare string. Validate it BEFORE the
+  // caller ever hands it to `setWebhook` (defence in depth: a malformed or
+  // non-string `result` must not become an empty/invalid token). The token
+  // value is never included in the error message.
+  const token = response.result;
+  if (typeof token !== "string" || token.trim().length === 0) {
+    return {
+      ok: false,
+      error: new TransportError(
+        "MALFORMED_PROVIDER_PAYLOAD",
+        "استجابة رمز البوت المُدار غير صالحة",
+      ),
+    };
+  }
+  return { ok: true, result: token };
 }
 
 /** The production adapter deps (app singletons; `fetch` = the runtime's). */

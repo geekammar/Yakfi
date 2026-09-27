@@ -50,6 +50,11 @@
  *      policy — the defect the live v0.31.0 E2E surfaced: both Telegram
  *      endpoints sat behind the session gate, so the proxy answered every
  *      Telegram delivery with a 307 to /sign-in and nothing ever arrived.
+ *   Q. getManagedBotToken WIRE SHAPE (G-1/G-2) — the request sends
+ *      `user_id` (the managed bot's User.id), NEVER `managed_bot_id`, and
+ *      the token response is parsed as a BARE STRING (a `{ token }` object
+ *      or an empty/non-string value fails safely with no connection and no
+ *      token leak); `setWebhook` receives the actual token string.
  *
  * Run: pnpm check:telegram
  */
@@ -625,7 +630,7 @@ async function main(): Promise<void> {
       fetchImpl: (async (url: string) => {
         if (url.includes("getManagedBotToken")) {
           return new Response(
-            JSON.stringify({ ok: true, result: { token: BOT_TOKEN_VALUE } }),
+            JSON.stringify({ ok: true, result: BOT_TOKEN_VALUE }),
             { status: 200 },
           );
         }
@@ -1911,7 +1916,7 @@ async function main(): Promise<void> {
       }
       if (method === "getManagedBotToken") {
         return new Response(
-          JSON.stringify({ ok: true, result: { token: BOT_TOKEN_VALUE } }),
+          JSON.stringify({ ok: true, result: BOT_TOKEN_VALUE }),
           { status: 200 },
         );
       }
@@ -2539,7 +2544,7 @@ async function main(): Promise<void> {
       const method = url.split("/").pop();
       if (method === "getManagedBotToken") {
         return new Response(
-          JSON.stringify({ ok: true, result: { token: BOT_TOKEN_VALUE } }),
+          JSON.stringify({ ok: true, result: BOT_TOKEN_VALUE }),
           { status: 200 },
         );
       }
@@ -2603,7 +2608,7 @@ async function main(): Promise<void> {
       const method = url.split("/").pop();
       if (method === "getManagedBotToken") {
         return new Response(
-          JSON.stringify({ ok: true, result: { token: BOT_TOKEN_VALUE } }),
+          JSON.stringify({ ok: true, result: BOT_TOKEN_VALUE }),
           { status: 200 },
         );
       }
@@ -2712,6 +2717,194 @@ async function main(): Promise<void> {
     "P3. بقية المسارات تبقى محمية (لا تسريب من البوابة)",
     isPublicPath("/api/conversations") === false &&
       isPublicPath("/settings/telegram") === false,
+  );
+
+  // ── Q. getManagedBotToken WIRE SHAPE (G-1 request param + G-2 response).
+  //    The authoritative Telegram Bot API takes `user_id` (the managed
+  //    bot's own Telegram User.id — carried on the `managed_bot` event as
+  //    `bot.id`) and returns the token as a BARE STRING (NOT a
+  //    `{ token }` object). These guards fail against the old
+  //    `managed_bot_id` + `{ token }` implementation and pass only against
+  //    the real contract. The bot token must NEVER cross an outward
+  //    boundary (result/DTO/log/error) — only the `fp:<id>` reference does.
+  const QBOT_ID = "6222222222";
+  const QCREATOR = "9111111111";
+
+  type QRecorded = {
+    method: string;
+    body: Record<string, unknown>;
+    url: string;
+  };
+  function makeRecordingApi(tokenResponse: unknown): {
+    api: typeof provisioningDeps.api;
+    recorded: QRecorded[];
+  } {
+    const recorded: QRecorded[] = [];
+    const api = {
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        const method = String(url.split("/").pop());
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        recorded.push({ method, body, url: String(url) });
+        if (method === "getManagedBotToken") {
+          // The REAL API shape: `result` is the token as a BARE STRING.
+          return new Response(
+            JSON.stringify({ ok: true, result: tokenResponse }),
+            { status: 200 },
+          );
+        }
+        if (method === "setWebhook") {
+          return new Response(JSON.stringify({ ok: true, result: true }), {
+            status: 200,
+          });
+        }
+        if (method === "getMe") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              result: {
+                id: Number(QBOT_ID),
+                is_bot: true,
+                username: BOT_USERNAME,
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: false, error_code: 400 }), {
+          status: 400,
+        });
+      }) as typeof fetch,
+      apiHost: "https://api.telegram.org",
+      credentialsResolver: provisioningDeps.api.credentialsResolver,
+    };
+    return { api, recorded };
+  }
+
+  // Q1–Q5. The success path with the REAL wire shape.
+  const qOkLedgerToken = mintTelegramStartToken();
+  ledger.push({
+    id: `led-${++ledgerSeq}`,
+    businessId: BUSINESS_A,
+    connectionId: null,
+    startToken: qOkLedgerToken,
+    creatorTelegramUserId: QCREATOR,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    consumedAt: null,
+    outcomeCode: null,
+    createdAt: new Date(),
+  });
+  const { api: qOkApi, recorded: qOkRecorded } =
+    makeRecordingApi(BOT_TOKEN_VALUE);
+  const qOkBefore = createdConnections.length;
+  const qOkResult = await completeManagedBotProvisioning(
+    { ...provisioningDeps, api: qOkApi },
+    {
+      creatorTelegramUserId: QCREATOR,
+      botExternalId: QBOT_ID,
+      botUsername: BOT_USERNAME,
+    },
+  );
+  const qTokenCall = qOkRecorded.find((r) => r.method === "getManagedBotToken");
+  const qWebhookCall = qOkRecorded.find((r) => r.method === "setWebhook");
+  const qConnection = createdConnections[createdConnections.length - 1];
+
+  check(
+    "Q1. getManagedBotToken يُرسل user_id = معرّف مستخدم البوت المُدار (G-1)",
+    qTokenCall?.body.user_id === QBOT_ID,
+  );
+  check(
+    "Q2. getManagedBotToken لا يُرسل الحقل الخاطئ managed_bot_id (G-1)",
+    qTokenCall !== undefined && !("managed_bot_id" in qTokenCall.body),
+  );
+  check(
+    "Q3. استجابة توكن نصية مجردة تُقبل والتفعيل يتقدّم إلى CONNECTED (G-2/C/G)",
+    qOkResult.ok === true &&
+      createdConnections.length === qOkBefore + 1 &&
+      qConnection!.status === "CONNECTED" &&
+      qConnection!.botExternalId === QBOT_ID,
+  );
+  check(
+    "Q4. setWebhook يستلم قيمة التوكن الفعلية (المسار bot<token>) (G-2/E)",
+    qWebhookCall !== undefined &&
+      qWebhookCall.url.includes(`bot${BOT_TOKEN_VALUE}/setWebhook`),
+  );
+  check(
+    "Q5. التوكن لا يظهر في نتيجة التفعيل ويُخزَّن فقط كمرجع fp:<id> (F)",
+    !JSON.stringify(qOkResult).includes(BOT_TOKEN_VALUE) &&
+      qConnection!.credentialsRef?.startsWith("fp:") === true &&
+      storedSecrets.get(qConnection!.credentialsRef!) === BOT_TOKEN_VALUE &&
+      !JSON.stringify(qConnection).includes(BOT_TOKEN_VALUE),
+  );
+
+  // Q6. The OLD wrong shape (`{ token: … }` object, not a bare string) is
+  //     rejected: the completion fails safely with a typed outcome, leaves
+  //     NO connection, and leaks no token. (G-2/D)
+  const qBadCreator = "9222222222";
+  const qBadLedgerToken = mintTelegramStartToken();
+  ledger.push({
+    id: `led-${++ledgerSeq}`,
+    businessId: BUSINESS_A,
+    connectionId: null,
+    startToken: qBadLedgerToken,
+    creatorTelegramUserId: qBadCreator,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    consumedAt: null,
+    outcomeCode: null,
+    createdAt: new Date(),
+  });
+  const { api: qBadApi } = makeRecordingApi({ token: BOT_TOKEN_VALUE });
+  const qBadBefore = createdConnections.length;
+  const qBadResult = await completeManagedBotProvisioning(
+    { ...provisioningDeps, api: qBadApi },
+    {
+      creatorTelegramUserId: qBadCreator,
+      botExternalId: "6333333333",
+      botUsername: BOT_USERNAME,
+    },
+  );
+  const qBadRow = ledger.find((row) => row.startToken === qBadLedgerToken);
+  check(
+    "Q6. استجابة توكن غير نصية (الشكل القديم { token }) → فشل مُصنَّف + لا اتصال + لا تسريب (G-2/D)",
+    qBadResult.ok === false &&
+      qBadResult.code === "PROVISIONING_FAILED" &&
+      createdConnections.length === qBadBefore &&
+      qBadRow?.outcomeCode === "PROVISIONING_FAILED" &&
+      !JSON.stringify(qBadResult).includes(BOT_TOKEN_VALUE),
+  );
+
+  // Q7. An empty-string token is likewise rejected before it can reach
+  //     `setWebhook` (D — non-usable token fails safely, no connection).
+  const qEmptyCreator = "9333333333";
+  const qEmptyLedgerToken = mintTelegramStartToken();
+  ledger.push({
+    id: `led-${++ledgerSeq}`,
+    businessId: BUSINESS_A,
+    connectionId: null,
+    startToken: qEmptyLedgerToken,
+    creatorTelegramUserId: qEmptyCreator,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    consumedAt: null,
+    outcomeCode: null,
+    createdAt: new Date(),
+  });
+  const { api: qEmptyApi, recorded: qEmptyRecorded } = makeRecordingApi("");
+  const qEmptyBefore = createdConnections.length;
+  const qEmptyResult = await completeManagedBotProvisioning(
+    { ...provisioningDeps, api: qEmptyApi },
+    {
+      creatorTelegramUserId: qEmptyCreator,
+      botExternalId: "6444444444",
+      botUsername: BOT_USERNAME,
+    },
+  );
+  check(
+    "Q7. توكن نصي فارغ → فشل آمن + لا اتصال + لا استدعاء setWebhook (G-2/D)",
+    qEmptyResult.ok === false &&
+      createdConnections.length === qEmptyBefore &&
+      qEmptyRecorded.find((r) => r.method === "setWebhook") === undefined,
   );
 
   let failed = 0;

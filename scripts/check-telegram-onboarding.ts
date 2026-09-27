@@ -140,7 +140,7 @@ async function main(): Promise<void> {
           );
         }
         return new Response(
-          JSON.stringify({ ok: true, result: { token: BOT_TOKEN_VALUE } }),
+          JSON.stringify({ ok: true, result: BOT_TOKEN_VALUE }),
           { status: 200 },
         );
       }
