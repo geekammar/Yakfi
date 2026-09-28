@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.31.7",
+  "version": "0.31.8",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -71,7 +71,10 @@
     "db:seed": "dotenv -e .env.local -e .env -- tsx prisma/seed.ts",
     "bootstrap:admin": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-production-admin.ts",
     "bootstrap:operator": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-platform-operator.ts",
-    "icons": "node scripts/generate-pwa-icons.mjs"
+    "icons": "node scripts/generate-pwa-icons.mjs",
+    "context": "node scripts/context.mjs",
+    "context:check": "node scripts/context-check.mjs",
+    "check:context": "node scripts/check-context.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

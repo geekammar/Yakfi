@@ -81,6 +81,12 @@ change.** This release also normalized the docs (DECISIONS #57).
 customers, services, settings, knowledge, team, staff workspace, platform
 control plane) plus the full conversation engine are built and released.
 
+**Developer context access (DECISIONS #75, not a product surface):** a
+`docs/CONTEXT_MAP.md` starting-point index + `pnpm context <name>` /
+`pnpm context:check` let a fresh session begin from a small mapped set of
+files per feature instead of re-scanning the repo. It is an index, NOT a
+dependency graph, and has no token accounting/telemetry.
+
 **Verified recent milestones (all shipped through v0.20.0–v0.29.1):**
 
 | Slice                                                                                       | Release | Decision |

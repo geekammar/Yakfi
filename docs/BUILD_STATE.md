@@ -51,6 +51,15 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **CONTEXT ARCHITECTURE V1 (DECISIONS #75) — developer tooling + docs only,
+  NOT deployed:** `docs/CONTEXT_MAP.md` (a starting-point index of 7 feature
+  boundaries) + read-only `pnpm context <name>` (`--verbose`/`--stats`),
+  `pnpm context:check`, `pnpm check:context`. Gives a fresh session an explicit
+  starting context instead of re-scanning the repo. NOT a dependency graph, NO
+  token accounting/embeddings/telemetry; ZERO runtime/product change. Guards:
+  `context:check` 7 contexts/84 paths OK, `check:context` 11/11; existing
+  suites unchanged (telegram 116/116, telegram-onboarding 32/32, signup 18/18,
+  whatsapp green); `pnpm verify` green.
 - **Telegram CUSTOMER `/start` + STANDARD-TELEGRAM-ONLY LAUNCHER
   (DECISIONS #73/#74) — two independent customer-facing fixes, code-proven
   - guarded, NOT deployed, NOT live-verified:** **(A) `/start` (#73)** — a

@@ -78,6 +78,35 @@ these steps in order and stop as soon as the task is actionable:
 - ❌ Treat a `Last updated: PROMPT-*` marker or an old release narrative as
   truth — the repository is the truth; a stale doc never overrides the code.
 
+## Context Map — code-level starting points (DECISIONS #75)
+
+Beneath the doc tiers there is a CODE-level starting index: `docs/CONTEXT_MAP.md`
+plus `pnpm context <name>`. It tells you which handful of source files, docs, and
+focused tests to START from for a feature area so you do not re-scan `src/`.
+
+The workflow (do this, not "read everything first"):
+
+```
+TASK
+ → read the Tier 0 triple (always)
+ → identify the context (pnpm context <name>, e.g. telegram.customer)
+ → read the mapped docs
+ → read the mapped source
+ → discover direct dependencies ONLY when a mapped file requires it
+   (follow a real import one hop at a time — the code is the truth)
+ → inspect the focused tests
+ → implement
+ → verify (pnpm verify)
+```
+
+Explicitly DISCOURAGED: `TASK → read all docs → read all source files → then
+start`. The map is a STARTING-POINT INDEX, not a dependency graph and not a
+second architecture doc — it holds no code, no token counts, no telemetry. When
+you add or move a mapped file, update the entry and run `pnpm context:check`. Add
+a new context only for a boundary that already obviously exists; record unclear
+boundaries under "Boundaries needing later refinement" instead of fabricating an
+entry.
+
 ## Before Making Any Changes
 
 1. Read the Tier 0 triple above (`AGENT_RULES.md` + `CURRENT_STATE.md` +
