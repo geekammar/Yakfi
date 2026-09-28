@@ -226,6 +226,21 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   row) and there is no second lifecycle. Guarded by NEW `check:telegram`
   L4c/L4d; `check:telegram` **109/109**. Whether the Android link path
   reaches CONNECTED live remains **LIVE E2E PENDING** (operator).
+- **Telegram Android app chooser (DECISIONS #72, code-proven, NOT
+  deployed, NOT live-verified):** live onboarding proved the OS
+  default-handler on an affected Android device routes the HTTPS `t.me`
+  provisioning link to **Telegram X** (`org.thunderdog.challegram`), where
+  the flow FAILS, while **standard Telegram** (`org.telegram.messenger`)
+  completes the identical flow. CLIENT launch/compatibility fix only — the
+  server contract is unchanged. On Android, a successful launch now opens an
+  in-app chooser («اختر تطبيق تيليجرام») with standard Telegram as the
+  primary/default option, Telegram X as an explicit optional choice (never
+  auto-selected), and the plain HTTPS link as the fallback; non-Android
+  keeps the normal HTTPS launch. NEW pure module
+  `telegram-app-launcher.ts` builds the Android `intent://` URLs without
+  touching the opaque start token; guarded by NEW
+  `check:telegram-onboarding` checks 23–32 (**32/32**). NOT deployed and
+  NOT live-verified.
 
 ## 5. What is the current product/architecture direction?
 

@@ -79,6 +79,13 @@ async function main(): Promise<void> {
     await import("@/server/integrations/telegram/telegram-manager-webhook-handler");
   const { deriveManagerWebhookSecret, MANAGED_BOT_REQUEST_ID } =
     await import("@/server/integrations/telegram/telegram-provisioning");
+  const {
+    STANDARD_TELEGRAM_PACKAGE,
+    TELEGRAM_X_PACKAGE,
+    isAndroidUserAgent,
+    buildTelegramAndroidIntentUrl,
+    buildAndroidTelegramLaunchTargets,
+  } = await import("@/features/telegram-connection/telegram-app-launcher");
 
   // ── In-memory fakes (mirror check-telegram.ts; no Prisma, no fetch) ──────
 
@@ -734,6 +741,109 @@ async function main(): Promise<void> {
     "22. عميل لا يمكنه اختيار منشأة أخرى (الخادم يحدد النطاق)",
     finalStatus.success === true &&
       finalStatus.view.botUsername === BOT_USERNAME,
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Android Telegram app chooser launcher (DECISIONS #72)
+  //
+  // A CLIENT launch/compatibility helper only: it hands the EXISTING HTTPS
+  // authorizationUrl to a specific Telegram package via an intent:// URL,
+  // preserving the original URL byte-for-byte as the fallback and NEVER
+  // touching the opaque start token or the server contract.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // A representative launch URL, exactly as beginTelegramProvisioning returns
+  // it: the ONLY payload is the opaque single-use start token.
+  const OPAQUE_START_TOKEN = "AbCdEf0123456789OPAQUE_start_TOKEN";
+  const LAUNCH_URL = `https://t.me/${MANAGER_USERNAME}?start=${OPAQUE_START_TOKEN}`;
+
+  const standardIntent = buildTelegramAndroidIntentUrl(
+    LAUNCH_URL,
+    STANDARD_TELEGRAM_PACKAGE,
+  );
+  const xIntent = buildTelegramAndroidIntentUrl(LAUNCH_URL, TELEGRAM_X_PACKAGE);
+  const targets = buildAndroidTelegramLaunchTargets(LAUNCH_URL);
+  const encodedOriginal = encodeURIComponent(LAUNCH_URL);
+
+  // A — standard Telegram intent targets org.telegram.messenger, preserves
+  // the original t.me URL as the underlying data + the fallback, and carries
+  // NO transformed business/credential data (only the original token rides).
+  check(
+    "23. نية أندرويد لتيليجرام الرسمي تستهدف org.telegram.messenger",
+    standardIntent.includes("package=org.telegram.messenger"),
+  );
+  check(
+    "24. نية تيليجرام الرسمي تحفظ رابط t.me الأصلي كبيانات + كاحتياطي",
+    standardIntent.startsWith(`intent://t.me/${MANAGER_USERNAME}?start=`) &&
+      standardIntent.includes(`scheme=https`) &&
+      standardIntent.includes(`S.browser_fallback_url=${encodedOriginal}`) &&
+      standardIntent.endsWith(";end"),
+  );
+  check(
+    "25. نية تيليجرام الرسمي لا تحوي أي بيانات منشأة/اعتماد محوّلة",
+    !standardIntent.includes("businessId") &&
+      !standardIntent.includes("connectionId") &&
+      !standardIntent.includes("token=") &&
+      // the opaque start token rides UNCHANGED (never parsed or rewritten)
+      standardIntent.includes(`start=${OPAQUE_START_TOKEN}`) &&
+      decodeURIComponent(encodedOriginal) === LAUNCH_URL,
+  );
+
+  // B — Telegram X intent targets org.thunderdog.challegram, same underlying
+  // HTTPS destination + fallback.
+  check(
+    "26. نية أندرويد لتيليجرام X تستهدف org.thunderdog.challegram",
+    xIntent.includes("package=org.thunderdog.challegram"),
+  );
+  check(
+    "27. نية تيليجرام X تحفظ نفس رابط HTTPS الأصلي كبيانات + كاحتياطي",
+    xIntent.startsWith(`intent://t.me/${MANAGER_USERNAME}?start=`) &&
+      xIntent.includes(`S.browser_fallback_url=${encodedOriginal}`) &&
+      xIntent.includes(`start=${OPAQUE_START_TOKEN}`),
+  );
+
+  // C — the fallback returns EXACTLY the original authorizationUrl.
+  check(
+    "28. الرابط العادي يعيد authorizationUrl الأصلي حرفياً",
+    targets.fallback.url === LAUNCH_URL &&
+      targets.fallback.packageName === null,
+  );
+
+  // D — token safety: the helper never alters the opaque start token, never
+  // persists/copies it into a new field, and is a pure function (calling it
+  // twice on the same input yields an identical result and mutates nothing).
+  check(
+    "29. المساعد لا يغيّر رمز البدء المبهم (نفس الرمز في النية والاحتياطي)",
+    standardIntent.includes(OPAQUE_START_TOKEN) &&
+      decodeURIComponent(encodedOriginal).includes(OPAQUE_START_TOKEN) &&
+      // the token is not truncated, re-encoded, or transformed anywhere
+      LAUNCH_URL.includes(OPAQUE_START_TOKEN),
+  );
+  check(
+    "30. المساعد دالة نقية (نفس المدخل ⇒ نفس المخرج، دون آثار جانبية)",
+    buildTelegramAndroidIntentUrl(LAUNCH_URL, STANDARD_TELEGRAM_PACKAGE) ===
+      standardIntent &&
+      buildAndroidTelegramLaunchTargets(LAUNCH_URL).fallback.url === LAUNCH_URL,
+  );
+
+  // E — non-Android keeps the normal HTTPS launch (the chooser is never
+  // shown): the platform gate is false off Android and true only on it.
+  const DESKTOP_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+  const IOS_UA =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15";
+  const ANDROID_UA =
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36";
+  check(
+    "31. غير أندرويد (سطح المكتب) لا يعرض المُنتقي (السلوك المعتاد محفوظ)",
+    isAndroidUserAgent(DESKTOP_UA) === false &&
+      isAndroidUserAgent(IOS_UA) === false &&
+      isAndroidUserAgent(null) === false &&
+      isAndroidUserAgent(undefined) === false,
+  );
+  check(
+    "32. أندرويد وحده يفعّل المُنتقي",
+    isAndroidUserAgent(ANDROID_UA) === true,
   );
 
   // ── Report ─────────────────────────────────────────────────────────────────

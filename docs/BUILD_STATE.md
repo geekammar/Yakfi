@@ -51,6 +51,38 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **Telegram ANDROID APP CHOOSER (DECISIONS #72) — client
+  launch/compatibility fix, code-proven + guarded, NOT deployed, NOT
+  live-verified:** live onboarding proved the OS default-handler on an
+  affected Android device routes the HTTPS `t.me` provisioning link to
+  **Telegram X** (`org.thunderdog.challegram`), where the flow FAILS,
+  while **standard Telegram** (`org.telegram.messenger`) completes the
+  identical flow. CLIENT-only fix — `beginTelegramProvisioningAction()`
+  and the whole server contract (`authorizationUrl`/`expiresAt`/`launched`,
+  the opaque single-use token, creator binding, tenant isolation) are
+  UNCHANGED. On Android, after a successful launch the `/settings/telegram`
+  screen shows an in-app chooser («اختر تطبيق تيليجرام») with three real
+  user-gesture actions: «فتح في Telegram» (PRIMARY → `org.telegram.messenger`),
+  «فتح في Telegram X» (explicit optional → `org.thunderdog.challegram`,
+  never auto-selected), «فتح الرابط العادي» (the original `authorizationUrl`,
+  byte-for-byte). NEW pure module
+  `src/features/telegram-connection/telegram-app-launcher.ts` builds
+  `intent://…#Intent;scheme=https;package=<pkg>;S.browser_fallback_url=<encoded original>;end`
+  WITHOUT ever inspecting/rewriting/logging/persisting the opaque start
+  token. The external app is opened ONLY from an `<a href="intent://…">`
+  tap (never a timer/effect/async callback); non-Android keeps
+  `window.location.href = authorizationUrl`; retry/reopen reuse the same
+  launcher + the same resumed attempt (no new token, no second lifecycle).
+  **GUARDED:** `check:telegram-onboarding` **32/32** (NEW 23–32),
+  `check:telegram` 109/109, `check:signup` 18/18, WhatsApp green
+  (`whatsapp-onboarding` 56/56, `whatsapp-transport` 27/27);
+  `pnpm verify` + `pnpm security` + `git diff --check` green. Files:
+  `telegram-app-launcher.ts` (new), `telegram-connection-screen.tsx`,
+  `scripts/check-telegram-onboarding.ts`. **NOT deployed, NOT
+  live-verified** — that a real Android tap on «فتح في Telegram» opens
+  standard Telegram and completes the flow requires a real human device
+  test (operator).
+
 - **Telegram OFFICIAL CREATION DEEP-LINK FALLBACK (DECISIONS #71) —
   client-compatibility fix, code-proven + guarded, NOT deployed:**
   production is now **v0.31.4** (`GET /api/health` →
@@ -833,7 +865,11 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
    defect surfaces. **Do not report a simulated success** — the offline
    harnesses prove code paths only, and two consecutive real attempts have
    now each surfaced a distinct blocking defect that every offline guard
-   was green for.
+   was green for. **Also (DECISIONS #72), on the affected Android device:
+   launch from `/settings/telegram`, tap «فتح في Telegram» in the new app
+   chooser, and confirm it opens STANDARD Telegram (`org.telegram.messenger`)
+   and completes the flow — the client fix is code-proven + guarded
+   (`check:telegram-onboarding` 32/32) but NOT live-verified.**
 2. **Telegram second channel — the foundation, transport sibling, manager-bot
    provisioning state machine, AND the customer onboarding surface are all
    BUILT and VERIFIED offline** (DECISIONS #63 discovery → #64 foundation →

@@ -463,6 +463,75 @@ customer message. Operator action: deploy the current head, then re-run
 §6 "The ONE live E2E" from a FRESH launch using the official-link path on
 the Android client.
 
+### 6.5 The Android Telegram app chooser (DECISIONS #72)
+
+A FOURTH live symptom, on the customer's Android device: the OS
+app-link/default-handler routes the HTTPS `t.me` provisioning link to
+**Telegram X** (`org.thunderdog.challegram`), where the FlowPilot flow
+fails, while **standard Telegram** (`org.telegram.messenger`) completes the
+identical flow. The provisioning deep link, the token, and the whole server
+contract are correct and UNCHANGED — the only problem is WHICH Android
+client receives the link.
+
+**Fix (CLIENT launch/compatibility only, no server/DB/lifecycle change).**
+`beginTelegramProvisioningAction()` still returns the same
+`authorizationUrl` / `expiresAt` / `launched`. On Android, after a
+successful launch the settings screen shows an in-app chooser
+(«اختر تطبيق تيليجرام») instead of navigating unconditionally:
+
+- **«فتح في Telegram»** — PRIMARY/default, targets `org.telegram.messenger`.
+- **«فتح في Telegram X»** — explicit optional, targets
+  `org.thunderdog.challegram` (NEVER auto-selected).
+- **«فتح الرابط العادي»** — the original `authorizationUrl`, byte-for-byte.
+
+Each option is a REAL user-gesture anchor. The Android app is launched via
+an `intent://` URL built by the pure module
+`src/features/telegram-connection/telegram-app-launcher.ts`:
+
+```
+intent://t.me/<manager>?start=<opaque-token>#Intent;
+  scheme=https;
+  package=org.telegram.messenger;
+  S.browser_fallback_url=<encoded original https url>;
+end
+```
+
+The helper swaps ONLY the URI scheme prefix and appends the `#Intent;…;end`
+fragment — it NEVER inspects, parses, rewrites, logs, or persists the opaque
+start token (which rides through unchanged in both the intent data and the
+encoded fallback), and copies nothing into any new state field beyond the
+already-returned `authorizationUrl`. If an intent cannot resolve, Android
+itself opens the identical `browser_fallback_url`.
+
+**Browser constraint:** the external app is opened ONLY from the anchor tap
+— never from `useEffect`, `setTimeout`, polling, page load, or an async
+callback (the async launch callback only stores the chooser URL in state).
+
+**Non-Android** (desktop/web/iOS): NO chooser — the prior behavior is
+preserved (`window.location.href = authorizationUrl`).
+
+**Retry/reopen:** «افتح رابط تيليجرام» (PROVISIONING) and «أعد المحاولة» /
+«أعد ربط تيليجرام» all use the SAME launcher; the service still RESUMES the
+same in-flight attempt (same token, same `authorizationUrl`) — no second
+provisioning attempt and no new token is minted just for app selection.
+
+**Guarded:** `check:telegram-onboarding` **32/32** (NEW 23–32: the standard
+intent targets `org.telegram.messenger` and preserves the original t.me URL
+as the intent data + the fallback with no transformed business/credential
+data; the Telegram X intent targets `org.thunderdog.challegram` with the
+same fallback; the fallback returns exactly the original `authorizationUrl`;
+the opaque token is unaltered; the helper is pure; non-Android/iOS/null UA
+never triggers the chooser and only Android does).
+
+**Still LIVE-ONLY (not fabricated):** OFFLINE VERIFIED — the intent URLs are
+built with the correct packages and the original URL preserved as the
+fallback, the platform gate is Android-only, and the token/tenant invariants
+are intact. NOT LIVE VERIFIED — that tapping «فتح في Telegram» on the real
+Android device opens standard Telegram, receives the deep link, and
+completes the flow. Operator action: on the affected Android device, launch
+from `/settings/telegram`, tap «فتح في Telegram», and confirm the flow
+reaches CONNECTED.
+
 ## 7. Offline verification (the code paths, no network)
 
 - `pnpm check:telegram` — **109/109**: the identity seam, Update parsing,
@@ -485,14 +554,21 @@ the Android client.
   `/start` reply carries the `t.me/newbot/…?name=…` link AND still the
   keyboard AND leaks no token/business id/start token, and the link
   escaping strips `@` + percent-encodes the display name.**
-- `pnpm check:telegram-onboarding` — **22/22** (DECISIONS #67): the
+- `pnpm check:telegram-onboarding` — **32/32** (DECISIONS #67 + #72): the
   customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing
   PROVISIONING → `/start` binding + the keyboard → the `managed_bot`
   completion → the poll observing CONNECTED (display name + @username, no
   secret) → single-use replay refusal → the typed-failure loop
   (ACTION_REQUIRED + a retryable label + a fresh attempt) → the
-  authorization boundaries.
+  authorization boundaries. **Checks 23–32 (DECISIONS #72) guard the
+  Android app chooser launcher: the standard-Telegram intent targets
+  `org.telegram.messenger` and Telegram X targets
+  `org.thunderdog.challegram`, both preserving the original HTTPS URL as
+  the intent data + `browser_fallback_url` with no transformed
+  business/credential data and the opaque token unaltered; the fallback
+  returns exactly the original `authorizationUrl`; the launcher is pure;
+  and only an Android user agent triggers the chooser.**
 - `pnpm check:signup` — **18/18**: the public-path policy, now including
   the provider-webhook reachability assertions (DECISIONS #68).
 
