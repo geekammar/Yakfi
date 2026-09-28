@@ -9,10 +9,13 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.31.2** — released and committed (`04260a1`, tag `v0.31.2`;
-HEAD == `origin/main`; tags through `v0.31.2`). v0.31.1/v0.31.2 carry the
+**Product version: v0.31.8** — released and committed (`49d264b`, tag `v0.31.8`;
+HEAD == `origin/main`; working tree clean; tags through `v0.31.8`). Releases
+v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
+fixes, the official-creation deep-link + Android launcher fixes, the customer
+`/start` command, and Context Architecture V1). v0.31.1/v0.31.2 carry the
 whole Telegram second channel (DECISIONS #63 → #67) committed + the #68
-route-proxy routing fix, and v0.31.2 is what production now serves. **The
+route-proxy routing fix. **The
 second REAL live Telegram verification pass (DECISIONS #69, this slice) ran
 against that deployment:** it LIVE-VERIFIED that all four #68 operator
 blockers are now RESOLVED (the routing fix IS live, both Telegram migrations
@@ -47,6 +50,20 @@ adapter, webhook, and Conversation-Engine bridge — is now BUILT too
 boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
+
+**DOC-SYNC-V0318 (documentation/context sync pass — repository baseline
+established, NO code change):** HEAD `49d264b` == `origin/main`, working tree
+clean, release **v0.31.8**, tags through v0.31.8. All DECISIONS through
+**#75 (Context Architecture V1)** are committed and released. Context
+Architecture V1 is the BASELINE for future agent work and was validated
+read-only this pass (`pnpm context:check` → 7 contexts / 84 paths OK;
+`pnpm check:context` → 11/11; the resolver executes no application code, reads
+no secrets, mutates nothing, and needs no repo-wide scan for normal
+resolution). Any "UNCOMMITTED in the worktree" / "NOT deployed pending commit"
+phrasing in the per-slice bullets below reflects each slice's authoring moment
+and is superseded by the v0.31.8 release; production deployment/live-
+verification state is operator-owned and was NOT re-verified this pass (the
+last recorded live checkpoint remains as noted in `Ops State`).
 
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.

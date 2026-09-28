@@ -6,8 +6,19 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.31.2** — released and committed (`04260a1`, tag `v0.31.2`;
-HEAD == `origin/main`; tags through `v0.31.2`). v0.31.1/v0.31.2 carry the
+**Version: v0.31.8** — released and committed (`49d264b`, tag `v0.31.8`;
+HEAD == `origin/main`; working tree clean; tags through `v0.31.8`).
+**Documentation/context sync (DOC-SYNC-V0318):** releases v0.31.3–v0.31.8
+committed DECISIONS #70–#75; the current baseline for future agent work is
+**Context Architecture V1 (DECISIONS #75)** — `docs/CONTEXT_MAP.md` +
+`pnpm context`/`context:check`/`check:context`, present and validated
+read-only this pass (7 contexts / 84 paths OK; 11/11 self-tests). Every
+DECISIONS #61–#75 slice described below as "UNCOMMITTED in the worktree" or
+"NOT deployed pending commit" is now committed and released through v0.31.8;
+that phrasing reflects each slice's authoring moment. Production
+deployment/live-verification state is operator-owned and was NOT re-verified
+this pass (the last recorded live checkpoint is unchanged). v0.31.1/v0.31.2
+carry the
 whole Telegram second channel committed (DECISIONS #63 → #67) + the #68
 route-proxy routing fix. **The second REAL live Telegram verification pass
 (DECISIONS #69) ran against that deployment:** it LIVE-VERIFIED that all
