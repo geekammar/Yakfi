@@ -1,6 +1,6 @@
 /**
- * Client-side Telegram Android app launcher (DECISIONS #72 — the Android
- * app-selection compatibility fix).
+ * Client-side Telegram Android app launcher (DECISIONS #72/#74 — the
+ * Android app-selection compatibility fix).
  *
  * WHY THIS EXISTS: live Telegram onboarding proved that on an affected
  * Android device the OS/app-link default-handler routes HTTPS `t.me` links
@@ -8,9 +8,16 @@
  * provisioning flow only completes in the **standard Telegram** app
  * (`org.telegram.messenger`). The provisioning deep link is correct; the
  * only problem is WHICH Android client receives it. So this module lets the
- * client explicitly target a specific Telegram package via an Android
- * `intent://` URL, with the standard Telegram app as the primary choice and
- * the original HTTPS URL always preserved as the fallback.
+ * client explicitly target the standard Telegram package via an Android
+ * `intent://` URL, with the original HTTPS URL always preserved as the
+ * fallback.
+ *
+ * DECISIONS #74: Telegram X is NO LONGER offered as a choice. The customer
+ * launcher targets ONLY standard Telegram (`org.telegram.messenger`) with
+ * the original HTTPS authorization URL as the fallback. Telegram X does not
+ * complete the managed-bot creation flow on the affected setup, so exposing
+ * it was an active foot-gun; it is intentionally removed from the UI and the
+ * launch targets. There is NO Telegram-X-specific URI anywhere.
  *
  * HARD BOUNDARIES (all enforced by construction here):
  * - This is a CLIENT launch/compatibility helper ONLY. It performs NO
@@ -29,12 +36,8 @@
  */
 
 /** The official Telegram Android package. FlowPilot's provisioning flow
- *  is verified against this client — it is the PRIMARY/default choice. */
+ *  is verified against this client — it is the ONLY targeted package. */
 export const STANDARD_TELEGRAM_PACKAGE = "org.telegram.messenger";
-
-/** The Telegram X Android package. Offered as an explicit optional choice,
- *  NEVER selected automatically (it is the client the flow fails on). */
-export const TELEGRAM_X_PACKAGE = "org.thunderdog.challegram";
 
 /**
  * True only for an Android user agent. Pure (the caller passes
@@ -83,11 +86,11 @@ export function buildTelegramAndroidIntentUrl(
 }
 
 /**
- * The three explicit launch targets for the Android chooser, in the
- * approved order: standard Telegram first (primary/default), Telegram X
- * second (explicit optional), the plain HTTPS link last (universal
- * fallback). The `authorizationUrl` is the SAME server-returned value in
- * every target — the chooser only decides which client receives it.
+ * The explicit launch targets for the Android chooser: standard Telegram
+ * (the ONLY targeted package) and the plain HTTPS link as the universal
+ * fallback. Telegram X is intentionally NOT offered (DECISIONS #74). The
+ * `authorizationUrl` is the SAME server-returned value in every target —
+ * the chooser only decides which client receives it.
  */
 export type TelegramLaunchTarget = {
   packageName: string | null; // null → the plain HTTPS fallback
@@ -96,7 +99,6 @@ export type TelegramLaunchTarget = {
 
 export function buildAndroidTelegramLaunchTargets(authorizationUrl: string): {
   standard: TelegramLaunchTarget;
-  telegramX: TelegramLaunchTarget;
   fallback: TelegramLaunchTarget;
 } {
   return {
@@ -106,10 +108,6 @@ export function buildAndroidTelegramLaunchTargets(authorizationUrl: string): {
         authorizationUrl,
         STANDARD_TELEGRAM_PACKAGE,
       ),
-    },
-    telegramX: {
-      packageName: TELEGRAM_X_PACKAGE,
-      url: buildTelegramAndroidIntentUrl(authorizationUrl, TELEGRAM_X_PACKAGE),
     },
     fallback: {
       packageName: null,

@@ -81,7 +81,6 @@ async function main(): Promise<void> {
     await import("@/server/integrations/telegram/telegram-provisioning");
   const {
     STANDARD_TELEGRAM_PACKAGE,
-    TELEGRAM_X_PACKAGE,
     isAndroidUserAgent,
     buildTelegramAndroidIntentUrl,
     buildAndroidTelegramLaunchTargets,
@@ -744,12 +743,13 @@ async function main(): Promise<void> {
   );
 
   // ════════════════════════════════════════════════════════════════════════
-  // Android Telegram app chooser launcher (DECISIONS #72)
+  // Android Telegram app launcher (DECISIONS #72/#74)
   //
   // A CLIENT launch/compatibility helper only: it hands the EXISTING HTTPS
-  // authorizationUrl to a specific Telegram package via an intent:// URL,
-  // preserving the original URL byte-for-byte as the fallback and NEVER
-  // touching the opaque start token or the server contract.
+  // authorizationUrl to STANDARD Telegram via an intent:// URL, preserving
+  // the original URL byte-for-byte as the fallback and NEVER touching the
+  // opaque start token or the server contract. Telegram X is intentionally
+  // NOT offered (DECISIONS #74).
   // ════════════════════════════════════════════════════════════════════════
 
   // A representative launch URL, exactly as beginTelegramProvisioning returns
@@ -761,7 +761,6 @@ async function main(): Promise<void> {
     LAUNCH_URL,
     STANDARD_TELEGRAM_PACKAGE,
   );
-  const xIntent = buildTelegramAndroidIntentUrl(LAUNCH_URL, TELEGRAM_X_PACKAGE);
   const targets = buildAndroidTelegramLaunchTargets(LAUNCH_URL);
   const encodedOriginal = encodeURIComponent(LAUNCH_URL);
 
@@ -789,17 +788,21 @@ async function main(): Promise<void> {
       decodeURIComponent(encodedOriginal) === LAUNCH_URL,
   );
 
-  // B — Telegram X intent targets org.thunderdog.challegram, same underlying
-  // HTTPS destination + fallback.
+  // B — Telegram X is NOT exposed anywhere (DECISIONS #74): neither the
+  // launcher module nor its built targets reference the Telegram X package
+  // or a Telegram-X-specific intent.
   check(
-    "26. نية أندرويد لتيليجرام X تستهدف org.thunderdog.challegram",
-    xIntent.includes("package=org.thunderdog.challegram"),
+    "26. تيليجرام X غير معروض إطلاقاً (لا حزمة org.thunderdog.challegram)",
+    !JSON.stringify(targets).includes("org.thunderdog.challegram") &&
+      !standardIntent.includes("org.thunderdog.challegram") &&
+      // the chooser exposes ONLY the standard target + the plain fallback
+      !("telegramX" in targets) &&
+      Object.keys(targets).sort().join(",") === "fallback,standard",
   );
   check(
-    "27. نية تيليجرام X تحفظ نفس رابط HTTPS الأصلي كبيانات + كاحتياطي",
-    xIntent.startsWith(`intent://t.me/${MANAGER_USERNAME}?start=`) &&
-      xIntent.includes(`S.browser_fallback_url=${encodedOriginal}`) &&
-      xIntent.includes(`start=${OPAQUE_START_TOKEN}`),
+    "27. الهدف الرسمي الوحيد هو تيليجرام القياسي",
+    targets.standard.packageName === STANDARD_TELEGRAM_PACKAGE &&
+      targets.standard.url === standardIntent,
   );
 
   // C — the fallback returns EXACTLY the original authorizationUrl.

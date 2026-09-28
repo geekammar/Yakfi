@@ -532,9 +532,56 @@ completes the flow. Operator action: on the affected Android device, launch
 from `/settings/telegram`, tap «فتح في Telegram», and confirm the flow
 reaches CONNECTED.
 
+### 6.6 Customer `/start` command + standard-Telegram-only launcher (DECISIONS #73/#74)
+
+Two independent customer-facing fixes, neither touching the server
+contract, the provisioning lifecycle, the AI, or WhatsApp:
+
+- **Customer `/start` is a DETERMINISTIC welcome, not an AI turn or a
+  handoff (DECISIONS #73).** A CUSTOMER managed bot's `/start` (with or
+  without a payload) is classified as a `start_command` by
+  `parseTelegramUpdate` BEFORE the message is normalized for the engine;
+  `handleTelegramWebhook` replies with a FIXED Arabic welcome
+  (`CUSTOMER_START_WELCOME` = «أهلاً بك 👋\nمرحبًا بك! كيف يمكنني
+  مساعدتك؟») through the EXISTING Telegram `MessageTransport` (the route
+  supplies a `sendStartWelcome` closure over the same transport the engine
+  uses) and returns 200. The `/start` path terminates BEFORE AI context
+  building, AI invocation, disclosure, human handoff, and operator-attention
+  routing — so opening the bot can never cost an AI call or trip a handoff.
+  The `startPayload` is safe metadata only and is NEVER fed to the AI as
+  user text. **The Manager Bot provisioning `/start <token>` is a SEPARATE
+  route (`/api/telegram/manager/webhook`) + handler and is UNTOUCHED** — the
+  two `/start` paths are distinguished structurally, never by inspecting the
+  token. Normal text behavior is unchanged (only a leading `/start` token
+  qualifies). No new engine, no new messaging abstraction, no migration.
+
+- **Standard Telegram only on Android (DECISIONS #74).** The Android
+  onboarding launcher now targets ONLY standard Telegram
+  (`org.telegram.messenger`); **Telegram X is intentionally NOT offered**
+  (it does not complete the managed-bot creation flow on the affected
+  setup). This reverses the Telegram-X option added in #72.
+  `buildAndroidTelegramLaunchTargets` returns only `{ standard, fallback }`;
+  the chooser renders «فتح في Telegram» (standard) + «فتح الرابط العادي»
+  (the original `authorizationUrl`, byte-for-byte). All #72 invariants hold:
+  the launcher is a pure client-side transform, the opaque start token is
+  never inspected/rewritten/logged/persisted, the external app opens ONLY
+  from a real anchor tap, non-Android keeps the plain HTTPS launch, and the
+  fallback is the exact original HTTPS authorization URL (never a
+  Telegram-X URI). No server route, no env var, no schema, no provisioning
+  change.
+
+**Guarded:** `check:telegram` **116/116** (NEW B9–B11 classify `/start` /
+`/start <payload>` as `start_command` and keep normal text a message; NEW
+H13–H16 assert the route returns `start:WELCOME`, never dispatches to the
+engine, and sends exactly ONE deterministic `CUSTOMER_START_WELCOME`),
+`check:telegram-onboarding` **32/32** (check 26 now asserts Telegram X is
+NOT exposed by the launcher; the Manager Bot `/start <token>` binding still
+passes), `check:signup` 18/18, WhatsApp green.
+
 ## 7. Offline verification (the code paths, no network)
 
-- `pnpm check:telegram` — **109/109**: the identity seam, Update parsing,
+- `pnpm check:telegram` — **116/116**: the identity seam, Update parsing,
+  the customer `/start` control command (DECISIONS #73),
   webhook secrets, the outbound transport, the provisioning ledger
   invariants, engine reuse, the per-connection webhook route, the launch,
   single-use consumption, the UI state machine, the whole manager-webhook
@@ -554,21 +601,21 @@ reaches CONNECTED.
   `/start` reply carries the `t.me/newbot/…?name=…` link AND still the
   keyboard AND leaks no token/business id/start token, and the link
   escaping strips `@` + percent-encodes the display name.**
-- `pnpm check:telegram-onboarding` — **32/32** (DECISIONS #67 + #72): the
-  customer journey through the REAL service + REAL manager handler —
+- `pnpm check:telegram-onboarding` — **32/32** (DECISIONS #67 + #72 + #74):
+  the customer journey through the REAL service + REAL manager handler —
   EMPTY → launch → the deep link (token-only) → the poll observing
   PROVISIONING → `/start` binding + the keyboard → the `managed_bot`
   completion → the poll observing CONNECTED (display name + @username, no
   secret) → single-use replay refusal → the typed-failure loop
   (ACTION_REQUIRED + a retryable label + a fresh attempt) → the
-  authorization boundaries. **Checks 23–32 (DECISIONS #72) guard the
-  Android app chooser launcher: the standard-Telegram intent targets
-  `org.telegram.messenger` and Telegram X targets
-  `org.thunderdog.challegram`, both preserving the original HTTPS URL as
-  the intent data + `browser_fallback_url` with no transformed
-  business/credential data and the opaque token unaltered; the fallback
-  returns exactly the original `authorizationUrl`; the launcher is pure;
-  and only an Android user agent triggers the chooser.**
+  authorization boundaries. **Checks 23–32 guard the Android launcher: the
+  standard-Telegram intent targets `org.telegram.messenger`, preserving the
+  original HTTPS URL as the intent data + `browser_fallback_url` with no
+  transformed business/credential data and the opaque token unaltered; the
+  fallback returns exactly the original `authorizationUrl`; the launcher is
+  pure; and only an Android user agent triggers the chooser. Per DECISIONS
+  #74, check 26 now asserts Telegram X (`org.thunderdog.challegram`) is NOT
+  exposed — it is no longer offered as a launch target.**
 - `pnpm check:signup` — **18/18**: the public-path policy, now including
   the provider-webhook reachability assertions (DECISIONS #68).
 

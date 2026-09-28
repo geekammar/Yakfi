@@ -310,6 +310,68 @@ async function main(): Promise<void> {
     ).status === "malformed",
   );
 
+  // /start (customer control command, DECISIONS #73): classified BEFORE the
+  // message path so it never becomes an engine turn. `/start` and
+  // `/start <payload>` are BOTH START_COMMAND for the MVP; the payload is
+  // preserved as safe metadata only, never fed to the AI.
+  const startBare = parseTelegramUpdate(
+    {
+      update_id: 7770010,
+      message: {
+        message_id: 60,
+        date: 1758900010,
+        chat: { id: Number(CHAT_ID), type: "private" },
+        from: { id: Number(CHAT_ID), is_bot: false },
+        text: "/start",
+      },
+    },
+    { botExternalId: BOT_ID },
+  );
+  check(
+    "B9. /start (بلا حمولة) → START_COMMAND (لا يُصنَّف كرسالة محرك)",
+    startBare.status === "start_command" &&
+      startBare.chatId === CHAT_ID &&
+      startBare.startPayload === null,
+  );
+  const startPayload = parseTelegramUpdate(
+    {
+      update_id: 7770011,
+      message: {
+        message_id: 61,
+        date: 1758900011,
+        chat: { id: Number(CHAT_ID), type: "private" },
+        from: { id: Number(CHAT_ID), is_bot: false },
+        text: "/start ref_campaign_42",
+      },
+    },
+    { botExternalId: BOT_ID },
+  );
+  check(
+    "B10. /start <payload> → START_COMMAND + الحمولة محفوظة كبيانات آمنة",
+    startPayload.status === "start_command" &&
+      startPayload.startPayload === "ref_campaign_42",
+  );
+  // A normal text message that merely CONTAINS "start" is NOT a command —
+  // only the leading `/start` token qualifies (a real turn is never
+  // swallowed).
+  const notStart = parseTelegramUpdate(
+    {
+      update_id: 7770012,
+      message: {
+        message_id: 62,
+        date: 1758900012,
+        chat: { id: Number(CHAT_ID), type: "private" },
+        from: { id: Number(CHAT_ID), is_bot: false },
+        text: "عايز أبدأ الحجز",
+      },
+    },
+    { botExternalId: BOT_ID },
+  );
+  check(
+    "B11. نص عادي يحتوي كلمة بدء ليس أمر /start (يبقى رسالة محرك)",
+    notStart.status === "message",
+  );
+
   // ════════════════════════════════════════════════════════════════════════
   // C. Webhook secret verification (constant-time, non-reversible)
   // ════════════════════════════════════════════════════════════════════════
@@ -1240,6 +1302,8 @@ async function main(): Promise<void> {
 
   const { handleTelegramWebhook } =
     await import("@/server/integrations/telegram/telegram-webhook-handler");
+  const { CUSTOMER_START_WELCOME } =
+    await import("@/server/integrations/telegram/telegram-webhook-handler");
 
   const SECRET_A = "webhook-secret-bot-a-aaaaaaaaaa";
   const SECRET_B = "webhook-secret-bot-b-bbbbbbbbbbb";
@@ -1280,6 +1344,13 @@ async function main(): Promise<void> {
   };
   const dispatched: Deferred[] = [];
   const scheduled: Array<() => Promise<void> | void> = [];
+  const welcomes: Array<{
+    chatId: string;
+    businessId: string;
+    connectionId: string;
+    branchId: string | null;
+    text: string;
+  }> = [];
 
   function webhookRequest(body: unknown, secret: string | null): Request {
     return new Request("https://flowpilot.example.com/api/telegram/webhook", {
@@ -1317,6 +1388,9 @@ async function main(): Promise<void> {
             },
           });
           return { ok: true };
+        },
+        async sendStartWelcome(params) {
+          welcomes.push(params);
         },
         schedule: (work) => {
           scheduled.push(work);
@@ -1498,6 +1572,48 @@ async function main(): Promise<void> {
       eq(result.body.deferred, "MANAGED_BOT_PROVISIONING") &&
       eq(result.body.outcome, "MANAGED_BOT_PROVISIONING_UNBOUND") &&
       dispatched.length === 5, // H2 + H5 + H6 + H11×2 — this event dispatches nothing
+  );
+
+  // H13–H16. Customer `/start` is a DETERMINISTIC control command
+  // (DECISIONS #73): it NEVER enters the engine (so never AI, disclosure, or
+  // human handoff) and replies with exactly ONE fixed welcome through the
+  // EXISTING transport.
+  const dispatchedBeforeStart = dispatched.length;
+  welcomes.length = 0;
+  result = await runRoute(privateUpdate(8880010, "/start"), SECRET_A);
+  check(
+    "H13. /start العميل → 200 + start:WELCOME (لا يُصنَّف رسالة محرك)",
+    result.status === 200 && eq(result.body.start, "WELCOME"),
+  );
+  check(
+    "H14. /start لا يدخل المحرك إطلاقاً (لا AI، لا تحويل بشري، لا انتباه مشغّل)",
+    dispatched.length === dispatchedBeforeStart,
+  );
+  await flushOne();
+  check(
+    "H15. /start يرسل ترحيباً حتمياً واحداً فقط عبر النقل القائم",
+    welcomes.length === 1 &&
+      eq(welcomes[0]!.chatId, CHAT_ID) &&
+      eq(welcomes[0]!.businessId, BUSINESS_A) &&
+      eq(welcomes[0]!.connectionId, CONNECTION_A) &&
+      eq(welcomes[0]!.text, CUSTOMER_START_WELCOME),
+  );
+  // `/start <payload>` is the SAME control command — the payload is never
+  // fed to the engine as user text, and the welcome is unchanged.
+  welcomes.length = 0;
+  const dispatchedBeforePayload = dispatched.length;
+  result = await runRoute(
+    privateUpdate(8880011, "/start deep_link_payload_123"),
+    SECRET_A,
+  );
+  await flushOne();
+  check(
+    "H16. /start <payload> → START_COMMAND: نفس الترحيب، لا دخول للمحرك",
+    result.status === 200 &&
+      eq(result.body.start, "WELCOME") &&
+      dispatched.length === dispatchedBeforePayload &&
+      welcomes.length === 1 &&
+      eq(welcomes[0]!.text, CUSTOMER_START_WELCOME),
   );
 
   // ════════════════════════════════════════════════════════════════════════

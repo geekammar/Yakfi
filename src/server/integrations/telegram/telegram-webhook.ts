@@ -35,6 +35,11 @@ import {
  * non-text messages hit the EXISTING approved contract (unsupported →
  * dropped, no invented behavior; the drop-vs-persist-and-defer decision
  * for stickers/voice stays an open, flagged decision, NOT guessed here).
+ * A customer `/start` (with or without a payload) is classified as a
+ * DETERMINISTIC control command (`start_command`, DECISIONS #73), NOT a
+ * conversation turn: the webhook answers it with a fixed welcome and never
+ * reaches the AI or human handoff. (The Manager Bot provisioning
+ * `/start <token>` is a separate route/handler and is untouched.)
  */
 
 // ─── Secret verification ────────────────────────────────────────────────────
@@ -124,6 +129,26 @@ export type ParsedTelegramUpdate =
       updateId: string;
       /** The normalized envelope the engine consumes (private TEXT only). */
       message: NormalizedInboundTransportMessage;
+    }
+  | {
+      /**
+       * A customer `/start` control command (with or without a payload).
+       * Classified BEFORE the message path so it never becomes an engine
+       * turn: the webhook answers it with a deterministic welcome and never
+       * invokes the AI, disclosure, or human handoff (DECISIONS #73). This
+       * is the CUSTOMER managed-bot `/start` — the Manager Bot provisioning
+       * `/start <token>` is a wholly separate route/handler and is untouched.
+       */
+      status: "start_command";
+      updateId: string;
+      /** The private chat to reply to (the customer). */
+      chatId: string;
+      /**
+       * The raw `/start` payload when present (`/start <payload>`), else
+       * null. Preserved only as safe metadata for the caller; it is NEVER
+       * fed to the AI as user text.
+       */
+      startPayload: string | null;
     }
   | {
       status: "managed_bot";
@@ -221,10 +246,6 @@ export function parseTelegramUpdate(
     // stays an open drop-vs-defer decision; no behavior is invented).
     return { status: "ignored", updateId, reason: "UNSUPPORTED_MESSAGE_TYPE" };
   }
-  const timestamp = toIsoTimestamp(message.date);
-  if (!timestamp) {
-    return { status: "malformed", error: malformed("زمن الرسالة غير صالح") };
-  }
 
   // The customer's provider-neutral external handle: the private-chat
   // chat id (which equals the user id) — the engine stores it on
@@ -235,6 +256,31 @@ export function parseTelegramUpdate(
       status: "malformed",
       error: malformed("هوية محادثة تيليجرام مفقودة"),
     };
+  }
+
+  // `/start` (with or without a payload) is a DETERMINISTIC control command,
+  // NOT a conversation turn (DECISIONS #73). It is classified here — before
+  // the message is normalized for the engine — so it can never enter AI
+  // context building, AI invocation, disclosure, or human handoff. Telegram
+  // sends `/start` when the customer first opens the bot (and `/start
+  // <payload>` for deep links); both are the SAME control command for this
+  // MVP. `/start@botusername` is tolerated (group-style suffix) though the
+  // MVP is private-only. The payload is preserved as safe metadata ONLY and
+  // is never fed to the AI as user text.
+  const startMatch = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]+))?$/.exec(text);
+  if (startMatch) {
+    const payload = startMatch[1]?.trim();
+    return {
+      status: "start_command",
+      updateId,
+      chatId: String(chatId),
+      startPayload: payload && payload.length > 0 ? payload : null,
+    };
+  }
+
+  const timestamp = toIsoTimestamp(message.date);
+  if (!timestamp) {
+    return { status: "malformed", error: malformed("زمن الرسالة غير صالح") };
   }
 
   const result = normalizeInboundTransportMessage({

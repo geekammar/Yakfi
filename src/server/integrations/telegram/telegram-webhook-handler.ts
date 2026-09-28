@@ -31,7 +31,12 @@ import {
  * 2. PARSE + CLASSIFY — a Telegram `Update` is validated and routed by the
  *    approved MVP scope (private text only; non-private and non-text are
  *    acknowledged and not processed; `managed_bot` is deferred to the
- *    provisioning slice).
+ *    provisioning slice). A customer `/start` (with or without a payload)
+ *    is classified as a DETERMINISTIC control command (DECISIONS #73), NOT
+ *    a conversation turn: it is answered with a fixed welcome and NEVER
+ *    reaches the engine, AI, disclosure, or human handoff. (The Manager
+ *    Bot provisioning `/start <token>` is a wholly separate route/handler
+ *    — `telegram-manager-webhook-handler.ts` — and is untouched.)
  * 3. DISPATCH — a supported private TEXT message is handed to the
  *    provider-neutral Conversation Engine through the SAME envelope the
  *    WhatsApp path uses, and the turn is SCHEDULED so the response returns
@@ -90,6 +95,24 @@ export type TelegramWebhookHandlerDeps = {
     event: ParsedManagedBotEvent;
   }) => Promise<ManagedBotProvisioningOutcome>;
   /**
+   * Send the deterministic customer `/start` welcome through the EXISTING
+   * Telegram `MessageTransport` (DECISIONS #73). Supplied by the route (the
+   * composition layer) — it closes over the SAME Telegram-backed transport
+   * the engine uses, so this module imports no transport and introduces NO
+   * second messaging abstraction. The handler decides the fixed `text`; the
+   * closure only delivers it. Optional: a route that does not wire it still
+   * acknowledges `/start` (still no engine, still no handoff) — the welcome
+   * is simply not sent.
+   */
+  sendStartWelcome?: (params: {
+    chatId: string;
+    businessId: string;
+    connectionId: string;
+    branchId: string | null;
+    /** The deterministic welcome text the handler chose (never AI-authored). */
+    text: string;
+  }) => Promise<void>;
+  /**
    * Defer the engine turn until AFTER the 200 is flushed (Next 16 `after`,
    * backed by `waitUntil` on Vercel). Telegram retries on non-2xx, so a slow
    * AI turn must never hold the response; the durable dedupe ledger keeps a
@@ -118,6 +141,16 @@ function unauthorized(message: string): Response {
     { status: 401 },
   );
 }
+
+/**
+ * The deterministic Arabic welcome a customer managed bot replies with when
+ * a customer sends `/start` (DECISIONS #73). It is a FIXED string — never
+ * AI-generated, never a handoff acknowledgment — appropriate for a business
+ * customer bot. Exported so the composition layer and the offline harness
+ * assert the exact copy.
+ */
+export const CUSTOMER_START_WELCOME =
+  "أهلاً بك 👋\nمرحبًا بك! كيف يمكنني مساعدتك؟";
 
 /**
  * The webhook POST. Pure orchestration over injected deps — the route's only
@@ -212,6 +245,41 @@ export async function handleTelegramWebhook(
       success: true,
       accepted: false,
       ignored: parsed.reason,
+      updateId: parsed.updateId,
+    });
+  }
+
+  // A customer `/start` (with or without a payload) is a DETERMINISTIC
+  // control command, NOT a conversation turn (DECISIONS #73). It terminates
+  // HERE — before any engine dispatch, AI context building, AI invocation,
+  // disclosure, or human/operator-attention routing — and replies with the
+  // fixed welcome through the EXISTING transport. The welcome send is
+  // scheduled so the webhook still returns 200 promptly (it is a single,
+  // fast, deterministic send; a lost deferral simply means no welcome, never
+  // a stuck conversation). The `startPayload` is preserved as safe metadata
+  // only and is NEVER fed to the AI as user text.
+  if (parsed.status === "start_command") {
+    const send = deps.sendStartWelcome;
+    if (send) {
+      const { chatId } = parsed;
+      deps.schedule(async () => {
+        try {
+          await send({
+            chatId,
+            businessId: connection.businessId,
+            connectionId: connection.id,
+            branchId: connection.branchId,
+            text: CUSTOMER_START_WELCOME,
+          });
+        } catch {
+          // A deferred welcome must never crash the process after the 200.
+        }
+      });
+    }
+    return Response.json({
+      success: true,
+      accepted: true,
+      start: "WELCOME",
       updateId: parsed.updateId,
     });
   }

@@ -51,6 +51,59 @@ boundary of what this slice does NOT claim).**
 **SPEC A — PILOT-READY AT THE PRESENTATION LAYER.** All screens + the
 conversation engine are implemented and released.
 
+- **Telegram CUSTOMER `/start` + STANDARD-TELEGRAM-ONLY LAUNCHER
+  (DECISIONS #73/#74) — two independent customer-facing fixes, code-proven
+  - guarded, NOT deployed, NOT live-verified:** **(A) `/start` (#73)** — a
+    CUSTOMER managed bot's `/start` (with or without a payload) is now a
+    DETERMINISTIC welcome/control command routed BEFORE the Conversation
+    Engine, never an AI turn and never a human handoff. Root cause: `/start`
+    was parsed as ordinary private text → dispatched to
+    `receiveInboundMessage` → the bypass classified it `AMBIGUOUS` → it
+    reached the AI turn → a refused/failed turn escalated to `NEED_HUMAN` +
+    operator attention. Fix (deterministic routing, NOT a prompt/policy/
+    handoff-prompt edit): `parseTelegramUpdate` (`telegram-webhook.ts`) now
+    classifies a leading `/start` token (optional `@botusername`, optional
+    payload) as a NEW `start_command` result before normalizing for the
+    engine; `handleTelegramWebhook` replies with a FIXED Arabic welcome
+    (`CUSTOMER_START_WELCOME` = «أهلاً بك 👋\nمرحبًا بك! كيف يمكنني
+    مساعدتك؟») through the EXISTING Telegram `MessageTransport` (the route
+    supplies a `sendStartWelcome` closure over the same transport the engine
+    uses — NO second messaging abstraction, NO AI, NO conversation created,
+    NO handoff, NO operator-attention) and returns 200 promptly (welcome
+    scheduled via `after()`). `startPayload` is safe metadata only, never fed
+    to the AI. The FlowPilot Manager Bot provisioning `/start <token>` is a
+    SEPARATE route (`/api/telegram/manager/webhook`) + handler
+    (`telegram-manager-webhook-handler.ts`) and is UNTOUCHED — the two paths
+    are distinguished structurally, never by inspecting the token. Normal
+    text behavior is unchanged (only a leading `/start` token qualifies).
+    **(B) STANDARD TELEGRAM ONLY (#74)** — the Android onboarding launcher now
+    targets ONLY standard Telegram (`org.telegram.messenger`); **Telegram X
+    (`org.thunderdog.challegram`) is intentionally removed** from the
+    customer-facing chooser (it fails the managed-bot creation flow on the
+    affected setup), reversing the Telegram-X option of #72.
+    `buildAndroidTelegramLaunchTargets` returns only `{ standard, fallback }`;
+    the screen's `AndroidTelegramChooser` renders «فتح في Telegram» +
+    «فتح الرابط العادي» only (no Telegram X option, package, or URI anywhere).
+    All #72 invariants preserved (pure client transform, opaque token
+    untouched, user-gesture-only launch, non-Android unchanged, original HTTPS
+    `authorizationUrl` as fallback — never a Telegram-X URI). NO server route,
+    env var, schema, or provisioning-lifecycle change. **GUARDED:**
+    `check:telegram` **116/116** (NEW B9–B11 classify `/start` / `/start
+<payload>` as `start_command` and keep normal text a message; NEW H13–H16
+    assert the route returns `start:WELCOME`, never dispatches to the engine,
+    and sends exactly ONE deterministic `CUSTOMER_START_WELCOME`),
+    `check:telegram-onboarding` **32/32** (check 26 now asserts Telegram X is
+    NOT exposed; the Manager Bot `/start <token>` binding still passes at
+    check 7), `check:signup` 18/18, WhatsApp green (`whatsapp-inbound` 13/13,
+    `whatsapp-transport` 27/27, `whatsapp-onboarding` 56/56, `meta-whatsapp`
+    17/17, `credentials-runtime` 36/36, `meta-embedded-signup` 27/27);
+    `pnpm verify` + `pnpm security` + `git diff --check` green. Files:
+    `telegram-webhook.ts`, `telegram-webhook-handler.ts`,
+    `src/app/api/telegram/webhook/route.ts`, `telegram-app-launcher.ts`,
+    `telegram-connection-screen.tsx`, `scripts/check-telegram.ts`,
+    `scripts/check-telegram-onboarding.ts`. **WhatsApp / AI / Meta Embedded
+    Signup HOLD untouched. NOT deployed, NOT live-verified.**
+
 - **Telegram ANDROID APP CHOOSER (DECISIONS #72) — client
   launch/compatibility fix, code-proven + guarded, NOT deployed, NOT
   live-verified:** live onboarding proved the OS default-handler on an

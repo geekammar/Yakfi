@@ -241,6 +241,23 @@ probe:codecraft` with `CODECRAFT_MODEL=deepseek-v4-flash-0731` and
   touching the opaque start token; guarded by NEW
   `check:telegram-onboarding` checks 23–32 (**32/32**). NOT deployed and
   NOT live-verified.
+- **Telegram customer `/start` + standard-Telegram-only launcher
+  (DECISIONS #73/#74, code-proven + guarded, NOT deployed):** a CUSTOMER
+  managed bot's `/start` (with or without a payload) is now a DETERMINISTIC
+  welcome routed BEFORE the Conversation Engine — never an AI turn, never a
+  human handoff — replying with a FIXED Arabic welcome through the EXISTING
+  Telegram transport (`sendStartWelcome` closure; no new engine, no new
+  messaging abstraction). The FlowPilot Manager Bot provisioning
+  `/start <token>` is a SEPARATE route/handler and is UNTOUCHED. Separately,
+  the Android onboarding launcher now targets ONLY standard Telegram
+  (`org.telegram.messenger`); **Telegram X is intentionally NOT offered**
+  (it fails the managed-bot creation flow on the affected setup), reversing
+  the Telegram-X option of #72 — the original HTTPS `authorizationUrl`
+  remains the fallback and no server/schema/provisioning change was made.
+  Guarded: `check:telegram` **116/116** (NEW B9–B11, H13–H16),
+  `check:telegram-onboarding` 32/32 (check 26 asserts Telegram X not
+  exposed), `check:signup` 18/18, WhatsApp green; `pnpm verify` +
+  `pnpm security` + `git diff --check` green. NOT deployed.
 
 ## 5. What is the current product/architecture direction?
 

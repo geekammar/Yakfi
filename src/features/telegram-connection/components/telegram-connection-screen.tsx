@@ -80,10 +80,11 @@ export function TelegramConnectionScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // On Android, a successful launch opens an in-app chooser instead of
-  // navigating unconditionally (DECISIONS #72): the OS default handler may
-  // route the HTTPS t.me link to Telegram X, but the flow only completes in
-  // standard Telegram, so the Admin explicitly picks the client. This holds
-  // ONLY the server-returned authorizationUrl — no token, nothing new.
+  // navigating unconditionally (DECISIONS #72/#74): the OS default handler
+  // may route the HTTPS t.me link to Telegram X, but the flow only completes
+  // in standard Telegram, so the Admin explicitly opens the standard client
+  // (Telegram X is no longer offered). This holds ONLY the server-returned
+  // authorizationUrl — no token, nothing new.
   const [androidLaunchUrl, setAndroidLaunchUrl] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -140,10 +141,11 @@ export function TelegramConnectionScreen({
         isAndroidUserAgent(navigator.userAgent);
       if (isAndroid) {
         // ON ANDROID: do NOT navigate here. Show the in-app chooser so the
-        // Admin explicitly taps a Telegram client (standard Telegram is the
-        // primary/default option). The actual app launch happens from a
-        // real <a href="intent://…"> user gesture (DECISIONS #72) — never
-        // from this async callback, a timer, or an effect.
+        // Admin explicitly opens standard Telegram (`org.telegram.messenger`
+        // — the only targeted client; Telegram X is not offered). The actual
+        // app launch happens from a real <a href="intent://…"> user gesture
+        // (DECISIONS #72/#74) — never from this async callback, a timer, or
+        // an effect.
         setAndroidLaunchUrl(result.authorizationUrl);
         return;
       }
@@ -311,16 +313,18 @@ export function TelegramConnectionScreen({
 }
 
 /**
- * The Android Telegram app chooser (DECISIONS #72). Shown ONLY on Android,
- * ONLY after a successful launch. Each option is a REAL user-gesture anchor
- * (`<a href="intent://…">` / the plain HTTPS link) — the external app is
- * NEVER opened from a timer, an effect, or an async callback, so the browser
- * treats the tap as a legitimate user-initiated navigation.
+ * The Android Telegram app chooser (DECISIONS #72/#74). Shown ONLY on
+ * Android, ONLY after a successful launch. Each option is a REAL
+ * user-gesture anchor (`<a href="intent://…">` / the plain HTTPS link) —
+ * the external app is NEVER opened from a timer, an effect, or an async
+ * callback, so the browser treats the tap as a legitimate user-initiated
+ * navigation.
  *
- * Standard Telegram (`org.telegram.messenger`) is the primary/default
- * option; Telegram X (`org.thunderdog.challegram`) is an explicit optional
- * choice (never auto-selected); the plain HTTPS link is the universal
- * fallback and is the SAME server-returned authorizationUrl, byte-for-byte.
+ * The launcher targets ONLY standard Telegram (`org.telegram.messenger`);
+ * the plain HTTPS link is the universal fallback and is the SAME
+ * server-returned authorizationUrl, byte-for-byte. Telegram X is
+ * intentionally NOT offered (DECISIONS #74) — it does not complete the
+ * managed-bot creation flow on the affected Android setup.
  */
 function AndroidTelegramChooser({ url }: { url: string }) {
   const targets = buildAndroidTelegramLaunchTargets(url);
@@ -328,10 +332,11 @@ function AndroidTelegramChooser({ url }: { url: string }) {
     <div className="mt-4 space-y-3 border-t pt-4">
       <div className="space-y-1">
         <h3 className="text-sm font-semibold tracking-tight">
-          اختر تطبيق تيليجرام
+          افتح تيليجرام لإكمال الإنشاء
         </h3>
         <p className="text-muted-foreground text-xs leading-5">
-          لإكمال إنشاء البوت، اختر تطبيق تيليجرام الذي تستخدمه.
+          لإكمال إنشاء البوت، افتح تطبيق تيليجرام الرسمي. إن لم يفتح تلقائياً،
+          استخدم الرابط العادي بالأسفل.
         </p>
       </div>
       <div className="flex flex-col gap-2">
@@ -339,12 +344,6 @@ function AndroidTelegramChooser({ url }: { url: string }) {
           <a href={targets.standard.url}>
             <SendIcon aria-hidden />
             فتح في Telegram
-          </a>
-        </Button>
-        <Button asChild variant="secondary" className="min-h-11 sm:min-h-9">
-          <a href={targets.telegramX.url}>
-            <SendIcon aria-hidden />
-            فتح في Telegram X
           </a>
         </Button>
         <Button asChild variant="ghost" className="min-h-11 sm:min-h-9">

@@ -58,9 +58,11 @@ export const dynamic = "force-dynamic";
  * stays offline, so no non-Telegram entry point gains a live Telegram
  * sender.
  */
+const telegramTransport = createTelegramMessageTransport();
+
 const telegramEngineDeps = {
   ...defaultConversationEngineDeps,
-  transport: createTelegramMessageTransport(),
+  transport: telegramTransport,
 };
 
 /**
@@ -109,6 +111,23 @@ export async function POST(request: Request): Promise<Response> {
           // event is acknowledged and the ledger carries the outcome.
           return { ok: false, code: "PROVISIONING_FAILED" };
         }
+      },
+      // A customer `/start` is a DETERMINISTIC welcome, never an engine turn
+      // (DECISIONS #73): reply through the SAME Telegram `MessageTransport`
+      // the engine already uses (no second messaging abstraction, no AI, no
+      // conversation created, no handoff). The handler supplies the fixed
+      // welcome `text`; this closure only delivers it. `businessName` /
+      // `conversationId` are unused by the Telegram transport send path.
+      async sendStartWelcome({ chatId, businessId, connectionId, text }) {
+        await telegramTransport.send({
+          to: chatId,
+          businessId,
+          businessName: "",
+          conversationId: "",
+          content: text,
+          connectionId,
+          kind: "TEXT",
+        });
       },
       schedule: (work) => {
         // Next 16 `after` — the turn runs after the 200 is flushed, backed
