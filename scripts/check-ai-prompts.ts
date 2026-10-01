@@ -655,6 +655,36 @@ async function main(): Promise<void> {
       /resolver executes exactly ONE goal/i.test(systemPrompt) &&
         /OWNS all precedence/i.test(systemPrompt),
     );
+    // (e) ANSWER-AND-CONTINUE TOP-LEVEL ACTION BINDING (PROMPT-AI-ARCH-11).
+    //     The exact EVAL-13 remediation: an answerable knowledge goal that
+    //     coexists with a domain/booking goal MUST pin the top-level action to
+    //     `reply` (with the answer as content) and defer the domain goal via
+    //     goals[] + continueAfter — NEVER top-level booking_handoff just because
+    //     a domain goal also exists.
+    check(
+      "PRODUCER: الموجه يُثبّت action=reply على هدف الإجابة عند تعايشه مع هدف نطاق (استجب-واستمر)",
+      /Answer-and-continue/i.test(systemPrompt) &&
+        /TOP-LEVEL action to reply/i.test(systemPrompt) &&
+        /do NOT set the top-level action to booking_handoff/i.test(
+          systemPrompt,
+        ),
+    );
+    // (f) The top-level action represents the CURRENT customer-visible response
+    //     (the goal answered THIS turn), not a goal merely being deferred.
+    check(
+      "PRODUCER: الموجه يُعرّف الحقول العليا كاستجابة الدور الحالية (لا هدفاً مؤجَّلاً)",
+      /CURRENT customer-visible response/i.test(systemPrompt) &&
+        /never for a goal you are only deferring/i.test(systemPrompt),
+    );
+    // (g) The handoff override is explicit: a required human/sensitive/
+    //     knowledge-gap handoff OUTRANKS answer-and-continue (the critical
+    //     precedence rule — answer-and-continue never masks a required handoff).
+    check(
+      "PRODUCER: الموجه يُبقي التحويل المطلوب أعلى من استجب-واستمر (NO_KNOWLEDGE لا رد مُلفَّق)",
+      /OUTRANKS answer-and-continue/i.test(systemPrompt) &&
+        /genuinely answerable/i.test(systemPrompt) &&
+        /NO_KNOWLEDGE rather than forcing a reply/i.test(systemPrompt),
+    );
   }
 
   // (1) single-intent output — valid, no goals[] needed.
@@ -846,6 +876,65 @@ async function main(): Promise<void> {
       gapPlus !== null &&
         gapPlus.action === "handoff" &&
         gapPlus.handoffReason === "NO_KNOWLEDGE",
+    );
+  }
+
+  // (9) single-intent BOOKING remains valid (PROMPT-AI-ARCH-11 regression):
+  //     a lone booking turn needs no goals[] and synthesizes to exactly ONE
+  //     DOMAIN_ACTION goal — the answer-and-continue binding never forces a
+  //     reply onto a genuinely single booking intent.
+  {
+    const booking = parseAiResponse({
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "تمام، هحجزلك",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: "طلب حجز",
+    });
+    const goals = booking ? synthesizeDecisionGoals(booking) : [];
+    check(
+      "PRODUCER-9: نية حجز واحدة صالحة بلا goals[] → هدف DOMAIN_ACTION واحد مُركَّب",
+      booking !== null &&
+        booking.action === "booking_handoff" &&
+        goals.length === 1 &&
+        goals[0]!.kind === "DOMAIN_ACTION",
+    );
+  }
+
+  // (10) ANSWER + BOOKING with TOP-LEVEL action=reply (the remediated shape):
+  //      an answerable knowledge goal is the primary (top-level reply + backed
+  //      content) and the booking goal is deferred via goals[] + continueAfter.
+  //      This is the exact structure the producer must now emit so the
+  //      resolver's answer-and-continue path fires (consumption guarded by
+  //      check:multi-intent).
+  {
+    const answerPlusBooking = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "مواعيدنا من 9 صباحاً حتى 6 مساءً",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 0 },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          priority: 1,
+          continueAfter: true,
+        },
+      ],
+    });
+    check(
+      "PRODUCER-10: إجابة + حجز بـ action=reply أعلى → هدف ANSWER أساسي + هدف حجز مؤجَّل (continueAfter)",
+      answerPlusBooking !== null &&
+        answerPlusBooking.action === "reply" &&
+        answerPlusBooking.goals?.length === 2 &&
+        answerPlusBooking.goals[0]!.kind === "ANSWER" &&
+        answerPlusBooking.goals[1]!.kind === "DOMAIN_ACTION" &&
+        answerPlusBooking.goals[1]!.intent === "BOOKING" &&
+        answerPlusBooking.goals[1]!.continueAfter === true,
     );
   }
 

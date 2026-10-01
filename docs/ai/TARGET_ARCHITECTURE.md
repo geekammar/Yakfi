@@ -1308,6 +1308,52 @@ big-bang; old behavior remains available behind the compatibility bridge
 > 25/18/22, `check:future-system` **33/33**, `check:ai-prompts` **108/108**;
 > `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green. Slices
 > 6–10 remain DESIGN ONLY.
+>
+> **REAL-LLM RE-VERIFICATION (PROMPT-AI-EVAL-13, after the PROMPT-AI-ARCH-10
+> producer activation): BLOCKED_BEHAVIOR.** The exact EVAL-12 focused 15-case set,
+> re-run through the real Atria FUTURE_SYSTEM path, confirms the producer
+> activation materially changed the structured output — genuine `goals[].length>1`
+> on 7/15 turns (`decision.hasGoals=true`; EVAL-12 was 0/15) and `multiIntentSuccess`
+> 1/6 — and calibration demonstrated answer-and-continue firing end-to-end
+> (`goals=2`, `answerAndContinue=true`, `pendingGoals=1`). BUT on the focused
+> answer-and-continue cases `answerAndContinueSuccess=0/5` and
+> `pendingPreservedTurns=0`: the model inconsistently sets the TOP-LEVEL
+> `action=booking_handoff` rather than `reply` when an ANSWER goal coexists with a
+> booking goal, so the resolver's `baseClass==="ANSWER" && action==="reply"` guard
+> correctly declines (price cases emit `HANDOFF(NO_KNOWLEDGE)` — a Slice-6 exposure
+> gap). Safety preserved (5/5 required handoffs, `safetyRegressions=0`); one runtime
+> provider timeout fail-safed to NEED_HUMAN. Classification: PRODUCER/PROMPT
+> reliability (primary) + knowledge exposure (secondary), NOT resolver/state/engine.
+> Smallest remediation (its own prompt): the producer must pin top-level
+> `action=reply`+`content` to the answerable ANSWER goal and defer the domain goal
+> via `goals[]`/`continueAfter`, then re-run the exact set expecting
+> `answerAndContinueSuccess≥4/5` + `pendingPreservedTurns>0`. Report:
+> `evaluation/reports/egyptian-v1/real-llm-eval13/`. Slice 6 NOT started.
+>
+> **PRODUCER REMEDIATION (PROMPT-AI-ARCH-11, after EVAL-13):
+> READY_FOR_EVAL_13_RERUN — producer/prompt-only.** The EVAL-13 gap is closed at
+> the ONLY boundary that caused it, the canonical system prompt
+> (`prompts/system/booking-assistant.prompt`; regenerated `system.booking-assistant`
+> sha256 `9b4b67f09715` → `9cc7f73ac2ae`). The prompt now (a) defines the top-level
+> `action/content` as the action for the CURRENT customer-visible response (the ONE
+> goal answered THIS turn), never a goal being deferred; (b) adds the explicit
+> ANSWER-AND-CONTINUE rule — a genuinely answerable knowledge goal that coexists with
+> a domain/booking goal pins TOP-LEVEL `action=reply`+answer `content` and defers the
+> domain goal via `goals[]`+`continueAfter`, NEVER top-level `booking_handoff` just
+> because a domain goal exists; (c) preserves the CRITICAL PRECEDENCE — a required
+> human/sensitive/knowledge-gap handoff OUTRANKS answer-and-continue (unanswerable
+> questions stay `handoff`+`NO_KNOWLEDGE`, never a fabricated reply). The
+> deterministic resolver guard (`turn-planner.ts:511`), ConversationState, engine,
+> contract schema, provider policy, dataset, gold, and scorer are UNCHANGED (no
+> `src/` logic edit, no migration). Guarded by `check:ai-prompts` **126/126** (NEW
+> producer-contract checks) + `check:multi-intent` **22/22** (NEW 21/22: the
+> remediated reply shape fires answer-and-continue; conflicting `booking_handoff`
+> output does NOT weaken server precedence); full suite + `verify`/`security` green.
+> **Deterministic producer tests are NOT proof the real-LLM behavior is fixed** —
+> Slice 6 REMAINS BLOCKED until `PROMPT-AI-EVAL-14` re-runs the exact EVAL-13 set and
+> proves `answerAndContinueSuccess≥4/5` + `pendingPreservedTurns>0` +
+> `safetyRegressions=0` + `multiCallTurns=0` + `providerFailures=0` under the real
+> LLM. No commit/push/tag/deploy; no second inference path; one send per turn.
 
 - **Goal:** represent multiple goals; answer the knowledge goal and keep the
   domain goal pending; hand off only when a goal truly requires it.

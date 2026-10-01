@@ -32,6 +32,10 @@ import { join } from "node:path";
  * 19  no second resolver / state / planner schema / classifier / inference
  * 20  no provider identifier in the decision contract; resolver has no domain
  *     mutation (no Prisma/repository/booking-service imports)
+ * 21  ANSWER + BOOKING with top-level action=reply → answer-and-continue fires
+ *     (PROMPT-AI-ARCH-11 remediated producer shape: ANSWER now, BOOKING pending)
+ * 22  conflicting producer output (action=booking_handoff + [ANSWER,DOMAIN])
+ *     does NOT weaken server precedence (resolver UNCHANGED; no a&c fabricated)
  *
  * Run: pnpm check:multi-intent
  */
@@ -277,6 +281,69 @@ async function main(): Promise<void> {
       r.decisionClass === "HANDOFF" &&
         r.handoffReason === "NO_KNOWLEDGE" &&
         r.answerAndContinue === false,
+    );
+  }
+
+  // ── 21. ANSWER + BOOKING with top-level action=reply → ANSWER-AND-CONTINUE ─
+  //      PROMPT-AI-ARCH-11: the exact REMEDIATED producer shape. When the model
+  //      pins the TOP-LEVEL action to `reply` (the answerable knowledge goal)
+  //      and defers the BOOKING goal via goals[] + continueAfter, the resolver's
+  //      EXISTING answer-and-continue guard (`baseClass === "ANSWER" &&
+  //      action === "reply"`) fires: ANSWER now, BOOKING preserved as pending.
+  {
+    const answerPlusBooking = reply("FAQ", {
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 0 },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          priority: 1,
+          continueAfter: true,
+        },
+      ],
+    });
+    const r = resolve(answerPlusBooking);
+    check(
+      "21 إجابة + حجز بـ action=reply أعلى → استجب-واستمر: ANSWER + الحجز معلّق",
+      r.decisionClass === "ANSWER" &&
+        r.answerAndContinue === true &&
+        r.pendingGoals.length === 1 &&
+        r.pendingGoals[0]?.intent === "BOOKING",
+    );
+  }
+
+  // ── 22. CONFLICTING producer output does NOT weaken server precedence ──────
+  //      This is the EXACT EVAL-13 gap the ARCH-11 producer remediation closes
+  //      at the PROMPT boundary: when the model emits a correct
+  //      `[ANSWER, DOMAIN_ACTION]` pair but sets the TOP-LEVEL action to
+  //      `booking_handoff` (not `reply`), the deterministic resolver — UNCHANGED
+  //      — correctly DECLINES answer-and-continue (it never fabricates an answer
+  //      the model did not back with a `reply`). The server stays authoritative:
+  //      no answer-and-continue, no pending-goal fabrication, no double send.
+  //      The remediation is PRODUCER-side (pin action=reply); the resolver
+  //      guard is deliberately NOT relaxed.
+  {
+    const conflicting = {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "تحويل للحجز",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: "حجز + سؤال",
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 0 },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          priority: 1,
+          continueAfter: true,
+        },
+      ],
+    };
+    const r = resolve(conflicting);
+    check(
+      "22 مخرَج متضارب (action=booking_handoff مع [ANSWER,DOMAIN]) لا يُضعف أسبقية الخادم: بلا استجب-واستمر",
+      r.answerAndContinue === false && r.pendingGoals.length === 0,
     );
   }
 

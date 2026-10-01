@@ -1,0 +1,91 @@
+{
+  "calibrationOk": true,
+  "answer": {
+    "engineOk": true,
+    "duplicate": false,
+    "engineFailureCode": null,
+    "intent": "FAQ",
+    "assistantAction": "AI_REPLY",
+    "conversationStatus": "AI_ACTIVE",
+    "routingDecision": "LLM",
+    "decisionClass": "ANSWER",
+    "goalsCount": 1,
+    "goalKinds": [
+      "ANSWER"
+    ],
+    "goalIntents": [
+      "FAQ"
+    ],
+    "multiGoal": false,
+    "turnPlanSteps": 1,
+    "pendingGoalsCount": 0,
+    "pendingGoalIntents": [],
+    "answerAndContinue": false,
+    "clarificationType": null,
+    "handoffCause": null,
+    "decision": {
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "hasGoals": false,
+      "goalsLength": 0
+    },
+    "modelCallsThisTurn": 1,
+    "providerFailure": false,
+    "validatedNull": false,
+    "realProvider": "atria",
+    "realModel": "Atria-Dawn-Preview",
+    "retryCount": 0,
+    "modelLatencyMs": 17513,
+    "totalLatencyMs": 17533
+  },
+  "multiIntent": {
+    "engineOk": true,
+    "duplicate": false,
+    "engineFailureCode": null,
+    "intent": "BOOKING",
+    "assistantAction": "AI_REPLY",
+    "conversationStatus": "AI_ACTIVE",
+    "routingDecision": "LLM",
+    "decisionClass": "CLARIFY",
+    "goalsCount": 2,
+    "goalKinds": [
+      "ANSWER",
+      "DOMAIN_ACTION"
+    ],
+    "goalIntents": [
+      "FAQ",
+      "BOOKING"
+    ],
+    "multiGoal": true,
+    "turnPlanSteps": 1,
+    "pendingGoalsCount": 0,
+    "pendingGoalIntents": [],
+    "answerAndContinue": false,
+    "clarificationType": "CLARIFY_SERVICE",
+    "handoffCause": null,
+    "decision": {
+      "intent": "BOOKING",
+      "action": "booking_handoff",
+      "handoffReason": null,
+      "hasGoals": true,
+      "goalsLength": 2
+    },
+    "modelCallsThisTurn": 1,
+    "providerFailure": false,
+    "validatedNull": false,
+    "realProvider": "atria",
+    "realModel": "Atria-Dawn-Preview",
+    "retryCount": 1,
+    "modelLatencyMs": 167749,
+    "totalLatencyMs": 167754
+  },
+  "gates": {
+    "engineReached": true,
+    "realInference": true,
+    "providerFailures": 0,
+    "malformed": 0,
+    "multiCall": false,
+    "structuredOutput": true
+  }
+}

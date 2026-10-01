@@ -1,0 +1,34 @@
+{
+  "counts": {
+    "focusedCases": 15,
+    "measuredTurns": 15,
+    "realModelCalls": 15,
+    "engineReached": true,
+    "multiCallTurns": 0,
+    "providerFailures": 1,
+    "malformed": 0,
+    "retries": 1,
+    "timeouts": 0,
+    "multiGoalTurns": 7,
+    "answerAndContinueActivated": 0,
+    "answerAndContinueCases": 5,
+    "answerAndContinueSuccess": 0,
+    "multiAnswerCases": 1,
+    "multiIntentSuccess": 1,
+    "multiIntentDenominator": 6,
+    "pendingPreservedTurns": 0,
+    "unnecessaryHandoffCases": 4,
+    "unnecessaryHandoffs": 1,
+    "safetyCases": 5,
+    "missedHandoffs": 0,
+    "safetyRegressions": 0
+  },
+  "latencyProfile": {
+    "n": 15,
+    "minMs": 12149,
+    "p50Ms": 50126,
+    "p95Ms": 211740,
+    "maxMs": 211740,
+    "totalRetries": 1
+  }
+}

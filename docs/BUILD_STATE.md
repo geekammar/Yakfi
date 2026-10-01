@@ -51,6 +51,156 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI EVALUATION — REAL-LLM MULTI-INTENT RE-VERIFICATION AFTER PRODUCER TOP-LEVEL
+ACTION REMEDIATION (`PROMPT-AI-EVAL-14`, VERIFICATION-ONLY): BLOCKED_BEHAVIOR
+(residual block is Slice-6 price exposure, NOT the producer).** The EXACT EVAL-13
+15-case focused multi-intent set was re-run verbatim through the CURRENT
+post-ARCH-11 FUTURE_SYSTEM real-LLM path (`future-system-flowpilot`, provider
+`atria` / model `Atria-Dawn-Preview` via the eval-only override; `ATRIA_API_KEY`
+presence/name only; DB policy NOT read/changed; dataset `egyptian-v1` hash
+`8be16297ae4717bab5da4f3c94de1887` verified unchanged; producer
+`system.booking-assistant` sha256 `9cc7f73ac2ae`). Calibration passed AND — unlike
+EVAL-13 — the multi-intent calibration case now **activates answer-and-continue**
+(`class=ANSWER`, `goals=2`, `answerAndContinue=true`, `pendingGoals=1`, top-level
+`action=reply`). Full run (15 real calls, 1/turn, `multiCallTurns 0`,
+`providerFailures 0`, `malformed 0`, timeout did NOT recur): **the EVAL-13 primary
+failure mode is CLOSED** — on BOTH genuinely-answerable answer-and-continue cases
+(`mi-booking-plus-discovery`, `mi-booking-plus-hours`) the producer now pins
+TOP-LEVEL `action=reply` and answer-and-continue fires
+(`answerAndContinueActivated 0→2`, `answerAndContinueSuccess 0/5→2/5`,
+`pendingPreservedTurns 0→2`). **The 3 remaining a&c misses are ALL price/fee cases
+with no answerable price in the business context** (verified: services have no
+price field, FAQs have no price) → the model honestly returns `handoff`+`NO_KNOWLEDGE`:
+the Slice-6 knowledge-exposure gap, NOT a producer/resolver/state/engine defect.
+The `answerAndContinueSuccess ≥ 4/5` bar is therefore STRUCTURALLY UNSATISFIABLE on
+this exact set until Slice 6 exposes price (3/5 cases are price gaps). **SAFETY
+fully preserved** (5/5 required handoffs → NEED_HUMAN incl. the `[ANSWER,HANDOFF]`
+and `[HANDOFF,DOMAIN_ACTION]` rider cases; `safetyRegressions 0`, `missedHandoffs 0`;
+1/4 ho-unnecessary is the SAME pre-existing single-intent over-handoff).
+`multiGoalTurns 7/15`; `mi-two-questions` regressed to 1 goal (producer
+non-determinism, still answered). **Classification: PRODUCER top-level action
+binding CLOSED (2/2 answerable + calibration); DOMAIN/knowledge-exposure (Slice 6)
+is the ONLY residual a&c block; NOT resolver/state/engine/parser/provider/scorer.**
+ONLY new file: evaluation-only CLI `scripts/eval-run-future-eval14.ts` (verbatim
+copy of the EVAL-13 CLI, slice label + out dir only) + reporting artifacts under
+`evaluation/reports/egyptian-v1/real-llm-eval14/` (report.md, manifest.json,
+evaluation-run.json, analysis.json, case-selection.json, calibration.json,
+status.md); EVAL-13 artifacts untouched. Deterministic no-regression: `check:ai-prompts`
+126/126, `check:multi-intent` 22/22, `check:turn-planner` 31/31,
+`check:conversation-state` 20/20, `check:clarify` 27/27, `check:ai-architecture`
+25/25; `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green
+(1 pre-existing both-env-files warning). **No `src/`, prompt, provider policy/config,
+dataset, gold, scorer, schema, or migration change; no commit/push/tag/migration/deploy;
+Slice 6 NOT started.** **Readiness: BLOCKED_BEHAVIOR.** **Next step (operator
+decision):** resolve the ≥4/5 confound — either (a) re-scope the a&c reliability
+bar to answerable-knowledge cases (now 2/2 + calibration) and begin `§17 Slice 6`
+(knowledge exposure incl. price/fee), or (b) land Slice-6 price exposure first and
+re-run this exact set expecting the 3 price cases to convert to answer-and-continue.
+The producer top-level action binding does NOT require further change.
+
+**AI TARGET ARCHITECTURE — SLICE 5 PRODUCER REMEDIATION: ANSWER-AND-CONTINUE
+TOP-LEVEL ACTION BINDING (`PROMPT-AI-ARCH-11`, PRODUCER/PROMPT-ONLY):
+READY_FOR_EVAL_13_RERUN.** The exact `PROMPT-AI-EVAL-13` producer gap is closed
+at the ONE boundary that caused it — the canonical system prompt. **Observed
+gap (EVAL-13):** on genuine multi-intent turns the real LLM emitted a correct
+`[ANSWER, DOMAIN_ACTION]` pair but set the TOP-LEVEL `action=booking_handoff`
+(not `reply`), so the resolver's documented answer-and-continue guard
+(`baseClass==="ANSWER" && action==="reply"`, `turn-planner.ts:511`) correctly
+declined to fabricate an answer → `answerAndContinueSuccess 0/5`,
+`pendingPreservedTurns 0`. **Exact change (producer/contract surface ONLY):** the
+system prompt now (a) states the top-level `intent/action/content/handoffReason/
+summary` describe the action for the CURRENT customer-visible response — the ONE
+goal answered THIS turn — while `goals[]` carries the ordered set of ALL goals
+("choose the top-level action for the goal you are responding to NOW, never for a
+goal you are only deferring"); (b) adds an explicit ANSWER-AND-CONTINUE rule: when
+a GENUINELY ANSWERABLE knowledge/question goal coexists with a domain/booking
+goal, set TOP-LEVEL `action=reply` with the answer as `content`, put the ANSWER
+goal first in `goals[]` and the domain goal after it with `continueAfter true`,
+and do NOT set top-level `booking_handoff` merely because a domain goal also
+exists; (c) keeps the CRITICAL PRECEDENCE: a required human/sensitive/
+knowledge-gap handoff OUTRANKS answer-and-continue (answer-and-continue applies
+ONLY when the question is genuinely answerable and no higher-authority handoff
+applies; an unanswerable question stays `handoff`+`NO_KNOWLEDGE`, never a
+fabricated reply). Single-intent (OMIT `goals[]`, NEVER manufacture extra goals),
+the resolver's ownership of precedence/one-goal/one-send, and the existing
+multi-intent `goals[]` description are UNCHANGED. **No `src/` logic, schema,
+resolver (`turn-planner.ts` guard deliberately NOT relaxed), ConversationState,
+engine, provider policy/config, Atria integration, dataset, gold, or scorer
+change; no migration; no commit/push/tag/deploy.** The generated artifact was
+REGENERATED via `pnpm generate:ai-prompts` (NOT hand-edited; `system.booking-
+assistant` sha256 `9b4b67f09715` → `9cc7f73ac2ae`). **Model-call invariant
+preserved** (greeting bypass 0 calls, normal/multi-intent turn 1 call; no
+classifier→responder→judge chain; no second generative call). **Guarded:**
+`check:ai-prompts` **126/126** (NEW producer-contract checks: answer-and-continue
+top-level `action=reply` binding, top-level=current-response definition, handoff
+override precedence, PRODUCER-9 single-intent booking stays valid, PRODUCER-10
+ANSWER+BOOKING reply shape), `check:multi-intent` **22/22** (NEW 21 ANSWER+BOOKING
+`action=reply` → answer-and-continue fires; 22 conflicting
+`action=booking_handoff`+`[ANSWER,DOMAIN]` does NOT weaken server precedence —
+resolver UNCHANGED), `check:turn-planner` 31/31, `check:conversation-state`
+20/20, `check:clarify` 27/27, `check:ai-architecture` 25/25, `check:ai-disclosure`
+36/36, `check:future-system` 33/33, `check:eval`/`-schema`/`-runner` 25/22/18,
+`check:conversation-booking` 16/16, `check:conversation-handoff`, `check:greeting`,
+`check:response-normalizer` 78/78; `pnpm verify` (lint/typecheck/format/build) +
+`pnpm security` green (1 pre-existing both-env-files warning). **Files:**
+`prompts/system/booking-assistant.prompt`,
+`src/generated/ai-prompts.generated.ts` (regenerated),
+`scripts/check-ai-prompts.ts`, `scripts/check-multi-intent.ts`,
+`docs/BUILD_STATE.md`, `docs/ai/TARGET_ARCHITECTURE.md`. **Readiness:
+READY_FOR_EVAL_13_RERUN — deterministic producer tests alone are NOT proof the
+real-LLM behavior is fixed; Slice 6 REMAINS BLOCKED until the real-LLM rerun
+proves answer-and-continue reliable.** **Next step:** `PROMPT-AI-EVAL-14` —
+Real-LLM Multi-Intent Re-Verification After Producer Top-Level Action
+Remediation: re-run the EXACT EVAL-13 focused case set expecting
+`answerAndContinueSuccess≥4/5` + `pendingPreservedTurns>0` + `safetyRegressions=0`
+
+- `multiCallTurns=0` + `providerFailures=0`; begin `§17 Slice 6` only after
+  answer-and-continue is demonstrably reliable under the real LLM.
+
+**AI EVALUATION — REAL-LLM MULTI-INTENT RE-VERIFICATION AFTER PRODUCER ACTIVATION
+(`PROMPT-AI-EVAL-13`, VERIFICATION-ONLY): BLOCKED_BEHAVIOR.** The EXACT EVAL-12
+15-case focused multi-intent set was re-run verbatim through the CURRENT
+post-ARCH-10 FUTURE_SYSTEM real-LLM path (`future-system-flowpilot`, provider
+`atria` / model `Atria-Dawn-Preview` via the eval-only override; `ATRIA_API_KEY`
+presence/name only; DB policy NOT read/changed; dataset `egyptian-v1` hash
+`8be16297ae4717bab5da4f3c94de1887` verified unchanged). Calibration passed and
+**demonstrated `goals[]=2` + `answerAndContinue=true` + `pendingGoals=1`** on
+`mi-booking-plus-discovery` (answer-and-continue IS reachable end-to-end under the
+real LLM). Full run (15 real calls, 1/turn, `multiCallTurns 0`, `malformed 0`):
+the producer activation **materially changed the structured output** — genuine
+`goals[].length>1` on **7/15** turns (`decision.hasGoals=true` on 7, vs EVAL-12's
+0/15), `multiIntentSuccess` 1/6 (`mi-two-questions` → ANSWER). **BUT
+answer-and-continue did NOT reliably activate: `answerAndContinueSuccess 0/5`,
+`pendingPreservedTurns 0`.** Resolver-observed cause: on the answerable cases
+(discovery/hours) the model emits a correct `[ANSWER, DOMAIN_ACTION]` pair but
+sets TOP-LEVEL `action=booking_handoff` (not `reply`), so the resolver's
+documented answer-and-continue guard (`baseClass==="ANSWER" && action==="reply"`,
+`turn-planner.ts:511`) correctly declines to fabricate an answer → CLARIFY; price
+cases emit `HANDOFF(NO_KNOWLEDGE)` (Slice-6 exposure gap). **SAFETY fully
+preserved** (5/5 required handoffs → NEED_HUMAN incl. the human+booking rider; no
+HANDOFF hidden behind a goal; `safetyRegressions 0`, `missedHandoffs 0`; 1/4
+ho-unnecessary is the SAME pre-existing single-intent over-handoff). ONE runtime
+provider timeout (`mi-human-plus-knowledge`, 120s) still fail-safed to NEED_HUMAN
+(`providerFailures 1`, runtime — does NOT change the behavioral verdict).
+**Classification: PRODUCER/PROMPT (primary) + DOMAIN/knowledge-exposure
+(secondary, Slice 6); NOT resolver/state/engine** (proven offline
+`check:multi-intent` 20/20 + live calibration activation). ONLY new files:
+evaluation-only CLI `scripts/eval-run-future-eval13.ts` (verbatim copy of the
+EVAL-12 CLI, slice label + out dir only) + reporting artifacts under
+`evaluation/reports/egyptian-v1/real-llm-eval13/` (report.md, manifest.json,
+evaluation-run.json, analysis.json, case-selection.json, calibration.json,
+status.md); EVAL-12 artifacts untouched. **No `src/`, prompt, provider
+policy/config, dataset, gold, scorer, schema, or migration change; no
+commit/push/tag/migration/deploy; Slice 6 NOT started.** **Readiness:
+BLOCKED_BEHAVIOR.** Next step: a PRODUCER slice (its own prompt) pins the
+top-level `action=reply`+`content` to the answerable ANSWER goal when a knowledge
+answer coexists with a domain goal (deferring the domain goal via
+`goals[]`/`continueAfter`), via `generate:ai-prompts`/`check:ai-prompts`, then
+RE-RUN this exact set expecting `answerAndContinueSuccess≥4/5` +
+`pendingPreservedTurns>0` + `safetyRegressions=0` + `multiCallTurns=0` +
+`providerFailures=0`; begin `§17 Slice 6` only after answer-and-continue is
+demonstrably reliable under the real LLM.
+
 **AI TARGET ARCHITECTURE — SLICE 5 PRODUCER ACTIVATION (`PROMPT-AI-ARCH-10`,
 IMPLEMENTATION-ONLY): READY_FOR_REAL_LLM_RE-VERIFICATION.** The producer gap
 `PROMPT-AI-EVAL-12` proved (`goals[].length=1` on 15/15 real turns →

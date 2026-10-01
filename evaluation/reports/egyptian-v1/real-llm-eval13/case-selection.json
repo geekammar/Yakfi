@@ -1,0 +1,103 @@
+{
+  "purpose": "PROMPT-AI-EVAL-13 real-LLM multi-intent verification after Slice 5. SELECTION ONLY — the canonical dataset is NEVER modified.",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "totalCasesInDataset": 1933,
+  "calibration": {
+    "answer": "st-service-discovery::u0",
+    "multiIntent": "mi-booking-plus-discovery::u0"
+  },
+  "focusedCases": [
+    {
+      "caseId": "mi-booking-plus-discovery::u0",
+      "axis": "booking + discovery (answer catalog, defer booking)",
+      "role": "ANSWER_AND_CONTINUE",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "mi-booking-plus-hours::u0",
+      "axis": "booking + hours (answer hours, defer booking)",
+      "role": "ANSWER_AND_CONTINUE",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "mi-booking-plus-price::u0",
+      "axis": "booking + price (answer price, defer booking)",
+      "role": "ANSWER_AND_CONTINUE",
+      "handoff": "ACCEPTABLE_EITHER"
+    },
+    {
+      "caseId": "mi-availability-plus-price::u0",
+      "axis": "availability + price (answer price, resolve availability)",
+      "role": "ANSWER_AND_CONTINUE",
+      "handoff": "ACCEPTABLE_EITHER"
+    },
+    {
+      "caseId": "mi-discovery-price-booking::u0",
+      "axis": "discovery + price + booking (answer, leave booking open)",
+      "role": "ANSWER_AND_CONTINUE",
+      "handoff": "ACCEPTABLE_EITHER"
+    },
+    {
+      "caseId": "mi-two-questions::u0",
+      "axis": "two questions (answer both in order)",
+      "role": "MULTI_ANSWER",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "ho-unnecessary-knowledge-looks-like-booking::u0",
+      "axis": "knowledge that looks like booking (answer, not handoff)",
+      "role": "UNNECESSARY_HANDOFF",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "ho-unnecessary-faq-hurried::u0",
+      "axis": "hurried FAQ (answer from stored FAQ)",
+      "role": "UNNECESSARY_HANDOFF",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "ho-unnecessary-discovery-mid-flow::u0",
+      "axis": "discovery mid-flow (answer discovery)",
+      "role": "UNNECESSARY_HANDOFF",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "ho-unnecessary-clarifiable::u0",
+      "axis": "clarifiable booking reference (clarify, not handoff)",
+      "role": "UNNECESSARY_HANDOFF",
+      "handoff": "NOT_REQUIRED"
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0",
+      "axis": "sensitive/restricted (SAFETY precedence)",
+      "role": "SAFETY_REQUIRED",
+      "handoff": "REQUIRED"
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0",
+      "axis": "explicit human request (HUMAN precedence)",
+      "role": "SAFETY_REQUIRED",
+      "handoff": "REQUIRED"
+    },
+    {
+      "caseId": "ho-empty-knowledge-gap::u0",
+      "axis": "knowledge gap (KNOWLEDGE_GAP handoff)",
+      "role": "SAFETY_REQUIRED",
+      "handoff": "REQUIRED"
+    },
+    {
+      "caseId": "mi-human-plus-knowledge::u0",
+      "axis": "human + knowledge rider (human precedence dominates multi-intent)",
+      "role": "SAFETY_REQUIRED",
+      "handoff": "REQUIRED"
+    },
+    {
+      "caseId": "mi-greeting-booking-human::u0",
+      "axis": "greeting + booking + human (human precedence dominates multi-intent)",
+      "role": "SAFETY_REQUIRED",
+      "handoff": "REQUIRED"
+    }
+  ],
+  "focusedCaseCount": 15
+}
