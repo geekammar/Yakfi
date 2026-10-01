@@ -76,6 +76,12 @@ import {
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
 import { enforceDisclosure } from "@/features/conversations/server/ai-disclosure";
+import type {
+  AiRoutingDecision,
+  TurnObservability,
+  TurnStateTransitionObservation,
+} from "@/features/conversations/server/ai-observability";
+import { buildTurnObservability } from "@/features/conversations/server/ai-observability";
 import {
   isProviderNameCandidate,
   mapAiResponseToBookingInput,
@@ -87,14 +93,32 @@ import type {
   BookingSelectionContext,
 } from "@/features/conversations/server/booking-selection";
 import { tryParseBookingSelection } from "@/features/conversations/server/booking-selection";
+import {
+  clarificationForBookingReason,
+  clarificationForInterruption,
+  derivePendingClarification,
+} from "@/features/conversations/server/clarification";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import {
   bypassDeterministicAi,
   classifyCustomerMessage,
+  detectTurnControlSignals,
   normalizeArabicText,
 } from "@/features/conversations/server/conversation-ai";
+import {
+  deriveConversationStateFromHistory,
+  factUpdatesFromExtraction,
+  mergeConversationState,
+} from "@/features/conversations/server/conversation-state";
+import type { ConversationState } from "@/features/conversations/server/conversation-state";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
+import {
+  resolveEgyptianRelativeDate,
+  todayIsoInTimeZone,
+} from "@/features/conversations/server/relative-date";
+import { resolveTurnPlan } from "@/features/conversations/server/turn-planner";
+import type { ResolvedTurn } from "@/features/conversations/server/turn-planner";
 import type { AttentionReason, RecordUsageDto } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
@@ -343,6 +367,13 @@ export type InboundSuccess = {
   conversationStatus: ConversationStatus;
   /** Assistant provider that answered (honest reporting). */
   assistantProvider: string;
+  /**
+   * ADDITIVE structured observables for the turn (PROMPT-AI-ARCH-02 Slice 0).
+   * Optional: a producer that cannot observe a field omits it, and every
+   * existing caller keeps working unchanged. Machine keys / bounded labels
+   * only — never content, prompts, secrets, or chain-of-thought.
+   */
+  observability?: TurnObservability;
   /** Best-effort outbound delivery report (null when nothing was sent). */
   delivery: { provider: string; delivered: boolean; error?: string } | null;
 };
@@ -475,6 +506,228 @@ function readAiTelemetry(ai: ConversationAi): AiTelemetry | null {
     return null;
   }
   return null;
+}
+
+/**
+ * The B-01/B-02 SOURCE CLASSES of the facts that actually entered the request
+ * (closed `KnowledgeFactSource` machine keys — never content). Additive
+ * observability (PROMPT-AI-ARCH-02 Slice 0) only; it changes no context
+ * decision and carries nothing customer-visible.
+ */
+function includedKnowledgeSources(
+  facts: ReadonlyArray<{ included: boolean; source: string }>,
+): string[] {
+  return [
+    ...new Set(
+      facts.filter((fact) => fact.included).map((fact) => fact.source),
+    ),
+  ];
+}
+
+/**
+ * Conversation State foundation (PROMPT-AI-ARCH-04 — Slice 2).
+ *
+ * Derive the engine-owned `ConversationState` from the already-persisted
+ * history (the EXISTING persistence seam) and merge it ADDITIVELY with the
+ * current turn's facts — the Slice-0 `factUpdates` plus the structured
+ * `extraction`, fed uniformly through the ONE pure merge function
+ * (`state + factUpdates → nextState`). It performs ZERO model inference, no
+ * I/O, no persistence, and NO behavior change: the resulting state is only
+ * projected into the additive Slice-0 observability as a content-free
+ * `stateTransition` (bounded machine keys only — never message content). The
+ * state is NOT yet authoritative over domain state; later slices consume it.
+ *
+ * Best-effort and total: a state-derivation error can never fail a customer
+ * turn (same contract as usage telemetry).
+ */
+function observeConversationStateTransition(
+  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  decision: AiResponse | null,
+): TurnStateTransitionObservation | undefined {
+  if (!decision) return undefined;
+  try {
+    const base = deriveConversationStateFromHistory(recentChronological);
+    const { transitions } = mergeConversationState(base, {
+      factUpdates: [
+        ...factUpdatesFromExtraction(decision.extraction),
+        ...(decision.factUpdates ?? []),
+      ],
+      turnGoal: decision.intent,
+      ...(decision.goals ? { goals: decision.goals } : {}),
+    });
+    const transition = transitions[0];
+    if (!transition) return undefined;
+    return {
+      from: transition.from,
+      to: transition.to,
+      ...(transition.factKey ? { factKey: transition.factKey } : {}),
+      ...(transition.isRevision !== undefined
+        ? { isRevision: transition.isRevision }
+        : {}),
+    };
+  } catch {
+    // Conversation State is orchestration observability, not a business
+    // action — a derivation error must never surface to the customer.
+    return undefined;
+  }
+}
+
+/**
+ * Decision / Action Resolver (PROMPT-AI-ARCH-05 — Slice 3; CLARIFY activated
+ * in PROMPT-AI-ARCH-06 — Slice 4).
+ *
+ * Run the ONE deterministic resolver for the finished turn and return its
+ * `ResolvedTurn`. The resolver combines the normalized AI decision, the
+ * engine-owned `ConversationState` (derived from the already-persisted history
+ * + this turn's facts, seeded with any PENDING clarification reconstructed
+ * from history so a resume is reflected), the existing deterministic/control
+ * routing, and the existing safety/handoff constraints into ONE ordered plan.
+ *
+ * The plan is projected into observability (the SAME canonical `AiTurnPlan`).
+ * Its `decisionClass` is now AUTHORITATIVE for ONE new branch only — a
+ * first-class `CLARIFY` turn, which the engine emits as ONE bounded question
+ * (AI_ACTIVE) instead of escalating. Every other decision class leaves the
+ * existing execution path (booking seam, disclosure gate, reply/handoff)
+ * authoritative and byte-for-byte unchanged. No additional model inference is
+ * performed (the resolver is pure); the zero-or-one generative call invariant
+ * holds. The domain outcome is passed as `PENDING`: the resolver never
+ * computes availability/eligibility — the DOMAIN (CORE-01/CORE-02) stays
+ * authoritative. Best-effort and total: a resolution error can never fail a
+ * customer turn.
+ */
+function resolveFinishedTurn(
+  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  decision: AiResponse | null,
+  routing: AiRoutingDecision,
+  currentMessage: string,
+  now: Date,
+  timezone: string,
+): { plan: ResolvedTurn; state: ConversationState } | null {
+  if (!decision) return null;
+  try {
+    // Deterministic, authoritative control/safety signals for THIS turn
+    // (PROMPT-AI-EVAL-07). Reused by value from the SAME keyword tables the
+    // deterministic classifier applies — no new classifier, no model call.
+    const signals = detectTurnControlSignals(currentMessage);
+
+    const base = deriveConversationStateFromHistory(recentChronological);
+    // Reconstruct a pending clarification from history (migration-safe §9) so
+    // the resumed state reflects what the engine actually asked last turn.
+    const pending = derivePendingClarification(recentChronological);
+    const seeded = pending
+      ? {
+          ...base,
+          missingFacts: pending.missingFacts,
+          lastClarification: { type: pending.type },
+        }
+      : base;
+
+    const factUpdates = [
+      ...factUpdatesFromExtraction(decision.extraction),
+      ...(decision.factUpdates ?? []),
+    ];
+
+    // SUPPLIED-FACT RESUME binding (PROMPT-AI-EVAL-07). When a clarification is
+    // pending for exactly ONE conversation fact and the model's extraction did
+    // NOT already supply it, bind the current customer turn as that fact so the
+    // clarification RESOLVES through the ONE merge path (never a second fact
+    // model). Gated to a plain CONTINUATION answer: a sensitive / explicit-human
+    // turn keeps safety precedence, and an explicit escalation (the model asked
+    // for a human) is a benign interruption to PRESERVE (rule 6), never a fact —
+    // so neither is silently bound as a booking fact.
+    const modelEscalatesHuman =
+      decision.intent === "HUMAN_REQUEST" ||
+      decision.handoffReason === "HUMAN_REQUEST";
+    if (
+      pending &&
+      pending.missingFacts.length === 1 &&
+      !signals.sensitive &&
+      !signals.explicitHuman &&
+      !modelEscalatesHuman
+    ) {
+      const missing = pending.missingFacts[0]!;
+      const alreadySupplied =
+        factUpdates.some((u) => u.key === missing) ||
+        base.knownFacts[missing] != null;
+      const trimmed = currentMessage.trim();
+      if (!alreadySupplied && trimmed.length > 0) {
+        // SUPPLIED COLLOQUIAL DATE (PROMPT-AI-ARCH-08). When the pending fact is
+        // the booking DATE and the customer supplied it in a supported
+        // colloquial Egyptian relative form («الخميس», «بكرة», «بعد بكرة»…),
+        // normalize it to the ISO `YYYY-MM-DD` the booking DOMAIN requires so
+        // the supplied fact BINDS deterministically (never re-clarified) and
+        // the booking advances. The AI contract can only carry ISO, so this
+        // normalization is the engine's (Conversation orchestration's) job —
+        // the DOMAIN still re-validates and executes. A non-colloquial answer
+        // (a verbatim ISO date, or a free-form service) keeps the existing
+        // raw-bind behavior.
+        let value = trimmed;
+        if (missing === "date") {
+          const iso = resolveEgyptianRelativeDate(
+            currentMessage,
+            todayIsoInTimeZone(now, timezone),
+          );
+          if (iso) value = iso;
+        }
+        factUpdates.push({ key: missing, value });
+      }
+    }
+
+    const { state } = mergeConversationState(seeded, {
+      factUpdates,
+      turnGoal: decision.intent,
+      ...(decision.goals ? { goals: decision.goals } : {}),
+    });
+    const plan = resolveTurnPlan({
+      decision,
+      state,
+      routing,
+      domain: { kind: "PENDING" },
+      signals,
+    });
+    return { plan, state };
+  } catch {
+    // The resolver is orchestration — a resolution error must never surface to
+    // the customer; the existing execution path then owns the turn.
+    return null;
+  }
+}
+
+/** The ISO date form (YYYY-MM-DD) the booking domain requires. */
+const RESUME_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Supplement a booking AI response's extraction with facts the customer already
+ * supplied for a pending booking clarification (merged into ConversationState)
+ * but that the model omitted on THIS turn (PROMPT-AI-EVAL-07 supplied-fact
+ * resume). The model's own extraction ALWAYS wins when present; a date is only
+ * supplemented when it is ISO-shaped (the domain's required form). Pure and
+ * additive — the DOMAIN still resolves/validates every fact and executes.
+ */
+function resumeBookingExtraction(
+  response: AiResponse,
+  state: ConversationState,
+): AiResponse {
+  const e = response.extraction;
+  const service = e.service ?? state.knownFacts.service ?? null;
+  const provider = e.provider ?? state.knownFacts.provider ?? null;
+  const timePreference =
+    e.timePreference ?? state.knownFacts.timePreference ?? null;
+  const stateDate = state.knownFacts.date ?? null;
+  const date =
+    e.date ?? (stateDate && RESUME_ISO_DATE.test(stateDate) ? stateDate : null);
+  if (
+    service === e.service &&
+    provider === e.provider &&
+    timePreference === e.timePreference &&
+    date === e.date
+  ) {
+    return response; // nothing to supplement — unchanged
+  }
+  return {
+    ...response,
+    extraction: { ...e, service, provider, date, timePreference },
+  };
 }
 
 async function persistAssistantReply(
@@ -1295,6 +1548,10 @@ async function runInboundTurn(
     //    decidable without an assistant never spend an AI call — and
     //    never produce an AI_TURN usage fact (no request was made).
     let turn: AiResponse | null = bypassDeterministicAi(aiRequest);
+    // Additive observability only (PROMPT-AI-ARCH-02 Slice 0): remembers
+    // WHICH routing produced the turn. It changes no branch.
+    const deterministicBypass = turn !== null;
+    let turnTelemetry: AiTelemetry | null = null;
     if (!turn) {
       try {
         turn = await deps.ai.respond(aiRequest);
@@ -1305,7 +1562,8 @@ async function runInboundTurn(
       // deterministic / non-telemetry adapters keep the lightweight record.
       // The orchestrator's deterministic-bypass telemetry is still a bypass
       // - no AI_TURN fact is recorded (no provider call was spent).
-      const telemetry = readAiTelemetry(deps.ai);
+      turnTelemetry = readAiTelemetry(deps.ai);
+      const telemetry = turnTelemetry;
       const isBypassTelemetry =
         telemetry?.finalProvider === "deterministic-bypass";
       if (!isBypassTelemetry) {
@@ -1351,6 +1609,62 @@ async function runInboundTurn(
     //    acknowledgment is deterministic, and no AI-authored content is
     //    trusted, persisted, or sent.
     const validated = turn ? parseAiResponse(turn) : null;
+
+    // 9a. ADDITIVE observability (PROMPT-AI-ARCH-02 Slice 0): a PURE
+    //     projection of the finished decision through the ONE canonical
+    //     contract. It adds no inference, no provider call, no persistence,
+    //     and no behavior; it never carries content, prompts, or secrets.
+    //     Today's producers emit no goals/clarification/cause/factUpdates,
+    //     so those stay absent — or are synthesized by the single-goal
+    //     compatibility bridge from the existing intent + action.
+    const turnRouting: AiRoutingDecision = deterministicBypass
+      ? "DETERMINISTIC_BYPASS"
+      : deps.ai.providerName === "deterministic"
+        ? "DETERMINISTIC"
+        : "LLM";
+    // PROMPT-AI-ARCH-05 (Slice 3): the ONE deterministic resolver's ordered
+    // single-goal TurnPlan. PROMPT-AI-ARCH-06 (Slice 4): its `decisionClass`
+    // is AUTHORITATIVE for the first-class CLARIFY branch below; every other
+    // class leaves the existing execution path authoritative and unchanged.
+    const resolution = resolveFinishedTurn(
+      recentChronological,
+      validated,
+      turnRouting,
+      inbound.text,
+      new Date(),
+      business.timezone,
+    );
+    const resolvedTurn = resolution?.plan ?? null;
+    const resolvedState = resolution?.state ?? null;
+    const turnObservability: TurnObservability = buildTurnObservability({
+      routingDecision: turnRouting,
+      response: validated,
+      provider: deterministicBypass
+        ? "deterministic-bypass"
+        : (turnTelemetry?.finalProvider ?? deps.ai.providerName),
+      model: turnTelemetry?.finalModel ?? null,
+      fallbackUsed: turnTelemetry?.fallbackUsed ?? false,
+      retryCount: turnTelemetry?.retryTrace
+        ? Math.max(0, turnTelemetry.retryTrace.attempts.length - 1)
+        : 0,
+      latencyMs: turnTelemetry?.retryTrace?.totalElapsedMs,
+      knowledgeSourceClass: includedKnowledgeSources(builtContext.facts),
+      stateTransition: observeConversationStateTransition(
+        recentChronological,
+        validated,
+      ),
+      turnPlan: resolvedTurn?.plan,
+      ...(resolvedTurn?.clarification
+        ? {
+            clarification: {
+              type: resolvedTurn.clarification.type,
+              ...(resolvedTurn.clarification.missingFacts.length > 0
+                ? { missingFacts: [...resolvedTurn.clarification.missingFacts] }
+                : {}),
+            },
+          }
+        : {}),
+    });
     if (!validated) {
       const safeHandoff = classifyCustomerMessage(
         inbound.text,
@@ -1383,6 +1697,114 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         assistantProvider: deps.ai.providerName,
+        observability: turnObservability,
+        delivery,
+      };
+    }
+
+    // 9a-pre. SAFETY / EXPLICIT-HUMAN PRECEDENCE (PROMPT-AI-EVAL-07). The ONE
+    //     resolver applies DETERMINISTIC, authoritative safety precedence: a
+    //     sensitive/restricted turn or an explicit human request hands off to a
+    //     human EVEN WHEN the model proposed a clarification or a booking
+    //     intent and did NOT self-report the safety reason. This branch runs
+    //     BEFORE the first-class CLARIFY branch AND the booking/availability
+    //     seam, so a safety-required turn can never be swallowed as CLARIFY or
+    //     routed into a booking clarification (EVAL-07 `ho-sensitive-medical`
+    //     reached CLARIFY_SERVICE + AI_ACTIVE — closed here). The customer sees
+    //     the SAME safe, deterministic, knowledge-free handoff acknowledgment
+    //     the other safe-handoff paths emit; the thread goes NEED_HUMAN and the
+    //     central choke point records operator attention. No extra model call.
+    if (
+      resolvedTurn &&
+      resolvedTurn.decisionClass === "HANDOFF" &&
+      (resolvedTurn.precedenceRule === "SAFETY_RESTRICTED" ||
+        resolvedTurn.precedenceRule === "EXPLICIT_HUMAN_REQUEST")
+    ) {
+      const safeHandoff = classifyCustomerMessage(
+        inbound.text,
+        builtContext.request.faqs,
+      );
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        safeHandoff.content,
+        "NEED_HUMAN",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        safeHandoff.content,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_HANDOFF",
+        intent: validated.intent,
+        conversationStatus: "NEED_HUMAN",
+        assistantProvider: deps.ai.providerName,
+        observability: turnObservability,
+        delivery,
+      };
+    }
+
+    // 9a-bis. FIRST-CLASS CLARIFY (PROMPT-AI-ARCH-06 — Slice 4). When the ONE
+    //     resolver classifies this turn as CLARIFY (a genuinely clarifiable
+    //     ambiguity: the classifier's `AMBIGUOUS`-reason turn, never SENSITIVE
+    //     / NO_KNOWLEDGE / HUMAN_REQUEST, never a sensitive/human/domain-blocked
+    //     turn — those are pre-empted by the resolver's precedence), the engine
+    //     asks ONE bounded question and STAYS AI_ACTIVE instead of handing off
+    //     to a human. The question is a fixed, engine-authored, knowledge-free
+    //     template (B-03 §16): it names no business fact, so it crosses the
+    //     customer boundary on its declared CLARIFY class, exactly like the
+    //     GREETING knowledge-free protocol — the disclosure gate is never
+    //     weakened. ZERO extra model inference: the clarification is produced
+    //     by the pure resolver inside this same turn (zero-or-one call holds).
+    //     The pending task + missing facts live in ConversationState (derived
+    //     from history), so the next turn resumes. Booking/availability intents
+    //     never reach here (their clarification is domain-owned, below).
+    if (
+      resolvedTurn &&
+      resolvedTurn.decisionClass === "CLARIFY" &&
+      resolvedTurn.clarification
+    ) {
+      const question = resolvedTurn.clarification.question;
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        question,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        question,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: validated.intent,
+        conversationStatus: "AI_ACTIVE",
+        assistantProvider: deps.ai.providerName,
+        observability: turnObservability,
         delivery,
       };
     }
@@ -1392,13 +1814,45 @@ async function runInboundTurn(
     // the generic reply/handoff path. No appointment mutation here.
     if (validated.intent === "BOOKING" || validated.intent === "AVAILABILITY") {
       const branchId = (conversation.branchId as string | null) ?? null;
+      // SUPPLIED-FACT RESUME (PROMPT-AI-EVAL-07): honor a fact the customer
+      // already supplied for the pending booking clarification (merged into
+      // ConversationState) when the model's extraction for THIS turn omits it,
+      // so the booking mapper never RE-ASKS a fact already given. Additive and
+      // safe: a free-form fact (service / provider / time) is supplemented
+      // verbatim; a date is supplemented ONLY when ISO-shaped (the domain's
+      // required form) — the DOMAIN still re-verifies and executes. The AI's
+      // own extraction always wins when present (never overwritten).
+      const bookingAiResponse = resolvedState
+        ? resumeBookingExtraction(validated, resolvedState)
+        : validated;
       const mapped = mapAiResponseToBookingInput({
         businessId: business.id,
         branchId,
         services: services.map((s) => ({ id: s.id, name: s.name })),
-        aiResponse: validated,
+        aiResponse: bookingAiResponse,
       });
       if (mapped.kind === "needs_clarification") {
+        // First-class CLARIFY (PROMPT-AI-ARCH-06 — Slice 4): the booking
+        // missing/ambiguous fact already clarifies and stays AI_ACTIVE (no
+        // handoff). The mapper (the DOMAIN boundary) authors the message; the
+        // engine LABELS it a first-class CLARIFY for observability + state —
+        // the pending missing fact (service / date) is recorded so the next
+        // turn resumes the booking task. No behavior change, no extra model
+        // call, domain authorship preserved.
+        const bookingClarification = clarificationForBookingReason(
+          mapped.reason,
+          mapped.message,
+        );
+        const clarifyObservability: TurnObservability = {
+          ...turnObservability,
+          turnPlan: {
+            steps: [{ kind: "CLARIFY", intent: validated.intent }],
+          },
+          clarification: {
+            type: bookingClarification.type,
+            missingFacts: [...bookingClarification.missingFacts],
+          },
+        };
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -1426,6 +1880,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           assistantProvider: deps.ai.providerName,
+          observability: clarifyObservability,
           delivery,
         };
       }
@@ -1476,6 +1931,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
           assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
           delivery,
         };
       }
@@ -1517,6 +1973,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
           delivery,
         };
       }
@@ -1569,6 +2026,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
           assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
           delivery,
         };
       }
@@ -1607,6 +2065,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
           assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
           delivery,
         };
       }
@@ -1643,6 +2102,7 @@ async function runInboundTurn(
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
         assistantProvider: deps.ai.providerName,
+        observability: turnObservability,
         delivery,
       };
     }
@@ -1661,6 +2121,69 @@ async function runInboundTurn(
       context: { request: aiRequest, facts: builtContext.facts },
     });
     if (disclosure.kind !== "disclosed") {
+      // 9d-pre. INTERRUPTION RECOVERY (PROMPT-AI-ARCH-08). When a refused
+      //     self-authored reply is actually a BENIGN non-task interruption of a
+      //     RESUMABLE booking/domain task (the engine-owned ConversationState
+      //     marked the active task INTERRUPTED this turn), preserving the task
+      //     is strictly better than escalating: the customer paused the booking
+      //     with a social aside («ثواني بس، أنا في مكالمة») and expects to
+      //     continue, not to be handed to a human. The engine drops the unbacked
+      //     reply (disclosure safety is NOT weakened — nothing unjustified is
+      //     emitted) and instead sends the fixed, knowledge-free interruption
+      //     acknowledgment, staying AI_ACTIVE. The pending task survives in
+      //     ConversationState + the authored offer in history, so the next turn
+      //     resumes it deterministically. Scope is deliberately narrow:
+      //       - a sensitive / explicit-human turn never reaches here (it was
+      //         handed off at 9a-pre by the resolver's safety precedence), and
+      //       - a knowledge QUESTION (ending «؟»/"?") stays a NEED_HUMAN
+      //         knowledge gap — only a benign non-question interruption of an
+      //         already-active task is preserved.
+      const resumableInterruption =
+        resolvedState != null &&
+        resolvedState.bookingStage === "INTERRUPTED" &&
+        resolvedState.activeTask != null &&
+        !inbound.text.includes("؟") &&
+        !inbound.text.includes("?");
+      if (resumableInterruption) {
+        const ack = clarificationForInterruption();
+        const preserveObservability: TurnObservability = {
+          ...turnObservability,
+          turnPlan: {
+            steps: [{ kind: "CLARIFY", intent: validated.intent }],
+          },
+          clarification: { type: ack.type },
+        };
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          ack.question,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          ack.question,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: validated.intent,
+          conversationStatus: "AI_ACTIVE",
+          assistantProvider: deps.ai.providerName,
+          observability: preserveObservability,
+          delivery,
+        };
+      }
       // The refused self-authored reply is dropped — B-03 never persists or
       // sends a reply it cannot justify from the disclosure ledger. But the
       // customer is NOT left in silence: the turn delivers the SAME safe,
@@ -1704,6 +2227,7 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         assistantProvider: deps.ai.providerName,
+        observability: turnObservability,
         delivery,
       };
     }
@@ -1777,6 +2301,7 @@ async function runInboundTurn(
       conversationStatus:
         validated.action === "reply" ? "AI_ACTIVE" : "NEED_HUMAN",
       assistantProvider: deps.ai.providerName,
+      observability: turnObservability,
       delivery,
     };
   } catch {

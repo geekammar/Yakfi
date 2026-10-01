@@ -1,0 +1,404 @@
+{
+  "purpose": "Focused real-LLM CLARIFY verification (PROMPT-AI-EVAL-05) — intended focused subset mapping the 14 CLARIFY-boundary categories to EXISTING egyptian-v1 scenarios/cases. SELECTION ONLY — NOT EXECUTED (see STATUS.md blocker).",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "totalCases": 1933,
+  "totalScenarios": 278,
+  "focusedCategories": {
+    "01_genuinely_ambiguous_booking": [
+      {
+        "scenarioId": "am-bare-booking-clarifiable",
+        "present": true,
+        "caseCountInDataset": 12,
+        "sampleCaseIds": [
+          "am-bare-booking-clarifiable::u0",
+          "am-bare-booking-clarifiable::u0_missing_hamza",
+          "am-bare-booking-clarifiable::u0_repeat_letters"
+        ]
+      }
+    ],
+    "02_booking_missing_service": [
+      {
+        "scenarioId": "jt-missing-service",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "jt-missing-service::u0",
+          "jt-missing-service::u1",
+          "jt-missing-service::u2"
+        ]
+      },
+      {
+        "scenarioId": "am-bare-service-clarifiable",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "am-bare-service-clarifiable::u0",
+          "am-bare-service-clarifiable::u1",
+          "am-bare-service-clarifiable::u2"
+        ]
+      }
+    ],
+    "03_booking_missing_date": [
+      {
+        "scenarioId": "jt-missing-date",
+        "present": true,
+        "caseCountInDataset": 7,
+        "sampleCaseIds": [
+          "jt-missing-date::u0",
+          "jt-missing-date::u0_missing_hamza",
+          "jt-missing-date::u1"
+        ]
+      }
+    ],
+    "04_ambiguous_service_discovery": [
+      {
+        "scenarioId": "st-service-discovery",
+        "present": true,
+        "caseCountInDataset": 8,
+        "sampleCaseIds": [
+          "st-service-discovery::u0",
+          "st-service-discovery::u0_drop_punctuation",
+          "st-service-discovery::u1"
+        ]
+      },
+      {
+        "scenarioId": "ex-service-discovery-variants",
+        "present": true,
+        "caseCountInDataset": 11,
+        "sampleCaseIds": [
+          "ex-service-discovery-variants::u0",
+          "ex-service-discovery-variants::u0_missing_hamza",
+          "ex-service-discovery-variants::u0_drop_punctuation"
+        ]
+      }
+    ],
+    "05_ambiguous_but_answerable": [
+      {
+        "scenarioId": "am-vague-time-clarifiable",
+        "present": true,
+        "caseCountInDataset": 8,
+        "sampleCaseIds": [
+          "am-vague-time-clarifiable::u0",
+          "am-vague-time-clarifiable::u0_missing_hamza",
+          "am-vague-time-clarifiable::u1"
+        ]
+      },
+      {
+        "scenarioId": "mt-any-time",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "mt-any-time::u0",
+          "mt-any-time::u0_missing_hamza",
+          "mt-any-time::u1"
+        ]
+      }
+    ],
+    "06_explicit_human_request": [
+      {
+        "scenarioId": "ho-customer-requested-human",
+        "present": true,
+        "caseCountInDataset": 12,
+        "sampleCaseIds": [
+          "ho-customer-requested-human::u0",
+          "ho-customer-requested-human::u0_missing_hamza",
+          "ho-customer-requested-human::u1"
+        ]
+      }
+    ],
+    "07_sensitive_restricted": [
+      {
+        "scenarioId": "ho-sensitive-medical",
+        "present": true,
+        "caseCountInDataset": 14,
+        "sampleCaseIds": [
+          "ho-sensitive-medical::u0",
+          "ho-sensitive-medical::u0_missing_hamza",
+          "ho-sensitive-medical::u0_repeat_letters"
+        ]
+      },
+      {
+        "scenarioId": "ho-sensitive-emotional",
+        "present": true,
+        "caseCountInDataset": 10,
+        "sampleCaseIds": [
+          "ho-sensitive-emotional::u0",
+          "ho-sensitive-emotional::u0_missing_hamza",
+          "ho-sensitive-emotional::u0_drop_punctuation"
+        ]
+      }
+    ],
+    "08_knowledge_gap_handoff": [
+      {
+        "scenarioId": "ho-empty-knowledge-gap",
+        "present": true,
+        "caseCountInDataset": 8,
+        "sampleCaseIds": [
+          "ho-empty-knowledge-gap::u0",
+          "ho-empty-knowledge-gap::u0_missing_hamza",
+          "ho-empty-knowledge-gap::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenarioId": "ho-knowledge-gap-no-channel",
+        "present": true,
+        "caseCountInDataset": 7,
+        "sampleCaseIds": [
+          "ho-knowledge-gap-no-channel::u0",
+          "ho-knowledge-gap-no-channel::u0_drop_punctuation",
+          "ho-knowledge-gap-no-channel::u1"
+        ]
+      },
+      {
+        "scenarioId": "kn-no-faq-empty-kb",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "kn-no-faq-empty-kb::u0",
+          "kn-no-faq-empty-kb::u0_drop_punctuation",
+          "kn-no-faq-empty-kb::u1"
+        ]
+      }
+    ],
+    "09_interruption_after_clarification": [
+      {
+        "scenarioId": "jt-interrupted",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "jt-interrupted::u0",
+          "jt-interrupted::u0_missing_hamza",
+          "jt-interrupted::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenarioId": "mt-topic-return",
+        "present": true,
+        "caseCountInDataset": 3,
+        "sampleCaseIds": [
+          "mt-topic-return::u0",
+          "mt-topic-return::u1",
+          "mt-topic-return::u2"
+        ]
+      }
+    ],
+    "10_clarification_answer_next_turn": [
+      {
+        "scenarioId": "jt-date-supplied",
+        "present": true,
+        "caseCountInDataset": 12,
+        "sampleCaseIds": [
+          "jt-date-supplied::u0",
+          "jt-date-supplied::u1",
+          "jt-date-supplied::u1_spelling_variation"
+        ]
+      },
+      {
+        "scenarioId": "jt-service-supplied",
+        "present": true,
+        "caseCountInDataset": 17,
+        "sampleCaseIds": [
+          "jt-service-supplied::u0",
+          "jt-service-supplied::u0_missing_hamza",
+          "jt-service-supplied::u0_spelling_variation"
+        ]
+      }
+    ],
+    "11_unrelated_topic_then_return": [
+      {
+        "scenarioId": "re-long-context-topic-return",
+        "present": true,
+        "caseCountInDataset": 10,
+        "sampleCaseIds": [
+          "re-long-context-topic-return::u0",
+          "re-long-context-topic-return::u0_drop_punctuation",
+          "re-long-context-topic-return::u1"
+        ]
+      },
+      {
+        "scenarioId": "re-resume-next-day",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "re-resume-next-day::u0",
+          "re-resume-next-day::u0_missing_hamza",
+          "re-resume-next-day::u1"
+        ]
+      }
+    ],
+    "12_egyptian_colloquial_spelling_noise": [
+      {
+        "scenarioId": "lg-arabizi-service-name",
+        "present": true,
+        "caseCountInDataset": 8,
+        "sampleCaseIds": [
+          "lg-arabizi-service-name::u0",
+          "lg-arabizi-service-name::u0_drop_punctuation",
+          "lg-arabizi-service-name::u1"
+        ]
+      },
+      {
+        "scenarioId": "adv-arabizi-service-name",
+        "present": true,
+        "caseCountInDataset": 3,
+        "sampleCaseIds": [
+          "adv-arabizi-service-name::u0",
+          "adv-arabizi-service-name::u1",
+          "adv-arabizi-service-name::u2"
+        ]
+      }
+    ],
+    "13_short_noisy_input": [
+      {
+        "scenarioId": "st-very-short",
+        "present": true,
+        "caseCountInDataset": 4,
+        "sampleCaseIds": [
+          "st-very-short::u0",
+          "st-very-short::u1",
+          "st-very-short::u2"
+        ]
+      },
+      {
+        "scenarioId": "lg-very-short-turn",
+        "present": true,
+        "caseCountInDataset": 5,
+        "sampleCaseIds": [
+          "lg-very-short-turn::u0",
+          "lg-very-short-turn::u1",
+          "lg-very-short-turn::u2"
+        ]
+      },
+      {
+        "scenarioId": "st-ambiguous-oneword",
+        "present": true,
+        "caseCountInDataset": 6,
+        "sampleCaseIds": [
+          "st-ambiguous-oneword::u0",
+          "st-ambiguous-oneword::u1",
+          "st-ambiguous-oneword::u2"
+        ]
+      }
+    ],
+    "14_multiturn_ambiguity_context_resolves": [
+      {
+        "scenarioId": "ho-ambiguous-but-clarifiable-multi-turn",
+        "present": true,
+        "caseCountInDataset": 5,
+        "sampleCaseIds": [
+          "ho-ambiguous-but-clarifiable-multi-turn::u0",
+          "ho-ambiguous-but-clarifiable-multi-turn::u1",
+          "ho-ambiguous-but-clarifiable-multi-turn::u1_missing_hamza"
+        ]
+      },
+      {
+        "scenarioId": "mt-ambiguous-yes",
+        "present": true,
+        "caseCountInDataset": 3,
+        "sampleCaseIds": [
+          "mt-ambiguous-yes::u0",
+          "mt-ambiguous-yes::u1",
+          "mt-ambiguous-yes::u2"
+        ]
+      },
+      {
+        "scenarioId": "jt-revise-date",
+        "present": true,
+        "caseCountInDataset": 14,
+        "sampleCaseIds": [
+          "jt-revise-date::u0",
+          "jt-revise-date::u0_keyboard_mistake",
+          "jt-revise-date::u1"
+        ]
+      }
+    ]
+  },
+  "focusedCaseIdCount": 84,
+  "focusedCaseIds": [
+    "am-bare-booking-clarifiable::u0",
+    "am-bare-booking-clarifiable::u0_missing_hamza",
+    "am-bare-booking-clarifiable::u0_repeat_letters",
+    "jt-missing-service::u0",
+    "jt-missing-service::u1",
+    "jt-missing-service::u2",
+    "am-bare-service-clarifiable::u0",
+    "am-bare-service-clarifiable::u1",
+    "am-bare-service-clarifiable::u2",
+    "jt-missing-date::u0",
+    "jt-missing-date::u0_missing_hamza",
+    "jt-missing-date::u1",
+    "st-service-discovery::u0",
+    "st-service-discovery::u0_drop_punctuation",
+    "st-service-discovery::u1",
+    "ex-service-discovery-variants::u0",
+    "ex-service-discovery-variants::u0_missing_hamza",
+    "ex-service-discovery-variants::u0_drop_punctuation",
+    "am-vague-time-clarifiable::u0",
+    "am-vague-time-clarifiable::u0_missing_hamza",
+    "am-vague-time-clarifiable::u1",
+    "mt-any-time::u0",
+    "mt-any-time::u0_missing_hamza",
+    "mt-any-time::u1",
+    "ho-customer-requested-human::u0",
+    "ho-customer-requested-human::u0_missing_hamza",
+    "ho-customer-requested-human::u1",
+    "ho-sensitive-medical::u0",
+    "ho-sensitive-medical::u0_missing_hamza",
+    "ho-sensitive-medical::u0_repeat_letters",
+    "ho-sensitive-emotional::u0",
+    "ho-sensitive-emotional::u0_missing_hamza",
+    "ho-sensitive-emotional::u0_drop_punctuation",
+    "ho-empty-knowledge-gap::u0",
+    "ho-empty-knowledge-gap::u0_missing_hamza",
+    "ho-empty-knowledge-gap::u0_drop_punctuation",
+    "ho-knowledge-gap-no-channel::u0",
+    "ho-knowledge-gap-no-channel::u0_drop_punctuation",
+    "ho-knowledge-gap-no-channel::u1",
+    "kn-no-faq-empty-kb::u0",
+    "kn-no-faq-empty-kb::u0_drop_punctuation",
+    "kn-no-faq-empty-kb::u1",
+    "jt-interrupted::u0",
+    "jt-interrupted::u0_missing_hamza",
+    "jt-interrupted::u0_drop_punctuation",
+    "mt-topic-return::u0",
+    "mt-topic-return::u1",
+    "mt-topic-return::u2",
+    "jt-date-supplied::u0",
+    "jt-date-supplied::u1",
+    "jt-date-supplied::u1_spelling_variation",
+    "jt-service-supplied::u0",
+    "jt-service-supplied::u0_missing_hamza",
+    "jt-service-supplied::u0_spelling_variation",
+    "re-long-context-topic-return::u0",
+    "re-long-context-topic-return::u0_drop_punctuation",
+    "re-long-context-topic-return::u1",
+    "re-resume-next-day::u0",
+    "re-resume-next-day::u0_missing_hamza",
+    "re-resume-next-day::u1",
+    "lg-arabizi-service-name::u0",
+    "lg-arabizi-service-name::u0_drop_punctuation",
+    "lg-arabizi-service-name::u1",
+    "adv-arabizi-service-name::u0",
+    "adv-arabizi-service-name::u1",
+    "adv-arabizi-service-name::u2",
+    "st-very-short::u0",
+    "st-very-short::u1",
+    "st-very-short::u2",
+    "lg-very-short-turn::u0",
+    "lg-very-short-turn::u1",
+    "lg-very-short-turn::u2",
+    "st-ambiguous-oneword::u0",
+    "st-ambiguous-oneword::u1",
+    "st-ambiguous-oneword::u2",
+    "ho-ambiguous-but-clarifiable-multi-turn::u0",
+    "ho-ambiguous-but-clarifiable-multi-turn::u1",
+    "ho-ambiguous-but-clarifiable-multi-turn::u1_missing_hamza",
+    "mt-ambiguous-yes::u0",
+    "mt-ambiguous-yes::u1",
+    "mt-ambiguous-yes::u2",
+    "jt-revise-date::u0",
+    "jt-revise-date::u0_keyboard_mistake",
+    "jt-revise-date::u1"
+  ]
+}

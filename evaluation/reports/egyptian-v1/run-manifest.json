@@ -1,0 +1,7 @@
+{
+  "datasetVersion": "egyptian-v1",
+  "seed": 20260928,
+  "cases": 945,
+  "subject": "current FlowPilot AI (deterministic classifier + disclosure gate), offline replay",
+  "generatedAt": "2026-09-28T20:34:07.702Z"
+}

@@ -129,9 +129,11 @@ Docs:
 
 - docs/ai/README.md
 - docs/ai/ARCHITECTURE.md
+- docs/ai/TARGET_ARCHITECTURE.md
   Code:
 - src/features/conversations/server/conversation-engine.ts
 - src/features/conversations/server/conversation-ai.ts
+- src/features/conversations/server/ai-observability.ts
 - src/features/conversations/server/ai-context-builder/context-builder.ts
 - src/features/conversations/server/ai-disclosure/disclosure-gate.ts
 - src/server/integrations/ai/factory.ts
@@ -142,6 +144,7 @@ Docs:
 - scripts/check-ai-provider.ts
 - scripts/check-ai-context-builder.ts
 - scripts/check-ai-disclosure.ts
+- scripts/check-ai-architecture.ts
 - scripts/check-conversation-booking.ts
 
 ### booking.appointments

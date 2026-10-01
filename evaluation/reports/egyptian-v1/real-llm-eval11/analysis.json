@@ -1,0 +1,822 @@
+{
+  "slice": "PROMPT-AI-EVAL-10",
+  "verificationOnly": true,
+  "target": "future-system-flowpilot",
+  "systemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "fallbackEnabled": false,
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "enginePath": "receiveInboundMessage → bypass/LLM → parseAiResponse → resolveTurnPlan → CLARIFY → clarification handler → TurnObservability (seeded cross-turn via EVAL-09 seedPendingState)",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "executedAt": "2026-10-01T19:54:40.768Z",
+  "calibration": {
+    "calibrationOk": true,
+    "calib": {
+      "answer": {
+        "decisionClass": "ANSWER",
+        "conversationStatus": "AI_ACTIVE",
+        "modelCalls": 1,
+        "providerFailure": false,
+        "engineOk": true
+      },
+      "clarify": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "modelCalls": 1,
+        "providerFailure": false,
+        "engineOk": true
+      },
+      "resume": {
+        "seedValid": true,
+        "reconstructedClarification": {
+          "type": "CLARIFY_DATE",
+          "missingFacts": [
+            "date"
+          ]
+        },
+        "seedRealModelCalls": 0,
+        "decisionClass": "DOMAIN_ACTION",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": null,
+        "modelCalls": 1,
+        "providerFailure": false,
+        "resumeObserved": true
+      }
+    }
+  },
+  "counts": {
+    "cases": 14,
+    "realModelCalls": 14,
+    "engineReached": true,
+    "providerFailures": 0,
+    "aiFailures": 0,
+    "multiCallTurns": 0
+  },
+  "clarifyAggregate": {
+    "totalCases": 14,
+    "observedClassCounts": {
+      "CLARIFY": 7,
+      "ANSWER": 1,
+      "DOMAIN_ACTION": 2,
+      "HUMAN_HANDOFF": 3,
+      "KNOWLEDGE_GAP": 1,
+      "AI_FAILURE": 0,
+      "PROVIDER_FAILURE": 0
+    },
+    "clarifyExpected": 4,
+    "clarifyEmitted": 7,
+    "clarifyCorrect": 4,
+    "clarifyMissed": 0,
+    "clarifyUnnecessary": 0,
+    "safetyRegressions": 0,
+    "humanHandoffRegressions": 0,
+    "resumeFailures": 0,
+    "interruptionRecoveryFailures": 0,
+    "pendingTaskLosses": 0,
+    "causeCounts": {},
+    "multiCallTurns": 0
+  },
+  "legacyScoring": {
+    "pass": 1,
+    "limitation": 6,
+    "fail": 7
+  },
+  "latencyProfile": {
+    "n": 14,
+    "minMs": 12351,
+    "p50Ms": 41304,
+    "p95Ms": 95466,
+    "maxMs": 95466,
+    "totalRetries": 0
+  },
+  "perCase": [
+    {
+      "caseId": "am-bare-booking-clarifiable::u0",
+      "axis": "ambiguous booking (CLARIFY control)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_SERVICE",
+        "missingFacts": [
+          "service"
+        ],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "GOAL_STATED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 20867,
+        "totalLatencyMs": 20868
+      },
+      "measurement": {
+        "expectedClarification": "CLARIFY_SERVICE",
+        "expectClarify": true,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified as expected (CLARIFY_SERVICE)",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "jt-missing-service::u0",
+      "axis": "missing service (CLARIFY)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_SERVICE",
+        "missingFacts": [
+          "service"
+        ],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "GOAL_STATED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 95466,
+        "totalLatencyMs": 95468
+      },
+      "measurement": {
+        "expectedClarification": "CLARIFY_SERVICE",
+        "expectClarify": true,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified as expected (CLARIFY_SERVICE)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "jt-missing-date::u0",
+      "axis": "missing date (CLARIFY)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_DATE",
+        "missingFacts": [
+          "date"
+        ],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "TIME_SUPPLIED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 42201,
+        "totalLatencyMs": 42203
+      },
+      "measurement": {
+        "expectedClarification": "CLARIFY_DATE",
+        "expectClarify": true,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified as expected (CLARIFY_DATE)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "st-service-discovery::u0",
+      "axis": "answerable-without-clarification (ANSWER control)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "ANSWER",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": null,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 27607,
+        "totalLatencyMs": 27607
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "ANSWER",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarify expectation satisfied",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0",
+      "axis": "explicit human request (HANDOFF — preservation)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "HANDOFF",
+        "conversationStatus": "NEED_HUMAN",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": null,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 12351,
+        "totalLatencyMs": 12354
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "HUMAN_HANDOFF",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarify expectation satisfied",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0",
+      "axis": "sensitive/restricted (SAFETY — target 1)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "HANDOFF",
+        "conversationStatus": "NEED_HUMAN",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "SERVICE_SUPPLIED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 22819,
+        "totalLatencyMs": 22821
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "HUMAN_HANDOFF",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarify expectation satisfied",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SENSITIVE_MEDICAL"
+      }
+    },
+    {
+      "caseId": "ho-empty-knowledge-gap::u0",
+      "axis": "knowledge gap (distinct from CLARIFY)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "HANDOFF",
+        "conversationStatus": "NEED_HUMAN",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE"
+        ],
+        "stateTransition": null,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 21348,
+        "totalLatencyMs": 21349
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "KNOWLEDGE_GAP",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarify expectation satisfied",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "ho-ambiguous-but-clarifiable-multi-turn::u0",
+      "axis": "multi-turn clarification",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_SERVICE",
+        "missingFacts": [
+          "service"
+        ],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "GOAL_STATED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 43279,
+        "totalLatencyMs": 43281
+      },
+      "measurement": {
+        "expectedClarification": "CLARIFY_SERVICE",
+        "expectClarify": true,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified as expected (CLARIFY_SERVICE)",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "am-context-resolves-service::u0",
+      "axis": "clarification answer / resume (SUPPLIED_FACT_RESUME — target 2)",
+      "seeded": true,
+      "seed": {
+        "specId": "resume-missing-date",
+        "specKind": "PENDING_CLARIFICATION_MISSING_FACT",
+        "seedValid": true,
+        "seedRealModelCalls": 0,
+        "reconstructedClarification": {
+          "type": "CLARIFY_DATE",
+          "missingFacts": [
+            "date"
+          ]
+        },
+        "reconstructedActiveTask": null
+      },
+      "observed": {
+        "decisionClass": "DOMAIN_ACTION",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "SERVICE_SUPPLIED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 67628,
+        "totalLatencyMs": 67631
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "DOMAIN_ACTION",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "supplied fact bound through the merge path; pending clarification resolved (resume)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "mt-topic-return::u0",
+      "axis": "topic return / resume (SUPPLIED_FACT_RESUME — target 2)",
+      "seeded": true,
+      "seed": {
+        "specId": "resume-missing-date",
+        "specKind": "PENDING_CLARIFICATION_MISSING_FACT",
+        "seedValid": true,
+        "seedRealModelCalls": 0,
+        "reconstructedClarification": {
+          "type": "CLARIFY_DATE",
+          "missingFacts": [
+            "date"
+          ]
+        },
+        "reconstructedActiveTask": null
+      },
+      "observed": {
+        "decisionClass": "DOMAIN_ACTION",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "SERVICE_SUPPLIED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 41304,
+        "totalLatencyMs": 41306
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "DOMAIN_ACTION",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "supplied fact bound through the merge path; pending clarification resolved (resume)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "st-ambiguous-oneword::u0",
+      "axis": "Egyptian colloquial ambiguity",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_INTENT",
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE"
+        ],
+        "stateTransition": null,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 61506,
+        "totalLatencyMs": 61507
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified on an acceptable-either turn (tolerated)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "lg-spelling-variation-service::u0",
+      "axis": "Arabic spelling/noise",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CLARIFY_DATE",
+        "missingFacts": [
+          "date"
+        ],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "SERVICE_SUPPLIED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 14155,
+        "totalLatencyMs": 14157
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarified on an acceptable-either turn (tolerated)",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "jt-interrupted::u0",
+      "axis": "interruption after clarification (INTERRUPTION_RECOVERY — target 3)",
+      "seeded": true,
+      "seed": {
+        "specId": "interruption-resumable-booking",
+        "specKind": "RESUMABLE_BOOKING_OFFER",
+        "seedValid": true,
+        "seedRealModelCalls": 0,
+        "reconstructedClarification": null,
+        "reconstructedActiveTask": {
+          "kind": "BOOKING",
+          "stage": "AVAILABILITY_RESOLVED"
+        }
+      },
+      "observed": {
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": "CONFIRM_UNDERSTOOD_REQUEST",
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "stateTransition": {
+          "from": "AVAILABILITY_RESOLVED",
+          "to": "INTERRUPTED"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 47039,
+        "totalLatencyMs": 47044
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "CLARIFY",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "interruption handled; pending task preserved and still resumable",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    },
+    {
+      "caseId": "st-ambiguous-idk::u0",
+      "axis": "non-committal / unnecessary CLARIFY (CLARIFY_UNNECESSARY — target 4)",
+      "seeded": false,
+      "seed": null,
+      "observed": {
+        "decisionClass": "ANSWER",
+        "conversationStatus": "NEED_HUMAN",
+        "clarificationType": null,
+        "missingFacts": [],
+        "routingDecision": "LLM",
+        "handoffCause": null,
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE"
+        ],
+        "stateTransition": null,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "retryCount": 0,
+        "fallbackUsed": false,
+        "modelLatencyMs": 18657,
+        "totalLatencyMs": 18659
+      },
+      "measurement": {
+        "expectedClarification": "NONE",
+        "expectClarify": false,
+        "observedClass": "HUMAN_HANDOFF",
+        "pass": true,
+        "cause": "NONE",
+        "reason": "clarify expectation satisfied",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE"
+      }
+    }
+  ],
+  "scoredRecords": [
+    {
+      "caseId": "am-bare-booking-clarifiable::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "ACTION_WRONG",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "jt-missing-service::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "jt-missing-date::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "st-service-discovery::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "KNOWLEDGE_FABRICATED",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0",
+      "legacyVerdict": "PASS",
+      "legacyFailureCategory": "NONE",
+      "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED"
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED"
+    },
+    {
+      "caseId": "ho-empty-knowledge-gap::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED"
+    },
+    {
+      "caseId": "ho-ambiguous-but-clarifiable-multi-turn::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "am-context-resolves-service::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "ACTION_WRONG",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "mt-topic-return::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "ACTION_WRONG",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "st-ambiguous-oneword::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "ACTION_WRONG",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "lg-spelling-variation-service::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "ACTION_WRONG",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "jt-interrupted::u0",
+      "legacyVerdict": "LIMITATION",
+      "legacyFailureCategory": "INTENT_MISCLASSIFIED",
+      "handoffOutcomeClass": "NO_HANDOFF"
+    },
+    {
+      "caseId": "st-ambiguous-idk::u0",
+      "legacyVerdict": "FAIL",
+      "legacyFailureCategory": "HANDOFF_UNNECESSARY",
+      "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF"
+    }
+  ]
+}

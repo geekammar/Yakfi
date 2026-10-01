@@ -1,0 +1,76 @@
+{
+  "runId": "7e2b10ac75f9db78",
+  "target": "future-system-flowpilot",
+  "systemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "SINGLE_CASE",
+  "enginePath": "receiveInboundMessage → bypass/LLM → parseAiResponse → resolveTurnPlan → CLARIFY → clarification handler → TurnObservability",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "caseAxes": {
+    "am-bare-booking-clarifiable::u0": "ambiguous booking",
+    "jt-missing-service::u0": "missing service",
+    "jt-missing-date::u0": "missing date",
+    "st-service-discovery::u0": "answerable-without-clarification",
+    "ho-customer-requested-human::u0": "explicit human request",
+    "ho-sensitive-medical::u0": "sensitive/restricted",
+    "ho-empty-knowledge-gap::u0": "knowledge gap",
+    "ho-ambiguous-but-clarifiable-multi-turn::u0": "multi-turn clarification",
+    "am-context-resolves-service::u0": "clarification answer / resume",
+    "mt-topic-return::u0": "topic return",
+    "st-ambiguous-oneword::u0": "Egyptian colloquial ambiguity",
+    "lg-spelling-variation-service::u0": "Arabic spelling/noise",
+    "jt-interrupted::u0": "interruption after clarification",
+    "st-ambiguous-idk::u0": "clarifiable ambiguity"
+  },
+  "clarifyAggregate": {
+    "totalCases": 1,
+    "observedClassCounts": {
+      "CLARIFY": 1,
+      "ANSWER": 0,
+      "DOMAIN_ACTION": 0,
+      "HUMAN_HANDOFF": 0,
+      "KNOWLEDGE_GAP": 0,
+      "AI_FAILURE": 0,
+      "PROVIDER_FAILURE": 0
+    },
+    "clarifyExpected": 1,
+    "clarifyEmitted": 1,
+    "clarifyCorrect": 1,
+    "clarifyMissed": 0,
+    "clarifyUnnecessary": 0,
+    "causeCounts": {},
+    "multiCallTurns": 0
+  },
+  "perCase": [
+    {
+      "caseId": "jt-missing-date::u0",
+      "scenarioId": "jt-missing-date",
+      "expectedClarification": "CLARIFY_DATE",
+      "expectClarify": true,
+      "observedClass": "CLARIFY",
+      "clarifyEmitted": true,
+      "clarificationType": "CLARIFY_DATE",
+      "missingFacts": [
+        "date"
+      ],
+      "exactlyOne": true,
+      "bounded": true,
+      "modelCalls": 1,
+      "handoffExpectation": "ACCEPTABLE_EITHER",
+      "safetyExpectation": "SAFE",
+      "pass": true,
+      "cause": "NONE",
+      "reason": "clarified as expected (CLARIFY_DATE)"
+    }
+  ],
+  "modelCallAccounting": {
+    "maxModelCallsObservedPerTurn": 1,
+    "multiCallTurns": 0,
+    "invariantHeld": true
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "runId": "ad531b3c0adbd922",
+  "slice": "PROMPT-AI-EVAL-05",
+  "title": "Focused Real-LLM CLARIFY Verification — Post Slice 4",
+  "executedAt": "2026-10-01T13:18:06.569Z",
+  "executionMode": "NOT_EXECUTED_BLOCKED",
+  "decision": "BLOCKED",
+  "dataset": {
+    "version": "egyptian-v1",
+    "hash": "8be16297ae4717bab5da4f3c94de1887",
+    "cases": 1933,
+    "scenarios": 278,
+    "mutated": false
+  },
+  "target": {
+    "id": "real-llm-flowpilot",
+    "kind": "CURRENT_SYSTEM",
+    "file": "evaluation/runner/targets/real-llm-flowpilot.ts",
+    "runnerCli": "pnpm eval:run-real",
+    "adapter": "evaluation/runner/real-llm-adapter.ts"
+  },
+  "providerPolicy": {
+    "resolvedFrom": "live DB-backed PlatformAiPolicy via getEffectiveAiPolicy()",
+    "overrideUsed": false,
+    "keysPresentByName": [
+      "OPENROUTER_API_KEY",
+      "AGENTROUTER_API_KEY",
+      "ATRIA_API_KEY",
+      "CODECRAFT_API_KEY"
+    ],
+    "note": "Provider/model identity NOT resolved live in this run — no inference was performed because the harness does not exercise the code under test (see blocker)."
+  },
+  "scoring": {
+    "engine": "EVAL-03 (unchanged)",
+    "versionsSource": "evaluation/runner/versions.ts",
+    "newScorer": false
+  },
+  "blocker": {
+    "code": "HARNESS_DOES_NOT_EXERCISE_CODE_UNDER_TEST",
+    "summary": "The existing real-LLM evaluation path (real-llm-adapter.ts -> RealLlmFlowpilotTarget) wires only [bypassDeterministicAi -> policy-backed LLM respond -> enforceDisclosure]. It does NOT invoke the Slice 4 CLARIFY integration point (resolveTurnPlan in turn-planner.ts / planClarification in clarification.ts), which lives ONLY in conversation-engine.ts (sections 9a-bis and 9b). Therefore the real-LLM eval cannot reach, observe, or score first-class CLARIFY.",
+    "evidence": [
+      "evaluation/runner/real-llm-adapter.ts imports: buildAiContext, enforceDisclosure, bypassDeterministicAi, createLlmConversationAi, adaptersFromEffectivePolicy — NO turn-planner, NO clarification handler.",
+      "evaluation/runner/real-llm-adapter.ts runTurn(): bypass -> llm.respond(request) -> enforceDisclosure(); returns before any resolver.",
+      "evaluation/runner/targets/real-llm-flowpilot.ts sets clarification: response.clarification (LLM-produced, absent — prompts unchanged in Slice 4), not a resolver output.",
+      "src/features/conversations/server/conversation-engine.ts:1612-1648 emits first-class CLARIFY; this file is NOT imported by the eval runner.",
+      "evaluation/runner/metrics.ts:182 comment: \"clarification (future axis: current arch cannot CLARIFY)\" — clarificationAccuracy keys off PASS/LIMITATION verdicts, not CLARIFY emission."
+    ]
+  },
+  "harnessValidity": {
+    "deterministicChecksGreen": {
+      "check:clarify": "18/18",
+      "check:turn-planner": "22/22",
+      "check:eval-runner": "18/18"
+    },
+    "note": "Slice 4 code is correct in isolation and under the ENGINE with the deterministic driver; the gap is solely that the real-LLM eval target does not route through the engine/resolver."
+  },
+  "productionMutation": "NONE (no DB writes, no appointment writes, no state persistence, no provider/tenant config change)",
+  "modelCalls": 0,
+  "artifacts": [
+    "manifest.json",
+    "STATUS.md",
+    "case-selection.json"
+  ]
+}

@@ -5,3 +5,7 @@ src/generated
 prompts
 pnpm-lock.yaml
 next-env.d.ts
+# generated evaluation artifacts (datasets + reports) are emitted by the
+# eval tooling, not hand-edited — same rule as src/generated
+evaluation/datasets/*/*.dataset.json
+evaluation/reports

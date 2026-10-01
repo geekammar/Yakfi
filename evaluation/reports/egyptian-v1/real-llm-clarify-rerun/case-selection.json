@@ -1,0 +1,44 @@
+{
+  "purpose": "Real-LLM re-verification after Slice 4 remediation (PROMPT-AI-EVAL-08). REUSES the EXACT focused EVAL-07 case IDs (run 7e2b10ac75f9db78, manifest.selectedCaseIds) covering the five ARCH-07 remediation targets + required axes. SELECTION ONLY — the canonical dataset is NEVER modified. No case was silently excluded.",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "totalCasesInDataset": 1933,
+  "totalScenariosInDataset": 278,
+  "reusedFrom": "evaluation/reports/egyptian-v1/future-system-clarify/manifest.json (EVAL-07, run 7e2b10ac75f9db78) — identical selectedCaseIds; also the CLI FOCUS_CASE_IDS in scripts/eval-run-future.ts",
+  "selectionMode": "FOCUSED_CLARIFY (14 cases / 24 turns)",
+  "calibration": {
+    "mode": "CALIBRATION_ONLY (2 cases)",
+    "caseIds": [
+      "st-service-discovery::u0",
+      "am-bare-booking-clarifiable::u0"
+    ],
+    "note": "One known non-CLARIFY (answerable) + one known CLARIFY-oriented case. Executed first; passed the harness-readiness gate before the focused set ran.",
+    "artifacts": "calibration/"
+  },
+  "focusedCaseIds": [
+    { "caseId": "am-bare-booking-clarifiable::u0", "axis": "ambiguous booking (CLARIFY control)" },
+    { "caseId": "jt-missing-service::u0", "axis": "missing service (CLARIFY)" },
+    { "caseId": "jt-missing-date::u0", "axis": "missing date (CLARIFY)" },
+    { "caseId": "st-service-discovery::u0", "axis": "answerable-without-clarification (ANSWER control)" },
+    { "caseId": "ho-customer-requested-human::u0", "axis": "explicit human request (HANDOFF — preservation)" },
+    { "caseId": "ho-sensitive-medical::u0", "axis": "sensitive/restricted (SAFETY — target 1)" },
+    { "caseId": "ho-empty-knowledge-gap::u0", "axis": "knowledge gap (distinct from CLARIFY)" },
+    { "caseId": "ho-ambiguous-but-clarifiable-multi-turn::u0", "axis": "multi-turn clarification" },
+    { "caseId": "am-context-resolves-service::u0", "axis": "clarification answer / resume (SUPPLIED_FACT_RESUME — target 2)" },
+    { "caseId": "mt-topic-return::u0", "axis": "topic return / resume (SUPPLIED_FACT_RESUME — target 2)" },
+    { "caseId": "st-ambiguous-oneword::u0", "axis": "Egyptian colloquial ambiguity" },
+    { "caseId": "lg-spelling-variation-service::u0", "axis": "Arabic spelling/noise" },
+    { "caseId": "jt-interrupted::u0", "axis": "interruption after clarification (INTERRUPTION_RECOVERY — target 3)" },
+    { "caseId": "st-ambiguous-idk::u0", "axis": "non-committal / unnecessary CLARIFY (CLARIFY_UNNECESSARY — target 4)" }
+  ],
+  "remediationTargetToCases": {
+    "1_SAFETY_REGRESSION": ["ho-sensitive-medical::u0", "ho-customer-requested-human::u0"],
+    "2_SUPPLIED_FACT_RESUME": ["am-context-resolves-service::u0", "mt-topic-return::u0"],
+    "3_INTERRUPTION_RECOVERY_PENDING_TASK_LOST": ["jt-interrupted::u0"],
+    "4_CLARIFY_UNNECESSARY": ["st-ambiguous-idk::u0"],
+    "5_CLARIFY_MEASUREMENT_INTEGRITY": ["ho-sensitive-medical::u0"],
+    "control_normal_answer": ["st-service-discovery::u0"],
+    "control_knowledge_gap_separation": ["ho-empty-knowledge-gap::u0"]
+  },
+  "focusedCaseIdCount": 14
+}

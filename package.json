@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.31.8",
+  "version": "0.32.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -14,6 +14,7 @@
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",
     "check:ai-context-builder": "tsx scripts/check-ai-context-builder.ts",
     "check:ai-disclosure": "tsx scripts/check-ai-disclosure.ts",
+    "check:ai-architecture": "tsx scripts/check-ai-architecture.ts",
     "check:greeting": "tsx scripts/check-greeting.ts",
     "check:assistant-style": "tsx scripts/check-assistant-style.ts",
     "check:eligibility": "tsx scripts/check-provider-eligibility.ts",
@@ -37,6 +38,9 @@
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",
+    "check:conversation-state": "tsx scripts/check-conversation-state.ts",
+    "check:turn-planner": "tsx scripts/check-turn-planner.ts",
+    "check:clarify": "tsx scripts/check-clarify.ts",
     "check:booking-confirm": "tsx scripts/check-booking-confirm.ts",
     "check:appointment-creation": "tsx scripts/check-appointment-creation.ts",
     "check:reschedule": "tsx scripts/check-reschedule.ts",
@@ -74,7 +78,18 @@
     "icons": "node scripts/generate-pwa-icons.mjs",
     "context": "node scripts/context.mjs",
     "context:check": "node scripts/context-check.mjs",
-    "check:context": "node scripts/check-context.mjs"
+    "check:context": "node scripts/check-context.mjs",
+    "eval:generate": "tsx scripts/eval-generate.ts",
+    "eval:baseline": "tsx scripts/eval-baseline.ts",
+    "eval:run": "tsx scripts/eval-run.ts",
+    "eval:run-real": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-real.ts",
+    "check:eval": "tsx scripts/check-eval.ts",
+    "check:eval-runner": "tsx scripts/check-eval-runner.ts",
+    "check:future-system": "tsx scripts/check-future-system.ts",
+    "eval:run-future": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future.ts",
+    "eval:run-future-fixtures": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-fixtures.ts",
+    "check:eval-schema": "tsx scripts/check-eval-schema.ts",
+    "eval:coverage": "tsx scripts/eval-coverage.ts"
   },
   "engines": {
     "node": ">=20.9.0"

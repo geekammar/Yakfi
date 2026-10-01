@@ -1,0 +1,66 @@
+{
+  "slice": "PROMPT-AI-EVAL-09",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "totalRealModelCalls": 3,
+  "multiCallTurn": false,
+  "anyProviderFailure": false,
+  "fixtures": {
+    "normalAnswer": {
+      "caseId": "fx-normal",
+      "engineOk": true,
+      "decisionClass": "ANSWER",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "DETERMINISTIC_BYPASS",
+      "modelCallsThisTurn": 0,
+      "expectedTransitionObserved": true
+    },
+    "suppliedFactResume": {
+      "caseId": "fx-resume",
+      "seed": {
+        "specId": "resume-missing-date",
+        "seedValid": true,
+        "reconstructedClarification": {
+          "type": "CLARIFY_DATE",
+          "missingFacts": [
+            "date"
+          ]
+        },
+        "seedRealModelCalls": 0
+      },
+      "observed": {
+        "decisionClass": "DOMAIN_ACTION",
+        "conversationStatus": "AI_ACTIVE",
+        "clarificationType": null,
+        "modelCallsThisTurn": 1
+      },
+      "expectedTransitionObserved": true
+    },
+    "interruptionRecovery": {
+      "caseId": "fx-interrupt",
+      "seed": {
+        "specId": "interruption-resumable-booking",
+        "seedValid": true,
+        "reconstructedActiveTask": {
+          "kind": "BOOKING",
+          "stage": "AVAILABILITY_RESOLVED"
+        },
+        "seedRealModelCalls": 0
+      },
+      "interruptionTurn": {
+        "decisionClass": "ANSWER",
+        "conversationStatus": "AI_ACTIVE",
+        "modelCallsThisTurn": 1,
+        "pendingTaskPreserved": true
+      },
+      "returnTurn": {
+        "decisionClass": "DOMAIN_ACTION",
+        "conversationStatus": "AI_ACTIVE",
+        "modelCallsThisTurn": 1,
+        "resumed": true
+      },
+      "expectedTransitionObserved": true
+    }
+  }
+}

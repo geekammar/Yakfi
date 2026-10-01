@@ -1,0 +1,80 @@
+{
+  "runId": "7e2b10ac75f9db78",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "scenarioVersion": "egyptian-v1",
+  "seed": 20260928,
+  "targetId": "future-system-flowpilot",
+  "systemIdentity": {
+    "kind": "FUTURE_SYSTEM",
+    "modelProvider": "atria/Atria-Dawn-Preview",
+    "routerVersion": "conversation-engine+turn-planner(Slice3)+clarify(Slice4)",
+    "contextBuilderVersion": "ai-context-builder(B-02)",
+    "note": "FUTURE_SYSTEM bridge (eval-only): real LLM → Conversation Engine → ConversationState → resolveTurnPlan() → CLARIFY → clarification handler → TurnObservability. No production mutation."
+  },
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "DATASET",
+  "filter": {},
+  "executedAt": "2026-10-01T15:02:06.569Z",
+  "totalCases": 14,
+  "totalTurns": 24,
+  "slice": "PROMPT-AI-EVAL-07",
+  "title": "Focused Real-LLM CLARIFY Verification — through FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "providerOverride": {
+    "used": true,
+    "flags": "--provider atria --model Atria-Dawn-Preview --timeout-ms 45000",
+    "note": "Evaluation-only provider seam. DB-backed PlatformAiPolicy NOT read and NOT changed. Keys resolved by name only (ATRIA_API_KEY present)."
+  },
+  "selectedCaseIds": [
+    "am-bare-booking-clarifiable::u0",
+    "jt-missing-service::u0",
+    "jt-missing-date::u0",
+    "st-service-discovery::u0",
+    "ho-customer-requested-human::u0",
+    "ho-sensitive-medical::u0",
+    "ho-empty-knowledge-gap::u0",
+    "ho-ambiguous-but-clarifiable-multi-turn::u0",
+    "am-context-resolves-service::u0",
+    "mt-topic-return::u0",
+    "st-ambiguous-oneword::u0",
+    "lg-spelling-variation-service::u0",
+    "jt-interrupted::u0",
+    "st-ambiguous-idk::u0"
+  ],
+  "modelCallAccounting": {
+    "maxModelCallsObservedPerTurn": 1,
+    "multiCallTurns": 0,
+    "invariantHeld": true,
+    "hiddenSecondInference": false
+  },
+  "runtime": {
+    "providerTimeouts": 4,
+    "timeoutCaseIds": [
+      "jt-missing-service::u0",
+      "jt-missing-date::u0",
+      "ho-sensitive-medical::u0",
+      "am-context-resolves-service::u0"
+    ],
+    "perAttemptTimeoutMs": 45000,
+    "boundedRetryAttempts": 2,
+    "timedOutTurnLatencyMs": 90009,
+    "note": "4/24 batch turns timed out at 45s x 2 under concurrent batch load (reproduces TARGET_ARCHITECTURE finding #7: Atria p50 ~30s). Re-run per-case at 120s executed cleanly; retries recorded under retries/."
+  },
+  "retries": {
+    "performed": true,
+    "reason": "Transient provider TIMEOUT (runtime, not model behavior). Re-ran the 4 timed-out cases + jt-interrupted at --timeout-ms 120000 to obtain the authoritative model behavior.",
+    "retriedCaseIds": [
+      "jt-missing-service::u0",
+      "jt-missing-date::u0",
+      "ho-sensitive-medical::u0",
+      "am-context-resolves-service::u0",
+      "jt-interrupted::u0"
+    ],
+    "artifacts": "retries/*.analysis.json"
+  },
+  "decision": "CLARIFY_BLOCKED",
+  "productionMutation": "NONE (isolated in-memory repositories; no DB/appointment/provider/tenant/prompt/schema change)"
+}

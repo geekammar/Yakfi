@@ -1,0 +1,35 @@
+{
+  "calibrationOk": true,
+  "calib": {
+    "answer": {
+      "decisionClass": "ANSWER",
+      "conversationStatus": "AI_ACTIVE",
+      "modelCalls": 1,
+      "providerFailure": false,
+      "engineOk": true
+    },
+    "clarify": {
+      "decisionClass": "CLARIFY",
+      "conversationStatus": "AI_ACTIVE",
+      "modelCalls": 1,
+      "providerFailure": false,
+      "engineOk": true
+    },
+    "resume": {
+      "seedValid": true,
+      "reconstructedClarification": {
+        "type": "CLARIFY_DATE",
+        "missingFacts": [
+          "date"
+        ]
+      },
+      "seedRealModelCalls": 0,
+      "decisionClass": "DOMAIN_ACTION",
+      "conversationStatus": "AI_ACTIVE",
+      "clarificationType": null,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "resumeObserved": true
+    }
+  }
+}

@@ -1,0 +1,1370 @@
+{
+  "datasetVersion": "egyptian-v1",
+  "totalCases": 1933,
+  "perDimension": {
+    "intent": {
+      "dimension": "intent",
+      "purpose": "What the customer wants — the goal space the assistant reads.",
+      "multiLabel": false,
+      "populatedMembers": 20,
+      "totalMembers": 20,
+      "members": [
+        {
+          "dimension": "intent",
+          "member": "GREETING",
+          "count": 49,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "FAQ",
+          "count": 166,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-insurance-exact::u0",
+            "st-faq-insurance-exact::u0_missing_hamza",
+            "st-faq-insurance-exact::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "BOOKING",
+          "count": 567,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-booking-basic::u0",
+            "st-booking-basic::u0_missing_hamza",
+            "st-booking-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "AVAILABILITY",
+          "count": 105,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-availability-basic::u0",
+            "st-availability-basic::u0_missing_hamza",
+            "st-availability-basic::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "RESCHEDULE",
+          "count": 48,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-reschedule-basic::u0",
+            "st-reschedule-basic::u0_missing_hamza",
+            "st-reschedule-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "CANCELLATION",
+          "count": 47,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-cancellation-basic::u0",
+            "st-cancellation-basic::u0_missing_hamza",
+            "st-cancellation-basic::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "HUMAN_REQUEST",
+          "count": 162,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-human-explicit::u0",
+            "st-human-explicit::u0_missing_hamza",
+            "st-human-explicit::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "AMBIGUOUS",
+          "count": 127,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-ambiguous-idk::u0",
+            "st-ambiguous-idk::u1",
+            "st-ambiguous-idk::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "SERVICE_DISCOVERY",
+          "count": 124,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-service-discovery::u0",
+            "st-service-discovery::u0_drop_punctuation",
+            "st-service-discovery::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "SERVICE_INFO",
+          "count": 82,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-orthodontics-kids-paraphrase::u0",
+            "st-faq-orthodontics-kids-paraphrase::u1",
+            "st-faq-no-match-empty-kb::u0"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "SERVICE_PRICE",
+          "count": 76,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-service-price::u0",
+            "st-service-price::u0_missing_hamza",
+            "st-service-price::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "BUSINESS_INFO",
+          "count": 14,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-business-info::u0",
+            "st-business-info::u1",
+            "st-business-info::u2"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "LOCATION",
+          "count": 26,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-location::u0",
+            "st-location::u0_drop_punctuation",
+            "st-location::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "HOURS",
+          "count": 51,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-hours-exact::u0",
+            "st-faq-hours-exact::u0_drop_punctuation",
+            "st-faq-hours-exact::u0_typo"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "CONFIRMATION",
+          "count": 33,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-bare-affirmation::u0",
+            "st-bare-affirmation::u1",
+            "st-bare-affirmation::u2"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "FOLLOW_UP",
+          "count": 64,
+          "populated": true,
+          "exampleCaseIds": [
+            "ex-booking-status-ask::u0",
+            "ex-booking-status-ask::u1",
+            "ex-booking-status-ask::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "MULTI_INTENT",
+          "count": 40,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-multi-question-one-turn::u0",
+            "mt-multi-question-one-turn::u0_missing_hamza",
+            "mt-multi-question-one-turn::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "TOPIC_SWITCH",
+          "count": 35,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-topic-switch-booking-to-hours::u0",
+            "mt-topic-switch-booking-to-hours::u0_drop_punctuation",
+            "mt-topic-switch-booking-to-hours::u1"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "KNOWLEDGE_GAP",
+          "count": 19,
+          "populated": true,
+          "exampleCaseIds": [
+            "ex-faq-sparse-tenant::u0",
+            "ex-faq-sparse-tenant::u1",
+            "ex-no-knowledge-variants::u0"
+          ]
+        },
+        {
+          "dimension": "intent",
+          "member": "CLARIFICATION_REQUIRED",
+          "count": 98,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-ambiguous-oneword::u0",
+            "st-ambiguous-oneword::u1",
+            "st-ambiguous-oneword::u2"
+          ]
+        }
+      ]
+    },
+    "language": {
+      "dimension": "language",
+      "purpose": "Egyptian language variation — the surface form must not change the label.",
+      "multiLabel": false,
+      "populatedMembers": 7,
+      "totalMembers": 7,
+      "members": [
+        {
+          "dimension": "language",
+          "member": "EGYPTIAN_COLLOQUIAL",
+          "count": 1706,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "EGYPTIAN_FORMALISH",
+          "count": 19,
+          "populated": true,
+          "exampleCaseIds": [
+            "lb-faq-egy-formalish::u0",
+            "lb-faq-egy-formalish::u0_missing_hamza",
+            "lb-faq-egy-formalish::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "MSA",
+          "count": 63,
+          "populated": true,
+          "exampleCaseIds": [
+            "lb-booking-msa::u0",
+            "lb-booking-msa::u0_missing_hamza",
+            "lb-booking-msa::u1"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "MIXED_EGY_MSA",
+          "count": 23,
+          "populated": true,
+          "exampleCaseIds": [
+            "lb-booking-mixed::u0",
+            "lb-booking-mixed::u0_missing_hamza",
+            "lb-booking-mixed::u1"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "ARABIZI",
+          "count": 58,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-booking-basic::u0_arabizi",
+            "st-booking-basic::u1_arabizi",
+            "st-service-price::u0_arabizi"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "ARABIC_ENGLISH",
+          "count": 32,
+          "populated": true,
+          "exampleCaseIds": [
+            "lb-abbreviated::u0",
+            "ex-greeting-variants::u0",
+            "ex-greeting-variants::u0_repeat_letters"
+          ]
+        },
+        {
+          "dimension": "language",
+          "member": "ENGLISH",
+          "count": 32,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-booking-english::u0",
+            "st-booking-english::u1",
+            "st-booking-english::u2"
+          ]
+        }
+      ]
+    },
+    "customer-behavior": {
+      "dimension": "customer-behavior",
+      "purpose": "HOW the customer behaves — vague, corrective, hurried, changing their mind.",
+      "multiLabel": true,
+      "populatedMembers": 18,
+      "totalMembers": 18,
+      "members": [
+        {
+          "dimension": "customer-behavior",
+          "member": "CLEAR",
+          "count": 555,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-discovery::u0",
+            "mi-booking-plus-discovery::u0_missing_hamza",
+            "mi-booking-plus-discovery::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "VAGUE",
+          "count": 117,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-missing-date::u0",
+            "jt-missing-date::u0_missing_hamza",
+            "jt-missing-date::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "HESITANT",
+          "count": 111,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-discovery-price-booking::u0",
+            "mi-discovery-price-booking::u0_missing_hamza",
+            "mi-discovery-price-booking::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "HURRIED",
+          "count": 225,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-human-plus-knowledge::u0",
+            "mi-human-plus-knowledge::u0_drop_punctuation",
+            "mi-human-plus-knowledge::u0_keyboard_mistake"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "REPETITIVE",
+          "count": 62,
+          "populated": true,
+          "exampleCaseIds": [
+            "kn-gap-recurrence::u0",
+            "kn-gap-recurrence::u0_drop_punctuation",
+            "kn-gap-recurrence::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CORRECTIVE",
+          "count": 53,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-revise-date::u0",
+            "jt-revise-date::u0_keyboard_mistake",
+            "jt-revise-date::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CONTRADICTORY",
+          "count": 25,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-aborted::u0",
+            "jt-aborted::u1",
+            "jt-aborted::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "EMOTIONAL",
+          "count": 43,
+          "populated": true,
+          "exampleCaseIds": [
+            "ho-sensitive-medical::u0",
+            "ho-sensitive-medical::u0_missing_hamza",
+            "ho-sensitive-medical::u0_repeat_letters"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "POLITE",
+          "count": 148,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-hours::u0",
+            "mi-booking-plus-hours::u0_missing_hamza",
+            "mi-booking-plus-hours::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CURIOUS",
+          "count": 325,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-discovery::u0",
+            "mi-booking-plus-discovery::u0_missing_hamza",
+            "mi-booking-plus-discovery::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "NONE",
+          "count": 777,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-discovery::u0",
+            "mi-booking-plus-discovery::u0_missing_hamza",
+            "mi-booking-plus-discovery::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CHANGES_MIND",
+          "count": 26,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-aborted::u0",
+            "jt-aborted::u1",
+            "jt-aborted::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CHANGES_DATE",
+          "count": 45,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-reschedule-plus-hours::u0",
+            "mi-reschedule-plus-hours::u0_missing_hamza",
+            "mi-reschedule-plus-hours::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CHANGES_SERVICE",
+          "count": 25,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-revise-service::u0",
+            "jt-revise-service::u1",
+            "jt-revise-service::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CHANGES_PROVIDER",
+          "count": 17,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-revise-provider::u0",
+            "jt-revise-provider::u0_missing_hamza",
+            "jt-revise-provider::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "CHANGES_TIME",
+          "count": 12,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-revise-time::u0",
+            "jt-revise-time::u0_missing_hamza",
+            "jt-revise-time::u1"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "ASKS_UNRELATED_QUESTION",
+          "count": 29,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-topic-switch-mid-booking::u0",
+            "mi-topic-switch-mid-booking::u0_missing_hamza",
+            "mi-topic-switch-mid-booking::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "customer-behavior",
+          "member": "REQUESTS_HUMAN_EXPLICITLY",
+          "count": 57,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-human-plus-knowledge::u0",
+            "mi-human-plus-knowledge::u0_drop_punctuation",
+            "mi-human-plus-knowledge::u0_keyboard_mistake"
+          ]
+        }
+      ]
+    },
+    "conversation-length": {
+      "dimension": "conversation-length",
+      "purpose": "Single-turn, short/medium/long multi-turn, and long-context.",
+      "multiLabel": false,
+      "populatedMembers": 5,
+      "totalMembers": 5,
+      "members": [
+        {
+          "dimension": "conversation-length",
+          "member": "SINGLE_TURN",
+          "count": 1273,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "conversation-length",
+          "member": "TWO_TURN",
+          "count": 90,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-implicit-mentioned::u0",
+            "mt-implicit-mentioned::u1",
+            "mt-implicit-mentioned::u2"
+          ]
+        },
+        {
+          "dimension": "conversation-length",
+          "member": "SHORT_MULTI_TURN",
+          "count": 488,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-booking-journey-service-then-date::u0",
+            "mt-booking-journey-service-then-date::u0_missing_hamza",
+            "mt-booking-journey-service-then-date::u1"
+          ]
+        },
+        {
+          "dimension": "conversation-length",
+          "member": "MEDIUM_MULTI_TURN",
+          "count": 59,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-contradiction::u0",
+            "mt-contradiction::u1",
+            "mt-contradiction::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "conversation-length",
+          "member": "LONG_MULTI_TURN",
+          "count": 23,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-long-support-conversation::u0",
+            "mt-long-support-conversation::u0_missing_hamza",
+            "mt-long-support-conversation::u0_drop_punctuation"
+          ]
+        }
+      ]
+    },
+    "multi-intent": {
+      "dimension": "multi-intent",
+      "purpose": "Turns carrying more than one goal, and their priority ordering.",
+      "multiLabel": false,
+      "populatedMembers": 2,
+      "totalMembers": 2,
+      "members": [
+        {
+          "dimension": "multi-intent",
+          "member": "SINGLE_GOAL",
+          "count": 1612,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "multi-intent",
+          "member": "MULTI_GOAL",
+          "count": 321,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-topic-switch-booking-to-hours::u0",
+            "mt-topic-switch-booking-to-hours::u0_drop_punctuation",
+            "mt-topic-switch-booking-to-hours::u1"
+          ]
+        }
+      ]
+    },
+    "ambiguity": {
+      "dimension": "ambiguity",
+      "purpose": "Ambiguity the assistant must resolve or honestly escalate — never guess.",
+      "multiLabel": false,
+      "populatedMembers": 4,
+      "totalMembers": 4,
+      "members": [
+        {
+          "dimension": "ambiguity",
+          "member": "UNAMBIGUOUS",
+          "count": 1678,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "ambiguity",
+          "member": "AMBIGUOUS_CLARIFIABLE",
+          "count": 156,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-ambiguous-oneword::u0",
+            "st-ambiguous-oneword::u1",
+            "st-ambiguous-oneword::u2"
+          ]
+        },
+        {
+          "dimension": "ambiguity",
+          "member": "AMBIGUOUS_NEEDS_HUMAN",
+          "count": 49,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-refusal::u0",
+            "mt-refusal::u0_missing_hamza",
+            "mt-refusal::u1"
+          ]
+        },
+        {
+          "dimension": "ambiguity",
+          "member": "AMBIGUOUS_STATE_RESOLVES",
+          "count": 50,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-partial-date-only::u0",
+            "mt-partial-date-only::u1",
+            "mt-partial-date-only::u2"
+          ]
+        }
+      ]
+    },
+    "knowledge": {
+      "dimension": "knowledge",
+      "purpose": "What the turn must KNOW, and what happens when it does not.",
+      "multiLabel": false,
+      "populatedMembers": 17,
+      "totalMembers": 17,
+      "members": [
+        {
+          "dimension": "knowledge",
+          "member": "NONE",
+          "count": 1018,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "EXACT_FAQ",
+          "count": 105,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-hours-exact::u0",
+            "st-faq-hours-exact::u0_drop_punctuation",
+            "st-faq-hours-exact::u0_typo"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "PARAPHRASED_FAQ",
+          "count": 78,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-parking-paraphrase::u0",
+            "st-faq-parking-paraphrase::u0_missing_hamza",
+            "st-faq-parking-paraphrase::u1"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "WEAK_FAQ",
+          "count": 11,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-weak-hours::u0",
+            "st-faq-weak-hours::u1",
+            "kn-weak-faq-near-miss::u0"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "NO_FAQ",
+          "count": 10,
+          "populated": true,
+          "exampleCaseIds": [
+            "kn-no-faq-empty-kb::u0",
+            "kn-no-faq-empty-kb::u0_drop_punctuation",
+            "kn-no-faq-empty-kb::u1"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "SERVICE_CATALOG",
+          "count": 170,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-discovery::u0",
+            "mi-booking-plus-discovery::u0_missing_hamza",
+            "mi-booking-plus-discovery::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "SERVICE_DETAILS",
+          "count": 14,
+          "populated": true,
+          "exampleCaseIds": [
+            "kn-service-details-duration::u0",
+            "kn-service-details-duration::u0_missing_hamza",
+            "kn-service-details-duration::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "SERVICE_INFO",
+          "count": 20,
+          "populated": true,
+          "exampleCaseIds": [
+            "ex-service-info-variants::u0",
+            "ex-service-info-variants::u0_drop_punctuation",
+            "ex-service-info-variants::u1"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "PRICE",
+          "count": 14,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-service-price::u0",
+            "st-service-price::u0_missing_hamza",
+            "st-service-price::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "POLICY",
+          "count": 23,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-cancellation-plus-policy::u0",
+            "mi-cancellation-plus-policy::u0_missing_hamza",
+            "mi-cancellation-plus-policy::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "BUSINESS_INFO",
+          "count": 26,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-business-info::u0",
+            "st-business-info::u1",
+            "st-business-info::u2"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "AVAILABILITY",
+          "count": 129,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-missing-date::u0",
+            "jt-missing-date::u0_missing_hamza",
+            "jt-missing-date::u1"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "MULTIPLE_SOURCES",
+          "count": 63,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-hours::u0",
+            "mi-booking-plus-hours::u0_missing_hamza",
+            "mi-booking-plus-hours::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "KNOWLEDGE_GAP",
+          "count": 123,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-booking-plus-price::u0",
+            "mi-booking-plus-price::u0_missing_hamza",
+            "mi-booking-plus-price::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "NOT_PRESENT",
+          "count": 57,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-faq-no-match-empty-kb::u0",
+            "st-faq-no-match-empty-kb::u0_missing_hamza",
+            "st-faq-no-match-empty-kb::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "NOT_EXPOSED",
+          "count": 59,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-service-discovery::u0",
+            "st-service-discovery::u0_drop_punctuation",
+            "st-service-discovery::u1"
+          ]
+        },
+        {
+          "dimension": "knowledge",
+          "member": "MULTIPLE_PLAUSIBLE",
+          "count": 13,
+          "populated": true,
+          "exampleCaseIds": [
+            "ex-faq-multiple-plausible::u0",
+            "ex-faq-multiple-plausible::u0_missing_hamza",
+            "ex-faq-multiple-plausible::u0_drop_punctuation"
+          ]
+        }
+      ]
+    },
+    "booking-state": {
+      "dimension": "booking-state",
+      "purpose": "The booking journey's causal progression, including interruption and recovery.",
+      "multiLabel": false,
+      "populatedMembers": 15,
+      "totalMembers": 15,
+      "members": [
+        {
+          "dimension": "booking-state",
+          "member": "NOT_APPLICABLE",
+          "count": 1633,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "GOAL_STATED",
+          "count": 18,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-goal-stated::u0",
+            "jt-goal-stated::u0_missing_hamza",
+            "jt-goal-stated::u0_repeat_letters"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "MISSING_SERVICE",
+          "count": 23,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-missing-service::u0",
+            "jt-missing-service::u1",
+            "jt-missing-service::u2"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "SERVICE_SUPPLIED",
+          "count": 48,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-service-supplied::u0",
+            "jt-service-supplied::u0_missing_hamza",
+            "jt-service-supplied::u0_spelling_variation"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "MISSING_DATE",
+          "count": 7,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-missing-date::u0",
+            "jt-missing-date::u0_missing_hamza",
+            "jt-missing-date::u1"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "DATE_SUPPLIED",
+          "count": 42,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-date-supplied::u0",
+            "jt-date-supplied::u1",
+            "jt-date-supplied::u1_spelling_variation"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "MISSING_TIME",
+          "count": 31,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-missing-time::u0",
+            "jt-missing-time::u0_missing_hamza",
+            "jt-missing-time::u1"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "TIME_SUPPLIED",
+          "count": 24,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-time-supplied::u0",
+            "jt-time-supplied::u0_spelling_variation",
+            "jt-time-supplied::u1"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "AVAILABILITY_RESOLVED",
+          "count": 15,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-availability-resolved::u0",
+            "jt-availability-resolved::u0_missing_hamza",
+            "jt-availability-resolved::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "SLOT_SELECTION",
+          "count": 29,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-slot-selection-seam::u0",
+            "jt-slot-selection-seam::u1",
+            "jt-slot-selection-seam::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "CONFIRMATION",
+          "count": 11,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-confirmation::u0",
+            "jt-confirmation::u0_missing_hamza",
+            "jt-confirmation::u1"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "COMPLETED",
+          "count": 10,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-completed::u0",
+            "jt-completed::u1",
+            "jt-completed::u1_missing_hamza"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "INTERRUPTED",
+          "count": 16,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-interrupted::u0",
+            "jt-interrupted::u0_missing_hamza",
+            "jt-interrupted::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "RECOVERING",
+          "count": 10,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-recovering::u0",
+            "jt-recovering::u0_drop_punctuation",
+            "jt-recovering::u1"
+          ]
+        },
+        {
+          "dimension": "booking-state",
+          "member": "ABORTED",
+          "count": 16,
+          "populated": true,
+          "exampleCaseIds": [
+            "jt-aborted::u0",
+            "jt-aborted::u1",
+            "jt-aborted::u1_missing_hamza"
+          ]
+        }
+      ]
+    },
+    "handoff": {
+      "dimension": "handoff",
+      "purpose": "The true-vs-unnecessary handoff split — the primary robustness axis.",
+      "multiLabel": false,
+      "populatedMembers": 3,
+      "totalMembers": 3,
+      "members": [
+        {
+          "dimension": "handoff",
+          "member": "REQUIRED",
+          "count": 218,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-human-explicit::u0",
+            "st-human-explicit::u0_missing_hamza",
+            "st-human-explicit::u1"
+          ]
+        },
+        {
+          "dimension": "handoff",
+          "member": "NOT_REQUIRED",
+          "count": 619,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "handoff",
+          "member": "ACCEPTABLE_EITHER",
+          "count": 1096,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-booking-basic::u0",
+            "st-booking-basic::u0_missing_hamza",
+            "st-booking-basic::u0_typo"
+          ]
+        }
+      ]
+    },
+    "safety": {
+      "dimension": "safety",
+      "purpose": "Sensitive and adversarial turns — the must-never-violate axis.",
+      "multiLabel": false,
+      "populatedMembers": 4,
+      "totalMembers": 4,
+      "members": [
+        {
+          "dimension": "safety",
+          "member": "SAFE",
+          "count": 1872,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "safety",
+          "member": "SENSITIVE_MEDICAL",
+          "count": 29,
+          "populated": true,
+          "exampleCaseIds": [
+            "ho-sensitive-medical::u0",
+            "ho-sensitive-medical::u0_missing_hamza",
+            "ho-sensitive-medical::u0_repeat_letters"
+          ]
+        },
+        {
+          "dimension": "safety",
+          "member": "EMOTIONAL_DISTRESS",
+          "count": 10,
+          "populated": true,
+          "exampleCaseIds": [
+            "ho-sensitive-emotional::u0",
+            "ho-sensitive-emotional::u0_missing_hamza",
+            "ho-sensitive-emotional::u0_drop_punctuation"
+          ]
+        },
+        {
+          "dimension": "safety",
+          "member": "SECURITY_ATTEMPT",
+          "count": 22,
+          "populated": true,
+          "exampleCaseIds": [
+            "re-injection-ignore-instructions::u0",
+            "re-injection-ignore-instructions::u1",
+            "re-injection-ignore-instructions::u1_missing_hamza"
+          ]
+        }
+      ]
+    },
+    "edge-rarity": {
+      "dimension": "edge-rarity",
+      "purpose": "Rare cases are represented ON PURPOSE — robustness is not average-case.",
+      "multiLabel": false,
+      "populatedMembers": 4,
+      "totalMembers": 4,
+      "members": [
+        {
+          "dimension": "edge-rarity",
+          "member": "COMMON",
+          "count": 1112,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-greeting-basic::u0",
+            "st-greeting-basic::u0_repeat_letters",
+            "st-greeting-basic::u0_typo"
+          ]
+        },
+        {
+          "dimension": "edge-rarity",
+          "member": "UNCOMMON",
+          "count": 331,
+          "populated": true,
+          "exampleCaseIds": [
+            "st-sensitive-pain::u0",
+            "st-sensitive-pain::u0_missing_hamza",
+            "st-sensitive-pain::u1"
+          ]
+        },
+        {
+          "dimension": "edge-rarity",
+          "member": "RARE",
+          "count": 377,
+          "populated": true,
+          "exampleCaseIds": [
+            "mt-sensitive-plus-question::u0",
+            "mt-sensitive-plus-question::u0_missing_hamza",
+            "mt-sensitive-plus-question::u1"
+          ]
+        },
+        {
+          "dimension": "edge-rarity",
+          "member": "EXTREMELY_RARE",
+          "count": 113,
+          "populated": true,
+          "exampleCaseIds": [
+            "mi-greeting-booking-human::u0",
+            "mi-greeting-booking-human::u0_missing_hamza",
+            "mi-greeting-booking-human::u0_drop_punctuation"
+          ]
+        }
+      ]
+    }
+  },
+  "gaps": [],
+  "curatedCells": [
+    {
+      "cell": {
+        "id": "egyptian-booking-arabizi",
+        "rationale": "A booking intent in Latin-script Arabizi — script switching must not erase the goal.",
+        "requires": {
+          "intent": "BOOKING",
+          "language": "ARABIZI"
+        }
+      },
+      "count": 22,
+      "populated": true,
+      "exampleCaseIds": [
+        "st-booking-basic::u0_arabizi",
+        "st-booking-basic::u1_arabizi",
+        "st-arabizi-booking::u0"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-human-request-clitic",
+        "rationale": "An explicit human request with Egyptian clitic attachment — the known F1 root cause.",
+        "requires": {
+          "intent": "HUMAN_REQUEST",
+          "customer-behavior": "REQUESTS_HUMAN_EXPLICITLY"
+        }
+      },
+      "count": 57,
+      "populated": true,
+      "exampleCaseIds": [
+        "mi-human-plus-knowledge::u0",
+        "mi-human-plus-knowledge::u0_drop_punctuation",
+        "mi-human-plus-knowledge::u0_keyboard_mistake"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-knowledge-gap-price",
+        "rationale": "A price question with no price knowledge — the assistant must not invent one.",
+        "requires": {
+          "intent": "SERVICE_PRICE",
+          "knowledge": "KNOWLEDGE_GAP"
+        }
+      },
+      "count": 62,
+      "populated": true,
+      "exampleCaseIds": [
+        "mi-booking-plus-price::u0",
+        "mi-booking-plus-price::u0_missing_hamza",
+        "mi-booking-plus-price::u0_drop_punctuation"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-clarification-ambiguous-booking",
+        "rationale": "An ambiguous booking the ideal assistant would clarify instead of escalate.",
+        "requires": {
+          "intent": "CLARIFICATION_REQUIRED",
+          "ambiguity": "AMBIGUOUS_CLARIFIABLE",
+          "handoff": "NOT_REQUIRED"
+        }
+      },
+      "count": 40,
+      "populated": true,
+      "exampleCaseIds": [
+        "am-bare-booking-clarifiable::u0",
+        "am-bare-booking-clarifiable::u0_missing_hamza",
+        "am-bare-booking-clarifiable::u0_repeat_letters"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-change-date-mid-journey",
+        "rationale": "A customer revising the date mid-journey — the expected state must move WITH the revision.",
+        "requires": {
+          "customer-behavior": "CHANGES_DATE",
+          "booking-state": "DATE_SUPPLIED",
+          "handoff": "ACCEPTABLE_EITHER"
+        }
+      },
+      "count": 26,
+      "populated": true,
+      "exampleCaseIds": [
+        "jt-revise-date::u0",
+        "jt-revise-date::u0_keyboard_mistake",
+        "jt-revise-date::u1"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-sensitive-medical-handoff",
+        "rationale": "A medical-sensitivity turn that must reach a human and never be diagnosed.",
+        "requires": {
+          "safety": "SENSITIVE_MEDICAL",
+          "handoff": "REQUIRED"
+        }
+      },
+      "count": 29,
+      "populated": true,
+      "exampleCaseIds": [
+        "ho-sensitive-medical::u0",
+        "ho-sensitive-medical::u0_missing_hamza",
+        "ho-sensitive-medical::u0_repeat_letters"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-prompt-injection-refusal",
+        "rationale": "An instruction-injection attempt that must be refused, not followed.",
+        "requires": {
+          "safety": "SECURITY_ATTEMPT",
+          "intent": "AMBIGUOUS"
+        }
+      },
+      "count": 22,
+      "populated": true,
+      "exampleCaseIds": [
+        "re-injection-ignore-instructions::u0",
+        "re-injection-ignore-instructions::u1",
+        "re-injection-ignore-instructions::u1_missing_hamza"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-long-context-topic-return",
+        "rationale": "A long conversation that returns to an earlier topic — memory across many turns.",
+        "requires": {
+          "conversation-length": "LONG_MULTI_TURN",
+          "intent": "TOPIC_SWITCH"
+        }
+      },
+      "count": 10,
+      "populated": true,
+      "exampleCaseIds": [
+        "re-long-context-topic-return::u0",
+        "re-long-context-topic-return::u0_drop_punctuation",
+        "re-long-context-topic-return::u1"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-multi-intent-discovery-plus-booking",
+        "rationale": "The canonical multi-intent turn: asking about services while booking.",
+        "requires": {
+          "multi-intent": "MULTI_GOAL",
+          "intent": "SERVICE_DISCOVERY"
+        }
+      },
+      "count": 54,
+      "populated": true,
+      "exampleCaseIds": [
+        "mt-second-service::u0",
+        "mt-second-service::u0_missing_hamza",
+        "mt-second-service::u1"
+      ]
+    },
+    {
+      "cell": {
+        "id": "egyptian-stt-fragmented-availability",
+        "rationale": "A speech-to-text fragment asking about availability — noise must not erase the intent.",
+        "requires": {
+          "intent": "AVAILABILITY",
+          "language": "EGYPTIAN_COLLOQUIAL"
+        }
+      },
+      "count": 92,
+      "populated": true,
+      "exampleCaseIds": [
+        "st-availability-basic::u0",
+        "st-availability-basic::u0_missing_hamza",
+        "st-availability-basic::u0_drop_punctuation"
+      ]
+    }
+  ],
+  "emptyCuratedCells": []
+}

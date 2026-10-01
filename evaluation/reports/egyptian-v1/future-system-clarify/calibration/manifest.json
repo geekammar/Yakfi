@@ -1,0 +1,22 @@
+{
+  "runId": "7e2b10ac75f9db78",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "scenarioVersion": "egyptian-v1",
+  "seed": 20260928,
+  "targetId": "future-system-flowpilot",
+  "systemIdentity": {
+    "kind": "FUTURE_SYSTEM",
+    "modelProvider": "atria/Atria-Dawn-Preview",
+    "routerVersion": "conversation-engine+turn-planner(Slice3)+clarify(Slice4)",
+    "contextBuilderVersion": "ai-context-builder(B-02)",
+    "note": "FUTURE_SYSTEM bridge (eval-only): real LLM → Conversation Engine → ConversationState → resolveTurnPlan() → CLARIFY → clarification handler → TurnObservability. No production mutation."
+  },
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "DATASET",
+  "filter": {},
+  "executedAt": "2026-10-01T14:44:47.279Z",
+  "totalCases": 2,
+  "totalTurns": 2
+}

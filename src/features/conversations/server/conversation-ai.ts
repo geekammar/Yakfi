@@ -67,11 +67,20 @@ export function normalizeArabicText(text: string): string {
     .trim();
 }
 
-/** Strips the definite article / waw prefix so tokens compare equally. */
+/**
+ * Strips the definite article / waw prefix so tokens compare equally, and
+ * the Egyptian single-letter clitic «بـ» ("with/by"). The clitic matters
+ * for safety (F1, DECISIONS: TARGET_ARCHITECTURE Slice 1): «بموظف» is "with
+ * an employee" and must normalize to the bare noun «موظف» so an explicit
+ * human request is never missed. The length guards keep short function
+ * words (e.g. «بس») intact — only words long enough to carry a real stem
+ * after the clitic are stripped.
+ */
 function stripAffixes(token: string): string {
   let word = token;
   if (word.length > 4 && word.startsWith("وال")) word = word.slice(3);
   else if (word.length > 3 && word.startsWith("ال")) word = word.slice(2);
+  else if (word.length > 3 && word.startsWith("ب")) word = word.slice(1);
   return word;
 }
 
@@ -127,6 +136,10 @@ const HUMAN_PHRASES = [
   "موظف حقيقي",
   "الدكتور نفسه",
   "معايا حد",
+  // "connect me with someone" — the transfer verb «وصّلني بـ» carries the
+  // human request even when the object is the bare «حد» ("anyone"), which
+  // is not a HUMAN_WORDS entry on its own (F1, TARGET_ARCHITECTURE Slice 1).
+  "وصلني بحد",
 ];
 
 const SENSITIVE_WORDS = [
@@ -310,7 +323,7 @@ const STOPWORDS = new Set(
     "ازاي",
     "ليه",
     "بتاع",
-  ].map(normalizeArabicText),
+  ].map((word) => stripAffixes(normalizeArabicText(word))),
 );
 
 /**
@@ -343,6 +356,88 @@ const AVAILABILITY_PHRASES_N = AVAILABILITY_PHRASES.map(normalizeArabicText);
 const GREETING_WORDS_N = tokenizedKeywords(GREETING_WORDS);
 const GREETING_PHRASES_N = GREETING_PHRASES.map(normalizeArabicText);
 const GREETING_TIME_WORDS_N = tokenizedKeywords(GREETING_TIME_WORDS);
+
+/**
+ * Bare NON-COMMITTAL fragments ("مش عارف" / "I don't know", "مش متأكد" /
+ * "not sure", "زي ما تشوفوا" / "whatever you think"). They carry NO actionable
+ * content and name NO task. The resolver uses this signal to suppress an
+ * UNNECESSARY CLARIFY (PROMPT-AI-EVAL-07 `st-ambiguous-idk`) in the EXACT
+ * situation where there is nothing to clarify: a fragment with no pending
+ * clarification and no active task. A non-committal reply TO a pending
+ * clarification stays clarifiable — the conversation state, never this flag,
+ * decides that (the resolver gates on `hasPendingTask`).
+ */
+const NON_COMMITTAL_PHRASES = [
+  "مش عارف",
+  "مش عارفة",
+  "مش عارفه",
+  "مش متأكد",
+  "مش متأكدة",
+  "مش متاكد",
+  "زي ما تشوفوا",
+  "زي ما تشوف",
+  "زي ما تحب",
+  "اللي تشوفوا",
+];
+const NON_COMMITTAL_PHRASES_N = NON_COMMITTAL_PHRASES.map(normalizeArabicText);
+
+/**
+ * The deterministic, authoritative control/safety classification of ONE
+ * customer message — reused BY VALUE from the same keyword tables the
+ * deterministic classifier already applies, so the LLM path and the
+ * deterministic path can never diverge on safety. It introduces NO new
+ * classifier and NO model inference: it is a pure, total projection of the
+ * EXISTING sensitive / human / non-committal vocabulary.
+ *
+ * Why it exists (PROMPT-AI-EVAL-07): in the LLM path the model AUTHORS the
+ * decision, so a safety-required turn can reach the engine WITHOUT the model
+ * self-reporting `handoffReason: "SENSITIVE"` (EVAL-07 `ho-sensitive-medical`
+ * reached CLARIFY_SERVICE + AI_ACTIVE). The resolver consults THIS signal so a
+ * sensitive / explicit-human turn is handed off deterministically, regardless
+ * of what the model proposed — safety precedence is authoritative, not
+ * model-trusted.
+ */
+export type TurnControlSignals = {
+  /** The turn carries sensitive / high-stakes language (safety precedence). */
+  readonly sensitive: boolean;
+  /** The customer explicitly asked for a human (explicit-human precedence). */
+  readonly explicitHuman: boolean;
+  /** A bare non-committal fragment with no task vocabulary (nothing to clarify). */
+  readonly nonCommittal: boolean;
+};
+
+export function detectTurnControlSignals(message: string): TurnControlSignals {
+  const normalized = normalizeArabicText(message);
+  const tokens = tokenize(message);
+  const sensitive =
+    hasWord(tokens, SENSITIVE_WORDS_N) ||
+    hasPhrase(normalized, SENSITIVE_PHRASES_N);
+  const humanRaw =
+    hasWord(tokens, HUMAN_WORDS_N) || hasPhrase(normalized, HUMAN_PHRASES_N);
+  // A booking / availability / reschedule / cancellation task carries its own
+  // vocabulary. Inside such a request a doctor/provider mention ("أي دكتور") is
+  // a PROVIDER PREFERENCE, not an explicit human handoff — the authoritative
+  // human signal must not fire there. (Sensitive is NOT gated: a medical
+  // booking with "ألم شديد" is still a safety turn.)
+  const hasBookingTask =
+    hasWord(tokens, BOOKING_WORDS_N) ||
+    hasPhrase(normalized, BOOKING_PHRASES_N) ||
+    hasWord(tokens, AVAILABILITY_WORDS_N) ||
+    hasPhrase(normalized, AVAILABILITY_PHRASES_N) ||
+    hasWord(tokens, CANCELLATION_WORDS_N) ||
+    hasPhrase(normalized, CANCELLATION_PHRASES_N) ||
+    hasWord(tokens, RESCHEDULE_MUTATION_N) ||
+    hasPhrase(normalized, RESCHEDULE_PHRASES_N);
+  const explicitHuman = humanRaw && !hasBookingTask;
+  // Non-committal ONLY when the fragment carries no other task / safety / human
+  // vocabulary — a bare "I don't know" with nothing actionable to clarify.
+  const nonCommittal =
+    !sensitive &&
+    !humanRaw &&
+    !hasBookingTask &&
+    hasPhrase(normalized, NON_COMMITTAL_PHRASES_N);
+  return { sensitive, explicitHuman, nonCommittal };
+}
 
 // ─── Reply / summary templates (assistant voice, vertical-agnostic) ─────────
 
@@ -516,25 +611,12 @@ export function classifyCustomerMessage(
     };
   }
 
-  // GREETING (DECISIONS #61) — a pure social opening is answered
-  // deterministically and stays AI_ACTIVE. It must run AFTER the safety
-  // intents (an explicit human request or a sensitive message is never
-  // swallowed by a greeting) and BEFORE booking/FAQ: a real booking or
-  // knowledge turn carries its own keywords and does not match a pure
-  // greeting (see isPureGreeting — a message with any other intent
-  // vocabulary is not a greeting). This branch never spends an LLM call.
-  if (isPureGreeting(message, normalized, tokens)) {
-    return {
-      action: "reply",
-      intent: "GREETING",
-      content: REPLIES.GREETING,
-      extraction: emptyAiExtraction,
-      handoffReason: null,
-      summary: null,
-    };
-  }
-
-  // Explicit human request first — the customer's own handoff.
+  // Explicit human request first — the customer's own handoff. This runs
+  // BEFORE the pure-greeting branch so a greeting can never swallow an
+  // explicit human request (F1 safety precedence, TARGET_ARCHITECTURE
+  // Slice 1): "أهلاً، وصلني بموظف" is a HUMAN_REQUEST, not a GREETING. The
+  // tokenizer strips the «بـ» clitic so «بموظف» matches «موظف», and the
+  // «وصلني بحد» transfer phrase is recognized explicitly.
   if (
     hasWord(tokens, HUMAN_WORDS_N) ||
     hasPhrase(normalized, HUMAN_PHRASES_N)
@@ -545,6 +627,25 @@ export function classifyCustomerMessage(
       content: REPLIES.HUMAN_REQUEST,
       extraction: emptyAiExtraction,
       handoffReason: "HUMAN_REQUEST",
+      summary: null,
+    };
+  }
+
+  // GREETING (DECISIONS #61) — a pure social opening is answered
+  // deterministically and stays AI_ACTIVE. It runs AFTER the safety
+  // intents (an explicit human request above, and sensitive language whose
+  // vocabulary isPureGreeting also disqualifies) and BEFORE booking/FAQ: a
+  // real booking or knowledge turn carries its own keywords and does not
+  // match a pure greeting (see isPureGreeting — a message with any other
+  // intent vocabulary is not a greeting). This branch never spends an LLM
+  // call.
+  if (isPureGreeting(message, normalized, tokens)) {
+    return {
+      action: "reply",
+      intent: "GREETING",
+      content: REPLIES.GREETING,
+      extraction: emptyAiExtraction,
+      handoffReason: null,
       summary: null,
     };
   }

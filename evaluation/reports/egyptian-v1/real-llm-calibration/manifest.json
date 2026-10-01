@@ -1,0 +1,20 @@
+{
+  "runId": "ddf469a396342a0f",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "scenarioVersion": "egyptian-v1",
+  "seed": 20260928,
+  "targetId": "real-llm-flowpilot",
+  "systemIdentity": {
+    "kind": "CURRENT_SYSTEM",
+    "modelProvider": "codecraft/deepseek-v4-flash-0731",
+    "note": "REAL-LLM current FlowPilot AI: bypass → policy-backed LLM (live provider) → disclosure gate"
+  },
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "DATASET",
+  "filter": {},
+  "executedAt": "2026-09-29T20:23:10.824Z",
+  "totalCases": 27,
+  "totalTurns": 33
+}

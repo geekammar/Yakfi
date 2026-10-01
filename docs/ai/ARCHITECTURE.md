@@ -1,5 +1,12 @@
 # FlowPilot — AI Architecture & Prompt Boundary
 
+> **Target architecture (design only, NOT implemented):**
+> `docs/ai/TARGET_ARCHITECTURE.md` records the evidence-based next-generation
+> design from the EVAL-04/04B/04C baselines (multi-intent goals, first-class
+> CLARIFY, explicit handoff causes, structured Conversation State, task-aware
+> knowledge exposure, optional JEV strategy, zero-or-one-inference invariant,
+> migration slices). This file remains the **current** boundary truth.
+>
 > Prompt/interface separation boundary for `ConversationAi`. Canonical
 > implementation boundary: `docs/ARCHITECTURE.md → Responsibility Separation
 (DECISIONS #33)` and `src/features/conversations/server/ai-contract.ts`
@@ -197,6 +204,43 @@ AVAILABILITY | RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`;
   be widened by it, and the directive expressly forbids claiming to be human.
   Per-business persistence (one nullable column + a nested Zod object) is a
   deferred domain decision pending pilot evidence — **no migration, no UI today**.
+
+### Additive decision shape + turn observability (PROMPT-AI-ARCH-02 — Slice 0)
+
+The implemented ground floor for the target AI architecture
+(`docs/ai/TARGET_ARCHITECTURE.md §17 Slice 0`). It is **additive only**: no
+current producer sets the new fields, no current consumer is required to read
+them, and no customer-visible behavior changes.
+
+- **Additive response fields — `aiResponseSchema`** (all optional): `goals[]`
+  (`{ kind: ANSWER | CLARIFY | DOMAIN_ACTION | HANDOFF, intent?,
+requiredKnowledge?, domainAction?, priority?, continueAfter? }`),
+  `clarification?` (`{ type, missingFacts? }`), `handoffCause?`, and
+  `factUpdates[]` (`{ key, value, isRevision? }`). The descriptive labels are
+  bounded strings — the final production enums land in later slices
+  (TARGET_ARCHITECTURE §7/§8/§20), so no evaluation-only vocabulary is copied
+  into production. `aiIntentValues` / `aiActionValues` / `handoffReasonValues`
+  are untouched.
+- **Single-goal synthesis bridge — `synthesizeDecisionGoals` /
+  `synthesizeTurnPlan`**: a decision with no `goals` is treated as exactly one
+  goal derived from the existing `intent` + `action` (`reply` → `ANSWER`,
+  booking-family reply → `DOMAIN_ACTION`, `booking_handoff` → `DOMAIN_ACTION`,
+  `handoff` → `HANDOFF`). There remains ONE canonical decision representation;
+  a `TurnPlan` is an ordered list of the SAME goals, never a second model.
+- **Turn observability — `ai-observability.ts` + `InboundSuccess.observability?`**:
+  a pure, optional projection of a finished turn (`routingDecision`, `goals[]`,
+  `turnPlan`, `clarification`, `handoffCause`, `factUpdates`,
+  `knowledgeSourceClass` from the B-02 ledger, provider/model,
+  fallback/retry/latency). It adds **no model call, no persistence, no
+  behavior**, and carries machine keys / bounded contract labels only — never
+  content, prompts, secrets, or chain-of-thought.
+- **Guards:** `pnpm check:ai-architecture` (offline) — old-contract
+  compatibility, new-field round-trip/bounds, the synthesis bridge,
+  representative engine-flow parity (greeting, FAQ, human handoff, booking,
+  availability), observability content-freeness, the zero-or-one generative
+  call invariant, and one-schema / one-provider guards. The evaluation boundary
+  surfaces the same observables additively through `ActualOutcome`'s optional /
+  `.passthrough()` members.
 
 ## Context budget (minimal prompt context)
 

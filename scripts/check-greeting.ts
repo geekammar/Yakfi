@@ -330,6 +330,75 @@ async function main(): Promise<void> {
       eq(sensitive.handoffReason, "SENSITIVE"),
   );
 
+  // ── F1. clitic + branch-ordering safety fix (TARGET_ARCHITECTURE Slice 1)
+  // The explicit human request must never be swallowed by a greeting (or by
+  // an FAQ answer): the «بـ» clitic is stripped so «بموظف»→«موظف», the
+  // «وصلني بحد» transfer phrase is recognized, and the HUMAN_REQUEST branch
+  // runs BEFORE the pure-greeting branch. These are the 5 genuine missed
+  // handoffs (`adv-greeting-plus-human::*`, `mt-human-plus-question::*`).
+  const f1Faqs = [
+    { question: "ما هي ساعات العمل؟", answer: "من 9 صباحاً حتى 6 مساءً" },
+  ];
+  // (1) pure greeting is still a GREETING reply and still bypasses the LLM.
+  const f1Greeting = classifyCustomerMessage("صباح الخير", f1Faqs);
+  const f1GreetingBypass = bypassDeterministicAi(requestFor("صباح الخير"));
+  check(
+    "F1a. ترحيب صريح يبقى GREETING/reply (الإصلاح لا يكسر الترحيب النقي)",
+    eq(f1Greeting.intent, "GREETING") && eq(f1Greeting.action, "reply"),
+  );
+  check(
+    "F1b. ترحيب نقي يُحسم بالـ bypass بلا نداء مزود (GREETING بلا LLM)",
+    f1GreetingBypass !== null && eq(f1GreetingBypass.intent, "GREETING"),
+  );
+  // (2) greeting + explicit human request with the «بـ» clitic → HUMAN_REQUEST,
+  // and the greeting bypass must NOT answer it (so it reaches the handoff).
+  for (const variant of [
+    "أهلاً، وصلني بموظف لو سمحت", // adv-greeting-plus-human::u1
+    "اهلا، وصلني بموظف لو سمحت", // ::u1_missing_hamza
+    "أهلاً وصلني بموظف لو سمحت", // ::u1_drop_punctuation
+  ]) {
+    const result = classifyCustomerMessage(variant, f1Faqs);
+    const bypassed = bypassDeterministicAi(requestFor(variant));
+    check(
+      `F1c. «${variant}» → HUMAN_REQUEST/handoff (الترحيب لا يبتلع الطلب البشري)`,
+      eq(result.intent, "HUMAN_REQUEST") &&
+        eq(result.action, "handoff") &&
+        eq(result.handoffReason, "HUMAN_REQUEST") &&
+        bypassed === null, // not swallowed as a greeting by the bypass
+    );
+  }
+  // (3) explicit human request + ordinary question → HUMAN_REQUEST wins over
+  // the FAQ answer; the «وصلني بحد» transfer phrase is recognized even though
+  // «حد» is not a HUMAN_WORDS entry on its own.
+  for (const variant of [
+    "وصلني بحد — وبعدين عايز أعرف ساعات العمل", // mt-human-plus-question::u1
+    "وصلني بحد وبعدين عايز اعرف ساعات العمل", // ::u1_missing_hamza
+  ]) {
+    const result = classifyCustomerMessage(variant, f1Faqs);
+    check(
+      `F1d. «${variant}» → HUMAN_REQUEST (الطلب البشري يسبق إجابة FAQ)`,
+      eq(result.intent, "HUMAN_REQUEST") &&
+        eq(result.action, "handoff") &&
+        eq(result.handoffReason, "HUMAN_REQUEST"),
+    );
+  }
+  // (4) the «بـ» clitic normalization is a tokenizer rule, not a one-off: a
+  // bare clitic-prefixed human noun also resolves without any greeting.
+  const f1BareClitic = classifyCustomerMessage("عايز أتكلم بموظف", f1Faqs);
+  check(
+    "F1e. «عايز أتكلم بموظف» → HUMAN_REQUEST (تجريد «بـ» عام في المحلّل)",
+    eq(f1BareClitic.intent, "HUMAN_REQUEST") &&
+      eq(f1BareClitic.action, "handoff"),
+  );
+  // (5) regression: the clitic rule does not over-strip ordinary «بـ» words —
+  // a plain question with no human/greeting vocabulary is unchanged.
+  const f1NoOverStrip = classifyCustomerMessage("التنظيف بكام؟", f1Faqs);
+  check(
+    "F1f. «التنظيف بكام؟» لا يتحول لطلب بشري (لا إفراط في تجريد «بـ»)",
+    f1NoOverStrip.intent !== "HUMAN_REQUEST" &&
+      f1NoOverStrip.intent !== "GREETING",
+  );
+
   // ── S1–S3. structural discipline ───────────────────────────────────────
   check(
     "S1. عائلة النيات زادت بعضو واحد فقط (GREETING) — لا نيات أخرى جديدة",

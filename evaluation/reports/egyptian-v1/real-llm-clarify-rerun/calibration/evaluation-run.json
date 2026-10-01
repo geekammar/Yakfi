@@ -1,0 +1,330 @@
+{
+  "run": {
+    "runId": "7e2b10ac75f9db78",
+    "datasetVersion": "egyptian-v1",
+    "scenarioVersion": "egyptian-v1",
+    "executedAt": "2026-10-01T16:49:07.721Z",
+    "offline": true
+  },
+  "system": {
+    "kind": "FUTURE_SYSTEM",
+    "modelProvider": "atria/Atria-Dawn-Preview",
+    "routerVersion": "conversation-engine+turn-planner(Slice3)+clarify(Slice4)",
+    "contextBuilderVersion": "ai-context-builder(B-02)",
+    "note": "FUTURE_SYSTEM bridge (eval-only): real LLM → Conversation Engine → ConversationState → resolveTurnPlan() → CLARIFY → clarification handler → TurnObservability. No production mutation."
+  },
+  "metrics": {
+    "totalCases": 2,
+    "scoredCases": 2,
+    "passCount": 0,
+    "limitationCount": 0,
+    "failCount": 2,
+    "seamOwnedCount": 0,
+    "intentAccuracy": 0.5,
+    "intentAccuracyLimitationAdjusted": 1,
+    "actionAccuracy": 0,
+    "handoffPrecision": 0,
+    "handoffRecall": 0,
+    "unnecessaryHandoffRate": 0,
+    "missedHandoffRate": 0,
+    "safetyViolationRate": 0,
+    "malformedOutputRate": 0,
+    "handoffOutcomeClasses": {
+      "NO_HANDOFF": 2
+    },
+    "totalTurns": 2,
+    "actionAccuracyLimitationAdjusted": 0.5,
+    "entityExtractionAccuracy": 0,
+    "multiIntentSuccessRate": 0,
+    "ambiguityHandlingAccuracy": 1,
+    "clarificationAccuracy": 0,
+    "knowledgeRequirementAccuracy": 0,
+    "conversationStateAccuracy": 1,
+    "bookingStateAccuracy": 1,
+    "providerFailureRate": 0,
+    "deterministicBypassCorrectness": 0,
+    "denominators": {
+      "intentAccuracy": {
+        "numerator": 1,
+        "denominator": 2,
+        "value": 0.5
+      },
+      "intentAccuracyLimitationAdjusted": {
+        "numerator": 2,
+        "denominator": 2,
+        "value": 1
+      },
+      "actionAccuracy": {
+        "numerator": 0,
+        "denominator": 2,
+        "value": 0
+      },
+      "actionAccuracyLimitationAdjusted": {
+        "numerator": 1,
+        "denominator": 2,
+        "value": 0.5
+      },
+      "handoffPrecision": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "handoffRecall": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "unnecessaryHandoffRate": {
+        "numerator": 0,
+        "denominator": 2,
+        "value": 0
+      },
+      "missedHandoffRate": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "entityExtractionAccuracy": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "multiIntentSuccessRate": {
+        "numerator": 0,
+        "denominator": 1,
+        "value": 0
+      },
+      "ambiguityHandlingAccuracy": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": 1
+      },
+      "clarificationAccuracy": {
+        "numerator": 0,
+        "denominator": 1,
+        "value": 0
+      },
+      "knowledgeRequirementAccuracy": {
+        "numerator": 0,
+        "denominator": 1,
+        "value": 0
+      },
+      "conversationStateAccuracy": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": 1
+      },
+      "bookingStateAccuracy": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": 1
+      },
+      "safetyViolationRate": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "providerFailureRate": {
+        "numerator": 0,
+        "denominator": 2,
+        "value": 0
+      },
+      "malformedOutputRate": {
+        "numerator": 0,
+        "denominator": 2,
+        "value": 0
+      },
+      "deterministicBypassCorrectness": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      }
+    }
+  },
+  "caseResults": [
+    {
+      "caseId": "st-service-discovery::u0",
+      "scenarioId": "st-service-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list available services",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "NOT_EXPOSED"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "goals": [
+          {
+            "kind": "ANSWER",
+            "intent": "FAQ"
+          }
+        ],
+        "turnPlan": {
+          "steps": [
+            {
+              "kind": "ANSWER",
+              "intent": "FAQ"
+            }
+          ]
+        },
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "routingDecision": "LLM",
+        "decisionClass": "ANSWER",
+        "conversationStatus": "AI_ACTIVE",
+        "assistantAction": "AI_REPLY",
+        "missingFacts": [],
+        "clarificationEmitted": false,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "fallbackUsed": false,
+        "retryCount": 0,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 16821,
+        "totalLatencyMs": 16829,
+        "inputTokens": 785,
+        "outputTokens": 222,
+        "providerErrorCode": null,
+        "engineOk": true
+      },
+      "verdict": "FAIL",
+      "failureCategory": "KNOWLEDGE_FABRICATED",
+      "reason": "knowledge: no source backs a NOT_EXPOSED turn but the system self-answered",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "FAIL",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "am-bare-booking-clarifiable::u0",
+      "scenarioId": "am-bare-booking-clarifiable",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "CLARIFICATION_REQUIRED",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "ask which service the booking is for",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "goals": [
+          {
+            "kind": "DOMAIN_ACTION",
+            "intent": "BOOKING"
+          }
+        ],
+        "turnPlan": {
+          "steps": [
+            {
+              "kind": "CLARIFY",
+              "intent": "BOOKING"
+            }
+          ]
+        },
+        "clarification": {
+          "type": "CLARIFY_SERVICE",
+          "missingFacts": [
+            "service"
+          ]
+        },
+        "knowledgeSourceClass": [
+          "CUSTOMER_MESSAGE",
+          "CONVERSATION_STATE",
+          "BUSINESS_RECORD",
+          "BUSINESS_FAQ_STORE",
+          "SERVICE_CATALOG"
+        ],
+        "routingDecision": "LLM",
+        "stateTransition": {
+          "from": "NOT_APPLICABLE",
+          "to": "GOAL_STATED"
+        },
+        "decisionClass": "CLARIFY",
+        "conversationStatus": "AI_ACTIVE",
+        "assistantAction": "AI_REPLY",
+        "missingFacts": [
+          "service"
+        ],
+        "clarificationEmitted": true,
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "fallbackUsed": false,
+        "retryCount": 0,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 28340,
+        "totalLatencyMs": 28341,
+        "inputTokens": 773,
+        "outputTokens": 404,
+        "providerErrorCode": null,
+        "engineOk": true
+      },
+      "verdict": "FAIL",
+      "failureCategory": "ACTION_WRONG",
+      "reason": "action: expected booking_handoff, got reply",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "FAIL",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    }
+  ]
+}

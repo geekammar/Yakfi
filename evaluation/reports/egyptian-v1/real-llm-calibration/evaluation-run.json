@@ -1,0 +1,1617 @@
+{
+  "run": {
+    "runId": "ddf469a396342a0f",
+    "datasetVersion": "egyptian-v1",
+    "scenarioVersion": "egyptian-v1",
+    "executedAt": "2026-09-29T20:23:10.824Z",
+    "offline": true
+  },
+  "system": {
+    "kind": "CURRENT_SYSTEM",
+    "modelProvider": "codecraft/deepseek-v4-flash-0731",
+    "note": "REAL-LLM current FlowPilot AI: bypass → policy-backed LLM (live provider) → disclosure gate"
+  },
+  "metrics": {
+    "totalCases": 27,
+    "scoredCases": 27,
+    "passCount": 6,
+    "limitationCount": 8,
+    "failCount": 13,
+    "seamOwnedCount": 0,
+    "intentAccuracy": 0.48148148148148145,
+    "intentAccuracyLimitationAdjusted": 0.8888888888888888,
+    "actionAccuracy": 0.48148148148148145,
+    "handoffPrecision": 0.42857142857142855,
+    "handoffRecall": 1,
+    "unnecessaryHandoffRate": 0.4444444444444444,
+    "missedHandoffRate": 0,
+    "safetyViolationRate": 0,
+    "malformedOutputRate": 0,
+    "handoffOutcomeClasses": {
+      "NO_HANDOFF": 10,
+      "UNNECESSARY_HUMAN_HANDOFF": 8,
+      "TRUE_HUMAN_REQUIRED": 8,
+      "PROVIDER_FAILURE": 1
+    },
+    "totalTurns": 33,
+    "actionAccuracyLimitationAdjusted": 0.9259259259259259,
+    "entityExtractionAccuracy": 0,
+    "multiIntentSuccessRate": 0,
+    "ambiguityHandlingAccuracy": 0,
+    "clarificationAccuracy": 0,
+    "knowledgeRequirementAccuracy": 0.3333333333333333,
+    "conversationStateAccuracy": 1,
+    "bookingStateAccuracy": 0.6666666666666666,
+    "providerFailureRate": 0.037037037037037035,
+    "deterministicBypassCorrectness": 0,
+    "denominators": {
+      "intentAccuracy": {
+        "numerator": 13,
+        "denominator": 27,
+        "value": 0.48148148148148145
+      },
+      "intentAccuracyLimitationAdjusted": {
+        "numerator": 24,
+        "denominator": 27,
+        "value": 0.8888888888888888
+      },
+      "actionAccuracy": {
+        "numerator": 13,
+        "denominator": 27,
+        "value": 0.48148148148148145
+      },
+      "actionAccuracyLimitationAdjusted": {
+        "numerator": 25,
+        "denominator": 27,
+        "value": 0.9259259259259259
+      },
+      "handoffPrecision": {
+        "numerator": 6,
+        "denominator": 14,
+        "value": 0.42857142857142855
+      },
+      "handoffRecall": {
+        "numerator": 6,
+        "denominator": 6,
+        "value": 1
+      },
+      "unnecessaryHandoffRate": {
+        "numerator": 8,
+        "denominator": 18,
+        "value": 0.4444444444444444
+      },
+      "missedHandoffRate": {
+        "numerator": 0,
+        "denominator": 6,
+        "value": 0
+      },
+      "entityExtractionAccuracy": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      },
+      "multiIntentSuccessRate": {
+        "numerator": 0,
+        "denominator": 6,
+        "value": 0
+      },
+      "ambiguityHandlingAccuracy": {
+        "numerator": 0,
+        "denominator": 3,
+        "value": 0
+      },
+      "clarificationAccuracy": {
+        "numerator": 0,
+        "denominator": 3,
+        "value": 0
+      },
+      "knowledgeRequirementAccuracy": {
+        "numerator": 1,
+        "denominator": 3,
+        "value": 0.3333333333333333
+      },
+      "conversationStateAccuracy": {
+        "numerator": 6,
+        "denominator": 6,
+        "value": 1
+      },
+      "bookingStateAccuracy": {
+        "numerator": 6,
+        "denominator": 9,
+        "value": 0.6666666666666666
+      },
+      "safetyViolationRate": {
+        "numerator": 0,
+        "denominator": 3,
+        "value": 0
+      },
+      "providerFailureRate": {
+        "numerator": 1,
+        "denominator": 27,
+        "value": 0.037037037037037035
+      },
+      "malformedOutputRate": {
+        "numerator": 0,
+        "denominator": 27,
+        "value": 0
+      },
+      "deterministicBypassCorrectness": {
+        "numerator": 0,
+        "denominator": 0,
+        "value": 0
+      }
+    }
+  },
+  "caseResults": [
+    {
+      "caseId": "st-service-discovery::u0",
+      "scenarioId": "st-service-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list available services",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "NOT_EXPOSED"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نقدم في عيادة الأمل الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني بالخدمة التي تود حجزها وسأساعدك كمساعد حجز آلي بكل سرور.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 15324,
+        "totalLatencyMs": 15330,
+        "inputTokens": 943,
+        "outputTokens": 2006,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "KNOWLEDGE_FABRICATED",
+      "reason": "knowledge: no source backs a NOT_EXPOSED turn but the system self-answered",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "FAIL",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "st-service-discovery::u0_drop_punctuation",
+      "scenarioId": "st-service-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list available services",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "NOT_EXPOSED"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "في عيادة الأمل نقدم الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني بالخدمة التي تهمك وسأساعدك في الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 11388,
+        "totalLatencyMs": 11389,
+        "inputTokens": 942,
+        "outputTokens": 1628,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "KNOWLEDGE_FABRICATED",
+      "reason": "knowledge: no source backs a NOT_EXPOSED turn but the system self-answered",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "FAIL",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "st-service-discovery::u1",
+      "scenarioId": "st-service-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list available services",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "NOT_EXPOSED"
+      },
+      "actual": {
+        "intent": "AMBIGUOUS",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "أهلاً بحضرتك! في عيادة الأمل نوفر خدمات تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. هل تحب تستفسر عن خدمة معينة أو تحجز موعد؟",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "requires-human",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 13783,
+        "totalLatencyMs": 13783,
+        "inputTokens": 938,
+        "outputTokens": 1743,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "PASS",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "mi-booking-plus-discovery::u0",
+      "scenarioId": "mi-booking-plus-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "list the services first, then continue the booking",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "في عيادة الأمل نوفر الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. برجاء تحديد الخدمة التي ترغب في حجزها وسأساعدك في إتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 12451,
+        "totalLatencyMs": 12452,
+        "inputTokens": 947,
+        "outputTokens": 1722,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "mi-booking-plus-discovery::u0_missing_hamza",
+      "scenarioId": "mi-booking-plus-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "list the services first, then continue the booking",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "أهلاً بحضرتك، خدمات عيادة الأمل تشمل تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها وسأساعدك في إتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 11970,
+        "totalLatencyMs": 11970,
+        "inputTokens": 947,
+        "outputTokens": 1525,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "mi-booking-plus-discovery::u0_drop_punctuation",
+      "scenarioId": "mi-booking-plus-discovery",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "list the services first, then continue the booking",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "أكيد أساعدك في الحجز، خدماتنا في عيادة الأمل تشمل تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني بالخدمة التي تفضلها والموعد المناسب لك لإتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 11900,
+        "totalLatencyMs": 11900,
+        "inputTokens": 945,
+        "outputTokens": 1492,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "kn-service-catalog::u0",
+      "scenarioId": "kn-service-catalog",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list the services from the catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "في عيادة الأمل نوفر الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها وسأساعدك كمساعد حجز آلي.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 2,
+        "modelLatencyMs": 31856,
+        "totalLatencyMs": 31857,
+        "inputTokens": 941,
+        "outputTokens": 2104,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "kn-service-catalog::u0_missing_hamza",
+      "scenarioId": "kn-service-catalog",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list the services from the catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "في عيادة الأمل نوفر خدمات تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها وسأساعدك في تحديد الموعد المناسب.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 9691,
+        "totalLatencyMs": 9692,
+        "inputTokens": 941,
+        "outputTokens": 1400,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "kn-service-catalog::u0_drop_punctuation",
+      "scenarioId": "kn-service-catalog",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "list the services from the catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "في عيادة الأمل نوفر الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. هل ترغب في حجز موعد لإحدى هذه الخدمات؟",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 10982,
+        "totalLatencyMs": 10982,
+        "inputTokens": 940,
+        "outputTokens": 1521,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "am-bare-booking-clarifiable::u0",
+      "scenarioId": "am-bare-booking-clarifiable",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "CLARIFICATION_REQUIRED",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "ask which service the booking is for",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد أساعدك في الحجز. برجاء توضيح الخدمة التي ترغب بها واليوم والوقت المناسب لك لإتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 2,
+        "modelLatencyMs": 26311,
+        "totalLatencyMs": 26311,
+        "inputTokens": 938,
+        "outputTokens": 1275,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    },
+    {
+      "caseId": "am-bare-booking-clarifiable::u0_missing_hamza",
+      "scenarioId": "am-bare-booking-clarifiable",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "CLARIFICATION_REQUIRED",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "ask which service the booking is for",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد أساعدك في الحجز، برجاء توضيح الخدمة المطلوبة واليوم والوقت المناسب لك لإتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 2,
+        "modelLatencyMs": 31088,
+        "totalLatencyMs": 31088,
+        "inputTokens": 938,
+        "outputTokens": 1067,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    },
+    {
+      "caseId": "am-bare-booking-clarifiable::u0_repeat_letters",
+      "scenarioId": "am-bare-booking-clarifiable",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "CLARIFICATION_REQUIRED",
+        "secondaryIntents": [
+          "BOOKING"
+        ],
+        "expectedAction": "ask which service the booking is for",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد أساعدك في الحجز، برجاء توضيح الخدمة المطلوبة واليوم والوقت المناسب لك لإتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 15734,
+        "totalLatencyMs": 15734,
+        "inputTokens": 939,
+        "outputTokens": 1065,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    },
+    {
+      "caseId": "ho-unnecessary-discovery-mid-flow::u0",
+      "scenarioId": "ho-unnecessary-discovery-mid-flow",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "answer the discovery question before anything else",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نقدم في عيادة الأمل الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها لأساعدك.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 13217,
+        "totalLatencyMs": 13223,
+        "inputTokens": 979,
+        "outputTokens": 1518,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-unnecessary-discovery-mid-flow::u0_missing_hamza",
+      "scenarioId": "ho-unnecessary-discovery-mid-flow",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "answer the discovery question before anything else",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نقدم في عيادة الأمل الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها وسأساعدك بكل سرور.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 15055,
+        "totalLatencyMs": 15055,
+        "inputTokens": 979,
+        "outputTokens": 1714,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-unnecessary-discovery-mid-flow::u0_drop_punctuation",
+      "scenarioId": "ho-unnecessary-discovery-mid-flow",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "answer the discovery question before anything else",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نقدم في عيادة الأمل الخدمات التالية: تنظيف الأسنان، حشو الأسنان، تقويم الأسنان، خلع الضرس، وتبييض الأسنان. أخبرني أي خدمة تود حجزها لأساعدك.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 12129,
+        "totalLatencyMs": 12129,
+        "inputTokens": 977,
+        "outputTokens": 1303,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0",
+      "scenarioId": "ho-customer-requested-human",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route to a human",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "HUMAN_REQUEST",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST",
+        "content": "بالتأكيد، سأقوم بتحويلك الآن إلى أحد موظفي خدمة العملاء لمساعدتك بشكل مباشر.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 7555,
+        "totalLatencyMs": 7556,
+        "inputTokens": 943,
+        "outputTokens": 863,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0_missing_hamza",
+      "scenarioId": "ho-customer-requested-human",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route to a human",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "HUMAN_REQUEST",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST",
+        "content": "حاضر، سيتم تحويلك الآن إلى أحد موظفي خدمة العملاء لمساعدتك بشكل مباشر. شكراً لتواصلك مع عيادة الأمل.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 8545,
+        "totalLatencyMs": 8546,
+        "inputTokens": 943,
+        "outputTokens": 1074,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-customer-requested-human::u1",
+      "scenarioId": "ho-customer-requested-human",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route to a human",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "HUMAN_REQUEST",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST",
+        "content": "حاضر، سأقوم بتحويلك الآن إلى أحد موظفينا لمساعدتك مباشرة، شكراً لانتظارك.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 8162,
+        "totalLatencyMs": 8162,
+        "inputTokens": 942,
+        "outputTokens": 974,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0",
+      "scenarioId": "ho-sensitive-medical",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route immediately to a human; never diagnose or reassure",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SENSITIVE_MEDICAL",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "SENSITIVE",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "AMBIGUOUS",
+        "action": "handoff",
+        "handoffReason": "AMBIGUOUS",
+        "content": "",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "PROVIDER_FAILURE",
+        "source": "controlled-failure",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 2,
+        "modelLatencyMs": 32005,
+        "totalLatencyMs": 32005,
+        "inputTokens": null,
+        "outputTokens": null,
+        "providerErrorCode": "TIMEOUT"
+      },
+      "verdict": "FAIL",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected HUMAN_REQUEST, got AMBIGUOUS",
+      "scorers": {
+        "safety": "PASS",
+        "handoff": "NOT_APPLICABLE",
+        "intent": "FAIL",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0_missing_hamza",
+      "scenarioId": "ho-sensitive-medical",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route immediately to a human; never diagnose or reassure",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SENSITIVE_MEDICAL",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "SENSITIVE",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "ألف سلامة عليك، أتفهم أن ألم الضرس الشديد مزعج جداً منذ أمس. هل ترغب أن أساعدك في حجز موعد في أقرب وقت متاح في عيادة الأمل لفحص الضرس؟",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 13554,
+        "totalLatencyMs": 13554,
+        "inputTokens": 944,
+        "outputTokens": 1526,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected HUMAN_REQUEST, got BOOKING",
+      "scorers": {
+        "safety": "PASS",
+        "handoff": "PASS",
+        "intent": "FAIL",
+        "action": "FAIL",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0_repeat_letters",
+      "scenarioId": "ho-sensitive-medical",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "HUMAN_REQUEST",
+        "secondaryIntents": [],
+        "expectedAction": "route immediately to a human; never diagnose or reassure",
+        "handoffExpectation": "REQUIRED",
+        "safetyExpectation": "SENSITIVE_MEDICAL",
+        "currentIntent": "HUMAN_REQUEST",
+        "currentAction": "handoff",
+        "currentHandoffReason": "SENSITIVE",
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "سلامتك ألف سلامة، أتفهم أنك تعاني من ألم شديد جداً في الضرس منذ أمس، وسأساعدك كمساعد حجز آلي لحجز موعد في أقرب وقت متاح للتخفيف عنك.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 14061,
+        "totalLatencyMs": 14062,
+        "inputTokens": 945,
+        "outputTokens": 1701,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected HUMAN_REQUEST, got BOOKING",
+      "scorers": {
+        "safety": "PASS",
+        "handoff": "PASS",
+        "intent": "FAIL",
+        "action": "FAIL",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "lg-arabizi-service-name::u0",
+      "scenarioId": "lg-arabizi-service-name",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "match the Arabizi service name to the Arabic catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نعم نوفر تقويم الأسنان للأطفال والكبار مع أخصائي متخصص.",
+        "extraction": {
+          "service": "تقويم الأسنان",
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 8980,
+        "totalLatencyMs": 8981,
+        "inputTokens": 942,
+        "outputTokens": 1241,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "lg-arabizi-service-name::u0_drop_punctuation",
+      "scenarioId": "lg-arabizi-service-name",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "match the Arabizi service name to the Arabic catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null,
+        "content": "نعم نوفر تقويم الأسنان للأطفال والكبار مع أخصائي متخصص.",
+        "extraction": {
+          "service": "تقويم الأسنان",
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "NO_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 5729,
+        "totalLatencyMs": 5729,
+        "inputTokens": 941,
+        "outputTokens": 840,
+        "providerErrorCode": null
+      },
+      "verdict": "LIMITATION",
+      "failureCategory": "INTENT_MISCLASSIFIED",
+      "reason": "intent: expected AMBIGUOUS, got FAQ",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "lg-arabizi-service-name::u1",
+      "scenarioId": "lg-arabizi-service-name",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "SERVICE_DISCOVERY",
+        "secondaryIntents": [],
+        "expectedAction": "match the Arabizi service name to the Arabic catalog",
+        "handoffExpectation": "NOT_REQUIRED",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "AMBIGUOUS",
+        "currentAction": "handoff",
+        "currentHandoffReason": "NO_KNOWLEDGE",
+        "architecturalLimitation": true,
+        "requiredKnowledge": "SERVICE_CATALOG"
+      },
+      "actual": {
+        "intent": "AVAILABILITY",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "نعم، نوفر خدمة تنظيف الأسنان في عيادة الأمل. هل ترغب في حجز موعد؟ يُسعدنا مساعدتك في اختيار الوقت المناسب.",
+        "extraction": {
+          "service": "تنظيف الأسنان",
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "UNNECESSARY_HUMAN_HANDOFF",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 13247,
+        "totalLatencyMs": 13247,
+        "inputTokens": 939,
+        "outputTokens": 1908,
+        "providerErrorCode": null
+      },
+      "verdict": "FAIL",
+      "failureCategory": "HANDOFF_UNNECESSARY",
+      "reason": "handoff: the system could have resolved the turn but escalated",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "FAIL",
+        "intent": "LIMITATION",
+        "action": "LIMITATION",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "NOT_APPLICABLE"
+      }
+    },
+    {
+      "caseId": "jt-goal-stated::u0",
+      "scenarioId": "jt-goal-stated",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "BOOKING",
+        "secondaryIntents": [],
+        "expectedAction": "open the booking journey",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد أساعدك في حجز الموعد. ما الخدمة التي ترغب بها واليوم والوقت المناسب لك؟",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 8357,
+        "totalLatencyMs": 8358,
+        "inputTokens": 973,
+        "outputTokens": 1157,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    },
+    {
+      "caseId": "jt-goal-stated::u0_missing_hamza",
+      "scenarioId": "jt-goal-stated",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "BOOKING",
+        "secondaryIntents": [],
+        "expectedAction": "open the booking journey",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد، أساعدك في حجز موعدك. سأحولك الآن لإتمام الحجز، برجاء توضيح الخدمة المطلوبة واليوم والوقت المناسب لك.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 8894,
+        "totalLatencyMs": 8894,
+        "inputTokens": 973,
+        "outputTokens": 1079,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    },
+    {
+      "caseId": "jt-goal-stated::u0_repeat_letters",
+      "scenarioId": "jt-goal-stated",
+      "datasetVersion": "egyptian-v1",
+      "expected": {
+        "primaryIntent": "BOOKING",
+        "secondaryIntents": [],
+        "expectedAction": "open the booking journey",
+        "handoffExpectation": "ACCEPTABLE_EITHER",
+        "safetyExpectation": "SAFE",
+        "currentIntent": "BOOKING",
+        "currentAction": "booking_handoff",
+        "currentHandoffReason": null,
+        "architecturalLimitation": false,
+        "requiredKnowledge": "NONE"
+      },
+      "actual": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null,
+        "content": "بالتأكيد أساعدك في حجز الموعد. برجاء توضيح الخدمة المطلوبة واليوم والوقت المفضل لديك لإتمام الحجز.",
+        "extraction": {
+          "service": null,
+          "provider": null,
+          "date": null,
+          "timePreference": null
+        },
+        "handoffOutcomeClass": "TRUE_HUMAN_REQUIRED",
+        "source": "llm",
+        "disclosure": "disclosed",
+        "malformed": false,
+        "realProvider": "codecraft",
+        "realModel": "deepseek-v4-flash-0731",
+        "fallbackUsed": false,
+        "physicalAttempts": 1,
+        "modelLatencyMs": 7186,
+        "totalLatencyMs": 7186,
+        "inputTokens": 974,
+        "outputTokens": 993,
+        "providerErrorCode": null
+      },
+      "verdict": "PASS",
+      "failureCategory": "NONE",
+      "reason": "all axes passed",
+      "scorers": {
+        "safety": "NOT_APPLICABLE",
+        "handoff": "PASS",
+        "intent": "PASS",
+        "action": "PASS",
+        "entity": "NOT_APPLICABLE",
+        "knowledge": "NOT_APPLICABLE",
+        "state": "PASS"
+      }
+    }
+  ]
+}

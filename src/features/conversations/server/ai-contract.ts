@@ -182,6 +182,99 @@ export const aiRequestSchema = z.object({
 
 export type AiRequest = z.infer<typeof aiRequestSchema>;
 
+// ─── Additive decision shape (PROMPT-AI-ARCH-02 — Slice 0) ────────────────────
+//
+// Target-architecture capacity ONLY. These fields are OPTIONAL: no current
+// producer emits them and no current consumer is required to read them, so
+// production behavior is unchanged. A decision that carries no `goals` is
+// treated as exactly one goal synthesized from `intent` + `action`
+// (`synthesizeDecisionGoals`) — the compatibility bridge the target defines
+// (docs/ai/TARGET_ARCHITECTURE.md §5.2/§18).
+//
+// The final production enums for the future behaviours (decision classes,
+// clarification types, handoff causes) land in later slices. To avoid copying
+// the evaluation-only semantic vocabulary into production, every descriptive
+// label here is a BOUNDED string; the ONE closed enum is the structural
+// decision class (`AiGoalKind`) the synthesis bridge must emit.
+
+/** The four target decision classes (TARGET_ARCHITECTURE §5.1). */
+export const aiGoalKindValues = [
+  "ANSWER",
+  "CLARIFY",
+  "DOMAIN_ACTION",
+  "HANDOFF",
+] as const;
+
+export type AiGoalKind = (typeof aiGoalKindValues)[number];
+
+export const aiGoalKindSchema = z.enum(aiGoalKindValues);
+
+/**
+ * One goal in a structured AI decision. `kind` is the target decision class;
+ * the remaining labels are resolver-mapped (bounded labels, NOT a copy of the
+ * evaluation-only vocabulary) and optional so a minimal goal stays valid.
+ */
+export const aiGoalSchema = z.object({
+  kind: aiGoalKindSchema,
+  /** Existing intent family, or a future resolver-mapped label. */
+  intent: z.string().trim().min(1).max(64).optional(),
+  /** Resolver-mapped knowledge requirement label (additive). */
+  requiredKnowledge: z.string().trim().min(1).max(64).optional(),
+  /** Resolver-mapped domain action label (additive). */
+  domainAction: z.string().trim().min(1).max(64).optional(),
+  /** Stable ordering — lower runs first. Optional for compatibility. */
+  priority: z.number().int().min(0).max(100).optional(),
+  /** Keep the task pending after this goal (answer-and-continue). */
+  continueAfter: z.boolean().optional(),
+});
+
+export type AiGoal = z.infer<typeof aiGoalSchema>;
+
+/** A clarification the model PROPOSES; the engine decides (later slice). */
+export const aiClarificationSchema = z.object({
+  /** Target clarification type; the final production enum lands later. */
+  type: z.string().trim().min(1).max(64),
+  /** Missing fact keys the clarification asks about (later slice). */
+  missingFacts: z.array(z.string().trim().min(1).max(64)).max(8).optional(),
+});
+
+export type AiClarification = z.infer<typeof aiClarificationSchema>;
+
+/**
+ * An explicit handoff cause. A bounded label in this slice — the final
+ * production cause enum lands with the handoff mapping (later slice). Target
+ * values: CUSTOMER_REQUESTED_HUMAN · SENSITIVE_OR_RESTRICTED ·
+ * DOMAIN_REQUIRES_HUMAN · KNOWLEDGE_GAP_UNRESOLVED · AMBIGUITY_UNRESOLVED ·
+ * POLICY_REFUSED · PROVIDER_FAILURE · AI_FAILURE · TENANT_CONFIGURATION ·
+ * RETRY_EXHAUSTED.
+ */
+export const aiHandoffCauseSchema = z.string().trim().min(1).max(64);
+
+export type AiHandoffCause = z.infer<typeof aiHandoffCauseSchema>;
+
+/** A conversation fact the model PROPOSES; the engine validates (later slice). */
+export const aiFactUpdateSchema = z.object({
+  /** Closed fact key in the target model (service | date | timePreference | …). */
+  key: z.string().trim().min(1).max(64),
+  /** Customer-stated value; the engine validates it against server ids. */
+  value: z.string().trim().min(1).max(200),
+  /** True when this supersedes a previously known value. */
+  isRevision: z.boolean().optional(),
+});
+
+export type AiFactUpdate = z.infer<typeof aiFactUpdateSchema>;
+
+/**
+ * The ordered executable plan (TARGET_ARCHITECTURE §3.10). A plan is an
+ * ordered list of goals — the SAME model, never a second one. Optional and
+ * unused by today's producers; the Decision/Action Resolver owns it later.
+ */
+export const aiTurnPlanSchema = z.object({
+  steps: z.array(aiGoalSchema).max(8),
+});
+
+export type AiTurnPlan = z.infer<typeof aiTurnPlanSchema>;
+
 // ─── Response (structured, bounded) ──────────────────────────────────────────
 
 const aiResponseBase = {
@@ -195,6 +288,15 @@ const aiResponseBase = {
   handoffReason: handoffReasonSchema.nullable().default(null),
   /** Short staff-facing summary (required for booking_handoff). */
   summary: z.string().trim().min(1).max(400).nullable().default(null),
+  // ── Additive target-architecture fields (OPTIONAL; unused by producers today)
+  /** Structured goals when a producer can express more than one intent. */
+  goals: z.array(aiGoalSchema).max(8).optional(),
+  /** A proposed clarification (the engine decides; later slice). */
+  clarification: aiClarificationSchema.optional(),
+  /** An explicit typed handoff cause (the engine maps it; later slice). */
+  handoffCause: aiHandoffCauseSchema.optional(),
+  /** Proposed conversation-fact updates (engine-validated; later slice). */
+  factUpdates: z.array(aiFactUpdateSchema).max(16).optional(),
 };
 
 /**
@@ -230,4 +332,42 @@ export function parseAiResponse(raw: unknown): AiResponse | null {
 export function parseAiRequest(raw: unknown): AiRequest | null {
   const parsed = aiRequestSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+// ─── Compatibility bridge (one canonical decision representation) ────────────
+
+/** Intents the DOMAIN executes (CORE-01/CORE-02), not the assistant. */
+const domainExecutedIntents: ReadonlySet<AiIntent> = new Set<AiIntent>([
+  "BOOKING",
+  "AVAILABILITY",
+  "RESCHEDULE",
+  "CANCELLATION",
+]);
+
+/** The target decision class an existing (intent, action) pair maps to. */
+function goalKindForDecision(response: AiResponse): AiGoalKind {
+  if (response.action === "handoff") return "HANDOFF";
+  if (response.action === "booking_handoff") return "DOMAIN_ACTION";
+  // action === "reply": booking-family intents resolve through the domain;
+  // everything else is answered from knowledge/domain facts.
+  return domainExecutedIntents.has(response.intent)
+    ? "DOMAIN_ACTION"
+    : "ANSWER";
+}
+
+/**
+ * The single-goal synthesis bridge (TARGET_ARCHITECTURE §5.2/§18): a decision
+ * that carries explicit `goals` keeps them; a decision with none is treated
+ * as exactly one goal derived from the existing `intent` + `action`. Pure and
+ * additive — current callers never need to call it, and it introduces no
+ * second decision representation.
+ */
+export function synthesizeDecisionGoals(response: AiResponse): AiGoal[] {
+  if (response.goals && response.goals.length > 0) return [...response.goals];
+  return [{ kind: goalKindForDecision(response), intent: response.intent }];
+}
+
+/** The single-step TurnPlan a no-goals decision implies (Slice 0 observation). */
+export function synthesizeTurnPlan(response: AiResponse): AiTurnPlan {
+  return { steps: synthesizeDecisionGoals(response) };
 }

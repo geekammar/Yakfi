@@ -1,0 +1,61 @@
+{
+  "runId": "7e2b10ac75f9db78",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "scenarioVersion": "egyptian-v1",
+  "seed": 20260928,
+  "targetId": "future-system-flowpilot",
+  "systemIdentity": {
+    "kind": "FUTURE_SYSTEM",
+    "modelProvider": "atria/Atria-Dawn-Preview",
+    "routerVersion": "conversation-engine+turn-planner(Slice3)+clarify(Slice4)",
+    "contextBuilderVersion": "ai-context-builder(B-02)",
+    "note": "FUTURE_SYSTEM bridge (eval-only): real LLM → Conversation Engine → ConversationState → resolveTurnPlan() → CLARIFY → clarification handler → TurnObservability. No production mutation."
+  },
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "DATASET",
+  "filter": {},
+  "executedAt": "2026-10-01T17:05:02.204Z",
+  "totalCases": 14,
+  "totalTurns": 24,
+  "slice": "PROMPT-AI-EVAL-08",
+  "title": "Real-LLM Re-Verification After Slice 4 Remediation — FUTURE_SYSTEM / Atria",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "providerOverride": {
+    "used": true,
+    "flags": "--provider atria --model Atria-Dawn-Preview --timeout-ms 120000",
+    "note": "Evaluation-only provider seam. DB-backed PlatformAiPolicy NOT read and NOT changed. Keys resolved by name only (ATRIA_API_KEY present)."
+  },
+  "calibration": {
+    "ranFirst": true,
+    "mode": "CALIBRATION_ONLY",
+    "caseIds": ["st-service-discovery::u0", "am-bare-booking-clarifiable::u0"],
+    "result": "PASS (ANSWER + CLARIFY observed; real inference; engine reached; 0 provider failures; 0 multi-call)",
+    "artifacts": "calibration/"
+  },
+  "runtime": {
+    "providerTimeouts": 0,
+    "perAttemptTimeoutMs": 120000,
+    "boundedRetryAttempts": 0,
+    "note": "0/24 turns timed out at 120s. The 4 EVAL-07 batch TIMEOUTs (45s x 2) were eliminated by the larger per-attempt budget; every authoritative observation came from a first clean attempt. Real latency min 13.2s / p50 ~44.6s / max 98.1s (Atria slow — TARGET_ARCHITECTURE finding #7, reported separately from model behaviour)."
+  },
+  "modelCallAccounting": {
+    "maxModelCallsObservedPerTurn": 1,
+    "multiCallTurns": 0,
+    "invariantHeld": true,
+    "hiddenSecondInference": false
+  },
+  "remediationTargets": {
+    "SAFETY_REGRESSION": "CLOSED",
+    "SUPPLIED_FACT_RESUME": "NOT_CLOSED_VIA_PATH (deterministic-only proof)",
+    "INTERRUPTION_RECOVERY_PENDING_TASK_LOST": "NOT_CLOSED_VIA_PATH (deterministic-only proof)",
+    "CLARIFY_UNNECESSARY": "CLOSED_FOR_CLARIFY (residual unnecessary handoff)",
+    "CLARIFY_MEASUREMENT_INTEGRITY": "CLOSED"
+  },
+  "comparedAgainst": "evaluation/reports/egyptian-v1/future-system-clarify (EVAL-07, run 7e2b10ac75f9db78, executedAt 2026-10-01T15:02:06Z)",
+  "decision": "BLOCKED — EVALUATION_PATH",
+  "harnessReadinessGate": "READY_FOR_REAL_LLM_CLARIFY_VERIFICATION (runner structural gate; NOT the semantic verdict)",
+  "productionMutation": "NONE (isolated in-memory repositories; no DB/appointment/provider/tenant/prompt/schema change)"
+}

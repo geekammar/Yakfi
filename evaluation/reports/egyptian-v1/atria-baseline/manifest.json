@@ -1,0 +1,20 @@
+{
+  "runId": "749af9925213cec5",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "scenarioVersion": "egyptian-v1",
+  "seed": 20260928,
+  "targetId": "real-llm-flowpilot",
+  "systemIdentity": {
+    "kind": "CURRENT_SYSTEM",
+    "modelProvider": "atria/Atria-Dawn-Preview",
+    "note": "REAL-LLM evaluation target (provider-override, eval-only): bypass → policy-backed LLM (atria) → disclosure gate. Production provider policy unchanged."
+  },
+  "evaluatorVersion": "eval-runner@1",
+  "scoringVersion": "eval-scoring@1",
+  "executionMode": "DATASET",
+  "filter": {},
+  "executedAt": "2026-10-01T01:14:53.750Z",
+  "totalCases": 1933,
+  "totalTurns": 2972
+}

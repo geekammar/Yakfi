@@ -1,0 +1,71 @@
+{
+  "purpose": "PROMPT-AI-EVAL-10 real-LLM re-verification after the EVAL-09 evaluation-path capability slice. REUSES the EXACT EVAL-08 focused 14-case ids. SELECTION ONLY — the canonical dataset is NEVER modified.",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "totalCasesInDataset": 1933,
+  "reusedFrom": "evaluation/reports/egyptian-v1/real-llm-clarify-rerun/case-selection.json (EVAL-08)",
+  "seededCrossTurnCases": [
+    "am-context-resolves-service::u0",
+    "mt-topic-return::u0",
+    "jt-interrupted::u0"
+  ],
+  "focusedCaseIds": [
+    {
+      "caseId": "am-bare-booking-clarifiable::u0",
+      "axis": "ambiguous booking (CLARIFY control)"
+    },
+    {
+      "caseId": "jt-missing-service::u0",
+      "axis": "missing service (CLARIFY)"
+    },
+    {
+      "caseId": "jt-missing-date::u0",
+      "axis": "missing date (CLARIFY)"
+    },
+    {
+      "caseId": "st-service-discovery::u0",
+      "axis": "answerable-without-clarification (ANSWER control)"
+    },
+    {
+      "caseId": "ho-customer-requested-human::u0",
+      "axis": "explicit human request (HANDOFF — preservation)"
+    },
+    {
+      "caseId": "ho-sensitive-medical::u0",
+      "axis": "sensitive/restricted (SAFETY — target 1)"
+    },
+    {
+      "caseId": "ho-empty-knowledge-gap::u0",
+      "axis": "knowledge gap (distinct from CLARIFY)"
+    },
+    {
+      "caseId": "ho-ambiguous-but-clarifiable-multi-turn::u0",
+      "axis": "multi-turn clarification"
+    },
+    {
+      "caseId": "am-context-resolves-service::u0",
+      "axis": "clarification answer / resume (SUPPLIED_FACT_RESUME — target 2)"
+    },
+    {
+      "caseId": "mt-topic-return::u0",
+      "axis": "topic return / resume (SUPPLIED_FACT_RESUME — target 2)"
+    },
+    {
+      "caseId": "st-ambiguous-oneword::u0",
+      "axis": "Egyptian colloquial ambiguity"
+    },
+    {
+      "caseId": "lg-spelling-variation-service::u0",
+      "axis": "Arabic spelling/noise"
+    },
+    {
+      "caseId": "jt-interrupted::u0",
+      "axis": "interruption after clarification (INTERRUPTION_RECOVERY — target 3)"
+    },
+    {
+      "caseId": "st-ambiguous-idk::u0",
+      "axis": "non-committal / unnecessary CLARIFY (CLARIFY_UNNECESSARY — target 4)"
+    }
+  ],
+  "focusedCaseIdCount": 14
+}

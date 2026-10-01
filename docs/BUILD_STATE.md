@@ -51,6 +51,303 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI EVALUATION — REAL-LLM RE-VERIFICATION AFTER ARCH-08 (`PROMPT-AI-EVAL-11`,
+VERIFICATION-ONLY): READY_FOR_SLICE_5 (human-review gate).** The EXACT EVAL-10
+focused 14-case set was re-run through the CURRENT post-ARCH-08 FUTURE_SYSTEM
+real-LLM path (`future-system-flowpilot`, provider `atria` / model
+`Atria-Dawn-Preview` via the eval-only override; `ATRIA_API_KEY` verified by
+presence/name only; DB production policy NOT read/changed; dataset `egyptian-v1`
+hash `8be16297ae4717bab5da4f3c94de1887` unchanged), reusing the EVAL-09
+`seedPendingState` seed (0 real calls) for the 3 cross-turn cases. Calibration
+(ANSWER + CLARIFY + seeded RESUME) passed FIRST — RESUME now
+`DOMAIN_ACTION`/`AI_ACTIVE`/`resumeObserved=true` (was `CLARIFY`/`CLARIFY_DATE`
+pre-ARCH-08). Full run (14 real calls, 1/turn, `multiCallTurns 0`,
+`providerFailures 0`, 0 retries, 0 timeouts; latency p50 ≈41s/max ≈95s =
+provider property): **BOTH remaining gaps CLOSED** —
+**SUPPLIED_FACT_RESUME 2/2 pass** (`am-context-resolves-service::u0` +
+`mt-topic-return::u0` → `DOMAIN_ACTION`, colloquial «الخميس» binds through
+`mergeConversationState`, no re-ask; `resumeFailures=0`) and
+**INTERRUPTION_RECOVERY 1/1 pass** (`jt-interrupted::u0` → `CONFIRM_UNDERSTOOD_REQUEST`,
+`AI_ACTIVE`, `AVAILABILITY_RESOLVED→INTERRUPTED`, task preserved;
+`interruptionRecoveryFailures=0`, `pendingTaskLosses=0`). **SAFETY preserved**
+(sensitive-medical + explicit-human → `NEED_HUMAN`, knowledge-gap →
+`KNOWLEDGE_GAP`; `safetyRegressions=0`), **CLARIFY 4/4 correct / 0 missed / 0
+unnecessary**, measurement semantically aligned (`causeCounts {}`; legacy EVAL-03
+PASS/LIM/FAIL 1/6/7 is a SCORER_ARTIFACT — the legacy scorer cannot represent
+first-class CLARIFY/DOMAIN_ACTION/resume). All MUST-be-0 counters are 0.
+Verification: `check:future-system` 33/33, `check:eval` 25/25, `check:eval-runner`
+18/18, `check:eval-schema` 22/22, `check:clarify` 27/27; `pnpm verify`
+(lint/typecheck/format/build) + `pnpm security` green. ONLY new files are the
+reporting artifacts under `evaluation/reports/egyptian-v1/real-llm-eval11/`
+(report.md A–Q, analysis.json, status.md, case-selection.json, calibration.json);
+EVAL-10 artifacts preserved in `real-llm-eval10/` for traceable before/after. **No
+`src/`, prompt, provider policy/config, dataset, gold, scorer, schema, or
+migration change; no commit/push/tag/migration/deploy; Slice 5 NOT started.**
+**Readiness: READY_FOR_SLICE_5 (human-review gate).** Next step: human review of
+this readiness; on approval begin `docs/ai/TARGET_ARCHITECTURE.md §17 Slice 5` as
+its own prompt.
+
+**AI TARGET ARCHITECTURE — SLICE 4 BEHAVIORAL REMEDIATION IMPLEMENTED
+(`PROMPT-AI-ARCH-08`): EVAL-11 VERIFIED — BEHAVIORALLY CLOSED under real Atria
+(see PROMPT-AI-EVAL-11 above).** The two remaining Slice-4
+behavioral gaps PROMPT-AI-EVAL-10 proved under real Atria —
+`SUPPLIED_FACT_RESUME` (2/2) and `INTERRUPTION_RECOVERY` (1/1) — are now closed
+DETERMINISTICALLY at the real production seams, with **NO new model call**
+(zero-or-one invariant held), no new classifier, no prompt/provider/schema/
+migration change, and **no second resolver / ConversationState / planner / fact
+model**. **(A) Supplied-fact resume for colloquial Egyptian dates.** Root cause:
+the AI contract's `extraction.date` only crosses the boundary as a bounded ISO
+`YYYY-MM-DD`, so a model can never carry «الخميس» as a date; the engine bound
+the raw text, which the booking seam (ISO-only `resumeBookingExtraction`) then
+re-clarified as `MISSING_DATE`. Fix: a NEW pure module
+`src/features/conversations/server/relative-date.ts`
+(`resolveEgyptianRelativeDate` + `todayIsoInTimeZone`) recognizes exactly the
+concrete colloquial forms the failing cases exercise — weekday names
+(«السبت…الجمعة»), «النهاردة/اليوم», «بكرة/غدا», «بعد بكرة/بعد غد» — relative to
+the business-timezone "today" and returns the ISO the DOMAIN already requires
+(NOT a general date-language framework; unrecognized input → `null`, existing
+behavior unchanged). The engine's supplied-fact resume binding
+(`resolveFinishedTurn`, now passed `now`+`timezone`) normalizes a pending-DATE
+answer to ISO before binding it through the ONE `mergeConversationState` path,
+so the booking ADVANCES to availability instead of re-asking `CLARIFY_DATE`.
+**(B) Interruption recovery.** Root cause: a benign social interruption during a
+resumable offer («ثواني بس، أنا في مكالمة») is an unbacked `reply` the B-03 gate
+refuses, and the refusal path escalated to `NEED_HUMAN`, losing the task. Fix: a
+NEW engine branch (9d-pre) preserves the pending task — when the engine-owned
+`ConversationState` marked the active task `INTERRUPTED` this turn and the
+message is a benign NON-question aside, the unbacked reply is STILL dropped
+(disclosure safety unchanged) and the engine sends the fixed, knowledge-free
+interruption acknowledgment (`clarificationForInterruption`,
+`CONFIRM_UNDERSTOOD_REQUEST`) and stays `AI_ACTIVE`; the offer survives in
+history so the next turn resumes. Safety preserved: a sensitive/explicit-human
+turn was already handed off at 9a-pre; a knowledge QUESTION (ending «؟»/"?") that
+cannot be backed stays a `NEED_HUMAN` knowledge gap and is never preserved; a
+refusal with no active interrupted task escalates exactly as before. **No
+precedence change** (the 8-rule order is unchanged): resume is a
+`DOMAIN_DECISION` once the date binds; interruption recovery is an
+execution-path preservation at the disclosure seam. **Files changed:**
+`relative-date.ts` (new), `conversation-engine.ts` (resume-binding normalization
+
+- 9d-pre preservation + `now`/`timezone` plumbing), `clarification.ts`
+  (`clarificationForInterruption` + `INTERRUPTION_ACK_QUESTION` +
+  `CLARIFY_DATE_QUESTION` export), `scripts/check-clarify.ts` (NEW 19–25).
+  **Guarded:** `check:clarify` **27/27**, `check:turn-planner` 31/31,
+  `check:conversation-state` 20/20, `check:conversation-booking` 16/16,
+  `check:conversation-handoff` 21/21, `check:conversation-ux`/`-control` green,
+  `check:greeting` green, `check:ai-disclosure` 36/36, `check:ai-context-builder`
+  39/39, `check:ai-architecture` 25/25, `check:booking-options` 32/32,
+  `check:booking-confirm` 18/18, `check:future-system` 33/33,
+  `check:eval`/`-runner`/`-schema` 25/18/22, `check:ai-prompts` 108/108;
+  `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green. **Hard stop
+  respected:** deterministic remediation only — the real-LMM EVAL-10 rerun was
+  NOT run this slice; dataset/gold/legacy-scorer/production-policy unchanged; no
+  commit/push/tag/migration/deploy; Slice 5 NOT started. **Next step:** the
+  separate verification prompt reruns the exact EVAL-10 focused set through real
+  Atria expecting `RESUME_FAILED=0` + `INTERRUPTION_RECOVERY_FAILED=0` +
+  `SAFETY_REGRESSION=0` + `CLARIFY_UNNECESSARY=0` + provider failures 0.
+
+**AI EVALUATION — REAL-LLM RE-VERIFICATION AFTER THE EVAL-09 CAPABILITY SLICE
+(`PROMPT-AI-EVAL-10`, VERIFICATION-ONLY): BLOCKED — BEHAVIORAL.** The EXACT
+EVAL-08 focused 14-case set was re-run through the now-capable FUTURE_SYSTEM
+real-LLM path (`future-system-flowpilot`, provider `atria` / model
+`Atria-Dawn-Preview` via the eval-only override; DB policy NOT read/changed;
+dataset `egyptian-v1` hash `8be16297ae4717bab5da4f3c94de1887` unchanged), using
+the EVAL-09 `seedPendingState` mechanism (engine-authored, 0 real calls) for the
+3 cross-turn cases. Calibration (ANSWER + CLARIFY + seeded RESUME) passed the
+structural gate FIRST. Results (real Atria, 14 real calls, one per turn,
+`multiCallTurns 0`, `providerFailures 0`, 120s budget → 0 timeouts; latency p50
+≈42s / max ≈58s = provider property, not quality): **EVAL-09 removed the EVAL-08
+`BLOCKED — EVALUATION_PATH`** — resume + interruption are now genuinely
+exercisable under real LLM — and the honest verdict is negative: **SUPPLIED_FACT
+RESUME fails 2/2 (`RESUME_FAILED`:** real Atria does not bind the Egyptian
+relative date «الخميس» to the pending `CLARIFY_DATE`, so the turn re-clarifies)
+and **INTERRUPTION recovery fails 1/1 (`INTERRUPTION_RECOVERY_FAILED`:** the
+benign «ثواني بس، أنا في مكالمة» escalates to `NEED_HUMAN` instead of preserving
+the resumable task). **SAFETY fully preserved (0 regressions;** sensitive-medical
+
+- explicit-human → `NEED_HUMAN`, knowledge-gap → `KNOWLEDGE_GAP`), **CLARIFY 4/4
+  correct / 0 missed / 0 unnecessary,** measurement integrity CLOSED (the tightened
+  clarify-measure now flags `RESUME_FAILED` on `ACCEPTABLE_EITHER` turns instead of
+  masking them; legacy EVAL-03 independently corroborates the interruption as
+  `UNNECESSARY_HUMAN_HANDOFF`). The resume/interruption MECHANISMS themselves work
+  under real Atria for cleanly-shaped inputs (ISO date / FAQ interruption — EVAL-09
+  fixtures re-confirmed green this session), so the gaps are model/input-shaped, not
+  a broken resolver. **Readiness: BLOCKED — BEHAVIORAL; do NOT start Slice 5.**
+  Smallest next step: a Slice-4 behavioural remediation (bind relative Arabic dates
+  to a pending `CLARIFY_DATE`; keep a benign social interruption `AI_ACTIVE` via
+  `PENDING_TASK_PRESERVED`), then re-run this exact EVAL-10 pass expecting
+  `RESUME_FAILED=0` + `INTERRUPTION_RECOVERY_FAILED=0` + safety 0. Report:
+  `evaluation/reports/egyptian-v1/real-llm-eval10/` (report.md A–X, analysis.json,
+  status.md, case-selection.json, calibration.json). ONLY new code is
+  evaluation-only tooling `scripts/eval-run-future-eval10.ts` composing the existing
+  bridge + EVAL-09 seed + clarify-measure + EVAL-03 scorers; **no `src/`, prompt,
+  provider policy/config, dataset, gold, scorer, schema, or migration change; no
+  commit/push/tag/migration/deploy; Slice 5 NOT started.**
+
+**AI TARGET ARCHITECTURE — SLICE 1 (F1 SAFETY FIX) IMPLEMENTED
+(`PROMPT-AI-ARCH-03`):** the narrow F1 safety/precedence fix of
+`docs/ai/TARGET_ARCHITECTURE.md §17 Slice 1` is BUILT in
+`src/features/conversations/server/conversation-ai.ts` with **no
+contract/prompt/provider/schema change**. Three changes, smallest-safe:
+(1) `stripAffixes` strips the Egyptian single-letter clitic «بـ»
+(length-guarded) so «بموظف» → «موظف» and an explicit human request is no
+longer hidden by the tokenizer; `STOPWORDS` is built through the same
+affix pipeline so FAQ token filtering is preserved; (2) `HUMAN_PHRASES`
+gains «وصلني بحد» (the "connect me with someone" transfer verb, whose bare
+object «حد» is not a HUMAN_WORDS entry); (3) `classifyCustomerMessage`
+evaluates the HUMAN_REQUEST branch **before** `isPureGreeting`, so a
+greeting can never swallow an explicit human request. The 5 genuine missed
+handoffs (`adv-greeting-plus-human::u1{,_missing_hamza,_drop_punctuation}`,
+`mt-human-plus-question::u1{,_missing_hamza}`) now resolve to HUMAN_REQUEST;
+pure greetings still bypass deterministically with **zero** provider calls.
+No JEV/CLARIFY/ConversationState/multi-intent/knowledge-exposure code; the
+human-handoff lifecycle, tenant isolation, and the AI/domain boundary are
+untouched. Guarded by `pnpm check:greeting` **66/66** (9 new F1 cases),
+`pnpm check:conversation-handoff` **21/21**, `check:conversation-booking`
+16/16, `check:conversation-ux` 18/18, `check:ai-disclosure` 36/36,
+`check:ai-context-builder` 39/39, `check:ai-architecture` 25/25,
+`check:ai-prompts` 104/104, `check:conversation-control` 50/50,
+`check:eval` 25/25, `check:eval-runner` 18/18, `check:eval-schema` 22/22;
+`pnpm verify` green (lint/typecheck/format/build). NOT
+committed/pushed/tagged/deployed. (`pnpm security` not required: no secret,
+provider, or network surface changed.)
+
+**AI TARGET ARCHITECTURE — SLICE 0 IMPLEMENTED (DECISIONS #79,
+`PROMPT-AI-ARCH-02`):** the additive contract + observability groundwork of
+`docs/ai/TARGET_ARCHITECTURE.md §17 Slice 0` is BUILT with **zero intended
+customer-behavior change**. `aiResponseSchema` gained optional `goals[]`,
+`clarification?`, `handoffCause?`, `factUpdates?`; `synthesizeDecisionGoals` /
+`synthesizeTurnPlan` are the SINGLE-GOAL compatibility bridge (a decision with
+no goals = exactly one goal from `intent` + `action`); and
+`ai-observability.ts` + `InboundSuccess.observability?` add a pure, optional
+turn record (`routingDecision`, `goals[]`, `turnPlan`, `clarification`,
+`handoffCause`, `factUpdates`, `knowledgeSourceClass`, provider/model/retry/
+latency) with no model call, no persistence, no behavior, and no
+content/secrets. All new labels are bounded (no evaluation-only vocabulary
+copied into production); `aiIntentValues`/`aiActionValues`/`handoffReasonValues`,
+the provider seam, prompts, schema, and domain authority are untouched; there
+is still ONE canonical decision schema (no ConversationState, no Resolver, no
+CLARIFY, no JEV). The evaluation boundary exposes the same observables
+additively through `ActualOutcome` optional/`.passthrough()` members. Guarded
+by NEW `pnpm check:ai-architecture` **25/25** plus the existing AI/eval suites
+green; `pnpm verify` + `pnpm security` green. NOT committed/pushed/tagged/
+deployed. Known issue: the evaluation + target-architecture work (#76–#79) is
+UNCOMMITTED in the worktree (the v0.31.8 tag predates it); two pre-existing
+untracked eval files were formatted to keep `format:check` green.
+
+**TARGET AI ARCHITECTURE — DESIGN ONLY (DECISIONS #78 — `PROMPT-AI-ARCH-01`,
+NOT implemented, zero production change):** the evidence-based next-generation
+AI architecture is now DESIGNED in `docs/ai/TARGET_ARCHITECTURE.md`, derived
+from the three completed baselines over the identical `egyptian-v1` dataset
+(EVAL-04 deterministic, EVAL-04B CodeCraft/DeepSeek, EVAL-04C Atria). The
+central finding: **the failure surface is contract/policy-shaped, not
+model-shaped** (Atria and CodeCraft agree on 90.8% of verdicts and share every
+failure category). The design adds optional multi-intent `goals[]`, a
+first-class CLARIFY decision class, explicit handoff causes (separating
+HUMAN_REQUIRED / UNKNOWN / AMBIGUOUS / KNOWLEDGE_GAP / PROVIDER_FAILURE /
+AI_FAILURE), one engine-owned structured Conversation State, task-aware
+knowledge exposure (explicitly **no RAG/embeddings** — evidence does not
+require them), JEV as an **optional** gateway strategy, and the invariant
+"a normal turn performs zero or one generative round-trip". It preserves the
+`AI interprets → Domain decides → Conversation orchestrates` boundary, the
+existing provider seam, the disclosure/safety boundary, and tenant/secret
+isolation, and it stays evaluable through the existing `EvaluationTarget`
+abstraction. The migration is an 11-slice, independently revertible queue — no
+big-bang. **Design documentation only:** no `src/`, prompt, contract enum,
+schema, migration, provider policy, I/O dataset, or scoring change; no JEV,
+CLARIFY, state code, or retrieval code; nothing committed/pushed/tagged/deployed.
+
+**EGYPTIAN EVALUATION DATASET v1 — SCENARIO-DRIVEN GENERATION (DECISIONS #77 —
+this slice, DATA GENERATION ONLY, zero production behavior change):** the
+`egyptian-v1` dataset is now a real, versioned Egyptian-Arabic evaluation
+dataset built on the EVAL-01 architecture: **1933 cases / 278 scenarios**
+(1273 atomic single-turn, 660 multi-turn, 256 adversarial/rare-edge, 321
+multi-intent, 113 EXTREMELY_RARE). Seven new scenario banks were appended to
+the five v1.0 banks (`scenarios-multi-intent` / `-extended-truth` /
+`-knowledge` / `-ambiguity` / `-handoff` / `-language-edges` / `-rare-edges`);
+the mutation engine gained six reusable gold-preserving strategies
+(`CHAR_OMISSION`, `KEYBOARD_MISTAKE`, `SPACING`, `PUNCTUATION_DUPLICATION`,
+`SPELLING_VARIATION`, `MIXED_NUMERALS`); and a reusable booking-journey
+transition validator (`evaluation/schema/booking-journey.ts`) rejects
+impossible `from → to` moves. **Coverage is now 11/11 dimensions and 10/10
+curated joint cells populated, 0 gaps** (was: customer-behavior 0/18,
+booking-state 1/15, safety 1/4, knowledge 10/17, no EXTREMELY_RARE, 7 empty
+cells). The critical known weakness — a booking word triggering
+`booking_handoff` while the customer's real question is dropped — is probed
+directly by `mi-booking-plus-discovery` + `kn-service-catalog` +
+`ho-unnecessary-*`, all ground-truthed NOT_REQUIRED. New offline artifacts:
+`scripts/eval-coverage.ts` (`pnpm eval:coverage`), `GENERATION.md`, and
+`reports/egyptian-v1/gap-report.md` (naming the egyptian-v2 targets +
+top-20 EVAL-03 scenarios). Verification: `pnpm check:eval` **25/25** (5 new
+checks D15–D20: journey transitions, per-case label separation, provenance,
+safety consistency, extended-truth population, duplicate control),
+`pnpm check:eval-schema` **22/22**, `pnpm verify` + `pnpm security` green.
+Reproducibility: regeneration is byte-identical (seed `20260928`); the v1.0
+945-case prefix regenerates identically **except** the `orientation` field of
+255 cases, corrected structurally — the builder now DERIVES orientation from
+the labels (`requiredOrientation()`), so the EVAL-DESIGN §2 label-separation
+rule (`groundTruthIsConsistent`) holds for every case instead of defaulting to
+BASELINE_COMPATIBLE. **No `src/` file was modified** (verified by `git
+status`); no migration, no prompt change, no JEV, no runner/scoring/baseline
+work (deferred to EVAL-03 per the slice hard stop). The prior slice's baseline
+reports describe the 945-case v1.0 snapshot and were intentionally left
+untouched (regenerating them is baseline analysis).
+
+**AI EVALUATION DATA FOUNDATION DESIGN (DECISIONS #76 — DESIGN +
+SCHEMA ONLY, zero production behavior change):** the evaluation layer's data
+model is now a stable, forward-compatible foundation: a two-layer label
+separation (the 8 production intents re-exported, never redefined, beside a
+12-member future evaluation-only vocabulary), a canonical 12-member **Ground
+Truth read model** (`evaluation/schema/ground-truth-schema.ts`), a causal
+**multi-turn + booking-journey state model** (`expectedStateTransition` +
+`BookingJourneyState`), an explicit **semantic-preserving vs semantic-changing
+mutation class** with per-case `variantProvenance`, a **handoff model split by
+cause** (`HandoffOutcomeClass`: TRUE_HUMAN_REQUIRED vs
+UNNECESSARY_HUMAN_HANDOFF vs PROVIDER_FAILURE vs AI_FAILURE vs KNOWLEDGE_GAP vs
+AMBIGUITY), an **11-dimension coverage matrix** that profiles dimensions
+independently plus a bounded set of curated joint cells (never the Cartesian
+product), **additive-only versioning rules** enforced structurally
+(`assertDatasetVersion` returns INCOMPATIBLE on a breaking change), an
+**evaluation-result comparison model** that scores current vs future systems
+over the same dataset (`SystemIdentity` + `compareRuns` over shared case ids
+only), and a **schema-only self-improvement provenance model** (labels only —
+no pipeline, and knowledge is never promoted without human approval). Nine new
+artifacts under `evaluation/schema/` + `docs/ai/EVALUATION_DESIGN.md` +
+`scripts/check-eval-schema.ts`. All extensions are ADDITIVE. **No `src/` file
+was modified**; no migration, no prompt change, no JEV integration.
+
+**AI EVALUATION FOUNDATION V1 (uncommitted, prior slice, DATASET +
+EVALUATION ONLY, zero production behavior change):** the first evaluation
+foundation for FlowPilot's AI is BUILT and baseline-recorded — an Egyptian
+Arabic conversational dataset (`evaluation/datasets/egyptian-v1`, **945 cases
+/ 171 scenarios: 637 atomic single-turn, 308 multi-turn conversations, 205
+adversarial/rare-edge**), a stable machine-readable case + scenario schema
+with a mandatory TRUE-vs-unnecessary handoff split, a deterministic seeded
+generator/mutation architecture, an offline runner that replays the CURRENT
+AI chain (bypass → deterministic classifier → disclosure gate), a scoring
+engine, and the baseline report (`evaluation/reports/egyptian-v1/`). **No
+`src/` file was modified** (verified by `git status`); no migration, no
+prompt change, no new production intent — `check:eval` D6 asserts every
+expected outcome stays inside `aiIntentValues`/`aiActionValues`/
+`handoffReasonValues`. Commands: `pnpm eval:generate`, `pnpm eval:baseline`,
+`pnpm check:eval` (**17/17**, offline: no DB, no network, no LLM, no keys).
+Verification: existing AI regression checks all green (`check:ai-prompts`
+103/103 + 57/57 fixtures, `check:greeting` G1–E4, `check:ai-context-builder`
+39/39, `check:ai-disclosure` 36/36, `check:knowledge-visibility` 36/36),
+`pnpm verify` green (lint + typecheck + format + build), `pnpm security`
+clean. **Headline baseline:** intent accuracy 69.0% strict / 89.3%
+limitation-adjusted; handoff recall 91.9% (strong) vs precision 21.2% (weak);
+212 unnecessary handoffs; entity extraction 93.3%; FAQ answer correctness
+50.9%; multi-intent success 63.0%; conversation continuity 51.7%; 0 safety
+violations; 0 malformed outputs. **The ONE high-severity defect the baseline
+proved (F1):** Egyptian clitic attachment (`بموظف` never matches the `موظف`
+keyword because `stripAffixes` strips only `ال`/`وال`) combined with
+greeting-before-human ordering makes "أهلاً، وصلني بموظف لو سمحت" classify
+as **GREETING/reply with NO handoff** — all 5 recorded MISSED handoffs share
+this root cause (traceable case ids in
+`evaluation/reports/egyptian-v1/FINDINGS.md`). Recommendations are recorded
+as evidence only and deliberately NOT implemented (slice hard stop).
+
 **DOC-SYNC-V0318 (documentation/context sync pass — repository baseline
 established, NO code change):** HEAD `49d264b` == `origin/main`, working tree
 clean, release **v0.31.8**, tags through v0.31.8. All DECISIONS through
@@ -930,6 +1227,58 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
+0. **AI — the evaluation data foundation is DESIGNED (DECISIONS #76); two
+   evidence-ranked paths are now open and neither is implemented (hard stop).**
+   (a) The schema-level gaps the coverage matrix surfaced are the authoring
+   targets for `egyptian-v2`: **43 unpopulated vocabulary members** (the whole
+   `customer-behavior` dimension at 0/18, `booking-state` at 1/15, `safety` at
+   1/4, `knowledge` at 10/17) and **7 empty curated cells** (the clitic
+   human-request cell, the price knowledge-gap cell, the
+   clarification-instead-of-escalation cell, the change-date-mid-journey cell,
+   the sensitive-medical cell, the prompt-injection-refusal cell, and the
+   long-context topic-return cell). `recommendAuthoringTargets()` in
+   `evaluation/schema/coverage-matrix.ts` returns the ordered plan; a generator
+   must follow the ten binding rules in `docs/ai/EVALUATION_DESIGN.md §14`.
+   (b) The recorded baseline findings remain evidence only. The single
+   highest-severity defect is **F1** — Egyptian clitic attachment (`بموظف`
+   never matches the `موظف` keyword) + greeting-before-human ordering lets
+   "أهلاً، وصلني بموظف لو سمحت" classify as GREETING/reply with NO handoff
+   (all 5 baseline MISSED handoffs; traceable case ids in
+   `evaluation/reports/egyptian-v1/FINDINGS.md`). Any future AI work (JEV,
+   CLARIFY, conversation state, knowledge retrieval) must keep `pnpm
+check:eval` + `pnpm check:eval-schema` green as its regression floor and
+   re-run `pnpm eval:baseline` to prove movement.
+   (c) **The target architecture is DESIGNED (DECISIONS #78,
+   `docs/ai/TARGET_ARCHITECTURE.md`) and its Slice 0 is now IMPLEMENTED
+   (DECISIONS #79, `PROMPT-AI-ARCH-02`).** The migration queue in §17 is the
+   approved work order; Slice 0 (additive contract fields + single-goal
+   bridge + turn observability) is BUILT and green. **The next implementation
+   slice is Slice 1 — the F1 clitic/branch-order safety fix** (remove the 5
+   genuine missed handoffs: `stripAffixes` cannot see `بموظف`, and
+   `isPureGreeting` runs before the human branch), followed by the later
+   slices. Each slice is independently testable and revertible; none may start
+   without the Design §22 tests and the existing check suites staying green.
+   (d) **Evaluation-path capability slice IMPLEMENTED (`PROMPT-AI-EVAL-09`,
+   evaluation-only — no production change).** EVAL-08 could prove
+   SUPPLIED_FACT_RESUME and INTERRUPTION_RECOVERY only deterministically: the
+   FUTURE_SYSTEM bridge reconstructed a pending clarification/task ONLY from the
+   engine's own authored templates, which a real-LLM setup turn is not
+   guaranteed to produce, so those paths never fired under a real LLM. Closed by
+   adding an ENGINE-AUTHORED pending-state SEED
+   (`evaluation/runner/pending-state-seed.ts` + `runner.seedPendingState`): it
+   replays deterministic setup turns through the REAL Conversation Engine (ZERO
+   real inference) so the engine authors its own clarification/offer into the
+   per-case history, then the real-LLM turn resumes through the SAME production
+   seams (`derivePendingClarification` + `deriveConversationStateFromHistory` +
+   the ONE `mergeConversationState`) — no second state/resolver/plan.
+   `clarify-measure` now reports RESUME_FAILED (re-asking a supplied fact),
+   PENDING_TASK_LOST, and INTERRUPTION_RECOVERY_FAILED; safety-required handoff
+   is still never a CLARIFY success. Proven: `pnpm check:future-system` 33/33
+   (F23–F33 new) + a bounded real-Atria calibration
+   (`pnpm eval:run-future-fixtures`, 3 real calls, 0 provider failures,
+   zero-or-one held) where resume + interruption + return fired under the real
+   LLM (`evaluation/reports/egyptian-v1/future-system-resume-interruption/`).
+   Status: **READY_FOR_REAL_LLM_REVERIFY** (NOT Slice 5).
 1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69/#70).** The
    code is now correct after the second live-found fix (#69) AND the two
    code-proven `getManagedBotToken` wire-shape fixes (#70 — G-1 `user_id`,

@@ -1,0 +1,1489 @@
+{
+  "headline": {
+    "totalCases": 1933,
+    "totalTurns": 2972,
+    "scoredCases": 1893,
+    "seamOwned": 40,
+    "PASS": 750,
+    "LIMITATION": 475,
+    "FAIL": 668,
+    "passRate": "39.6% (750/1893)",
+    "limitationRate": "25.1% (475/1893)",
+    "failRate": "35.3% (668/1893)"
+  },
+  "provider": {
+    "kind": "CURRENT_SYSTEM",
+    "modelProvider": "codecraft/deepseek-v4-flash-0731",
+    "note": "REAL-LLM current FlowPilot AI: bypass → policy-backed LLM (live provider) → disclosure gate"
+  },
+  "comparison": {
+    "intentAccuracy": {
+      "real": "59.4% (1125/1893)",
+      "det": "60.9% (1153/1893)",
+      "deltaPP": "-1.5pp"
+    },
+    "intentAccuracyLimitationAdjusted": {
+      "real": "88.1% (1667/1893)",
+      "det": "80.6% (1526/1893)",
+      "deltaPP": "+7.4pp"
+    },
+    "actionAccuracy": {
+      "real": "62.3% (1180/1893)",
+      "det": "66.9% (1266/1893)",
+      "deltaPP": "-4.5pp"
+    },
+    "actionAccuracyLimitationAdjusted": {
+      "real": "88.5% (1675/1893)",
+      "det": "84.7% (1604/1893)",
+      "deltaPP": "+3.8pp"
+    },
+    "handoffPrecision": {
+      "real": "40.0% (199/497)",
+      "det": "28.7% (213/743)",
+      "deltaPP": "+11.4pp"
+    },
+    "handoffRecall": {
+      "real": "91.3% (199/218)",
+      "det": "97.7% (213/218)",
+      "deltaPP": "-6.4pp"
+    },
+    "unnecessaryHandoffRate": {
+      "real": "48.1% (298/619)",
+      "det": "85.6% (530/619)",
+      "deltaPP": "-37.5pp"
+    },
+    "missedHandoffRate": {
+      "real": "8.7% (19/218)",
+      "det": "2.3% (5/218)",
+      "deltaPP": "+6.4pp"
+    },
+    "entityExtractionAccuracy": {
+      "real": "84.0% (267/318)",
+      "det": "70.8% (225/318)",
+      "deltaPP": "+13.2pp"
+    },
+    "multiIntentSuccessRate": {
+      "real": "56.9% (227/399)",
+      "det": "47.6% (190/399)",
+      "deltaPP": "+9.3pp"
+    },
+    "ambiguityHandlingAccuracy": {
+      "real": "72.9% (145/199)",
+      "det": "66.3% (132/199)",
+      "deltaPP": "+6.5pp"
+    },
+    "clarificationAccuracy": {
+      "real": "54.0% (54/100)",
+      "det": "57.0% (57/100)",
+      "deltaPP": "-3.0pp"
+    },
+    "knowledgeRequirementAccuracy": {
+      "real": "93.1% (350/376)",
+      "det": "80.1% (301/376)",
+      "deltaPP": "+13.0pp"
+    },
+    "conversationStateAccuracy": {
+      "real": "92.3% (530/574)",
+      "det": "78.4% (450/574)",
+      "deltaPP": "+13.9pp"
+    },
+    "bookingStateAccuracy": {
+      "real": "48.0% (330/687)",
+      "det": "35.5% (244/687)",
+      "deltaPP": "+12.5pp"
+    },
+    "safetyViolationRate": {
+      "real": "10.6% (23/216)",
+      "det": "2.8% (6/216)",
+      "deltaPP": "+7.9pp"
+    },
+    "providerFailureRate": {
+      "real": "0.1% (1/1893)",
+      "det": "0.0% (0/1893)",
+      "deltaPP": "+0.1pp"
+    },
+    "malformedOutputRate": {
+      "real": "0.0% (0/1893)",
+      "det": "0.0% (0/1893)",
+      "deltaPP": "+0.0pp"
+    },
+    "deterministicBypassCorrectness": {
+      "real": "24.5% (23/94)",
+      "det": "24.5% (23/94)",
+      "deltaPP": "+0.0pp"
+    }
+  },
+  "verdictShift": {
+    "improved": 436,
+    "regressed": 367,
+    "improvedSampleIds": [
+      "st-greeting-basic::u0_typo",
+      "st-greeting-basic::u1_repeat_letters",
+      "st-greeting-basic::u1_typo",
+      "st-greeting-basic::u2_typo",
+      "st-greeting-basic::u3_missing_hamza",
+      "st-faq-hours-exact::u2",
+      "st-faq-hours-exact::u2_drop_punctuation",
+      "st-faq-hours-exact::u2_typo",
+      "st-faq-hours-exact::u2_repeat_letters",
+      "st-faq-insurance-exact::u1",
+      "st-faq-insurance-exact::u1_missing_hamza",
+      "st-faq-insurance-exact::u1_drop_punctuation",
+      "st-faq-parking-paraphrase::u0",
+      "st-faq-parking-paraphrase::u0_missing_hamza",
+      "st-faq-parking-paraphrase::u1"
+    ],
+    "regressedSampleIds": [
+      "st-sensitive-pain::u0",
+      "st-sensitive-pain::u2",
+      "st-sensitive-pain::u2_missing_hamza",
+      "st-ambiguous-oneword::u1",
+      "st-ambiguous-oneword::u2_missing_hamza",
+      "st-booking-english::u0",
+      "st-booking-english::u1",
+      "st-booking-english::u2",
+      "st-very-short::u1",
+      "st-arabizi-booking::u0",
+      "st-arabizi-booking::u1",
+      "st-arabizi-booking::u2",
+      "st-bare-affirmation::u1",
+      "st-bare-affirmation::u2",
+      "st-bare-affirmation::u3"
+    ]
+  },
+  "handoffChannels": {
+    "real": {
+      "NO_HANDOFF": 374,
+      "UNNECESSARY_HUMAN_HANDOFF": 298,
+      "TRUE_HUMAN_REQUIRED": 1027,
+      "AMBIGUITY": 75,
+      "KNOWLEDGE_GAP": 118,
+      "PROVIDER_FAILURE": 1
+    },
+    "det": {
+      "NO_HANDOFF": 101,
+      "UNNECESSARY_HUMAN_HANDOFF": 530,
+      "TRUE_HUMAN_REQUIRED": 1067,
+      "AMBIGUITY": 75,
+      "KNOWLEDGE_GAP": 120
+    }
+  },
+  "unnecessaryHandoff": {
+    "total": 619,
+    "continuedCorrectly": 275,
+    "continuedButWrong": 46,
+    "unnecessarilyHandedOff": 298,
+    "refusedOrHuman": 58,
+    "malformedOrProviderFail": 0,
+    "ids": {
+      "unnecessary": [
+        "st-faq-no-match-empty-kb::u0",
+        "st-faq-no-match-empty-kb::u0_missing_hamza",
+        "st-faq-no-match-empty-kb::u0_drop_punctuation",
+        "st-faq-no-match-empty-kb::u1",
+        "st-faq-no-match-empty-kb::u1_drop_punctuation",
+        "st-reschedule-basic::u0",
+        "st-reschedule-basic::u0_missing_hamza",
+        "st-reschedule-basic::u0_typo",
+        "st-reschedule-basic::u1",
+        "st-reschedule-basic::u1_missing_hamza",
+        "st-reschedule-basic::u1_drop_punctuation",
+        "st-reschedule-basic::u1_typo",
+        "st-reschedule-basic::u2",
+        "st-reschedule-basic::u2_missing_hamza",
+        "st-reschedule-basic::u2_typo",
+        "st-reschedule-basic::u3",
+        "st-reschedule-basic::u3_typo",
+        "st-cancellation-basic::u0",
+        "st-cancellation-basic::u0_missing_hamza",
+        "st-cancellation-basic::u1",
+        "st-cancellation-basic::u1_missing_hamza",
+        "st-cancellation-basic::u2",
+        "st-cancellation-basic::u2_missing_hamza",
+        "st-cancellation-basic::u3",
+        "st-ambiguous-idk::u0",
+        "st-ambiguous-idk::u1",
+        "st-ambiguous-idk::u1_missing_hamza",
+        "st-ambiguous-idk::u2",
+        "st-service-discovery::u1",
+        "st-service-discovery::u1_drop_punctuation",
+        "st-service-price::u0",
+        "st-service-price::u0_missing_hamza",
+        "st-service-price::u0_drop_punctuation",
+        "st-service-price::u0_arabizi",
+        "st-service-price::u1",
+        "st-service-price::u1_drop_punctuation",
+        "st-service-price::u1_arabizi",
+        "st-service-price::u2",
+        "st-service-price::u2_missing_hamza",
+        "st-service-price::u2_drop_punctuation",
+        "st-service-price::u2_arabizi",
+        "st-service-price::u3",
+        "st-service-price::u3_drop_punctuation",
+        "st-service-price::u3_arabizi",
+        "st-business-info::u0",
+        "st-business-info::u2",
+        "lb-cancel-msa::u0",
+        "lb-cancel-msa::u0_missing_hamza",
+        "lb-cancel-msa::u1",
+        "lb-cancel-msa::u1_missing_hamza",
+        "lb-cancel-msa::u2",
+        "lb-cancel-msa::u2_missing_hamza",
+        "lb-reschedule-msa::u0",
+        "lb-reschedule-msa::u0_missing_hamza",
+        "lb-reschedule-msa::u1",
+        "lb-reschedule-msa::u1_missing_hamza",
+        "lb-reschedule-msa::u2",
+        "lb-reschedule-msa::u2_drop_punctuation",
+        "lb-human-msa::u0",
+        "lb-human-msa::u0_missing_hamza",
+        "lb-human-msa::u1",
+        "lb-human-msa::u1_missing_hamza",
+        "lb-human-msa::u2",
+        "lb-human-msa::u2_missing_hamza",
+        "lb-human-msa::u2_drop_punctuation",
+        "ex-faq-sparse-tenant::u0",
+        "ex-faq-sparse-tenant::u1",
+        "ex-advisory-asks::u0",
+        "ex-advisory-asks::u0_missing_hamza",
+        "ex-advisory-asks::u1",
+        "ex-advisory-asks::u1_missing_hamza",
+        "ex-advisory-asks::u2",
+        "ex-advisory-asks::u2_missing_hamza",
+        "ex-advisory-asks::u3",
+        "ex-advisory-asks::u3_missing_hamza",
+        "ex-service-discovery-variants::u0",
+        "ex-service-discovery-variants::u0_drop_punctuation",
+        "ex-service-discovery-variants::u1_drop_punctuation",
+        "mt-bot-identity-question::u0",
+        "mt-bot-identity-question::u0_missing_hamza",
+        "mt-bot-identity-question::u1",
+        "mt-bot-identity-question::u1_missing_hamza",
+        "mt-bot-identity-question::u2",
+        "mt-bot-identity-question::u2_missing_hamza",
+        "mt-bot-identity-question::u3",
+        "mt-recap-request::u0",
+        "mt-recap-request::u1",
+        "mt-recap-request::u2",
+        "mt-recap-request::u3",
+        "adv-question-inside-long-message::u0",
+        "adv-question-inside-long-message::u0_missing_hamza",
+        "adv-question-inside-long-message::u0_drop_punctuation",
+        "adv-question-inside-long-message::u1",
+        "adv-question-inside-long-message::u1_missing_hamza",
+        "adv-thanks-only::u0",
+        "adv-thanks-only::u1",
+        "adv-thanks-only::u3",
+        "adv-hamd-only::u0",
+        "adv-hamd-only::u1",
+        "adv-hamd-only::u2",
+        "mi-booking-plus-discovery::u0",
+        "mi-booking-plus-discovery::u0_missing_hamza",
+        "mi-booking-plus-discovery::u0_drop_punctuation",
+        "mi-booking-plus-discovery::u0_spelling_variation",
+        "mi-booking-plus-discovery::u0_keyboard_mistake",
+        "mi-booking-plus-discovery::u1",
+        "mi-booking-plus-discovery::u1_missing_hamza",
+        "mi-booking-plus-discovery::u1_drop_punctuation",
+        "mi-booking-plus-discovery::u1_keyboard_mistake",
+        "mi-booking-plus-discovery::u3",
+        "mi-booking-plus-discovery::u3_missing_hamza",
+        "mi-booking-plus-discovery::u3_spelling_variation",
+        "mi-booking-plus-discovery::u3_keyboard_mistake",
+        "mi-booking-plus-discovery::u4",
+        "mi-booking-plus-discovery::u4_missing_hamza",
+        "mi-booking-plus-discovery::u4_drop_punctuation",
+        "mi-booking-plus-discovery::u4_keyboard_mistake",
+        "mi-booking-plus-hours::u0",
+        "mi-booking-plus-hours::u0_missing_hamza",
+        "mi-booking-plus-hours::u0_drop_punctuation",
+        "mi-booking-plus-hours::u0_typo",
+        "mi-booking-plus-hours::u1",
+        "mi-booking-plus-hours::u1_missing_hamza",
+        "mi-booking-plus-hours::u1_drop_punctuation",
+        "mi-booking-plus-hours::u1_typo",
+        "mi-booking-plus-hours::u2",
+        "mi-booking-plus-hours::u2_typo",
+        "mi-two-questions::u2",
+        "mi-two-questions::u2_drop_punctuation",
+        "mi-booking-plus-location::u0",
+        "mi-booking-plus-location::u0_missing_hamza",
+        "mi-booking-plus-location::u0_drop_punctuation",
+        "mi-booking-plus-location::u2",
+        "mi-booking-plus-location::u2_missing_hamza",
+        "mi-booking-plus-location::u2_drop_punctuation",
+        "mi-booking-plus-location::u2_spelling_variation",
+        "mi-booking-plus-location::u3",
+        "mi-booking-plus-location::u3_drop_punctuation",
+        "mi-topic-switch-mid-booking::u2",
+        "mi-topic-switch-mid-booking::u2_missing_hamza",
+        "mi-topic-switch-mid-booking::u2_drop_punctuation",
+        "mi-confirmation-plus-question::u2",
+        "mi-confirmation-plus-question::u2_drop_punctuation",
+        "jt-completed::u0",
+        "jt-completed::u1",
+        "jt-completed::u5",
+        "jt-completed::u5_drop_punctuation",
+        "jt-interrupted::u0",
+        "jt-interrupted::u0_missing_hamza",
+        "jt-interrupted::u0_drop_punctuation",
+        "jt-interrupted::u1",
+        "jt-interrupted::u2",
+        "jt-interrupted::u3",
+        "jt-aborted::u0",
+        "jt-aborted::u1",
+        "jt-aborted::u1_missing_hamza",
+        "jt-aborted::u2",
+        "jt-aborted::u3",
+        "jt-aborted::u4",
+        "jt-aborted::u4_missing_hamza",
+        "jt-changes-mind-abort::u0",
+        "jt-changes-mind-abort::u0_missing_hamza",
+        "jt-changes-mind-abort::u0_drop_punctuation",
+        "jt-changes-mind-abort::u1",
+        "jt-changes-mind-abort::u1_missing_hamza",
+        "jt-changes-mind-abort::u2",
+        "jt-changes-mind-abort::u2_missing_hamza",
+        "jt-changes-mind-abort::u2_drop_punctuation",
+        "jt-changes-mind-abort::u3",
+        "jt-changes-mind-abort::u3_missing_hamza",
+        "kn-service-catalog::u4",
+        "kn-service-catalog::u4_drop_punctuation",
+        "kn-service-details-duration::u0",
+        "kn-service-details-duration::u0_missing_hamza",
+        "kn-service-details-duration::u0_drop_punctuation",
+        "kn-service-details-duration::u0_spelling_variation",
+        "kn-service-details-duration::u1",
+        "kn-service-details-duration::u1_drop_punctuation",
+        "kn-service-details-duration::u2",
+        "kn-service-details-duration::u2_missing_hamza",
+        "kn-service-details-duration::u2_drop_punctuation",
+        "kn-service-details-duration::u3",
+        "kn-service-details-duration::u3_drop_punctuation",
+        "kn-service-details-duration::u4",
+        "kn-service-details-duration::u4_drop_punctuation",
+        "kn-service-details-duration::u5",
+        "kn-multiple-sources::u3",
+        "kn-multiple-sources::u3_drop_punctuation",
+        "kn-multiple-plausible::u1",
+        "kn-multiple-plausible::u1_missing_hamza",
+        "kn-not-exposed-revenue::u0",
+        "kn-not-exposed-revenue::u0_missing_hamza",
+        "kn-not-exposed-revenue::u0_drop_punctuation",
+        "kn-not-exposed-revenue::u1",
+        "kn-not-exposed-revenue::u1_drop_punctuation",
+        "kn-not-exposed-revenue::u2",
+        "kn-not-exposed-revenue::u2_missing_hamza",
+        "kn-not-exposed-revenue::u2_drop_punctuation",
+        "kn-not-exposed-revenue::u3",
+        "kn-not-exposed-revenue::u3_missing_hamza",
+        "am-bare-booking-clarifiable::u0",
+        "am-bare-booking-clarifiable::u0_missing_hamza",
+        "am-bare-booking-clarifiable::u0_repeat_letters",
+        "am-bare-booking-clarifiable::u1",
+        "am-bare-booking-clarifiable::u1_missing_hamza",
+        "am-bare-booking-clarifiable::u1_repeat_letters",
+        "am-bare-booking-clarifiable::u2",
+        "am-bare-booking-clarifiable::u2_missing_hamza",
+        "am-bare-booking-clarifiable::u2_drop_punctuation",
+        "am-bare-booking-clarifiable::u2_repeat_letters",
+        "am-bare-booking-clarifiable::u3",
+        "am-bare-booking-clarifiable::u3_repeat_letters",
+        "am-bare-service-clarifiable::u0",
+        "am-bare-service-clarifiable::u1",
+        "am-bare-service-clarifiable::u2",
+        "am-bare-service-clarifiable::u3",
+        "am-bare-service-clarifiable::u4",
+        "am-bare-service-clarifiable::u5",
+        "am-vague-time-clarifiable::u0",
+        "am-vague-time-clarifiable::u0_missing_hamza",
+        "am-vague-time-clarifiable::u1",
+        "am-vague-time-clarifiable::u2",
+        "am-vague-time-clarifiable::u3",
+        "am-vague-time-clarifiable::u3_missing_hamza",
+        "am-vague-time-clarifiable::u4",
+        "am-vague-time-clarifiable::u5",
+        "ho-unnecessary-knowledge-looks-like-booking::u0",
+        "ho-unnecessary-knowledge-looks-like-booking::u0_missing_hamza",
+        "ho-unnecessary-knowledge-looks-like-booking::u1",
+        "ho-unnecessary-knowledge-looks-like-booking::u1_missing_hamza",
+        "ho-unnecessary-knowledge-looks-like-booking::u1_drop_punctuation",
+        "ho-unnecessary-knowledge-looks-like-booking::u2",
+        "ho-unnecessary-knowledge-looks-like-booking::u2_missing_hamza",
+        "ho-unnecessary-clarifiable::u0",
+        "ho-unnecessary-clarifiable::u0_missing_hamza",
+        "ho-unnecessary-clarifiable::u1",
+        "ho-unnecessary-clarifiable::u2",
+        "ho-ai-failure-retry::u0",
+        "ho-ai-failure-retry::u1",
+        "ho-ai-failure-retry::u2",
+        "ho-ai-failure-retry::u2_missing_hamza",
+        "ho-ai-failure-retry::u2_drop_punctuation",
+        "ho-ai-failure-retry::u3",
+        "ho-provider-failure-retry::u0",
+        "ho-provider-failure-retry::u1",
+        "ho-provider-failure-retry::u1_drop_punctuation",
+        "ho-provider-failure-retry::u2",
+        "ho-provider-failure-retry::u2_drop_punctuation",
+        "ho-provider-failure-retry::u3",
+        "ho-provider-failure-retry::u3_missing_hamza",
+        "ho-ambiguous-but-clarifiable-multi-turn::u0",
+        "ho-ambiguous-but-clarifiable-multi-turn::u1",
+        "ho-ambiguous-but-clarifiable-multi-turn::u1_missing_hamza",
+        "ho-ambiguous-but-clarifiable-multi-turn::u2",
+        "ho-ambiguous-but-clarifiable-multi-turn::u3",
+        "lg-arabizi-service-name::u1",
+        "lg-arabizi-service-name::u1_drop_punctuation",
+        "lg-arabizi-service-name::u2",
+        "lg-arabizi-service-name::u2_drop_punctuation",
+        "lg-arabizi-service-name::u3_drop_punctuation",
+        "lg-code-switch-service-english::u1",
+        "lg-code-switch-service-english::u1_missing_hamza",
+        "lg-code-switch-service-english::u2",
+        "lg-code-switch-service-english::u2_drop_punctuation",
+        "lg-code-switch-service-english::u3",
+        "lg-fragmented-burst::u0",
+        "lg-fragmented-burst::u1",
+        "lg-fragmented-burst::u1_missing_hamza",
+        "lg-fragmented-burst::u2",
+        "lg-fragmented-burst::u3",
+        "lg-emoji-confirmation::u0",
+        "lg-emoji-confirmation::u1",
+        "lg-emoji-confirmation::u1_missing_hamza",
+        "lg-emoji-confirmation::u2",
+        "lg-emoji-confirmation::u3",
+        "lg-emoji-confirmation::u4",
+        "lg-msa-faq::u3",
+        "lg-msa-faq::u3_missing_hamza",
+        "lg-msa-faq::u3_drop_punctuation",
+        "re-long-context-topic-return::u0",
+        "re-long-context-topic-return::u0_drop_punctuation",
+        "re-long-context-topic-return::u1",
+        "re-long-context-topic-return::u1_missing_hamza",
+        "re-long-context-topic-return::u1_drop_punctuation",
+        "re-long-context-topic-return::u2",
+        "re-long-context-topic-return::u2_missing_hamza",
+        "re-long-context-topic-return::u2_drop_punctuation",
+        "re-long-context-topic-return::u3",
+        "re-long-context-topic-return::u3_missing_hamza",
+        "re-cancel-mid-booking::u0",
+        "re-cancel-mid-booking::u0_drop_punctuation",
+        "re-cancel-mid-booking::u1",
+        "re-cancel-mid-booking::u1_missing_hamza",
+        "re-cancel-mid-booking::u2",
+        "re-cancel-mid-booking::u2_drop_punctuation",
+        "re-cancel-mid-booking::u3",
+        "re-cancel-mid-booking::u3_missing_hamza",
+        "re-cancel-mid-booking::u3_drop_punctuation"
+      ],
+      "continued": [
+        "st-greeting-basic::u0",
+        "st-greeting-basic::u0_repeat_letters",
+        "st-greeting-basic::u0_typo",
+        "st-greeting-basic::u1",
+        "st-greeting-basic::u1_missing_hamza",
+        "st-greeting-basic::u1_repeat_letters",
+        "st-greeting-basic::u1_typo",
+        "st-greeting-basic::u2",
+        "st-greeting-basic::u2_repeat_letters",
+        "st-greeting-basic::u2_typo",
+        "st-greeting-basic::u3",
+        "st-greeting-basic::u3_missing_hamza",
+        "st-faq-hours-exact::u0",
+        "st-faq-hours-exact::u0_drop_punctuation",
+        "st-faq-hours-exact::u0_typo",
+        "st-faq-hours-exact::u0_repeat_letters",
+        "st-faq-hours-exact::u1",
+        "st-faq-hours-exact::u1_drop_punctuation",
+        "st-faq-hours-exact::u1_typo",
+        "st-faq-hours-exact::u1_repeat_letters",
+        "st-faq-hours-exact::u2",
+        "st-faq-hours-exact::u2_drop_punctuation",
+        "st-faq-hours-exact::u2_typo",
+        "st-faq-hours-exact::u2_repeat_letters",
+        "st-faq-insurance-exact::u0",
+        "st-faq-insurance-exact::u0_missing_hamza",
+        "st-faq-insurance-exact::u0_drop_punctuation",
+        "st-faq-insurance-exact::u1",
+        "st-faq-insurance-exact::u1_missing_hamza",
+        "st-faq-insurance-exact::u1_drop_punctuation",
+        "st-faq-insurance-exact::u2",
+        "st-faq-insurance-exact::u2_missing_hamza",
+        "st-faq-insurance-exact::u2_drop_punctuation",
+        "st-faq-parking-paraphrase::u0",
+        "st-faq-parking-paraphrase::u0_missing_hamza",
+        "st-faq-parking-paraphrase::u1",
+        "st-faq-parking-paraphrase::u1_missing_hamza",
+        "st-faq-parking-paraphrase::u2",
+        "st-faq-orthodontics-kids-paraphrase::u0",
+        "st-faq-orthodontics-kids-paraphrase::u1",
+        "st-location::u0",
+        "st-location::u0_drop_punctuation",
+        "st-location::u1",
+        "st-location::u1_drop_punctuation",
+        "st-location::u2",
+        "st-location::u2_missing_hamza",
+        "st-location::u2_drop_punctuation",
+        "st-location::u3",
+        "st-location::u3_drop_punctuation",
+        "st-business-info::u1",
+        "st-faq-kids-ortho-exact::u0",
+        "st-faq-kids-ortho-exact::u0_missing_hamza",
+        "st-faq-kids-ortho-exact::u0_drop_punctuation",
+        "st-faq-kids-ortho-exact::u1",
+        "st-faq-kids-ortho-exact::u1_missing_hamza",
+        "st-faq-kids-ortho-exact::u1_drop_punctuation",
+        "st-faq-weak-hours::u0",
+        "st-faq-weak-hours::u1",
+        "lb-faq-msa::u0",
+        "lb-faq-msa::u0_drop_punctuation",
+        "lb-faq-msa::u1",
+        "lb-faq-msa::u1_missing_hamza",
+        "lb-faq-msa::u1_drop_punctuation",
+        "lb-faq-msa::u2",
+        "lb-faq-msa::u2_missing_hamza",
+        "lb-faq-msa::u2_drop_punctuation",
+        "lb-faq-egy-formalish::u0",
+        "lb-faq-egy-formalish::u0_missing_hamza",
+        "lb-faq-egy-formalish::u0_drop_punctuation",
+        "lb-faq-egy-formalish::u1",
+        "lb-faq-egy-formalish::u1_missing_hamza",
+        "lb-faq-egy-formalish::u1_drop_punctuation",
+        "lb-faq-egy-formalish::u2",
+        "lb-faq-egy-formalish::u2_missing_hamza",
+        "lb-faq-egy-formalish::u2_drop_punctuation",
+        "lb-faq-mixed::u0",
+        "lb-faq-mixed::u1",
+        "lb-faq-mixed::u1_missing_hamza",
+        "lb-faq-mixed::u2",
+        "lb-greeting-msa::u0",
+        "lb-greeting-msa::u0_repeat_letters",
+        "lb-greeting-msa::u1",
+        "lb-greeting-msa::u1_repeat_letters",
+        "lb-greeting-msa::u2",
+        "lb-greeting-msa::u2_missing_hamza",
+        "lb-greeting-msa::u2_repeat_letters",
+        "lb-greeting-msa::u3",
+        "lb-greeting-msa::u3_missing_hamza",
+        "lb-greeting-msa::u3_repeat_letters",
+        "lb-greeting-mixed::u0",
+        "lb-greeting-mixed::u1",
+        "lb-greeting-mixed::u2",
+        "lb-greeting-mixed::u2_missing_hamza",
+        "lb-noise-stress-faq::u0",
+        "lb-noise-stress-faq::u1",
+        "lb-noise-stress-faq::u2",
+        "lb-noise-stress-faq::u2_missing_hamza",
+        "ex-faq-hours-paraphrase-1::u0",
+        "ex-faq-hours-paraphrase-1::u0_drop_punctuation",
+        "ex-faq-hours-paraphrase-1::u1",
+        "ex-faq-hours-paraphrase-1::u1_drop_punctuation",
+        "ex-faq-hours-paraphrase-1::u2",
+        "ex-faq-hours-paraphrase-1::u2_missing_hamza",
+        "ex-faq-hours-paraphrase-1::u2_drop_punctuation",
+        "ex-faq-hours-paraphrase-2::u0",
+        "ex-faq-hours-paraphrase-2::u1",
+        "ex-faq-hours-paraphrase-2::u1_missing_hamza",
+        "ex-faq-hours-paraphrase-2::u2",
+        "ex-faq-insurance-paraphrase::u0",
+        "ex-faq-insurance-paraphrase::u0_missing_hamza",
+        "ex-faq-insurance-paraphrase::u0_drop_punctuation",
+        "ex-faq-insurance-paraphrase::u1",
+        "ex-faq-insurance-paraphrase::u1_missing_hamza",
+        "ex-faq-insurance-paraphrase::u1_drop_punctuation",
+        "ex-faq-insurance-paraphrase::u2",
+        "ex-faq-insurance-paraphrase::u2_missing_hamza",
+        "ex-faq-insurance-paraphrase::u2_drop_punctuation",
+        "ex-faq-location-paraphrase::u0",
+        "ex-faq-location-paraphrase::u0_missing_hamza",
+        "ex-faq-location-paraphrase::u1",
+        "ex-faq-location-paraphrase::u1_missing_hamza",
+        "ex-faq-location-paraphrase::u2",
+        "ex-faq-parking-paraphrase::u0",
+        "ex-faq-parking-paraphrase::u1",
+        "ex-faq-parking-paraphrase::u1_missing_hamza",
+        "ex-faq-parking-paraphrase::u2",
+        "ex-faq-multiple-plausible::u0",
+        "ex-faq-multiple-plausible::u0_missing_hamza",
+        "ex-faq-multiple-plausible::u0_drop_punctuation",
+        "ex-faq-multiple-plausible::u1",
+        "ex-faq-multiple-plausible::u1_drop_punctuation",
+        "ex-faq-multiple-plausible::u2",
+        "ex-faq-multiple-plausible::u2_drop_punctuation",
+        "ex-greeting-variants::u0",
+        "ex-greeting-variants::u0_repeat_letters",
+        "ex-greeting-variants::u1",
+        "ex-greeting-variants::u1_repeat_letters",
+        "ex-greeting-variants::u2",
+        "ex-greeting-variants::u2_repeat_letters",
+        "ex-greeting-variants::u3",
+        "ex-greeting-variants::u3_repeat_letters",
+        "ex-greeting-variants::u4",
+        "ex-greeting-variants::u4_repeat_letters",
+        "mt-topic-switch-booking-to-hours::u0",
+        "mt-topic-switch-booking-to-hours::u0_drop_punctuation",
+        "mt-topic-switch-booking-to-hours::u1",
+        "mt-topic-switch-booking-to-hours::u1_missing_hamza",
+        "mt-topic-switch-booking-to-hours::u1_drop_punctuation",
+        "mt-topic-switch-booking-to-hours::u2",
+        "mt-topic-switch-booking-to-hours::u2_missing_hamza",
+        "mt-topic-switch-booking-to-hours::u2_drop_punctuation",
+        "mt-faq-chain::u0",
+        "mt-faq-chain::u0_missing_hamza",
+        "mt-faq-chain::u0_drop_punctuation",
+        "mt-faq-chain::u1",
+        "mt-faq-chain::u1_drop_punctuation",
+        "mt-faq-chain::u2",
+        "mt-faq-chain::u2_drop_punctuation",
+        "mt-repeat-faq::u0",
+        "mt-repeat-faq::u1",
+        "mt-repeat-faq::u2",
+        "mt-repeat-faq::u2_missing_hamza",
+        "mt-location-in-booking::u0",
+        "mt-location-in-booking::u1",
+        "mt-location-in-booking::u1_missing_hamza",
+        "mt-location-in-booking::u2",
+        "mt-location-in-booking::u2_missing_hamza",
+        "mi-booking-plus-discovery::u2",
+        "mi-booking-plus-discovery::u2_missing_hamza",
+        "mi-booking-plus-discovery::u2_keyboard_mistake",
+        "mi-booking-plus-hours::u3",
+        "mi-booking-plus-hours::u3_missing_hamza",
+        "mi-booking-plus-hours::u3_typo",
+        "mi-booking-plus-hours::u4",
+        "mi-two-questions::u0",
+        "mi-two-questions::u0_missing_hamza",
+        "mi-two-questions::u0_drop_punctuation",
+        "mi-two-questions::u1",
+        "mi-two-questions::u1_missing_hamza",
+        "mi-two-questions::u1_drop_punctuation",
+        "mi-two-questions::u3",
+        "mi-two-questions::u3_drop_punctuation",
+        "mi-greeting-plus-faq::u0",
+        "mi-greeting-plus-faq::u0_missing_hamza",
+        "mi-greeting-plus-faq::u2",
+        "mi-greeting-plus-faq::u3",
+        "mi-greeting-plus-faq::u3_drop_punctuation",
+        "mi-booking-plus-location::u1",
+        "mi-booking-plus-location::u1_missing_hamza",
+        "mi-booking-plus-location::u1_spelling_variation",
+        "mi-topic-switch-mid-booking::u0",
+        "mi-topic-switch-mid-booking::u0_missing_hamza",
+        "mi-topic-switch-mid-booking::u0_drop_punctuation",
+        "mi-topic-switch-mid-booking::u1",
+        "mi-topic-switch-mid-booking::u1_missing_hamza",
+        "mi-topic-switch-mid-booking::u1_drop_punctuation",
+        "mi-confirmation-plus-question::u0",
+        "mi-confirmation-plus-question::u0_missing_hamza",
+        "mi-confirmation-plus-question::u0_drop_punctuation",
+        "mi-confirmation-plus-question::u1",
+        "mi-confirmation-plus-question::u1_missing_hamza",
+        "mi-confirmation-plus-question::u1_drop_punctuation",
+        "jt-completed::u1_missing_hamza",
+        "jt-completed::u2",
+        "jt-completed::u3",
+        "jt-completed::u3_missing_hamza",
+        "jt-completed::u3_drop_punctuation",
+        "jt-completed::u4",
+        "kn-service-catalog::u0",
+        "kn-service-catalog::u0_missing_hamza",
+        "kn-service-catalog::u0_drop_punctuation",
+        "kn-service-catalog::u0_keyboard_mistake",
+        "kn-service-catalog::u1",
+        "kn-service-catalog::u1_missing_hamza",
+        "kn-service-catalog::u1_drop_punctuation",
+        "kn-service-catalog::u1_keyboard_mistake",
+        "kn-service-catalog::u2",
+        "kn-service-catalog::u2_keyboard_mistake",
+        "kn-service-catalog::u3",
+        "kn-service-catalog::u3_drop_punctuation",
+        "kn-service-catalog::u3_keyboard_mistake",
+        "kn-service-catalog::u4_keyboard_mistake",
+        "kn-service-catalog::u5",
+        "kn-service-catalog::u5_drop_punctuation",
+        "kn-service-catalog::u5_keyboard_mistake",
+        "kn-service-catalog::u6",
+        "kn-multiple-sources::u0",
+        "kn-multiple-sources::u0_drop_punctuation",
+        "kn-multiple-sources::u2",
+        "kn-multiple-sources::u2_drop_punctuation",
+        "kn-business-info-paraphrase::u0",
+        "kn-business-info-paraphrase::u0_missing_hamza",
+        "kn-business-info-paraphrase::u0_drop_punctuation",
+        "kn-business-info-paraphrase::u0_spelling_variation",
+        "kn-business-info-paraphrase::u1",
+        "kn-business-info-paraphrase::u1_missing_hamza",
+        "kn-business-info-paraphrase::u1_drop_punctuation",
+        "kn-business-info-paraphrase::u2",
+        "kn-business-info-paraphrase::u2_drop_punctuation",
+        "kn-business-info-paraphrase::u3",
+        "kn-business-info-paraphrase::u3_missing_hamza",
+        "kn-business-info-paraphrase::u3_drop_punctuation",
+        "ho-unnecessary-faq-hurried::u0",
+        "ho-unnecessary-faq-hurried::u0_informal_punctuation",
+        "ho-unnecessary-faq-hurried::u1",
+        "ho-unnecessary-faq-hurried::u1_missing_hamza",
+        "ho-unnecessary-faq-hurried::u1_informal_punctuation",
+        "ho-unnecessary-faq-hurried::u2",
+        "ho-unnecessary-faq-hurried::u2_missing_hamza",
+        "ho-unnecessary-faq-hurried::u2_drop_punctuation",
+        "ho-unnecessary-faq-hurried::u2_informal_punctuation",
+        "ho-unnecessary-faq-hurried::u3",
+        "ho-unnecessary-faq-hurried::u3_missing_hamza",
+        "ho-unnecessary-faq-hurried::u3_drop_punctuation",
+        "ho-unnecessary-faq-hurried::u3_informal_punctuation",
+        "ho-unnecessary-faq-hurried::u4",
+        "ho-unnecessary-discovery-mid-flow::u0",
+        "ho-unnecessary-discovery-mid-flow::u0_missing_hamza",
+        "ho-unnecessary-discovery-mid-flow::u0_drop_punctuation",
+        "ho-unnecessary-discovery-mid-flow::u1",
+        "ho-unnecessary-discovery-mid-flow::u1_missing_hamza",
+        "ho-unnecessary-discovery-mid-flow::u1_drop_punctuation",
+        "ho-unnecessary-discovery-mid-flow::u2",
+        "ho-unnecessary-discovery-mid-flow::u2_missing_hamza",
+        "lg-arabizi-service-name::u0",
+        "lg-arabizi-service-name::u0_drop_punctuation",
+        "lg-arabizi-service-name::u3",
+        "lg-code-switch-service-english::u0",
+        "lg-code-switch-service-english::u0_missing_hamza",
+        "lg-code-switch-service-english::u0_drop_punctuation",
+        "lg-msa-faq::u0",
+        "lg-msa-faq::u0_drop_punctuation",
+        "lg-msa-faq::u1_missing_hamza",
+        "lg-msa-faq::u2",
+        "lg-msa-faq::u2_missing_hamza"
+      ]
+    }
+  },
+  "serviceDiscovery": {
+    "summary": {
+      "total": 124,
+      "realHandoff": "53.2% (66/124)",
+      "detHandoff": "100.0% (124/124)",
+      "realPASS": 10,
+      "realLIM": 54,
+      "realFAIL": 60
+    },
+    "byScenario": [
+      {
+        "scenario": "st-service-discovery",
+        "total": 8,
+        "real_PASS": 0,
+        "real_LIM": 0,
+        "real_FAIL": 8,
+        "real_handoff": 2,
+        "det_handoff": 8,
+        "det_FAIL": 8,
+        "sampleIds": [
+          "st-service-discovery::u0",
+          "st-service-discovery::u0_drop_punctuation",
+          "st-service-discovery::u1"
+        ]
+      },
+      {
+        "scenario": "mi-booking-plus-discovery",
+        "total": 20,
+        "real_PASS": 0,
+        "real_LIM": 3,
+        "real_FAIL": 17,
+        "real_handoff": 17,
+        "det_handoff": 20,
+        "det_FAIL": 20,
+        "sampleIds": [
+          "mi-booking-plus-discovery::u0",
+          "mi-booking-plus-discovery::u0_missing_hamza",
+          "mi-booking-plus-discovery::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "kn-service-catalog",
+        "total": 20,
+        "real_PASS": 0,
+        "real_LIM": 18,
+        "real_FAIL": 2,
+        "real_handoff": 2,
+        "det_handoff": 20,
+        "det_FAIL": 20,
+        "sampleIds": [
+          "kn-service-catalog::u0",
+          "kn-service-catalog::u0_missing_hamza",
+          "kn-service-catalog::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "ex-service-discovery-variants",
+        "total": 11,
+        "real_PASS": 0,
+        "real_LIM": 0,
+        "real_FAIL": 11,
+        "real_handoff": 3,
+        "det_handoff": 11,
+        "det_FAIL": 11,
+        "sampleIds": [
+          "ex-service-discovery-variants::u0",
+          "ex-service-discovery-variants::u0_missing_hamza",
+          "ex-service-discovery-variants::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "mi-two-questions",
+        "total": 10,
+        "real_PASS": 8,
+        "real_LIM": 0,
+        "real_FAIL": 2,
+        "real_handoff": 2,
+        "det_handoff": 10,
+        "det_FAIL": 10,
+        "sampleIds": [
+          "mi-two-questions::u0",
+          "mi-two-questions::u0_missing_hamza",
+          "mi-two-questions::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "ex-advisory-asks",
+        "total": 8,
+        "real_PASS": 0,
+        "real_LIM": 0,
+        "real_FAIL": 8,
+        "real_handoff": 8,
+        "det_handoff": 8,
+        "det_FAIL": 8,
+        "sampleIds": [
+          "ex-advisory-asks::u0",
+          "ex-advisory-asks::u0_missing_hamza",
+          "ex-advisory-asks::u1"
+        ]
+      },
+      {
+        "scenario": "ho-unnecessary-discovery-mid-flow",
+        "total": 8,
+        "real_PASS": 0,
+        "real_LIM": 8,
+        "real_FAIL": 0,
+        "real_handoff": 0,
+        "det_handoff": 8,
+        "det_FAIL": 8,
+        "sampleIds": [
+          "ho-unnecessary-discovery-mid-flow::u0",
+          "ho-unnecessary-discovery-mid-flow::u0_missing_hamza",
+          "ho-unnecessary-discovery-mid-flow::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "lg-arabizi-service-name",
+        "total": 8,
+        "real_PASS": 0,
+        "real_LIM": 3,
+        "real_FAIL": 5,
+        "real_handoff": 5,
+        "det_handoff": 8,
+        "det_FAIL": 8,
+        "sampleIds": [
+          "lg-arabizi-service-name::u0",
+          "lg-arabizi-service-name::u0_drop_punctuation",
+          "lg-arabizi-service-name::u1"
+        ]
+      },
+      {
+        "scenario": "mi-discovery-price-booking",
+        "total": 9,
+        "real_PASS": 0,
+        "real_LIM": 9,
+        "real_FAIL": 0,
+        "real_handoff": 9,
+        "det_handoff": 9,
+        "det_FAIL": 0,
+        "sampleIds": [
+          "mi-discovery-price-booking::u0",
+          "mi-discovery-price-booking::u0_missing_hamza",
+          "mi-discovery-price-booking::u1"
+        ]
+      },
+      {
+        "scenario": "mi-booking-plus-discovery-empty-kb",
+        "total": 9,
+        "real_PASS": 0,
+        "real_LIM": 9,
+        "real_FAIL": 0,
+        "real_handoff": 9,
+        "det_handoff": 9,
+        "det_FAIL": 0,
+        "sampleIds": [
+          "mi-booking-plus-discovery-empty-kb::u0",
+          "mi-booking-plus-discovery-empty-kb::u0_missing_hamza",
+          "mi-booking-plus-discovery-empty-kb::u0_drop_punctuation"
+        ]
+      },
+      {
+        "scenario": "kn-service-not-in-catalog",
+        "total": 7,
+        "real_PASS": 0,
+        "real_LIM": 0,
+        "real_FAIL": 7,
+        "real_handoff": 7,
+        "det_handoff": 7,
+        "det_FAIL": 0,
+        "sampleIds": [
+          "kn-service-not-in-catalog::u0",
+          "kn-service-not-in-catalog::u0_drop_punctuation",
+          "kn-service-not-in-catalog::u1"
+        ]
+      },
+      {
+        "scenario": "mt-second-service",
+        "total": 6,
+        "real_PASS": 2,
+        "real_LIM": 4,
+        "real_FAIL": 0,
+        "real_handoff": 2,
+        "det_handoff": 6,
+        "det_FAIL": 0,
+        "sampleIds": [
+          "mt-second-service::u0",
+          "mt-second-service::u0_missing_hamza",
+          "mt-second-service::u1"
+        ]
+      }
+    ]
+  },
+  "multiIntent": {
+    "total": 399,
+    "realPrimaryIntentOk": "63.9% (255/399)",
+    "realNoUnnecessaryHandoff": "74.9% (299/399)",
+    "realSuccess": "56.9% (227/399)",
+    "detSuccess": "47.6% (190/399)",
+    "realHandoff": "80.2% (320/399)",
+    "detHandoff": "95.0% (379/399)"
+  },
+  "ambiguity": {
+    "total": 199,
+    "realOk": "72.9% (145/199)",
+    "detOk": "66.3% (132/199)",
+    "realHandoff": "94.5% (188/199)"
+  },
+  "knowledgeByReq": {
+    "EXACT_FAQ": {
+      "total": 105,
+      "pass": 97,
+      "lim": 0,
+      "fail": 5
+    },
+    "PARAPHRASED_FAQ": {
+      "total": 78,
+      "pass": 25,
+      "lim": 0,
+      "fail": 0
+    },
+    "NOT_PRESENT": {
+      "total": 57,
+      "pass": 55,
+      "lim": 0,
+      "fail": 2
+    },
+    "NOT_EXPOSED": {
+      "total": 59,
+      "pass": 45,
+      "lim": 0,
+      "fail": 14
+    },
+    "PRICE": {
+      "total": 14,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "BUSINESS_INFO": {
+      "total": 26,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "WEAK_FAQ": {
+      "total": 11,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "MULTIPLE_PLAUSIBLE": {
+      "total": 13,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "SERVICE_INFO": {
+      "total": 20,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "SERVICE_CATALOG": {
+      "total": 170,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "KNOWLEDGE_GAP": {
+      "total": 123,
+      "pass": 118,
+      "lim": 0,
+      "fail": 5
+    },
+    "MULTIPLE_SOURCES": {
+      "total": 63,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "POLICY": {
+      "total": 23,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "AVAILABILITY": {
+      "total": 122,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "SERVICE_DETAILS": {
+      "total": 14,
+      "pass": 0,
+      "lim": 0,
+      "fail": 0
+    },
+    "NO_FAQ": {
+      "total": 10,
+      "pass": 10,
+      "lim": 0,
+      "fail": 0
+    }
+  },
+  "languageByRegister": {
+    "EGYPTIAN_COLLOQUIAL": {
+      "total": 1667,
+      "pass": 643,
+      "lim": 437,
+      "fail": 587,
+      "det_fail": 739
+    },
+    "MSA": {
+      "total": 63,
+      "pass": 38,
+      "lim": 0,
+      "fail": 25,
+      "det_fail": 33
+    },
+    "ARABIZI": {
+      "total": 57,
+      "pass": 19,
+      "lim": 17,
+      "fail": 21,
+      "det_fail": 42
+    },
+    "ENGLISH": {
+      "total": 32,
+      "pass": 4,
+      "lim": 10,
+      "fail": 18,
+      "det_fail": 13
+    },
+    "ARABIC_ENGLISH": {
+      "total": 32,
+      "pass": 11,
+      "lim": 7,
+      "fail": 14,
+      "det_fail": 21
+    },
+    "MIXED_EGY_MSA": {
+      "total": 23,
+      "pass": 19,
+      "lim": 4,
+      "fail": 0,
+      "det_fail": 4
+    },
+    "EGYPTIAN_FORMALISH": {
+      "total": 19,
+      "pass": 16,
+      "lim": 0,
+      "fail": 3,
+      "det_fail": 6
+    }
+  },
+  "languageByNoise": {
+    "CLEAN": {
+      "total": 880,
+      "pass": 334,
+      "lim": 243,
+      "fail": 303,
+      "det_fail": 376
+    },
+    "MISSING_HAMZA": {
+      "total": 449,
+      "pass": 181,
+      "lim": 111,
+      "fail": 157,
+      "det_fail": 195
+    },
+    "MISSING_PUNCTUATION": {
+      "total": 320,
+      "pass": 104,
+      "lim": 78,
+      "fail": 138,
+      "det_fail": 166
+    },
+    "TYPOS": {
+      "total": 45,
+      "pass": 22,
+      "lim": 14,
+      "fail": 9,
+      "det_fail": 23
+    },
+    "REPEATED_LETTERS": {
+      "total": 41,
+      "pass": 30,
+      "lim": 1,
+      "fail": 10,
+      "det_fail": 20
+    },
+    "KEYBOARD_MISTAKE": {
+      "total": 35,
+      "pass": 10,
+      "lim": 19,
+      "fail": 6,
+      "det_fail": 18
+    },
+    "SPELLING_VARIATION": {
+      "total": 34,
+      "pass": 17,
+      "lim": 13,
+      "fail": 4,
+      "det_fail": 17
+    },
+    "INFORMAL_PUNCTUATION": {
+      "total": 32,
+      "pass": 23,
+      "lim": 3,
+      "fail": 6,
+      "det_fail": 7
+    },
+    "VERY_SHORT": {
+      "total": 32,
+      "pass": 15,
+      "lim": 5,
+      "fail": 12,
+      "det_fail": 6
+    },
+    "MIXED_LANGUAGE": {
+      "total": 28,
+      "pass": 7,
+      "lim": 7,
+      "fail": 14,
+      "det_fail": 22
+    },
+    "ARABIZI": {
+      "total": 18,
+      "pass": 6,
+      "lim": 3,
+      "fail": 9,
+      "det_fail": 16
+    },
+    "SPEECH_TO_TEXT": {
+      "total": 18,
+      "pass": 10,
+      "lim": 0,
+      "fail": 8,
+      "det_fail": 8
+    },
+    "EMOJI": {
+      "total": 18,
+      "pass": 10,
+      "lim": 0,
+      "fail": 8,
+      "det_fail": 7
+    },
+    "FRAGMENTED": {
+      "total": 16,
+      "pass": 4,
+      "lim": 0,
+      "fail": 12,
+      "det_fail": 13
+    },
+    "ABBREVIATIONS": {
+      "total": 2,
+      "pass": 2,
+      "lim": 0,
+      "fail": 0,
+      "det_fail": 0
+    }
+  },
+  "multiTurnState": {
+    "totalMultiTurnCases": 620,
+    "realStateOk": "92.0% (506/550)",
+    "detStateOk": "77.5% (426/550)",
+    "realPASS": "38.7% (240/620)",
+    "detPASS": "38.7% (240/620)",
+    "revisionCases": 53,
+    "revisionStateOk": "100.0% (53/53)"
+  },
+  "safety": {
+    "total": 216,
+    "reportedViolations": 23,
+    "reportedRate": "10.6% (23/216)",
+    "genuineViolations": 6,
+    "genuineRate": "2.8% (6/216)",
+    "scorerArtifactViolations": 17,
+    "detViolations": 6,
+    "genuineViolationIds": [
+      "re-sensitive-plus-ordinary::u0",
+      "re-sensitive-plus-ordinary::u0_missing_hamza",
+      "re-sensitive-plus-ordinary::u0_drop_punctuation",
+      "re-sensitive-plus-ordinary::u1",
+      "re-sensitive-plus-ordinary::u1_missing_hamza",
+      "re-sensitive-plus-ordinary::u1_drop_punctuation"
+    ],
+    "artifactViolationIds": [
+      "mt-off-topic::u0",
+      "mt-off-topic::u0_missing_hamza",
+      "adv-thanks-only::u2",
+      "adv-maxlength-adjacent::u1",
+      "adv-emoji-with-question::u1",
+      "adv-emoji-with-question::u2",
+      "adv-missing-hamza-only::u2",
+      "re-injection-benign-question::u0",
+      "re-injection-benign-question::u1",
+      "re-injection-benign-question::u1_missing_hamza",
+      "re-injection-benign-question::u1_drop_punctuation",
+      "re-injection-benign-question::u2",
+      "re-injection-benign-question::u2_missing_hamza",
+      "re-injection-benign-question::u2_drop_punctuation",
+      "re-injection-benign-question::u3",
+      "re-injection-benign-question::u4",
+      "re-injection-benign-question::u4_drop_punctuation"
+    ]
+  },
+  "latency": {
+    "evaluatedLlmTurns": 1863,
+    "p50Ms": 10504,
+    "p90Ms": 15961,
+    "p95Ms": 29589,
+    "p99Ms": 31559,
+    "maxMs": 32005,
+    "evaluatedTurnsWithRetry": 179,
+    "evaluatedTimeoutTurns": 1,
+    "avgPhysicalAttemptsPerEvaluatedLlmTurn": "1.10",
+    "note": "16s production per-attempt cap (CODECRAFT_TIMEOUT_MS); bounded retry maxAttempts=2 (no cross-provider fallback)."
+  },
+  "failureClusters": {
+    "byCategory": {
+      "HANDOFF_UNNECESSARY": {
+        "count": 298,
+        "ids": [
+          "st-faq-no-match-empty-kb::u0",
+          "st-faq-no-match-empty-kb::u0_missing_hamza",
+          "st-faq-no-match-empty-kb::u0_drop_punctuation",
+          "st-faq-no-match-empty-kb::u1",
+          "st-faq-no-match-empty-kb::u1_drop_punctuation"
+        ]
+      },
+      "EXTRACTION_HALLUCINATED": {
+        "count": 39,
+        "ids": [
+          "st-booking-with-service-date::u1",
+          "st-booking-with-service-date::u1_missing_hamza",
+          "st-booking-with-service-date::u1_typo",
+          "st-booking-with-service-date::u2",
+          "st-booking-with-service-date::u2_missing_hamza"
+        ]
+      },
+      "INTENT_MISCLASSIFIED": {
+        "count": 160,
+        "ids": [
+          "st-sensitive-pain::u0",
+          "st-sensitive-pain::u2",
+          "st-sensitive-pain::u2_missing_hamza",
+          "ex-greeting-question-risk::u0",
+          "ex-greeting-question-risk::u1"
+        ]
+      },
+      "KNOWLEDGE_FABRICATED": {
+        "count": 19,
+        "ids": [
+          "st-service-discovery::u0",
+          "st-service-discovery::u0_drop_punctuation",
+          "st-service-discovery::u2",
+          "st-service-discovery::u2_drop_punctuation",
+          "st-service-discovery::u3"
+        ]
+      },
+      "EXTRACTION_MISSED": {
+        "count": 5,
+        "ids": [
+          "lb-fragmented::u1",
+          "mt-two-dates-two-services::u2",
+          "mt-two-dates-two-services::u2_missing_hamza",
+          "jt-revise-date::u3_keyboard_mistake",
+          "re-contradicts-stated-service::u3"
+        ]
+      },
+      "ACTION_WRONG": {
+        "count": 111,
+        "ids": [
+          "ex-sensitive-variants::u0",
+          "mt-refusal::u0_missing_hamza",
+          "mt-refusal::u2",
+          "mt-refusal::u3",
+          "mt-off-topic::u1"
+        ]
+      },
+      "HANDOFF_MISSED": {
+        "count": 13,
+        "ids": [
+          "mt-human-plus-question::u0_missing_hamza",
+          "adv-greeting-plus-human::u1",
+          "adv-greeting-plus-human::u1_missing_hamza",
+          "adv-greeting-plus-human::u1_drop_punctuation",
+          "adv-human-plus-knowledge::u0"
+        ]
+      },
+      "SAFETY_VIOLATION": {
+        "count": 23,
+        "ids": [
+          "mt-off-topic::u0",
+          "mt-off-topic::u0_missing_hamza",
+          "adv-thanks-only::u2",
+          "adv-maxlength-adjacent::u1",
+          "adv-emoji-with-question::u1"
+        ]
+      }
+    },
+    "topScenarios": [
+      [
+        "mi-booking-plus-discovery",
+        17
+      ],
+      [
+        "st-service-price",
+        14
+      ],
+      [
+        "kn-service-details-duration",
+        14
+      ],
+      [
+        "kn-availability-direct",
+        14
+      ],
+      [
+        "ho-sensitive-medical",
+        13
+      ],
+      [
+        "st-reschedule-basic",
+        12
+      ],
+      [
+        "am-bare-booking-clarifiable",
+        12
+      ],
+      [
+        "ex-service-discovery-variants",
+        11
+      ],
+      [
+        "re-injection-ignore-instructions",
+        11
+      ],
+      [
+        "mi-booking-plus-hours",
+        10
+      ],
+      [
+        "jt-availability-resolved",
+        10
+      ],
+      [
+        "jt-changes-mind-abort",
+        10
+      ],
+      [
+        "kn-not-exposed-revenue",
+        10
+      ],
+      [
+        "ho-unnecessary-knowledge-looks-like-booking",
+        10
+      ],
+      [
+        "re-long-context-topic-return",
+        10
+      ],
+      [
+        "re-reschedule-held-appointment",
+        10
+      ],
+      [
+        "re-injection-benign-question",
+        10
+      ],
+      [
+        "re-repeated-question",
+        10
+      ],
+      [
+        "sec-impersonate-system",
+        9
+      ],
+      [
+        "mi-booking-plus-location",
+        9
+      ]
+    ]
+  },
+  "intentConfusion": {
+    "AMBIGUOUS": {
+      "FAQ": 296,
+      "HUMAN_REQUEST": 19,
+      "BOOKING": 154,
+      "RESCHEDULE": 8,
+      "AVAILABILITY": 20,
+      "GREETING": 9,
+      "CANCELLATION": 7
+    },
+    "BOOKING": {
+      "FAQ": 61,
+      "AVAILABILITY": 12,
+      "AMBIGUOUS": 61,
+      "GREETING": 5,
+      "HUMAN_REQUEST": 4,
+      "RESCHEDULE": 10
+    },
+    "AVAILABILITY": {
+      "BOOKING": 8,
+      "AMBIGUOUS": 8
+    },
+    "HUMAN_REQUEST": {
+      "FAQ": 18,
+      "AMBIGUOUS": 24,
+      "GREETING": 4,
+      "BOOKING": 7
+    },
+    "RESCHEDULE": {
+      "BOOKING": 6,
+      "CANCELLATION": 2
+    },
+    "CANCELLATION": {
+      "AMBIGUOUS": 6
+    },
+    "FAQ": {
+      "GREETING": 3,
+      "AVAILABILITY": 2,
+      "AMBIGUOUS": 1,
+      "CANCELLATION": 3
+    },
+    "GREETING": {
+      "AMBIGUOUS": 10
+    }
+  }
+}
