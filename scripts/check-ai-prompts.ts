@@ -363,6 +363,8 @@ async function main(): Promise<void> {
     aiIntentValues,
     handoffReasonValues,
     emptyAiExtraction,
+    synthesizeDecisionGoals,
+    aiGoalKindValues,
   } =
     aiContract as typeof import("../src/features/conversations/server/ai-contract");
 
@@ -608,6 +610,242 @@ async function main(): Promise<void> {
       "كل handoffReason في الموجهات ضمن handoffReasonValues",
       promptReasons.length === 0 ||
         promptReasons.every((v) => allowedReasons.has(v)),
+    );
+  }
+
+  // ── PRODUCER CONTRACT: multi-intent goals[] activation (PROMPT-AI-ARCH-10) ──
+  // The producer boundary that PROMPT-AI-EVAL-12 proved missing: the canonical
+  // system prompt must now ASK for goals[] on genuine multi-intent turns, and
+  // the response contract/parser must ACCEPT a genuine multi-goal structure
+  // (while staying strict enough to reject malformed goals) and stay
+  // single-intent compatible. These checks assert the PRODUCER side only — the
+  // resolver/state/engine consumption is guarded by check:multi-intent.
+  {
+    const systemPrompt =
+      generated.find((g) => g.id === "system.booking-assistant")?.body ?? "";
+
+    // (a) The prompt now DESCRIBES goals[] in the contract + multi-intent rule.
+    check(
+      "PRODUCER: الموجه يصف goals[] في العقد",
+      /goals:\s*ordered array/i.test(systemPrompt) &&
+        aiGoalKindValues.every((k) => systemPrompt.includes(k)),
+    );
+    check(
+      "PRODUCER: الموجه يُعلّم تعدد النوايا (goals[] عند أكثر من هدف)",
+      /Multi-intent/i.test(systemPrompt) &&
+        /continueAfter/.test(systemPrompt) &&
+        /lowest priority first/i.test(systemPrompt),
+    );
+    // (b) Single-intent must stay valid: the prompt tells the model to OMIT
+    // goals[] for one goal and never manufacture extra goals.
+    check(
+      "PRODUCER: الموجه يبقي النية الواحدة صالحة (أهمِل goals[]؛ لا تُلفّق أهدافاً)",
+      /OMIT goals\[\]/i.test(systemPrompt) &&
+        /NEVER manufacture extra goals/i.test(systemPrompt),
+    );
+    // (c) Safety stays authoritative in the producer instruction.
+    check(
+      "PRODUCER: الموجه يُبقي السلامة/التحويل مرجعاً أعلى",
+      /Safety stays authoritative/i.test(systemPrompt) &&
+        /never hide a required handoff/i.test(systemPrompt),
+    );
+    // (d) The resolver owns precedence/one-goal/one-send — not the model.
+    check(
+      "PRODUCER: الموجه يسند الأسبقية/التنفيذ للمحلّل الحتمي",
+      /resolver executes exactly ONE goal/i.test(systemPrompt) &&
+        /OWNS all precedence/i.test(systemPrompt),
+    );
+  }
+
+  // (1) single-intent output — valid, no goals[] needed.
+  {
+    const single = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "من 9 حتى 6",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+    });
+    const goals = single ? synthesizeDecisionGoals(single) : [];
+    check(
+      "PRODUCER-1: نية واحدة صالحة بلا goals[] → هدف واحد مُركَّب",
+      single !== null && goals.length === 1 && goals[0]!.kind === "ANSWER",
+    );
+  }
+
+  // (2) genuine multi-intent output with 2+ goals — accepted + preserved.
+  {
+    const multi = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "من 9 صباحاً حتى 6 مساءً",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 0 },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          priority: 1,
+          continueAfter: true,
+        },
+      ],
+    });
+    check(
+      "PRODUCER-2: تعدد النوايا (هدفان) مقبول ومحفوظ في العقد",
+      multi !== null &&
+        multi.goals?.length === 2 &&
+        multi.goals[0]!.kind === "ANSWER" &&
+        multi.goals[1]!.kind === "DOMAIN_ACTION" &&
+        multi.goals[1]!.continueAfter === true,
+    );
+  }
+
+  // (3) multi-intent goal ORDERING — array order is preserved verbatim.
+  {
+    const ordered = parseAiResponse({
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "تمام",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: "حجز + سؤال",
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 2 },
+        { kind: "DOMAIN_ACTION", intent: "BOOKING", priority: 0 },
+        { kind: "ANSWER", intent: "AVAILABILITY", priority: 1 },
+      ],
+    });
+    check(
+      "PRODUCER-3: ترتيب أهداف تعدد النوايا محفوظ حرفياً (parser لا يعيد الترتيب)",
+      ordered !== null &&
+        ordered.goals?.map((g) => g.intent).join(",") ===
+          "FAQ,BOOKING,AVAILABILITY" &&
+        ordered.goals?.map((g) => g.priority).join(",") === "2,0,1",
+    );
+  }
+
+  // (4) invalid/malformed goals structure — strictly rejected.
+  {
+    const badKind = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "رد",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: [{ kind: "SELL" }],
+    });
+    const missingKind = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "رد",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: [{ intent: "FAQ" }],
+    });
+    const notArray = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "رد",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: { kind: "ANSWER" },
+    });
+    check(
+      "PRODUCER-4: بنية goals[] مشوّهة مرفوضة (نوع خاطئ/ناقص/ليست مصفوفة)",
+      badKind === null && missingKind === null && notArray === null,
+    );
+  }
+
+  // (5) single-goal compatibility with Slice 5 — one explicit goal round-trips
+  //     and synthesizes to exactly that one goal.
+  {
+    const oneGoal = parseAiResponse({
+      intent: "FAQ",
+      action: "reply",
+      content: "رد",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: null,
+      summary: null,
+      goals: [{ kind: "ANSWER", intent: "FAQ", priority: 0 }],
+    });
+    const goals = oneGoal ? synthesizeDecisionGoals(oneGoal) : [];
+    check(
+      "PRODUCER-5: هدف واحد صريح متوافق مع Slice 5 (يبقى هدفاً واحداً)",
+      oneGoal !== null && goals.length === 1 && goals[0]!.kind === "ANSWER",
+    );
+  }
+
+  // (6) human + other goal — the producer keeps the top-level handoff so the
+  //     resolver's EXISTING precedence hands off (never masked by a goal).
+  {
+    const humanPlus = parseAiResponse({
+      intent: "HUMAN_REQUEST",
+      action: "handoff",
+      content: "تحويل",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: "HUMAN_REQUEST",
+      summary: null,
+      goals: [
+        { kind: "HANDOFF", intent: "HUMAN_REQUEST", priority: 0 },
+        { kind: "DOMAIN_ACTION", intent: "BOOKING", priority: 1 },
+      ],
+    });
+    check(
+      "PRODUCER-6: إنسان + هدف آخر → العقد يبقى handoff/HUMAN_REQUEST (أسبقية التحويل)",
+      humanPlus !== null &&
+        humanPlus.action === "handoff" &&
+        humanPlus.handoffReason === "HUMAN_REQUEST" &&
+        humanPlus.goals?.some((g) => g.kind === "HANDOFF") === true,
+    );
+  }
+
+  // (7) sensitive + other goal — top-level handoff/SENSITIVE preserved.
+  {
+    const sensitivePlus = parseAiResponse({
+      intent: "AMBIGUOUS",
+      action: "handoff",
+      content: "تحويل",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: "SENSITIVE",
+      summary: null,
+      goals: [
+        { kind: "HANDOFF", intent: "AMBIGUOUS", priority: 0 },
+        { kind: "DOMAIN_ACTION", intent: "BOOKING", priority: 1 },
+      ],
+    });
+    check(
+      "PRODUCER-7: حساس + هدف آخر → العقد يبقى handoff/SENSITIVE",
+      sensitivePlus !== null &&
+        sensitivePlus.action === "handoff" &&
+        sensitivePlus.handoffReason === "SENSITIVE",
+    );
+  }
+
+  // (8) knowledge-gap + other goal — top-level handoff/NO_KNOWLEDGE preserved.
+  {
+    const gapPlus = parseAiResponse({
+      intent: "AMBIGUOUS",
+      action: "handoff",
+      content: "تحويل",
+      extraction: { ...emptyAiExtraction },
+      handoffReason: "NO_KNOWLEDGE",
+      summary: null,
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", priority: 0 },
+        { kind: "DOMAIN_ACTION", intent: "BOOKING", priority: 1 },
+      ],
+    });
+    check(
+      "PRODUCER-8: فجوة معرفة + هدف آخر → العقد يبقى handoff/NO_KNOWLEDGE",
+      gapPlus !== null &&
+        gapPlus.action === "handoff" &&
+        gapPlus.handoffReason === "NO_KNOWLEDGE",
     );
   }
 

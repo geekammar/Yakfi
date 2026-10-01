@@ -51,6 +51,98 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 5 PRODUCER ACTIVATION (`PROMPT-AI-ARCH-10`,
+IMPLEMENTATION-ONLY): READY_FOR_REAL_LLM_RE-VERIFICATION.** The producer gap
+`PROMPT-AI-EVAL-12` proved (`goals[].length=1` on 15/15 real turns →
+answer-and-continue unreachable) is CLOSED at the ONLY boundary that caused it:
+the canonical system prompt. **Root cause (code-established):** the schema
+already carries optional `goals[]` (Slice 0), `parseAiResponse` already accepts
+
+- preserves it, the response-normalizer is structural-only (keeps known keys),
+  and `resolveTurnPlan` already consumes `goals[]` deterministically (Slice 5) —
+  so the resolver/state/engine were reachable, but
+  `prompts/system/booking-assistant.prompt` (1) OMITTED `goals[]` from the
+  contract description and (2) said "never extra keys", so the real LLM was never
+  asked for — and was actively discouraged from — multiple goals. **Exact change
+  (producer/contract surface ONLY):** the system prompt now (a) describes
+  `goals[]` as an ordered optional array `{ kind: ANSWER|CLARIFY|DOMAIN_ACTION|
+HANDOFF, intent, priority (lower first), continueAfter }`, (b) teaches
+  multi-intent (emit one ordered goal per genuine goal, lowest priority first;
+  mark a deferred domain goal `continueAfter`), (c) keeps single-intent valid
+  (OMIT `goals[]`; NEVER manufacture extra goals), (d) assigns ALL
+  precedence/one-goal/one-send to the deterministic resolver, and (e) keeps
+  safety authoritative (any human/sensitive/knowledge-gap goal keeps the
+  top-level `action=handoff` + reason — never masked). "never extra keys" became
+  "never any key outside this contract" (`goals[]` is in-contract). The generated
+  artifact was REGENERATED via `pnpm generate:ai-prompts` (NOT hand-edited;
+  `system.booking-assistant` sha256 `9b4b67f09715`). **No `src/` logic, schema,
+  resolver, state, engine, provider policy/config, Atria integration, dataset,
+  gold, or scorer change; no migration; no commit/push/tag/deploy.** **Model-call
+  invariant preserved** (greeting bypass 0 calls, normal/multi-intent turn 1
+  call; no classifier→responder→judge chain; no second generative call to split
+  goals). **Guarded:** `check:ai-prompts` **121/121** (NEW producer-contract
+  block: 5 prompt-activation checks + PRODUCER-1..8 parser checks —
+  single-intent, 2+ goals accepted/preserved, ordering preserved, malformed
+  goals rejected, single-goal Slice-5 compatibility, human/sensitive/
+  knowledge-gap + other goal keep top-level handoff), `check:multi-intent`
+  20/20, `check:turn-planner` 31/31, `check:conversation-state` 20/20,
+  `check:clarify` 27/27, `check:ai-architecture` 25/25, `check:ai-disclosure`
+  36/36, `check:future-system` 33/33, `check:eval`/`-runner`/`-schema`
+  25/18/22, `check:conversation-handoff` 21/21, `check:conversation-booking`
+  16/16, `check:booking-ux` 18/18, `check:greeting`, `check:response-normalizer`
+  78/78; `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green
+  (1 pre-existing both-env-files warning; one pre-existing untracked
+  `scripts/eval-run-future-eval12.ts` reformatted for `format:check`). **Files:**
+  `prompts/system/booking-assistant.prompt`,
+  `src/generated/ai-prompts.generated.ts` (regenerated),
+  `scripts/check-ai-prompts.ts` (producer-contract tests), `docs/ai/PROMPTS.md`
+  (catalog purpose line). **Readiness: READY_FOR_REAL_LLM_RE-VERIFICATION.**
+  **Next step:** `PROMPT-AI-EVAL-13` — Real-LLM Multi-Intent Re-Verification
+  After Producer Activation: re-run the EXACT `PROMPT-AI-EVAL-12` focused
+  multi-intent case set through the current FUTURE_SYSTEM real-LLM path (do NOT
+  modify the dataset, gold labels, or scoring engine), expecting
+  `multiGoalTurns>0` + `answerAndContinueSuccess≥4/5` + `pendingPreservedTurns>0`
+- `safetyRegressions=0` + `multiCallTurns=0`; begin `§17 Slice 6` only after
+  multi-intent is demonstrably reachable under the real LLM.
+
+**AI EVALUATION — REAL-LLM MULTI-INTENT VERIFICATION AFTER SLICE 5
+(`PROMPT-AI-EVAL-12`, VERIFICATION-ONLY): BLOCKED_BEHAVIOR.** The focused
+Slice-5 multi-intent set (15 cases: the answer-and-continue mi-* family —
+`mi-booking-plus-discovery`, `-hours`, `-price`, `mi-availability-plus-price`,
+`mi-discovery-price-booking` — plus `mi-two-questions`, the four
+`ho-unnecessary-*`, and 5 safety/handoff regression cases) was run through the
+CURRENT Slice-5 FUTURE_SYSTEM real-LLM path (`future-system-flowpilot`, provider
+`atria` / model `Atria-Dawn-Preview` via the eval-only override; `ATRIA_API_KEY`
+presence/name only; DB policy NOT read/changed; dataset `egyptian-v1` hash
+`8be16297ae4717bab5da4f3c94de1887` unchanged). Calibration (ANSWER control +
+multi-intent turn) passed FIRST. Full run (15 real calls, 1/turn, routing `LLM`
+on all, `multiCallTurns 0`, `providerFailures 0`, 0 retries, 0 timeouts, 0
+malformed; latency p50 ≈28s / max ≈101s = provider property): **multi-intent is
+NOT reachable under the real LLM** — the model emitted a SINGLE goal on 15/15
+turns (`goals[].length=1`, `decision.hasGoals=false` everywhere), so
+**answer-and-continue activated 0×, pendingGoals preserved on 0 turns,
+multi-intent success 0/6**. **SAFETY fully preserved** (5/5 required handoffs →
+`NEED_HUMAN`, incl. the human+rider multi-intent cases; `safetyRegressions 0`,
+`missedHandoffs 0`; 1/4 ho-unnecessary is a pre-existing single-intent
+over-handoff, not a multi-intent regression). Root boundary: **A — producer/
+prompt gap**: the production prompt (`prompts/system/booking-assistant.prompt`)
+describes a contract WITHOUT `goals[]` and forbids extra keys, so the LLM is
+never asked for multiple goals — exactly the "UNREACHABLE until a producer emits
+goals[]" shadow state Slice 5 recorded. The resolver/state/engine foundation is
+proven correct offline (`check:multi-intent` 20/20, green this slice). ONLY new
+files: evaluation-only CLI `scripts/eval-run-future-eval12.ts` + reporting
+artifacts under `evaluation/reports/egyptian-v1/real-llm-eval12/` (report.md A–S,
+manifest.json, evaluation-run.json, analysis.json, status.md, case-selection.json,
+calibration.json). **No `src/`, prompt, provider policy/config, dataset, gold,
+scorer, schema, or migration change; no commit/push/tag/migration/deploy; Slice 6
+NOT started.** **Readiness: BLOCKED_BEHAVIOR.** Next step: a PRODUCER slice (its
+own prompt) teaches a producer to emit `AiResponse.goals[]` for genuine
+multi-intent turns (smallest safe change: extend the system prompt +
+`generate:ai-prompts`/`check:ai-prompts`), then RE-RUN this exact EVAL-12 set
+expecting `multiGoalTurns>0` + `answerAndContinueSuccess≥4/5` +
+`pendingPreservedTurns>0` + `safetyRegressions=0` + `multiCallTurns=0`; begin
+`§17 Slice 6` only after multi-intent is demonstrably reachable under the real LLM.
+
 **AI TARGET ARCHITECTURE — SLICE 5 IMPLEMENTED (MULTI-INTENT + ANSWER-AND-CONTINUE,
 `PROMPT-AI-ARCH-09`, IMPLEMENTATION-ONLY).** The smallest production-side
 multi-intent foundation of `docs/ai/TARGET_ARCHITECTURE.md §17 Slice 5` is BUILT

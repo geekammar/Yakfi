@@ -1,0 +1,18 @@
+{
+  "slice": "PROMPT-AI-EVAL-12",
+  "kind": "verification-only",
+  "target": "future-system-flowpilot",
+  "systemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "fallbackEnabled": false,
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "datasetHashExpected": "8be16297ae4717bab5da4f3c94de1887",
+  "datasetHashMatches": true,
+  "evaluatorVersion": "eval-runner@1",
+  "timeoutMs": 120000,
+  "credentialCheckedByNameOnly": true,
+  "productionMutation": "NONE",
+  "executedAt": "2026-10-01T21:37:13.185Z"
+}
