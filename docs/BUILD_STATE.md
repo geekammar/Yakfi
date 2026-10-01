@@ -51,6 +51,61 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 5 IMPLEMENTED (MULTI-INTENT + ANSWER-AND-CONTINUE,
+`PROMPT-AI-ARCH-09`, IMPLEMENTATION-ONLY).** The smallest production-side
+multi-intent foundation of `docs/ai/TARGET_ARCHITECTURE.md §17 Slice 5` is BUILT
+in the ONE existing decision architecture — **no second engine, resolver, state
+model, planner schema, classifier, or inference**, and **no prompt / provider /
+contract-enum / schema / migration change**. It reuses the canonical
+`AiResponse.goals[]` (Slice 0) and adds ANSWER-AND-CONTINUE as the first
+executable multi-intent behavior. **(A) Resolver (`turn-planner.ts`):** selects
+the PRIMARY executable goal by a DETERMINISTIC goal-kind precedence
+(`HANDOFF > CLARIFY > ANSWER > DOMAIN_ACTION`, independent of the decision's goal
+array order); when an answerable KNOWLEDGE goal (a genuine `reply`) coexists with
+a DOMAIN/booking goal it resolves to `ANSWER` and carries the domain goal in a NEW
+`ResolvedTurn.pendingGoals` with `answerAndContinue = true`. The 8-rule precedence
+is UNCHANGED and applied FIRST, so safety / explicit-human / authoritative-domain
+ALWAYS outrank answer-and-continue; a `NO_KNOWLEDGE` (or any `action !== "reply"`)
+turn stays a handoff. Exactly ONE goal executes; the plan stays a single-step
+canonical `AiTurnPlan`; `goals[]` is never collapsed/mutated. **(B)
+ConversationState (`conversation-state.ts`):** gained `pendingGoals` + a
+`deferredGoals` merge input — a deferred domain goal SURVIVES the answer, a topic
+interruption, and next-turn continuation, and is RESUMED when the customer
+pursues the task / cleared on booking completion. No new persistence: the pending
+goal is reconstructed from already-persisted history via a knowledge-free marker
+(`derivePendingContinuation` in `clarification.ts`, the same migration-safe §9
+seam as `derivePendingClarification`). **(C) Engine (`conversation-engine.ts`):**
+the answer flows through the EXISTING reply/disclosure path; on an
+answer-and-continue turn the engine composes ONE coherent send by appending the
+fixed, knowledge-free `CONTINUE_DOMAIN_INVITE` (B-03 §16, names no business fact)
+— ONE customer-visible send, ZERO additional model inference (zero-or-one
+invariant held: greeting bypass 0 calls, generative turn 1), booking goal
+preserved as pending, invite doubling as the next-turn history marker. **(D)
+Observability + eval seam:** additive optional `pendingGoals` + `answerAndContinue`
+(machine labels only, content-free; `TurnObservability` + `ActualOutcome`). **No
+scorer/dataset/gold change. Today's deterministic classifier emits no `goals[]`,
+so answer-and-continue is UNREACHABLE in production until a producer extracts
+multiple goals — zero customer-visible change this slice (a Slice-3/4-style shadow
+boundary).** Guarded by NEW `pnpm check:multi-intent` **20/20** plus
+`check:turn-planner` 31/31, `check:conversation-state` 20/20, `check:clarify`
+27/27, `check:ai-architecture` 25/25, `check:ai-disclosure` 36/36,
+`check:conversation-handoff`/`-booking`/`-ux`/`-control`, `check:greeting`,
+`check:booking-options` 32/32, `check:booking-confirm` 18/18, `check:ai-context-builder`
+39/39, `check:operator-attention` 20/20, `check:eval`/`-runner`/`-schema`
+25/18/22, `check:future-system` 33/33, `check:ai-prompts` 108/108; `pnpm verify`
+(lint/typecheck/format/build) + `pnpm security` green. **Files:**
+`turn-planner.ts`, `conversation-state.ts`, `clarification.ts`,
+`conversation-engine.ts`, `ai-observability.ts`,
+`evaluation/schema/evaluation-result-schema.ts`, `scripts/check-ai-architecture.ts`
+(test 22 updated for the Slice-5 activation), NEW `scripts/check-multi-intent.ts`.
+**Hard stop respected:** implementation-only — Slice 6 NOT started; no real-LLM
+benchmark; no prompt/provider/schema/migration change; nothing committed/pushed/
+tagged/deployed. **Next step:** a VERIFICATION prompt reruns the focused real-LLM
+multi-intent cases (`mi-booking-plus-discovery`, `mi-two-questions`,
+`ho-unnecessary-*`) expecting answer-and-continue to answer the knowledge goal +
+preserve the booking goal with 0 safety regressions and ≤1 model call/turn;
+on green, begin `§17 Slice 6` (knowledge exposure) as its own prompt.
+
 **AI EVALUATION — REAL-LLM RE-VERIFICATION AFTER ARCH-08 (`PROMPT-AI-EVAL-11`,
 VERIFICATION-ONLY): READY_FOR_SLICE_5 (human-review gate).** The EXACT EVAL-10
 focused 14-case set was re-run through the CURRENT post-ARCH-08 FUTURE_SYSTEM

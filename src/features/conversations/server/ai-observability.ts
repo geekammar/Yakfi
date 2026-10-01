@@ -76,6 +76,15 @@ export type TurnObservability = {
   readonly handoffCause?: AiHandoffCause;
   readonly factUpdates?: readonly AiFactUpdate[];
   /**
+   * The DOMAIN/booking goal(s) a turn PRESERVED for continuation
+   * (PROMPT-AI-ARCH-09 — Slice 5). Populated only on an answer-and-continue
+   * turn; absent otherwise. Machine labels only (the same bounded `AiGoal`),
+   * never customer content.
+   */
+  readonly pendingGoals?: readonly AiGoal[];
+  /** True on an answer-and-continue turn (knowledge answered, domain pending). */
+  readonly answerAndContinue?: boolean;
+  /**
    * The B-01/B-02 source classes of the facts that actually entered context
    * (closed `KnowledgeFactSource` machine keys — never content).
    */
@@ -118,6 +127,13 @@ export type BuildTurnObservabilityInput = {
   readonly latencyMs?: number;
   readonly knowledgeSourceClass?: readonly string[] | null;
   readonly stateTransition?: TurnStateTransitionObservation | null;
+  /**
+   * The DOMAIN/booking goal(s) the resolver preserved for continuation on an
+   * answer-and-continue turn (PROMPT-AI-ARCH-09 — Slice 5). Absent otherwise.
+   */
+  readonly pendingGoals?: readonly AiGoal[] | null;
+  /** True on an answer-and-continue turn. */
+  readonly answerAndContinue?: boolean;
 };
 
 /**
@@ -165,6 +181,12 @@ export function buildTurnObservability(
     ...(input.latencyMs !== undefined ? { latencyMs: input.latencyMs } : {}),
     ...(input.stateTransition
       ? { stateTransition: input.stateTransition }
+      : {}),
+    ...(input.pendingGoals && input.pendingGoals.length > 0
+      ? { pendingGoals: [...input.pendingGoals] }
+      : {}),
+    ...(input.answerAndContinue !== undefined
+      ? { answerAndContinue: input.answerAndContinue }
       : {}),
   };
 }

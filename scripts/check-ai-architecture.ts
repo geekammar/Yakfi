@@ -774,6 +774,13 @@ async function main(): Promise<void> {
   }
 
   // ── 22. Additive fields change NO engine outcome ─────────────────────────
+  //     Slice-0 invariant: additive decision fields that do NOT request
+  //     answer-and-continue leave the turn byte-for-byte identical. (The
+  //     DOMAIN-continuation activation introduced in Slice 5 — a knowledge
+  //     goal PLUS a domain goal — is covered by `check:multi-intent`; here the
+  //     enriched decision carries two ANSWERable goals + the other additive
+  //     fields, so there is no domain goal to continue and the output is
+  //     unchanged.)
   {
     const runPlain = await runTurn({
       text: "إيه مواعيد العمل",
@@ -788,8 +795,8 @@ async function main(): Promise<void> {
         respond: async () =>
           legacyResponse({
             goals: [
-              { kind: "ANSWER", priority: 0 },
-              { kind: "DOMAIN_ACTION", priority: 1, continueAfter: true },
+              { kind: "ANSWER", intent: "FAQ", priority: 0 },
+              { kind: "ANSWER", intent: "FAQ", priority: 1 },
             ],
             clarification: { type: "CLARIFY_DATE", missingFacts: ["date"] },
             handoffCause: "KNOWLEDGE_GAP_UNRESOLVED",
@@ -804,7 +811,7 @@ async function main(): Promise<void> {
       (m) => m.senderType === "AI",
     );
     check(
-      "22 الحقول الإضافية لا تغير أي نتيجة خارجية (سلوك متطابق)",
+      "22 الحقول الإضافية (بلا هدف نطاق للاستكمال) لا تغير أي نتيجة خارجية (سلوك متطابق)",
       plain.assistantAction === enriched.assistantAction &&
         plain.intent === enriched.intent &&
         plain.conversationStatus === enriched.conversationStatus &&

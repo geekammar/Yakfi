@@ -25,12 +25,23 @@
  * always yield the same `ResolvedTurn`, so it is deterministic and
  * offline-testable in isolation.
  *
- * SCOPE (deliberate non-goals, after PROMPT-AI-ARCH-06 — Slice 4):
- * - SINGLE-GOAL ONLY: the plan carries exactly ONE ordered step and remains
- *   compatible with the current single-goal execution model. The decision's
- *   `goals[]` capacity is NOT collapsed — the resolver reads the PRIMARY
- *   goal and leaves the remaining goals untouched in the contract/state for
- *   a later multi-intent slice.
+ * SCOPE (after PROMPT-AI-ARCH-09 — Slice 5, multi-intent + answer-and-continue):
+ * - SINGLE EXECUTED GOAL: the plan still carries exactly ONE ordered step and
+ *   remains compatible with the current single-goal execution model. The
+ *   decision's `goals[]` capacity is NEVER collapsed — the resolver selects
+ *   the PRIMARY EXECUTABLE goal by a deterministic goal-kind precedence and
+ *   leaves every remaining goal untouched in the contract, surfaced to the
+ *   engine/state as `pendingGoals` for continuation on a later turn.
+ * - ANSWER-AND-CONTINUE (Slice 5): when an answerable KNOWLEDGE goal coexists
+ *   with a DOMAIN/booking goal, the resolver resolves the turn to `ANSWER`
+ *   (the knowledge goal) and carries the domain goal in `pendingGoals` with
+ *   `answerAndContinue = true`, so the engine answers the knowledge goal in
+ *   ONE customer-visible send while PRESERVING the domain goal as pending. It
+ *   does NOT execute a second action, does NOT produce a second send, and does
+ *   NOT perform a second inference. Safety/human/domain-constraint precedence
+ *   (rules 1–4) is applied FIRST and ALWAYS outranks answer-and-continue: a
+ *   goal that independently requires a human, sensitive handling, or an
+ *   authoritative domain block still hands off.
  * - CLARIFY is now FIRST-CLASS (Slice 4): a genuinely clarifiable turn (an
  *   `AMBIGUOUS`-reason handoff, or a model-proposed clarification) resolves to
  *   `CLARIFY` — ONE bounded question, no human handoff — INSTEAD of escalating.
@@ -40,8 +51,6 @@
  *   sensitive/restricted turn, or an authoritative domain constraint, and a
  *   genuine knowledge gap (`NO_KNOWLEDGE`) stays a handoff. CLARIFY resolves
  *   only MISSING CONVERSATIONAL INFORMATION; it never resolves domain truth.
- * - Multi-intent execution is NOT implemented (no second send, no secondary
- *   goal sequencing).
  * - The handoff lifecycle is NOT redesigned: the resolver only maps an
  *   already-established human-required condition to `HANDOFF` and carries the
  *   EXISTING `HandoffReason`. The explicit handoff-cause taxonomy is a later
@@ -222,6 +231,22 @@ export type ResolvedTurn = {
    * for every other decision class. Knowledge-free by policy (§16).
    */
   readonly clarification: ClarificationPlan | null;
+  /**
+   * The goals this turn does NOT execute but PRESERVES for continuation
+   * (PROMPT-AI-ARCH-09 — Slice 5). In the answer-and-continue case these are
+   * the DOMAIN/booking goal(s) the engine keeps pending while it answers the
+   * knowledge goal. Empty for every single-goal turn. The resolver never
+   * mutates or drops them from the decision — it only surfaces them so the
+   * engine/state can continue the conversation toward them next turn.
+   */
+  readonly pendingGoals: readonly AiGoal[];
+  /**
+   * True when the turn ANSWERS a knowledge goal while a domain goal remains
+   * pending (`pendingGoals` non-empty + `decisionClass === "ANSWER"`). The
+   * engine composes ONE coherent send and preserves the pending domain goal.
+   * False for every single-goal turn and every handoff/clarify/domain turn.
+   */
+  readonly answerAndContinue: boolean;
 };
 
 /** Build a single-step plan from the primary goal, overriding its class. */
@@ -236,6 +261,52 @@ function singleGoalPlan(
   return { steps: [step] };
 }
 
+/**
+ * Deterministic goal-kind precedence used to pick the ONE primary executable
+ * goal from a multi-goal decision (PROMPT-AI-ARCH-09 — Slice 5). Lower runs
+ * first. A HANDOFF goal is handled by the turn-level safety precedence; a
+ * CLARIFY goal is a bounded question; an ANSWER goal is a knowledge answer
+ * (chosen OVER a domain goal so the engine ANSWERS-and-CONTINUES — the domain
+ * goal becomes pending); a DOMAIN_ACTION goal executes when it is the only
+ * executable goal. Ties keep the decision's own goal order (stable), so the
+ * selection is fully deterministic.
+ */
+const GOAL_KIND_RANK: Record<AiGoalKind, number> = {
+  HANDOFF: 0,
+  CLARIFY: 1,
+  ANSWER: 2,
+  DOMAIN_ACTION: 3,
+};
+
+/** Select the ONE primary executable goal by the deterministic precedence. */
+function selectPrimaryGoal(
+  goals: readonly AiGoal[],
+  decision: AiResponse,
+): AiGoal {
+  if (goals.length === 0) return { kind: "ANSWER", intent: decision.intent };
+  let best = goals[0]!;
+  for (const goal of goals) {
+    if (GOAL_KIND_RANK[goal.kind] < GOAL_KIND_RANK[best.kind]) best = goal;
+  }
+  return best;
+}
+
+/**
+ * The DOMAIN/booking goals a turn preserves for continuation (every goal that
+ * is a domain action or a booking-journey task intent, other than the primary
+ * executed goal). Pure and order-preserving; never mutates the decision.
+ */
+function continuationGoals(
+  goals: readonly AiGoal[],
+  primary: AiGoal,
+): AiGoal[] {
+  return goals.filter(
+    (goal) =>
+      goal !== primary &&
+      (goal.kind === "DOMAIN_ACTION" || isTaskGoal(goal.intent)),
+  );
+}
+
 function resolved(
   primaryGoal: AiGoal,
   decisionClass: AiGoalKind,
@@ -243,6 +314,8 @@ function resolved(
   handoffReason: HandoffReason | null,
   routing: AiRoutingDecision,
   clarification: ClarificationPlan | null = null,
+  pendingGoals: readonly AiGoal[] = [],
+  answerAndContinue = false,
 ): ResolvedTurn {
   return {
     decisionClass,
@@ -251,6 +324,8 @@ function resolved(
     handoffReason,
     routing,
     clarification,
+    pendingGoals,
+    answerAndContinue,
   };
 }
 
@@ -270,13 +345,16 @@ export function resolveTurnPlan(input: ResolveTurnPlanInput): ResolvedTurn {
   const domain = input.domain ?? { kind: "PENDING" };
   const signals = input.signals ?? {};
 
-  // The PRIMARY goal (single-goal boundary). `synthesizeDecisionGoals`
-  // returns the decision's explicit goals when present (future multi-intent
-  // capacity, NOT collapsed) or the ONE synthesized goal from intent+action.
-  // This slice executes only the primary (first) goal; the rest stay in the
-  // decision/state for a later multi-intent slice.
+  // The PRIMARY goal (single executed goal). `synthesizeDecisionGoals`
+  // returns the decision's explicit goals when present (multi-intent capacity,
+  // NEVER collapsed) or the ONE synthesized goal from intent+action. The
+  // resolver selects the primary by a DETERMINISTIC goal-kind precedence
+  // (`selectPrimaryGoal`): an answerable knowledge goal is chosen OVER a
+  // coexisting domain goal, so the turn ANSWERS-and-CONTINUES (the domain goal
+  // stays in `pendingGoals`). This slice still executes exactly ONE goal; the
+  // remaining goals stay represented in the decision/state for continuation.
   const goals = synthesizeDecisionGoals(decision);
-  const primaryGoal = goals[0] ?? { kind: "ANSWER", intent: decision.intent };
+  const primaryGoal = selectPrimaryGoal(goals, decision);
   const baseClass = primaryGoal.kind;
 
   // Is a task (a CLARIFY-recorded missing fact, or an in-progress booking
@@ -421,9 +499,37 @@ export function resolveTurnPlan(input: ResolveTurnPlanInput): ResolvedTurn {
   // ── 8. NORMAL_DECISION — normal answer, or the existing knowledge-gap /
   //      genuinely-ambiguous handoff. The class is exactly the canonical
   //      synthesis.
+  //
+  //      ANSWER-AND-CONTINUE (PROMPT-AI-ARCH-09 — Slice 5): when the primary
+  //      executable goal is an answerable KNOWLEDGE goal (a genuine `reply`)
+  //      and a DOMAIN/booking goal ALSO exists in the decision, answer the
+  //      knowledge goal now and PRESERVE the domain goal as pending. Reached
+  //      only after rules 1–7 could not fire, so safety / explicit human /
+  //      authoritative domain constraint already won — answer-and-continue can
+  //      never mask a required handoff. The engine composes ONE coherent send
+  //      and continues toward the pending domain goal on the next turn.
+  if (baseClass === "ANSWER" && decision.action === "reply") {
+    const pending = continuationGoals(goals, primaryGoal);
+    if (pending.length > 0) {
+      return resolved(
+        primaryGoal,
+        "ANSWER",
+        "NORMAL_DECISION",
+        null,
+        routing,
+        null,
+        pending,
+        true,
+      );
+    }
+  }
+
   return resolved(
     primaryGoal,
-    baseClass,
+    // The top-level `action` stays authoritative for whether the turn hands
+    // off: a handoff decision (knowledge-gap / genuinely-ambiguous) resolves to
+    // HANDOFF even when an explicit (contradictory) goal proposed another kind.
+    decision.action === "handoff" ? "HANDOFF" : baseClass,
     "NORMAL_DECISION",
     decision.action === "handoff" ? (decision.handoffReason ?? null) : null,
     routing,

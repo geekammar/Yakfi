@@ -94,9 +94,11 @@ import type {
 } from "@/features/conversations/server/booking-selection";
 import { tryParseBookingSelection } from "@/features/conversations/server/booking-selection";
 import {
+  CONTINUE_DOMAIN_INVITE,
   clarificationForBookingReason,
   clarificationForInterruption,
   derivePendingClarification,
+  derivePendingContinuation,
 } from "@/features/conversations/server/clarification";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import {
@@ -614,13 +616,29 @@ function resolveFinishedTurn(
     // Reconstruct a pending clarification from history (migration-safe §9) so
     // the resumed state reflects what the engine actually asked last turn.
     const pending = derivePendingClarification(recentChronological);
-    const seeded = pending
-      ? {
-          ...base,
-          missingFacts: pending.missingFacts,
-          lastClarification: { type: pending.type },
-        }
-      : base;
+    // Reconstruct a pending DOMAIN goal from an earlier answer-and-continue
+    // turn (PROMPT-AI-ARCH-09 — Slice 5), from the same migration-safe history
+    // marker — so a deferred booking goal SURVIVES into this turn's state.
+    const pendingContinuation = derivePendingContinuation(recentChronological);
+    const seededPendingGoals = pendingContinuation
+      ? [
+          {
+            kind: "DOMAIN_ACTION",
+            intent: pendingContinuation.intent,
+            active: false,
+          } as const,
+        ]
+      : base.pendingGoals;
+    const seeded = {
+      ...base,
+      pendingGoals: seededPendingGoals,
+      ...(pending
+        ? {
+            missingFacts: pending.missingFacts,
+            lastClarification: { type: pending.type },
+          }
+        : {}),
+    };
 
     const factUpdates = [
       ...factUpdatesFromExtraction(decision.extraction),
@@ -1654,6 +1672,12 @@ async function runInboundTurn(
         validated,
       ),
       turnPlan: resolvedTurn?.plan,
+      ...(resolvedTurn
+        ? { answerAndContinue: resolvedTurn.answerAndContinue }
+        : {}),
+      ...(resolvedTurn && resolvedTurn.pendingGoals.length > 0
+        ? { pendingGoals: resolvedTurn.pendingGoals }
+        : {}),
       ...(resolvedTurn?.clarification
         ? {
             clarification: {
@@ -2233,13 +2257,34 @@ async function runInboundTurn(
     }
     const content = disclosure.response.content;
 
+    // ANSWER-AND-CONTINUE (PROMPT-AI-ARCH-09 — Slice 5). When the SAME customer
+    // turn expressed a KNOWLEDGE goal AND a DOMAIN/booking goal, the resolver
+    // resolved it to ANSWER with the domain goal in `pendingGoals`
+    // (`answerAndContinue`). The knowledge answer above was authored + disclosed
+    // normally; here the engine COMPOSES exactly ONE coherent send by appending
+    // the fixed, knowledge-free continuation invite (B-03 §16 — it names no
+    // business fact), keeping the booking task alive. This produces NO second
+    // send, NO second model call, and NO domain mutation: the booking goal is
+    // preserved and the appended invite is also the migration-safe history
+    // marker (`derivePendingContinuation`) the NEXT turn reads to resume it.
+    // Safety is unaffected — a safety/human/domain-blocked turn never reaches
+    // this disclosed-answer path (it handed off earlier), and a handoff turn
+    // (`action !== "reply"`) never answer-and-continues.
+    const answerAndContinue =
+      validated.action === "reply" &&
+      resolvedTurn?.answerAndContinue === true &&
+      resolvedTurn.pendingGoals.length > 0;
+    const finalContent = answerAndContinue
+      ? `${content}\n\n${CONTINUE_DOMAIN_INVITE}`
+      : content;
+
     // 10. Persist the assistant reply through the single write path with
     //     the workflow the turn decided.
     const assistantMessage = await deps.conversationRepository.addMessage(
       {
         conversationId: conversation.id,
         senderType: "AI",
-        content,
+        content: finalContent,
       },
       {
         status: validated.action === "reply" ? "AI_ACTIVE" : "NEED_HUMAN",
@@ -2264,7 +2309,7 @@ async function runInboundTurn(
         businessId: business.id,
         businessName: business.name,
         conversationId: conversation.id,
-        content,
+        content: finalContent,
         connectionId: outboundConnectionId ?? undefined,
       });
       delivery = {

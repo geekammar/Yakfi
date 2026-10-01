@@ -196,6 +196,15 @@ export type ConversationState = {
   readonly pendingOffer: ConversationPendingOffer | null;
   /** Goals the conversation is pursuing (multi-intent foundation). */
   readonly goals: readonly ConversationGoal[];
+  /**
+   * Secondary DOMAIN/booking goal(s) the engine deferred by an
+   * answer-and-continue turn and still owes the customer (PROMPT-AI-ARCH-09 —
+   * Slice 5). A pending goal SURVIVES subsequent turns (topic interruption,
+   * the current answer, next-turn continuation) until it is RESUMED (the
+   * customer pursues it) or COMPLETED (a booking is written). It is
+   * orchestration state only — never authoritative domain truth.
+   */
+  readonly pendingGoals: readonly ConversationGoal[];
   /** The last clarification the engine recorded (future slices populate). */
   readonly lastClarification: {
     readonly type: string;
@@ -213,6 +222,7 @@ export type ConversationStateTransition = {
 
 const MAX_TOPIC_FRAMES = 8;
 const MAX_REVISIONS = 32;
+const MAX_PENDING_GOALS = 8;
 
 /** The canonical empty/initial state (a brand-new conversation). */
 export function emptyConversationState(): ConversationState {
@@ -230,6 +240,7 @@ export function emptyConversationState(): ConversationState {
     topics: [],
     pendingOffer: null,
     goals: [],
+    pendingGoals: [],
     lastClarification: null,
   };
 }
@@ -304,6 +315,13 @@ export type MergeConversationStateInput = {
   readonly turnGoal?: string | null;
   /** Structured goals the decision proposed (multi-intent foundation). */
   readonly goals?: readonly AiGoal[];
+  /**
+   * DOMAIN/booking goal(s) the engine DEFERRED this turn by answering a
+   * knowledge goal (answer-and-continue, PROMPT-AI-ARCH-09 — Slice 5). They
+   * are ADDED to `pendingGoals` and preserved across subsequent turns until
+   * resumed or completed. Omit on a normal single-goal turn.
+   */
+  readonly deferredGoals?: readonly AiGoal[];
   /** A domain offer presented this turn (cached presentation, re-verified). */
   readonly pendingOffer?: ConversationPendingOffer | null;
   /** True when the customer completed a booking this turn. */
@@ -380,6 +398,44 @@ export function mergeConversationState(
 
   // ── Goals (multi-intent foundation) ──────────────────────────────────────
   const goals = input.goals ? goalsFromDecision(input.goals) : [...state.goals];
+
+  // ── Pending (deferred) domain goals — answer-and-continue (Slice 5) ──────
+  // Carry forward the pending DOMAIN goal(s) an earlier answer-and-continue
+  // turn deferred, so a secondary booking goal SURVIVES the answer, a topic
+  // interruption, and next-turn continuation. A pending goal is dropped only
+  // when it is RESUMED (the current turn pursues the same task goal) or
+  // COMPLETED (a booking is written). The turn goal is computed just below;
+  // we read it after it is resolved so a resumption clears the matching
+  // pending goal deterministically.
+  const resumingGoal = input.turnGoal ?? null;
+  const resumesTask = resumingGoal != null && isTaskGoal(resumingGoal);
+  let pendingGoals: ConversationGoal[] = state.pendingGoals.filter((goal) => {
+    if (input.booked) return false; // a completed booking clears domain pendings
+    // Resumed: the customer is pursuing this (or an unlabeled) pending task.
+    if (resumesTask && (goal.intent === resumingGoal || goal.intent == null))
+      return false;
+    return true;
+  });
+  if (input.deferredGoals && input.deferredGoals.length > 0) {
+    for (const goal of input.deferredGoals) {
+      const next: ConversationGoal = {
+        kind: goal.kind,
+        ...(goal.intent ? { intent: goal.intent } : {}),
+        ...(goal.priority !== undefined ? { priority: goal.priority } : {}),
+        active: false,
+      };
+      const duplicate = pendingGoals.some(
+        (existing) =>
+          existing.kind === next.kind && existing.intent === next.intent,
+      );
+      if (!duplicate) pendingGoals.push(next);
+    }
+    if (pendingGoals.length > MAX_PENDING_GOALS) {
+      pendingGoals = pendingGoals.slice(
+        pendingGoals.length - MAX_PENDING_GOALS,
+      );
+    }
+  }
 
   // ── Active task + topic interruption / return ────────────────────────────
   const turnGoal = input.turnGoal ?? state.currentGoal ?? null;
@@ -491,6 +547,7 @@ export function mergeConversationState(
     topics,
     pendingOffer,
     goals,
+    pendingGoals,
     lastClarification,
   };
 

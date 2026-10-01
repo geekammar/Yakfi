@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -41,6 +41,7 @@
     "check:conversation-state": "tsx scripts/check-conversation-state.ts",
     "check:turn-planner": "tsx scripts/check-turn-planner.ts",
     "check:clarify": "tsx scripts/check-clarify.ts",
+    "check:multi-intent": "tsx scripts/check-multi-intent.ts",
     "check:booking-confirm": "tsx scripts/check-booking-confirm.ts",
     "check:appointment-creation": "tsx scripts/check-appointment-creation.ts",
     "check:reschedule": "tsx scripts/check-reschedule.ts",

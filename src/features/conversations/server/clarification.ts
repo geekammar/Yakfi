@@ -105,6 +105,21 @@ export const INTERRUPTION_ACK_QUESTION =
 export const CLARIFY_DATE_QUESTION =
   "يرجى تحديد التاريخ المطلوب — مثال: 2026-09-14.";
 
+/**
+ * The ANSWER-AND-CONTINUE invitation (PROMPT-AI-ARCH-09 — Slice 5). A fixed,
+ * knowledge-free continuation line the engine APPENDS to a knowledge answer
+ * when the SAME customer turn also expressed a domain/booking goal: the engine
+ * answers the knowledge question and, in the SAME single send, keeps the
+ * booking task alive by inviting the customer to continue. It names NO service,
+ * price, slot, policy, provider, or any business fact — so it crosses the
+ * customer boundary on its declared knowledge-free class, exactly like the
+ * GREETING / CLARIFY / interruption-ack protocols (B-03 §16). It is ALSO the
+ * migration-safe history marker the next turn reads to reconstruct the pending
+ * domain goal (`derivePendingContinuation`), so no new storage is required.
+ */
+export const CONTINUE_DOMAIN_INVITE =
+  "وبخصوص طلب الحجز، أنا جاهز أكمل معك — تحب نحجز إمتى؟";
+
 const QUESTION_BY_TYPE: Partial<Record<ClarificationType, string>> = {
   CLARIFY_INTENT: CLARIFY_INTENT_QUESTION,
   CLARIFY_SERVICE:
@@ -297,6 +312,34 @@ export function derivePendingClarification(
     return { type: "CLARIFY_DATE", missingFacts: ["date"] };
   }
   return null;
+}
+
+/**
+ * Reconstruct a PENDING DOMAIN goal from the already-persisted history
+ * (PROMPT-AI-ARCH-09 — Slice 5). When an earlier answer-and-continue turn
+ * appended the knowledge-free `CONTINUE_DOMAIN_INVITE` to its answer, that line
+ * is the migration-safe marker (the SAME approach `derivePendingClarification`
+ * uses) that the engine still owes the customer a BOOKING continuation. It
+ * inspects the most recent ASSISTANT message, skipping the trailing customer /
+ * staff turns (the current answer). Returns the pending goal's intent, or null
+ * when nothing is pending.
+ *
+ * Pure and deterministic; it reads only the structured template the engine
+ * authored, never the customer's words and never a model.
+ */
+export function derivePendingContinuation(
+  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+): { readonly intent: string } | null {
+  let lastAi: string | null = null;
+  for (let i = recentChronological.length - 1; i >= 0; i -= 1) {
+    const entry = recentChronological[i]!;
+    if (entry.senderType === "AI") {
+      lastAi = entry.content;
+      break;
+    }
+  }
+  if (!lastAi) return null;
+  return lastAi.includes(CONTINUE_DOMAIN_INVITE) ? { intent: "BOOKING" } : null;
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────

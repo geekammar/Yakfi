@@ -119,6 +119,13 @@ export const actualOutcomeSchema = z
     knowledgeSourceClass: z.array(z.string()).optional(),
     routingDecision: z.string().optional(),
     stateTransition: z.unknown().optional(),
+    // ── Multi-intent observables (PROMPT-AI-ARCH-09, Slice 5) ───────────────
+    // Additive and OPTIONAL: a future system that extracts more than one goal
+    // may populate them so answer-and-continue is measurable later; the
+    // current system leaves them absent. Deliberately loose — the evaluation
+    // boundary must not force a production enum before its slice lands.
+    pendingGoals: z.array(z.unknown()).optional(),
+    answerAndContinue: z.boolean().optional(),
   })
   .passthrough();
 

@@ -1244,6 +1244,71 @@ big-bang; old behavior remains available behind the compatibility bridge
 
 ### Slice 5 — Multi-intent (goals + answer-and-continue)
 
+> **STATUS: IMPLEMENTED (PROMPT-AI-ARCH-09).** The smallest production-side
+> multi-intent foundation now lives in the ONE existing decision architecture —
+> no second engine, resolver, state model, planner schema, classifier, or
+> inference. It reuses the canonical `AiResponse.goals[]` (Slice 0, unchanged
+> contract) and adds ANSWER-AND-CONTINUE as the first executable multi-intent
+> behavior.
+>
+> **(A) Resolver (`turn-planner.ts`).** The ONE resolver now selects the PRIMARY
+> executable goal by a DETERMINISTIC goal-kind precedence
+> (`HANDOFF > CLARIFY > ANSWER > DOMAIN_ACTION`, order-independent of the
+> decision's goal array). When an answerable KNOWLEDGE goal (`ANSWER`, a genuine
+> `reply`) coexists with a DOMAIN/booking goal, the turn resolves to `ANSWER`
+> and carries the domain goal(s) in a NEW `ResolvedTurn.pendingGoals` with
+> `answerAndContinue = true`. The 8-rule precedence is UNCHANGED and still
+> applied FIRST, so safety / explicit-human / authoritative-domain-constraint
+> ALWAYS outrank answer-and-continue; a handoff decision (`action !== "reply"`,
+> e.g. a `NO_KNOWLEDGE` gap) stays a handoff. Exactly ONE goal executes per
+> turn; the plan stays a single-step canonical `AiTurnPlan`; `goals[]` is never
+> collapsed or mutated.
+>
+> **(B) ConversationState (`conversation-state.ts`).** The ONE engine-owned
+> state gained `pendingGoals` and the merge accepts `deferredGoals`: a deferred
+> domain goal SURVIVES the answer, a topic interruption, and next-turn
+> continuation, and is RESUMED (consumed) when the customer pursues the task or
+> COMPLETED when a booking is written. No new persistence model — the pending
+> goal is reconstructed from the already-persisted history via a knowledge-free
+> marker (`derivePendingContinuation` in `clarification.ts`, the same
+> migration-safe §9 seam `derivePendingClarification` uses).
+>
+> **(C) Engine (`conversation-engine.ts`).** The answer flows through the
+> EXISTING reply/disclosure path; on an answer-and-continue turn the engine
+> composes ONE coherent send by appending the fixed, knowledge-free
+> `CONTINUE_DOMAIN_INVITE` (B-03 §16 — names no business fact). Result: ONE
+> customer-visible send, ZERO additional model inference (zero-or-one invariant
+> intact — a greeting bypass still makes 0 calls, a generative turn 1), the
+> booking goal preserved as pending, and the invite doubling as the history
+> marker the next turn reads to resume.
+>
+> **(D) Observability + eval seam.** `TurnObservability` + `ActualOutcome` gained
+> additive optional `pendingGoals` + `answerAndContinue` (machine labels only,
+> content-free). No scorer/dataset/gold change.
+>
+> **Note on today's producers.** The deterministic classifier emits NO
+> `goals[]`, so answer-and-continue is UNREACHABLE in production until a producer
+> extracts multiple goals — zero customer-visible change this slice, exactly like
+> the Slice 3/4 shadow boundaries. No prompt change was required (the existing
+> `goals[]` contract already carries multiple goals); if a producer later needs
+> prompt work to extract them, that is its own slice.
+>
+> **Guarded by** NEW `pnpm check:multi-intent` **20/20** (single-goal parity,
+> two answerable goals represented, knowledge+booking answer-and-continue,
+> booking pending + survives interruption + survives/resumes next turn,
+> knowledge+human/sensitive/knowledge-gap precedence, one send, one model call,
+> one state, one plan, deterministic ordering, deterministic-bypass zero call,
+> history derivation, no second resolver/state/planner/classifier/inference, no
+> provider id in contract, no resolver domain mutation), with
+> `check:turn-planner` **31/31**, `check:conversation-state` **20/20**,
+> `check:clarify` **27/27**, `check:ai-architecture` **25/25**,
+> `check:ai-disclosure` **36/36**, `check:conversation-handoff`/`-booking`/
+> `-ux`/`-control`, `check:greeting`, `check:booking-options` **32/32**,
+> `check:booking-confirm` **18/18**, `check:eval`/`-runner`/`-schema`
+> 25/18/22, `check:future-system` **33/33**, `check:ai-prompts` **108/108**;
+> `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green. Slices
+> 6–10 remain DESIGN ONLY.
+
 - **Goal:** represent multiple goals; answer the knowledge goal and keep the
   domain goal pending; hand off only when a goal truly requires it.
 - **Boundary:** contract `goals[]` → resolver sequencing → state
