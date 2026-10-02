@@ -105,8 +105,9 @@ Prompt bodies contain **no** provider syntax — no `Authorization` /
 model-hack strings (`gpt-4o` / `claude` / `gemini`), no `openrouter/…` or
 `agentrouter/…` model refs, no tool-call DSL, no provider SDK names. Any
 violation fails the check. Prompts reference only the contract (`AiRequest`:
-`message`, `recentMessages`, `services`, `faqs`, `providerPreference`,
-`availability`) and the response shape (`AiResponse`: `intent`, `action`,
+`message`, `recentMessages`, `services` incl. optional task-gated
+`price`/`description`, `faqs`, `providerPreference`, `availability`, optional
+`businessAbout`) and the response shape (`AiResponse`: `intent`, `action`,
 `content`, `extraction`, `handoffReason`, `summary`), validated by
 `parseAiResponse` — unknown keys / `reasoning` are **stripped**, never
 persisted.

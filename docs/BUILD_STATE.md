@@ -51,6 +51,72 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 6 BROADER KNOWLEDGE EXPOSURE: BUSINESS ABOUT
+
+- SERVICE DESCRIPTION + BOUNDED CATALOG (`PROMPT-AI-ARCH-15`, IMPLEMENTATION +
+  VERIFICATION): BUILT + REAL-LLM VERIFIED — READY_FOR_NEXT_STAGE (human-review
+  gate; NO release/commit).** The remaining Slice-6 knowledge families the
+  EVAL-15 knowledge map recorded as `NOT YET WIRED` are now reachable through the
+  EXISTING B-01/B-02/B-03 seams. **Smallest justified shape (no new storage —
+  the data already existed):** (1) `AiRequest` gains OPTIONAL `businessAbout`
+  (≤2000) and OPTIONAL `services[].description` (≤600) — provider-neutral,
+  additive, absent on unrelated turns; (2) the B-02 context builder adds two
+  deterministic relevance families to `deriveTaskRelevance` — `businessInfo`
+  («عن العيادة/قصة/نبذة/فرع/تخصص/شغالين/about») gates the PUBLIC
+  `business.about`; `serviceInfo` («بتشمل/بيشمل/بيعمل/خطوات/تفاصيل/include/
+  details») gates the PUBLIC per-service `description`, selected by a bounded
+  deterministic reference check (exact-name phrase OR the service's FIRST
+  significant token) with a `AI_SERVICE_DESCRIPTION_LIMIT=5` fallback — never the
+  full catalog; the existing service NAMES remain the bounded catalog channel
+  unchanged; (3) the B-03 disclosure gate gains ADDITIVE FAQ support families
+  `business.about` (channel `businessAbout`) and `service.description` (channel
+  `serviceDescriptions`), each backed ONLY when `channelCarried` proves the data
+  is actually in the request — an absent about/description is an honest
+  `NO_KNOWLEDGE` handoff, never invented (the `service.price` path is
+  untouched); (4) ONE provider-neutral prompt line permits quoting a PRESENT
+  `businessAbout`/service description and forbids inventing one (regenerated
+  artifact — same prompt id, following the ARCH-13 precedent). **Untouched and
+  preserved:** price semantics (FIXED/RANGE/STARTING_FROM/CONDITIONAL, missing →
+  NEED_HUMAN only when the goal needs price), duration/isActive/ids remain
+  INTERNAL/FORBIDDEN (never exposed), safety/handoff precedence, tenant proof,
+  goals[]/answer-and-continue/pendingGoals, one generative call/turn, no second
+  engine/resolver/state/planner/knowledge/RAG. **Deterministic:**
+  `check:ai-context-builder` **54/54** (NEW: about/description task-gating,
+  bounded catalog, missing-value absence, channel separation from price),
+  `check:ai-disclosure` **41/41** (NEW: about/description support families,
+  off-task refusal, missing-value refusal), all adjacent gates green
+  (service-price 33, ai-prompts 126, ai-architecture 25, multi-intent 22,
+  future-system 33, turn-planner 31, conversation-state 20, clarify 27,
+  services 50, conversation-booking 16, conversation-handoff 21,
+  response-normalizer 78, knowledge-visibility 36, eval/-schema/-runner
+  25/22/18); `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green
+  (1 pre-existing both-env-files warning). **Real-LLM (NEW eval-only runner
+  `scripts/eval-run-future-arch15.ts`, `arch15@1`; eval-only about/description
+  overlay on the isolated in-memory adapter; Atria `Atria-Dawn-Preview` override;
+  DB policy NOT read/changed; dataset hash `8be16297…` unchanged):**
+  calibration 4/4 · gating **13/13** · 17 measured turns · 17 real calls ·
+  1 call/turn · 0 multi-call · 0 bypass · 0 provider failures · 0 malformed.
+  Verified: about-relevant quotes the authoritative about; about-missing →
+  NEED_HUMAN `NO_KNOWLEDGE`; about-irrelevant booking carries NO about; service
+  description relevant quotes the referenced service; description-missing →
+  NEED_HUMAN; description-irrelevant carries none; catalog discovery answers
+  from names; price-present answers "300 جنيه"; missing-price explicit →
+  NEED_HUMAN no digits; booking-only missing → AI_ACTIVE; multi-intent about +
+  booking → answer-and-continue (`a&c=true`, `goals=2`); safety human/sensitive
+  2/2 → NEED_HUMAN. Latency p50 26.2s / p95 78.1s (provider property; transient
+  Atria fast-fails were correctly calibration-gate-blocked as BLOCKED_PROVIDER;
+  the recorded canonical run had 0 provider failures). **Artifacts:**
+  `evaluation/reports/egyptian-v1/real-llm-arch15/` (prior EVAL-15 dirs
+  preserved). **Files changed:** `ai-contract.ts`, `ai-context-builder/
+context-builder.ts` (+ index), `ai-disclosure/disclosure-gate.ts`,
+  `prompt.ts`, `prompts/system/booking-assistant.prompt` (+ regenerated
+  artifact), `evaluation/runner/future-system-adapter.ts` (eval-only),
+  `scripts/check-ai-context-builder.ts`, `scripts/check-ai-disclosure.ts`,
+  `scripts/eval-run-future-arch15.ts`, `package.json` (eval script),
+  `docs/BUILD_STATE.md`, `docs/ai/{TARGET_ARCHITECTURE,ARCHITECTURE,README,
+PROMPTS}.md`. **No commit/push/tag/deploy/migrate.** **Readiness:
+  READY_FOR_NEXT_STAGE.**
+
 **AI TARGET ARCHITECTURE — SLICE 6 PRICE-RELEVANCE «و» CLITIC REMEDIATION
 (`PROMPT-AI-ARCH-14`, IMPLEMENTATION + VERIFICATION): BUILT + REAL-LLM
 RE-VERIFIED — READY_FOR_PRICE_REAL_LLM_REVERIFY (human-review gate; NO release).**

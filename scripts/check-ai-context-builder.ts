@@ -38,6 +38,7 @@ import * as path from "node:path";
 
 import * as contextBuilderModule from "../src/features/conversations/server/ai-context-builder";
 import {
+  AI_SERVICE_DESCRIPTION_LIMIT,
   CONTEXT_OMISSION_REASONS,
   buildAiContext,
   deriveTaskRelevance,
@@ -280,6 +281,151 @@ async function main(): Promise<void> {
     "اشتقاق السعر: دور غير سعري لا يُوسَّع «عايز أحجز بكرة»",
     eq(deriveTaskRelevance("عايز أحجز بكرة").priceOrFee, false) &&
       eq(deriveTaskRelevance("تمام").priceOrFee, false),
+  );
+
+  // ── 2b. BUSINESS ABOUT + SERVICE DESCRIPTION (PROMPT-AI-ARCH-15) ─────────
+  // The two remaining Slice-6 knowledge channels are PUBLIC but carried ONLY
+  // on their own relevance gate. Relevance derivation first (deterministic):
+  check(
+    "اشتقاق معلومات المنشأة: أسئلة «عن العيادة/قصة/نبذة» ذات صلة",
+    eq(deriveTaskRelevance("احكيلي عن العيادة").businessInfo, true) &&
+      eq(deriveTaskRelevance("إيه قصة العيادة دي؟").businessInfo, true) &&
+      eq(deriveTaskRelevance("ممكن نبذة عنكم؟").businessInfo, true),
+  );
+  check(
+    "اشتقاق معلومات المنشأة: دور حجز عادي ليس سؤال «عن المنشأة»",
+    eq(deriveTaskRelevance("عايز أحجز موعد").businessInfo, false) &&
+      eq(deriveTaskRelevance("تنظيف الأسنان بكام؟").businessInfo, false),
+  );
+  check(
+    "اشتقاق تفاصيل الخدمة: أسئلة «بتشمل ايه/بيتعمل ازاي» ذات صلة",
+    eq(
+      deriveTaskRelevance("تنظيف الأسنان بيعملوا فيه إيه؟").serviceInfo,
+      true,
+    ) && eq(deriveTaskRelevance("الخدمة دي بتشمل ايه؟").serviceInfo, true),
+  );
+  check(
+    "اشتقاق تفاصيل الخدمة: ذكر اسم الخدمة للأسعار/الحجز ليس سؤال تفاصيل",
+    eq(deriveTaskRelevance("تنظيف الأسنان بكام؟").serviceInfo, false) &&
+      eq(deriveTaskRelevance("عايز أحجز تنظيف الأسنان").serviceInfo, false),
+  );
+
+  // BUSINESS ABOUT exposure — relevant turn carries it; unrelated does not.
+  const aboutBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: baseSources({ message: "احكيلي عن العيادة" }),
+  });
+  check(
+    "ARCH15-B1. سؤال «عن المنشأة» يحمل النص المعتمد businessAbout",
+    eq(aboutBuilt.request.businessAbout, "عيادة متخصصة في طب وتجميل الأسنان") &&
+      eq(record(aboutBuilt, "business.about")?.included, true) &&
+      eq(record(aboutBuilt, "business.about")?.visibility, "PUBLIC") &&
+      eq(record(aboutBuilt, "business.about")?.disclosable, true),
+  );
+  check(
+    "ARCH15-B2. دور غير ذي صلة لا يحمل businessAbout (لا حشو سياق)",
+    publicBuilt.request.businessAbout === undefined &&
+      eq(record(publicBuilt, "business.about")?.included, false) &&
+      eq(
+        record(publicBuilt, "business.about")?.omissionReason,
+        "OUTSIDE_CONTEXT_BUDGET",
+      ),
+  );
+
+  // SERVICE DESCRIPTION exposure — relevant named service carries it.
+  const serviceInfoBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: baseSources({ message: "تنظيف الأسنان بيعملوا فيه إيه؟" }),
+  });
+  const cleaningFact = serviceInfoBuilt.request.services.find(
+    (service) => service.name === "تنظيف الأسنان",
+  );
+  check(
+    "ARCH15-S1. سؤال تفاصيل خدمة محددة يحمل الوصف المعتمد",
+    eq(cleaningFact?.description, "تنظيف وتلميع الأسنان") &&
+      eq(
+        record(serviceInfoBuilt, "service.description:تنظيف الأسنان")?.included,
+        true,
+      ) &&
+      eq(
+        record(serviceInfoBuilt, "service.description:تنظيف الأسنان")
+          ?.visibility,
+        "PUBLIC",
+      ) &&
+      eq(record(serviceInfoBuilt, "service.description")?.included, true),
+  );
+  check(
+    "ARCH15-S2. دور حجز غير ذي صلة لا يحمل أي وصف خدمة",
+    publicBuilt.request.services.every(
+      (service) => !("description" in service),
+    ) &&
+      eq(
+        record(publicBuilt, "service.description:تنظيف الأسنان")?.included,
+        false,
+      ) &&
+      eq(record(publicBuilt, "service.description")?.included, false),
+  );
+  check(
+    "ARCH15-S3. دور سعر فقط لا يحمل وصف الخدمة (القنوات مفصولة)",
+    (() => {
+      const priceTurn = buildAiContext({
+        scope: { businessId: TENANT_A },
+        sources: baseSources({ message: "تنظيف الأسنان بكام؟" }),
+      });
+      return priceTurn.request.services.every(
+        (service) => !("description" in service),
+      );
+    })(),
+  );
+  // Missing/empty description stays absent — a service without a stored
+  // description contributes no description value (never fabricated).
+  const missingDescriptionBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: baseSources({
+      message: "حشو الأسنان بيعملوا فيه إيه؟",
+      services: [
+        {
+          id: "svc-a2",
+          businessId: TENANT_A,
+          name: "حشو الأسنان",
+          durationMinutes: 45,
+        },
+      ],
+    }),
+  });
+  check(
+    "ARCH15-S4. وصف غائب/فارغ يبقى غائباً (لا اختراع)",
+    missingDescriptionBuilt.request.services.length === 1 &&
+      !("description" in missingDescriptionBuilt.request.services[0]!),
+  );
+
+  // CATALOG — a generic service-info ask exposes a BOUNDED summary; a large
+  // catalog can never dump every description.
+  const manyServices = Array.from({ length: 8 }, (_, index) => ({
+    id: `svc-many-${index}`,
+    businessId: TENANT_A,
+    name: `خدمة رقم ${index + 1}`,
+    description: `وصف الخدمة رقم ${index + 1}`,
+    durationMinutes: 30,
+  }));
+  const boundedCatalogBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: baseSources({
+      message: "الخدمة دي بتشمل ايه؟",
+      services: manyServices,
+    }),
+  });
+  check(
+    "ARCH15-C1. سؤال تفاصيل عام يحمل ملخصاً محدوداً (لا تفريغ كامل)",
+    boundedCatalogBuilt.request.services.filter(
+      (service) => "description" in service,
+    ).length === AI_SERVICE_DESCRIPTION_LIMIT &&
+      eq(record(boundedCatalogBuilt, "service.description")?.included, true),
+  );
+  check(
+    "ARCH15-C2. التفاصيل ليست قناة داخلية: durationMinutes يبقى غائباً",
+    !JSON.stringify(boundedCatalogBuilt.request).includes("durationMinutes") &&
+      !JSON.stringify(aboutBuilt.request).includes("durationMinutes"),
   );
 
   // ── 3. INTERNAL operational facts: omitted, never disclosable ────────────

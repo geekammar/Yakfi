@@ -177,6 +177,18 @@ export type TaskRelevance = {
   readonly contactOrIdentity: boolean;
   /** Price / fee / cost asks → the service `price` fact (Slice 6). */
   readonly priceOrFee: boolean;
+  /**
+   * Business-profile asks ("tell me about you") → the PUBLIC
+   * `business.about` fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so an
+   * unrelated turn never carries the business description.
+   */
+  readonly businessInfo: boolean;
+  /**
+   * Service-detail asks ("what does it include?") → the PUBLIC service
+   * `description` fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so a booking or
+   * price-only turn never carries descriptive catalog copy.
+   */
+  readonly serviceInfo: boolean;
 };
 
 const BOOKING_OR_AVAILABILITY_WORDS = [
@@ -269,6 +281,62 @@ const PRICE_OR_FEE_WORDS = [
 ];
 
 /**
+ * Business-profile vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks that
+ * are ABOUT the business itself ("tell me about you", "how old are you",
+ * "how many branches") so the PUBLIC `business.about` fact is carried only on
+ * those turns. Deliberately excludes generic service words (`خدمة`/`خدمات`)
+ * and location words — those stay on their own existing channels.
+ */
+const BUSINESS_INFO_WORDS = [
+  "نبذه", // نبذة / النبذة (ta-marbuta normalized to ه)
+  "احكيلي", // احكيلي عن العيادة
+  "قصه", // قصة / القصة
+  "تابعه", // تابعة / تابعين
+  "فروع", // فروع / الفروع
+  "فرع", // فرع / الفرع
+  "تخصص", // تخصص / التخصص
+  "شغالين", // "من كم سنة أنتم شغالين"
+  "about", // mixed-language "about you"
+];
+
+/**
+ * Service-detail vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks for
+ * what a service INCLUDES / how it is carried out, so the PUBLIC service
+ * `description` is carried only on service-info turns. A plain service NAME
+ * mention is NOT enough (that is discovery/booking), and a price ask is NOT
+ * enough (price has its own channel) — so a booking or price turn never gains
+ * descriptive copy.
+ */
+const SERVICE_INFO_WORDS = [
+  "بتشمل", // "الخدمة دي بتشمل ايه؟"
+  "بيشمل", // بيشمل / بيشملوا
+  "تشمل",
+  "يشمل",
+  "شامل", // شامل
+  "خطوات", // خطواته / الخطوات
+  "بيمشي", // بيمشي إزاي
+  "بيتعمل", // بيعملوا فيه إيه / بيتعمل إزاي
+  "يتعمل",
+  "بيعمل", // بيعملوا فيه إيه
+  "بتعمل", // بتعملوا فيه إيه
+  "بترمم", // الحشو بيترمم إزاي
+  "بيترمم",
+  "تفاصيل", // تفاصيل / التفاصيل
+  "include", // mixed-language "what does it include"
+  "includes",
+  "details",
+  "detail",
+];
+
+/**
+ * Upper bound on how many service descriptions a single turn may carry. The
+ * catalog names are already bounded by the contract; descriptions are more
+ * verbose, so a generic service-info turn carries at most this many — a
+ * BOUNDED catalog summary, never an unbounded dump.
+ */
+export const AI_SERVICE_DESCRIPTION_LIMIT = 5;
+
+/**
  * Deterministic relevance derivation from the customer message (Arabic
  * normalized + light morphology, same pipeline the classifier uses for
  * text). Pure: same input ⇒ same output, no I/O, no LLM.
@@ -297,6 +365,8 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     providerChoice: matches(PROVIDER_CHOICE_WORDS),
     contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
     priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
+    businessInfo: matches(BUSINESS_INFO_WORDS),
+    serviceInfo: matches(SERVICE_INFO_WORDS),
   };
 }
 
@@ -379,6 +449,27 @@ const storedFaqsSchema = z.array(faqEntrySchema);
 function safeFaqs(raw: unknown): Array<{ question: string; answer: string }> {
   const parsed = storedFaqsSchema.safeParse(raw ?? []);
   return parsed.success ? parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT) : [];
+}
+
+/**
+ * Deterministic "does the current turn reference this service?" signal
+ * (PROMPT-AI-ARCH-15 — Slice 6). It reuses the existing Arabic normalizer and
+ * is deliberately bounded: an exact phrase containment check, otherwise the
+ * service's FIRST significant token (≥3 chars — the discriminating word in
+ * this domain, e.g. «تنظيف» in «تنظيف الأسنان»). It is NOT a search index, NOT
+ * fuzzy, NOT ranked — it only decides whether a service's PUBLIC description
+ * is task-relevant this turn (the common word «الأسنان» alone never selects a
+ * sibling service).
+ */
+function serviceReferenced(serviceName: string, message: string): boolean {
+  const hay = normalizeArabicText(serviceName);
+  if (hay.length === 0) return false;
+  const needle = normalizeArabicText(message);
+  if (needle.length === 0) return false;
+  if (needle.includes(hay)) return true;
+  const firstToken = hay.split(" ").find((token) => token.length >= 3);
+  if (!firstToken) return false;
+  return new Set(needle.split(" ").filter(Boolean)).has(firstToken);
 }
 
 type Ledger = {
@@ -571,16 +662,18 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     inBudget: true,
     taskRequired: true,
   });
-  // about is PUBLIC and eligible, but the context budget does not carry it
-  // today — recorded, not expanded into (the builder filters, never widens).
-  evaluateCandidate({
+  // about is PUBLIC; PROMPT-AI-ARCH-15 (Slice 6) carries it ONLY when the
+  // current turn is business-profile relevant. Unrelated turns keep the
+  // previous behavior (recorded, not forwarded). The fact stays PUBLIC and
+  // disclosable — the gate only needs the ledger verdict.
+  const aboutVerdict = evaluateCandidate({
     ledger,
     scope,
     source: "BUSINESS_RECORD",
     businessId: businessProvenance,
     visibility: classifyBusinessField("about"),
     key: "business.about",
-    inBudget: false,
+    inBudget: relevance.businessInfo,
     taskRequired: true,
   });
   // CONDITIONAL contact fact — only on contact/identity asks. Recorded in
@@ -663,8 +756,34 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
   });
 
   // ── 6. Service catalog (names PUBLIC; duration INTERNAL — B-03 decides) ──
+  // Service descriptions are PUBLIC but PROMPT-AI-ARCH-15 (Slice 6) carries
+  // them ONLY on a service-info turn, and only for a BOUNDED set: services the
+  // turn actually references, otherwise at most AI_SERVICE_DESCRIPTION_LIMIT
+  // descriptive entries (a bounded catalog summary — never a full dump).
+  const descriptionServiceIds = new Set<string>();
+  if (relevance.serviceInfo) {
+    for (const service of sources.services) {
+      if (descriptionServiceIds.size >= AI_SERVICE_DESCRIPTION_LIMIT) break;
+      if (!service.description || !service.description.trim()) continue;
+      if (serviceReferenced(service.name, sources.message)) {
+        descriptionServiceIds.add(service.id);
+      }
+    }
+    if (descriptionServiceIds.size === 0) {
+      for (const service of sources.services) {
+        if (descriptionServiceIds.size >= AI_SERVICE_DESCRIPTION_LIMIT) break;
+        if (!service.description || !service.description.trim()) continue;
+        descriptionServiceIds.add(service.id);
+      }
+    }
+  }
+
   const seenServiceNames = new Set<string>();
-  const includedServices: Array<{ name: string; price?: string }> = [];
+  const includedServices: Array<{
+    name: string;
+    price?: string;
+    description?: string;
+  }> = [];
   for (const service of sources.services) {
     // Per-row tenant proof: a service from another Business is excluded,
     // never resolved by the AI.
@@ -681,7 +800,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     if (!nameVerdict.included) continue;
     if (seenServiceNames.has(service.name)) continue; // dedupe by name
     seenServiceNames.add(service.name);
-    const included: { name: string; price?: string } = { name: service.name };
+    const included: {
+      name: string;
+      price?: string;
+      description?: string;
+    } = { name: service.name };
 
     // durationMinutes is INTERNAL and no current AI task requires it:
     // availability comes from CORE-02, not from LLM schedule reasoning.
@@ -721,18 +844,28 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     if (priceVerdict.included && formattedPrice) {
       included.price = formattedPrice;
     }
-    includedServices.push(included);
-    // Service description is PUBLIC but outside today's context budget.
-    evaluateCandidate({
+    // Service description (PROMPT-AI-ARCH-15 — Slice 6): PUBLIC, exposed ONLY
+    // on a service-info turn AND only for the bounded relevant set. A service
+    // with no stored description contributes nothing — never invented.
+    const descriptionWanted = descriptionServiceIds.has(service.id);
+    const descriptionVerdict = evaluateCandidate({
       ledger,
       scope,
       source: "SERVICE_CATALOG",
       businessId: service.businessId,
       visibility: classifyServiceField("description"),
       key: `service.description:${service.name}`,
-      inBudget: false,
+      inBudget: descriptionWanted,
       taskRequired: true,
     });
+    if (
+      descriptionVerdict.included &&
+      service.description &&
+      service.description.trim()
+    ) {
+      included.description = service.description.trim();
+    }
+    includedServices.push(included);
     // Internal identifiers are FORBIDDEN as facts — provenance only.
     evaluateCandidate({
       ledger,
@@ -761,6 +894,24 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     key: "service.price",
     inBudget: true,
     taskRequired: relevance.priceOrFee,
+  });
+
+  // Aggregate service-description disclosure family (PROMPT-AI-ARCH-15 —
+  // Slice 6): the ONE ledger key the disclosure gate consults to back a
+  // service-detail answer (per-service keys cannot be matched by the gate's
+  // single-family lookup). PUBLIC, but IN BUDGET ONLY on a service-info turn;
+  // `channelCarried("serviceDescriptions")` separately proves a description is
+  // actually carried, so this family being disclosable never emits an invented
+  // service detail.
+  evaluateCandidate({
+    ledger,
+    scope,
+    source: "SERVICE_CATALOG",
+    businessId: scopeId,
+    visibility: classifyServiceField("description"),
+    key: "service.description",
+    inBudget: relevance.serviceInfo,
+    taskRequired: true,
   });
 
   // ── 7. Domain-computed availability (CORE-02 truth — CONDITIONAL) ────────
@@ -816,6 +967,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     // knowledge: it comes from no source, carries no business facts, and
     // the budget ledger has nothing to classify for it.
     assistantStyle: ASSISTANT_STYLE_DIRECTIVE,
+    ...(aboutVerdict.included &&
+    sources.business.about &&
+    sources.business.about.trim()
+      ? { businessAbout: sources.business.about.trim() }
+      : {}),
     ...(providerPreferenceIncluded
       ? { providerPreference: sources.providerPreference ?? undefined }
       : {}),

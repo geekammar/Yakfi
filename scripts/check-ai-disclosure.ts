@@ -282,6 +282,96 @@ async function main(): Promise<void> {
       eq(record(faqTurn, "customer.message")?.included, true),
   );
 
+  // ── 1b/1c. PROMPT-AI-ARCH-15: about + service-description channels ────────
+  // A business-profile FAQ reply is newly backable by the task-gated PUBLIC
+  // business-about channel — here with an EMPTY FAQ store, so the store cannot
+  // be the support. It stays refused when the turn is not business-info.
+  const aboutTurn = gateReply({
+    message: "احكيلي عن العيادة",
+    sources: { business: businessSources({ faqs: [] }) },
+    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان"),
+  });
+  check(
+    "1b. رد FAQ مدعوم بقناة «عن المنشأة» (مخزن فارغ) — يُفصح",
+    eq(aboutTurn.decision.kind, "disclosed") &&
+      deepEq(
+        aboutTurn.decision.kind === "disclosed"
+          ? aboutTurn.decision.support
+          : [],
+        ["business.about"],
+      ) &&
+      eq(aboutTurn.request.businessAbout, "عيادة متخصصة في طب وتجميل الأسنان"),
+  );
+  const aboutOffTaskTurn = gateReply({
+    message: "عايز أحجز موعد",
+    sources: { business: businessSources({ faqs: [] }) },
+    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان"),
+  });
+  check(
+    "1c. قناة «عن المنشأة» غير محمولة في دور غير ذي صلة — رفض (لا اختراع)",
+    eq(aboutOffTaskTurn.decision.kind, "requires-human") &&
+      eq(aboutOffTaskTurn.request.businessAbout, undefined),
+  );
+
+  // A service-detail FAQ reply is backable by the task-gated PUBLIC service
+  // description channel; absent descriptions/channels still refuse.
+  const descriptionTurn = gateReply({
+    message: "تنظيف الأسنان بيعملوا فيه إيه؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact("تنظيف الأسنان", { description: "تنظيف وتلميع الأسنان" }),
+      ],
+    },
+    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان"),
+  });
+  check(
+    "1d. رد FAQ مدعوم بقناة «وصف الخدمة» (مخزن فارغ) — يُفصح",
+    eq(descriptionTurn.decision.kind, "disclosed") &&
+      deepEq(
+        descriptionTurn.decision.kind === "disclosed"
+          ? descriptionTurn.decision.support
+          : [],
+        ["service.description"],
+      ) &&
+      eq(
+        descriptionTurn.request.services[0]?.description,
+        "تنظيف وتلميع الأسنان",
+      ),
+  );
+  const descriptionOffTaskTurn = gateReply({
+    message: "عايز أحجز موعد",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact("تنظيف الأسنان", { description: "تنظيف وتلميع الأسنان" }),
+      ],
+    },
+    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان"),
+  });
+  check(
+    "1e. قناة «وصف الخدمة» غير محمولة في دور غير ذي صلة — رفض",
+    eq(descriptionOffTaskTurn.decision.kind, "requires-human") &&
+      descriptionOffTaskTurn.request.services.every(
+        (service) => service.description === undefined,
+      ),
+  );
+  const missingDescriptionTurn = gateReply({
+    message: "حشو الأسنان بيعملوا فيه إيه؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [serviceFact("حشو الأسنان")], // description null
+    },
+    reply: replyOf("FAQ", "حشو تجميلي"),
+  });
+  check(
+    "1f. وصف مفقود على دور تفاصيل = تحويل لبشري (لا اختراع وصف)",
+    eq(missingDescriptionTurn.decision.kind, "requires-human") &&
+      missingDescriptionTurn.request.services.every(
+        (service) => service.description === undefined,
+      ),
+  );
+
   // ── 3. CONDITIONAL: disclosed only when its task allows it ───────────────
   const bookingTurn = gateReply({
     message: "عايز أحجز موعد",

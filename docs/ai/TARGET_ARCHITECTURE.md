@@ -1392,9 +1392,32 @@ big-bang; old behavior remains available behind the compatibility bridge
 > Duration-gated bookability is unchanged (price never gates). Verified by NEW
 > `check:service-price` 30/30 + real-LLM EVAL-15 (calibration 3/3, focused 7/7,
 > the 3 EVAL-14 price cases convert to answer-and-continue) — dataset hash
-> unchanged, one send/turn, zero provider failures. The REMAINING Slice-6
-> channels (`about`, service `description`, broader catalog info) are NOT yet
-> wired and stay as below.
+> unchanged, one send/turn, zero provider failures.
+>
+> **BROADER KNOWLEDGE CHANNELS — BUSINESS ABOUT + SERVICE DESCRIPTION +
+> CATALOG (PROMPT-AI-ARCH-15): IMPLEMENTED + REAL-LLM VERIFIED.** The
+> remaining Slice-6 channels are now wired through the SAME B-01/B-02/B-03
+> seams (no second knowledge engine): `business.about` (PUBLIC) and service
+> `description` (PUBLIC) are added as OPTIONAL `AiRequest.businessAbout` +
+> `services[].description` channels, carried ONLY on their own deterministic
+> relevance gate (`deriveTaskRelevance` `businessInfo` / `serviceInfo`; the
+> unrelated/booking turn carries neither), with a bounded
+> `AI_SERVICE_DESCRIPTION_LIMIT` for the service-detail channel and the
+> existing service names unchanged as the bounded catalog channel. The B-03
+> disclosure gate gains ADDITIVE FAQ support families (`business.about`,
+> `service.description`) backed only when the channel is actually carried; a
+> missing about/description stays an honest `NO_KNOWLEDGE` gap (never
+> invented). ONE provider-neutral prompt line permits quoting
+> present `businessAbout` / service description. Duration/isActive/ids stay
+> INTERNAL/FORBIDDEN and are never exposed. Verified by
+> `check:ai-context-builder` **54/54** + `check:ai-disclosure` **41/41** and a
+> focused real-Atria run (calibration 4/4, gating **13/13**, 1 call/turn,
+> 0 provider failures, safety 2/2 `NEED_HUMAN`, irrelevant turns carried no
+> about/description) — dataset hash unchanged. Report:
+> `evaluation/reports/egyptian-v1/real-llm-arch15/`.
+>
+> **STATUS (historical): the REMAINING Slice-6 channels were not yet wired as
+> of ARCH-13/14 — now closed by ARCH-15 above.**
 >
 > **BROADER REAL-LLM RE-VERIFICATION (PROMPT-AI-EVAL-15, verification-only):
 > BLOCKED_BEHAVIOR.** A wider real-Atria suite (24 turns) confirmed the price

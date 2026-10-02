@@ -67,8 +67,17 @@ const EVAL_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 
 export type FutureTurnBusinessContext = {
   businessName: string;
+  // Evaluation-only overlay (PROMPT-AI-ARCH-15): when a fixture supplies the
+  // business about text, the REAL context builder task-gates and carries it
+  // exactly as production would. Absent ⇒ no about ⇒ a business-info question
+  // stays an honest gap.
+  about?: string | null;
   services: ReadonlyArray<{
     name: string;
+    // Evaluation-only overlay (PROMPT-AI-ARCH-15): when a fixture supplies a
+    // service description, the REAL context builder task-gates and carries it
+    // exactly as production would. Absent ⇒ no description ⇒ honest gap.
+    description?: string | null;
     durationMinutes?: number | null;
     // Structured, OPTIONAL price columns (PROMPT-AI-ARCH-13 — Slice 6).
     // Evaluation-only overlay: a priced fixture carries these so the REAL
@@ -305,7 +314,10 @@ export function createFutureSystemRunner(params: {
       id: env.serviceIds[index] ?? (env.serviceIds[index] = randomUUID()),
       businessId: EVAL_BUSINESS_ID,
       name: service.name,
-      description: null,
+      // Description is carried only when the eval fixture supplies one; the
+      // REAL context builder task-gates it exactly as production does
+      // (PROMPT-AI-ARCH-15).
+      description: service.description ?? null,
       durationMinutes: service.durationMinutes ?? 30,
       isActive: true,
       createdAt: now,
@@ -327,7 +339,9 @@ export function createFutureSystemRunner(params: {
       city: null,
       whatsappNumber: EVAL_WHATSAPP_NUMBER,
       timezone: "Africa/Cairo",
-      about: null,
+      // Eval-only overlay (PROMPT-AI-ARCH-15): the REAL context builder
+      // task-gates the business about text exactly as production does.
+      about: businessContext.about ?? null,
       workingHours: openWeek(),
       slotDurationMinutes: 30,
       confirmationMode: "manual",

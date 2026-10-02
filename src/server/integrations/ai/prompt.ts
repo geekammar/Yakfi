@@ -34,12 +34,16 @@ export function buildPromptMessages(
         // Duration is INTERNAL (PROMPT-B02) and may be intentionally
         // absent; price is CONDITIONAL (PROMPT-AI-ARCH-13) and present only
         // when the context builder found the turn price-relevant AND an
-        // authoritative price is stored. Render each only when provided.
+        // authoritative price is stored; description is PUBLIC but carried
+        // only on a service-info turn (PROMPT-AI-ARCH-15). Render each only
+        // when provided.
         .map((s) => {
           const parts = [s.name];
           if (s.durationMinutes !== undefined)
             parts.push(`${s.durationMinutes}m`);
           if (s.price !== undefined) parts.push(`السعر: ${s.price}`);
+          if (s.description !== undefined)
+            parts.push(`الوصف: ${s.description}`);
           return parts.length > 1
             ? `${parts[0]} (${parts.slice(1).join(", ")})`
             : parts[0];
@@ -65,6 +69,7 @@ export function buildPromptMessages(
     // (phrasing only, like businessName), so every provider follows ONE
     // style and no provider-specific prompt copy exists.
     `assistantStyle: ${request.assistantStyle ?? ASSISTANT_STYLE_DIRECTIVE}`,
+    `businessAbout: ${request.businessAbout ?? "(none)"}`,
     `recentMessages:\n${recent}`,
     `services: ${services}`,
     `faqs:\n${faqs}`,

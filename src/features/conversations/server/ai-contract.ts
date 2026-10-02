@@ -133,6 +133,15 @@ const serviceFactSchema = z.object({
    * deterministic server-side Domain stays authoritative for the real value.
    */
   price: z.string().trim().min(1).max(120).optional(),
+  /**
+   * Service description — the business's own customer-facing copy
+   * (PROMPT-AI-ARCH-15 — Slice 6). Present ONLY when the context builder
+   * found the current turn service-info relevant AND the service carries an
+   * authoritative stored description (task-gated exposure); absent
+   * otherwise. The AI may QUOTE it but must NEVER invent a service detail
+   * when it is absent — missing description stays a knowledge gap.
+   */
+  description: z.string().trim().min(1).max(600).optional(),
 });
 
 const knowledgeEntrySchema = z.object({
@@ -171,6 +180,14 @@ export const aiRequestSchema = z.object({
   recentMessages: z.array(recentMessageSchema).max(AI_RECENT_MESSAGE_LIMIT),
   /** Business display name (for phrasing only). */
   businessName: z.string().trim().min(1).max(120),
+  /**
+   * The business's own "about" description (PROMPT-AI-ARCH-15 — Slice 6).
+   * PUBLIC customer-facing copy, carried ONLY when the context builder found
+   * the current turn business-info relevant (task-gated exposure — never on
+   * unrelated turns). The AI may QUOTE it but must NEVER invent a business
+   * fact when it is absent.
+   */
+  businessAbout: z.string().trim().min(1).max(2000).optional(),
   /** Service facts when the task may involve a service. */
   services: z.array(serviceFactSchema).max(100).default([]),
   /** Relevant knowledge entries when available. */

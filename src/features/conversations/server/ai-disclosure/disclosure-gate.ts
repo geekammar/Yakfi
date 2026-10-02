@@ -116,7 +116,13 @@ export type DisclosureRefusalReason =
  * `AiRequest` channel yet — a reply declaring that task can never be backed
  * today, so it routes to a human rather than being invented.
  */
-export type SupportChannel = "faqs" | "availability" | "services" | null;
+export type SupportChannel =
+  | "faqs"
+  | "availability"
+  | "services"
+  | "businessAbout"
+  | "serviceDescriptions"
+  | null;
 
 export type TaskSupportFamily = {
   /** The disclosure-ledger key this task draws its answer from. */
@@ -132,7 +138,9 @@ export type TaskSupportFamily = {
  * rather than re-deriving anything.
  *
  * - FAQ answers come from the canonical knowledge store (`business.faqs`,
- *   PUBLIC as a whole — DECISIONS #13).
+ *   PUBLIC as a whole — DECISIONS #13), or additively from a task-gated
+ *   Slice-6 channel that is actually carried this turn (service price,
+ *   business about, service description — see `candidateSupportFamilies`).
  * - Booking/availability answers come from the domain-computed result
  *   (`domain.availability`, CONDITIONAL — booking/availability asks only).
  * - Cancellation/reschedule answers would come from `business.cancellationPolicy`
@@ -240,6 +248,25 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
         (service) =>
           typeof service.price === "string" && service.price.trim().length > 0,
       );
+    case "businessAbout":
+      // The PUBLIC business-about channel (PROMPT-AI-ARCH-15 — Slice 6) is
+      // carried only when the turn was business-info relevant AND the
+      // business carries authoritative about text. An empty channel means the
+      // reply would invent a business fact → refused.
+      return (
+        typeof request.businessAbout === "string" &&
+        request.businessAbout.trim().length > 0
+      );
+    case "serviceDescriptions":
+      // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6)
+      // is carried only when the turn was service-info relevant AND at least
+      // one exposed service carries an authoritative description. An empty
+      // channel means the reply would invent a service detail → refused.
+      return request.services.some(
+        (service) =>
+          typeof service.description === "string" &&
+          service.description.trim().length > 0,
+      );
     case null:
       // No request channel exists for this family today.
       return false;
@@ -249,17 +276,26 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
 /**
  * The ordered candidate support families a reply intent may draw its answer
  * from. Almost every intent has exactly ONE (its `TASK_SUPPORT_FAMILIES`
- * entry). FAQ is the ONE exception (PROMPT-AI-ARCH-13 — Slice 6): a price
- * question is classified FAQ, so a FAQ reply may be backed by EITHER the
- * canonical FAQ store OR the task-gated service-price channel — whichever is
- * included + disclosable + carried. This is purely ADDITIVE: a FAQ reply that
- * the FAQ store already backs is unchanged; a price-backed FAQ reply is newly
- * permitted ONLY when the price channel actually carries a price.
+ * entry). FAQ is the exception (PROMPT-AI-ARCH-13/-15 — Slice 6): the fixed
+ * intent family has no separate BUSINESS_INFO/SERVICE_INFO intents, so a
+ * business-profile, service-detail, or price question is classified FAQ. A
+ * FAQ reply may therefore be backed by the canonical FAQ store OR any of the
+ * task-gated Slice-6 channels — whichever is included + disclosable +
+ * actually carried. This is purely ADDITIVE: a FAQ reply the store already
+ * backs is unchanged, and each new channel is carried ONLY on its own
+ * relevance gate (`businessAbout` on business-info turns,
+ * `serviceDescriptions` on service-info turns, `service.price` on
+ * price turns) — so a booking or unrelated turn can never carry them.
  */
 function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
   const primary = TASK_SUPPORT_FAMILIES[intent];
   if (intent === "FAQ") {
-    return [primary, { family: "service.price", channel: "services" }];
+    return [
+      primary,
+      { family: "service.price", channel: "services" },
+      { family: "business.about", channel: "businessAbout" },
+      { family: "service.description", channel: "serviceDescriptions" },
+    ];
   }
   return [primary];
 }

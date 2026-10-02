@@ -162,8 +162,10 @@ build`) inherits this automatically.
   `message` (1–4096) + `conversationStatus` + `recentMessages` (≤20) +
   `businessName` + `services[]` (≤100) + `faqs[]` (≤50) +
   optional `providerPreference` + optional `availability[]` (≤14 × ≤50 slots) +
-  optional `assistantStyle` (a bounded Arabic phrasing directive — DECISIONS #62).
-  Never the whole DB, never complete history.
+  optional `assistantStyle` (a bounded Arabic phrasing directive — DECISIONS #62) +
+  optional `businessAbout` and per-service optional `price`/`description`
+  (task-gated Slice-6 channels — PROMPT-AI-ARCH-13/-15; absent on unrelated
+  turns). Never the whole DB, never complete history.
 - **Response — `AiResponse` (`aiResponseSchema`):** `intent` (fixed family) +
   `action` (`reply` | `handoff` | `booking_handoff`) + `content` (1–4096, already
   phrased) + `extraction` (service/provider/date/timePreference — facts only) +
@@ -483,7 +485,7 @@ nothing enters context. The builder is pure and total — no I/O, no LLM, no
 `process.env`, no Prisma, no credential; safety is structural (source +
 field + provenance + visibility), never string redaction.
 
-Guard: `pnpm check:ai-context-builder` (39/39, offline, in-memory, no
+Guard: `pnpm check:ai-context-builder` (54/54, offline, in-memory, no
 DB/network/LLM/secrets).
 
 ## Customer disclosure boundary (PROMPT-B03 — binding)
@@ -530,13 +532,13 @@ never sent.
   declared task is backed by a ledger fact that is `included` AND
   `disclosable` AND actually carried in the request:
 
-  | Intent                        | Support family (ledger key)                 | Request channel                         |
-  | ----------------------------- | ------------------------------------------- | --------------------------------------- |
-  | `GREETING`                    | **none — knowledge-free social protocol**   | n/a (passed by declared intent)         |
-  | `FAQ`                         | `business.faqs` (PUBLIC as a whole)         | `request.faqs` non-empty                |
-  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)         | `request.availability` non-empty        |
-  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL) | **none today** ⇒ always routed to staff |
-  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                      | n/a                                     |
+  | Intent                        | Support family (ledger key)                                                                                                                                     | Request channel                                              |
+  | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+  | `GREETING`                    | **none — knowledge-free social protocol**                                                                                                                       | n/a (passed by declared intent)                              |
+  | `FAQ`                         | `business.faqs` (PUBLIC as a whole) **or** a task-gated Slice-6 channel actually carried this turn (`service.price` · `business.about` · `service.description`) | `request.faqs` non-empty **or** the matching carried channel |
+  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)                                                                                                                             | `request.availability` non-empty                             |
+  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL)                                                                                                                     | **none today** ⇒ always routed to staff                      |
+  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                                                                                                                                          | n/a                                                          |
 
   Consequences: an `INTERNAL` fact is never disclosable (B-01), so it can
   never back a reply; a `CONDITIONAL` fact is disclosable only when B-02
@@ -563,7 +565,7 @@ ever surfaced):
   no data for it (an empty knowledge store, or a family with no request
   channel today).
 
-Guard: `pnpm check:ai-disclosure` (32/32, offline, in-memory, no
+Guard: `pnpm check:ai-disclosure` (41/41, offline, in-memory, no
 DB/network/LLM/secrets — including end-to-end engine runs that prove an AI
 failure and a refused reply take the same `NEED_HUMAN` / `AI_HANDOFF` path,
 and that a refused reply is neither persisted nor sent).
