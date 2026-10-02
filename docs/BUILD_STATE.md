@@ -51,6 +51,76 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 8 OPTIONAL JEV DECISION STRATEGY BEHIND THE
+EXISTING PROVIDER GATEWAY (`PROMPT-AI-ARCH-17`, IMPLEMENTATION + VERIFICATION):
+BUILT + DETERMINISTIC + REAL-LLM VERIFIED — READY_FOR_NEXT_STAGE (human-review
+gate; NO release/commit).** The target architecture's JEV integration point
+(§11 / §17 Slice 8) is now an OPTIONAL, provider-neutral decision seam behind
+the EXISTING provider gateway — not a mandatory stage. **ONE pure module**
+(`src/server/integrations/ai/jev-strategy.ts`) owns the bounded decision
+contract (`mode: DETERMINISTIC | GENERATIVE`; `reason:
+DETERMINISTIC_ACKNOWLEDGEMENT · DETERMINISTIC_UNDECIDABLE ·
+GENERATIVE_REQUIRED`; a complete contract `AiResponse` present IFF
+DETERMINISTIC) and the ONE conservative strategy (`jev-conservative@v1`)
+whose `decide()` is pure/synchronous — no I/O, no model call. **The EXISTING
+gateway** (`orchestrator.ts`, the ONE-generative-call-budget owner) gains an
+OPTIONAL `decisionStrategy`: DETERMINISTIC terminates with ZERO provider
+attempts (`finalProvider: "jev-deterministic"` + `AiTelemetry.jevDecision`);
+GENERATIVE falls through to the gateway's SINGLE existing call; with no
+strategy the gateway keeps its exact prior built-in bypass (rollback = remove
+one argument). `factory.ts` wires the conservative strategy into the
+policy-backed `ConversationAi`. **Conservative by construction (no new
+deterministic behaviour):** the strategy's deterministic set is EXACTLY the
+repository's already-proven zero-LLM evidence (`bypassDeterministicAi`: pure
+Arabic greeting → knowledge-free `GREETING` reply; too-short → safe
+`AMBIGUOUS`/CLARIFY resolution); every UNKNOWN/UNSAFE/AMBIGUOUS turn continues
+to the single generative call. **Observability:** additive
+`AiTelemetry.jevDecision` + `TurnObservability.jev` carry closed machine keys
+only (never content/provider/chain-of-thought, never customer-visible); the
+engine recognises `jev-deterministic` as a zero-call outcome (no `AI_TURN`
+usage fact) and labels routing `JEV` (the value already reserved in
+`aiRoutingDecisionValues`); the FUTURE_SYSTEM eval target maps `routing ===
+"JEV"` → source `jev-deterministic` + `jevMode`/`jevReason`. **Safety /
+Slice-7 preserved:** explicit-human / sensitive / domain / knowledge-gap /
+provider-failure / retry-exhaustion precedence stays authoritative; the Slice-7
+typed cause survives unchanged; one-send invariant held. **Deterministic:** NEW
+`check:jev` (`scripts/check-jev-strategy.ts`) **28/28** across three layers —
+pure contract, the REAL orchestrator (DETERMINISTIC ⇒ 0 adapter calls;
+GENERATIVE ⇒ exactly 1; provider failure not masked; provider-neutral
+atria↔codecraft), and the REAL Conversation Engine (zero-call greeting,
+one-call generative, handoff precedence, typed cause, one-send, no second
+inference); all adjacent gates green (ai-architecture 25, ai-provider 74,
+future-system 33, turn-planner 31, clarify 27, multi-intent 22, handoff-cause
+31, conversation-state 20, conversation-handoff 21, conversation-booking 16,
+ai-disclosure 41, ai-context-builder 54, ai-prompts 128, response-normalizer
+78, eval/-schema/-runner 25/22/18, greeting 66, conversation-control 50,
+knowledge-visibility 36, service-price 33, operator-attention 20, context
+7/87/11); `pnpm verify` (lint/typecheck/format/build) + `pnpm security` green
+(1 pre-existing both-env-files warning; 2 pre-existing lint warnings:
+`check-conversation-ux.ts` unused eslint-disable, `service-form-dialog.tsx`
+React-Compiler incompatible-library). **Real-LLM (NEW eval-only runner
+`scripts/eval-run-future-arch17.ts`, `arch17@1`; Atria `Atria-Dawn-Preview`
+override; DB policy NOT read/changed; dataset hash `8be16297…` unchanged; the
+conservative JEV strategy wired into the gateway exactly as production):**
+calibration 3/3 · gating **12/12** · 14 measured turns · 12 real calls · 0.86
+calls/turn · max 1/turn · 0 multi-call · 2 zero-call deterministic turns · 0
+provider failures · 0 retries · 0 malformed; JEV GENERATIVE on every inference
+turn; a real-adapter-wired gateway probe proved a deterministic greeting
+terminates with **0 provider invocations** (`jev-deterministic` /
+`DETERMINISTIC`); safety preserved; cause contract holds; one-send invariant
+holds; latency p50 22.2s / p95 88.4s (provider property). **Artifacts:**
+`evaluation/reports/egyptian-v1/real-llm-arch17/` (prior dirs preserved).
+**Files changed:** `jev-strategy.ts` (new), `orchestrator.ts`, `types.ts`,
+`conversation-ai.ts` (integrations), `factory.ts`, `conversation-engine.ts`,
+`ai-observability.ts`, `evaluation/runner/future-system-adapter.ts` +
+`targets/future-system-flowpilot.ts` (eval-only), `scripts/check-jev-strategy.ts`
+
+- `scripts/eval-run-future-arch17.ts` (new), `package.json`,
+  `docs/BUILD_STATE.md`, `docs/DECISIONS.md` (#82),
+  `docs/DECISIONS_INDEX.md`, `docs/ai/TARGET_ARCHITECTURE.md`,
+  `docs/ai/ARCHITECTURE.md`. **No commit/push/tag/deploy/migrate.**
+  **Readiness: READY_FOR_NEXT_STAGE.**
+
 **AI TARGET ARCHITECTURE — SLICE 7 TYPED HANDOFF-CAUSE TAXONOMY + OPERATOR
 MAPPING (`PROMPT-AI-ARCH-16`, IMPLEMENTATION + VERIFICATION): BUILT +
 DETERMINISTIC + REAL-LLM VERIFIED — READY_FOR_NEXT_STAGE (human-review gate;

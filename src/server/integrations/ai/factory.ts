@@ -22,6 +22,7 @@ import { createCodeCraftAdapter } from "./codecraft";
 import { createLlmConversationAi } from "./conversation-ai";
 import { createConversationControl } from "./conversation-control";
 import type { ConversationControl } from "./conversation-control";
+import { createConservativeJevStrategy } from "./jev-strategy";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
 
@@ -139,7 +140,17 @@ export async function createPolicyBackedAi(
     effective,
     deps,
   );
-  return createLlmConversationAi({ primary, secondary, fallbackEnabled });
+  // JEV (PROMPT-AI-ARCH-17 — Slice 8): the OPTIONAL conservative decision
+  // strategy behind this gateway. It terminates only on turns the repository
+  // already proves decidable without a provider; every other turn continues to
+  // the single existing generative call. Removing this one argument is the
+  // complete rollback.
+  return createLlmConversationAi({
+    primary,
+    secondary,
+    fallbackEnabled,
+    decisionStrategy: createConservativeJevStrategy(),
+  });
 }
 
 /** Alias matching the BUILD_STATE seam name. */

@@ -12,6 +12,7 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 
+import type { JevStrategy } from "./jev-strategy";
 import { createAiOrchestrator } from "./orchestrator";
 import type { AiProviderAdapter, AiTelemetry } from "./types";
 
@@ -23,11 +24,19 @@ export function createLlmConversationAi(params: {
   primary: AiProviderAdapter;
   secondary?: AiProviderAdapter | null;
   fallbackEnabled: boolean;
+  /**
+   * OPTIONAL JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8). Absent ⇒ the
+   * gateway keeps its exact prior behaviour; present ⇒ the strategy decides
+   * whether a turn terminates deterministically or continues to the single
+   * existing generative call.
+   */
+  decisionStrategy?: JevStrategy | null;
 }): LlmConversationAi {
   const orchestrator = createAiOrchestrator({
     primary: params.primary,
     secondary: params.secondary ?? null,
     fallbackEnabled: params.fallbackEnabled,
+    decisionStrategy: params.decisionStrategy ?? null,
   });
 
   let lastTelemetry: AiTelemetry | null = null;

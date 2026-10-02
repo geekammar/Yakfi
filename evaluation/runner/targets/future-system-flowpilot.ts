@@ -145,13 +145,20 @@ export class FutureSystemFlowpilotTarget implements EvaluationTarget {
     const source =
       routing === "DETERMINISTIC_BYPASS"
         ? "deterministic-bypass"
-        : routing === "LLM"
-          ? "llm"
-          : routing === "DETERMINISTIC"
-            ? "deterministic-assistant"
-            : outcome.providerFailure
-              ? "controlled-failure"
-              : "engine";
+        : routing === "JEV"
+          ? "jev-deterministic"
+          : routing === "LLM"
+            ? "llm"
+            : routing === "DETERMINISTIC"
+              ? "deterministic-assistant"
+              : outcome.providerFailure
+                ? "controlled-failure"
+                : "engine";
+
+    // PROMPT-AI-ARCH-17 (Slice 8) — the JEV gateway decision this turn, as
+    // closed machine keys. Additive + passthrough; audit-only, never scored as
+    // customer-visible behaviour.
+    const jev = obs as { jev?: { mode?: string; reason?: string } } | undefined;
 
     const clarification = obs?.clarification;
     const missingFacts = clarification?.missingFacts ?? [];
@@ -192,6 +199,9 @@ export class FutureSystemFlowpilotTarget implements EvaluationTarget {
       knowledgeSourceClass: obs?.knowledgeSourceClass,
       routingDecision: routing,
       stateTransition: obs?.stateTransition,
+      // PROMPT-AI-ARCH-17 (Slice 8) — the gateway's JEV decision (machine keys).
+      jevMode: jev?.jev?.mode ?? null,
+      jevReason: jev?.jev?.reason ?? null,
       // ── FUTURE_SYSTEM passthrough (schema is .passthrough()) ──────────────
       decisionClass: decisionClassOf(obs),
       conversationStatus: engine.conversationStatus,

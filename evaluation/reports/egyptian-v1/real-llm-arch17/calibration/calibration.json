@@ -1,0 +1,132 @@
+{
+  "calibrationOk": true,
+  "results": [
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "handoffCause": null,
+      "routingDecision": "LLM",
+      "jevMode": "GENERATIVE",
+      "jevReason": "GENERATIVE_REQUIRED",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "physicalAttempts": 1,
+      "retryCount": 0,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 19532,
+      "totalLatencyMs": 19545,
+      "id": "cal-answer",
+      "axis": "ANSWERABLE",
+      "role": "ANSWERABLE",
+      "gating": true,
+      "expectStatus": "AI_ACTIVE",
+      "expectCauses": [],
+      "expectRouting": "GENERATIVE",
+      "statusOk": true,
+      "causeOk": true,
+      "routingOk": true,
+      "roleSuccess": true
+    },
+    {
+      "engineOk": true,
+      "intent": "HUMAN_REQUEST",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "handoffCause": "CUSTOMER_REQUESTED_HUMAN",
+      "routingDecision": "LLM",
+      "jevMode": "GENERATIVE",
+      "jevReason": "GENERATIVE_REQUIRED",
+      "goalsCount": 1,
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "decision": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "physicalAttempts": 1,
+      "retryCount": 0,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 12672,
+      "totalLatencyMs": 12674,
+      "id": "cal-human",
+      "axis": "EXPLICIT_HUMAN",
+      "role": "HUMAN_REQUIRED",
+      "gating": true,
+      "expectStatus": "NEED_HUMAN",
+      "expectCauses": [
+        "CUSTOMER_REQUESTED_HUMAN"
+      ],
+      "expectRouting": "GENERATIVE",
+      "statusOk": true,
+      "causeOk": true,
+      "routingOk": true,
+      "roleSuccess": true
+    },
+    {
+      "engineOk": true,
+      "intent": "HUMAN_REQUEST",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "handoffCause": "SENSITIVE_OR_RESTRICTED",
+      "routingDecision": "LLM",
+      "jevMode": "GENERATIVE",
+      "jevReason": "GENERATIVE_REQUIRED",
+      "goalsCount": 1,
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "decision": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "SENSITIVE"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "physicalAttempts": 1,
+      "retryCount": 0,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 88449,
+      "totalLatencyMs": 88451,
+      "id": "cal-sensitive",
+      "axis": "SENSITIVE",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expectStatus": "NEED_HUMAN",
+      "expectCauses": [
+        "SENSITIVE_OR_RESTRICTED"
+      ],
+      "expectRouting": "GENERATIVE",
+      "statusOk": true,
+      "causeOk": true,
+      "routingOk": true,
+      "roleSuccess": true
+    }
+  ]
+}

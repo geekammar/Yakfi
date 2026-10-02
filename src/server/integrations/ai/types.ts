@@ -12,6 +12,7 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 
 import type { ConversationControlOutcome } from "./conversation-control/types";
+import type { JevDecisionMode, JevDecisionReason } from "./jev-strategy";
 import type { NormalizerTrace } from "./response-normalizer/types";
 
 export type AiProviderId = "openrouter" | "agentrouter" | "atria" | "codecraft";
@@ -187,4 +188,16 @@ export type AiTelemetry = {
    * the engine remains the executor of any state transition.
    */
   conversationControl?: ConversationControlOutcome;
+  /**
+   * The JEV decision the gateway strategy made for this turn
+   * (PROMPT-AI-ARCH-17 — Slice 8). Present only when a JEV strategy was
+   * configured. Closed machine keys only (`mode` / `reason`) — never content,
+   * provider identity, or chain-of-thought. A `DETERMINISTIC` mode means the
+   * strategy terminated the turn and NO provider call was spent (see
+   * `finalProvider === "jev-deterministic"`).
+   */
+  jevDecision?: {
+    readonly mode: JevDecisionMode;
+    readonly reason: JevDecisionReason;
+  };
 };

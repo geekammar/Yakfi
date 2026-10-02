@@ -97,6 +97,16 @@ export type TurnObservability = {
   readonly retryCount?: number;
   readonly latencyMs?: number;
   readonly stateTransition?: TurnStateTransitionObservation;
+  /**
+   * The JEV decision the gateway strategy made for this turn
+   * (PROMPT-AI-ARCH-17 — Slice 8). Absent when no JEV strategy was configured.
+   * Closed machine keys only (`mode` / `reason`) — never content, provider
+   * identity, or chain-of-thought, and never customer-visible.
+   */
+  readonly jev?: {
+    readonly mode: "DETERMINISTIC" | "GENERATIVE";
+    readonly reason: string;
+  } | null;
 };
 
 export type BuildTurnObservabilityInput = {
@@ -134,6 +144,11 @@ export type BuildTurnObservabilityInput = {
   readonly pendingGoals?: readonly AiGoal[] | null;
   /** True on an answer-and-continue turn. */
   readonly answerAndContinue?: boolean;
+  /** The JEV gateway decision (Slice 8) — closed machine keys, audit-only. */
+  readonly jev?: {
+    readonly mode: "DETERMINISTIC" | "GENERATIVE";
+    readonly reason: string;
+  } | null;
 };
 
 /**
@@ -188,5 +203,6 @@ export function buildTurnObservability(
     ...(input.answerAndContinue !== undefined
       ? { answerAndContinue: input.answerAndContinue }
       : {}),
+    ...(input.jev ? { jev: input.jev } : {}),
   };
 }

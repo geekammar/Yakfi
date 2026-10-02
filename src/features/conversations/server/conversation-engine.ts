@@ -129,6 +129,7 @@ import { resolveTurnPlan } from "@/features/conversations/server/turn-planner";
 import type { ResolvedTurn } from "@/features/conversations/server/turn-planner";
 import type { AttentionReason, RecordUsageDto } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
+import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 import type {
   AppointmentRepository,
@@ -1616,8 +1617,12 @@ async function runInboundTurn(
       // - no AI_TURN fact is recorded (no provider call was spent).
       turnTelemetry = readAiTelemetry(deps.ai);
       const telemetry = turnTelemetry;
+      // A JEV deterministic termination (Slice 8) spends no provider call,
+      // exactly like the built-in deterministic bypass: no AI_TURN usage fact
+      // is recorded (no request was made).
       const isBypassTelemetry =
-        telemetry?.finalProvider === "deterministic-bypass";
+        telemetry?.finalProvider === "deterministic-bypass" ||
+        telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER;
       if (!isBypassTelemetry) {
         const lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
         const successAttempt = telemetry
@@ -1671,9 +1676,11 @@ async function runInboundTurn(
     //     compatibility bridge from the existing intent + action.
     const turnRouting: AiRoutingDecision = deterministicBypass
       ? "DETERMINISTIC_BYPASS"
-      : deps.ai.providerName === "deterministic"
-        ? "DETERMINISTIC"
-        : "LLM";
+      : turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER
+        ? "JEV"
+        : deps.ai.providerName === "deterministic"
+          ? "DETERMINISTIC"
+          : "LLM";
     // PROMPT-AI-ARCH-05 (Slice 3): the ONE deterministic resolver's ordered
     // single-goal TurnPlan. PROMPT-AI-ARCH-06 (Slice 4): its `decisionClass`
     // is AUTHORITATIVE for the first-class CLARIFY branch below; every other
@@ -1722,6 +1729,9 @@ async function runInboundTurn(
             },
           }
         : {}),
+      // PROMPT-AI-ARCH-17 (Slice 8) — the JEV gateway decision, auditable as
+      // closed machine keys. Additive only; never customer-visible.
+      jev: turnTelemetry?.jevDecision ?? null,
     });
     if (!validated) {
       const safeHandoff = classifyCustomerMessage(

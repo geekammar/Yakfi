@@ -53,6 +53,10 @@ import type {
 } from "@/features/conversations/server/conversation-engine";
 import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import { deriveConversationStateFromHistory } from "@/features/conversations/server/conversation-state";
+import {
+  JEV_DETERMINISTIC_PROVIDER,
+  isJevDeterministicProvider,
+} from "@/server/integrations/ai/jev-strategy";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 
 import type { PendingStateSeedSpec } from "./pending-state-seed";
@@ -120,6 +124,12 @@ export type FutureTurnTelemetry = {
   inputTokens: number | null;
   outputTokens: number | null;
   errorCode: string | null;
+  /**
+   * The gateway's JEV decision for this turn (PROMPT-AI-ARCH-17 — Slice 8):
+   * closed machine keys only, `null` when no JEV strategy made a decision.
+   */
+  jevMode: string | null;
+  jevReason: string | null;
 };
 
 export type FutureTurnOutcome = {
@@ -288,12 +298,19 @@ export function createFutureSystemRunner(params: {
     const retryAttempts = tel?.retryTrace?.attempts.length ?? 0;
     const physicalAttempts =
       modelCalls === 0 ? 0 : Math.max(retryAttempts, attempts.length, 1);
+    // On a zero-call turn the PROVIDER label comes from the turn's own routing,
+    // never from telemetry left over from a previous turn (eval-only accuracy;
+    // the gateway's JEV label is preserved when present).
+    const zeroCallProvider = isJevDeterministicProvider(tel?.finalProvider)
+      ? JEV_DETERMINISTIC_PROVIDER
+      : "deterministic-bypass";
     return {
       finalProvider:
-        tel?.finalProvider ??
-        (modelCalls === 0 ? "deterministic-bypass" : identity.primaryProvider),
+        modelCalls === 0
+          ? zeroCallProvider
+          : (tel?.finalProvider ?? identity.primaryProvider),
       finalModel:
-        tel?.finalModel ?? (modelCalls === 0 ? null : identity.primaryModel),
+        modelCalls === 0 ? null : (tel?.finalModel ?? identity.primaryModel),
       fallbackUsed: tel?.fallbackUsed ?? false,
       physicalAttempts,
       retryCount: Math.max(0, physicalAttempts - 1),
@@ -301,6 +318,10 @@ export function createFutureSystemRunner(params: {
       inputTokens: last?.inputTokens ?? null,
       outputTokens: last?.outputTokens ?? null,
       errorCode: last?.status === "FAILURE" ? (last.errorCode ?? null) : null,
+      // Zero-call turns have no telemetry for THIS turn; never report a stale
+      // decision from a previous fixture.
+      jevMode: modelCalls === 0 ? null : (tel?.jevDecision?.mode ?? null),
+      jevReason: modelCalls === 0 ? null : (tel?.jevDecision?.reason ?? null),
     };
   }
 

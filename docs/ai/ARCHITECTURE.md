@@ -190,6 +190,17 @@ AVAILABILITY | RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`;
   The engine consults it **before** `ConversationAi.respond`, so those turns emit
   no `AI_TURN` telemetry. The bypass is part of the prompt boundary — future
   adapters inherit it.
+- **JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8) — OPTIONAL, behind the
+  gateway:** `src/server/integrations/ai/jev-strategy.ts` defines a bounded
+  decision (`mode: DETERMINISTIC | GENERATIVE` + a closed `reason`) and the ONE
+  conservative strategy; the gateway (`orchestrator.ts`, which owns the
+  ONE-generative-call budget) consults it optionally — a `DETERMINISTIC` decision
+  terminates with zero provider attempts, a `GENERATIVE` decision falls through to
+  the gateway's single existing call. The strategy never calls a model and never
+  executes domain truth; its deterministic set is EXACTLY the already-proven
+  `bypassDeterministicAi` evidence (no new deterministic behaviour). The decision
+  is provider-neutral and rides only on sanitized telemetry/turn observability
+  (`AiTelemetry.jevDecision` / `TurnObservability.jev`) — never customer-visible.
 - **Assistant voice (DECISIONS #62) — `assistantStyle`, phrasing only:** the
   assistant's tone/register/language/emoji/role live in ONE structured module
   (`src/features/conversations/server/assistant-style.ts`) as validated closed-enum

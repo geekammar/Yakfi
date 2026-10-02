@@ -1512,6 +1512,27 @@ big-bang; old behavior remains available behind the compatibility bridge
 
 ### Slice 8 — JEV strategy behind the gateway
 
+> **STATUS: IMPLEMENTED + REAL-LLM VERIFIED (PROMPT-AI-ARCH-17).** The
+> OPTIONAL JEV decision strategy is wired behind the EXISTING provider
+> gateway as designed here. `src/server/integrations/ai/jev-strategy.ts`
+> owns the bounded decision contract (`mode: DETERMINISTIC | GENERATIVE`
+>
+> - a bounded `reason` + a complete response on DETERMINISTIC) and the ONE
+>   conservative strategy; `orchestrator.ts` (the ONE-call-budget owner)
+>   consults it optionally — DETERMINISTIC spends zero provider calls
+>   (`finalProvider: "jev-deterministic"`), GENERATIVE falls through to the
+>   single existing call, and with no strategy the gateway keeps its prior
+>   behaviour. The strategy never calls a model, so the budget stays with the
+>   gateway. Its deterministic set is EXACTLY the already-proven
+>   `bypassDeterministicAi` evidence (no new deterministic behaviour); every
+>   unknown/unsafe/ambiguous turn stays generative. Additive
+>   `AiTelemetry.jevDecision` / `TurnObservability.jev` (machine keys only).
+>   Guarded by `pnpm check:jev` 28/28 (contract + real orchestrator + real
+>   engine); real-LLM (`scripts/eval-run-future-arch17.ts`, `arch17@1`):
+>   calib 3/3, gating 12/12, 0 multi-call, 0 provider failures, and a
+>   real-adapter gateway probe proving 0 provider invocations on a
+>   deterministic greeting. **No release/commit.**
+
 - **Goal:** add an optional decision strategy that can terminate without an
   LLM or be the single generative call; no mandatory stage.
 - **Boundary:** gateway strategy plug + policy selection.
