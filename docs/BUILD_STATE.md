@@ -51,6 +51,70 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 9 ASYNC KNOWLEDGE-GAP / SELF-IMPROVEMENT —
+RECORD-ONLY, OFF THE CRITICAL PATH (`PROMPT-AI-ARCH-18`, IMPLEMENTATION +
+VERIFICATION): BUILT + DETERMINISTIC VERIFIED — READY_FOR_NEXT_STAGE
+(human-review gate; NO release/commit/migrate).** The target architecture's
+async knowledge-gap boundary (`docs/ai/TARGET_ARCHITECTURE.md §3.16 / §17
+Slice 9`) is now a bounded, tenant-scoped, append-oriented record-only
+lifecycle that can NEVER enter the authoritative response decision. **The
+authoritative signal** is the EXISTING Slice-7
+`InboundSuccess.handoffCause === "KNOWLEDGE_GAP_UNRESOLVED"` (the engine's
+final handoff branch: `action:"handoff"` + `handoffReason:"NO_KNOWLEDGE"`),
+derived AFTER the resolver/safety decision — provider/AI failure, retry
+exhaustion, safety, explicit human, ambiguity, policy refusal, domain block
+and tenant-configuration all stay distinct and NEVER create a record. **ONE
+pure recorder module** (`src/features/conversations/server/knowledge-gap.ts`)
+derives a bounded observation only for that cause, with a stable category
+(`SERVICE_PRICE · BUSINESS_INFO · SERVICE_INFO · AVAILABILITY · FAQ ·
+GENERAL`) computed DETERMINISTICALLY by REUSING the EXISTING B-02
+`deriveTaskRelevance` seam + the turn's authoritative intent (NO new
+classifier, NO model call). **ONE repository**
+(`src/server/repositories/knowledge-gap.repository.ts`) owns the ONLY Prisma
+boundary: append-idempotent `record` (per-turn unique `(conversationId,
+customerMessageId)`), tenant-scoped `list`/`countUnresolved`, and a
+status-guarded `markReviewed`/`markRejected` (UNRESOLVED →
+REVIEWED/REJECTED). **NO promotion path exists** — no FAQ/business/service/
+price/prompt write, no RAG/embeddings/vector store, no queue/event
+bus/Redis, no second engine/resolver/state/planner/classifier/inference.
+**Off-path wiring:** the engine records at the SAME post-turn choke point as
+operator attention (`receiveInboundMessage`, AFTER the reply was persisted +
+delivered), best-effort/total — a failed write yields no record and can
+never block, retry, or alter the turn. Additive
+`InboundSuccess.knowledgeGap?` carries `{ id, category }` (machine keys only;
+absent when nothing was recorded). **Storage (additive, NOT applied):** ONE
+new `knowledge_gaps` table (migration `20261002140000_knowledge_gap`,
+CREATE TABLE + indexes + FKs only, zero ALTERs on existing tables; nullable
+review columns; `@@unique([conversationId, customerMessageId])`).
+**Deterministic:** NEW `check:knowledge-gap` **24/24** (genuine gap
+recorded; ordinary answer / provider failure / safety / human request create
+NO record; booking unaffected; price gap recorded without fabricating a
+price; duplicate deterministic; tenant isolation; recording failure leaves
+the turn byte-identical; zero-or-one call; one send; pure-recorder +
+no-second-layer structural guards); all adjacent gates green
+(ai-architecture, ai-prompts, ai-context-builder, ai-disclosure, ai-provider,
+future-system, multi-intent, clarify, turn-planner, conversation-state,
+conversation-handoff, conversation-booking, booking-options, booking-confirm,
+handoff-cause, operator-attention, service-price, response-normalizer,
+greeting, knowledge-visibility, conversation-control, conversation-ux, jev,
+assistant-style, eval/-schema/-runner, knowledge-faq, services, policy,
+context, whatsapp-_, telegram_, signup, credentials-runtime); `pnpm verify`
+(lint/typecheck/format/build) + `pnpm security` green (1 pre-existing
+both-env-files warning). **Incidental pre-existing repair:**
+`check:conversation-ux` U4b was stale since Slice 7 (its chip regex predated
+the added `cause` prop) — the assertion was corrected test-only; no
+production/UI change. **Real-LLM:** NOT required (purely post-decision
+recording; no prompt/model/provider behavior change) — deterministic
+verification only. **Files changed:** `knowledge-gap.ts` (new recorder),
+`src/lib/validation/knowledge-gap.ts` (new) + index,
+`knowledge-gap.repository.ts` (new) + repositories index, `prisma/schema.prisma`
+
+- migration `20261002140000_knowledge_gap/`, `conversation-engine.ts`,
+  `scripts/check-knowledge-gap.ts` (new), `scripts/check-conversation-ux.ts`
+  (stale assertion repair), `package.json`, docs. **No JEV token/provider
+  switch; migration NOT applied; no commit/push/tag/deploy.**
+  **Readiness: READY_FOR_NEXT_STAGE.**
+
 **AI TARGET ARCHITECTURE — SLICE 8 OPTIONAL JEV DECISION STRATEGY BEHIND THE
 EXISTING PROVIDER GATEWAY (`PROMPT-AI-ARCH-17`, IMPLEMENTATION + VERIFICATION):
 BUILT + DETERMINISTIC + REAL-LLM VERIFIED — READY_FOR_NEXT_STAGE (human-review

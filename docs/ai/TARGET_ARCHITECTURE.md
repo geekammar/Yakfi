@@ -1543,6 +1543,31 @@ big-bang; old behavior remains available behind the compatibility bridge
 
 ### Slice 9 — Async knowledge-gap / self-improvement
 
+> **STATUS: IMPLEMENTED + DETERMINISTIC VERIFIED (PROMPT-AI-ARCH-18;
+> DECISIONS #83).** The record-only, off-critical-path lifecycle described
+> here is now built. The authoritative signal is the EXISTING Slice-7
+> `InboundSuccess.handoffCause === "KNOWLEDGE_GAP_UNRESOLVED"` (derived AFTER
+> the resolver/safety decision), so provider/AI failure, safety, explicit
+> human, ambiguity, policy refusal, domain blocking and configuration
+> failures can never create a false record. ONE pure recorder
+> (`src/features/conversations/server/knowledge-gap.ts`) reuses the EXISTING
+> B-02 `deriveTaskRelevance` seam + the authoritative intent to label the
+> gap (`SERVICE_PRICE · BUSINESS_INFO · SERVICE_INFO · AVAILABILITY · FAQ ·
+GENERAL`) — no new classifier, no model call. ONE repository
+> (`src/server/repositories/knowledge-gap.repository.ts`) appends a bounded,
+> tenant-scoped row (`knowledge_gaps`, migration
+> `20261002140000_knowledge_gap`) and exposes a deterministic review
+> transition (`UNRESOLVED → REVIEWED / REJECTED`). The engine records it in
+> `receiveInboundMessage` AFTER the reply was persisted + delivered,
+> best-effort exactly like usage telemetry and operator attention — it can
+> never block, retry, delay, or alter a turn, and the zero-or-one call /
+> one-send invariants hold. **No promotion path exists**: no FAQ/business/
+> service/price/prompt write, no RAG/embeddings, no queue/event bus, no
+> second engine/resolver/state/planner/classifier/inference. Promotion into
+> business knowledge remains a future, explicitly human-approved workflow.
+> Guarded by NEW `pnpm check:knowledge-gap` 24/24. **No release/commit/
+> migrate.**
+
 - **Goal:** record structured gaps off the critical path; human approval
   gates promotion.
 - **Boundary:** record-only module + repository; no request-path work.

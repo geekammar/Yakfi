@@ -121,13 +121,18 @@ import {
   eligibilityFailureCodeToCause,
   type HandoffCause,
 } from "@/features/conversations/server/handoff-cause";
+import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
 import { resolveTurnPlan } from "@/features/conversations/server/turn-planner";
 import type { ResolvedTurn } from "@/features/conversations/server/turn-planner";
-import type { AttentionReason, RecordUsageDto } from "@/lib/validation";
+import type {
+  AttentionReason,
+  KnowledgeGapCategory,
+  RecordUsageDto,
+} from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
@@ -138,6 +143,7 @@ import type {
   ConversationRepository,
   CustomerRepository,
   InboundDedupeRepository,
+  KnowledgeGapRepository,
   OperatorAttentionRepository,
   ProviderRepository,
   ServiceRepository,
@@ -150,6 +156,7 @@ import {
   conversationRepository,
   customerRepository,
   inboundDedupeRepository,
+  knowledgeGapRepository,
   operatorAttentionRepository,
   providerRepository,
   serviceRepository,
@@ -278,6 +285,16 @@ export type ConversationEngineDeps = {
    * `providerRepository` / `appointmentRepository`).
    */
   attentionRepository?: Pick<OperatorAttentionRepository, "open">;
+  /**
+   * OPTIONAL (PROMPT-AI-ARCH-18 — Slice 9): the RECORD-ONLY knowledge-gap
+   * seam. When present, a turn whose authoritative cause is
+   * `KNOWLEDGE_GAP_UNRESOLVED` records ONE bounded gap observation AFTER the
+   * customer reply was persisted + sent. It is off the critical path and
+   * best-effort: a missing or failing repository can never block, retry, or
+   * alter the turn. Offline engine harnesses may omit it (the same
+   * optionality convention as `attentionRepository`).
+   */
+  knowledgeGapRepository?: Pick<KnowledgeGapRepository, "record">;
   providerRepository?: Pick<
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
@@ -301,6 +318,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   inboundDedupeRepository,
   usageRepository,
   attentionRepository: operatorAttentionRepository,
+  knowledgeGapRepository,
   providerRepository,
   appointmentRepository,
   ai: policyBackedAi,
@@ -392,6 +410,15 @@ export type InboundSuccess = {
    * only — never content, prompts, secrets, or chain-of-thought.
    */
   observability?: TurnObservability;
+  /**
+   * The RECORD-ONLY knowledge-gap observation created for this turn
+   * (PROMPT-AI-ARCH-18 — Slice 9), or absent when the turn was not an
+   * authoritative unresolved knowledge gap or the best-effort recording did
+   * not happen. It is set AFTER the turn completed and the reply was sent,
+   * carries a machine key only (never content), and never affects any other
+   * field of the result.
+   */
+  knowledgeGap?: { id: string; category: KnowledgeGapCategory } | null;
   /** Best-effort outbound delivery report (null when nothing was sent). */
   delivery: { provider: string; delivered: boolean; error?: string } | null;
 };
@@ -1332,6 +1359,65 @@ function handoffAttentionReason(
 }
 
 /**
+ * Read the inbound message text WITHOUT re-validating the payload. It is used
+ * ONLY to copy a bounded human-readable subject into the review record; it has
+ * no authority and is never rendered to a customer.
+ */
+function readInboundText(input: unknown): string | null {
+  if (typeof input !== "object" || input === null) return null;
+  const text = (input as { text?: unknown }).text;
+  return typeof text === "string" ? text : null;
+}
+
+/**
+ * Record the turn's knowledge-gap observation OFF the critical path
+ * (PROMPT-AI-ARCH-18 — Slice 9).
+ *
+ * It runs ONLY on a finished, non-duplicate turn whose authoritative cause is
+ * `KNOWLEDGE_GAP_UNRESOLVED` — i.e. the assistant genuinely could not answer
+ * because authoritative knowledge was unresolved. The authoritative customer
+ * reply was ALREADY persisted + delivered before this runs, so recording can
+ * never change the outcome, the safety/handoff precedence, the booking result,
+ * the price safety, the one-call invariant, or the one-send invariant.
+ *
+ * Total and best-effort, exactly like usage telemetry and operator attention:
+ * a missing seam or a failed write yields `null` (observable as a missing
+ * record) and can never fail, retry, or delay the customer turn. It performs
+ * NO model call, NO transport call, NO second resolution, and NO knowledge
+ * promotion.
+ */
+async function recordKnowledgeGapOffPath(
+  deps: ConversationEngineDeps,
+  result: InboundSuccess,
+  input: unknown,
+): Promise<{ id: string; category: KnowledgeGapCategory } | null> {
+  if (!deps.knowledgeGapRepository) return null;
+  try {
+    const observation = deriveKnowledgeGapObservation({
+      turn: {
+        businessId: result.businessId,
+        conversationId: result.conversationId,
+        customerMessageId: result.customerMessageId,
+        intent: result.intent,
+        handoffCause: result.handoffCause,
+      },
+      messageText: readInboundText(input),
+    });
+    if (!observation) return null;
+    const recorded = await deps.knowledgeGapRepository.record(observation);
+    return {
+      id: recorded.id,
+      category: recorded.category ?? observation.category,
+    };
+  } catch {
+    // A knowledge-gap write failure is classified SEPARATELY from the AI
+    // behavioural outcome: it is a missing observation row, never a
+    // PROVIDER_FAILURE, and it must never surface to the customer.
+    return null;
+  }
+}
+
+/**
  * Process ONE inbound WhatsApp-style message end-to-end. Idempotent at
  * every level: durable external-key dedupe before irreversible
  * processing, customer upsert + latest-conversation reuse, and
@@ -1343,6 +1429,11 @@ function handoffAttentionReason(
  * idempotent attention row. The handoff itself is unchanged (status stays
  * the authoritative lifecycle); attention is the notification layer on top.
  * The write is best-effort, like usage telemetry: it can never fail the turn.
+ *
+ * It is ALSO the single choke point for the RECORD-ONLY knowledge-gap signal
+ * (PROMPT-AI-ARCH-18 — Slice 9): a finished turn whose authoritative cause is
+ * `KNOWLEDGE_GAP_UNRESOLVED` records ONE bounded gap observation, strictly
+ * after the customer reply was persisted + sent. It cannot change the turn.
  */
 export async function receiveInboundMessage(
   deps: ConversationEngineDeps,
@@ -1369,6 +1460,18 @@ export async function receiveInboundMessage(
         // attention write can never fail a customer turn (same contract as
         // usage telemetry above).
       }
+    }
+
+    // PROMPT-AI-ARCH-18 (Slice 9) — the record-only knowledge-gap signal,
+    // written AFTER the authoritative turn (the reply is already persisted +
+    // delivered) and after the operator attention above, so it is strictly
+    // off the customer critical path. It reads ONLY the already-decided
+    // typed cause; a non-gap turn (provider/AI failure, safety, human,
+    // ambiguity, policy refusal, domain block, configuration) can never
+    // create a record, and a failed record can never alter the turn.
+    const knowledgeGap = await recordKnowledgeGapOffPath(deps, result, input);
+    if (knowledgeGap) {
+      return { ...result, knowledgeGap };
     }
   }
 

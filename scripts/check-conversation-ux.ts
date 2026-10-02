@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   );
   check(
     "U4b. الشارة تُعرض فقط عند وجود سبب (تختفي بعد الإقرار)",
-    /data\.attentionReason \? \(\s*<AttentionReasonChip reason=\{data\.attentionReason\} \//.test(
+    /data\.attentionReason \? \(\s*<AttentionReasonChip[\s\S]*?\)\s*:\s*null/.test(
       detail,
     ),
   );

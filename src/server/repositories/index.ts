@@ -17,6 +17,7 @@ import { ConversationRepository } from "./conversation.repository";
 import { CustomerRepository } from "./customer.repository";
 import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
+import { KnowledgeGapRepository } from "./knowledge-gap.repository";
 import { OperatorAttentionRepository } from "./operator-attention.repository";
 import { PlatformInvitationRepository } from "./platform-invitation.repository";
 import { ProviderRepository } from "./provider.repository";
@@ -47,6 +48,7 @@ export const providerRepository = new ProviderRepository();
 export const inboundDedupeRepository = new InboundDedupeRepository();
 export const usageRepository = new UsageRepository();
 export const operatorAttentionRepository = new OperatorAttentionRepository();
+export const knowledgeGapRepository = new KnowledgeGapRepository();
 export const platformInvitationRepository = new PlatformInvitationRepository();
 export const aiPolicyRepository = new AiPolicyRepository();
 export const runtimeCredentialRepository = new RuntimeCredentialRepository();
@@ -60,6 +62,7 @@ export {
   CustomerRepository,
   InboundDedupeRepository,
   InvitationRepository,
+  KnowledgeGapRepository,
   OperatorAttentionRepository,
   PlatformInvitationRepository,
   ProviderRepository,

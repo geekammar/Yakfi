@@ -99,6 +99,7 @@ model Business {
   inboundDedupe                    InboundMessageDedupe[]
   usageRecords                     UsageRecord[]
   operatorAttentions               OperatorAttention[]
+  knowledgeGaps                    KnowledgeGap[]
 
   @@index([isActive])
   @@map("businesses")
@@ -224,6 +225,7 @@ model Conversation {
   assignedTo User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   messages   Message[]
   attention  OperatorAttention?
+  knowledgeGaps KnowledgeGap[]
 
   @@index([businessId])
   @@index([businessId, status])
@@ -294,6 +296,46 @@ model OperatorAttention {
   @@index([businessId])
   @@index([businessId, resolvedAt])
   @@map("operator_attentions")
+}
+
+// ─── Knowledge gaps (PROMPT-AI-ARCH-18 — Slice 9) ───────────
+// The RECORD-ONLY evidence that a turn ended in the authoritative
+// `KNOWLEDGE_GAP_UNRESOLVED` handoff — "the assistant could not answer
+// because authoritative knowledge was unresolved". It is NOT a second
+// knowledge store, NOT RAG/embeddings, NOT an automatic learning artifact,
+// and NOT a second operator system: it is a bounded, tenant-scoped,
+// append-oriented row a human may review later. Recording is OFF the
+// customer critical path (best-effort, after the reply was persisted +
+// sent) and can NEVER alter a turn, fabricate knowledge, or promote
+// anything. `category` and `status` are stable machine keys validated by
+// Zod (no Prisma enum — extending the list needs no data migration).
+// `status` is UNRESOLVED → REVIEWED / REJECTED; there is deliberately no
+// APPROVED/PROMOTED state and no promotion write path — turning a gap
+// into business knowledge is a future, explicitly human-approved workflow.
+// `(conversationId, customerMessageId)` is unique per turn, so a crash
+// replay of the same turn can never create a duplicate record.
+model KnowledgeGap {
+  id                String    @id @default(uuid())
+  businessId        String    @map("business_id")
+  conversationId    String    @map("conversation_id")
+  customerMessageId String    @map("customer_message_id")
+  category          String
+  /** Bounded slice of the customer's own question (never model output). */
+  subjectText       String?   @map("subject_text")
+  status            String    @default("UNRESOLVED")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  reviewedAt        DateTime? @map("reviewed_at")
+  reviewedById      String?   @map("reviewed_by_id")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  reviewedBy   User?        @relation("KnowledgeGapReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([conversationId, customerMessageId])
+  @@index([businessId, status])
+  @@index([businessId, category, createdAt])
+  @@map("knowledge_gaps")
 }
 
 // ─── Appointments ────────────────────────────────────────────
@@ -904,6 +946,7 @@ model User {
   platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
   aiPolicyUpdates            PlatformAiPolicy[]   @relation("PlatformAiPolicyUpdater")
   resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
+  reviewedKnowledgeGaps      KnowledgeGap[]       @relation("KnowledgeGapReviewer")
 
   @@index([businessId])
   @@index([accountType])
