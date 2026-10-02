@@ -1369,17 +1369,45 @@ big-bang; old behavior remains available behind the compatibility bridge
 
 ### Slice 6 — Knowledge exposure (catalog / business info / service info)
 
+> **STATUS: IMPLEMENTED for SERVICE PRICE (PROMPT-AI-ARCH-13).** The first
+> knowledge-exposure channel to land is the authoritative, OPTIONAL per-service
+> PRICE — the exact gap EVAL-14 left (`mi-booking-plus-price`,
+> `mi-availability-plus-price`, `mi-discovery-price-booking` emitted
+> `HANDOFF(NO_KNOWLEDGE)` because price was category C: genuinely absent, not
+> stored-but-unexposed; ARCH-12 forensic). Delivered: five nullable columns on
+> `Service` (`price_type`/`price_amount`/`price_max_amount`/`price_currency`/
+> `price_note`; migration `20261002120000_service_price`) representing
+> FIXED·RANGE·STARTING_FROM·CONDITIONAL; `src/lib/service-price.ts` (value sets,
+> invariants, the ONE `formatServicePrice`); a `priceOrFee` relevance gate +
+> CONDITIONAL `service.price` classification in the B-02 context builder that
+> carries the formatted price on `AiRequest.services[].price` ONLY when the turn
+> needs it (never globally, never fabricated); an OPTIONAL
+> `serviceFactSchema.price` (minimal display string — the AI never sees the
+> structured columns) + ONE prompt line; and a task-gated service-price channel
+> in the B-03 disclosure gate (purely additive — a FAQ-intent price reply is
+> backed by the price channel only when a price is actually carried). Price is
+> authoritative DOMAIN data on the Service catalog, NEVER duplicated into FAQ;
+> missing price → NEED_HUMAN only when the goal needs price, via the EXISTING
+> handoff seam; no pricing engine / billing / entitlement; Products deferred.
+> Duration-gated bookability is unchanged (price never gates). Verified by NEW
+> `check:service-price` 30/30 + real-LLM EVAL-15 (calibration 3/3, focused 7/7,
+> the 3 EVAL-14 price cases convert to answer-and-continue) — dataset hash
+> unchanged, one send/turn, zero provider failures. The REMAINING Slice-6
+> channels (`about`, service `description`, broader catalog info) are NOT yet
+> wired and stay as below.
+
 - **Goal:** expose the public facts the evidence says are present but
   unreachable (`about`, service `description`, catalog info) through
   task-aware context channels; close `NOT_EXPOSED` and discovery/service
-  info/unnecessary handoffs.
+  info/unnecessary handoffs. (SERVICE PRICE: DONE — see status above.)
 - **Boundary:** Context Planner source selection + `AiRequest` channels
   (additive) + disclosure family mapping.
 - **Preserved:** B-01 classification, provenance drop, tenant proof,
   duration/operational facts remain non-disclosable.
 - **Tests:** `kn-service-catalog`, `st-service-discovery`,
   `kn-business-info-paraphrase`, `st-service-price`; `check:ai-context-builder`,
-  `check:ai-disclosure`, `check:knowledge-visibility` stay green.
+  `check:ai-disclosure`, `check:knowledge-visibility`, `check:service-price`
+  stay green.
 - **Depends on:** Slices 3/5. **Rollback:** stop carrying the new channels.
 
 ### Slice 7 — Handoff cause taxonomy + operator mapping

@@ -74,6 +74,7 @@ import {
   type KnowledgeFactSource,
   type VisibilityLevel,
 } from "@/lib/ai-knowledge-visibility";
+import { formatServicePrice } from "@/lib/service-price";
 import { faqEntrySchema } from "@/lib/validation";
 import type { ConversationStatus } from "@/types/domain";
 
@@ -118,6 +119,17 @@ export type ContextServiceFact = {
   readonly name: string;
   readonly description?: string | null;
   readonly durationMinutes?: number | null;
+  /**
+   * Structured, authoritative price columns (PROMPT-AI-ARCH-13 — Slice 6).
+   * The builder formats them into the MINIMAL display string via
+   * `formatServicePrice` and exposes it ONLY when the turn is price-relevant
+   * (CONDITIONAL). A null `priceType` means NO price — never invented.
+   */
+  readonly priceType?: string | null;
+  readonly priceAmount?: number | null;
+  readonly priceMaxAmount?: number | null;
+  readonly priceCurrency?: string | null;
+  readonly priceNote?: string | null;
 };
 
 export type ContextAvailabilityFact = {
@@ -160,6 +172,8 @@ export type TaskRelevance = {
   readonly providerChoice: boolean;
   /** Contact / identity / location asks → the `whatsappNumber` fact. */
   readonly contactOrIdentity: boolean;
+  /** Price / fee / cost asks → the service `price` fact (Slice 6). */
+  readonly priceOrFee: boolean;
 };
 
 const BOOKING_OR_AVAILABILITY_WORDS = [
@@ -228,6 +242,30 @@ const CONTACT_OR_IDENTITY_WORDS = [
 ];
 
 /**
+ * Price / fee / cost vocabulary (Slice 6). Egyptian colloquial + MSA + the
+ * common Arabizi/English "price". Matched against normalized tokens by exact
+ * equality OR prefix (so "سعر" catches "سعره"/"سعرها", "تكلف" catches
+ * "تكلفه"/"بتكلف"). Deliberately bounded — it gates ONLY the CONDITIONAL
+ * exposure of an already-stored price; it never invents one.
+ */
+const PRICE_OR_FEE_WORDS = [
+  "كام", // بكام / كام — "how much"
+  "بكام",
+  "بكم",
+  "سعر", // سعر / سعره / سعرها / السعر
+  "اسعار", // أسعار / الأسعار (hamza normalized to ا)
+  "الاسعار",
+  "تكلف", // تكلفة / التكلفة / بتكلف / يكلف
+  "التكلفه",
+  "تمن", // ثمن (normalized) / التمن
+  "فلوس",
+  "price",
+  "prices",
+  "pricing",
+  "cost",
+];
+
+/**
  * Deterministic relevance derivation from the customer message (Arabic
  * normalized + light morphology, same pipeline the classifier uses for
  * text). Pure: same input ⇒ same output, no I/O, no LLM.
@@ -244,6 +282,7 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     cancellationOrReschedule: matches(CANCELLATION_OR_RESCHEDULE_WORDS),
     providerChoice: matches(PROVIDER_CHOICE_WORDS),
     contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
+    priceOrFee: matches(PRICE_OR_FEE_WORDS),
   };
 }
 
@@ -611,7 +650,7 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
 
   // ── 6. Service catalog (names PUBLIC; duration INTERNAL — B-03 decides) ──
   const seenServiceNames = new Set<string>();
-  const includedServices: Array<{ name: string }> = [];
+  const includedServices: Array<{ name: string; price?: string }> = [];
   for (const service of sources.services) {
     // Per-row tenant proof: a service from another Business is excluded,
     // never resolved by the AI.
@@ -628,7 +667,7 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     if (!nameVerdict.included) continue;
     if (seenServiceNames.has(service.name)) continue; // dedupe by name
     seenServiceNames.add(service.name);
-    includedServices.push({ name: service.name });
+    const included: { name: string; price?: string } = { name: service.name };
 
     // durationMinutes is INTERNAL and no current AI task requires it:
     // availability comes from CORE-02, not from LLM schedule reasoning.
@@ -643,6 +682,32 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       inBudget: true,
       taskRequired: false,
     });
+    // Service price (PROMPT-AI-ARCH-13 — Slice 6): CONDITIONAL, exposed ONLY
+    // when the turn is price-relevant AND an authoritative price is stored.
+    // The deterministic formatter turns the structured columns into the
+    // MINIMAL display string; a service with no stored price contributes
+    // nothing (never a fabricated amount — missing price stays NO_KNOWLEDGE).
+    const formattedPrice = formatServicePrice({
+      priceType: service.priceType ?? null,
+      priceAmount: service.priceAmount ?? null,
+      priceMaxAmount: service.priceMaxAmount ?? null,
+      priceCurrency: service.priceCurrency ?? null,
+      priceNote: service.priceNote ?? null,
+    });
+    const priceVerdict = evaluateCandidate({
+      ledger,
+      scope,
+      source: "SERVICE_CATALOG",
+      businessId: service.businessId,
+      visibility: classifyServiceField("price"),
+      key: `service.price:${service.name}`,
+      inBudget: true,
+      taskRequired: relevance.priceOrFee,
+    });
+    if (priceVerdict.included && formattedPrice) {
+      included.price = formattedPrice;
+    }
+    includedServices.push(included);
     // Service description is PUBLIC but outside today's context budget.
     evaluateCandidate({
       ledger,
@@ -666,6 +731,23 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       taskRequired: false,
     });
   }
+
+  // Aggregate service-price disclosure family (PROMPT-AI-ARCH-13 — Slice 6):
+  // the ONE ledger key the disclosure gate consults to back a price answer
+  // (a per-service key cannot be matched by the gate's single-family lookup).
+  // CONDITIONAL + task-gated on price relevance; `channelCarried("services")`
+  // in the gate separately proves a price is actually carried, so this family
+  // being disclosable never emits an invented price.
+  evaluateCandidate({
+    ledger,
+    scope,
+    source: "SERVICE_CATALOG",
+    businessId: scopeId,
+    visibility: classifyServiceField("price"),
+    key: "service.price",
+    inBudget: true,
+    taskRequired: relevance.priceOrFee,
+  });
 
   // ── 7. Domain-computed availability (CORE-02 truth — CONDITIONAL) ────────
   let availabilityIncluded = false;

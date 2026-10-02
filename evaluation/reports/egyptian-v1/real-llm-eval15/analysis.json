@@ -1,0 +1,462 @@
+{
+  "slice": "PROMPT-AI-ARCH-13",
+  "verificationOnly": true,
+  "target": "future-system-flowpilot",
+  "systemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "evaluatorVersion": "eval-runner@1",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "executedAt": "2026-10-02T01:41:10.408Z",
+  "readiness": "READY_FOR_PRICE_REAL_LLM_REVERIFY",
+  "calibration": {
+    "calibrationOk": true,
+    "results": [
+      {
+        "engineOk": true,
+        "intent": "FAQ",
+        "assistantAction": "AI_REPLY",
+        "conversationStatus": "AI_ACTIVE",
+        "routingDecision": "LLM",
+        "decisionClass": "ANSWER",
+        "goalsCount": 1,
+        "goalKinds": [
+          "ANSWER"
+        ],
+        "multiGoal": false,
+        "pendingGoalsCount": 0,
+        "answerAndContinue": false,
+        "replyContent": "نعمل يومياً من 10 صباحاً حتى 8 مساءً ما عدا الجمعة.",
+        "decision": {
+          "intent": "FAQ",
+          "action": "reply",
+          "handoffReason": null
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "validatedNull": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "modelLatencyMs": 8714,
+        "totalLatencyMs": 8724,
+        "id": "calib-ordinary-answerable",
+        "axis": "ordinary answerable FAQ (hours)",
+        "role": "ANSWER_CONTROL"
+      },
+      {
+        "engineOk": true,
+        "intent": "FAQ",
+        "assistantAction": "AI_REPLY",
+        "conversationStatus": "AI_ACTIVE",
+        "routingDecision": "LLM",
+        "decisionClass": "ANSWER",
+        "goalsCount": 1,
+        "goalKinds": [
+          "ANSWER"
+        ],
+        "multiGoal": false,
+        "pendingGoalsCount": 0,
+        "answerAndContinue": false,
+        "replyContent": "تنظيف الأسنان في عيادة الأمل بسعر 300 جنيه. هل تحب أحجز لك موعد؟",
+        "decision": {
+          "intent": "FAQ",
+          "action": "reply",
+          "handoffReason": null
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "validatedNull": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "modelLatencyMs": 15250,
+        "totalLatencyMs": 15257,
+        "id": "calib-price-present",
+        "axis": "price question + stored fixed price",
+        "role": "PRICE_PRESENT"
+      },
+      {
+        "engineOk": true,
+        "intent": "FAQ",
+        "assistantAction": "AI_HANDOFF",
+        "conversationStatus": "NEED_HUMAN",
+        "routingDecision": "LLM",
+        "decisionClass": "HANDOFF",
+        "goalsCount": 1,
+        "goalKinds": [
+          "HANDOFF"
+        ],
+        "multiGoal": false,
+        "pendingGoalsCount": 0,
+        "answerAndContinue": false,
+        "replyContent": "معذرة، لا تتوفر لدي معلومات عن سعر تنظيف الأسنان حالياً. سأحوّلك لفريق عيادة الأمل للإجابة على استفسارك بدقة.",
+        "decision": {
+          "intent": "FAQ",
+          "action": "handoff",
+          "handoffReason": "NO_KNOWLEDGE"
+        },
+        "modelCallsThisTurn": 1,
+        "providerFailure": false,
+        "validatedNull": false,
+        "realProvider": "atria",
+        "realModel": "Atria-Dawn-Preview",
+        "modelLatencyMs": 27157,
+        "totalLatencyMs": 27161,
+        "id": "calib-price-missing",
+        "axis": "price question + NO stored price",
+        "role": "PRICE_MISSING_QUESTION"
+      }
+    ]
+  },
+  "counts": {
+    "fixtures": 7,
+    "focusedPass": 7,
+    "conversions": 3,
+    "conversionsPass": 3,
+    "realModelCalls": 13,
+    "measuredTurns": 13,
+    "multiCallTurns": 0,
+    "providerFailures": 0,
+    "malformed": 0,
+    "engineReached": true,
+    "safetyPreserved": true,
+    "bookingContinued": true
+  },
+  "fixtureResults": [
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "تنظيف الأسنان في عيادة الأمل بـ 300 جنيه. هل تحب أحجز لك موعد؟",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 9901,
+      "totalLatencyMs": 9904,
+      "id": "price-fixed",
+      "axis": "A — fixed price answered from authoritative service data",
+      "role": "PRICE_PRESENT",
+      "expect": "AI_ACTIVE",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "سعر تقويم الأسنان يتراوح من 5000 إلى 8000 جنيه، وتقدر تحجز معانا لو حابب تكمل على الخطوة دي.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 10537,
+      "totalLatencyMs": 10539,
+      "id": "price-range",
+      "axis": "B — range represented",
+      "role": "PRICE_PRESENT",
+      "expect": "AI_ACTIVE",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "حشو الأسنان يبدأ من 250 جنيه، وده حسب حالة السن ونوع الحشو. تحب أحجز لك موعد للكشف؟",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 11987,
+      "totalLatencyMs": 11989,
+      "id": "price-starting-from",
+      "axis": "C — starting-from represented",
+      "role": "PRICE_PRESENT",
+      "expect": "AI_ACTIVE",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "سعر تقويم الأسنان حسب الحالة، وبيتم تحديده بعد الكشف والمعاينة وتقييم حالة الأسنان. هل تحب أساعدك في حجز موعد للكشف؟",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 24968,
+      "totalLatencyMs": 24970,
+      "id": "price-conditional",
+      "axis": "D — conditional pricing (never a fabricated amount)",
+      "role": "PRICE_PRESENT",
+      "expect": "AI_ACTIVE",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "routingDecision": "LLM",
+      "decisionClass": "HANDOFF",
+      "goalsCount": 1,
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "عذراً، لا أملك سعر تقويم الأسنان حالياً، سأحولك لفريق عيادة الأمل ليقدم لك التفاصيل الدقيقة.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "handoff",
+        "handoffReason": "NO_KNOWLEDGE"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 22557,
+      "totalLatencyMs": 22560,
+      "id": "price-missing-question",
+      "axis": "E — missing price + explicit price question → NEED_HUMAN",
+      "role": "PRICE_MISSING_QUESTION",
+      "expect": "NEED_HUMAN",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "BOOKING",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "DOMAIN_ACTION",
+      "goalsCount": 1,
+      "goalKinds": [
+        "DOMAIN_ACTION"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "تمام، سيتم حجز موعد تنظيف الأسنان بكرة، وهنأكدلك التفاصيل في أقرب وقت.",
+      "decision": {
+        "intent": "BOOKING",
+        "action": "booking_handoff",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 28264,
+      "totalLatencyMs": 28273,
+      "id": "price-missing-booking-only",
+      "axis": "F — missing price + booking-only (not requested) → continue",
+      "role": "PRICE_MISSING_BOOKING",
+      "expect": "AI_ACTIVE",
+      "roleSuccess": true,
+      "conditionalClean": true
+    },
+    {
+      "engineOk": true,
+      "intent": "HUMAN_REQUEST",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "routingDecision": "LLM",
+      "decisionClass": "HANDOFF",
+      "goalsCount": 2,
+      "goalKinds": [
+        "HANDOFF",
+        "ANSWER"
+      ],
+      "multiGoal": true,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "حاضر، هنحوّلكِ لحد من فريقنا يتكلم معاكِ. وبالمناسبة، سعر تنظيف الأسنان عندنا 300 جنيه.",
+      "decision": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 181190,
+      "totalLatencyMs": 181193,
+      "id": "price-plus-human",
+      "axis": "G — explicit human request alongside price → NEED_HUMAN",
+      "role": "SAFETY_REQUIRED",
+      "expect": "NEED_HUMAN",
+      "roleSuccess": true,
+      "conditionalClean": true
+    }
+  ],
+  "conversionResults": [
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 2,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "multiGoal": true,
+      "pendingGoalsCount": 1,
+      "answerAndContinue": true,
+      "replyContent": "سعر تقويم الأسنان يتراوح من 5000 إلى 8000 جنيه، وتنظيف الأسنان بيبدأ من 300 جنيه. تحب أبدأ حجز تنظيف الأسنان دلوقتي؟",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 41285,
+      "totalLatencyMs": 41287,
+      "id": "mi-booking-plus-price::u0",
+      "converted": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 2,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "multiGoal": true,
+      "pendingGoalsCount": 1,
+      "answerAndContinue": true,
+      "replyContent": "سعر تنظيف الأسنان 300 جنيه. قولي عايز تحجز في أي يوم وهقولك المواعيد المتاحة.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 42080,
+      "totalLatencyMs": 42081,
+      "id": "mi-availability-plus-price::u0",
+      "converted": true
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 2,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "multiGoal": true,
+      "pendingGoalsCount": 1,
+      "answerAndContinue": true,
+      "replyContent": "أسعار خدماتنا كالتالي: تنظيف الأسنان 300 جنيه، حشو الأسنان يبدأ من 250 جنيه، تقويم الأسنان من 5000 إلى 8000 جنيه، خلع الضرس 200 جنيه، وتبييض الأسنان حسب الحالة. تقدر تقولي الخدمة اللي تناسبك والموعد المفضل لك ونكمل الحجز.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 26701,
+      "totalLatencyMs": 26702,
+      "id": "mi-discovery-price-booking::u0",
+      "converted": true
+    }
+  ]
+}

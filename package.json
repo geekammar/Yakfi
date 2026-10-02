@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.34.1",
+  "version": "0.35.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -9,6 +9,7 @@
     "security": "node scripts/security-check.mjs",
     "check:signup": "tsx scripts/check-signup-policy.ts",
     "check:services": "tsx scripts/check-services.ts",
+    "check:service-price": "tsx scripts/check-service-price.ts",
     "check:knowledge-faq": "tsx scripts/check-knowledge-faq.ts",
     "check:policy": "tsx scripts/check-ai-policy.ts",
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",
@@ -89,6 +90,7 @@
     "check:future-system": "tsx scripts/check-future-system.ts",
     "eval:run-future": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future.ts",
     "eval:run-future-fixtures": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-fixtures.ts",
+    "eval:run-future-price": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-eval15.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts"
   },

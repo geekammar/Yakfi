@@ -32,12 +32,18 @@ export function buildPromptMessages(
   const services = request.services.length
     ? request.services
         // Duration is INTERNAL (PROMPT-B02) and may be intentionally
-        // absent; render it only when the context builder passed it.
-        .map((s) =>
-          s.durationMinutes !== undefined
-            ? `${s.name} (${s.durationMinutes}m)`
-            : s.name,
-        )
+        // absent; price is CONDITIONAL (PROMPT-AI-ARCH-13) and present only
+        // when the context builder found the turn price-relevant AND an
+        // authoritative price is stored. Render each only when provided.
+        .map((s) => {
+          const parts = [s.name];
+          if (s.durationMinutes !== undefined)
+            parts.push(`${s.durationMinutes}m`);
+          if (s.price !== undefined) parts.push(`السعر: ${s.price}`);
+          return parts.length > 1
+            ? `${parts[0]} (${parts.slice(1).join(", ")})`
+            : parts[0];
+        })
         .join("; ")
     : "(none)";
   const faqs = request.faqs.length

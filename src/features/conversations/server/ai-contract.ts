@@ -123,6 +123,16 @@ const serviceFactSchema = z.object({
     .min(1)
     .max(24 * 60)
     .optional(),
+  /**
+   * Service price — the provider-facing, MINIMAL, already-formatted display
+   * string (PROMPT-AI-ARCH-13 — Slice 6). Present ONLY when the context
+   * builder found the current turn price-relevant AND the service has an
+   * authoritative stored price (task-gated CONDITIONAL exposure); absent
+   * otherwise. The AI never sees the internal structured columns — it may
+   * QUOTE this string but must NEVER invent a price when it is absent. The
+   * deterministic server-side Domain stays authoritative for the real value.
+   */
+  price: z.string().trim().min(1).max(120).optional(),
 });
 
 const knowledgeEntrySchema = z.object({

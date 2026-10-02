@@ -67,7 +67,19 @@ const EVAL_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 
 export type FutureTurnBusinessContext = {
   businessName: string;
-  services: ReadonlyArray<{ name: string; durationMinutes?: number | null }>;
+  services: ReadonlyArray<{
+    name: string;
+    durationMinutes?: number | null;
+    // Structured, OPTIONAL price columns (PROMPT-AI-ARCH-13 — Slice 6).
+    // Evaluation-only overlay: a priced fixture carries these so the REAL
+    // context builder exposes the price exactly as production would. Absent
+    // ⇒ no price ⇒ the assistant must hand off a price question (NO_KNOWLEDGE).
+    priceType?: string | null;
+    priceAmount?: number | null;
+    priceMaxAmount?: number | null;
+    priceCurrency?: string | null;
+    priceNote?: string | null;
+  }>;
   faqs: ReadonlyArray<{ question: string; answer: string }>;
 };
 
@@ -299,6 +311,14 @@ export function createFutureSystemRunner(params: {
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
+      // Structured price columns (PROMPT-AI-ARCH-13 — Slice 6). Null unless a
+      // priced eval overlay supplied them; the REAL context builder then
+      // formats + task-gates them exactly as production does.
+      priceType: service.priceType ?? null,
+      priceAmount: service.priceAmount ?? null,
+      priceMaxAmount: service.priceMaxAmount ?? null,
+      priceCurrency: service.priceCurrency ?? null,
+      priceNote: service.priceNote ?? null,
     }));
     const business = {
       id: EVAL_BUSINESS_ID,

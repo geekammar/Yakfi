@@ -156,6 +156,12 @@ const SERVICE_FIELD_VISIBILITY: Record<string, VisibilityLevel> = {
   name: "PUBLIC", // bookable service names — the customer picks from them
   description: "PUBLIC", // the business's own customer-facing copy
   durationMinutes: "INTERNAL", // operational (product rule: duration behavior is B-03)
+  // Price is authoritative, customer-facing DOMAIN data (PROMPT-AI-ARCH-13 —
+  // Slice 6) but CONDITIONAL: it is exposed to AI context + disclosable ONLY
+  // when the current customer turn is price-relevant (the context builder's
+  // task gate), never on every turn. A missing price stays NO_KNOWLEDGE — the
+  // AI must never invent one.
+  price: "CONDITIONAL",
   isActive: "INTERNAL", // operational state; inactive services are hidden upstream
   id: "FORBIDDEN", // internal identifier — never a fact
   businessId: "FORBIDDEN", // tenant identifier — provenance only, never content

@@ -140,6 +140,30 @@ model Service {
   description     String?
   durationMinutes Int       @map("duration_minutes")
   isActive        Boolean   @default(true)
+  // ── Service price (PROMPT-AI-ARCH-13 — Slice 6) ──────────────────────────
+  // Authoritative, OPTIONAL, per-service DOMAIN price (NOT FlowPilot billing;
+  // see ECONOMICS.md — the business's price TO ITS CUSTOMERS, never FlowPilot's
+  // price to the business). STRUCTURED + MINIMAL, not a pricing engine: no
+  // discounts / tax / coupons / dynamic rules / history. Name/duration remain
+  // the only REQUIRED catalog facts; `durationMinutes` alone makes a service
+  // bookable, price never does. Representation (all columns nullable; a null
+  // `priceType` means NO price exists → the assistant must NEVER invent one):
+  //   FIXED         → priceAmount                           (e.g. 300 EGP)
+  //   RANGE         → priceAmount + priceMaxAmount           (e.g. 300–500 EGP)
+  //   STARTING_FROM → priceAmount                            (e.g. "من 300")
+  //   CONDITIONAL   → priceNote (bounded, e.g. "حسب الحالة") — amounts null
+  // `priceType` is a stable machine key validated by the Zod union in
+  // `lib/service-price` (NO Prisma enum — extending needs no migration, the
+  // confirmationMode / vertical convention). `priceAmount`/`priceMaxAmount`
+  // are whole currency units (sub-unit precision intentionally out of scope).
+  // `priceCurrency` is an ISO machine key (validated union); it is present
+  // whenever an amount is. Price is authoritative on the Service catalog and
+  // is NEVER duplicated into the FAQ store (DECISIONS: no second price source).
+  priceType       String?   @map("price_type")
+  priceAmount     Int?      @map("price_amount")
+  priceMaxAmount  Int?      @map("price_max_amount")
+  priceCurrency   String?   @map("price_currency")
+  priceNote       String?   @map("price_note")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")

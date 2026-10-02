@@ -116,7 +116,7 @@ export type DisclosureRefusalReason =
  * `AiRequest` channel yet — a reply declaring that task can never be backed
  * today, so it routes to a human rather than being invented.
  */
-export type SupportChannel = "faqs" | "availability" | null;
+export type SupportChannel = "faqs" | "availability" | "services" | null;
 
 export type TaskSupportFamily = {
   /** The disclosure-ledger key this task draws its answer from. */
@@ -231,10 +231,37 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
       return request.faqs.length > 0;
     case "availability":
       return (request.availability?.length ?? 0) > 0;
+    case "services":
+      // The service-catalog price channel (PROMPT-AI-ARCH-13 — Slice 6) is
+      // carried only when at least one exposed service has a non-empty price
+      // string (the context builder exposes it CONDITIONALLY, task-gated). An
+      // empty price channel means the reply would invent a price → refused.
+      return request.services.some(
+        (service) =>
+          typeof service.price === "string" && service.price.trim().length > 0,
+      );
     case null:
       // No request channel exists for this family today.
       return false;
   }
+}
+
+/**
+ * The ordered candidate support families a reply intent may draw its answer
+ * from. Almost every intent has exactly ONE (its `TASK_SUPPORT_FAMILIES`
+ * entry). FAQ is the ONE exception (PROMPT-AI-ARCH-13 — Slice 6): a price
+ * question is classified FAQ, so a FAQ reply may be backed by EITHER the
+ * canonical FAQ store OR the task-gated service-price channel — whichever is
+ * included + disclosable + carried. This is purely ADDITIVE: a FAQ reply that
+ * the FAQ store already backs is unchanged; a price-backed FAQ reply is newly
+ * permitted ONLY when the price channel actually carries a price.
+ */
+function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
+  const primary = TASK_SUPPORT_FAMILIES[intent];
+  if (intent === "FAQ") {
+    return [primary, { family: "service.price", channel: "services" }];
+  }
+  return [primary];
 }
 
 // ─── The gate ────────────────────────────────────────────────────────────────
@@ -281,29 +308,39 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
   }
 
-  const record = ledger.find((fact) => fact.key === support.family);
-  if (!record || !record.included) {
-    // Excluded at enrollment (FORBIDDEN / unproven tenant / unknown
-    // provenance) or omitted by the builder — never reinterpreted as public.
-    return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-  }
-  if (!record.disclosable) {
-    // Known to the AI, unmentionable to the customer (INTERNAL, or a
-    // CONDITIONAL fact outside its task). Never emitted merely because the
-    // model happened to have it.
-    return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-  }
-  if (!channelCarried(context.request, support.channel)) {
-    // Disclosable in principle but empty in practice — the reply would have
-    // to be invented. Missing provenance lands here too (an unproven fact
-    // never reaches the request).
-    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+  // Try each candidate support family in order (FAQ may be backed by the FAQ
+  // store OR the task-gated service-price channel — PROMPT-AI-ARCH-13). The
+  // reply is disclosed as soon as ONE candidate is included + disclosable +
+  // carried. If none qualifies, the PRIMARY family's refusal reason is
+  // returned, preserving the existing single-family behavior for every intent
+  // other than a price-backed FAQ.
+  const candidates = candidateSupportFamilies(response.intent);
+  let primaryRefusal: DisclosureRefusalReason | null = null;
+  for (const candidate of candidates) {
+    if (!candidate.family) continue;
+    const record = ledger.find((fact) => fact.key === candidate.family);
+    if (!record || !record.included) {
+      if (primaryRefusal === null) primaryRefusal = "EXCLUDED_FROM_CONTEXT";
+      continue;
+    }
+    if (!record.disclosable) {
+      if (primaryRefusal === null) primaryRefusal = "NOT_DISCLOSABLE";
+      continue;
+    }
+    if (!channelCarried(context.request, candidate.channel)) {
+      if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
+      continue;
+    }
+    return {
+      kind: "disclosed",
+      response,
+      support: [candidate.family],
+    };
   }
 
   return {
-    kind: "disclosed",
-    response,
-    support: [support.family],
+    kind: "requires-human",
+    reason: primaryRefusal ?? "EXCLUDED_FROM_CONTEXT",
   };
 }
 

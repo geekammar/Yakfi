@@ -93,6 +93,11 @@ async function main(): Promise<void> {
     createdAt: Date;
     updatedAt: Date;
     deletedAt: null;
+    priceType: string | null;
+    priceAmount: number | null;
+    priceMaxAmount: number | null;
+    priceCurrency: string | null;
+    priceNote: string | null;
   };
   type ProviderRow = {
     id: string;
@@ -172,6 +177,11 @@ async function main(): Promise<void> {
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
+      priceType: null,
+      priceAmount: null,
+      priceMaxAmount: null,
+      priceCurrency: null,
+      priceNote: null,
     };
   }
 

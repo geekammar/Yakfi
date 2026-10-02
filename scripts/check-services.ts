@@ -114,6 +114,11 @@ type StoredService = {
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  priceType: string | null;
+  priceAmount: number | null;
+  priceMaxAmount: number | null;
+  priceCurrency: string | null;
+  priceNote: string | null;
 };
 
 function makeService(
@@ -130,6 +135,11 @@ function makeService(
     deletedAt: service.deletedAt ?? null,
     createdAt: service.createdAt ?? now,
     updatedAt: service.updatedAt ?? now,
+    priceType: service.priceType ?? null,
+    priceAmount: service.priceAmount ?? null,
+    priceMaxAmount: service.priceMaxAmount ?? null,
+    priceCurrency: service.priceCurrency ?? null,
+    priceNote: service.priceNote ?? null,
   };
 }
 
@@ -174,6 +184,11 @@ function makeDeps(initial: StoredService[]): {
         name: string;
         description?: string;
         durationMinutes: number;
+        priceType?: string | null;
+        priceAmount?: number | null;
+        priceMaxAmount?: number | null;
+        priceCurrency?: string | null;
+        priceNote?: string | null;
       }) {
         const now = new Date();
         const created: StoredService = {
@@ -186,13 +201,27 @@ function makeDeps(initial: StoredService[]): {
           deletedAt: null,
           createdAt: now,
           updatedAt: now,
+          priceType: data.priceType ?? null,
+          priceAmount: data.priceAmount ?? null,
+          priceMaxAmount: data.priceMaxAmount ?? null,
+          priceCurrency: data.priceCurrency ?? null,
+          priceNote: data.priceNote ?? null,
         };
         stores.set(created.id, created);
         return { ...created };
       },
       async update(
         id: string,
-        data: { name?: string; description?: string; durationMinutes?: number },
+        data: {
+          name?: string;
+          description?: string;
+          durationMinutes?: number;
+          priceType?: string | null;
+          priceAmount?: number | null;
+          priceMaxAmount?: number | null;
+          priceCurrency?: string | null;
+          priceNote?: string | null;
+        },
       ) {
         const current = stores.get(id);
         if (!current) throw new Error("not found");

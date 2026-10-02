@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { SERVICE_NOUNS, arabicCount } from "@/lib/arabic";
+import { formatServicePrice } from "@/lib/service-price";
 
 import {
   CalendarPlusIcon,
@@ -22,10 +23,22 @@ import {
   PencilIcon,
   PlayCircleIcon,
   PlusIcon,
+  TagIcon,
   TrashIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+
+/** Customer-facing price label for a service row (null = no stored price). */
+function servicePriceLabel(service: ServiceListItem): string | null {
+  return formatServicePrice({
+    priceType: service.priceType,
+    priceAmount: service.priceAmount,
+    priceMaxAmount: service.priceMaxAmount,
+    priceCurrency: service.priceCurrency,
+    priceNote: service.priceNote,
+  });
+}
 
 /**
  * Services management screen: what the business offers, how long each
@@ -175,6 +188,12 @@ export function ServicesScreen({
                         </span>{" "}
                         دقيقة
                       </p>
+                      {servicePriceLabel(service) ? (
+                        <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <TagIcon aria-hidden className="size-3.5" />
+                          <span>{servicePriceLabel(service)}</span>
+                        </p>
+                      ) : null}
                       {service.description ? (
                         <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
                           {service.description}

@@ -51,6 +51,106 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 6 SERVICE PRICING FOUNDATION + TASK-GATED
+PRICE EXPOSURE + MISSING-PRICE HANDOFF (`PROMPT-AI-ARCH-13`): BUILT +
+REAL-LLM VERIFIED — READY_FOR_PRICE_REAL_LLM_REVERIFY.** The storage
+prerequisite ARCH-12 identified is now implemented and the EVAL-14 residual
+price block is closed. **What was built (smallest architecture-compatible
+shape):** (1) five NULLABLE columns on `Service`
+(`price_type`/`price_amount`/`price_max_amount`/`price_currency`/`price_note`)
+via additive migration `20261002120000_service_price` — authoritative DOMAIN
+price (the business's price TO ITS CUSTOMERS; NOT FlowPilot billing / the
+ECONOMICS.md SaaS-price concept, both still deferred), representing FIXED /
+RANGE / STARTING_FROM / CONDITIONAL; `price_type` is a stable Zod machine key
+(no Prisma enum), amounts are whole currency units, currency an ISO machine
+key. Price is OPTIONAL; **duration alone still makes a service bookable** —
+price never does. (2) `src/lib/service-price.ts` — the ONE value sets +
+structural invariants (`refineServicePrice`) + normalizer
+(`toServicePriceColumns`) + deterministic `formatServicePrice` (Arabic display
+string; CONDITIONAL never yields a number). (3) Service DTO/validation,
+repository pass-through, `service-service` normalization, `ServiceListItem` +
+the `/services` CRUD form (an OPTIONAL price section, Arabic-first/RTL) and a
+price line on the list. (4) Context builder: a new `priceOrFee` task relevance
+gate + a CONDITIONAL `service.price` classification exposes the formatted price
+on `AiRequest.services[].price` ONLY on a price-relevant turn (never globally;
+missing price is never fabricated); an aggregate `service.price` disclosure
+family is recorded. (5) AI contract `serviceFactSchema.price` (optional,
+minimal display string — the AI never sees the structured columns), prompt
+render + ONE prompt line permitting quoting a PRESENT price and handing off
+NO_KNOWLEDGE when absent (regenerated artifact). (6) Disclosure gate: a FAQ
+reply may be backed by the task-gated service-price channel (purely additive;
+`channelCarried("services")` proves a price is actually carried, so a reply is
+never invented). **Price is NEVER duplicated into the FAQ store.** No new
+resolver / ConversationState / TurnPlan / inference / provider branch.
+**Verification:** `pnpm check:service-price` 30/30 (storage · visibility ·
+disclosure · guards); all adjacent gates green (ai-prompts 126, multi-intent
+22, turn-planner 31, conversation-state 20, clarify 27, future-system 33,
+ai-architecture 25, ai-context-builder 39, ai-disclosure 36,
+conversation-booking 16, conversation-handoff 21, response-normalizer 78,
+knowledge-visibility 36, services 50, eval 25, eval-schema 22); `pnpm verify`
+(lint+typecheck+format+build) + `pnpm security` PASS. **Real-LLM (Atria
+`Atria-Dawn-Preview`, FUTURE_SYSTEM, isolated in-memory, NO production
+mutation, `scripts/eval-run-future-eval15.ts`):** calibration 3/3 (ordinary ·
+price-present answered · price-missing → NEED_HUMAN); focused 7/7 (FIXED
+"300 جنيه" · RANGE "من 5000 إلى 8000 جنيه" · STARTING_FROM "يبدأ من 250 جنيه" ·
+CONDITIONAL "حسب الحالة" with NO fabricated number · missing-price question →
+NEED_HUMAN · missing-price booking-only → continues AI_ACTIVE · price+human →
+NEED_HUMAN); the 3 canonical EVAL-14 price cases
+(`mi-booking-plus-price`/`mi-availability-plus-price`/`mi-discovery-price-booking`)
+all CONVERT to answer-and-continue (AI_ACTIVE, pending=1) under an eval-only
+price overlay — the dataset byte hash `8be16297…` is unchanged. 13 real calls,
+0 multi-call turns (one send/turn), 0 provider failures, 0 malformed. **No
+commit/push/tag/ship/deploy; dataset/gold/history untouched.** **Readiness:
+READY_FOR_PRICE_REAL_LLM_REVERIFY.**
+
+**AI TARGET ARCHITECTURE — SLICE 6 KNOWLEDGE EXPOSURE / PRICE & FEE
+ANSWERABILITY (`PROMPT-AI-ARCH-12`, FORENSIC-ONLY): SUPERSEDED BY
+`PROMPT-AI-ARCH-13` (above) — the storage prerequisite is now BUILT.** The
+Slice-6 forensic baseline traced the EVAL-14 price/fee block to its source and
+found it is **category C
+(genuinely absent authoritative knowledge), NOT category A (stored-but-not-
+exposed) or B (exposed-but-not-contractual)**, so per the slice's own
+fail-closed rule NO exposure logic was fabricated and NO migration was run.
+**Evidence (code, not assumption):** (1) `prisma/schema.prisma` `model Service`
+has `name` / `description` / `durationMinutes` only — **NO price field**, and
+there is **no price-list / pricing model** anywhere in the schema; (2) the AI
+contract `serviceFactSchema` (`ai-contract.ts`) carries `name` + optional
+`durationMinutes` — **no price channel**, and the canonical prompt
+(`prompts/system/booking-assistant.prompt`) says "Never invent slots, prices,
+or dates"; (3) the B-02 context builder exposes service `name` only (duration
+INTERNAL, description PUBLIC-but-`inBudget:false`) — no price to expose; (4) the
+knowledge-visibility map `SERVICE_FIELD_VISIBILITY` has no `price` key (unknown
+⇒ INTERNAL, fail-closed); (5) **B-05 `faq-suggestions.ts` DELIBERATELY excludes
+price from the FAQ store** — price is a canonical per-service DOMAIN fact
+(alongside the service list, duration, hours, location), and duplicating it in
+FAQ "would create a second source of truth and let stored knowledge drift from
+the domain"; (6) the FAQ store IS already fully exposed (full Q/A in
+`AiRequest.faqs`) and CAN answer an FAQ-authored price today (demo seed proves
+it: "كم سعر الكشف؟" → "٣٠٠ جنيه"), but that is the anti-pattern B-05 forbids and
+is NOT the per-service PRICE_LIST the EVAL-14 cases need; (7) the EVAL-14 dataset
+ground truth itself asserts `knowledgeSourceAssertion.source = PRICE_LIST /
+MULTIPLE_SOURCES(services)` with `currentChannel = NONE/services` — i.e. the
+authoritative source is a per-service price list that has **no production
+channel** — and the fixtures carry no price in services OR FAQs. **Why
+fail-closed, not implement:** the canonical dataset is immutable, so NO exposure
+code can convert the 3 fixtures (`mi-booking-plus-price`, `mi-availability-plus-
+price`, `mi-discovery-price-booking`) without authoring price data that does not
+exist; and adding `Service.price` is a schema + migration change whose pricing
+semantics (fixed amount vs range vs conditional "contact us" vs currency) are
+UNDECIDED — two explicit STOP triggers ("no authoritative price source",
+"migration required but semantics uncertain"). **Smallest prerequisite
+(operator decision, NOT taken here):** author a nullable, structured price
+representation on the Service catalog (the canonical domain home B-05 already
+reserves) with an explicit pricing-semantics decision, add its PUBLIC
+knowledge-visibility classification + context-budget exposure (task-gated on
+price/service-info relevance) + the matching `serviceFactSchema` field +
+one prompt line permitting quoting a PRESENT price (never inventing one), then
+re-run the 3 EVAL-14 price cases against fixtures that carry a price. Until that
+authoritative storage exists, unknown price correctly stays `handoff` +
+`NO_KNOWLEDGE` (preserved, unchanged). **No `src/`, prompt, schema, migration,
+provider, dataset, gold, or scorer change; no commit/push/tag/ship/deploy;
+EVAL-14 history untouched.** **Readiness: BLOCKED_ON_STORAGE_PREREQUISITE.**
+
 **AI EVALUATION — REAL-LLM MULTI-INTENT RE-VERIFICATION AFTER PRODUCER TOP-LEVEL
 ACTION REMEDIATION (`PROMPT-AI-EVAL-14`, VERIFICATION-ONLY): BLOCKED_BEHAVIOR
 (residual block is Slice-6 price exposure, NOT the producer).** The EXACT EVAL-13
@@ -1523,6 +1623,18 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
+
+**AI — Slice 6 (`PROMPT-AI-ARCH-13`, Service pricing foundation + task-gated
+price exposure + missing-price handoff) is BUILT + real-LLM VERIFIED
+(READY_FOR_PRICE_REAL_LLM_REVERIFY — see `Current State`).** The next logical
+prompt is a DEDICATED real-LLM price-and-knowledge RE-VERIFICATION / broader
+regression over a wider priced-fixture set (more services, Arabizi/colloquial
+price phrasings, multi-service price asks, and a re-run of the full EVAL-14
+answer-and-continue bar now that the 3 price cases convert) — NOT Products,
+NOT Billing, NOT a generalized pricing engine (all remain deferred evidence
+work). The migration (`20261002120000_service_price`) has NOT been applied to
+any database by this slice; the operator owns the release. Keep `pnpm
+check:service-price` + the adjacent gates as the regression floor.
 
 0. **AI — the evaluation data foundation is DESIGNED (DECISIONS #76); two
    evidence-ranked paths are now open and neither is implemented (hard stop).**

@@ -20,18 +20,51 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  SERVICE_PRICE_CURRENCY_VALUES,
+  type ServicePriceCurrency,
+  type ServicePriceType,
+} from "@/lib/service-price";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
+
+/** Sentinel the "no price" Select option carries (maps to null on change). */
+const NO_PRICE = "NONE";
+
+const PRICE_TYPE_LABELS: Record<ServicePriceType, string> = {
+  FIXED: "سعر ثابت",
+  RANGE: "نطاق سعري",
+  STARTING_FROM: "يبدأ من",
+  CONDITIONAL: "حسب الحالة",
+};
+
+const CURRENCY_LABELS: Record<ServicePriceCurrency, string> = {
+  EGP: "جنيه مصري",
+  SAR: "ريال سعودي",
+  AED: "درهم إماراتي",
+  KWD: "دينار كويتي",
+  QAR: "ريال قطري",
+  USD: "دولار أمريكي",
+};
 
 /**
- * Small create/edit form: name, optional description, duration in
- * minutes. The same form serves both modes — the parent remounts it
- * (key change) on every open, so edit values are prefilled through
- * mount-time defaults. No wizard, no extra fields.
+ * Small create/edit form: name, optional description, duration in minutes,
+ * and an OPTIONAL structured price (PROMPT-AI-ARCH-13 — Slice 6). The same
+ * form serves both modes — the parent remounts it (key change) on every open,
+ * so edit values are prefilled through mount-time defaults. Name + duration
+ * remain the only required fields (duration alone makes a service bookable);
+ * price is clearly optional and never blocks saving.
  */
 export function ServiceFormDialog({
   open,
@@ -54,8 +87,22 @@ export function ServiceFormDialog({
       name: service?.name ?? "",
       description: service?.description ?? "",
       durationMinutes: service?.durationMinutes ?? 30,
+      priceType: (service?.priceType as ServicePriceType | null) ?? null,
+      priceAmount: service?.priceAmount ?? null,
+      priceMaxAmount: service?.priceMaxAmount ?? null,
+      priceCurrency:
+        (service?.priceCurrency as ServicePriceCurrency | null) ?? null,
+      priceNote: service?.priceNote ?? "",
     },
   });
+
+  const priceType = form.watch("priceType");
+  const showAmount =
+    priceType === "FIXED" ||
+    priceType === "RANGE" ||
+    priceType === "STARTING_FROM";
+  const showMax = priceType === "RANGE";
+  const showNote = priceType === "CONDITIONAL";
 
   const submit = form.handleSubmit(async (data) => {
     setError(null);
@@ -72,6 +119,11 @@ export function ServiceFormDialog({
     onOpenChange(false);
     onSaved(result.service);
   });
+
+  const numberSetValueAs = (value: unknown) =>
+    value === "" || value === null || value === undefined
+      ? null
+      : Number(value);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -150,6 +202,182 @@ export function ServiceFormDialog({
               </p>
             )}
           </div>
+
+          {/* OPTIONAL structured price (PROMPT-AI-ARCH-13 — Slice 6). */}
+          <div className="space-y-2">
+            <Label htmlFor="service-price-type">
+              السعر <span className="text-muted-foreground">(اختياري)</span>
+            </Label>
+            <Controller
+              control={form.control}
+              name="priceType"
+              render={({ field }) => (
+                <Select
+                  value={field.value ?? NO_PRICE}
+                  onValueChange={(value) => {
+                    field.onChange(value === NO_PRICE ? null : value);
+                    // Clear dependent price fields when the shape changes so a
+                    // stale amount never lingers (the server normalizes too).
+                    form.setValue("priceAmount", null);
+                    form.setValue("priceMaxAmount", null);
+                    form.setValue("priceNote", "");
+                    if (value === NO_PRICE || value === "CONDITIONAL") {
+                      form.setValue("priceCurrency", null);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="service-price-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_PRICE}>بدون سعر</SelectItem>
+                    {(Object.keys(PRICE_TYPE_LABELS) as ServicePriceType[]).map(
+                      (type) => (
+                        <SelectItem key={type} value={type}>
+                          {PRICE_TYPE_LABELS[type]}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              يُعرض للعميل فقط عندما يسأل عن السعر — غير مطلوب لتفعيل الحجز.
+            </p>
+          </div>
+
+          {showAmount ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="service-price-amount">
+                  {priceType === "RANGE" ? "من" : "المبلغ"}
+                </Label>
+                <Input
+                  id="service-price-amount"
+                  type="number"
+                  dir="ltr"
+                  inputMode="numeric"
+                  min={1}
+                  placeholder="300"
+                  aria-invalid={Boolean(form.formState.errors.priceAmount)}
+                  {...form.register("priceAmount", {
+                    setValueAs: numberSetValueAs,
+                  })}
+                />
+                {form.formState.errors.priceAmount ? (
+                  <p className="text-xs text-destructive">
+                    {form.formState.errors.priceAmount.message}
+                  </p>
+                ) : null}
+              </div>
+              {showMax ? (
+                <div className="space-y-2">
+                  <Label htmlFor="service-price-max">إلى</Label>
+                  <Input
+                    id="service-price-max"
+                    type="number"
+                    dir="ltr"
+                    inputMode="numeric"
+                    min={1}
+                    placeholder="500"
+                    aria-invalid={Boolean(form.formState.errors.priceMaxAmount)}
+                    {...form.register("priceMaxAmount", {
+                      setValueAs: numberSetValueAs,
+                    })}
+                  />
+                  {form.formState.errors.priceMaxAmount ? (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.priceMaxAmount.message}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="service-price-currency">العملة</Label>
+                  <Controller
+                    control={form.control}
+                    name="priceCurrency"
+                    render={({ field }) => (
+                      <Select
+                        value={field.value ?? undefined}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger id="service-price-currency">
+                          <SelectValue placeholder="اختر العملة" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SERVICE_PRICE_CURRENCY_VALUES.map((currency) => (
+                            <SelectItem key={currency} value={currency}>
+                              {CURRENCY_LABELS[currency]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {form.formState.errors.priceCurrency ? (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.priceCurrency.message}
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {showMax ? (
+            <div className="space-y-2">
+              <Label htmlFor="service-price-currency-range">العملة</Label>
+              <Controller
+                control={form.control}
+                name="priceCurrency"
+                render={({ field }) => (
+                  <Select
+                    value={field.value ?? undefined}
+                    onValueChange={field.onChange}
+                  >
+                    <SelectTrigger id="service-price-currency-range">
+                      <SelectValue placeholder="اختر العملة" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SERVICE_PRICE_CURRENCY_VALUES.map((currency) => (
+                        <SelectItem key={currency} value={currency}>
+                          {CURRENCY_LABELS[currency]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {form.formState.errors.priceCurrency ? (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.priceCurrency.message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {showNote ? (
+            <div className="space-y-2">
+              <Label htmlFor="service-price-note">وصف السعر</Label>
+              <Input
+                id="service-price-note"
+                placeholder="مثال: حسب الحالة"
+                aria-invalid={Boolean(form.formState.errors.priceNote)}
+                {...form.register("priceNote")}
+              />
+              {form.formState.errors.priceNote ? (
+                <p className="text-xs text-destructive">
+                  {form.formState.errors.priceNote.message}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  نص قصير يوضح أن السعر يُحدَّد حسب الحالة.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {error ? (
             <p role="alert" className="text-sm text-destructive">

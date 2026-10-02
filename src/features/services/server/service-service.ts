@@ -19,6 +19,7 @@ import type {
   ServiceActionResult,
   ServiceListItem,
 } from "@/features/services/types";
+import { toServicePriceColumns } from "@/lib/service-price";
 import type { ServiceRepository } from "@/server/repositories";
 import { serviceRepository } from "@/server/repositories";
 import type { Service, UserRole } from "@/types/domain";
@@ -60,6 +61,11 @@ function toListItem(service: Service): ServiceListItem {
     description: service.description ?? null,
     durationMinutes: service.durationMinutes,
     isActive: service.isActive,
+    priceType: service.priceType ?? null,
+    priceAmount: service.priceAmount ?? null,
+    priceMaxAmount: service.priceMaxAmount ?? null,
+    priceCurrency: service.priceCurrency ?? null,
+    priceNote: service.priceNote ?? null,
   };
 }
 
@@ -135,6 +141,10 @@ export async function createService(
       name: parsed.data.name,
       description: parsed.data.description || undefined,
       durationMinutes: parsed.data.durationMinutes,
+      // Price is authoritative DOMAIN data, OPTIONAL (PROMPT-AI-ARCH-13).
+      // Normalize to the exact nullable column shape (a null priceType zeroes
+      // every price column — never a fabricated amount).
+      ...toServicePriceColumns(parsed.data),
     });
     return { success: true, service: toListItem(service) };
   } catch {
@@ -188,6 +198,9 @@ export async function updateService(
       name: parsed.data.service.name,
       description: parsed.data.service.description || "",
       durationMinutes: parsed.data.service.durationMinutes,
+      // Normalize price to the canonical nullable columns (clearing a price
+      // sets every column null; switching type drops stale amounts).
+      ...toServicePriceColumns(parsed.data.service),
     });
     return { success: true, service: toListItem(service) };
   } catch {
