@@ -1395,6 +1395,42 @@ big-bang; old behavior remains available behind the compatibility bridge
 > unchanged, one send/turn, zero provider failures. The REMAINING Slice-6
 > channels (`about`, service `description`, broader catalog info) are NOT yet
 > wired and stay as below.
+>
+> **BROADER REAL-LLM RE-VERIFICATION (PROMPT-AI-EVAL-15, verification-only):
+> BLOCKED_BEHAVIOR.** A wider real-Atria suite (24 turns) confirmed the price
+> path is robust — all four price shapes answered with no fabrication, mixed
+> Arabic+English «price», multi-service + comparison, missing-price→NEED_HUMAN,
+> booking-only-missing→AI_ACTIVE, safety 4/4→NEED_HUMAN, the 3 EVAL-14 cases
+> convert, 1 model call/turn, 0 provider failures — EXCEPT ONE narrow gap: a
+> follow-up «تمام **وبكام**؟» is not gated as price-relevant because
+> `deriveTaskRelevance`/`PRICE_OR_FEE_WORDS` does not strip the «و» conjunction
+> clitic, so the task-gated price is withheld and the turn fails closed to
+> NO_KNOWLEDGE (category D — safe, but a missed answerable price; pure Arabizi is
+> a separate known out-of-vocabulary boundary). Smallest next slice:
+> `PROMPT-AI-ARCH-14` — strip the «و» clitic in the price gate (reuse the Slice-1
+> F1 `stripAffixes` seam), guard «تمام وبكام؟»/«وكام سعره؟», do NOT widen to
+> Arabizi; then re-run the EVAL-15 broader set. Report:
+> `evaluation/reports/egyptian-v1/real-llm-eval15/`.
+>
+> **EVAL-15 RECOVERY/RERUN (PROMPT-AI-EVAL-15R, verification-only):
+> BLOCKED_BEHAVIOR — same gap reproduced.** `eval15-rerun@1` re-ran the same
+> 24-turn real-Atria suite on the unchanged state (calibration 5/5, gating
+> 13/14, conversions 3/3, 1 call/turn, 0 provider failures, safety 4/4) and
+> reproduced `fu-price-after-service-id`→NEED_HUMAN with `derivedPriceOrFee=false`
+> (the «و» clitic). Prior EVAL-15 evidence preserved, not overwritten.
+> Report: `evaluation/reports/egyptian-v1/real-llm-eval15-rerun/`.
+>
+> **CLITIC REMEDIATION (PROMPT-AI-ARCH-14): GAP CLOSED — real-LLM re-verified.**
+> The «و» conjunction clitic now passes through the EXISTING Slice-1 F1
+> `stripAffixes` seam (length-guarded, exported; the «بـ» handling is unchanged)
+> and the price gate in `deriveTaskRelevance` reuses it — scoped to `priceOrFee`
+> only, with no generic Arabizi layer and no new mechanism. The unchanged
+> 24-turn EVAL-15 broader suite now runs calibration 5/5 · gating **14/14**
+> (`fu-price-after-service-id` → `AI_ACTIVE`, `derivedPriceOrFee=true`, reply
+> carries «300 جنيه») · conversions 3/3 (`a&c=true`, `pending=1`) · 24 calls /
+> 24 turns · 0 multi-call · 0 provider failures · 0 malformed · safety 4/4 →
+> `NEED_HUMAN` · booking-only-missing → `AI_ACTIVE`. Report:
+> `evaluation/reports/egyptian-v1/real-llm-eval15-arch14/`.
 
 - **Goal:** expose the public facts the evidence says are present but
   unreachable (`about`, service `description`, catalog info) through

@@ -1,0 +1,89 @@
+{
+  "slice": "PROMPT-AI-EVAL-15",
+  "verificationOnly": true,
+  "target": "future-system-flowpilot",
+  "systemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "datasetVersion": "egyptian-v1",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "evaluatorVersion": "eval-runner@1",
+  "runnerVersion": "eval15-broader@1",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "startedAt": "2026-10-02T11:35:39.435Z",
+  "finishedAt": "2026-10-02T11:37:00.037Z",
+  "executionMode": "real-llm · isolated in-memory · provider override (eval-only)",
+  "readiness": "READY_FOR_NEXT_STAGE",
+  "calibration": {
+    "calibrationOk": true,
+    "results": []
+  },
+  "counts": {
+    "fixtures": 1,
+    "gatingFixtures": 1,
+    "gatingPass": 1,
+    "exploratory": 0,
+    "conversions": 0,
+    "conversionsPass": 0,
+    "measuredTurns": 1,
+    "realModelCalls": 1,
+    "bypassTurns": 0,
+    "multiCallTurns": 0,
+    "providerFailures": 0,
+    "malformed": 0,
+    "engineReached": true,
+    "safetyPreserved": true,
+    "bookingContinued": true
+  },
+  "latency": {
+    "measuredTurnsWithLatency": 1,
+    "p50": 80585,
+    "p95": 80585,
+    "max": 80585,
+    "timeoutMsConfigured": 300000,
+    "timeoutCount": 0
+  },
+  "calibResults": [],
+  "fixtureResults": [
+    {
+      "engineOk": true,
+      "intent": "HUMAN_REQUEST",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "routingDecision": "LLM",
+      "decisionClass": "HANDOFF",
+      "goalsCount": 2,
+      "goalKinds": [
+        "HANDOFF",
+        "ANSWER"
+      ],
+      "multiGoal": true,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "أهلاً بكِ، سعر تنظيف الأسنان 300 جنيه، وهنوّصلكِ بأحد أفراد فريقنا حالاً للرد على كل استفساراتكِ.",
+      "decision": {
+        "intent": "HUMAN_REQUEST",
+        "action": "handoff",
+        "handoffReason": "HUMAN_REQUEST"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 80585,
+      "totalLatencyMs": 80595,
+      "id": "sf-price-plus-human",
+      "axis": "price PRESENT + explicit human request → NEED_HUMAN",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expect": "NEED_HUMAN",
+      "derivedPriceOrFee": true,
+      "derivedBookingOrAvailability": false,
+      "statusOk": true,
+      "digitsClean": true,
+      "roleSuccess": true
+    }
+  ],
+  "conversionResults": []
+}

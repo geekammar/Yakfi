@@ -1,0 +1,42 @@
+{
+  "slice": "PROMPT-AI-EVAL-15",
+  "title": "Real-LLM Price + Knowledge Re-Verification / Broader Slice 6 Regression",
+  "verificationOnly": true,
+  "target": "future-system-flowpilot",
+  "futureSystemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "dataset": {
+    "version": "egyptian-v1",
+    "hash": "8be16297ae4717bab5da4f3c94de1887",
+    "hashAlgo": "sha256-first32",
+    "byteIdentical": true,
+    "mutated": false
+  },
+  "baseline": {
+    "productVersion": "0.35.0",
+    "sliceUnderTest": "Slice 6 Service Pricing Foundation (PROMPT-AI-ARCH-13)",
+    "gitHead": "15ecbd8 feat: release v0.35.0",
+    "workingTreeAtStart": "clean"
+  },
+  "runnerVersion": "eval15-broader@1",
+  "evaluatorVersion": "eval-runner@1",
+  "executionMode": "real-llm · isolated in-memory · provider override (eval-only)",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "startedAt": "2026-10-02T04:42:41.585Z",
+  "finishedAt": "2026-10-02T05:05:16.516Z",
+  "providerOverride": "evaluation-only (DB policy NOT read/changed)",
+  "artifacts": [
+    "manifest.json",
+    "evaluation-run.json",
+    "case-selection.json",
+    "analysis.json",
+    "calibration.json",
+    "calibration/calibration.json",
+    "status.md",
+    "report.md",
+    "retries/",
+    "arch13-focused-baseline/"
+  ],
+  "readiness": "BLOCKED_BEHAVIOR"
+}

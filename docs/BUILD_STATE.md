@@ -51,6 +51,115 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 6 PRICE-RELEVANCE «و» CLITIC REMEDIATION
+(`PROMPT-AI-ARCH-14`, IMPLEMENTATION + VERIFICATION): BUILT + REAL-LLM
+RE-VERIFIED — READY_FOR_PRICE_REAL_LLM_REVERIFY (human-review gate; NO release).**
+The single behavioral blocker EVAL-15/EVAL-15R proved (the follow-up
+«تمام وبكام؟» withheld the task-gated price) is CLOSED at the existing
+normalization seam. **Root cause:** `deriveTaskRelevance`/`PRICE_OR_FEE_WORDS`
+(`ai-context-builder/context-builder.ts`) matched raw normalized tokens, so the
+fused token «وبكام» never matched «بكام»/«كام» and the price channel stayed
+withheld. **Exact fix (smallest justified):** the EXISTING Slice-1 F1
+`stripAffixes` seam (`conversation-ai.ts`) now also strips the length-guarded
+Egyptian conjunction «و» (the «بـ» clitic handling is unchanged) and is exported
+for reuse; `deriveTaskRelevance` maps its price-gate tokens through that seam.
+Scoped to the `priceOrFee` family only — the other relevance families keep their
+exact prior matching. **No generic Arabizi layer, no new Arabic NLP subsystem,
+no broad Unicode rewriting, no second resolver/engine/state/planner/classifier,
+no second model call, no schema/migration/pricing-semantics/prompt/provider/
+dataset/gold/scorer change.** **Deterministic:** `check:service-price` **33/33**
+(NEW: «تمام وبكام؟» exposes the stored price; missing price with the clitic is
+never fabricated and still routes to the human/no-knowledge path),
+`check:ai-context-builder` **42/42** (NEW: «تمام وبكام؟»/«وكام سعره؟» are
+price-relevant; «عايز أحجز بكرة»/«تمام» are NOT — unrelated behavior not
+widened); all adjacent gates unchanged-green (ai-disclosure 36, multi-intent 22,
+clarify 27, future-system 33, ai-architecture 25, turn-planner 31,
+conversation-state 20, conversation-booking 16, conversation-handoff 21,
+greeting 66, ai-prompts 126, knowledge-visibility 36, response-normalizer 78,
+eval 25, eval-schema 22, eval-runner 18, services 50); `pnpm verify`
+(lint/typecheck/format/build) + `pnpm security` green (1 pre-existing
+both-env-files warning). **Real-LLM (reused EVAL-15 broader runner,
+`eval15-broader@1`, UNCHANGED fixture set + dataset hash `8be16297…`, eval-only
+Atria override `atria`/`Atria-Dawn-Preview`; DB policy NOT read/changed):** clean
+full run — calibration 5/5, gating **14/14** (was 13/14;
+`fu-price-after-service-id` → `AI_ACTIVE`, `derivedPriceOrFee=true`, reply
+carries «300 جنيه»), conversions 3/3 (`a&c=true`, `pending=1`), 24 measured
+turns · 24 real model calls · 1 call/turn · 0 multi-call · 0 bypass · 0 provider
+failures · 0 malformed; safety 4/4 → `NEED_HUMAN` (price answerability never
+outranks human/sensitive precedence); booking-only-missing-price → `AI_ACTIVE`;
+missing-price explicit question → `NEED_HUMAN` with no digits; exploratory
+`bp-arabizi-pure` unchanged (`NEED_HUMAN`, intended non-gating boundary);
+latency p50 30.8s / p95 199.4s / max 252.4s (provider property). Earlier
+attempts' transient Atria fast-fail/300s-timeout events were correctly
+calibration-gate-blocked as `BLOCKED_PROVIDER`; the slow safety case was
+independently re-verified GENUINE in `retries/` (`providerFail=0`, 80.6s,
+`NEED_HUMAN`), and the final full pass had 0 provider failures. **Artifacts:**
+`evaluation/reports/egyptian-v1/real-llm-eval15-arch14/` (prior EVAL-15 and
+EVAL-15R dirs preserved). **Files changed:** `conversation-ai.ts`,
+`ai-context-builder/context-builder.ts`, `scripts/check-ai-context-builder.ts`,
+`scripts/check-service-price.ts`, `docs/BUILD_STATE.md`,
+`docs/ai/TARGET_ARCHITECTURE.md`. **No commit/push/tag/deploy/migrate.**
+**Readiness: READY_FOR_PRICE_REAL_LLM_REVERIFY.**
+
+**AI EVALUATION — REAL-LLM PRICE + KNOWLEDGE BROADER SLICE-6 RE-VERIFICATION
+(`PROMPT-AI-EVAL-15`, VERIFICATION-ONLY): BLOCKED_BEHAVIOR (one narrow,
+fail-closed answerable-price gap; everything else verified).** A broader
+real-Atria price/knowledge suite (24 measured turns, `future-system-flowpilot`,
+`atria`/`Atria-Dawn-Preview` via eval-only override; DB policy NOT read/changed;
+dataset `egyptian-v1` hash `8be16297…` byte-identical) re-verified the shipped
+Slice-6 path. **Verified (1 model call/turn, 0 multi-call, 0 provider failures,
+0 malformed on the canonical run):** calibration 5/5; price shapes
+FIXED/RANGE/STARTING_FROM/CONDITIONAL answered with no fabrication (CONDITIONAL
+carries no digit); mixed Arabic+English «price»; multi-service (two prices +
+comparison, no collapse/invention); missing-price question → NEED_HUMAN;
+booking-only-with-missing-price → stays AI_ACTIVE; **safety 4/4 → NEED_HUMAN**
+(price+human, price+sensitive, missing+human, missing+sensitive; the two slowest
+independently re-verified GENUINE at a 240s eval-only timeout, not fail-safes);
+and the **3 EVAL-14 price cases all CONVERT** to answer-and-continue (AI_ACTIVE,
+`answerAndContinue=true`, pending=1). **The ONE blocker:** a follow-up price
+«تمام **وبكام**؟» returns NO_KNOWLEDGE (reproduced 3/3 clean) because the
+price-relevance gate (`deriveTaskRelevance`/`PRICE_OR_FEE_WORDS`,
+`ai-context-builder/context-builder.ts`) does not strip the Arabic «و»
+conjunction clitic, so «وبكام»/«وكام» fail `priceOrFee` and the task-gated price
+is withheld — **category D (knowledge exposure); fail-closed and safe, but a
+missed answerable price.** (`بكام؟`→relevant, `وبكام؟`→not; verified.) A pure
+Arabizi price («b kam») is a known out-of-vocabulary boundary (exploratory,
+non-gating); `price+knowledge-gap` correctly answers the price AND hands off the
+unanswerable part (gap not hidden). Latency p50 26.8s / p95 220s / max 274s
+(provider property; prod timeout policy unchanged). **Knowledge-visibility map
+(§9):** service name / price / FAQ = WORKING-VERIFIED; service description = NOT
+YET WIRED (PUBLIC but out of budget); duration/isActive/ids = BLOCKED BY
+PREREQUISITE (INTERNAL/FORBIDDEN); hours/location = WORKING / NOT FULLY VERIFIED.
+Deterministic gates all green (service-price 30/30, ai-prompts 126, multi-intent
+22, turn-planner 31, conversation-state 20, clarify 27, future-system 33,
+ai-architecture 25, ai-context-builder 39, ai-disclosure 36,
+knowledge-visibility 36, conversation-booking 16, conversation-handoff 21,
+response-normalizer 78, eval/-schema/-runner 25/22/18, services 50);
+`pnpm verify` + `pnpm security` green. **No `src/`/prompt/schema/migration/
+provider/dataset/gold/scorer change; no commit/push/tag/deploy/migrate.** ONLY
+new: eval-only runner `scripts/eval-run-future-eval15-broader.ts` + artifacts
+under `evaluation/reports/egyptian-v1/real-llm-eval15/` (ARCH-13 focused
+artifacts preserved under `arch13-focused-baseline/`). **Readiness:
+BLOCKED_BEHAVIOR.** **Next step:** `PROMPT-AI-ARCH-14` — smallest Slice-6
+price-relevance clitic remediation (strip the «و» clitic in the price gate,
+reusing the Slice-1 F1 `stripAffixes` seam; guard «تمام وبكام؟»/«وكام سعره؟»; do
+NOT widen to Arabizi), then re-run this exact EVAL-15 broader set expecting
+`fu-price-after-service-id`→AI_ACTIVE, safety 0 regressions, 0 multi-call.
+
+**AI EVALUATION — EVAL-15 RECOVERY/RERUN (`PROMPT-AI-EVAL-15R`,
+VERIFICATION-ONLY): BLOCKED_BEHAVIOR (SAME blocker, reproduced).** A fresh
+real-Atria rerun (`eval15-rerun@1`, new dir
+`evaluation/reports/egyptian-v1/real-llm-eval15-rerun/`; prior EVAL-15 artifacts
+preserved and NOT overwritten) on the unchanged `v0.35.0` state reproduced the
+verdict exactly: calibration 5/5; gating 13/14; conversions 3/3; 24 measured
+turns · 24 real calls · 1 call/turn · 0 multi-call · 0 provider failures · 0
+malformed; safety 4/4; the lone miss is the same «و»-clitic follow-up price gap
+(`fu-price-after-service-id`→NEED_HUMAN, `derivedPriceOrFee=false`), re-confirmed
+deterministically. The prior-session tooling lifecycle symptom was not found in
+any repository artifact and is classified EXECUTION/ORCHESTRATION. No `src/`
+drift; `pnpm verify` + `pnpm security` green. **Readiness: BLOCKED_BEHAVIOR**
+(same next step: `PROMPT-AI-ARCH-14`).
+
 **AI TARGET ARCHITECTURE — SLICE 6 SERVICE PRICING FOUNDATION + TASK-GATED
 PRICE EXPOSURE + MISSING-PRICE HANDOFF (`PROMPT-AI-ARCH-13`): BUILT +
 REAL-LLM VERIFIED — READY_FOR_PRICE_REAL_LLM_REVERIFY.** The storage

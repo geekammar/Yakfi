@@ -266,6 +266,21 @@ async function main(): Promise<void> {
       ) &&
       eq(deriveTaskRelevance("بماذا تفعلون؟").bookingOrAvailability, false),
   );
+  // ARCH-14: the price gate reuses the Slice-1 F1 affix seam so the Egyptian
+  // conjunction «و» clitic does not hide a price question («تمام وبكام؟»).
+  check(
+    "اشتقاق السعر: الواو العطف لا تحجب السؤال عن السعر «تمام وبكام؟»",
+    eq(deriveTaskRelevance("تمام وبكام؟").priceOrFee, true),
+  );
+  check(
+    "اشتقاق السعر: «وكام سعره؟» يُطابق كقناة سعر",
+    eq(deriveTaskRelevance("وكام سعره؟").priceOrFee, true),
+  );
+  check(
+    "اشتقاق السعر: دور غير سعري لا يُوسَّع «عايز أحجز بكرة»",
+    eq(deriveTaskRelevance("عايز أحجز بكرة").priceOrFee, false) &&
+      eq(deriveTaskRelevance("تمام").priceOrFee, false),
+  );
 
   // ── 3. INTERNAL operational facts: omitted, never disclosable ────────────
   check(

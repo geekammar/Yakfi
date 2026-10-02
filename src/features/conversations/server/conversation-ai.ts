@@ -68,16 +68,20 @@ export function normalizeArabicText(text: string): string {
 }
 
 /**
- * Strips the definite article / waw prefix so tokens compare equally, and
- * the Egyptian single-letter clitic «بـ» ("with/by"). The clitic matters
- * for safety (F1, DECISIONS: TARGET_ARCHITECTURE Slice 1): «بموظف» is "with
- * an employee" and must normalize to the bare noun «موظف» so an explicit
- * human request is never missed. The length guards keep short function
- * words (e.g. «بس») intact — only words long enough to carry a real stem
- * after the clitic are stripped.
+ * Strips the definite article / waw prefix so tokens compare equally, the
+ * Egyptian conjunction «و» ("and"), and the Egyptian single-letter clitic
+ * «بـ» ("with/by"). The clitic matters for safety (F1, DECISIONS:
+ * TARGET_ARCHITECTURE Slice 1): «بموظف» is "with an employee" and must
+ * normalize to the bare noun «موظف» so an explicit human request is never
+ * missed. The conjunction matters for task relevance (ARCH-14): «وبكام» is
+ * "and how much" and must normalize to «كام» so a price question hidden
+ * behind «و» is not withheld. The length guards keep short function words
+ * (e.g. «بس», «وقت») intact — only words long enough to carry a real stem
+ * after the affix are stripped.
  */
-function stripAffixes(token: string): string {
+export function stripAffixes(token: string): string {
   let word = token;
+  if (word.length > 3 && word.startsWith("و")) word = word.slice(1);
   if (word.length > 4 && word.startsWith("وال")) word = word.slice(3);
   else if (word.length > 3 && word.startsWith("ال")) word = word.slice(2);
   else if (word.length > 3 && word.startsWith("ب")) word = word.slice(1);

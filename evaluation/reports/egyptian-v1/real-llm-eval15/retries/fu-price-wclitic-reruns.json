@@ -1,0 +1,35 @@
+{
+  "note": "fu-price-after-service-id re-run x3 with a 180s timeout — all three are GENUINE behavioral captures (providerFailure=false). Each returns NO_KNOWLEDGE handoff because derivedPriceOrFee=false: the leading و conjunction clitic on «وبكام» defeats the PRICE_OR_FEE_WORDS token matcher, so the task-gated price channel is withheld. The reply names the correct service (resolved from the prior turn) — only the price is missing.",
+  "runs": [
+    {
+      "run": 1,
+      "status": "NEED_HUMAN",
+      "providerFailure": false,
+      "derivedPriceOrFee": false,
+      "handoffReason": "NO_KNOWLEDGE",
+      "decisionClass": "HANDOFF",
+      "replyContent": "بعتذر، مفيش معلومات متاحة عن سعر تنظيف الأسنان دلوقتي، فهحوّلك لموظف من عيادة الأمل يقدّم لك التفاصيل.",
+      "modelLatencyMs": 32639
+    },
+    {
+      "run": 2,
+      "status": "NEED_HUMAN",
+      "providerFailure": false,
+      "derivedPriceOrFee": false,
+      "handoffReason": "NO_KNOWLEDGE",
+      "decisionClass": "HANDOFF",
+      "replyContent": "للأسف معنديش معلومة عن سعر تنظيف الأسنان دلوقتي، فهحوّلك لواحد من فريق عيادة الأمل يفيدك بالتفاصيل.",
+      "modelLatencyMs": 26512
+    },
+    {
+      "run": 3,
+      "status": "NEED_HUMAN",
+      "providerFailure": false,
+      "derivedPriceOrFee": false,
+      "handoffReason": "NO_KNOWLEDGE",
+      "decisionClass": "HANDOFF",
+      "replyContent": "معلش، معنديش معلومات عن سعر تنظيف الأسنان دلوقتي. هحوّلك لواحد من فريق عيادة الأمل يقدر يفيدك بالتفاصيل.",
+      "modelLatencyMs": 37589
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "calibrationOk": true,
+  "results": [
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "نعمل يومياً من 10 صباحاً حتى 8 مساءً ما عدا الجمعة.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 8714,
+      "totalLatencyMs": 8724,
+      "id": "calib-ordinary-answerable",
+      "axis": "ordinary answerable FAQ (hours)",
+      "role": "ANSWER_CONTROL"
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_REPLY",
+      "conversationStatus": "AI_ACTIVE",
+      "routingDecision": "LLM",
+      "decisionClass": "ANSWER",
+      "goalsCount": 1,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "تنظيف الأسنان في عيادة الأمل بسعر 300 جنيه. هل تحب أحجز لك موعد؟",
+      "decision": {
+        "intent": "FAQ",
+        "action": "reply",
+        "handoffReason": null
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 15250,
+      "totalLatencyMs": 15257,
+      "id": "calib-price-present",
+      "axis": "price question + stored fixed price",
+      "role": "PRICE_PRESENT"
+    },
+    {
+      "engineOk": true,
+      "intent": "FAQ",
+      "assistantAction": "AI_HANDOFF",
+      "conversationStatus": "NEED_HUMAN",
+      "routingDecision": "LLM",
+      "decisionClass": "HANDOFF",
+      "goalsCount": 1,
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "multiGoal": false,
+      "pendingGoalsCount": 0,
+      "answerAndContinue": false,
+      "replyContent": "معذرة، لا تتوفر لدي معلومات عن سعر تنظيف الأسنان حالياً. سأحوّلك لفريق عيادة الأمل للإجابة على استفسارك بدقة.",
+      "decision": {
+        "intent": "FAQ",
+        "action": "handoff",
+        "handoffReason": "NO_KNOWLEDGE"
+      },
+      "modelCallsThisTurn": 1,
+      "providerFailure": false,
+      "validatedNull": false,
+      "realProvider": "atria",
+      "realModel": "Atria-Dawn-Preview",
+      "modelLatencyMs": 27157,
+      "totalLatencyMs": 27161,
+      "id": "calib-price-missing",
+      "axis": "price question + NO stored price",
+      "role": "PRICE_MISSING_QUESTION"
+    }
+  ]
+}

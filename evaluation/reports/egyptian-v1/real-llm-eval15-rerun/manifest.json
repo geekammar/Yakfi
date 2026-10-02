@@ -1,0 +1,50 @@
+{
+  "slice": "PROMPT-AI-EVAL-15R",
+  "title": "Real-LLM Price + Knowledge Re-Verification — Recovery/Rerun of PROMPT-AI-EVAL-15",
+  "verificationOnly": true,
+  "recovery": true,
+  "runId": "eval15-rerun@1",
+  "derivedFrom": "evaluation/reports/egyptian-v1/real-llm-eval15/",
+  "target": "future-system-flowpilot",
+  "futureSystemKind": "FUTURE_SYSTEM",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "dataset": {
+    "version": "egyptian-v1",
+    "hash": "8be16297ae4717bab5da4f3c94de1887",
+    "hashAlgo": "sha256-first32",
+    "byteIdentical": true,
+    "mutated": false
+  },
+  "baseline": {
+    "productVersion": "0.35.0",
+    "sliceUnderTest": "Slice 6 Service Pricing Foundation (PROMPT-AI-ARCH-13)",
+    "gitHead": "15ecbd8 feat: release v0.35.0",
+    "workingTreeAtStart": "EVAL-15 broader artifacts uncommitted (recovery baseline); no src/ drift"
+  },
+  "priorRun": {
+    "slice": "PROMPT-AI-EVAL-15",
+    "path": "evaluation/reports/egyptian-v1/real-llm-eval15/",
+    "status": "COMPLETE",
+    "overwritten": false,
+    "preserved": true
+  },
+  "runnerVersion": "eval15-broader@1",
+  "evaluatorVersion": "eval-runner@1",
+  "executionMode": "real-llm · isolated in-memory · provider override (eval-only)",
+  "productionMutation": "NONE (isolated in-memory repositories)",
+  "providerOverride": "evaluation-only (DB policy NOT read/changed)",
+  "startedAt": "2026-10-02T05:31:30.013Z",
+  "finishedAt": "2026-10-02T05:46:54.331Z",
+  "artifacts": [
+    "recovery-provenance.json",
+    "manifest.json",
+    "evaluation-run.json",
+    "case-selection.json",
+    "analysis.json",
+    "calibration/calibration.json",
+    "status.md",
+    "report.md"
+  ],
+  "readiness": "BLOCKED_BEHAVIOR"
+}

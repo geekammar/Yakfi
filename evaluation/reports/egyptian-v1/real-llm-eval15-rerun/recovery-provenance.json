@@ -1,0 +1,35 @@
+{
+  "recovery": true,
+  "runId": "eval15-rerun@1",
+  "slice": "PROMPT-AI-EVAL-15R",
+  "title": "Real-LLM price + knowledge re-verification (recovery / rerun)",
+  "derivedFrom": "evaluation/reports/egyptian-v1/real-llm-eval15/",
+  "priorRun": {
+    "slice": "PROMPT-AI-EVAL-15",
+    "status": "COMPLETE",
+    "startedAt": "2026-10-02T04:42:41.585Z",
+    "finishedAt": "2026-10-02T05:05:16.516Z",
+    "measuredTurns": 24,
+    "realModelCalls": 24,
+    "providerFailures": 0,
+    "readiness": "BLOCKED_BEHAVIOR",
+    "preserved": true,
+    "overwritten": false
+  },
+  "priorAttempts": {
+    "toolingSymptom": "message lifecycle symptom reported by the prior session (message_start while a message was still open)",
+    "classification": "EXECUTION / ORCHESTRATION unless repository evidence proves otherwise",
+    "repositoryEvidence": "the prior canonical run has startedAt + finishedAt + a complete measured per-turn record; the symptom is NOT recorded in any repository artifact"
+  },
+  "reason": "Re-verify the shipped Slice-6 price/knowledge behavior under real LLM inference on the CURRENT repository state, with a fresh run_id and a NEW output directory. Prior EVAL-15 artifacts are preserved verbatim and are NOT modified.",
+  "scope": "evaluation-only; no src/, prompt, schema, migration, provider policy, dataset, gold-label or scorer change; no commit/push/tag/deploy/migrate",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "dataset": {
+    "version": "egyptian-v1",
+    "hash": "8be16297ae4717bab5da4f3c94de1887",
+    "hashAlgo": "sha256-first32",
+    "mutated": false
+  },
+  "startedAt": "2026-10-02T05:28:00Z"
+}

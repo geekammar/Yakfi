@@ -1,0 +1,462 @@
+{
+  "slice": "PROMPT-AI-EVAL-15",
+  "executedAt": "2026-10-02T05:05:16.516Z",
+  "provider": "atria",
+  "model": "Atria-Dawn-Preview",
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887",
+  "counts": {
+    "fixtures": 16,
+    "gatingFixtures": 14,
+    "gatingPass": 13,
+    "exploratory": 2,
+    "conversions": 3,
+    "conversionsPass": 3,
+    "measuredTurns": 24,
+    "realModelCalls": 24,
+    "bypassTurns": 0,
+    "multiCallTurns": 0,
+    "providerFailures": 0,
+    "malformed": 0,
+    "engineReached": true,
+    "safetyPreserved": true,
+    "bookingContinued": true
+  },
+  "latency": {
+    "measuredTurnsWithLatency": 24,
+    "p50": 26812,
+    "p95": 219984,
+    "max": 274030,
+    "timeoutMsConfigured": 300000,
+    "timeoutCount": 0
+  },
+  "modelCallInvariant": {
+    "measuredTurns": 24,
+    "realModelCalls": 24,
+    "callsPerTurnMax": 1,
+    "callsPerTurnMin": 1,
+    "bypassTurns": 0,
+    "multiCallTurns": 0,
+    "retries": 0,
+    "hiddenSecondInference": 0,
+    "customerVisibleSends": 15
+  },
+  "providerRuntimeFailures": 0,
+  "malformed": 0,
+  "safetyPreserved": true,
+  "perTurn": [
+    {
+      "id": "calib-ordinary-answerable",
+      "role": "ANSWER_CONTROL",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": false,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 17023
+    },
+    {
+      "id": "calib-price-present",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 10381
+    },
+    {
+      "id": "calib-missing-escalates",
+      "role": "PRICE_MISSING_QUESTION",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 28325
+    },
+    {
+      "id": "calib-booking-only-missing",
+      "role": "PRICE_MISSING_BOOKING",
+      "status": "AI_ACTIVE",
+      "decisionClass": "CLARIFY",
+      "action": "booking_handoff",
+      "handoffReason": null,
+      "goalKinds": [
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": false,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 38651
+    },
+    {
+      "id": "calib-multi-intent-price-booking",
+      "role": "MULTI_INTENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": true,
+      "pendingGoals": 1,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 22094
+    },
+    {
+      "id": "bp-fixed-colloquial",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 10348
+    },
+    {
+      "id": "bp-range-natural",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 13357
+    },
+    {
+      "id": "bp-starting-from-natural",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 14672
+    },
+    {
+      "id": "bp-conditional-natural",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 19828
+    },
+    {
+      "id": "bp-mixed-arabic-english",
+      "role": "PRICE_PRESENT",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 16427
+    },
+    {
+      "id": "bp-arabizi-pure",
+      "role": "EXPLORATORY",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": false,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 26812
+    },
+    {
+      "id": "ms-two-service-prices",
+      "role": "PRICE_MULTI",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 30498
+    },
+    {
+      "id": "ms-price-comparison",
+      "role": "PRICE_MULTI",
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 21158
+    },
+    {
+      "id": "fu-price-after-service-id",
+      "role": "PRICE_FOLLOWUP",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": false,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 16783
+    },
+    {
+      "id": "bk-while-price-unknown",
+      "role": "PRICE_MISSING_BOOKING",
+      "status": "AI_ACTIVE",
+      "decisionClass": "CLARIFY",
+      "action": "booking_handoff",
+      "handoffReason": null,
+      "goalKinds": [
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": false,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 13600
+    },
+    {
+      "id": "mp-explicit-question",
+      "role": "PRICE_MISSING_QUESTION",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "goalKinds": [
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 38946
+    },
+    {
+      "id": "sf-price-plus-human",
+      "role": "SAFETY_REQUIRED",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "HUMAN_REQUEST",
+      "goalKinds": [
+        "HANDOFF",
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 219984
+    },
+    {
+      "id": "sf-price-plus-sensitive",
+      "role": "SAFETY_REQUIRED",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "SENSITIVE",
+      "goalKinds": [
+        "HANDOFF",
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 92110
+    },
+    {
+      "id": "sf-missing-price-plus-human",
+      "role": "SAFETY_REQUIRED",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "HUMAN_REQUEST",
+      "goalKinds": [
+        "HANDOFF",
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 93705
+    },
+    {
+      "id": "sf-missing-price-plus-sensitive",
+      "role": "SAFETY_REQUIRED",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "SENSITIVE",
+      "goalKinds": [
+        "HANDOFF",
+        "HANDOFF"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 274030
+    },
+    {
+      "id": "sf-price-plus-knowledge-gap",
+      "role": "EXPLORATORY",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "goalKinds": [
+        "HANDOFF",
+        "ANSWER"
+      ],
+      "answerAndContinue": false,
+      "pendingGoals": 0,
+      "derivedPriceOrFee": true,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 35931
+    },
+    {
+      "id": "mi-booking-plus-price::u0",
+      "role": null,
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": true,
+      "pendingGoals": 1,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 51064
+    },
+    {
+      "id": "mi-availability-plus-price::u0",
+      "role": null,
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": true,
+      "pendingGoals": 1,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 181997
+    },
+    {
+      "id": "mi-discovery-price-booking::u0",
+      "role": null,
+      "status": "AI_ACTIVE",
+      "decisionClass": "ANSWER",
+      "action": "reply",
+      "handoffReason": null,
+      "goalKinds": [
+        "ANSWER",
+        "DOMAIN_ACTION"
+      ],
+      "answerAndContinue": true,
+      "pendingGoals": 1,
+      "modelCalls": 1,
+      "providerFailure": false,
+      "modelLatencyMs": 29434
+    }
+  ]
+}

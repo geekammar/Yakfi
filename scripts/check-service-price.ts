@@ -340,6 +340,26 @@ function main(): void {
     missingPriceTurn.request.services[0]?.price === undefined,
   );
 
+  // ARCH-14: the concrete EVAL-15R follow-up «تمام وبكام؟» — the «و»
+  // conjunction clitic must not withhold the task-gated price (reuses the
+  // Slice-1 F1 affix seam), and a missing price is still never fabricated.
+  const cliticPriceTurn = buildAiContext({
+    scope: { businessId: TENANT },
+    sources: sources("تمام وبكام؟", FIXED, []),
+  });
+  check(
+    "الظهور: «تمام وبكام؟» تعرض السعر المخزّن (إصلاح الواو العطف)",
+    cliticPriceTurn.request.services[0]?.price === "300 جنيه",
+  );
+  const cliticMissingTurn = buildAiContext({
+    scope: { businessId: TENANT },
+    sources: sources("تمام وبكام؟", { priceType: null }, []),
+  });
+  check(
+    "الظهور: «تمام وبكام؟» مع سعر مفقود لا يُختلق",
+    cliticMissingTurn.request.services[0]?.price === undefined,
+  );
+
   // ── DISCLOSURE (real gate) ───────────────────────────────────────────────
 
   const priceDisclosure = enforceDisclosure({
@@ -361,6 +381,18 @@ function main(): void {
   check(
     "الإفصاح: سؤال السعر + لا سعر = تحويل لبشري (لا اختراع)",
     missingDisclosure.kind === "requires-human",
+  );
+
+  const cliticMissingDisclosure = enforceDisclosure({
+    response: faqReply(),
+    context: {
+      request: cliticMissingTurn.request,
+      facts: cliticMissingTurn.facts,
+    },
+  });
+  check(
+    "الإفصاح: «تمام وبكام؟» + لا سعر = تحويل لبشري (المسار نفسه)",
+    cliticMissingDisclosure.kind === "requires-human",
   );
 
   const notRelevantDisclosure = enforceDisclosure({

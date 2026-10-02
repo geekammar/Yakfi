@@ -62,7 +62,10 @@ import {
   AI_RECENT_MESSAGE_LIMIT,
 } from "@/features/conversations/server/ai-contract";
 import { ASSISTANT_STYLE_DIRECTIVE } from "@/features/conversations/server/assistant-style";
-import { normalizeArabicText } from "@/features/conversations/server/conversation-ai";
+import {
+  normalizeArabicText,
+  stripAffixes,
+} from "@/features/conversations/server/conversation-ai";
 import {
   FACT_EXCLUSION_REASONS,
   classifyBusinessField,
@@ -269,12 +272,23 @@ const PRICE_OR_FEE_WORDS = [
  * Deterministic relevance derivation from the customer message (Arabic
  * normalized + light morphology, same pipeline the classifier uses for
  * text). Pure: same input ⇒ same output, no I/O, no LLM.
+ *
+ * The price gate additionally runs the token through the existing Slice-1 F1
+ * `stripAffixes` seam so a price word carrying the Egyptian conjunction «و»
+ * clitic is recognized («وبكام» → «كام»). Scoped to the price family only —
+ * the other relevance families keep their exact previous matching, so the
+ * remediation does not widen task-gated exposure beyond the concrete
+ * EVAL-15R price-relevance edge case.
  */
 export function deriveTaskRelevance(message: string): TaskRelevance {
   const normalized = normalizeArabicText(message);
   const tokens = normalized.split(" ").filter(Boolean);
-  const matches = (words: ReadonlyArray<string>): boolean =>
-    tokens.some((token) =>
+  const priceTokens = tokens.map(stripAffixes);
+  const matches = (
+    words: ReadonlyArray<string>,
+    candidates: ReadonlyArray<string> = tokens,
+  ): boolean =>
+    candidates.some((token) =>
       words.some((word) => token === word || token.startsWith(word)),
     );
   return {
@@ -282,7 +296,7 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     cancellationOrReschedule: matches(CANCELLATION_OR_RESCHEDULE_WORDS),
     providerChoice: matches(PROVIDER_CHOICE_WORDS),
     contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
-    priceOrFee: matches(PRICE_OR_FEE_WORDS),
+    priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
   };
 }
 

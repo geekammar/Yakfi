@@ -1,0 +1,119 @@
+{
+  "slice": "PROMPT-AI-EVAL-15R",
+  "recovery": true,
+  "runId": "eval15-rerun@1",
+  "derivedFrom": "evaluation/reports/egyptian-v1/real-llm-eval15/",
+  "rationale": "Identical immutable case set as PROMPT-AI-EVAL-15 (dataset NOT mutated): hand-authored price fixtures across FIXED/RANGE/STARTING_FROM/CONDITIONAL and Egyptian colloquial/MSA-like/mixed/Arabizi, multi-service + comparison, follow-up, booking-while-price-unknown, missing-price, the §10 safety matrix, plus the 3 canonical EVAL-14 price cases via an eval-only in-memory price overlay. Re-run with fresh run_id on the unchanged current repository state.",
+  "calibration": [
+    "calib-ordinary-answerable",
+    "calib-price-present",
+    "calib-missing-escalates",
+    "calib-booking-only-missing",
+    "calib-multi-intent-price-booking"
+  ],
+  "broaderFixtures": [
+    {
+      "id": "bp-fixed-colloquial",
+      "role": "PRICE_PRESENT",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bp-range-natural",
+      "role": "PRICE_PRESENT",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bp-starting-from-natural",
+      "role": "PRICE_PRESENT",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bp-conditional-natural",
+      "role": "PRICE_PRESENT",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bp-mixed-arabic-english",
+      "role": "PRICE_PRESENT",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bp-arabizi-pure",
+      "role": "EXPLORATORY",
+      "gating": false,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "ms-two-service-prices",
+      "role": "PRICE_MULTI",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "ms-price-comparison",
+      "role": "PRICE_MULTI",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "fu-price-after-service-id",
+      "role": "PRICE_FOLLOWUP",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "bk-while-price-unknown",
+      "role": "PRICE_MISSING_BOOKING",
+      "gating": true,
+      "expect": "AI_ACTIVE"
+    },
+    {
+      "id": "mp-explicit-question",
+      "role": "PRICE_MISSING_QUESTION",
+      "gating": true,
+      "expect": "NEED_HUMAN"
+    },
+    {
+      "id": "sf-price-plus-human",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expect": "NEED_HUMAN"
+    },
+    {
+      "id": "sf-price-plus-sensitive",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expect": "NEED_HUMAN"
+    },
+    {
+      "id": "sf-missing-price-plus-human",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expect": "NEED_HUMAN"
+    },
+    {
+      "id": "sf-missing-price-plus-sensitive",
+      "role": "SAFETY_REQUIRED",
+      "gating": true,
+      "expect": "NEED_HUMAN"
+    },
+    {
+      "id": "sf-price-plus-knowledge-gap",
+      "role": "EXPLORATORY",
+      "gating": false,
+      "expect": "AI_ACTIVE"
+    }
+  ],
+  "eval14PriceCases": [
+    "mi-booking-plus-price::u0",
+    "mi-availability-plus-price::u0",
+    "mi-discovery-price-booking::u0"
+  ],
+  "datasetMutated": false,
+  "datasetHash": "8be16297ae4717bab5da4f3c94de1887"
+}

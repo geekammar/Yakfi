@@ -1,0 +1,44 @@
+{
+  "note": "bp-fixed-colloquial originally used «التنظيف بكام يا دكتور؟». The model ANSWERED the price (reply quotes 300 جنيه, action=reply, goals=[ANSWER]) 3/3, but «دكتور» is a HUMAN_WORDS token (conversation-ai.ts:124), so the deterministic human-request precedence correctly escalated to NEED_HUMAN. This was a FIXTURE CONFOUND, not a price defect. The fixture message was corrected to «التنظيف بكام؟» which then returns AI_ACTIVE with the price (shown as cleanFix).",
+  "confoundRuns": [
+    {
+      "run": 1,
+      "message": "التنظيف بكام يا دكتور؟",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "action": "reply",
+      "replyContent": "تنظيف الأسنان في عيادة الأمل بـ 300 جنيه. تحب أحجز لك موعد للتنظيف؟"
+    },
+    {
+      "run": 2,
+      "message": "التنظيف بكام يا دكتور؟",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "action": "reply",
+      "replyContent": "تنظيف الأسنان في عيادة الأمل بـ 300 جنيه. هل تحب أحجز لك موعد للتنظيف؟"
+    },
+    {
+      "run": 3,
+      "message": "التنظيف بكام يا دكتور؟",
+      "status": "NEED_HUMAN",
+      "decisionClass": "HANDOFF",
+      "goalKinds": [
+        "ANSWER"
+      ],
+      "action": "reply",
+      "replyContent": "تنظيف الأسنان في عيادة الأمل بـ 300 جنيه. تحب أحجز لك موعد للتنظيف؟"
+    }
+  ],
+  "cleanFix": {
+    "message": "التنظيف بكام؟",
+    "status": "AI_ACTIVE",
+    "decisionClass": "ANSWER",
+    "replyContent": "تنظيف الأسنان بسعر 300 جنيه."
+  }
+}
