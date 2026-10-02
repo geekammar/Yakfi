@@ -178,6 +178,7 @@ export async function getStaffWorkspace(
           ),
           hasAttention: Boolean(attention),
           attentionReason: attention?.reason ?? null,
+          attentionCause: attention?.cause ?? null,
           attentionCreatedAt: attention?.createdAt ?? null,
         };
       });

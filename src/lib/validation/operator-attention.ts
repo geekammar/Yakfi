@@ -1,3 +1,5 @@
+import { handoffCauseValues } from "@/features/conversations/server/handoff-cause";
+
 import { uuidSchema } from "./common";
 import { z } from "zod";
 
@@ -30,6 +32,19 @@ export const attentionReasonValues = [
 export type AttentionReason = (typeof attentionReasonValues)[number];
 
 /**
+ * The canonical TYPED handoff cause (PROMPT-AI-ARCH-16 — Slice 7) — the
+ * stable, fine-grained answer to "why does this conversation need me?". It is
+ * a SEPARATE dimension from the coarse operational `reason`: the reason stays
+ * the operational category; the cause explains the assistant's specific
+ * motivation in plain operator language. Optional and additive: a legacy row
+ * (or a staff-routed thread) carries none, and the operator simply falls back
+ * to the coarse `reason`. Unknown stored values are rejected by the closed
+ * enum — they can never silently become a misleading cause.
+ */
+export type { HandoffCause } from "@/features/conversations/server/handoff-cause";
+export { handoffCauseValues } from "@/features/conversations/server/handoff-cause";
+
+/**
  * Operator-facing Arabic labels — plain operational language. Deliberately
  * hides B-01/B-02/B-03 internals, provider identity, and AI internals; the
  * operator only ever sees what they need to act.
@@ -44,6 +59,11 @@ const openAttentionSchema = z.object({
   businessId: uuidSchema,
   conversationId: uuidSchema,
   reason: z.enum(attentionReasonValues),
+  /**
+   * The typed cause of the handoff (Slice 7). Absent on a staff-routed thread
+   * and on any legacy caller; the operator mapping renders it when present.
+   */
+  cause: z.enum(handoffCauseValues).nullish(),
 });
 
 const resolveAttentionSchema = z.object({

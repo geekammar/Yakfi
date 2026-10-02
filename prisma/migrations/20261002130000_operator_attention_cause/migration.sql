@@ -1,0 +1,30 @@
+-- Operator attention — typed handoff cause (PROMPT-AI-ARCH-16 — Slice 7).
+--
+-- ADDITIVE ONLY: ONE new NULLABLE column on the EXISTING `operator_attentions`
+-- table. No existing column, constraint, index, or table is renamed,
+-- reinterpreted, or dropped; NO data is backfilled and NO cause is fabricated
+-- — every pre-existing row stays valid with `cause` NULL (i.e. "no typed cause
+-- recorded", which the operator surface renders by falling back to the coarse
+-- `reason`). Backward-compatible by construction.
+--
+-- WHY: the coarse `reason` collapses every "the assistant could not safely
+-- answer" cause into one key, so an operator cannot tell a knowledge gap from
+-- a policy refusal, a provider outage, or an invalid model output. `cause`
+-- carries the canonical typed handoff cause the project committed to
+-- (docs/ai/TARGET_ARCHITECTURE.md §8): CUSTOMER_REQUESTED_HUMAN ·
+-- SENSITIVE_OR_RESTRICTED · DOMAIN_REQUIRES_HUMAN · KNOWLEDGE_GAP_UNRESOLVED ·
+-- AMBIGUITY_UNRESOLVED · POLICY_REFUSED · PROVIDER_FAILURE · AI_FAILURE ·
+-- TENANT_CONFIGURATION · RETRY_EXHAUSTED. It is a stable machine key
+-- (validated by the closed Zod enum `handoffCauseValues` in
+-- `features/conversations/server/handoff-cause` — no Prisma enum, so extending
+-- the list needs no further migration, the same pattern as `reason`). It is
+-- DERIVED AFTER the authoritative engine/resolver handoff decision and can
+-- never change whether a handoff occurs; a staff-routed thread carries none.
+-- It holds ONLY safe operational metadata — never a prompt, never
+-- chain-of-thought, never a provider payload, never resolver internals.
+--
+-- No other table is touched. The handoff lifecycle itself
+-- (`conversations.status` = NEED_HUMAN) is unchanged.
+
+-- AlterTable
+ALTER TABLE "operator_attentions" ADD COLUMN "cause" TEXT;

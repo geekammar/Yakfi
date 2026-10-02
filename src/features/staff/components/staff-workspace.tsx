@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  HANDOFF_CAUSE_PRESENTATIONS,
+  type HandoffCause,
+} from "@/features/conversations/server/handoff-cause";
 import type {
   StaffAssignedItem,
   StaffQueueItem,
@@ -94,13 +98,28 @@ function previewPrefix(senderType: "CUSTOMER" | "AI" | "STAFF") {
  * "this one is still waiting for you" chip: why the assistant did not
  * answer, in plain operator language. Carries no AI internals (no prompts,
  * no chain-of-thought, no provider details). Shown to the operator only.
+ *
+ * PROMPT-AI-ARCH-16 (Slice 7) — when a TYPED cause was recorded it becomes
+ * the primary explanation (the plain "why does this need me?" label + a
+ * bounded description on hover/title); the coarse reason stays as the
+ * operational category underneath. A staff-routed thread or a legacy row
+ * carries no cause and falls back to the coarse reason alone.
  */
 function AttentionMarker({ item }: { item: StaffQueueItem }) {
   if (!item.hasAttention || !item.attentionReason) return null;
+  const cause = item.attentionCause;
+  const presentation = cause
+    ? HANDOFF_CAUSE_PRESENTATIONS[cause as HandoffCause]
+    : null;
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground">
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"
+      {...(presentation ? { title: presentation.description } : {})}
+    >
       <AlertCircleIcon aria-hidden className="size-3" />
-      {ATTENTION_REASON_LABELS[item.attentionReason]}
+      {presentation
+        ? presentation.label
+        : ATTENTION_REASON_LABELS[item.attentionReason]}
     </span>
   );
 }

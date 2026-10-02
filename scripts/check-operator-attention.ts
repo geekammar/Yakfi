@@ -30,6 +30,7 @@ import type {
   InboundResult,
   InboundSuccess,
 } from "../src/features/conversations/server/conversation-engine";
+import type { HandoffCause } from "../src/features/conversations/server/handoff-cause";
 import type { AttentionReason } from "../src/lib/validation";
 import type {
   Branch,
@@ -146,6 +147,8 @@ async function main(): Promise<void> {
     businessId: string;
     conversationId: string;
     reason: AttentionReason;
+    /** The typed handoff cause (Slice 7) — null when none was recorded. */
+    cause: HandoffCause | null;
     createdAt: string;
     resolvedAt: string | null;
     resolvedById: string | null;
@@ -158,6 +161,7 @@ async function main(): Promise<void> {
       businessId: string;
       conversationId: string;
       reason: AttentionReason;
+      cause?: HandoffCause | null;
     }) {
       const parsed = operatorAttentionValidation.open.parse(input);
       const existing = attentionStore.get(parsed.conversationId);
@@ -166,6 +170,9 @@ async function main(): Promise<void> {
         businessId: parsed.businessId,
         conversationId: parsed.conversationId,
         reason: parsed.reason,
+        // Mirrors the real repository: the latest handoff's cause wins, and
+        // a re-open without a cause clears any prior one (no stale leak).
+        cause: parsed.cause ?? null,
         createdAt: existing ? existing.createdAt : now().toISOString(),
         resolvedAt: null,
         resolvedById: null,

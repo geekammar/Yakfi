@@ -369,6 +369,16 @@ export function resolveTurnPlan(input: ResolveTurnPlanInput): ResolvedTurn {
     decision.intent === "HUMAN_REQUEST" ||
     decision.handoffReason === "HUMAN_REQUEST";
 
+  // A safety-required turn, judged by the DETERMINISTIC signal OR the model's
+  // OWN explicit `SENSITIVE` handoff reason. Used to keep a model-only human
+  // claim from outranking safety (PROMPT-AI-ARCH-16 — Slice 7): the model can
+  // emit `intent: HUMAN_REQUEST` while ALSO reporting `handoffReason:
+  // SENSITIVE`, and letting the model's `intent` field win would mislabel a
+  // safety handoff as a customer request — the LLM silently becoming the
+  // authority for safety precedence.
+  const safetyRequired =
+    signals.sensitive === true || decision.handoffReason === "SENSITIVE";
+
   // ── 1. CONTROL_COMMAND — a hard, already-decided control pre-empts the AI.
   if (input.control) {
     return resolved(
@@ -385,8 +395,14 @@ export function resolveTurnPlan(input: ResolveTurnPlanInput): ResolvedTurn {
   //      model-only human claim fires too, EXCEPT while a task is pending,
   //      where (absent any deterministic human/sensitive signal) it is a
   //      benign interruption handled by rule 6 — never losing the task to a
-  //      human escalation the customer did not actually request.
-  if (signals.explicitHuman === true || (modelHuman && !hasPendingTask)) {
+  //      human escalation the customer did not actually request. It ALSO
+  //      never fires over a safety-required turn (Slice 7): a model that
+  //      reports HUMAN_REQUEST and SENSITIVE at once must not downgrade the
+  //      authoritative safety reason.
+  if (
+    signals.explicitHuman === true ||
+    (modelHuman && !hasPendingTask && !safetyRequired)
+  ) {
     return resolved(
       primaryGoal,
       "HANDOFF",
@@ -400,7 +416,7 @@ export function resolveTurnPlan(input: ResolveTurnPlanInput): ResolvedTurn {
   //      The DETERMINISTIC signal is authoritative: a safety-required turn
   //      hands off even when the MODEL proposed a clarification and did not
   //      self-report SENSITIVE (PROMPT-AI-EVAL-07 `ho-sensitive-medical`).
-  if (signals.sensitive === true || decision.handoffReason === "SENSITIVE") {
+  if (safetyRequired) {
     return resolved(
       primaryGoal,
       "HANDOFF",

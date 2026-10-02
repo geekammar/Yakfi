@@ -1,4 +1,4 @@
-import type { AttentionReason } from "@/lib/validation";
+import type { AttentionReason, HandoffCause } from "@/lib/validation";
 import type {
   AppointmentStatus,
   ConversationStatus,
@@ -122,6 +122,14 @@ export type StaffQueueItem = {
    */
   hasAttention: boolean;
   attentionReason: AttentionReason | null;
+  /**
+   * PROMPT-AI-ARCH-16 (Slice 7) — the canonical TYPED cause of the handoff:
+   * the stable, fine-grained answer to "why does this conversation need me?".
+   * Null when no cause was recorded (a staff-routed thread, or a legacy row);
+   * the operator surface then falls back to the coarse `attentionReason`.
+   * Operator-only, never customer-visible, never internal AI reasoning.
+   */
+  attentionCause: HandoffCause | null;
   attentionCreatedAt: string | null;
 };
 

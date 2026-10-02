@@ -51,6 +51,76 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**AI TARGET ARCHITECTURE — SLICE 7 TYPED HANDOFF-CAUSE TAXONOMY + OPERATOR
+MAPPING (`PROMPT-AI-ARCH-16`, IMPLEMENTATION + VERIFICATION): BUILT +
+DETERMINISTIC + REAL-LLM VERIFIED — READY_FOR_NEXT_STAGE (human-review gate;
+NO release/commit).** The NEED_HUMAN behavior is now typed, explicit and
+operator-usable end-to-end. **ONE pure module**
+(`src/features/conversations/server/handoff-cause.ts`) owns the canonical
+10-value `HandoffCause` (`CUSTOMER_REQUESTED_HUMAN · SENSITIVE_OR_RESTRICTED ·
+DOMAIN_REQUIRES_HUMAN · KNOWLEDGE_GAP_UNRESOLVED · AMBIGUITY_UNRESOLVED ·
+POLICY_REFUSED · PROVIDER_FAILURE · AI_FAILURE · TENANT_CONFIGURATION ·
+RETRY_EXHAUSTED`), a fail-safe `parseHandoffCause` (unknown/legacy → `null`,
+never a misleading cause), total mappers from the EXISTING AI-contract and
+Conversation-Control reasons, and the ONE centralized Arabic operator mapping
+(label + bounded description). The engine derives the cause at every
+already-decided `NEED_HUMAN` branch AFTER the authoritative resolver/safety
+decision and carries it on the additive optional
+`InboundSuccess.handoffCause`; the model's free-form `handoffCause` string is
+never trusted as canonical. Provider/retry/AI failure stay distinct via the
+EXISTING provider-neutral Conversation-Control outcome
+(`AiTelemetry.conversationControl.handoffReason`) — **no second model call, no
+prompt change**. **Smallest persistence seam:** ONE additive nullable `cause`
+column on the EXISTING `operator_attentions` table (migration
+`20261002130000_operator_attention_cause`; no backfill/destructive op), read
+back fail-safe, latest handoff wins (no stale leak); the EXISTING staff
+workspace queue + conversation-detail chip render the typed cause, falling
+back to the coarse `attentionReason`; takeover / Resume AI / tenant scoping
+unchanged. A staff-routed thread (`DEFERRED_TO_STAFF`) intentionally carries
+no cause. **Safety-precedence correction (real-LLM finding):** a model-only
+human claim (`intent: HUMAN_REQUEST` while reporting `handoffReason:
+SENSITIVE` on a deterministically sensitive message) no longer outranks
+`SAFETY_RESTRICTED`; the deterministic explicit-human request still wins and
+the HANDOFF OUTCOME is unchanged — only the cause/precedenceRule is corrected.
+**Untouched/preserved:** lifecycle (`AI_ACTIVE → NEED_HUMAN → takeover →
+explicit Resume AI`), safety/handoff precedence, `goals[]`/answer-and-continue/
+pendingGoals, tenant proof, Slice-6 price semantics, one-call/one-send
+invariant, no second resolver/state/planner/engine/classifier.
+**Deterministic:** NEW `check:handoff-cause` **31/31** (taxonomy +
+presentation coverage, fail-safe parse, both reason mappers, eligibility
+split, purity/no-second-module guards; real-engine E2E for all 10 causes incl.
+provider failure vs retry exhaustion vs AI failure vs policy refusal vs tenant
+configuration, safety precedence, multi-intent, persistence, stale-cause
+overwrite, Resume-AI non-fabrication, tenant isolation, no customer-visible
+cause, zero extra model calls); all adjacent gates green (ai-prompts 127,
+ai-architecture 25, ai-disclosure 41, service-price 33, ai-context-builder 54,
+knowledge-visibility 36, response-normalizer 78, services 50, multi-intent 22,
+turn-planner 31, conversation-state 20, clarify 27, future-system 33,
+conversation-handoff 21, operator-attention 20, conversation-booking 16,
+eval/-schema/-runner 25/22/18); `pnpm verify` (lint/typecheck/format/build) +
+`pnpm security` green (1 pre-existing both-env-files warning). **Real-LLM (NEW
+eval-only runner `scripts/eval-run-future-arch16.ts`, `arch16@1`; Atria
+`Atria-Dawn-Preview` override; DB policy NOT read/changed; dataset hash
+`8be16297…` unchanged):** calibration 3/3 · gating **10/10** · 13 measured
+turns · 13 real calls · 1 call/turn · 0 multi-call · 0 bypass · 0 provider
+failures · 0 malformed; explicit-human/sensitive/knowledge-gap/domain-
+constraint/multi-intent-handoff all derive the correct cause; answerable +
+booking-only + multi-intent-no-handoff stay AI_ACTIVE with no cause; Slice-6
+price preserved (missing → KNOWLEDGE_GAP_UNRESOLVED, present → AI_ACTIVE).
+Latency p50 20.5s / p95 42.2s (provider property). **Files changed:**
+`handoff-cause.ts` (new), `conversation-engine.ts`, `turn-planner.ts`,
+`ai-contract.ts` (comment), `ai-observability` consumers,
+`operator-attention.ts` (validation), `operator-attention.repository.ts`,
+`prisma/schema.prisma` + `prisma/migrations/20261002130000_operator_attention_cause/`,
+`staff/{types,server/workspace-service,components/staff-workspace}`,
+`conversations/{types,server/conversation-queries,components/conversation-detail}`,
+`evaluation/runner/targets/future-system-flowpilot.ts` (eval-only),
+`scripts/check-handoff-cause.ts` + `scripts/check-operator-attention.ts` +
+`scripts/eval-run-future-arch16.ts` (new/updated), `package.json`,
+`docs/BUILD_STATE.md`, `docs/DECISIONS.md` (#81), `docs/DECISIONS_INDEX.md`,
+`docs/ai/TARGET_ARCHITECTURE.md`. **No commit/push/tag/deploy/migrate.**
+**Readiness: READY_FOR_NEXT_STAGE.**
+
 **AI TARGET ARCHITECTURE — SLICE 6 BROADER KNOWLEDGE EXPOSURE: BUSINESS ABOUT
 
 - SERVICE DESCRIPTION + BOUNDED CATALOG (`PROMPT-AI-ARCH-15`, IMPLEMENTATION +
@@ -1799,17 +1869,28 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
 ## Next Step
 
+**AI — Slice 7 (`PROMPT-AI-ARCH-16`, Typed handoff-cause taxonomy + operator
+mapping) is BUILT + DETERMINISTIC + REAL-LLM VERIFIED (READY_FOR_NEXT_STAGE —
+see `Current State`).** The next logical prompt in the approved target-
+architecture migration queue (`docs/ai/TARGET_ARCHITECTURE.md §17`) is **Slice
+8 — the optional JEV decision strategy behind the EXISTING provider gateway**
+(`PROMPT-AI-ARCH-17`): add a strategy plug that may terminate without an LLM or
+act as the single generative call, preserving the zero-or-one generative
+round-trip invariant, provider neutrality, and the `AI interprets → Domain/
+Resolver decides → Engine orchestrates` authority chain — NOT RAG/vector
+search, NOT a mandatory extra inference stage, NOT a classifier→responder→judge
+chain (all remain deferred evidence work). The Slice-7 migration
+(`20261002130000_operator_attention_cause`) and the resolver safety-precedence
+correction have NOT been applied/released by this slice; the operator owns the
+release. Keep `pnpm check:handoff-cause`, `check:operator-attention`, and the
+adjacent gates as the regression floor.
+
 **AI — Slice 6 (`PROMPT-AI-ARCH-13`, Service pricing foundation + task-gated
 price exposure + missing-price handoff) is BUILT + real-LLM VERIFIED
-(READY_FOR_PRICE_REAL_LLM_REVERIFY — see `Current State`).** The next logical
-prompt is a DEDICATED real-LLM price-and-knowledge RE-VERIFICATION / broader
-regression over a wider priced-fixture set (more services, Arabizi/colloquial
-price phrasings, multi-service price asks, and a re-run of the full EVAL-14
-answer-and-continue bar now that the 3 price cases convert) — NOT Products,
-NOT Billing, NOT a generalized pricing engine (all remain deferred evidence
-work). The migration (`20261002120000_service_price`) has NOT been applied to
-any database by this slice; the operator owns the release. Keep `pnpm
-check:service-price` + the adjacent gates as the regression floor.
+(READY_FOR_PRICE_REAL_LLM_REVERIFY — see `Current State`).** The migration
+(`20261002120000_service_price`) has NOT been applied to any database by that
+slice; the operator owns the release. Keep `pnpm check:service-price` + the
+adjacent gates as the regression floor.
 
 0. **AI — the evaluation data foundation is DESIGNED (DECISIONS #76); two
    evidence-ranked paths are now open and neither is implemented (hard stop).**

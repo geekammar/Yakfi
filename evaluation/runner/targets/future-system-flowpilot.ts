@@ -184,7 +184,10 @@ export class FutureSystemFlowpilotTarget implements EvaluationTarget {
       goals: obs?.goals,
       turnPlan: obs?.turnPlan,
       clarification: obs?.clarification,
-      handoffCause: obs?.handoffCause,
+      // PROMPT-AI-ARCH-16 (Slice 7) — the SERVER-AUTHORITATIVE typed cause
+      // the engine derived for this turn's handoff (the model's own bounded
+      // cause string is only a fallback and is never trusted as canonical).
+      handoffCause: engine.handoffCause ?? obs?.handoffCause,
       factUpdates: obs?.factUpdates,
       knowledgeSourceClass: obs?.knowledgeSourceClass,
       routingDecision: routing,

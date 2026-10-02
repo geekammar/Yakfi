@@ -1471,6 +1471,35 @@ big-bang; old behavior remains available behind the compatibility bridge
 
 ### Slice 7 — Handoff cause taxonomy + operator mapping
 
+> **STATUS: IMPLEMENTED + VERIFIED (PROMPT-AI-ARCH-16; DECISIONS #81).** The
+> target handoff causes from §8 are now first-class end-to-end. **ONE pure
+> module** (`src/features/conversations/server/handoff-cause.ts`) owns the
+> closed 10-value `HandoffCause` taxonomy, a fail-safe `parseHandoffCause`
+> (unknown/legacy → `null`, never a misleading cause), total mappers from the
+> EXISTING AI-contract and Conversation-Control reasons, and the ONE
+> centralized operator mapping (Arabic label + bounded description). The engine
+> derives the cause at each already-decided `NEED_HUMAN` branch AFTER the
+> authoritative resolver/safety decision and carries it on the additive
+> optional `InboundSuccess.handoffCause`; the model's own free-form
+> `handoffCause` string is never trusted as canonical. Provider/runtime failure
+> (`PROVIDER_FAILURE` / `RETRY_EXHAUSTED` / `AI_FAILURE`) is distinguished
+> through the EXISTING provider-neutral Conversation-Control outcome already on
+> `AiTelemetry.conversationControl.handoffReason` — no second model call. The
+> cause is persisted additively on the EXISTING `operator_attentions` row (one
+> nullable `cause` column, migration `20261002130000_operator_attention_cause`,
+> no backfill) and rendered in the EXISTING staff workspace + conversation
+> detail, falling back to the coarse `attentionReason` when absent. A
+> staff-routed thread (`DEFERRED_TO_STAFF`) intentionally carries no cause.
+> **Safety precedence:** the real-LLM run exposed that a model-only human claim
+> (`intent: HUMAN_REQUEST`) could outrank a safety-required turn; the resolver
+> now keeps `SAFETY_RESTRICTED` authoritative over a model-only human claim
+> (the deterministic explicit-human request still wins, and the HANDOFF OUTCOME
+> is unchanged). Guarded by NEW `check:handoff-cause` **31/31**, all adjacent
+> suites, `pnpm verify` + `pnpm security`, and a bounded ARCH-16 real-LLM run
+> (`scripts/eval-run-future-arch16.ts`: calibration 3/3, gating **10/10**, 13
+> calls, 1 call/turn, 0 provider failures, dataset hash unchanged).
+> **Readiness: READY_FOR_NEXT_STAGE.**
+
 - **Goal:** typed causes end-to-end; distinguish policy refusal, provider
   failure, AI failure, knowledge gap, ambiguity.
 - **Boundary:** contract `handoffCause`, gateway mapping, engine state +

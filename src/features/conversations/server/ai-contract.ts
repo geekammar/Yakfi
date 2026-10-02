@@ -268,12 +268,11 @@ export const aiClarificationSchema = z.object({
 export type AiClarification = z.infer<typeof aiClarificationSchema>;
 
 /**
- * An explicit handoff cause. A bounded label in this slice — the final
- * production cause enum lands with the handoff mapping (later slice). Target
- * values: CUSTOMER_REQUESTED_HUMAN · SENSITIVE_OR_RESTRICTED ·
- * DOMAIN_REQUIRES_HUMAN · KNOWLEDGE_GAP_UNRESOLVED · AMBIGUITY_UNRESOLVED ·
- * POLICY_REFUSED · PROVIDER_FAILURE · AI_FAILURE · TENANT_CONFIGURATION ·
- * RETRY_EXHAUSTED.
+ * An OPTIONAL model-proposed handoff cause label. This field is a bounded
+ * string (never a second authority): the canonical production taxonomy landed
+ * in `handoff-cause.ts` (PROMPT-AI-ARCH-16 — Slice 7; DECISIONS #81), and the
+ * engine DERIVES the authoritative `HandoffCause` deterministically AFTER the
+ * resolver/safety decision — it never trusts this free-form model string.
  */
 export const aiHandoffCauseSchema = z.string().trim().min(1).max(64);
 

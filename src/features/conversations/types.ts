@@ -1,4 +1,4 @@
-import type { AttentionReason } from "@/lib/validation";
+import type { AttentionReason, HandoffCause } from "@/lib/validation";
 import type {
   AppointmentStatus,
   ConversationStatus,
@@ -43,6 +43,15 @@ export type ConversationDetailData = {
    * Arabic text (never color-only).
    */
   attentionReason: AttentionReason | null;
+  /**
+   * PROMPT-AI-ARCH-16 (Slice 7) — the canonical TYPED cause of the handoff:
+   * the stable, fine-grained "why does this need me?" value, captured
+   * alongside the coarse `attentionReason` at the moment the thread is
+   * opened. Same first-load-only semantics as `attentionReason` (opening the
+   * thread acknowledges it). Null when no cause was recorded — the operator
+   * then reads the coarse reason alone.
+   */
+  attentionCause: HandoffCause | null;
   customer: {
     id: string;
     name: string;

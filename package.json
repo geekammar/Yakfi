@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -35,6 +35,7 @@
     "check:atria-retry": "tsx scripts/check-atria-retry.ts",
     "check:conversation-control": "tsx scripts/check-conversation-control.ts",
     "check:conversation-handoff": "tsx scripts/check-conversation-handoff.ts",
+    "check:handoff-cause": "tsx scripts/check-handoff-cause.ts",
     "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
@@ -92,6 +93,7 @@
     "eval:run-future-fixtures": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-fixtures.ts",
     "eval:run-future-price": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-eval15.ts",
     "eval:run-future-arch15": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch15.ts",
+    "eval:run-future-arch16": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch16.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts"
   },

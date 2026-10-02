@@ -272,6 +272,14 @@ model OperatorAttention {
   businessId     String    @map("business_id")
   conversationId String    @unique @map("conversation_id")
   reason         String
+  /**
+   * The canonical TYPED handoff cause (PROMPT-AI-ARCH-16 — Slice 7) — the
+   * stable, fine-grained "why does this need me?" value. ADDITIVE + NULLABLE:
+   * legacy rows and staff-routed threads carry none; a missing value simply
+   * falls back to the coarse `reason`. A stable machine key (no Prisma enum),
+   * so extending the cause list needs no data migration.
+   */
+  cause          String?   @map("cause")
   createdAt      DateTime  @default(now()) @map("created_at")
   // Null while OPEN (the alert is live); set when the operator
   // acknowledges the thread or it leaves NEED_HUMAN.

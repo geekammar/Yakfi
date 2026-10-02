@@ -116,6 +116,12 @@ import type { ConversationState } from "@/features/conversations/server/conversa
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
 import {
+  contractHandoffReasonToCause,
+  controlHandoffReasonToCause,
+  eligibilityFailureCodeToCause,
+  type HandoffCause,
+} from "@/features/conversations/server/handoff-cause";
+import {
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
@@ -367,6 +373,15 @@ export type InboundSuccess = {
   /** Classified intent when the AI ran; null when deferred to staff. */
   intent: AiResponse["intent"] | null;
   conversationStatus: ConversationStatus;
+  /**
+   * The canonical TYPED cause when this turn ended in a handoff
+   * (PROMPT-AI-ARCH-16 — Slice 7), or `null` when the turn did not hand off.
+   * Explanatory ONLY: it is derived AFTER the authoritative engine/resolver
+   * decision and can never change the turn's outcome. A staff-owned thread
+   * (`DEFERRED_TO_STAFF`) intentionally carries NO cause — the taxonomy
+   * describes why the ASSISTANT needed a human, not a staff routing.
+   */
+  handoffCause: HandoffCause | null;
   /** Assistant provider that answered (honest reporting). */
   assistantProvider: string;
   /**
@@ -1005,6 +1020,7 @@ async function selectionReply(
   scope: BookingSelectionScope,
   content: string,
   status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
+  cause: HandoffCause | null = null,
 ): Promise<InboundSuccess> {
   const assistantMessage = await persistAssistantReply(
     deps,
@@ -1032,6 +1048,7 @@ async function selectionReply(
     assistantAction: status === "NEED_HUMAN" ? "AI_HANDOFF" : "AI_REPLY",
     intent: "BOOKING",
     conversationStatus: status,
+    handoffCause: status === "NEED_HUMAN" ? cause : null,
     assistantProvider: deps.ai.providerName,
     delivery,
   };
@@ -1076,7 +1093,8 @@ async function completeBookingSelection(
   const reply = (
     content: string,
     status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
-  ) => selectionReply(deps, scope, content, status);
+    cause: HandoffCause | null = null,
+  ) => selectionReply(deps, scope, content, status, cause);
 
   // 1. Service — matched ONLY against the persisted Business services
   //    (the offer's service name is the selector, never an id source).
@@ -1113,6 +1131,7 @@ async function completeBookingSelection(
     return reply(
       bookingEligibilityErrorMessage(eligibility.error.code),
       "NEED_HUMAN",
+      eligibilityFailureCodeToCause(eligibility.error.code),
     );
   }
 
@@ -1158,6 +1177,7 @@ async function completeBookingSelection(
     return reply(
       bookingOptionsErrorMessage(bookingResult.error.code),
       "NEED_HUMAN",
+      "DOMAIN_REQUIRES_HUMAN",
     );
   }
   const freshOptions = bookingResult.data.options;
@@ -1165,6 +1185,7 @@ async function completeBookingSelection(
     return reply(
       bookingEmptyReasonMessage(bookingResult.reason ?? "FULLY_BOOKED", date),
       "NEED_HUMAN",
+      "DOMAIN_REQUIRES_HUMAN",
     );
   }
 
@@ -1217,7 +1238,7 @@ async function completeBookingSelection(
     chosen = freshOptions[0] ?? null;
   }
   if (!chosen) {
-    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN");
+    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "DOMAIN_REQUIRES_HUMAN");
   }
 
   // 6. Authoritative creation values — server-derived exclusively.
@@ -1235,7 +1256,9 @@ async function completeBookingSelection(
     chosen.providerId,
   );
   if (!resolvedBranchId || !assigneeId) {
-    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN");
+    // The booking cannot be routed — the business's branch/assignee setup
+    // cannot accept it. An operator can fix this configuration gap.
+    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "TENANT_CONFIGURATION");
   }
 
   const created = await createAppointmentForSelection(deps, {
@@ -1252,7 +1275,7 @@ async function completeBookingSelection(
 
   if (created.status === "failed") {
     // Unexpected booking failure — NEVER a success confirmation.
-    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN");
+    return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "DOMAIN_REQUIRES_HUMAN");
   }
   if (created.status === "conflict") {
     // SLOT_CONFLICT (concurrent close) — retry-safe: refresh + re-offer.
@@ -1267,7 +1290,11 @@ async function completeBookingSelection(
         "AI_ACTIVE",
       );
     }
-    return reply(BOOKING_CONFLICT_MESSAGE, "NEED_HUMAN");
+    return reply(
+      BOOKING_CONFLICT_MESSAGE,
+      "NEED_HUMAN",
+      "DOMAIN_REQUIRES_HUMAN",
+    );
   }
 
   // 7. BOOKED transition + authoritative confirmation. The confirmation
@@ -1331,6 +1358,10 @@ export async function receiveInboundMessage(
           businessId: result.businessId,
           conversationId: result.conversationId,
           reason,
+          // PROMPT-AI-ARCH-16 (Slice 7) — the typed cause of THIS turn's
+          // handoff, derived after the authoritative decision. Null for a
+          // staff-owned thread (DEFERRED_TO_STAFF carries no AI cause).
+          ...(result.handoffCause ? { cause: result.handoffCause } : {}),
         });
       } catch {
         // Attention is a notification layer, not a business action — an
@@ -1498,6 +1529,9 @@ async function runInboundTurn(
         assistantAction: "DEFERRED_TO_STAFF",
         intent: null,
         conversationStatus: "NEED_HUMAN",
+        // A staff-owned thread is not an assistant-initiated handoff — the
+        // typed cause taxonomy describes why the ASSISTANT needed a human.
+        handoffCause: null,
         assistantProvider: deps.ai.providerName,
         delivery: null,
       };
@@ -1694,6 +1728,16 @@ async function runInboundTurn(
         inbound.text,
         builtContext.request.faqs,
       );
+      // PROMPT-AI-ARCH-16 (Slice 7) — type WHY the turn failed safe. The
+      // provider-neutral Conversation Control outcome already classified the
+      // failure (retry exhausted / provider unavailable / quota / auth /
+      // invalid output / the customer's own human request). When none is
+      // available the assistant's structured output was absent or invalid —
+      // AI_FAILURE, never a mislabeled knowledge gap.
+      const failureCause =
+        controlHandoffReasonToCause(
+          turnTelemetry?.conversationControl?.handoffReason ?? null,
+        ) ?? "AI_FAILURE";
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
@@ -1720,6 +1764,7 @@ async function runInboundTurn(
         assistantAction: "AI_HANDOFF",
         intent: null,
         conversationStatus: "NEED_HUMAN",
+        handoffCause: failureCause,
         assistantProvider: deps.ai.providerName,
         observability: turnObservability,
         delivery,
@@ -1774,6 +1819,14 @@ async function runInboundTurn(
         assistantAction: "AI_HANDOFF",
         intent: validated.intent,
         conversationStatus: "NEED_HUMAN",
+        // PROMPT-AI-ARCH-16 (Slice 7) — the resolver's AUTHORITATIVE
+        // precedence rule is the cause: safety-sensitive vs the customer's
+        // own explicit request. Derived AFTER the decision, so a safety
+        // handoff can never be relabeled as something weaker.
+        handoffCause:
+          resolvedTurn.precedenceRule === "SAFETY_RESTRICTED"
+            ? "SENSITIVE_OR_RESTRICTED"
+            : "CUSTOMER_REQUESTED_HUMAN",
         assistantProvider: deps.ai.providerName,
         observability: turnObservability,
         delivery,
@@ -1827,6 +1880,7 @@ async function runInboundTurn(
         assistantAction: "AI_REPLY",
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
         assistantProvider: deps.ai.providerName,
         observability: turnObservability,
         delivery,
@@ -1903,6 +1957,7 @@ async function runInboundTurn(
           assistantAction: "AI_REPLY",
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
           assistantProvider: deps.ai.providerName,
           observability: clarifyObservability,
           delivery,
@@ -1923,6 +1978,13 @@ async function runInboundTurn(
       );
       if (!eligibility.success) {
         const msg = bookingEligibilityErrorMessage(eligibility.error.code);
+        // PROMPT-AI-ARCH-16 (Slice 7) — the DOMAIN (CORE-01) is the
+        // authoritative source of truth: a missing/inactive business, branch
+        // or service is a TENANT_CONFIGURATION cause the operator can fix;
+        // any other eligibility block is a domain constraint needing a human.
+        const eligibilityCause = eligibilityFailureCodeToCause(
+          eligibility.error.code,
+        );
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -1954,6 +2016,7 @@ async function runInboundTurn(
           assistantAction: "AI_HANDOFF",
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
+          handoffCause: eligibilityCause,
           assistantProvider: deps.ai.providerName,
           observability: turnObservability,
           delivery,
@@ -1996,6 +2059,7 @@ async function runInboundTurn(
           assistantAction: "AI_REPLY",
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
           assistantProvider: deps.ai.providerName,
           observability: turnObservability,
           delivery,
@@ -2049,6 +2113,8 @@ async function runInboundTurn(
           assistantAction: "AI_HANDOFF",
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
+          // CORE-02 blocked the booking — an authoritative domain constraint.
+          handoffCause: "DOMAIN_REQUIRES_HUMAN",
           assistantProvider: deps.ai.providerName,
           observability: turnObservability,
           delivery,
@@ -2088,6 +2154,9 @@ async function runInboundTurn(
           assistantAction: "AI_HANDOFF",
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
+          // CORE-02 found no bookable options — a domain constraint the
+          // assistant cannot resolve autonomously.
+          handoffCause: "DOMAIN_REQUIRES_HUMAN",
           assistantProvider: deps.ai.providerName,
           observability: turnObservability,
           delivery,
@@ -2125,6 +2194,7 @@ async function runInboundTurn(
         assistantAction: "AI_REPLY",
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
         assistantProvider: deps.ai.providerName,
         observability: turnObservability,
         delivery,
@@ -2203,6 +2273,7 @@ async function runInboundTurn(
           assistantAction: "AI_REPLY",
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
           assistantProvider: deps.ai.providerName,
           observability: preserveObservability,
           delivery,
@@ -2250,6 +2321,10 @@ async function runInboundTurn(
         assistantAction: "AI_HANDOFF",
         intent: null,
         conversationStatus: "NEED_HUMAN",
+        // The B-03 disclosure gate refused an unbacked self-authored reply —
+        // the assistant could not justify the answer from authoritative
+        // sources, which is a policy refusal, never a knowledge gap.
+        handoffCause: "POLICY_REFUSED",
         assistantProvider: deps.ai.providerName,
         observability: turnObservability,
         delivery,
@@ -2345,6 +2420,16 @@ async function runInboundTurn(
       intent: validated.intent,
       conversationStatus:
         validated.action === "reply" ? "AI_ACTIVE" : "NEED_HUMAN",
+      // PROMPT-AI-ARCH-16 (Slice 7) — the turn's own decision is authoritative;
+      // the cause only types it. A booking-related escalation is a domain
+      // task routed to staff; any other handoff carries the model's VALIDATED
+      // closed-enum reason (safety/human/knowledge/ambiguity already
+      // pre-empted by the resolver's precedence above, so this can never
+      // downgrade a safety handoff).
+      handoffCause:
+        validated.action === "booking_handoff"
+          ? "DOMAIN_REQUIRES_HUMAN"
+          : contractHandoffReasonToCause(validated.handoffReason),
       assistantProvider: deps.ai.providerName,
       observability: turnObservability,
       delivery,

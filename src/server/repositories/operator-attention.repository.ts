@@ -1,5 +1,7 @@
+import { parseHandoffCause } from "@/features/conversations/server/handoff-cause";
 import type {
   AttentionReason,
+  HandoffCause,
   OpenAttentionDto,
   ResolveAttentionDto,
 } from "@/lib/validation";
@@ -15,6 +17,12 @@ import type { OperatorAttention } from "@/types/domain";
  * typed models out; tenant scope is always a server-derived `businessId`;
  * one row per conversation (`conversation_id` UNIQUE) so the open operation
  * is structurally idempotent. No Prisma access outside this layer.
+ *
+ * The typed `cause` (PROMPT-AI-ARCH-16 — Slice 7) is stored alongside the
+ * coarse `reason`. It is derived AFTER the authoritative handoff decision,
+ * so it is purely explanatory; storing it here is what lets the operator
+ * answer "why does this need me?" without reconstructing the cause from raw
+ * messages.
  */
 
 /** An attention row that is still OPEN (the operator has not acknowledged it). */
@@ -22,6 +30,8 @@ export type OpenAttention = {
   id: string;
   conversationId: string;
   reason: AttentionReason;
+  /** The canonical typed handoff cause, when one was recorded (Slice 7). */
+  cause: HandoffCause | null;
   createdAt: string;
 };
 
@@ -30,6 +40,9 @@ function toOpenAttention(row: OperatorAttention): OpenAttention {
     id: row.id,
     conversationId: row.conversationId,
     reason: row.reason as AttentionReason,
+    // Fail safe: an unknown/legacy stored value yields null (the operator
+    // falls back to the coarse reason) — never a misleading cause.
+    cause: parseHandoffCause(row.cause),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -53,14 +66,18 @@ export class OperatorAttentionRepository {
         businessId: parsed.businessId,
         conversationId: parsed.conversationId,
         reason: parsed.reason,
+        ...(parsed.cause ? { cause: parsed.cause } : {}),
         createdAt: now,
         resolvedAt: null,
         resolvedById: null,
       },
       update: {
         // Re-open / refresh: a new unresolved handoff supersedes any prior
-        // acknowledgment state for this conversation.
+        // acknowledgment state for this conversation. The typed cause of the
+        // LATEST handoff wins — a stale cause never leaks from an earlier
+        // turn into the operator's view of the current one.
         reason: parsed.reason,
+        ...(parsed.cause ? { cause: parsed.cause } : { cause: null }),
         createdAt: now,
         resolvedAt: null,
         resolvedById: null,

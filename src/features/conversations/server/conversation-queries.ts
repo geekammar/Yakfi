@@ -94,6 +94,7 @@ export async function getConversationDetail(
     status: conversation.status,
     aiSummary: conversation.aiSummary ?? "",
     attentionReason: openAttention?.reason ?? null,
+    attentionCause: openAttention?.cause ?? null,
     customer: {
       id: conversation.customer.id,
       name: conversation.customer.name,

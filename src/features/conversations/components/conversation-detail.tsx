@@ -7,6 +7,7 @@ import {
   updateAiSummary,
 } from "@/features/conversations/actions/conversation-actions";
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
 import type { ConversationDetailData } from "@/features/conversations/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -66,19 +67,31 @@ function formatAppointmentTime(date: string) {
  * persistent NEED_HUMAN status badge: the badge says the thread is human-
  * owned, this says the operational cause. Icon + Arabic text + a full
  * accessible name — the state is never color-only (DESIGN_SYSTEM §11).
+ *
+ * PROMPT-AI-ARCH-16 (Slice 7) — when a TYPED cause was recorded it becomes
+ * the primary explanation (label + bounded description, Arabic-first); the
+ * coarse reason stays as the accessible fallback. A staff-routed thread or a
+ * legacy row carries no cause and renders the coarse reason alone.
  */
 function AttentionReasonChip({
   reason,
+  cause,
 }: {
   reason: NonNullable<ConversationDetailData["attentionReason"]>;
+  cause: ConversationDetailData["attentionCause"];
 }) {
+  const presentation = cause ? HANDOFF_CAUSE_PRESENTATIONS[cause] : null;
+  const label = presentation
+    ? presentation.label
+    : ATTENTION_REASON_LABELS[reason];
   return (
     <span
-      aria-label={`سبب انتباه المشغل: ${ATTENTION_REASON_LABELS[reason]}`}
+      aria-label={`سبب انتباه المشغل: ${label}`}
       className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"
+      {...(presentation ? { title: presentation.description } : {})}
     >
       <AlertCircleIcon aria-hidden className="size-3" />
-      {ATTENTION_REASON_LABELS[reason]}
+      {label}
     </span>
   );
 }
@@ -265,7 +278,10 @@ export function ConversationDetail({
           </div>
           <ConversationStatusBadge status={data.status} />
           {data.attentionReason ? (
-            <AttentionReasonChip reason={data.attentionReason} />
+            <AttentionReasonChip
+              reason={data.attentionReason}
+              cause={data.attentionCause}
+            />
           ) : null}
           {/* B-07 §A — the conversation's customer is already known
            * context; booking from here prefills العميل and opens the
