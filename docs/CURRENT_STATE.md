@@ -6,8 +6,24 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.31.8** — released and committed (`49d264b`, tag `v0.31.8`;
-HEAD == `origin/main`; working tree clean; tags through `v0.31.8`).
+**Version: v0.39.0** — released and committed (`c55d3de`, tag `v0.39.0`;
+HEAD == `origin/main`). **Production IS LIVE-VERIFIED AT v0.39.0
+(2026-10-03, DECISIONS #85 / `PROMPT-AI-OPS-19`):** `GET /api/health` →
+`status:"ok"`, `version:"0.39.0"`, `deploymentReady:true`,
+`database:"connected"`, `missingEnvVars:[]`; all **18** migrations applied
+and `prisma migrate diff` reports **zero drift** against `schema.prisma`
+(the three Slice-6/7/9 additive migrations ARE live, superseding earlier
+"unapplied" notes). **A REAL PILOT IS ALREADY RUNNING** — see DECISIONS #85
+for the full readiness verdict, the live evidence inventory and the two
+onboarding-repeatability gaps. **The engineering critical path is DONE; the
+operator critical path is NOT** (re-verify the live AI provider — the last 4
+live AI turns FAILED with fallback disabled — finish onboarding pilot #2,
+start logging the strategy's named evidence by hand). The earlier
+`DOC-SYNC-V0318` narrative below describes each slice's authoring moment and
+is retained as history; deployment state statements in it are superseded by
+the live verification above (in particular production is NOT v0.31.2, the
+Telegram fixes ARE live, a managed bot DID reach CONNECTED in production, and
+the Slice-6/7/9 migrations ARE applied).
 **Documentation/context sync (DOC-SYNC-V0318):** releases v0.31.3–v0.31.8
 committed DECISIONS #70–#75; the current baseline for future agent work is
 **Context Architecture V1 (DECISIONS #75)** — `docs/CONTEXT_MAP.md` +
@@ -296,6 +312,27 @@ unavailable candidate slots; no Busy/reason inference; no per-slot availability
 requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
+
+> **CURRENT (2026-10-03, DECISIONS #85 / `PROMPT-AI-OPS-19`) — RUN THE
+> PILOTS; engineering is no longer the critical path.** The product is
+> operationally ready and a real pilot is already running. The next phase is
+> operator-owned and non-code: (1) **re-verify the live AI provider** (policy
+> `codecraft`/`deepseek-v4-flash-0731`, fallback disabled, last 4 live
+> `AI_TURN` rows were FAILURE, no AI traffic since 2026-09-28); (2) **finish
+> onboarding pilot #2** (`صالون سارة التجميلي`, beauty — WhatsApp stuck
+> `AUTHORIZING`, no provider rows); (3) **start logging the strategy's named
+> evidence by hand** (baseline bookings / response time / no-show rate, then
+> weekly; objections, price reaction, churn reasons — the pilot registry is
+> Spec B, NOT now). The smallest justified ENGINEERING work is exactly two
+> onboarding-repeatability surfaces, ONLY with operator approval: a
+> **provider authoring surface** (today `providerRepository.createProfile`/
+> `linkRelation` have ZERO app callers, so the AI can never book on an
+> un-provisioned business) and a **UI/server-action for the ENV-credential
+> WhatsApp connection** (`saveConnection` is called only from offline
+> harnesses). Neither is built. Everything else (knowledge-gap review UI,
+> staff notifications, the pilot registry, Founder Console, vertical scoring,
+> promotion, RAG, billing, JEV activation) stays DEFERRED. Full verdict +
+> live evidence inventory: DECISIONS #85.
 
 1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69):** two
    actions, neither code — (a) **deploy the current head** (the deployed

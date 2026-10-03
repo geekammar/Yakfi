@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import type { KnowledgeGapRepository } from "../src/server/repositories/knowledge-gap.repository";
+
 /**
  * FlowPilot AI Evaluation — FUTURE_SYSTEM bridge STRUCTURAL check
  * (PROMPT-AI-EVAL-06).
@@ -33,6 +35,9 @@ import { join } from "node:path";
  *   F16 provider neutrality: adapter consumes an INJECTED ai (no provider wiring)
  *   F17 clarify-measure distinguishes all seven observed decision classes
  *   F18 production → evaluation boundary intact (no src/ import of evaluation/)
+ *   F34 the optional knowledge-gap recorder seam: a REAL
+ *       KNOWLEDGE_GAP_UNRESOLVED turn records exactly ONE bounded,
+ *       tenant-scoped, UNRESOLVED row (Slice 9)
  *
  *   PROMPT-AI-EVAL-09 — engine-authored pending-state SEED capability:
  *   F23 pending clarification seed is VALID (engine authors it; the production
@@ -53,6 +58,10 @@ import { join } from "node:path";
  * Run: pnpm check:future-system
  */
 export {};
+
+type KnowledgeGapRepositoryRecord = Awaited<
+  ReturnType<KnowledgeGapRepository["record"]>
+>;
 
 type Check = { label: string; pass: boolean };
 const checks: Check[] = [];
@@ -1100,6 +1109,166 @@ async function main(): Promise<void> {
     check(
       `F18 no src/ file imports evaluation/ (${offenders.length} offenders)`,
       offenders.length === 0,
+    );
+  }
+
+  // ── F34 knowledge-gap recorder seam: the bridge can carry the optional ───
+  //    recorder and a REAL KNOWLEDGE_GAP_UNRESOLVED turn records exactly ONE
+  //    bounded, tenant-scoped, UNRESOLVED row (PROMPT-AI-ARCH-18 — Slice 9).
+  {
+    const { FUTURE_SYSTEM_EVAL_BUSINESS_ID } =
+      await import("../evaluation/runner/future-system-adapter");
+    const { knowledgeGapValidation } = await import("../src/lib/validation");
+    // Type-only views of the shipped repository contract (no runtime import:
+    // the structural check must not reach a Prisma boundary).
+    type KnowledgeGapRecord = KnowledgeGapRepositoryRecord;
+    type GapRow = KnowledgeGapRecord & { reviewedById: string | null };
+    const rows = new Map<string, GapRow>();
+    let recordCalls = 0;
+    type GapRowShape = GapRow;
+    const recorder: { record: (input: unknown) => Promise<GapRowShape> } = {
+      record: async (input: unknown): Promise<GapRowShape> => {
+        recordCalls += 1;
+        const parsed = knowledgeGapValidation.record.parse(input);
+        const key = `${parsed.conversationId}|${parsed.customerMessageId}`;
+        const existing = rows.get(key);
+        if (existing) return existing; // append-idempotent, like the repository
+        const row: GapRow = {
+          id: crypto.randomUUID(),
+          businessId: parsed.businessId,
+          conversationId: parsed.conversationId,
+          customerMessageId: parsed.customerMessageId,
+          category: parsed.category,
+          subjectText: parsed.subjectText ?? null,
+          status: "UNRESOLVED" as const,
+          createdAt: new Date().toISOString(),
+          reviewedAt: null,
+          reviewedById: null,
+        };
+        rows.set(key, row);
+        return row;
+      },
+    };
+
+    const runner = createFutureSystemRunner({
+      ai: {
+        providerName: "stub-ai",
+        respond: async () => knowledgeGapHandoff() as never,
+        getLastTelemetry: () => null,
+      },
+      identity: {
+        primaryProvider: "stub",
+        primaryModel: "stub-model",
+        secondaryProvider: null,
+        secondaryModel: null,
+        fallbackEnabled: false,
+      },
+      knowledgeGapRepository: recorder,
+    });
+    const gapOut = await runner.runTurn({
+      caseId: "fs-gap-record",
+      turnIndex: 0,
+      message: "بكام جلسة تنظيف الأسنان؟",
+      history: [],
+      businessContext: business,
+    });
+    const gapEngine = gapOut.engine as {
+      ok?: boolean;
+      conversationId?: string;
+      customerMessageId?: string;
+      knowledgeGap?: { id: string; category: string } | null;
+    };
+    const gapRow = [...rows.values()][0];
+
+    check(
+      "F34 knowledge-gap turn through the bridge → exactly ONE UNRESOLVED record, tenant + turn bound, reviewedById null",
+      gapEngine.ok === true &&
+        gapEngine.knowledgeGap !== null &&
+        gapEngine.knowledgeGap !== undefined &&
+        recordCalls === 1 &&
+        rows.size === 1 &&
+        gapRow !== undefined &&
+        gapRow.businessId === FUTURE_SYSTEM_EVAL_BUSINESS_ID &&
+        gapRow.conversationId === gapEngine.conversationId &&
+        gapRow.customerMessageId === gapEngine.customerMessageId &&
+        gapRow.status === "UNRESOLVED" &&
+        gapRow.reviewedAt === null &&
+        gapRow.reviewedById === null &&
+        // The engine-side observability seam agrees with the recorded row.
+        gapEngine.knowledgeGap.id === gapRow.id &&
+        gapEngine.knowledgeGap.category === gapRow.category,
+    );
+
+    // A control turn (answerable) through the SAME recorder adds no row.
+    const ctrlRunner = createFutureSystemRunner({
+      ai: {
+        providerName: "stub-ai",
+        respond: async () => bookingAi("تنظيف أسنان", TEST_DATE) as never,
+        getLastTelemetry: () => null,
+      },
+      identity: {
+        primaryProvider: "stub",
+        primaryModel: "stub-model",
+        secondaryProvider: null,
+        secondaryModel: null,
+        fallbackEnabled: false,
+      },
+      knowledgeGapRepository: recorder,
+    });
+    const ctrlOut = await ctrlRunner.runTurn({
+      caseId: "fs-gap-ctrl",
+      turnIndex: 0,
+      message: "عايز أحجز",
+      history: [],
+      businessContext: business,
+    });
+    const ctrlEngine = ctrlOut.engine as {
+      ok?: boolean;
+      knowledgeGap?: { id: string; category: string } | null;
+    };
+    check(
+      "F35 control (non-gap) turn through the SAME recorder → no record, no false positive",
+      ctrlEngine.ok === true &&
+        ctrlEngine.knowledgeGap === undefined &&
+        rows.size === 1 &&
+        recordCalls === 1,
+    );
+
+    // The optional seam is additive by construction: with NO recorder injected,
+    // the same gap turn completes unchanged and exposes no knowledgeGap field.
+    const bareRunner = createFutureSystemRunner({
+      ai: {
+        providerName: "stub-ai",
+        respond: async () => knowledgeGapHandoff() as never,
+        getLastTelemetry: () => null,
+      },
+      identity: {
+        primaryProvider: "stub",
+        primaryModel: "stub-model",
+        secondaryProvider: null,
+        secondaryModel: null,
+        fallbackEnabled: false,
+      },
+    });
+    const bareOut = await bareRunner.runTurn({
+      caseId: "fs-gap-bare",
+      turnIndex: 0,
+      message: "بكام جلسة تنظيف الأسنان؟",
+      history: [],
+      businessContext: business,
+    });
+    const bareEngine = bareOut.engine as {
+      ok?: boolean;
+      conversationStatus?: string;
+      knowledgeGap?: { id: string; category: string } | null;
+    };
+    check(
+      "F36 recorder seam is optional: no recorder injected → same NEED_HUMAN gap turn, no knowledgeGap field, no store write",
+      bareEngine.ok === true &&
+        bareEngine.conversationStatus === "NEED_HUMAN" &&
+        bareEngine.knowledgeGap === undefined &&
+        rows.size === 1 &&
+        recordCalls === 1,
     );
   }
 

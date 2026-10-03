@@ -58,13 +58,16 @@ import {
   isJevDeterministicProvider,
 } from "@/server/integrations/ai/jev-strategy";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
+import type { KnowledgeGapRepository } from "@/server/repositories/knowledge-gap.repository";
 
 import type { PendingStateSeedSpec } from "./pending-state-seed";
 
 /** A fixed, eval-only tenant identity (never a real tenant). */
+export const FUTURE_SYSTEM_EVAL_BUSINESS_ID =
+  "11111111-1111-4111-8111-111111111111";
 const EVAL_WHATSAPP_NUMBER = "+990000000000";
 const EVAL_CUSTOMER_PHONE = "+990000000001";
-const EVAL_BUSINESS_ID = "11111111-1111-4111-8111-111111111111";
+const EVAL_BUSINESS_ID = FUTURE_SYSTEM_EVAL_BUSINESS_ID;
 const EVAL_BRANCH_ID = "44444444-4444-4444-8444-444444444444";
 const EVAL_PROVIDER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const EVAL_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
@@ -257,6 +260,16 @@ function openWeek(): Record<string, unknown> {
 export function createFutureSystemRunner(params: {
   ai: InjectedConversationAi;
   identity: FutureSystemRunner["identity"];
+  /**
+   * OPTIONAL in-memory knowledge-gap recorder (PROMPT-AI-ARCH-18 — Slice 9).
+   * Evaluation-only: when a caller supplies it, the bridge wires the SAME
+   * optional `knowledgeGapRepository` dep the production engine already
+   * accepts, so a real turn's off-path recording becomes observable WITHOUT
+   * touching production code. Absent ⇒ the engine's documented optional-seam
+   * behavior (no recorder ⇒ no record ⇒ the turn is unchanged) — the exact
+   * behavior every prior run relied on. Never a real Prisma boundary.
+   */
+  knowledgeGapRepository?: Pick<KnowledgeGapRepository, "record">;
 }): FutureSystemRunner {
   const { ai, identity } = params;
 
@@ -401,7 +414,6 @@ export function createFutureSystemRunner(params: {
     };
 
     let claimSeq = 0;
-    let conversationSeq = 0;
     let appointmentSeq = 0;
 
     const deps = {
@@ -426,9 +438,12 @@ export function createFutureSystemRunner(params: {
           customerId: string;
           branchId: string | null;
         }) => {
-          conversationSeq += 1;
           env.conversation = {
-            id: `eval-conv-${conversationSeq}`,
+            // A REAL uuid, exactly as the production repository emits
+            // (the engine's downstream DTOs — e.g. the Slice-9 recorder —
+            // validate uuid shape; a synthetic `eval-conv-N` would be
+            // rejected and silently dropped).
+            id: randomUUID(),
             businessId: input.businessId,
             customerId: input.customerId,
             branchId: input.branchId,
@@ -452,7 +467,7 @@ export function createFutureSystemRunner(params: {
           if (workflow?.status && env.conversation) {
             env.conversation = { ...env.conversation, status: workflow.status };
           }
-          return { id: `eval-msg-${env.messages.length}`, createdAt: now };
+          return { id: randomUUID(), createdAt: now };
         },
         getMessages: async () => [...env.messages].reverse(),
         update: async (_id: string, patch: { aiSummary?: string | null }) => {
@@ -523,6 +538,12 @@ export function createFutureSystemRunner(params: {
         // structured outcome only.
         send: async () => ({ provider: "eval-no-delivery", delivered: true }),
       },
+      // PROMPT-AI-ARCH-18 (Slice 9) — the optional off-path recorder. Only
+      // present when the caller injected an in-memory one; the engine then
+      // populates `InboundSuccess.knowledgeGap` from the REAL turn outcome.
+      ...(params.knowledgeGapRepository
+        ? { knowledgeGapRepository: params.knowledgeGapRepository }
+        : {}),
     };
 
     return deps as unknown as ConversationEngineDeps;

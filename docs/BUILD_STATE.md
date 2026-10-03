@@ -51,6 +51,151 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**PILOT EVIDENCE READINESS (`PROMPT-AI-OPS-19`, ASSESSMENT ONLY — ZERO
+production code/prompt/schema/migration change; no commit/push/tag/deploy):
+PRODUCT IS OPERATIONALLY READY TO RUN REAL PILOTS; A REAL PILOT IS ALREADY
+RUNNING; NO CODE CHANGE IS JUSTIFIED — READINESS REPORT ONLY.**
+Classification A/B/C/D applied to every pilot-readiness question
+(A=sufficient now, B=missing but operationally necessary, C=useful later,
+D=premature/out of scope). **(A) ALREADY RUNNING — LIVE-VERIFIED PRODUCTION
+EVIDENCE (read-only queries against the production Neon DB + `GET
+/api/health`):** production IS **v0.39.0**, `status:"ok"`,
+`deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`;
+`prisma migrate status` → "Database schema is up to date!" (**all 18**
+migrations — the three Slice-6/7/9 additive migrations ARE applied,
+correcting the stale ledger note that said they were pending) and
+`prisma migrate diff --from-config-datasource --to-schema` → **"No
+difference detected"** (zero drift). Real pilot rows exist: **2
+businesses in Kafr El Sheikh** (`مركز أفنان` dental — onboarded, working
+hours, `confirmation_mode:"automatic"`, WhatsApp **CONNECTED** + active via
+the ENV-credential grammar (`credentials_ref=WHATSAPP_META_ACCESS_TOKEN` +
+real `external_id`); `صالون سارة التجميلي` beauty — NOT onboarded, WhatsApp
+stuck `AUTHORIZING`/`PENDING`), 9 customers, 4 services (all unpriced),
+**1 provider profile + 1 provider service + 1 provider branch** (created
+2026-09-19 — manually, see blockers), **10 appointments (9 CONFIRMED / 1
+PENDING, all assigned)**, 6 conversations (4 AI_ACTIVE / 2 NEED_HUMAN), 71
+messages (54 customer / 16 AI / 1 staff), 3 operator attentions (all
+resolved, `cause` null = pre-Slice-7 rows), 95 usage records (56
+INBOUND_MESSAGE / 16 OUTBOUND_MESSAGE / 9 AI_TURN SUCCESS / **14 AI_TURN
+FAILURE**), and a Telegram managed bot that DID reach **CONNECTED** +
+`onboarding_state:READY` (`Drafnanafnanbot`). **(B) EVIDENCE ALREADY
+DIRECTLY DERIVABLE from existing data (no new analytics stack):**
+conversations + per-sender message counts; **response time** (proven
+derivable — observed customer→AI gaps of 1–32s from `messages.created_at`);
+booking outcomes via `appointments.status` (incl. `NO_SHOW` when recorded);
+operator handoffs via `conversations.status=NEED_HUMAN`; **handoff causes**
+via the Slice-7 typed `operator_attentions.cause`; **knowledge gaps** via
+the Slice-9 `knowledge_gaps` table (0 rows today — no live turn has crossed
+the recorder yet: the last live AI turn was **2026-09-28**); service/price
+configuration via `services.price_*`; repeat usage via
+`customers.lastConversationAt`/`lastAppointmentAt` (6/9 with a
+conversation, 4/9 with an appointment); automation economics via
+`usage_records` (kind/provider/model/status; `estimatedCostMicros` is never
+computed — cost is not yet derivable). **(C) THE TWO ONBOARDING-
+REPEATABILITY BLOCKERS (B-class, NOT hard blockers for running the first
+pilots — the operator has a proven manual path, but they break the Spec A
+exit criterion "a real business can be onboarded in < 1 day using the app
+alone"):** (1) **no provider authoring surface** —
+`providerRepository.createProfile`/`linkRelation` have **ZERO callers** in
+`src/app`/`src/features`/`src/server`/`scripts`/`prisma/seed.ts`, so with
+no `ProviderProfile`/`ProviderService` rows `resolveEligibleProviders`
+returns `NO_ELIGIBLE_PROVIDERS` for EVERY booking turn → deterministic
+Arabic "لا يوجد مزود متاح" + NEED_HUMAN (the AI can never offer a slot or
+book); the live dental pilot books only because a founder inserted those
+rows by hand; (2) **no UI/server-action for the ENV-credential WhatsApp
+connection** — `saveConnection` (accepts an ENV `credentialsRef` + real
+`externalId`, the documented `.env.example` grammar the live pilot actually
+uses) is called ONLY from offline harness scripts; the only UI path is Meta
+Embedded Signup (DEFERRED/HOLD per `docs/INTEGRATION_CHECKPOINTS.md`) or the
+deterministic stand-in (fabricates an unresolvable env name → can NEVER
+reach CONNECTED), so a new pilot's number needs a manual DB row. Both are
+the minimum candidate next slices; NEITHER was built here. **(D)
+CLASSIFIED:** A — business profile/services/working-hours(knowledge/FAQ/
+conversation engine/operator lifecycle/handoff-cause/knowledge-gap/
+response-time/usage metering); B — provider authoring surface, ENV-credential
+WhatsApp connect surface, live AI-provider re-verification (last 4 AI turns
+FAILED, no traffic since 2026-09-28), second pilot onboarding (beauty salon
+stuck in onboarding); C — knowledge-gap review UI (`list`/`markReviewed`/
+`markRejected` have no app caller), out-of-band staff notifications (sink is
+a stub), working-hours editing in settings (wizard-only, re-editable via the
+raw `/onboarding/hours` URL), attention-reason persistence past first load
+(`getConversationDetail` resolves the attention on open so the chip renders
+only on first load; the typed `cause` persists in the DB so evidence is
+intact), inbox attention-first sorting; D — pilot registry/Spec B evidence
+layer (`ROADMAP.md` files it under planned Spec B; `CLIENT_DEMO.md`: "pilot
+registry comes in Spec B — for now: who, which vertical, objections, price
+reaction"), Founder Console, vertical scoring, WTP engine, knowledge-gap
+promotion, RAG/embeddings, billing/payments, JEV activation. **(E)
+OPERATIONAL NOTES:** the platform AI policy row is `codecraft` /
+`deepseek-v4-flash-0731` with `fallback_enabled:false`; its stored
+`primary_secret_ref` is the stale `OPENROUTER_API_KEY` — HARMLESS because
+`toEffectivePolicy` ignores the stored ref and each adapter resolves its own
+key via `secretRefFor(provider)` (codecraft → `CODECRAFT_API_KEY`), but it is
+cosmetically inconsistent; `/api/health`'s `missingEnvVars` checks only the
+4 core vars, so `missingEnvVars:[]` does NOT prove an AI key is present.
+**(F) VERIFICATION (focused, no ceremony):** `pnpm check:knowledge-gap`
+24/24, `check:handoff-cause` 31/31, `check:operator-attention` 20/20,
+`check:service-price` 33/33, `check:conversation-handoff` 21/21,
+`check:conversation-ux` 18/18, `pnpm verify` (lint 23.3s / typecheck 7.0s /
+format 22.5s / build 13.7s) PASS, `pnpm security` PASS (1 pre-existing
+both-env-files warning). **Readiness: RUN_PILOT_NOW — no engineering change
+is the critical path; the critical path is operator-owned (verify the live
+AI provider, finish onboarding pilot #2, start collecting the named
+evidence).** See DECISIONS #85.
+
+**AI TARGET ARCHITECTURE — SLICE-9 KNOWLEDGE-GAP LIFECYCLE EVALUATION
+(`PROMPT-AI-EVAL-16`, FORENSIC VERIFICATION): VERIFIED CORRECT + TENANT-SAFE +
+OFF-CRITICAL-PATH — READY_FOR_NEXT_STAGE (zero production change; human-review
+gate; NO release/commit/migrate).** The shipped Slice-9 record-only lifecycle
+(DECISIONS #83, released in v0.39.0 / `c55d3de`) answers the evaluation
+question YES. **Deterministic floor:** `check:knowledge-gap` **24/24** through
+the REAL Conversation Engine — one bounded `UNRESOLVED` record per genuine
+`KNOWLEDGE_GAP_UNRESOLVED` turn (correct `businessId`/`conversationId`/
+`customerMessageId`, `reviewedById` null, `subjectText` ≤200 chars from the
+customer's own question); ordinary answer / provider failure / safety /
+explicit-human / booking-only create none; the price gap is evidence and never
+fabricates a price; a same-turn replay is a structural no-op; cross-tenant
+list/review excluded; a throwing recorder leaves the turn byte-identical at
+1 call / 1 send; the recorder is pure (no DB/provider/env/network, reuses the
+EXISTING `deriveTaskRelevance` seam). **Real-LLM (NEW eval-only
+`scripts/eval-run-future-arch18.ts`, `arch18@1`; Atria `Atria-Dawn-Preview`
+through the established eval-only override; DB policy NOT read/changed;
+dataset hash `8be16297…` asserted unchanged):** calibration 3/3 · gating
+**10/10** · 12 turns · 11 real calls · 0.92 calls/turn · max 1/turn · 1
+zero-call deterministic turn · 0 multi-call · 0 provider failures · 0
+malformed; **4/4 gap turns → 4 records (0 false pos / 0 false neg / 0 dup)**;
+5 controls → none (incl. the SAME price question on a PRICED business);
+recorder outage → byte-identical turn, no `PROVIDER_FAILURE` relabel, still
+1 call; `InboundSuccess.knowledgeGap` cross-checked against the stored row on
+both `id` and `category`; latency p50 11.7s / p95 108s (provider property).
+**Category derivation proven deterministic + provider-neutral** by executing
+`deriveKnowledgeGapCategory` directly on every gap message. **Two
+EVALUATION-HARNESS defects found + closed IN PLACE (no production change):**
+(1) the FUTURE_SYSTEM bridge omitted the optional `knowledgeGapRepository`
+dep, so real-LLM runs could never reach the recorder path; (2) the bridge
+emitted non-UUID conversation/message ids which the shipped recorder's
+`uuidSchema` record DTO rejects — both were silently swallowed by the
+recorder's own best-effort contract. Remediation (evaluation-only): ONE
+additive optional recorder injection point on `createFutureSystemRunner`
+(absent = exact prior behaviour) + real `randomUUID()` ids. **Review
+lifecycle `UNRESOLVED → REVIEWED/REJECTED` is implemented + verified but NOT
+exposed through any UI/API** (`list`/`countUnresolved`/`markReviewed`/
+`markRejected` have no caller outside the repository + checks) — reported
+accurately; NO operator UI was built. **Deterministic:** `check:future-system`
+33→**36/36** (NEW F34–F36: the recorder seam asserted both present and
+absent); all 13 named adjacent suites green (handoff-cause 31, operator-
+attention 20, conversation-handoff 21, conversation-booking 16,
+ai-architecture 25, ai-context-builder 54, ai-disclosure 41, service-price 33,
+multi-intent 22, clarify 27, turn-planner 31, conversation-state 20,
+knowledge-gap 24); `pnpm verify` (lint/typecheck/format/build) + `pnpm
+security` green (1 pre-existing both-env-files warning). **Files changed
+(evaluation-only):** `evaluation/runner/future-system-adapter.ts`,
+`scripts/check-future-system.ts`, `scripts/eval-run-future-arch18.ts` (new),
+`package.json`, docs. **Zero `src/`/`prisma/`/`prompts/` change; migration
+`20261002140000_knowledge_gap` untouched; dataset/gold/scorer/historical
+reports unchanged; no secret/provider payload in any artifact.**
+**Readiness: READY_FOR_NEXT_STAGE.**
+
 **AI TARGET ARCHITECTURE — SLICE 9 ASYNC KNOWLEDGE-GAP / SELF-IMPROVEMENT —
 RECORD-ONLY, OFF THE CRITICAL PATH (`PROMPT-AI-ARCH-18`, IMPLEMENTATION +
 VERIFICATION): BUILT + DETERMINISTIC VERIFIED — READY_FOR_NEXT_STAGE
@@ -1914,20 +2059,20 @@ marker, SERIALIZABLE booking concurrency with bounded retry, durable
 ## Migration State
 
 Chain is **complete and clean**, rooted at `0_init` + `migration_lock.toml`
-(provider postgresql). **15 migrations**, ending at
-`20260927120000_telegram_provisioning_outcome` (the two Telegram
-migrations: `20260926120000_telegram_connection` — DECISIONS #64, ADDITIVE:
-two new dedicated tables only, verified by `prisma migrate diff` = exactly
-those tables + indexes/FKs, zero ALTERs on existing tables; and
-`20260927120000_telegram_provisioning_outcome` — DECISIONS #66, ADDITIVE:
-one new NULLABLE `outcome_code` column on the ledger table introduced by
-the previous migration, which has NOT been applied to any database yet, so
-no existing column/constraint/index/table is renamed, reinterpreted, or
-dropped). **APPLIED to the production Neon DB as of 2026-09-27
+(provider postgresql). **18 migrations**, ending at
+`20261002140000_knowledge_gap` (Slice 9). The last three —
+`20261002120000_service_price` (Slice 6), `20261002130000_operator_attention_cause`
+(Slice 7), `20261002140000_knowledge_gap` (Slice 9) — are all CREATE-only /
+additive, zero ALTERs on existing tables, and **ARE APPLIED to the production
+Neon DB (LIVE-VERIFIED 2026-10-03 by `PROMPT-AI-OPS-19`: `prisma migrate
+status` → "Database schema is up to date!" all 18; `prisma migrate diff
+--from-config-datasource --to-schema` → "No difference detected", zero
+drift)**, correcting earlier ledger notes that listed them as pending.
+**APPLIED to the production Neon DB as of 2026-09-27
 (live-verified by DECISIONS #69):** `prisma migrate status` → "Database
-schema is up to date!" (all 15), and a direct production-DB read confirms
-both `telegram_connections` + `telegram_provisioning_ledgers` exist with
-the `outcome_code` column. A genuinely EMPTY database bootstraps
+schema is up to date!" (all 15 then), and a direct production-DB read confirms
+both `telegram_connections` + `telegram_provisioning_ledgers` exist with the
+`outcome_code` column. A genuinely EMPTY database bootstraps
 fully via `pnpm db:deploy` (verified 8/8 at repair time; deploy count grows
 with each additive migration — re-run to reconcile). The old Demo/Neon DB
 needed a one-time HUMAN-ONLY baseline reconciliation
@@ -1939,19 +2084,25 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 - **Production:** `https://flowpilot-prod.vercel.app` — Neon production DB
   (`ep-tiny-grass-a5e63jev-pooler` pooler), dedicated Vercel project
   `flowpilot-prod`, repository PRIVATE. **Last live-verified checkpoint:
-  v0.31.2** (2026-09-27, DECISIONS #69 — `GET /api/health` →
-  `version:"0.31.2"`, `deploymentReady:true`, `database:"connected"`,
-  `missingEnvVars:[]`; production env PRESENCE verified without reading any
-  value: `TELEGRAM_MANAGER_BOT_TOKEN` ✓, `TELEGRAM_MANAGER_BOT_USERNAME` ✓
-  (now present), `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓.
-  **The #68 routing fix IS live** — both Telegram webhooks return 401
-  fail-closed with no 307. **The whole launch + binding chain ran for
-  real** and the manager webhook is installed on the Manager Bot at the
-  production URL. **Production carries v0.31.2 but is NOT yet re-deployed
-  with the DECISIONS #69 `request_id` fix** — the deployed build still
-  sends the invalid empty `request_managed_bot` object, so the creation
-  keyboard is still rejected and the live E2E still cannot complete until
-  the operator deploys the current head.
+  v0.39.0** (2026-10-03, DECISIONS #85 / `PROMPT-AI-OPS-19` — `GET
+/api/health` → `status:"ok"`, `version:"0.39.0"`,
+  `deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`;
+  `prisma migrate status` → all 18 applied; `prisma migrate diff` → zero
+  drift; production DB read-only inventory confirms a real pilot is
+  running — see DECISIONS #85 and `Current State`). Production is
+  therefore AT the released head and the Slice-6/7/9 behavior IS live.
+  (Earlier checkpoint v0.31.2, 2026-09-27, DECISIONS #69: production env
+  PRESENCE verified without reading any value:
+  `TELEGRAM_MANAGER_BOT_TOKEN` ✓, `TELEGRAM_MANAGER_BOT_USERNAME` ✓
+  (now present), `CREDENTIAL_MASTER_KEY` ✓, `NEXT_PUBLIC_APP_URL` ✓;
+  the #68 routing fix IS live — both Telegram webhooks return 401
+  fail-closed with no 307; the whole launch + binding chain ran for
+  real and the manager webhook is installed on the Manager Bot at the
+  production URL. The #69/#71/#72/#73/#74 Telegram delivery fixes are
+  now live through v0.39.0, and a managed bot DID reach CONNECTED +
+  `onboarding_state:READY` in production — `Drafnanafnanbot` — so the
+  earlier "no connection has ever reached CONNECTED" statement is
+  superseded by live evidence.)
   Live inbound E2E was proven at the earlier v0.15.9 checkpoint (signed
   webhook → 200, dedupe replay, tenant isolation).
 - **Demo:** `https://flowpilot-demo-gamma.vercel.app` — isolated Demo Neon DB,
@@ -1969,43 +2120,110 @@ against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 ## Unresolved User Actions (not code)
 
 1. **Operator — the ONE remaining Telegram live-E2E unblock (DECISIONS
-   #69).** Three of the four #68 blockers are already live-verified
-   RESOLVED (deployed routing fix, applied migrations, present
-   `TELEGRAM_MANAGER_BOT_USERNAME`). Exactly two operator-owned items
-   remain, neither a code task:
-   (a) **deploy the current head** (`pnpm deploy`) — the deployed v0.31.2
-   still sends the invalid empty `request_managed_bot` object, so the
-   creation keyboard is rejected by the real Bot API and the ONE customer
-   action can never appear; deploy to make the #69 `request_id` fix live;
-   (b) **re-run the ONE live E2E** (`docs/TELEGRAM.md → The ONE live E2E`)
-   from a FRESH launch — the `/start` tap, the native bot-creation
-   confirmation, and the first customer message are Telegram-hosted
-   human actions. Then record the outcome here + a `DECISIONS.md` entry if
-   a further defect surfaces.
-2. **Operator:** review + release the uncommitted **#61** shared conversation-layer UX
+   #69).** SUPERSEDED-ISH by the 2026-10-03 live read (DECISIONS #85):
+   production is at v0.39.0 (all #69/#71/#72/#73/#74 fixes ARE live) and a
+   managed bot DID reach CONNECTED + `onboarding_state:READY`
+   (`Drafnanafnanbot`), so the earlier "the creation keyboard can never
+   appear" statement no longer holds. The residual operator item is a
+   confirmation, not an unblock: re-run `docs/TELEGRAM.md → The ONE live
+E2E` from a FRESH launch and record whether the whole
+   launch → `/start` → managed-bot creation → CONNECTED → first customer
+   message chain completes on the CURRENT deployed build, and file a
+   `DECISIONS.md` entry if a further defect surfaces.
+2. **Operator — PILOT EVIDENCE COLLECTION is now the critical path
+   (DECISIONS #85 / `PROMPT-AI-OPS-19`).** No engineering change is required
+   to run the pilots. The operator-owned items, in order:
+   (a) **re-verify the live AI provider** — the platform policy is
+   `codecraft` / `deepseek-v4-flash-0731` with fallback DISABLED, and the
+   last 4 live `AI_TURN` rows (2026-09-26..28) were all FAILURE with no AI
+   traffic since; send ONE real inbound message on an AI_ACTIVE thread (or
+   run `pnpm probe:codecraft`) and confirm a SUCCESS + a customer-visible
+   reply (the #60 AI-failure acknowledgment is live, so a failure is no
+   longer silent — but a failing provider would still mean no AI pilot);
+   (b) **finish onboarding pilot #2** (`صالون سارة التجميلي`, beauty) — its
+   WhatsApp connection is stuck `AUTHORIZING`/`PENDING` and it has NO
+   provider rows, so it needs either the manual provisioning path the
+   dental pilot used (ENV credential row + `provider_profiles`/
+   `provider_services` inserts) or the two candidate slices in §G;
+   (c) **start logging the strategy's named evidence by hand**
+   (`CLIENT_DEMO.md`: "for now: who, which vertical, objections, price
+   reaction") — baseline metrics at onboarding (bookings, response time,
+   no-show rate), then weekly; the pilot registry is Spec B, NOT now.
+3. **Operator:** review + release the uncommitted **#61** shared conversation-layer UX
    slice (GREETING intent + verified handoff/resume — the only functional
    changes are the deterministic greeting branch in `conversation-ai.ts`, the
    closed `KNOWLEDGE_FREE_REPLY_INTENTS` list in the disclosure gate, one enum
    value, and the re-generated prompt artifact), then release it as the next
    patch (`pnpm release`/`pnpm ship`) and deploy (see below). The #60
    AI-failure acknowledgment fix already shipped as v0.29.4.
-3. **Operator (only if RUNTIME credentials are used):** generate and set
+4. **Operator (only if RUNTIME credentials are used):** generate and set
    `CREDENTIAL_MASTER_KEY` in the deployment env. Until set, the RUNTIME
    credential path stays honestly UNAVAILABLE and the ENV pilot path is
    unaffected. (Live evidence, post-v0.29.1: against the local dev DB the
    RUNTIME store round-trips exactly with `CREDENTIAL_MASTER_KEY` set —
    store/resolve/delete all succeed. A real Meta round-trip still has
    never run — see `docs/INTEGRATION_CHECKPOINTS.md`.)
-4. **Operator (optional):** add `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` /
+5. **Operator (optional):** add `OPENROUTER_API_KEY` / `AGENTROUTER_API_KEY` /
    `ATRIA_API_KEY` to Vercel env; `pnpm db:deploy` against the Demo DB.
-5. **Operator (optional):** exercise one real outbound to an operator-owned
+6. **Operator (optional):** exercise one real outbound to an operator-owned
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
 
-**AI — Slice 7 (`PROMPT-AI-ARCH-16`, Typed handoff-cause taxonomy + operator
-mapping) is BUILT + DETERMINISTIC + REAL-LLM VERIFIED (READY_FOR_NEXT_STAGE —
-see `Current State`).** The next logical prompt in the approved target-
+**PILOT EVIDENCE READINESS — the engineering critical path is DONE; the
+operator critical path is NOT (`PROMPT-AI-OPS-19`, DECISIONS #85).**
+Every target-architecture production slice (0–9) is BUILT + green and
+**LIVE**: production is at v0.39.0 with all 18 migrations applied and zero
+schema drift, so Slice 6 (service price), Slice 7 (typed handoff cause) and
+Slice 9 (record-only knowledge gaps) are all running. A real pilot is
+already running (`مركز أفنان`, dental, Kafr El Sheikh: CONNECTED WhatsApp
+via the ENV grammar, a provider, 10 appointments, 54 inbound messages).
+The (a) `pnpm db:deploy` and (b) release steps that earlier versions of
+this section listed as next are **DONE — do not redo them**. The remaining
+critical path is operator-owned and non-code: re-verify the live AI
+provider (last 4 live AI turns FAILED, fallback disabled), finish
+onboarding pilot #2, and start logging the strategy's named evidence by
+hand. **The smallest justified ENGINEERING changes — only if the operator
+approves, and ONLY because they break the Spec A exit criterion "a real
+business can be onboarded in < 1 day using the app alone" — are exactly
+two B-class onboarding-repeatability surfaces** (neither was built; both
+reuse existing seams and need no schema change): (1) a **provider
+authoring surface** (`providerRepository.createProfile`/`linkRelation`
+have ZERO app callers today, so every booking turn on an un-provisioned
+business deterministically returns `NO_ELIGIBLE_PROVIDERS` → NEED_HUMAN and
+the AI can never book); (2) a **UI/server-action for the ENV-credential
+WhatsApp connection** (`saveConnection` already implements the documented
+`.env.example` grammar the live pilot uses but is called only from offline
+harness scripts). Both are candidate slices, NOT started. Everything in
+class C (knowledge-gap review UI, out-of-band staff notifications,
+working-hours editing in settings, attention-reason persistence past first
+load, inbox attention-first sorting) and class D (pilot registry / Spec B
+evidence layer, Founder Console, vertical scoring, WTP engine, knowledge-
+gap promotion, RAG, billing, JEV activation) stays explicitly DEFERRED
+until pilot evidence justifies it.
+
+**AI — the target-architecture migration queue (`docs/ai/TARGET_ARCHITECTURE.md
+§17`) is now COMPLETE through Slice 9, and Slice 10 (the evaluation-target
+slice) is built and has just been extended by `PROMPT-AI-EVAL-16`
+(`check:future-system` 36/36 + the NEW `eval:run-future-arch18` real-LLM
+runner).** Every production slice (0–9) is BUILT + green, and Slice 9 is now
+verified BOTH deterministically and under a real LLM. There is therefore NO
+further production slice queued — and, per `PROMPT-AI-OPS-19` above, the
+release + apply steps it used to recommend are ALREADY DONE. The next
+engineering work is evidence-gated onboarding repeatability, not more
+architecture: (a) gather the first real pilot gap evidence (the
+`knowledge_gaps` rows are the discovery signal the strategy depends on —
+0 rows today because no live turn has crossed the recorder since v0.39.0
+went live) before deciding whether the review lifecycle needs an operator
+surface and whether promotion is worth building; (b) then, only with
+evidence, the two B-class onboarding surfaces above. The evaluation
+deliberately did NOT build a UI or a promotion path — that remains a
+future, explicitly human-approved workflow once pilot evidence exists.
+
+**AI — Slice 9 (`PROMPT-AI-ARCH-18`, Async knowledge-gap / self-improvement —
+record-only, off the critical path) is BUILT + DETERMINISTIC + REAL-LLM
+VERIFIED (READY_FOR_NEXT_STAGE — see `Current State`).** The next logical
+prompt in the approved target-
 architecture migration queue (`docs/ai/TARGET_ARCHITECTURE.md §17`) is **Slice
 8 — the optional JEV decision strategy behind the EXISTING provider gateway**
 (`PROMPT-AI-ARCH-17`): add a strategy plug that may terminate without an LLM or

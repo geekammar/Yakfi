@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.39.0",
+  "version": "0.39.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -97,6 +97,7 @@
     "eval:run-future-arch15": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch15.ts",
     "eval:run-future-arch16": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch16.ts",
     "eval:run-future-arch17": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch17.ts",
+    "eval:run-future-arch18": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch18.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts"
   },

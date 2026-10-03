@@ -1567,6 +1567,35 @@ GENERAL`) — no new classifier, no model call. ONE repository
 > business knowledge remains a future, explicitly human-approved workflow.
 > Guarded by NEW `pnpm check:knowledge-gap` 24/24. **No release/commit/
 > migrate.**
+>
+> **STATUS UPDATE (PROMPT-AI-EVAL-16 — forensic lifecycle evaluation; ZERO
+> production change).** The shipped lifecycle was evaluated end-to-end and
+> verified correct, tenant-safe, bounded, and strictly off the customer path.
+> Deterministic floor: `check:knowledge-gap` 24/24 through the REAL engine.
+> Real-LLM (NEW eval-only `scripts/eval-run-future-arch18.ts`, `arch18@1`,
+> Atria `Atria-Dawn-Preview` override through the established eval-only seam,
+> dataset hash `8be16297…` asserted unchanged): calibration 3/3, gating
+> **10/10**, 12 turns / 11 real calls / max 1 per turn / 0 multi-call / 0
+> provider failures; **4/4 genuine gap turns each produced exactly ONE record**
+> (0 false positives, 0 false negatives, 0 duplicates) while the 5 non-gap
+> controls — including the SAME price question on a PRICED business — produced
+> none; a recorder outage left the turn byte-identical with no
+> `PROVIDER_FAILURE` relabel and still exactly 1 call; one-send held.
+> Category derivation was proven deterministic and provider-neutral by
+> executing `deriveKnowledgeGapCategory` directly on every gap message (price
+> relevance wins over any intent; no task-gated vocabulary hit falls to the
+> authoritative intent). **Two evaluation-harness defects were found and closed
+> IN PLACE with no production change:** the FUTURE_SYSTEM bridge (a) omitted
+> the optional `knowledgeGapRepository` dep, so real-LLM runs could never reach
+> the recorder, and (b) emitted non-UUID conversation/message ids that the
+> shipped `uuidSchema` record DTO rejects — both silently swallowed by the
+> recorder's own best-effort contract, which is exactly the property that makes
+> it safe to ship and the reason a positive assertion on BOTH sides of the seam
+> is now required (`check:future-system` 33→36, NEW F34–F36). **The review
+> lifecycle is implemented and verified but deliberately NOT exposed through
+> any UI/API** — `list`/`countUnresolved`/`markReviewed`/`markRejected` have no
+> caller outside the repository and the check suites; promotion remains a
+> future explicitly human-approved workflow.
 
 - **Goal:** record structured gaps off the critical path; human approval
   gates promotion.
