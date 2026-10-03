@@ -24,6 +24,29 @@ is retained as history; deployment state statements in it are superseded by
 the live verification above (in particular production is NOT v0.31.2, the
 Telegram fixes ARE live, a managed bot DID reach CONNECTED in production, and
 the Slice-6/7/9 migrations ARE applied).
+**LIVE PILOT FALSE-HANDOFF FORENSICS (DECISIONS #86 / `PROMPT-AI-OPS-20`,
+2026-10-03):** the pilot's ordinary-question false handoffs are diagnosed. In
+`مركز أفنان` conversation `f217cf5e`, every non-greeting turn is an `AI_TURN`
+`codecraft`/`deepseek-v4-flash-0731` **FAILURE with zero tokens**, while the
+greeting succeeds because it is the zero-call deterministic bypass; the policy
+has **fallback disabled** with no secondary, so the engine fails safe to
+NEED_HUMAN with a correctly-typed provider/AI cause (`knowledge_gaps` = 0 rows
+— no fake knowledge gap). The codecraft SERVICE is healthy (a local probe
+succeeds on the configured model), so the live symptom is production-side
+provider configuration (`CODECRAFT_API_KEY`, which `/api/health` does not
+check). A SECOND, independent application defect was also proven and repaired
+minimally at the existing B-02/B-03 disclosure seam: a services-list question
+("ايه الخدمات اللي عندكم؟") was refused because the gate had no
+service-catalog **name** channel even though the PUBLIC names are always
+carried; B-02 now derives a `serviceCatalog` relevance family + an aggregate
+`service.name` family (armed only on a catalog turn) and B-03 adds the
+`serviceNames` FAQ candidate channel, with the disclosure backstop for
+location/hours/about/price left intact. **Readiness: BLOCKED_PROVIDER** —
+operator verifies/rotates the production `CODECRAFT_API_KEY` (or enables
+fallback + a secondary) and deploys; no further code change is required for
+the observed symptom. The location/hours/price classes remain honest
+knowledge gaps (no address field, INTERNAL hours, no prices entered) and are
+recorded as the distinct DATA/UX work, NOT patched into the engine.
 **Documentation/context sync (DOC-SYNC-V0318):** releases v0.31.3–v0.31.8
 committed DECISIONS #70–#75; the current baseline for future agent work is
 **Context Architecture V1 (DECISIONS #75)** — `docs/CONTEXT_MAP.md` +

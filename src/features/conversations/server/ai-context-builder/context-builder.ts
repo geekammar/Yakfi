@@ -189,6 +189,15 @@ export type TaskRelevance = {
    * price-only turn never carries descriptive catalog copy.
    */
   readonly serviceInfo: boolean;
+  /**
+   * Service-catalog listing asks ("what services do you have?") → the PUBLIC
+   * service-catalog `name` family (PROMPT-AI-OPS-20). Gated so ONLY a
+   * catalog-listing turn arms the name disclosure family — a location, hours,
+   * about or price turn keeps the names in the base catalog (the model may
+   * still use them for booking) but cannot back a self-authored reply on
+   * them, so the disclosure backstop stays intact for non-catalog questions.
+   */
+  readonly serviceCatalog: boolean;
 };
 
 const BOOKING_OR_AVAILABILITY_WORDS = [
@@ -329,6 +338,26 @@ const SERVICE_INFO_WORDS = [
 ];
 
 /**
+ * Service-catalog listing vocabulary (PROMPT-AI-OPS-20). Matches asks for the
+ * CATALOG ITSELF ("what services do you have?") so the PUBLIC service-name
+ * disclosure family is armed only on those turns. Deliberately a tight,
+ * catalog-only set: it does NOT match a price ask (its own channel), a
+ * service-detail ask (`SERVICE_INFO_WORDS`), or a booking ask — and it does
+ * not match location/hours/about questions, which is what keeps a
+ * self-authored reply on those topics unbacked and refused.
+ */
+const SERVICE_CATALOG_WORDS = [
+  "خدمه", // خدمة / الخدمة (ta-marbuta normalized to ه)
+  "الخدمه",
+  "خدمات", // خدمات / الخدمات
+  "الخدمات",
+  "خدماتكم", // "ايه الخدمات اللي عندكم"
+  "خدماتنا",
+  "service", // mixed-language
+  "services",
+];
+
+/**
  * Upper bound on how many service descriptions a single turn may carry. The
  * catalog names are already bounded by the contract; descriptions are more
  * verbose, so a generic service-info turn carries at most this many — a
@@ -367,6 +396,7 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
     businessInfo: matches(BUSINESS_INFO_WORDS),
     serviceInfo: matches(SERVICE_INFO_WORDS),
+    serviceCatalog: matches(SERVICE_CATALOG_WORDS),
   };
 }
 
@@ -878,6 +908,35 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       taskRequired: false,
     });
   }
+
+  // Aggregate service-catalog NAME disclosure family (PROMPT-AI-OPS-20):
+  // the ONE ledger key the disclosure gate consults to back a catalog-listing
+  // reply ("ايه الخدمات اللي عندكم؟"). Service `name` is PUBLIC and the
+  // per-service names are ALWAYS carried in `request.services` (the model
+  // needs the catalog for booking/discovery), but this AGGREGATE disclosure
+  // family is armed ONLY on a catalog-listing turn (`serviceCatalog`) — the
+  // same budget-gate pattern `service.description` uses with `serviceInfo`.
+  // That is what keeps the disclosure backstop intact for NON-catalog
+  // questions: on a location/hours/about turn the names stay in the base
+  // catalog (still usable for booking) but cannot back a self-authored reply,
+  // so an unbacked answer is still refused. It is the missing sibling of the
+  // existing `service.price` / `service.description` aggregates: B-01 declares
+  // a service name "AI may mention", B-02 carries it, and before this the
+  // gate had NO channel that recognized a carried catalog — so an answerable
+  // services-list reply was refused even though its backing facts were
+  // legitimately exposed. `channelCarried("serviceNames")` separately proves a
+  // name is actually carried, so this family can never emit an invented
+  // service.
+  evaluateCandidate({
+    ledger,
+    scope,
+    source: "SERVICE_CATALOG",
+    businessId: scopeId,
+    visibility: classifyServiceField("name"),
+    key: "service.name",
+    inBudget: relevance.serviceCatalog,
+    taskRequired: true,
+  });
 
   // Aggregate service-price disclosure family (PROMPT-AI-ARCH-13 — Slice 6):
   // the ONE ledger key the disclosure gate consults to back a price answer

@@ -310,6 +310,32 @@ async function main(): Promise<void> {
       eq(deriveTaskRelevance("عايز أحجز تنظيف الأسنان").serviceInfo, false),
   );
 
+  // SERVICE CATALOG relevance (PROMPT-AI-OPS-20) — a services-list ask arms the
+  // name disclosure family; non-catalog asks (booking / price / location /
+  // hours / about) do NOT, which is what keeps the disclosure backstop intact
+  // for non-catalog questions.
+  check(
+    "OPSD20-R1. أسئلة قائمة الخدمات («الخدمات/خدمات/عندكم») ذات صلة بالكتالوج",
+    eq(deriveTaskRelevance("ايه الخدمات اللي عندكم؟").serviceCatalog, true) &&
+      eq(
+        deriveTaskRelevance("ما هي الخدمات المتاحة لديكم؟").serviceCatalog,
+        true,
+      ) &&
+      eq(deriveTaskRelevance("عندكم خدمة تنظيف؟").serviceCatalog, true) &&
+      eq(
+        deriveTaskRelevance("what services do you offer?").serviceCatalog,
+        true,
+      ),
+  );
+  check(
+    "OPSD20-R2. الأسعار/الحجز/الموقع/المواعيد/التعريف ليست أسئلة كتالوج",
+    eq(deriveTaskRelevance("تنظيف الأسنان بكام؟").serviceCatalog, false) &&
+      eq(deriveTaskRelevance("عايز أحجز موعد").serviceCatalog, false) &&
+      eq(deriveTaskRelevance("المركز فين؟").serviceCatalog, false) &&
+      eq(deriveTaskRelevance("مواعيد العمل ايه؟").serviceCatalog, false) &&
+      eq(deriveTaskRelevance("انتو مين؟").serviceCatalog, false),
+  );
+
   // BUSINESS ABOUT exposure — relevant turn carries it; unrelated does not.
   const aboutBuilt = buildAiContext({
     scope: { businessId: TENANT_A },

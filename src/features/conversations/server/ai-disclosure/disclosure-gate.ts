@@ -122,6 +122,7 @@ export type SupportChannel =
   | "services"
   | "businessAbout"
   | "serviceDescriptions"
+  | "serviceNames"
   | null;
 
 export type TaskSupportFamily = {
@@ -258,14 +259,26 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
         request.businessAbout.trim().length > 0
       );
     case "serviceDescriptions":
-      // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6)
-      // is carried only when the turn was service-info relevant AND at least
-      // one exposed service carries an authoritative description. An empty
-      // channel means the reply would invent a service detail → refused.
+      // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6) is
+      // carried only when the turn was service-info relevant AND at least one
+      // exposed service carries an authoritative description. An empty channel
+      // means the reply would invent a service detail → refused.
       return request.services.some(
         (service) =>
           typeof service.description === "string" &&
           service.description.trim().length > 0,
+      );
+    case "serviceNames":
+      // The PUBLIC service-catalog NAME channel (PROMPT-AI-OPS-20) is carried
+      // whenever at least one service NAME is exposed in the catalog. B-01
+      // already declares a service name "AI may mention" and B-02 always
+      // carries the names in request.services; this channel lets the gate back
+      // a catalog-listing reply from those carried names instead of refusing
+      // it. It licenses mentioning the CATALOG ONLY — never a price, location,
+      // hour or detail, each of which still requires its own carried channel.
+      return request.services.some(
+        (service) =>
+          typeof service.name === "string" && service.name.trim().length > 0,
       );
     case null:
       // No request channel exists for this family today.
@@ -276,16 +289,20 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
 /**
  * The ordered candidate support families a reply intent may draw its answer
  * from. Almost every intent has exactly ONE (its `TASK_SUPPORT_FAMILIES`
- * entry). FAQ is the exception (PROMPT-AI-ARCH-13/-15 — Slice 6): the fixed
- * intent family has no separate BUSINESS_INFO/SERVICE_INFO intents, so a
- * business-profile, service-detail, or price question is classified FAQ. A
- * FAQ reply may therefore be backed by the canonical FAQ store OR any of the
- * task-gated Slice-6 channels — whichever is included + disclosable +
- * actually carried. This is purely ADDITIVE: a FAQ reply the store already
- * backs is unchanged, and each new channel is carried ONLY on its own
- * relevance gate (`businessAbout` on business-info turns,
- * `serviceDescriptions` on service-info turns, `service.price` on
- * price turns) — so a booking or unrelated turn can never carry them.
+ * entry). FAQ is the exception (PROMPT-AI-ARCH-13/-15 — Slice 6,
+ * PROMPT-AI-OPS-20): the fixed intent family has no separate
+ * BUSINESS_INFO/SERVICE_INFO/SERVICE_CATALOG intents, so a business-profile,
+ * service-detail, price, or services-list question is classified FAQ. A FAQ
+ * reply may therefore be backed by the canonical FAQ store OR any of the
+ * task-gated Slice-6 channels OR the carried service-catalog names —
+ * whichever is included + disclosable + actually carried. This is purely
+ * ADDITIVE: a FAQ reply the store already backs is unchanged, and each
+ * channel is carried ONLY on its own relevance gate (`businessAbout` on
+ * business-info turns, `serviceDescriptions` on service-info turns,
+ * `service.price` on price turns) — so a booking or unrelated turn can never
+ * carry them. The catalog-name channel is carried whenever the catalog is
+ * exposed (B-01 marks names PUBLIC and B-02 always carries them), and it backs
+ * ONLY the mention of those carried names.
  */
 function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
   const primary = TASK_SUPPORT_FAMILIES[intent];
@@ -295,6 +312,7 @@ function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
       { family: "service.price", channel: "services" },
       { family: "business.about", channel: "businessAbout" },
       { family: "service.description", channel: "serviceDescriptions" },
+      { family: "service.name", channel: "serviceNames" },
     ];
   }
   return [primary];

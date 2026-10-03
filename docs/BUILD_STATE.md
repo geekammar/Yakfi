@@ -400,6 +400,65 @@ Latency p50 20.5s / p95 42.2s (provider property). **Files changed:**
 `docs/ai/TARGET_ARCHITECTURE.md`. **No commit/push/tag/deploy/migrate.**
 **Readiness: READY_FOR_NEXT_STAGE.**
 
+**LIVE PILOT FALSE-HANDOFF FORENSICS + SERVICE-CATALOG DISCLOSURE REPAIR
+(`PROMPT-AI-OPS-20`, FORENSICS + MINIMAL ADDITIVE FIX AT THE B-02/B-03 SEAM;
+NO engine/handoff/provider/schema/migration change; no production DB write):
+FORENSICS COMPLETE — live root cause PROVEN provider-side; smallest justified
+application repair BUILT + deterministically VERIFIED — READY_FOR_PILOT_RETEST
+(blocked on the operator restoring the production AI key; human-review gate; NO
+release/commit).** A live pilot conversation (`مركز أفنان` `f217cf5e`,
+2026-10-03) showed the greeting succeeding while every ordinary question
+returned the generic handoff. **Live root cause:** all 7 non-greeting `AI_TURN`
+rows are `codecraft`/`deepseek-v4-flash-0731` **FAILURE with zero tokens**
+(the greeting emits no `AI_TURN` — it is the zero-call `bypassDeterministicAi`),
+and the policy has `fallbackEnabled:false` + `secondary:null`, so a provider
+failure fails safe to NEED_HUMAN with the correct provider/AI cause
+(`knowledge_gaps` = 0 rows — never a fake gap). The codecraft SERVICE is healthy
+(`/v1/models` 200 + 33 models incl. the configured model; real adapter
+chat/JSON/contract SUCCESS ~5 s); the failure is production-side provider
+configuration. **Independent APP DEFECT (fixed, additive):** with a healthy
+provider, a services-list reply was authored by the model from the
+always-carried PUBLIC `request.services` names but REFUSED by the B-03 gate
+(`UNAVAILABLE_IN_REQUEST` → `POLICY_REFUSED`) because no FAQ candidate family
+recognized the carried NAMES. **Exact fix:** (1) `deriveTaskRelevance` gains a
+tight `serviceCatalog` family (خدمة/الخدمة/خدمات/الخدمات/service(s)) that arms
+an aggregate PUBLIC `service.name` ledger family ONLY on a catalog-listing turn
+(the same budget-gate pattern `service.description`/`serviceInfo` uses);
+(2) the gate gains the ADDITIVE `serviceNames` FAQ candidate channel
+(`request.services` non-empty). The names stay in the base catalog on every
+turn (unchanged), but the disclosure backstop is preserved: on a
+location/hours/about/price turn the family is unarmed, so an invented answer is
+still refused. `deriveKnowledgeGapCategory` is unchanged (a catalog turn now
+stays AI_ACTIVE → no gap record). **Deterministic:**
+`check:ai-disclosure` **46/46** (NEW 1g/1g-bis/1h/1i/1j: catalog reply
+disclosed, definite-article morphology, off-task unarmed, location/hours reply
+still refused despite carried names, empty catalog refused),
+`check:ai-context-builder` **56/56** (NEW OPSD20-R1/R2), `check:knowledge-gap`
+24/24 (+ literal update), all adjacent gates green (`ai-knowledge-visibility`
+36, `ai-architecture` 25, `ai-provider` 74, `service-price` 33,
+`handoff-cause` 31, `conversation-handoff` 21, `conversation-control` 50,
+`conversation-ux` 18, `turn-planner` 31, `multi-intent` 22, `clarify` 27,
+`greeting` 66, `response-normalizer` 78, `atria-retry` 17,
+`conversation-state` 20, `conversation-booking` 16, `booking-options` 32,
+`assistant-style` 27); `pnpm verify` + `pnpm security` green (1 pre-existing
+warning). **Real-LLM (12 classes, real codecraft + real pilot context):** 9
+calls · one-call/turn HELD · 0 provider failures · 0 malformed; greeting 0-call
+AI_ACTIVE; about/location/hours/missing-price/genuine-gap →
+`KNOWLEDGE_GAP_UNRESOLVED` (no fabrication); **service-list + known-price
+(synthetic in-memory price) + multi-intent → DISCLOSED AI_ACTIVE**; booking →
+`BOOKING_SEAM`; explicit-human/sensitive → 0-call `SAFETY_PRECEDENCE`.
+**DATA/UX gap (recorded, NOT built):** no address/location `Business` field
+exists; `about=""`, `faqs=null`, hours INTERNAL by design, all services
+unpriced. **Files changed:** `ai-context-builder/context-builder.ts`,
+`ai-disclosure/disclosure-gate.ts`, `scripts/check-ai-disclosure.ts`,
+`scripts/check-ai-context-builder.ts`, `scripts/check-knowledge-gap.ts`,
+`docs/BUILD_STATE.md`, `docs/DECISIONS.md` (#86),
+`docs/DECISIONS_INDEX.md`, `docs/CURRENT_STATE.md`,
+`docs/ai/ARCHITECTURE.md`. **No commit/push/tag/deploy/migrate.**
+**Readiness: BLOCKED_PROVIDER** (operator restores the production
+`CODECRAFT_API_KEY` or enables fallback + a secondary, then deploys; the
+service-list fix is deploy-gated on the same release).
+
 **AI TARGET ARCHITECTURE — SLICE 6 BROADER KNOWLEDGE EXPOSURE: BUSINESS ABOUT
 
 - SERVICE DESCRIPTION + BOUNDED CATALOG (`PROMPT-AI-ARCH-15`, IMPLEMENTATION +

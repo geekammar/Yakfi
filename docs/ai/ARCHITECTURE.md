@@ -543,19 +543,35 @@ never sent.
   declared task is backed by a ledger fact that is `included` AND
   `disclosable` AND actually carried in the request:
 
-  | Intent                        | Support family (ledger key)                                                                                                                                     | Request channel                                              |
-  | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-  | `GREETING`                    | **none — knowledge-free social protocol**                                                                                                                       | n/a (passed by declared intent)                              |
-  | `FAQ`                         | `business.faqs` (PUBLIC as a whole) **or** a task-gated Slice-6 channel actually carried this turn (`service.price` · `business.about` · `service.description`) | `request.faqs` non-empty **or** the matching carried channel |
-  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)                                                                                                                             | `request.availability` non-empty                             |
-  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL)                                                                                                                     | **none today** ⇒ always routed to staff                      |
-  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                                                                                                                                          | n/a                                                          |
+  | Intent                        | Support family (ledger key)                                                                                                                                                                          | Request channel                                              |
+  | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+  | `GREETING`                    | **none — knowledge-free social protocol**                                                                                                                                                            | n/a (passed by declared intent)                              |
+  | `FAQ`                         | `business.faqs` (PUBLIC as a whole) **or** a task-gated channel actually carried this turn (`service.price` · `business.about` · `service.description` — Slice 6; `service.name` — PROMPT-AI-OPS-20) | `request.faqs` non-empty **or** the matching carried channel |
+  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)                                                                                                                                                                  | `request.availability` non-empty                             |
+  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL)                                                                                                                                                          | **none today** ⇒ always routed to staff                      |
+  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                                                                                                                                                                               | n/a                                                          |
 
   Consequences: an `INTERNAL` fact is never disclosable (B-01), so it can
   never back a reply; a `CONDITIONAL` fact is disclosable only when B-02
   found the task relevant; a `FORBIDDEN` fact is never even enrolled; and a
   reply backed by nothing would have to be invented — it is routed to a human
   instead.
+
+  **Service-catalog name channel (PROMPT-AI-OPS-20).** A service `name` is
+  `PUBLIC` and B-02 **always** carries the catalog in `AiRequest.services`
+  (the model needs it for booking/discovery), so a services-list question
+  ("ايه الخدمات اللي عندكم؟") is genuinely answerable from carried facts.
+  The gate's FAQ candidates therefore also include the aggregate
+  `service.name` family with the `serviceNames` channel (`request.services`
+  non-empty). The family is armed **only on a catalog-listing turn** — B-02
+  derives a `serviceCatalog` relevance family (the same budget-gate pattern
+  `service.description` uses with `serviceInfo`) — so on a location / hours /
+  about / price turn the names stay in the base catalog but cannot back a
+  self-authored reply. The disclosure backstop is therefore unchanged for
+  non-catalog questions: an invented location or hours answer is still
+  refused even though the catalog is carried. The channel licenses mentioning
+  the CATALOG ONLY — never a price, location, hour or detail, each of which
+  still requires its own carried channel.
 
 ### Typed refusal decisions
 

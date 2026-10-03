@@ -777,6 +777,7 @@ async function main(): Promise<void> {
       priceOrFee: true,
       businessInfo: false,
       serviceInfo: false,
+      serviceCatalog: false,
     }) === "SERVICE_PRICE" &&
       recorder.deriveKnowledgeGapCategory("FAQ", {
         bookingOrAvailability: false,
@@ -786,6 +787,7 @@ async function main(): Promise<void> {
         priceOrFee: false,
         businessInfo: true,
         serviceInfo: false,
+        serviceCatalog: false,
       }) === "BUSINESS_INFO" &&
       recorder.deriveKnowledgeGapCategory("FAQ", {
         bookingOrAvailability: false,
@@ -795,6 +797,7 @@ async function main(): Promise<void> {
         priceOrFee: false,
         businessInfo: false,
         serviceInfo: true,
+        serviceCatalog: false,
       }) === "SERVICE_INFO" &&
       recorder.deriveKnowledgeGapCategory("AVAILABILITY", null) ===
         "AVAILABILITY" &&

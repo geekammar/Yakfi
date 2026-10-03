@@ -372,6 +372,108 @@ async function main(): Promise<void> {
       ),
   );
 
+  // ── 1g/1h/1i/1j. PROMPT-AI-OPS-20: service-catalog NAME channel ────────────
+  // A services-list FAQ reply is backable by the carried PUBLIC catalog NAMES
+  // — with an EMPTY FAQ store and NO descriptions/prices, so no other channel
+  // can be the support. Before this channel existed, an answerable
+  // services-list reply was refused (UNAVAILABLE_IN_REQUEST) even though B-01
+  // marks a service name "AI may mention" and B-02 carries it: the gate had
+  // no channel that recognized a carried catalog. This is the pilot defect
+  // ("ايه الخدمات اللي عندكم؟" → NEED_HUMAN despite a real, exposed catalog).
+  const catalogTurn = gateReply({
+    message: "ايه الخدمات اللي عندكم؟",
+    sources: {
+      business: businessSources({ faqs: [], about: "" }),
+      services: [serviceFact("تنظيف الأسنان"), serviceFact("حشو الأسنان")],
+    },
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان وحشو الأسنان."),
+  });
+  check(
+    "1g. رد «قائمة الخدمات» مدعوم بأسماء الكتالوج المحمّلة (مخزن فارغ) — يُفصح ويبقى AI_ACTIVE",
+    eq(catalogTurn.decision.kind, "disclosed") &&
+      deepEq(
+        catalogTurn.decision.kind === "disclosed"
+          ? catalogTurn.decision.support
+          : [],
+        ["service.name"],
+      ) &&
+      eq(record(catalogTurn, "service.name")?.visibility, "PUBLIC") &&
+      eq(record(catalogTurn, "service.name")?.included, true) &&
+      eq(record(catalogTurn, "service.name")?.disclosable, true) &&
+      eq(catalogTurn.request.services.length, 2),
+  );
+  // Arabic morphology: the definite-article form «الخدمات» and the bare plural
+  // both arm the family (relevance matches on non-affix-stripped tokens, so both
+  // surface forms must be recognized).
+  const definiteCatalogTurn = gateReply({
+    message: "ما هي الخدمات المتاحة لديكم؟",
+    sources: {
+      business: businessSources({ faqs: [], about: "" }),
+      services: [serviceFact("تنظيف الأسنان")],
+    },
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+  });
+  check(
+    "1g-bis. صيغة «الخدمات» بالتعريف تُفعّل عائلة أسماء الكتالوج أيضاً",
+    eq(definiteCatalogTurn.decision.kind, "disclosed") &&
+      eq(
+        definiteCatalogTurn.decision.kind === "disclosed"
+          ? definiteCatalogTurn.decision.support[0]
+          : undefined,
+        "service.name",
+      ),
+  );
+  // The name channel is armed ONLY on a catalog-listing turn. On an unrelated
+  // turn the names stay in the base catalog (the model may still use them for
+  // booking) but cannot back a self-authored reply — the disclosure backstop
+  // stays intact for non-catalog questions.
+  const catalogOffTaskTurn = gateReply({
+    message: "عايز أحجز موعد",
+    sources: {
+      business: businessSources({ faqs: [], about: "" }),
+      services: [serviceFact("تنظيف الأسنان")],
+    },
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+  });
+  check(
+    "1h. عائلة أسماء الكتالوج غير مسلّحة في دور غير الكتالوج — رفض (تبقى الأسماء في الكتالوج)",
+    eq(catalogOffTaskTurn.decision.kind, "requires-human") &&
+      eq(record(catalogOffTaskTurn, "service.name")?.included, false) &&
+      eq(catalogOffTaskTurn.request.services.length, 1),
+  );
+  // The backstop that the fix had to preserve: on a NON-catalog turn (a
+  // location/hours-style ask) a self-authored reply is still refused even
+  // though the catalog names are carried — so an invented location or hours
+  // answer can never leak through the catalog channel.
+  const nonCatalogLeakTurn = gateReply({
+    message: "المركز فين؟ ومواعيد العمل ايه؟",
+    sources: {
+      business: businessSources({ faqs: [], about: "" }),
+      services: [serviceFact("تنظيف الأسنان")],
+    },
+    reply: replyOf("FAQ", "المركز في القاهرة ونعمل من 10 لـ 6."),
+  });
+  check(
+    "1i. رد موقع/مواعيد على دور غير الكتالوج يُرفض رغم حمل الأسماء (لا تسرّب معلومات مخترعة)",
+    eq(nonCatalogLeakTurn.decision.kind, "requires-human") &&
+      eq(record(nonCatalogLeakTurn, "service.name")?.included, false),
+  );
+  // An EMPTY catalog on a catalog-listing turn still refuses — the channel
+  // proves a name is actually carried, so a service can never be invented.
+  const emptyCatalogTurn = gateReply({
+    message: "ايه الخدمات اللي عندكم؟",
+    sources: {
+      business: businessSources({ faqs: [], about: "" }),
+      services: [],
+    },
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+  });
+  check(
+    "1j. كتالوج فارغ على دور قائمة خدمات = تحويل لبشري (لا اختراع خدمة)",
+    eq(emptyCatalogTurn.decision.kind, "requires-human") &&
+      eq(emptyCatalogTurn.request.services.length, 0),
+  );
+
   // ── 3. CONDITIONAL: disclosed only when its task allows it ───────────────
   const bookingTurn = gateReply({
     message: "عايز أحجز موعد",
