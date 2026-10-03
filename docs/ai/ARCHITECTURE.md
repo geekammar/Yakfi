@@ -257,6 +257,67 @@ requiredKnowledge?, domainAction?, priority?, continueAfter? }`),
   surfaces the same observables additively through `ActualOutcome`'s optional /
   `.passthrough()` members.
 
+### Turn evidence / observability seam (PROMPT-AI-OPS-22)
+
+The Slice-0 `TurnObservability` record above is computed on every turn but —
+before OPS-22 — was returned on `InboundSuccess.observability` and discarded by
+the webhook callers. OPS-22 makes the record **emitted, bounded, and
+forensically usable** without changing any decision:
+
+```
+inbound.receive → business.resolve → conversation.load → turn.plan →
+context.build → ai.call → ai.parse → domain.resolve → disclosure.evaluate →
+handoff/response.finalize → outbound.send     (one trace id per turn)
+        ↓  (AFTER persist + send, off the critical path)
+buildTurnEvidence  (pure, content-free projection)
+        ↓
+emitTurnEvidence   (fail-open sink)
+        ↓
+structured JSON line → EXISTING Vercel/runtime logs → optional OTLP sink
+```
+
+- **Record — `flowpilot.turn.evidence@v1`** (`src/features/conversations/
+server/turn-evidence.ts`): bounded machine-safe fields only —
+  `environment`, `appVersion`, `traceId`, `conversationId`, `businessId`,
+  `customerMessageId`, `intent`, `assistantAction`, `conversationStatus`,
+  `handoffCause`, `routingDecision`, `taskRelevance[]`, `contextChannels`
+  (`servicesCount`, `addressPresent`, `aboutPresent`, `faqPresent`,
+  `pricePresent`, `availabilityPresent`), `knowledgeSourceClass[]`, `provider`,
+  `model`, `providerAttempts`, `providerStatus`, `providerLatencyMs`,
+  `parseSuccess`, `disclosureChannel`, `disclosureAllowed`,
+  `disclosureRefusalReason`, `knowledgeGapCategory`, `finalOutcome`,
+  `outboundSendAttempted`, `outboundSendDelivered`, `emittedAt`.
+  **Never** customer message text, phone numbers, keys/tokens/secretRefs,
+  prompts, chain-of-thought, raw provider payloads, or PII. A structural
+  content-freeness guard is exported and asserted by the deterministic check.
+- **Sink — `src/lib/observability/turn-telemetry.ts`:** ONE structured JSON
+  line (`msg:"flowpilot.turn.evidence"`) to the existing runtime logs, plus an
+  OPTIONAL OTLP/HTTP-JSON exporter implemented with platform `fetch` (no
+  `@opentelemetry/*` dependency on the customer path), gated entirely by env
+  (`TURN_EVIDENCE_DISABLED` · `OTEL_TURN_EVIDENCE_ENABLED` ·
+  `OTEL_EXPORTER_OTLP_ENDPOINT`). No new database or table.
+- **Fail-open (binding):** emission happens at the EXISTING single
+  `receiveInboundMessage` choke point, strictly AFTER the reply was persisted +
+  sent, inside a total `try/catch`. A missing, disabled, or throwing sink
+  leaves the turn byte-identical — telemetry can never block, retry, or alter a
+  customer turn, and no telemetry dependency sits on the critical path. The
+  engine dep `turnTelemetry` is OPTIONAL (same convention as
+  `attentionRepository` / `knowledgeGapRepository`); offline harnesses omit it.
+- **Disclosure observation:** `disclosure.channel` is the ledger family that
+  actually backed a disclosed reply (`business.faqs`, `business.address`,
+  `service.name`, …), `routing-action` when the turn's output is a routing
+  action (handoff / booking_handoff, which discloses no knowledge), or the
+  primary family a refused self-authored reply needed; `disclosureAllowed` is
+  the gate verdict and `disclosureRefusalReason` the typed refusal when the
+  gate refused. The gate itself is UNCHANGED — OPS-22 only records its verdict.
+- **Invariants preserved:** one generative call max, no second
+  inference/resolver/state/planner/classifier, no prompt/schema/migration
+  change, no change to routing/context/disclosure/booking/handoff precedence.
+
+Guard: `pnpm check:turn-evidence` (offline, in-memory, no DB/network/LLM/
+secrets — including a non-destructive replay of the two observed live questions
+against the real pilot data shape with a healthy provider, both → DISCLOSED).
+
 ## Context budget (minimal prompt context)
 
 The engine's `AiRequest` is the **prompt context** — nothing larger is sent.

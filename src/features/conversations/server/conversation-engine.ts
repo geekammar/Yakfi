@@ -66,7 +66,11 @@ import {
   inboundMessageSchema,
   type InboundMessageInput,
 } from "@/features/conversations/schemas/conversation-schema";
-import { buildAiContext } from "@/features/conversations/server/ai-context-builder";
+import {
+  buildAiContext,
+  deriveTaskRelevance,
+  type TaskRelevance,
+} from "@/features/conversations/server/ai-context-builder";
 import type {
   AiRequest,
   AiResponse,
@@ -75,7 +79,10 @@ import {
   AI_RECENT_MESSAGE_LIMIT,
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
-import { enforceDisclosure } from "@/features/conversations/server/ai-disclosure";
+import {
+  TASK_SUPPORT_FAMILIES,
+  enforceDisclosure,
+} from "@/features/conversations/server/ai-disclosure";
 import type {
   AiRoutingDecision,
   TurnObservability,
@@ -126,8 +133,16 @@ import {
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
+import {
+  armedRelevance,
+  buildTurnEvidence,
+  newTurnTraceId,
+  readContextChannels,
+} from "@/features/conversations/server/turn-evidence";
 import { resolveTurnPlan } from "@/features/conversations/server/turn-planner";
 import type { ResolvedTurn } from "@/features/conversations/server/turn-planner";
+import type { TurnTelemetrySink } from "@/lib/observability/turn-telemetry";
+import { turnTelemetrySink } from "@/lib/observability/turn-telemetry";
 import type {
   AttentionReason,
   KnowledgeGapCategory,
@@ -164,6 +179,8 @@ import {
 } from "@/server/repositories";
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
 import type { Conversation, ConversationStatus } from "@/types/domain";
+
+import pkg from "../../../../package.json";
 
 // ─── Policy-backed assistant (PROMPT-AI-02) ────────────────────────────────
 // Resolves the live Platform AI policy on every turn — no hard-coded
@@ -295,6 +312,16 @@ export type ConversationEngineDeps = {
    * optionality convention as `attentionRepository`).
    */
   knowledgeGapRepository?: Pick<KnowledgeGapRepository, "record">;
+  /**
+   * OPTIONAL (PROMPT-AI-OPS-22): the fail-open turn-evidence sink. When
+   * present, ONE bounded, content-free evidence record is emitted for every
+   * finished turn, strictly AFTER the reply was persisted + sent. It is off
+   * the critical path and best-effort: a missing or failing sink can never
+   * block, retry, or alter the turn (the same optionality convention as
+   * `attentionRepository` / `knowledgeGapRepository`). Offline engine
+   * harnesses may omit it to keep their output silent.
+   */
+  turnTelemetry?: TurnTelemetrySink;
   providerRepository?: Pick<
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
@@ -319,6 +346,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   usageRepository,
   attentionRepository: operatorAttentionRepository,
   knowledgeGapRepository,
+  turnTelemetry: turnTelemetrySink,
   providerRepository,
   appointmentRepository,
   ai: policyBackedAi,
@@ -438,6 +466,17 @@ export type InboundDuplicate = {
 export type InboundResult = InboundFailure | InboundSuccess | InboundDuplicate;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * PROMPT-AI-OPS-22 — the deployment metadata stamped on every turn-evidence
+ * record. Environment is the runtime deployment context (never a secret) and
+ * the app version is the shipped release a turn ran on, so a record is always
+ * attributable to the exact build that produced it.
+ */
+const TURN_EVIDENCE_META = {
+  environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
+  appVersion: pkg.version,
+} as const;
 
 const VALIDATION_MESSAGE = "بيانات الرسالة الواردة غير صالحة";
 const BUSINESS_NOT_FOUND_MESSAGE = "تعذر تحديد المنشأة المستقبلة للرسالة";
@@ -1462,6 +1501,20 @@ export async function receiveInboundMessage(
       }
     }
 
+    // PROMPT-AI-OPS-22 — emit ONE bounded, content-free turn-evidence record.
+    // This sits at the SAME single choke point as operator attention and the
+    // knowledge-gap recorder, strictly AFTER the reply was persisted + sent,
+    // so it is off the customer critical path and best-effort/total: a missing
+    // sink, a disabled sink, or a throwing sink can never block, retry, or
+    // alter the turn (the evidence is explanatory, never authoritative).
+    if (deps.turnTelemetry) {
+      try {
+        deps.turnTelemetry.emit(buildTurnEvidence(result, TURN_EVIDENCE_META));
+      } catch {
+        // Observability failure must never change a customer outcome.
+      }
+    }
+
     // PROMPT-AI-ARCH-18 (Slice 9) — the record-only knowledge-gap signal,
     // written AFTER the authoritative turn (the reply is already persisted +
     // delivered) and after the operator attention above, so it is strictly
@@ -1492,6 +1545,11 @@ async function runInboundTurn(
     };
   }
   const inbound: InboundMessageInput = parsed.data;
+
+  // PROMPT-AI-OPS-22 — ONE correlation id for the whole turn, born before any
+  // decision and carried on every downstream observation of this turn. Opaque,
+  // random, never derived from content.
+  const traceId = newTurnTraceId();
 
   // 1. Resolve the Business: the provider adapter's server-resolved
   //    identity wins when present (e.g. Meta `phone_number_id` →
@@ -1700,6 +1758,13 @@ async function runInboundTurn(
     });
     const aiRequest: AiRequest = builtContext.request;
 
+    // PROMPT-AI-OPS-22 — the deterministic, text-derived task families and the
+    // bounded channel facts of the ASSEMBLED request. Both are machine keys /
+    // counters only; they never copy message text or a knowledge value, and
+    // they make "was the expected context available?" answerable from evidence.
+    const taskRelevance: TaskRelevance = deriveTaskRelevance(inbound.text);
+    const contextChannels = readContextChannels(aiRequest);
+
     // 8. Deterministic bypass first (DECISIONS #33): turns safely
     //    decidable without an assistant never spend an AI call — and
     //    never produce an AI_TURN usage fact (no request was made).
@@ -1798,7 +1863,21 @@ async function runInboundTurn(
     );
     const resolvedTurn = resolution?.plan ?? null;
     const resolvedState = resolution?.state ?? null;
-    const turnObservability: TurnObservability = buildTurnObservability({
+    // PROMPT-AI-OPS-22 — provider execution facts for the evidence record.
+    // `NOT_CALLED` marks a turn that spent no physical provider call (the
+    // deterministic bypass / a JEV deterministic termination). When an adapter
+    // exposes no telemetry the count falls back to 1 — a non-bypass turn DID
+    // consult the adapter exactly once (the one-call invariant).
+    const providerAttempts = deterministicBypass
+      ? 0
+      : (turnTelemetry?.retryTrace?.attempts.length ??
+        turnTelemetry?.attempts.length ??
+        1);
+    const providerStatus: "SUCCESS" | "FAILURE" | "NOT_CALLED" =
+      deterministicBypass
+        ? "NOT_CALLED"
+        : (turnTelemetry?.finalStatus ?? (validated ? "SUCCESS" : "FAILURE"));
+    let turnObservability: TurnObservability = buildTurnObservability({
       routingDecision: turnRouting,
       response: validated,
       provider: deterministicBypass
@@ -1816,6 +1895,20 @@ async function runInboundTurn(
         validated,
       ),
       turnPlan: resolvedTurn?.plan,
+      // PROMPT-AI-OPS-22 — turn correlation + the deterministic task families
+      // + the request's channel facts + the provider execution facts.
+      traceId,
+      taskRelevance: armedRelevance(taskRelevance),
+      contextChannels,
+      providerAttempts,
+      providerStatus,
+      // Null for a bypass (no provider output existed to parse); true/false
+      // only when a provider was actually consulted this turn.
+      parseSuccess: deterministicBypass
+        ? null
+        : turn
+          ? validated !== null
+          : null,
       ...(resolvedTurn
         ? { answerAndContinue: resolvedTurn.answerAndContinue }
         : {}),
@@ -2327,6 +2420,28 @@ async function runInboundTurn(
       response: validated,
       context: { request: aiRequest, facts: builtContext.facts },
     });
+    // PROMPT-AI-OPS-22 — record the gate's verdict on the evidence record so
+    // "did disclosure allow or refuse this channel?" is answerable from
+    // evidence. `channel` is the LEDGER FAMILY the gate decided on: the family
+    // that actually backed a disclosed knowledge reply; `routing-action` when
+    // the turn's output is a routing action (handoff / booking_handoff), which
+    // discloses no knowledge and so is passed through; or the primary family a
+    // refused self-authored reply needed. Closed machine keys only — never
+    // reply text or policy internals surfaced to a customer.
+    turnObservability = {
+      ...turnObservability,
+      disclosure: {
+        channel:
+          disclosure.kind === "disclosed"
+            ? (disclosure.support[0] ?? "routing-action")
+            : (TASK_SUPPORT_FAMILIES[validated.intent].family ??
+              "declared-intent"),
+        allowed: disclosure.kind === "disclosed",
+        ...(disclosure.kind === "requires-human"
+          ? { refusalReason: disclosure.reason }
+          : {}),
+      },
+    };
     if (disclosure.kind !== "disclosed") {
       // 9d-pre. INTERRUPTION RECOVERY (PROMPT-AI-ARCH-08). When a refused
       //     self-authored reply is actually a BENIGN non-task interruption of a

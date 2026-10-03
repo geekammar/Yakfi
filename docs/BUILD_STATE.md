@@ -51,6 +51,65 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**LIVE PILOT ROUTING FORENSICS + OBSERVABILITY FOUNDATION (`PROMPT-AI-OPS-22`,
+OBSERVABILITY-FIRST + READ-ONLY FORENSICS; ZERO routing/context/disclosure/
+booking/provider-policy/prompt/schema/migration change; no commit/push/tag/
+deploy): FORENSICS COMPLETE — both live symptoms classified PROVIDER/
+CONFIGURATION; the real (proven) defect was the discarded observability
+record, now closed by a fail-open, vendor-neutral, content-free turn-evidence
+seam.** **Source of truth:** HEAD `e8e763e` = tag `v0.40.0`, working tree
+clean; production live-verified `GET /api/health` → `version:"0.40.0"`,
+`status:"ok"`, `database:"connected"`, `missingEnvVars:[]`; migration
+`20261003150000_business_address` IS APPLIED (17:33:53Z, before the 17:36:17Z
+release commit); policy `codecraft`/`deepseek-v4-flash-0731`,
+`fallback_enabled:false`. **Read-only production forensics (`مركز أفنان`,
+conv `f217cf5e`, 2026-10-03, post-v0.40.0):** the address IS present
+(`شارع الاستاد - دسوق - كفر الشيخ`), `about` IS present, 4 active named
+services exist (all unpriced, `faqs` empty); BOTH target questions —
+«أين موقعكم؟» (17:43:42) and «ما الخدمات المتاحة؟» (17:45:57, a re-send after
+the 17:43:53 send was DEFERRED_TO_STAFF on the already-NEED_HUMAN thread) —
+hit a `codecraft` **`AI_TURN` FAILURE with `in=null out=null` (zero tokens)**,
+so **the provider attempt itself is the first incorrect decision**; the engine
+then fails safe to NEED_HUMAN with cause `AI_FAILURE` (`knowledge_gaps`=0).
+Every non-greeting turn in the conversation (10/10) is a zero-token codecraft
+FAILURE; the local `pnpm probe:codecraft` is **5/5 SUCCESS** on the configured
+model, so the production `CODECRAFT_API_KEY` is the failure point
+(`/api/health` checks only 4 core vars). **No application defect → no
+production behavior change** (the provider failed BEFORE disclosure). **The
+proven observability gap:** the engine already computes a content-free
+`TurnObservability` per turn but all three webhook callers discard it — the
+disclosure verdict, context channels, and routing decision were never emitted
+or persisted, so a turn could not be explained from evidence. **Smallest seam
+(vendor-neutral, fail-open, no new dependency/table):** additive
+`TurnObservability` fields (`traceId`, `taskRelevance[]`, `contextChannels`,
+`disclosure`, `providerAttempts`, `providerStatus`, `parseSuccess`); a new PURE
+`src/features/conversations/server/turn-evidence.ts` projecting a finished turn
+into ONE content-free `flowpilot.turn.evidence@v1` record; a new fail-open sink
+`src/lib/observability/turn-telemetry.ts` (ONE structured JSON line to the
+EXISTING runtime logs + optional env-gated OTLP/HTTP exporter implemented with
+plain `fetch`; `TURN_EVIDENCE_DISABLED` / `OTEL_TURN_EVIDENCE_ENABLED` /
+`OTEL_EXPORTER_OTLP_ENDPOINT`); the optional `turnTelemetry` engine dep emits
+at the EXISTING `receiveInboundMessage` choke point AFTER persist+send,
+best-effort/total (a missing/throwing/disabled sink leaves the turn
+byte-identical). ONE trace id per turn, one generative call max, no second
+inference/resolver/classifier, no prompt/schema/migration change, no
+critical-path telemetry DB dependency. **Deterministic:** NEW
+`check:turn-evidence` **27/27** (catalog present→DISCLOSED / absent→safe;
+address present→DISCLOSED / absent→NO_KNOWLEDGE; unsupported self-authored
+reply→POLICY_REFUSED; provider failure→AI_FAILURE never a gap + gate never
+consulted; throwing sink→identical outcome; zero-call greeting→NOT_CALLED/0/
+parse-null; content-freeness; kill switch; determinism; BOTH live questions
+replayed against the real pilot data shape with a healthy provider→DISCLOSED)
+
+- all adjacent suites green + `pnpm verify` + `pnpm security` (1 pre-existing
+  warning). **Files changed:** `ai-observability.ts`, `conversation-engine.ts`,
+  `turn-evidence.ts` (new), `src/lib/observability/turn-telemetry.ts` (new),
+  `scripts/check-turn-evidence.ts` (new), `package.json`, docs. **No
+  commit/push/tag/deploy; no migration.** **Readiness: FORENSICS_COMPLETE +
+  OBSERVABILITY_BUILT** — operator restores/rotates the production
+  `CODECRAFT_API_KEY` (or enables fallback + a secondary) and sends ONE live
+  turn, which the new evidence line will then explain end-to-end.
+
 **LOW-FRICTION BUSINESS KNOWLEDGE / PILOT READINESS UX (`PROMPT-AI-OPS-21`,
 IMPLEMENTATION + DETERMINISTIC + REAL-LLM VERIFICATION; ONE additive nullable
 column + migration NOT applied; ZERO engine/resolver/handoff/provider change;

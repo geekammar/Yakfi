@@ -63,6 +63,35 @@ export type TurnStateTransitionObservation = {
 };
 
 /**
+ * Which knowledge channels the assembled `AiRequest` actually carried this
+ * turn (PROMPT-AI-OPS-22). A bounded, machine-safe projection of the B-02
+ * context decision: counters and presence booleans ONLY — never a value,
+ * never message content. This is what makes "was the expected context
+ * available?" answerable from evidence instead of inference.
+ */
+export type TurnContextChannels = {
+  readonly servicesCount: number;
+  readonly addressPresent: boolean;
+  readonly aboutPresent: boolean;
+  readonly faqPresent: boolean;
+  readonly pricePresent: boolean;
+  readonly availabilityPresent: boolean;
+};
+
+/**
+ * The B-03 disclosure gate's decision for this turn (PROMPT-AI-OPS-22), when
+ * the gate was consulted. `channel` is the support family / request channel
+ * key that backed (or failed to back) the reply; `allowed` is the gate's
+ * verdict; `refusalReason` is present only on a refusal. Closed machine keys
+ * only — never reply text, never policy internals surfaced to a customer.
+ */
+export type TurnDisclosureObservation = {
+  readonly channel: string;
+  readonly allowed: boolean;
+  readonly refusalReason?: string;
+};
+
+/**
  * The additive, optional observable record for ONE turn. Every member is
  * optional: a producer that cannot observe a field simply omits it, so the
  * current system populates exactly what its existing seams expose and nothing
@@ -107,6 +136,29 @@ export type TurnObservability = {
     readonly mode: "DETERMINISTIC" | "GENERATIVE";
     readonly reason: string;
   } | null;
+  /**
+   * ONE correlation id for the whole inbound turn (PROMPT-AI-OPS-22): born at
+   * turn start, carried on every downstream observation of the same turn so a
+   * single finished turn is traceable end-to-end. Opaque, random, and carries
+   * no business or customer meaning.
+   */
+  readonly traceId?: string;
+  /**
+   * The B-02 task-relevance families that armed this turn
+   * (PROMPT-AI-OPS-22) — the deterministic, text-derived family names only
+   * (e.g. `serviceCatalog` / `contactOrIdentity`), never the message text.
+   */
+  readonly taskRelevance?: readonly string[];
+  /** Which knowledge channels the request carried (PROMPT-AI-OPS-22). */
+  readonly contextChannels?: TurnContextChannels;
+  /** The B-03 gate's verdict, when the gate was consulted (PROMPT-AI-OPS-22). */
+  readonly disclosure?: TurnDisclosureObservation;
+  /** Number of physical provider attempts in this turn (0 = no call spent). */
+  readonly providerAttempts?: number;
+  /** Provider outcome for the turn; `NOT_CALLED` for a deterministic turn. */
+  readonly providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED";
+  /** Whether `parseAiResponse` accepted the provider output. */
+  readonly parseSuccess?: boolean;
 };
 
 export type BuildTurnObservabilityInput = {
@@ -145,10 +197,24 @@ export type BuildTurnObservabilityInput = {
   /** True on an answer-and-continue turn. */
   readonly answerAndContinue?: boolean;
   /** The JEV gateway decision (Slice 8) — closed machine keys, audit-only. */
-  readonly jev?: {
+  jev?: {
     readonly mode: "DETERMINISTIC" | "GENERATIVE";
     readonly reason: string;
   } | null;
+  /** One correlation id for the turn (PROMPT-AI-OPS-22). */
+  traceId?: string | null;
+  /** Armed task-relevance family names (PROMPT-AI-OPS-22). */
+  taskRelevance?: readonly string[] | null;
+  /** Which knowledge channels the request carried (PROMPT-AI-OPS-22). */
+  contextChannels?: TurnContextChannels | null;
+  /** The B-03 gate verdict, when consulted (PROMPT-AI-OPS-22). */
+  disclosure?: TurnDisclosureObservation | null;
+  /** Physical provider attempts this turn (PROMPT-AI-OPS-22). */
+  providerAttempts?: number | null;
+  /** Provider outcome for the turn (PROMPT-AI-OPS-22). */
+  providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED" | null;
+  /** Whether `parseAiResponse` accepted the provider output. */
+  parseSuccess?: boolean | null;
 };
 
 /**
@@ -204,5 +270,20 @@ export function buildTurnObservability(
       ? { answerAndContinue: input.answerAndContinue }
       : {}),
     ...(input.jev ? { jev: input.jev } : {}),
+    ...(input.traceId ? { traceId: input.traceId } : {}),
+    ...(input.taskRelevance && input.taskRelevance.length > 0
+      ? { taskRelevance: [...input.taskRelevance] }
+      : {}),
+    ...(input.contextChannels
+      ? { contextChannels: input.contextChannels }
+      : {}),
+    ...(input.disclosure ? { disclosure: input.disclosure } : {}),
+    ...(input.providerAttempts !== undefined && input.providerAttempts !== null
+      ? { providerAttempts: input.providerAttempts }
+      : {}),
+    ...(input.providerStatus ? { providerStatus: input.providerStatus } : {}),
+    ...(input.parseSuccess !== undefined && input.parseSuccess !== null
+      ? { parseSuccess: input.parseSuccess }
+      : {}),
   };
 }

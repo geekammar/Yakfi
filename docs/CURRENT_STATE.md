@@ -6,11 +6,15 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.39.2** — released and committed (`acf12c2`, tag `v0.39.2`;
-HEAD == `origin/main`). **Production IS DEPLOYED AT v0.39.2** (`GET
-/api/health` → `status:"ok"`, `version:"0.39.2"`, `database:"connected"`,
-`missingEnvVars:[]`; read 2026-10-03), superseding the v0.39.0 checkpoint
-below. **The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
+**Version: v0.40.0** — released and committed (`e8e763e`, tag `v0.40.0`;
+HEAD == `origin/main`; working tree clean). **Production IS DEPLOYED AT
+v0.40.0** (`GET /api/health` → `status:"ok"`, `version:"0.40.0"`,
+`database:"connected"`, `missingEnvVars:[]`; re-verified 2026-10-03),
+superseding the v0.39.2/v0.39.0 checkpoints below. **All 19 migrations are
+applied**, including `20261003150000_business_address` (applied
+2026-10-03T17:33:53Z, before the 17:36:17Z release commit) — the
+`Business.address` column IS live and populated for the dental pilot.
+**The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
 `PROMPT-AI-OPS-19`):** `GET /api/health` →
 `status:"ok"`, `version:"0.39.0"`, `deploymentReady:true`,
 `database:"connected"`, `missingEnvVars:[]`; all **18** migrations applied
@@ -27,6 +31,38 @@ is retained as history; deployment state statements in it are superseded by
 the live verification above (in particular production is NOT v0.31.2, the
 Telegram fixes ARE live, a managed bot DID reach CONNECTED in production, and
 the Slice-6/7/9 migrations ARE applied).
+**LIVE PILOT ROUTING FORENSICS + OBSERVABILITY FOUNDATION (DECISIONS #88 /
+`PROMPT-AI-OPS-22`, 2026-10-03): FORENSICS COMPLETE; the real defect was the
+discarded observability record.** Read-only production forensics on `مركز
+أفنان` conv `f217cf5e` (post-v0.40.0) proved BOTH observed questions —
+«أين موقعكم؟» and «ما الخدمات المتاحة؟» — hit a `codecraft` **`AI_TURN`
+FAILURE with `in=null out=null` (zero tokens)**: **the provider attempt itself
+is the first incorrect decision**, classified **PROVIDER/CONFIGURATION**, not
+an application bug, not missing data, not a disclosure failure. The address IS
+present (`شارع الاستاد - دسوق - كفر الشيخ`), `about` IS present, and 4 active
+named services exist; the local `pnpm probe:codecraft` is **5/5 SUCCESS**, so
+the production `CODECRAFT_API_KEY` is the failure point (`/api/health` checks
+only 4 core vars). Because the provider failed BEFORE disclosure, the prompt's
+defect rule forbids a behavior change. **The proven defect was evidential:**
+the engine already computes a content-free `TurnObservability` per turn but the
+three webhook callers DISCARD it — the disclosure verdict, context channels,
+and routing decision were never emitted or persisted. **Built (smallest seam,
+vendor-neutral, fail-open, no new dependency/table):** additive
+`TurnObservability` fields (`traceId`, `taskRelevance[]`, `contextChannels`,
+`disclosure`, `providerAttempts`, `providerStatus`, `parseSuccess`); a new PURE
+`turn-evidence.ts`; a new fail-open sink
+(`src/lib/observability/turn-telemetry.ts`) emitting ONE structured JSON line
+to the EXISTING runtime logs + an OPTIONAL env-gated OTLP/HTTP exporter
+(dependency-free `fetch`; `TURN_EVIDENCE_DISABLED` /
+`OTEL_TURN_EVIDENCE_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT`); emitted at the
+EXISTING `receiveInboundMessage` choke point AFTER persist+send, best-effort/
+total. Never content/secrets/prompts/PII; one trace id per turn; one generative
+call max; no second inference; no prompt/schema/migration change. **Verified:**
+NEW `check:turn-evidence` **27/27** (incl. BOTH live questions replayed against
+the real pilot data shape with a healthy provider → DISCLOSED) + all adjacent
+suites + `pnpm verify` + `pnpm security` green. **Readiness:
+FORENSICS_COMPLETE + OBSERVABILITY_BUILT** — the operator's one action is to
+restore/rotate the production codecraft key and send ONE live turn.
 **LIVE PILOT FALSE-HANDOFF FORENSICS (DECISIONS #86 / `PROMPT-AI-OPS-20`,
 2026-10-03):** the pilot's ordinary-question false handoffs are diagnosed. In
 `مركز أفنان` conversation `f217cf5e`, every non-greeting turn is an `AI_TURN`

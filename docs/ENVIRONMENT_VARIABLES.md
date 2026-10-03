@@ -105,6 +105,25 @@ Notes:
 | `WHATSAPP_META_API_VERSION`               | `v21.0` | Graph API version (e.g. `v21.0`) — `https://graph.facebook.com/{version}/{phone_number_id}/messages`. Optional; `v21.0` when unset.                                                                                                                                                                                                                                                                                                                                                                            |
 | `CREDENTIAL_MASTER_KEY`                   | unset   | **RUNTIME credential store** master encryption key (DECISIONS #49) — 32 random bytes as hex (64 chars) or base64 (44 chars). Optional: while unset the store stays UNAVAILABLE (every `fp:<id>` store/resolve fails closed) and the existing ENV grammar is unaffected. Server-side only; NEVER in the DB/UI/logs and never `NEXT_PUBLIC_`. Rotation is a later operational concern (`runtime_credentials.key_version` is the hook).                                                                           |
 
+### Optional Turn-Evidence Observability (DECISIONS #88 / `PROMPT-AI-OPS-22`)
+
+These govern the fail-open turn-evidence sink ONLY. All are optional; unset
+means the default behaviour below. They never affect routing, disclosure,
+booking, or any customer-visible outcome.
+
+| Variable                      | Default      | Meaning                                                                                                                                                                                                                                         |
+| ----------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TURN_EVIDENCE_DISABLED`      | unset (emit) | `1`/`true` silences the sink entirely (no structured log line, no OTLP). A kill switch for a noisy/incident scenario.                                                                                                                           |
+| `OTEL_TURN_EVIDENCE_ENABLED`  | unset (off)  | `1`/`true` ALSO exports each turn-evidence record via OTLP/HTTP-JSON. Requires `OTEL_EXPORTER_OTLP_ENDPOINT`; without it the sink stays logs-only.                                                                                              |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset        | OTLP/HTTP base URL (the sink POSTs to `{endpoint}/v1/traces`). Standard OTLP variable name; vendor-neutral. Example: a Better Stack / Honeycomb / Grafana OTLP endpoint, configured through env only — no vendor is hard-coded in domain logic. |
+
+By default the sink writes ONE structured JSON line per inbound turn to the
+existing runtime logs (`msg:"flowpilot.turn.evidence"`). The record is
+content-free (machine keys, counters, booleans, and correlation ids only —
+never customer text, phone numbers, keys, prompts, or chain-of-thought) and is
+emitted off the customer critical path. See `docs/ai/ARCHITECTURE.md → Turn
+evidence / observability seam`.
+
 ## Per-Business WhatsApp Connections (pilot onboarding)
 
 A Business Admin connects a WhatsApp number at `/settings/whatsapp`

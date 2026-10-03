@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.40.0",
+  "version": "0.40.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -38,6 +38,7 @@
     "check:conversation-handoff": "tsx scripts/check-conversation-handoff.ts",
     "check:handoff-cause": "tsx scripts/check-handoff-cause.ts",
     "check:knowledge-gap": "tsx scripts/check-knowledge-gap.ts",
+    "check:turn-evidence": "tsx scripts/check-turn-evidence.ts",
     "check:jev": "tsx scripts/check-jev-strategy.ts",
     "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
