@@ -1,0 +1,151 @@
+{
+  "provider": "codecraft",
+  "model": "deepseek-v4-flash-0731",
+  "results": [
+    {
+      "id": "about-present",
+      "ok": true,
+      "latencyMs": 22932,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "about-missing",
+      "ok": true,
+      "latencyMs": 10100,
+      "intent": "FAQ",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "location-present",
+      "ok": true,
+      "latencyMs": 5730,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "location-missing",
+      "ok": true,
+      "latencyMs": 8344,
+      "intent": "FAQ",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "service-list",
+      "ok": true,
+      "latencyMs": 8106,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "service-description",
+      "ok": true,
+      "latencyMs": 6733,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "price-present",
+      "ok": true,
+      "latencyMs": 7125,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "price-missing",
+      "ok": true,
+      "latencyMs": 9521,
+      "intent": "FAQ",
+      "action": "handoff",
+      "handoffReason": "NO_KNOWLEDGE",
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "faq",
+      "ok": true,
+      "latencyMs": 6409,
+      "intent": "FAQ",
+      "action": "reply",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [
+        "business.faqs"
+      ],
+      "contentContainsExpected": true,
+      "pass": true
+    },
+    {
+      "id": "unrelated-booking-carries-nothing",
+      "ok": true,
+      "latencyMs": 11236,
+      "intent": "BOOKING",
+      "action": "booking_handoff",
+      "handoffReason": null,
+      "gate": "disclosed",
+      "gateReason": null,
+      "support": [],
+      "contentContainsExpected": true,
+      "pass": true
+    }
+  ],
+  "passed": 10,
+  "total": 10,
+  "providerFailures": 0
+}

@@ -55,6 +55,15 @@ model Business {
   whatsappNumber        String
   timezone              String    @default("Asia/Riyadh")
   about                 String?
+  // Customer-facing location/address (PROMPT-AI-OPS-21). A single free-text
+  // line — the smallest provider-neutral representation actually needed for
+  // the assistant to answer "أين موقعكم؟". NOT geocoding, maps, routing, or
+  // delivery zones; the owner is guided (placeholder) to include the
+  // area/city naturally. CONDITIONAL in the B-01 policy: it reaches the
+  // assistant ONLY on a contact/identity/location turn, and a missing
+  // address is never invented. `city` stays a separate discovery-metadata
+  // column (INTERNAL) — this is the customer-facing location fact.
+  address               String?
   /// JSON working-hours structure, e.g. { "sun": { "open": "09:00", "close": "21:00", "closed": false }, ... }
   workingHours          Json?
   slotDurationMinutes   Int       @default(30) @map("slot_duration_minutes")

@@ -1,5 +1,9 @@
 import { Dashboard } from "@/features/dashboard/components/dashboard";
-import { getDashboardData } from "@/features/dashboard/server/dashboard-query";
+import {
+  getAiReadinessInput,
+  getDashboardData,
+} from "@/features/dashboard/server/dashboard-query";
+import { computeAiReadiness } from "@/lib/ai-readiness";
 import { requireUser } from "@/server/auth/guards";
 import { businessRepository } from "@/server/repositories";
 
@@ -13,13 +17,17 @@ export default async function HomePage() {
   const business = await businessRepository.findById(session.user.businessId);
   if (!business || !business.onboardingCompletedAt) redirect("/onboarding");
 
-  const data = await getDashboardData(business.id, business.timezone);
+  const [data, readinessInput] = await Promise.all([
+    getDashboardData(business.id, business.timezone),
+    getAiReadinessInput(business),
+  ]);
 
   return (
     <Dashboard
       businessName={business.name}
       whatsappNumber={business.whatsappNumber}
       timeZone={business.timezone}
+      readiness={computeAiReadiness(readinessInput)}
       data={data}
     />
   );

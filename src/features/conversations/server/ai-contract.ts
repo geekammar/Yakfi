@@ -188,6 +188,15 @@ export const aiRequestSchema = z.object({
    * fact when it is absent.
    */
   businessAbout: z.string().trim().min(1).max(2000).optional(),
+  /**
+   * The business's customer-facing location/address line
+   * (PROMPT-AI-OPS-21). CONDITIONAL: carried ONLY when the context builder
+   * found the current turn contact/identity/location-relevant (the same gate
+   * `whatsappNumber` uses) AND the business stored an authoritative address.
+   * The AI may QUOTE it but must NEVER invent a location when it is absent —
+   * a missing address stays a knowledge gap (NO_KNOWLEDGE handoff).
+   */
+  businessAddress: z.string().trim().min(1).max(500).optional(),
   /** Service facts when the task may involve a service. */
   services: z.array(serviceFactSchema).max(100).default([]),
   /** Relevant knowledge entries when available. */

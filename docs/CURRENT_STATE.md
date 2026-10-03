@@ -6,9 +6,12 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.39.0** — released and committed (`c55d3de`, tag `v0.39.0`;
-HEAD == `origin/main`). **Production IS LIVE-VERIFIED AT v0.39.0
-(2026-10-03, DECISIONS #85 / `PROMPT-AI-OPS-19`):** `GET /api/health` →
+**Version: v0.39.2** — released and committed (`acf12c2`, tag `v0.39.2`;
+HEAD == `origin/main`). **Production IS DEPLOYED AT v0.39.2** (`GET
+/api/health` → `status:"ok"`, `version:"0.39.2"`, `database:"connected"`,
+`missingEnvVars:[]`; read 2026-10-03), superseding the v0.39.0 checkpoint
+below. **The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
+`PROMPT-AI-OPS-19`):** `GET /api/health` →
 `status:"ok"`, `version:"0.39.0"`, `deploymentReady:true`,
 `database:"connected"`, `missingEnvVars:[]`; all **18** migrations applied
 and `prisma migrate diff` reports **zero drift** against `schema.prisma`
@@ -47,6 +50,26 @@ fallback + a secondary) and deploys; no further code change is required for
 the observed symptom. The location/hours/price classes remain honest
 knowledge gaps (no address field, INTERNAL hours, no prices entered) and are
 recorded as the distinct DATA/UX work, NOT patched into the engine.
+**LOW-FRICTION BUSINESS KNOWLEDGE / PILOT READINESS UX (DECISIONS #87 /
+`PROMPT-AI-OPS-21`, 2026-10-03): READY_FOR_PILOT_UX_REVIEW.** The DATA/UX gap
+OPS-20 recorded is closed at the smallest authoring surface. **Provider gate
+PASS:** production is deployed at v0.39.2 and the EXISTING probe
+`pnpm probe:codecraft` → 5/5 SUCCESS, so the prior production key failure is
+classified PROVIDER/CONFIGURATION **resolved-by-redeploy** (a live pilot turn
+remains the operator's final confirmation). **What was built:** `about` +
+`address` are now authorable in the EXISTING Settings «بيانات المنشأة» form
+(optional, partial save), a deterministic **AI-readiness card on the dashboard**
+links to the EXISTING editors (settings / `/onboarding/hours` / services /
+knowledge), and `Business.address` — ONE additive nullable column (migration
+`20261003150000_business_address`, **NOT applied**) — reaches the assistant as
+`AiRequest.businessAddress` ONLY on a contact/identity/location turn via the
+existing B-01/B-02/B-03 seams; a missing address is never invented. **Verified:**
+NEW `check:ai-readiness` 29/29 + adjacent suites + `pnpm verify` + `pnpm
+security` green; REAL-LLM (real codecraft `deepseek-v4-flash-0731`) **10/10
+classes PASS, 0 provider failures** (location/about present → DISCLOSED quoting
+the stored text; missing → NO_KNOWLEDGE handoff, no fabrication). **The two
+B-class onboarding-repeatability blockers (provider authoring surface; ENV
+WhatsApp connect surface) remain unbuilt and unchanged.**
 **Documentation/context sync (DOC-SYNC-V0318):** releases v0.31.3–v0.31.8
 committed DECISIONS #70–#75; the current baseline for future agent work is
 **Context Architecture V1 (DECISIONS #75)** — `docs/CONTEXT_MAP.md` +

@@ -15,6 +15,10 @@ export type BusinessSettingsView = {
   city: string;
   whatsappNumber: string;
   timezone: string;
+  /** Customer-facing description (PROMPT-AI-OPS-21). "" when not set. */
+  about: string;
+  /** Customer-facing location line (PROMPT-AI-OPS-21). "" when not set. */
+  address: string;
   confirmationMode: string;
   cancellationPolicy: string;
 };

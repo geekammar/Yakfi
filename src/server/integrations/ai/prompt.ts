@@ -70,6 +70,7 @@ export function buildPromptMessages(
     // style and no provider-specific prompt copy exists.
     `assistantStyle: ${request.assistantStyle ?? ASSISTANT_STYLE_DIRECTIVE}`,
     `businessAbout: ${request.businessAbout ?? "(none)"}`,
+    `businessAddress: ${request.businessAddress ?? "(none)"}`,
     `recentMessages:\n${recent}`,
     `services: ${services}`,
     `faqs:\n${faqs}`,

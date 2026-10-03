@@ -33,6 +33,14 @@ export const businessSettingsSchema = z.object({
     .max(80),
   whatsappNumber: phoneSchema,
   timezone: z.enum(TIMEZONE_VALUES, "اختر المنطقة الزمنية"),
+  // ── AI information (PROMPT-AI-OPS-21) ────────────────────────────────
+  // Both are OPTIONAL: the owner may save partial information, and neither
+  // ever blocks using FlowPilot. `about` is the customer-facing description
+  // the assistant quotes on a business-profile question; `address` is the
+  // location line it quotes on a location question. An empty string clears
+  // the stored field (normalized to null by the service).
+  about: z.string().trim().max(2000, "النبذة طويلة جداً").optional(),
+  address: z.string().trim().max(500, "العنوان طويل جداً").optional(),
   // Booking behavior — إعدادات الحجز
   confirmationMode: z.enum(CONFIRMATION_MODE_VALUES, "اختر طريقة تأكيد الحجز"),
   cancellationPolicy: z

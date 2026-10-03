@@ -60,6 +60,8 @@ export function SettingsScreen({
       city: initialSettings.city,
       whatsappNumber: initialSettings.whatsappNumber,
       timezone: initialSettings.timezone as BusinessSettingsInput["timezone"],
+      about: initialSettings.about,
+      address: initialSettings.address,
       confirmationMode:
         initialSettings.confirmationMode as BusinessSettingsInput["confirmationMode"],
       cancellationPolicy: initialSettings.cancellationPolicy,
@@ -252,7 +254,59 @@ export function SettingsScreen({
           </div>
         </section>
 
-        {/* ─── Section 2: إعدادات الحجز ─── */}
+        {/* ─── Section 2: معلومات المساعد (AI information — optional) ─── */}
+        <section
+          aria-labelledby="settings-ai-section"
+          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+        >
+          <SectionHeader
+            title="معلومات المساعد"
+            description="أدخل أهم المعلومات عن نشاطك مرة واحدة، والمساعد يستخدمها للإجابة على العملاء — اختيارية بالكامل."
+          />
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="settings-about">
+                نبذة عن المنشأة{" "}
+                <span className="font-normal text-muted-foreground">
+                  (اختياري)
+                </span>
+              </Label>
+              <Textarea
+                id="settings-about"
+                rows={3}
+                placeholder="مثال: عيادة أسنان متخصصة في تنظيف وحشو الأسنان، فريق محترف وأحدث الأجهزة."
+                aria-invalid={Boolean(form.formState.errors.about)}
+                {...form.register("about")}
+              />
+              {fieldError(form.formState.errors.about?.message)}
+              <p className="text-xs text-muted-foreground">
+                يُستخدمها المساعد عندما يسأل العميل عن نشاطك.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="settings-address">
+                موقع النشاط{" "}
+                <span className="font-normal text-muted-foreground">
+                  (اختياري)
+                </span>
+              </Label>
+              <Input
+                id="settings-address"
+                autoComplete="street-address"
+                placeholder="مثال: كفر الشيخ — شارع الجمهورية، بجوار صيدلية النيل"
+                aria-invalid={Boolean(form.formState.errors.address)}
+                {...form.register("address")}
+              />
+              {fieldError(form.formState.errors.address?.message)}
+              <p className="text-xs text-muted-foreground">
+                يُستخدمها المساعد عندما يسأل العميل عن مكانك.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* ─── Section 3: إعدادات الحجز ─── */}
         <section
           aria-labelledby="settings-booking-section"
           className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"

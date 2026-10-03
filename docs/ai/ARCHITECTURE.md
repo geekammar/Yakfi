@@ -165,7 +165,9 @@ build`) inherits this automatically.
   optional `assistantStyle` (a bounded Arabic phrasing directive — DECISIONS #62) +
   optional `businessAbout` and per-service optional `price`/`description`
   (task-gated Slice-6 channels — PROMPT-AI-ARCH-13/-15; absent on unrelated
-  turns). Never the whole DB, never complete history.
+  turns) + optional `businessAddress` (a task-gated contact/identity/location
+  channel — PROMPT-AI-OPS-21; absent on unrelated turns, never invented).
+  Never the whole DB, never complete history.
 - **Response — `AiResponse` (`aiResponseSchema`):** `intent` (fixed family) +
   `action` (`reply` | `handoff` | `booking_handoff`) + `content` (1–4096, already
   phrased) + `extraction` (service/provider/date/timePreference — facts only) +
@@ -543,13 +545,13 @@ never sent.
   declared task is backed by a ledger fact that is `included` AND
   `disclosable` AND actually carried in the request:
 
-  | Intent                        | Support family (ledger key)                                                                                                                                                                          | Request channel                                              |
-  | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-  | `GREETING`                    | **none — knowledge-free social protocol**                                                                                                                                                            | n/a (passed by declared intent)                              |
-  | `FAQ`                         | `business.faqs` (PUBLIC as a whole) **or** a task-gated channel actually carried this turn (`service.price` · `business.about` · `service.description` — Slice 6; `service.name` — PROMPT-AI-OPS-20) | `request.faqs` non-empty **or** the matching carried channel |
-  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)                                                                                                                                                                  | `request.availability` non-empty                             |
-  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL)                                                                                                                                                          | **none today** ⇒ always routed to staff                      |
-  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                                                                                                                                                                               | n/a                                                          |
+  | Intent                        | Support family (ledger key)                                                                                                                                                                                                                  | Request channel                                              |
+  | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+  | `GREETING`                    | **none — knowledge-free social protocol**                                                                                                                                                                                                    | n/a (passed by declared intent)                              |
+  | `FAQ`                         | `business.faqs` (PUBLIC as a whole) **or** a task-gated channel actually carried this turn (`service.price` · `business.about` · `business.address` · `service.description` — Slice 6 / PROMPT-AI-OPS-21; `service.name` — PROMPT-AI-OPS-20) | `request.faqs` non-empty **or** the matching carried channel |
+  | `BOOKING` / `AVAILABILITY`    | `domain.availability` (CONDITIONAL)                                                                                                                                                                                                          | `request.availability` non-empty                             |
+  | `CANCELLATION` / `RESCHEDULE` | `business.cancellationPolicy` (CONDITIONAL)                                                                                                                                                                                                  | **none today** ⇒ always routed to staff                      |
+  | `HUMAN_REQUEST` / `AMBIGUOUS` | none — routing intents                                                                                                                                                                                                                       | n/a                                                          |
 
   Consequences: an `INTERNAL` fact is never disclosable (B-01), so it can
   never back a reply; a `CONDITIONAL` fact is disclosable only when B-02

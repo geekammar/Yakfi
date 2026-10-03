@@ -102,6 +102,11 @@ export type ContextBusinessSources = {
   readonly businessId?: string | null;
   readonly name: string;
   readonly about?: string | null;
+  /**
+   * Customer-facing location line (PROMPT-AI-OPS-21). Exposed ONLY on a
+   * contact/identity/location turn; absent otherwise, and never invented.
+   */
+  readonly address?: string | null;
   readonly whatsappNumber?: string | null;
   /** Raw `Business.faqs` JSON — validated here, same as the engine did. */
   readonly faqs?: unknown;
@@ -718,6 +723,24 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     inBudget: false,
     taskRequired: relevance.contactOrIdentity,
   });
+  // CONDITIONAL location fact (PROMPT-AI-OPS-21): the customer-facing
+  // address line, carried ONLY on a contact/identity/location turn — the
+  // same gate `whatsappNumber` uses. `contactOrIdentity` already covers the
+  // Egyptian location vocabulary («العنوان»/«عنوان»/«مكان»/«أين»/«وين»), so
+  // no new relevance family is needed. The fact is PUBLIC in level but
+  // task-gated, exactly like `about` on a business-info turn: an unrelated
+  // turn never carries the address, and a missing address contributes
+  // nothing (never invented).
+  const addressVerdict = evaluateCandidate({
+    ledger,
+    scope,
+    source: "BUSINESS_RECORD",
+    businessId: businessProvenance,
+    visibility: classifyBusinessField("address"),
+    key: "business.address",
+    inBudget: relevance.contactOrIdentity,
+    taskRequired: true,
+  });
   // CONDITIONAL policy fact — only on cancellation/reschedule asks.
   // Recorded in the ledger; not part of today's context budget.
   evaluateCandidate({
@@ -1030,6 +1053,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     sources.business.about &&
     sources.business.about.trim()
       ? { businessAbout: sources.business.about.trim() }
+      : {}),
+    ...(addressVerdict.included &&
+    sources.business.address &&
+    sources.business.address.trim()
+      ? { businessAddress: sources.business.address.trim() }
       : {}),
     ...(providerPreferenceIncluded
       ? { providerPreference: sources.providerPreference ?? undefined }

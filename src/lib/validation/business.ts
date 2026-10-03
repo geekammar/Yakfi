@@ -112,6 +112,10 @@ const createBusinessSchema = z.object({
   whatsappNumber: phoneSchema,
   timezone: z.string().trim().min(1).max(64).default("Asia/Riyadh"),
   about: z.string().trim().max(2000).optional(),
+  // Customer-facing location line (PROMPT-AI-OPS-21). Optional and
+  // unvalidated beyond length — a free-text address the assistant quotes on
+  // a location question. Never required, never bookable-critical.
+  address: z.string().trim().max(500).optional(),
   workingHours: workingHoursSchema.optional(),
   slotDurationMinutes: z.number().int().min(5).max(480).optional(),
   confirmationMode: confirmationModeSchema.optional(),

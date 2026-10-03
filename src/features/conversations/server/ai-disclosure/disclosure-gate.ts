@@ -121,6 +121,7 @@ export type SupportChannel =
   | "availability"
   | "services"
   | "businessAbout"
+  | "businessAddress"
   | "serviceDescriptions"
   | "serviceNames"
   | null;
@@ -258,6 +259,15 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
         typeof request.businessAbout === "string" &&
         request.businessAbout.trim().length > 0
       );
+    case "businessAddress":
+      // The CONDITIONAL business-location channel (PROMPT-AI-OPS-21) is
+      // carried only when the turn was contact/identity/location relevant AND
+      // the business stored an authoritative address. An empty channel means
+      // the reply would invent a location → refused.
+      return (
+        typeof request.businessAddress === "string" &&
+        request.businessAddress.trim().length > 0
+      );
     case "serviceDescriptions":
       // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6) is
       // carried only when the turn was service-info relevant AND at least one
@@ -311,6 +321,7 @@ function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
       primary,
       { family: "service.price", channel: "services" },
       { family: "business.about", channel: "businessAbout" },
+      { family: "business.address", channel: "businessAddress" },
       { family: "service.description", channel: "serviceDescriptions" },
       { family: "service.name", channel: "serviceNames" },
     ];

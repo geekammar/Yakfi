@@ -53,6 +53,8 @@ function toView(business: Business): BusinessSettingsView {
     city: business.city ?? "",
     whatsappNumber: business.whatsappNumber,
     timezone: business.timezone,
+    about: business.about ?? "",
+    address: business.address ?? "",
     confirmationMode: business.confirmationMode,
     cancellationPolicy: business.cancellationPolicy ?? "",
   };
@@ -95,13 +97,21 @@ export async function updateBusinessSettings(
 
   try {
     // The update targets ONLY the actor's own businessId — a client-
-    // supplied businessId cannot redirect this write.
+    // supplied businessId cannot redirect this write. `about`/`address` are
+    // optional AI information (PROMPT-AI-OPS-21): a blank value is stored as
+    // an EMPTY string (the same convention `saveBusinessSetup` uses for
+    // `about`), which reads back as "not set" everywhere — readiness treats
+    // a blank field as missing and the context builder never carries it.
+    const blankToEmpty = (value: string | undefined): string =>
+      typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
     await deps.businessRepository.update(scope.businessId, {
       name: parsed.data.name,
       vertical: parsed.data.vertical,
       city: parsed.data.city,
       whatsappNumber: parsed.data.whatsappNumber,
       timezone: parsed.data.timezone,
+      about: blankToEmpty(parsed.data.about),
+      address: blankToEmpty(parsed.data.address),
       confirmationMode: parsed.data.confirmationMode,
       cancellationPolicy: parsed.data.cancellationPolicy,
     });

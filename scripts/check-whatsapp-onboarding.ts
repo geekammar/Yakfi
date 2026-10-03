@@ -747,6 +747,7 @@ async function main(): Promise<void> {
     whatsappNumber: string;
     timezone: string;
     about: string | null;
+    address: string | null;
     workingHours: null;
     slotDurationMinutes: number;
     confirmationMode: string;
@@ -771,6 +772,7 @@ async function main(): Promise<void> {
     whatsappNumber: input.whatsappNumber,
     timezone: "Asia/Riyadh",
     about: null,
+    address: null,
     workingHours: null,
     slotDurationMinutes: 30,
     confirmationMode: "manual",

@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.39.2",
+  "version": "0.40.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -11,6 +11,7 @@
     "check:services": "tsx scripts/check-services.ts",
     "check:service-price": "tsx scripts/check-service-price.ts",
     "check:knowledge-faq": "tsx scripts/check-knowledge-faq.ts",
+    "check:ai-readiness": "tsx scripts/check-ai-readiness.ts",
     "check:policy": "tsx scripts/check-ai-policy.ts",
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",
     "check:ai-context-builder": "tsx scripts/check-ai-context-builder.ts",
@@ -98,6 +99,7 @@
     "eval:run-future-arch16": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch16.ts",
     "eval:run-future-arch17": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch17.ts",
     "eval:run-future-arch18": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch18.ts",
+    "eval:run-future-op21": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-op21.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts"
   },

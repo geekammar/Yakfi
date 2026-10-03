@@ -51,6 +51,80 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**LOW-FRICTION BUSINESS KNOWLEDGE / PILOT READINESS UX (`PROMPT-AI-OPS-21`,
+IMPLEMENTATION + DETERMINISTIC + REAL-LLM VERIFICATION; ONE additive nullable
+column + migration NOT applied; ZERO engine/resolver/handoff/provider change;
+no commit/push/deploy): BUILT + DETERMINISTIC + REAL-LLM VERIFIED —
+READY_FOR_PILOT_UX_REVIEW.** The DATA/UX gap OPS-20 recorded now has its
+smallest authoring surface — the AI already consumed business about/FAQ/
+service/price data, so the goal was to let the owner provide the small
+authoritative set quickly from a phone, NOT a new architecture. **Provider
+gate PASS:** production `GET /api/health` → `v0.39.2` + `database:"connected"`
+
+- `missingEnvVars:[]` (operator redeployed since the v0.39.0 note) and the
+  EXISTING supported probe `pnpm probe:codecraft` → **5/5 stages SUCCESS** (real
+  Arabic chat completion, `json_object`, token capture, `parseAiResponse`), so
+  the OPS-20 production key failure is classified PROVIDER/CONFIGURATION
+  resolved-by-redeploy (confirmed again by the real-LLM run: 0 failures).
+  **Audit (actual code):** `Business.about` was authorable ONLY in the onboarding
+  wizard (not `/settings`); **no address/location field existed anywhere** (only
+  `city`, INTERNAL discovery metadata); working hours are INTERNAL by design
+  (availability is CORE-02; re-editable via `/onboarding/hours`); services and
+  FAQ already have complete editors (untouched). **Chosen UX (hybrid, smallest):**
+  a deterministic **AI-readiness card on the dashboard** (admin home — least
+  navigation) whose rows link to the EXISTING editors (`/settings`,
+  `/onboarding/hours`, `/services`, `/settings/knowledge`), plus **`about` +
+  `address` added to the EXISTING Settings «بيانات المنشأة» flow** (one textarea
+- one input, OPTIONAL — no second settings/knowledge architecture, no
+  duplicate forms). **Storage:** ONE additive nullable `Business.address`
+  (`String?`) with migration `20261003150000_business_address` (ALTER ... ADD
+  COLUMN only; no backfill/destructive op; **NOT applied**). **AI visibility
+  (reuses the EXISTING B-01/B-02/B-03 seams, no new store):** `address` is
+  CONDITIONAL (`knowledge-visibility.ts`), carried as `AiRequest.businessAddress`
+  ONLY on a contact/identity/location turn (reusing the EXISTING
+  `contactOrIdentity` relevance — «العنوان»/«مكان»/«أين»/«وين» already matched),
+  backed by a new `business.address` disclosure family + `businessAddress` FAQ
+  channel; a missing address is never invented (model hands off `NO_KNOWLEDGE`);
+  `about` keeps its existing PUBLIC business-info gate and is now
+  post-onboarding authorable; ONE prompt line permits quoting a present address
+  and forbids inventing one (regenerated artifact). **Preserved:** partial save
+  (about/address optional; blank stores the existing `""` convention),
+  name/duration required, description/price optional, price never duplicated in
+  FAQ, no products/vertical UI, tenant scoping unchanged, readiness never blocks
+  usage. **Deterministic:** NEW `check:ai-readiness` **29/29** (authoring
+  persistence + partial save + overlong rejection + ADMIN-only + hostile
+  businessId stripped; readiness determinism incl. hours/services-partial/
+  prices/FAQ count; address/about carried only on their gated turns; missing
+  field ⇒ no fabrication via the disclosure gate; tenant isolation; preserved
+  service rules) + all adjacent suites green (`ai-context-builder` 56,
+  `ai-disclosure` 46, `knowledge-visibility` 36, `knowledge-gap` 24,
+  `knowledge-faq` 32, `service-price` 33, `services` 50, `handoff-cause` 31,
+  `conversation-handoff` 21, `ai-prompts` 129, `ai-architecture` 25, `greeting`
+  66, `multi-intent` 22, `conversation-booking` 16) + `pnpm verify` +
+  `pnpm security` (1 pre-existing warning). **Real-LLM (NEW eval-only
+  `scripts/eval-run-future-op21.ts`; real codecraft `deepseek-v4-flash-0731`,
+  the live policy; key by NAME only): 10/10 classes PASS, 0 provider failures** —
+  about-present → reply DISCLOSED (quotes the stored about); about-missing →
+  handoff NO_KNOWLEDGE; **location-present → reply DISCLOSED (quotes the stored
+  address); location-missing → handoff NO_KNOWLEDGE (no fabricated location)**;
+  service-list/service-description/known-price/FAQ → DISCLOSED; missing-price →
+  NO_KNOWLEDGE; unrelated booking → BOOKING_HANDOFF. **Readiness:
+  READY_FOR_PILOT_UX_REVIEW** (migration unapplied + not deployed).
+  **Files changed:** `prisma/schema.prisma` + migration
+  `20261003150000_business_address/`, `src/lib/ai-knowledge-visibility/
+knowledge-visibility.ts`, `src/features/conversations/server/ai-contract.ts`,
+  `ai-context-builder/context-builder.ts`, `ai-disclosure/disclosure-gate.ts`,
+  `src/server/integrations/ai/prompt.ts`,
+  `prompts/system/booking-assistant.prompt` (+ regenerated artifact),
+  `src/lib/ai-readiness.ts` (new), `src/lib/validation/business.ts`,
+  `src/features/settings/{schemas/settings-schema.ts,types.ts,
+server/settings-service.ts,components/settings-screen.tsx}`,
+  `src/features/dashboard/components/{ai-readiness-card.tsx (new),dashboard.tsx}`,
+  `src/features/dashboard/server/dashboard-query.ts`, `src/app/(app)/page.tsx`,
+  `scripts/check-ai-readiness.ts` (new), `scripts/eval-run-future-op21.ts` (new),
+  `scripts/check-whatsapp-onboarding.ts` (test-fake `address`),
+  `package.json`, docs. **No commit/push/tag/deploy; migration NOT applied.**
+
 **PILOT EVIDENCE READINESS (`PROMPT-AI-OPS-19`, ASSESSMENT ONLY — ZERO
 production code/prompt/schema/migration change; no commit/push/tag/deploy):
 PRODUCT IS OPERATIONALLY READY TO RUN REAL PILOTS; A REAL PILOT IS ALREADY

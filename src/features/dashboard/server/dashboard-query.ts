@@ -1,7 +1,10 @@
+import type { AiReadinessInput } from "@/lib/ai-readiness";
 import {
   appointmentRepository,
   conversationRepository,
+  serviceRepository,
 } from "@/server/repositories";
+import type { Business } from "@/types/domain";
 
 function dateParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -83,4 +86,30 @@ export async function getDashboardData(businessId: string, timeZone: string) {
   ]);
 
   return { appointments, conversations };
+}
+
+/**
+ * Assemble the AI-readiness input (PROMPT-AI-OPS-21) from the already-loaded
+ * Business record + the active service catalog. One extra repository read;
+ * the readiness computation itself is a separate pure module. Only the
+ * fields the readiness aid tracks are projected out — nothing else is
+ * carried to the UI.
+ */
+export async function getAiReadinessInput(
+  business: Business,
+): Promise<AiReadinessInput> {
+  const services = await serviceRepository.listByBusiness(business.id, {
+    includeInactive: false,
+  });
+  return {
+    about: business.about,
+    address: business.address,
+    workingHours: business.workingHours,
+    faqs: business.faqs,
+    services: services.map((service) => ({
+      isActive: service.isActive,
+      description: service.description,
+      priceType: service.priceType,
+    })),
+  };
 }

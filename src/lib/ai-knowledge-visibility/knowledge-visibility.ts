@@ -131,6 +131,11 @@ export const FAQ_STORE_VISIBILITY: VisibilityLevel = "PUBLIC";
 const BUSINESS_FIELD_VISIBILITY: Record<string, VisibilityLevel> = {
   name: "PUBLIC", // the business name — phrasing only, already in AiRequest
   about: "PUBLIC", // the business's own customer-facing description
+  // Customer-facing location line (PROMPT-AI-OPS-21). CONDITIONAL like
+  // `whatsappNumber`: it reaches the assistant ONLY on a
+  // contact/identity/location turn, so an unrelated turn never carries it
+  // and a missing address is never invented.
+  address: "CONDITIONAL",
   faqs: FAQ_STORE_VISIBILITY, // the canonical knowledge store
   vertical: "INTERNAL", // discovery metadata — operator use only
   city: "INTERNAL", // discovery metadata — operator use only
