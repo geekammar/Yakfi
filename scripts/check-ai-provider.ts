@@ -1460,6 +1460,52 @@ async function main(): Promise<void> {
         labels.secretRefFor("openrouter") === "OPENROUTER_API_KEY",
     );
   }
+  // PROMPT-AI-OPS-23 — the Superadmin form derives the displayed secret
+  // reference from the SELECTED provider, so pin that what the operator reads
+  // is exactly what each adapter resolves at runtime, for EVERY selectable
+  // provider (a provider added to the allowlist without a matching mapping
+  // would otherwise show a wrong/undefined reference).
+  {
+    const labels: typeof import("../src/features/platform/server/provider-labels") =
+      await import("../src/features/platform/server/provider-labels");
+    const validation: typeof import("../src/lib/validation/platform") =
+      await import("../src/lib/validation/platform");
+    const adapters: Record<string, { secretRef: string }> = {
+      openrouter: openrouter.createOpenRouterAdapter({
+        model: "probe-model",
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      }),
+      agentrouter: agentrouter.createAgentRouterAdapter({
+        model: "probe-model",
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      }),
+      atria: atria.createAtriaAdapter({
+        model: "probe-model",
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      }),
+      codecraft: codecraft.createCodeCraftAdapter({
+        model: "probe-model",
+        getEnvVar,
+        fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      }),
+    };
+    check(
+      "15l secretRefFor يساوي secretRef كل مهيئ لكل مزود مسموح (واجهة Superadmin = وقت التشغيل)",
+      validation.aiProviderValues.every((p) => {
+        const adapter = adapters[p];
+        return (
+          typeof labels.secretRefFor(p) === "string" &&
+          !!adapter &&
+          labels.secretRefFor(p) === adapter.secretRef
+        );
+      }) &&
+        new Set(validation.aiProviderValues.map((p) => labels.secretRefFor(p)))
+          .size === validation.aiProviderValues.length,
+    );
+  }
   // The CodeCraft policy is EMPTY, so CodeCraft content is held to the strict
   // parser + schema alone — identical to the pre-existing shared path.
   {

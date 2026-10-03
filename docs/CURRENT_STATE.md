@@ -6,12 +6,14 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.40.0** — released and committed (`e8e763e`, tag `v0.40.0`;
+**Version: v0.40.1** — released and committed (`412976d`, tag `v0.40.1`;
 HEAD == `origin/main`; working tree clean). **Production IS DEPLOYED AT
-v0.40.0** (`GET /api/health` → `status:"ok"`, `version:"0.40.0"`,
-`database:"connected"`, `missingEnvVars:[]`; re-verified 2026-10-03),
-superseding the v0.39.2/v0.39.0 checkpoints below. **All 19 migrations are
-applied**, including `20261003150000_business_address` (applied
+v0.40.1** (`GET /api/health` → `status:"ok"`, `version:"0.40.1"`,
+`deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`;
+re-verified 2026-10-03T21:11Z), superseding the v0.40.0/v0.39.2/v0.39.0
+checkpoints below — so the PROMPT-AI-OPS-22 turn-evidence observability IS
+live. **All 19 migrations are**
+applied, including `20261003150000_business_address` (applied
 2026-10-03T17:33:53Z, before the 17:36:17Z release commit) — the
 `Business.address` column IS live and populated for the dental pilot.
 **The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
@@ -63,6 +65,31 @@ the real pilot data shape with a healthy provider → DISCLOSED) + all adjacent
 suites + `pnpm verify` + `pnpm security` green. **Readiness:
 FORENSICS_COMPLETE + OBSERVABILITY_BUILT** — the operator's one action is to
 restore/rotate the production codecraft key and send ONE live turn.
+**SUPERADMIN AI-PROVIDER / RUNTIME VERIFICATION (DECISIONS #89 /
+`PROMPT-AI-OPS-23`, 2026-10-03): FORENSICS COMPLETE — the Atria-works /
+CodeCraft-doesn't divergence is a CONFIGURATION condition, not a code
+defect.** A controlled production A/B (read-only `usage_records` + the
+singleton policy row) in pilot conv `f217cf5e`: policy switched to
+`atria`/`Atria-Dawn-Preview` (20:57Z); `atria` → **SUCCESS with real tokens**
+(1837/142 then 1817/176); `codecraft`/`deepseek-v4-flash-0731` → **FAILURE
+`in=null out=null` 14/14 over 7 days**. The local `pnpm probe:codecraft` is
+**5/5 SUCCESS** on the same model, so the endpoint/adapter/model/parser are
+healthy and the shared Superadmin → policy → factory → adapter → HTTP path is
+PROVEN working (by Atria) — the production `CODECRAFT_API_KEY` (missing or
+rejected) is the failure point, and `/api/health` cannot see it (4 core vars
+only). **First failing boundary: the production provider attempt itself.**
+**One proven source defect, minimally repaired (display-only):** the Superadmin
+form showed the DB column `primary_secret_ref`, which is NEVER rewritten on a
+provider switch (write path persists only provider/model/fallback) — the live
+row read `primary_provider=atria` + `primary_secret_ref=OPENROUTER_API_KEY`.
+The form now derives the shown reference from the SELECTED provider via
+`secretRefFor` (byte-for-byte the runtime value); the runtime was always
+correct (it uses the adapter constant). Verified: `check:ai-provider` 74→75/75
+(NEW 15l), `check:policy` 13/13, `check:turn-evidence` 27/27, `pnpm verify` +
+`pnpm security` green. **Readiness: CONFIGURATION_ACTION_REQUIRED — operator
+sets/rotates the production `CODECRAFT_API_KEY`, redeploys, retests; a bounded
+operator-only "Test provider" diagnostic action is PROVEN justified but NOT
+built (awaits approval).**
 **LIVE PILOT FALSE-HANDOFF FORENSICS (DECISIONS #86 / `PROMPT-AI-OPS-20`,
 2026-10-03):** the pilot's ordinary-question false handoffs are diagnosed. In
 `مركز أفنان` conversation `f217cf5e`, every non-greeting turn is an `AI_TURN`

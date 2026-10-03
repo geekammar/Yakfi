@@ -9,8 +9,12 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.31.8** — released and committed (`49d264b`, tag `v0.31.8`;
-HEAD == `origin/main`; working tree clean; tags through `v0.31.8`). Releases
+**Product version: v0.40.1** — released and committed (`412976d`, tag `v0.40.1`;
+HEAD == `origin/main`; working tree clean; tags through `v0.40.1`). Release
+v0.40.1 ships the PROMPT-AI-OPS-22 turn-evidence observability seam (DECISIONS
+#88) over v0.40.0. **Production IS DEPLOYED AT v0.40.1** (live-verified
+`GET /api/health` → `version:"0.40.1"`, `status:"ok"`, `deploymentReady:true`,
+`database:"connected"`, `missingEnvVars:[]`, 2026-10-03T21:11Z). Releases
 v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
 fixes, the official-creation deep-link + Android launcher fixes, the customer
 `/start` command, and Context Architecture V1). v0.31.1/v0.31.2 carry the
@@ -50,6 +54,58 @@ adapter, webhook, and Conversation-Engine bridge — is now BUILT too
 boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
+
+**SUPERADMIN AI-PROVIDER POLICY / RUNTIME VERIFICATION (`PROMPT-AI-OPS-23`,
+FORENSICS-FIRST + ONE MINIMAL DISPLAY REPAIR; ZERO engine/provider-gateway/
+policy/orchestrator/parser/schema/migration change; no commit/push/tag/deploy):
+FORENSICS COMPLETE — "why does Atria work from Superadmin while CodeCraft does
+not" is answered from production evidence as a CONFIGURATION condition, not a
+code defect.** **Source of truth:** HEAD `412976d` = tag `v0.40.1`, working
+tree clean; production live-verified `GET /api/health` → `version:"0.40.1"`,
+`deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]` — so the
+v0.40.1 turn-evidence observability IS live. **Controlled production A/B
+(read-only, `usage_records` + the singleton policy row, 2026-10-03):** policy
+is now `atria`/`Atria-Dawn-Preview`, `fallback_enabled:false`,
+`secondary:null` (switched 20:57:07Z). Same pilot conversation `f217cf5e`:
+`atria`/`Atria-Dawn-Preview` → **SUCCESS with real tokens** (20:54:17
+1837/142; 20:54:53 1817/176); `codecraft`/`deepseek-v4-flash-0731` →
+**FAILURE with `in=null out=null` (zero tokens) 14/14 over 7 days** (latest
+20:56:46, minutes before the Atria successes). One `atria`/`deepseek-v4-flash-
+0731` FAILURE (20:50:35) is the operator testing a model on the wrong provider
+— corrected to `Atria-Dawn-Preview`, which then succeeded. **Conclusion: the
+shared Superadmin → policy → factory → adapter → HTTP → parser path is PROVEN
+working in production (Atria), and the CodeCraft divergence is isolated to the
+provider-credential boundary** — the local `pnpm probe:codecraft` is **5/5
+SUCCESS** on the same model (33 models incl. `deepseek-v4-flash-0731`, chat +
+JSON-mode + `parseAiResponse` DIRECT_PARSE, 1654/640 tokens), so the endpoint,
+adapter, model and parser are healthy; the production `CODECRAFT_API_KEY`
+(missing or rejected → fast `CONFIG_ERROR`, zero tokens, no retry) is the
+failure point, and `/api/health` cannot see it (it checks only 4 core vars).
+**First failing boundary: the production provider attempt itself (before
+HTTP completion) — classification A (credential/configuration).** **ONE
+proven source defect, minimally repaired (display-only):** the Superadmin form
+displayed the DB column `primary_secret_ref`, but that column is NEVER
+rewritten on a provider switch (the write path persists only provider/model/
+fallback) — the live row reads `primary_provider=atria` while
+`primary_secret_ref=OPENROUTER_API_KEY` (stale since the initial seed). The
+form now derives the shown reference from the SELECTED provider via the
+existing `secretRefFor` — byte-for-byte what the adapter resolves at runtime
+(the column stays cosmetic, as DECISIONS #86 established; the runtime always
+used the adapter constant). **Verified:** `check:ai-provider` 74→**75/75**
+(NEW 15l pins `secretRefFor(p) === adapter.secretRef` for EVERY selectable
+provider, so the UI can never show a reference the runtime does not resolve),
+`check:policy` 13/13, `check:turn-evidence` 27/27, + `pnpm verify` (lint/
+typecheck/format/build) + `pnpm security` (1 pre-existing both-env-files
+warning) green. Files changed: `src/features/platform/components/ai-policy-
+form.tsx` (2 display bindings), `scripts/check-ai-provider.ts` (NEW 15l).
+**Readiness: CONFIGURATION_ACTION_REQUIRED** — the operator's action is to
+set/rotate the production `CODECRAFT_API_KEY` (Vercel env), redeploy, retest
+from Superadmin, and verify one real `AI_ACTIVE` turn; NO source change is
+required for the observed failure. **Proven but NOT built (proposed, awaits
+operator approval): a bounded operator-only "Test provider" diagnostic action**
+(see DECISIONS #89) — the Superadmin UI still cannot tell the operator whether
+a credential exists or can execute, which is what made this failure silent for
+8 days.
 
 **LIVE PILOT ROUTING FORENSICS + OBSERVABILITY FOUNDATION (`PROMPT-AI-OPS-22`,
 OBSERVABILITY-FIRST + READ-ONLY FORENSICS; ZERO routing/context/disclosure/
@@ -2364,8 +2420,16 @@ E2E` from a FRESH launch and record whether the whole
 
 **PILOT EVIDENCE READINESS — the engineering critical path is DONE; the
 operator critical path is NOT (`PROMPT-AI-OPS-19`, DECISIONS #85).**
+**IMMEDIATE OPERATOR ACTION (`PROMPT-AI-OPS-23`, DECISIONS #89): restore the
+production `CODECRAFT_API_KEY`** — proven dead/missing by the controlled
+production A/B (Atria SUCCESS with tokens vs CodeCraft FAILURE zero tokens
+14/14, while the local probe is 5/5). Set/rotate it as a Vercel environment
+variable, redeploy, then send ONE live turn on an `AI_ACTIVE` thread and read
+the `flowpilot.turn.evidence` line the v0.40.1 seam now emits. If Atria is the
+intended primary instead, leave the policy as-is (already switched) and simply
+keep fallback disabled only while no secondary is configured.
 Every target-architecture production slice (0–9) is BUILT + green and
-**LIVE**: production is at v0.39.0 with all 18 migrations applied and zero
+**LIVE**: production is at v0.40.1 with all 19 migrations applied and zero
 schema drift, so Slice 6 (service price), Slice 7 (typed handoff cause) and
 Slice 9 (record-only knowledge gaps) are all running. A real pilot is
 already running (`مركز أفنان`, dental, Kafr El Sheikh: CONNECTED WhatsApp

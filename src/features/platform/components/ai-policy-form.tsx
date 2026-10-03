@@ -5,7 +5,10 @@ import {
   updateAiPolicyInputSchema,
   type UpdateAiPolicyInput,
 } from "@/features/platform/schemas/platform-schema";
-import { AI_PROVIDER_OPTIONS } from "@/features/platform/server/provider-labels";
+import {
+  AI_PROVIDER_OPTIONS,
+  secretRefFor,
+} from "@/features/platform/server/provider-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,8 +55,6 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const hasSecondary = state.secondaryProvider !== null;
 
   function update(patch: Partial<PolicyFormState>) {
     setSaved(false);
@@ -164,7 +165,7 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
             <p className="text-muted-foreground">
               مفتاح المزود الأساسي يُدار كمتغير بيئة:
               <span dir="ltr" className="text-foreground ms-1 font-mono">
-                {state.primarySecretRef}
+                {secretRefFor(state.primaryProvider)}
               </span>
             </p>
             <p className="text-muted-foreground">
@@ -203,7 +204,7 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
             </Select>
           </div>
 
-          {hasSecondary ? (
+          {state.secondaryProvider ? (
             <>
               <div className="space-y-2">
                 <Label htmlFor="secondary-model">معرّف النموذج</Label>
@@ -238,7 +239,7 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
                 <p className="text-muted-foreground">
                   مفتاح المزود الاحتياطي يُدار كمتغير بيئة:
                   <span dir="ltr" className="text-foreground ms-1 font-mono">
-                    {state.secondarySecretRef}
+                    {secretRefFor(state.secondaryProvider)}
                   </span>
                 </p>
               </div>
