@@ -6,6 +6,39 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
+**IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-AI-OPS-25`
+(REPEATED FALSE HANDOFF + RESUME-AI FORENSIC): ROOT CAUSE PROVEN + MINIMALLY
+FIXED.** A provider/professional TITLE («دكتور»/«دكتورة») sat in
+`HUMAN_WORDS` (`src/features/conversations/server/conversation-ai.ts`), so a
+turn that merely NAMED the provider — the live identity question «السلام
+عليكم هو انتو عيادة الدكتورة افنان للاسنان؟» — was read as an EXPLICIT
+HUMAN REQUEST. That signal is AUTHORITATIVE (`turn-planner` rule 2 →
+`detectTurnControlSignals`), so the engine discarded the provider's valid
+reply and emitted the customer-request handoff message. Because the signal is
+re-derived from the CURRENT message text every turn, **Resume AI could never
+clear it** — the next ordinary message re-fired the identical handoff, which
+is the reported repetition. Resume AI persistence itself was PROVEN DURABLE
+(`NEED_HUMAN` → `AI_ACTIVE` + `assignedUserId: null` persists across turns);
+no second state machine and no handoff-cause reuse was involved. **Fix
+(smallest correction):** the titles moved to a new `HUMAN_TITLE_WORDS` list
+and count as an explicit human request ONLY when the turn ALSO carries a
+first-person request-to-speak cue (`HUMAN_REQUEST_CUES`); naming a provider
+is a normal business turn, asking to speak to one still hands off, and the
+booking-task provider-preference mask («أي دكتور» inside a booking request)
+is unchanged. Safety is INTACT: sensitive turns still hand off and the
+deterministic explicit-human precedence still fires for real requests.
+**Verified offline:** NEW `check:conversation-ops-25` 18/18 (the exact
+reported sequence: ordinary → Resume AI → ordinary again → no handoff;
+explicit human request still handoffs; provider failure still fails safe with
+a typed cause, never mislabeled as the customer's own request) + 24 adjacent
+suites green + `pnpm typecheck`/`lint`/`build` clean. **Real-LLM:** NEW
+`probe:ops-25` exercised the live Atria path; the turns that reached the
+provider produced correct precedence verdicts, but Atria is currently
+borderline (trivial request ~11–13 s SUCCESS; full engine-shaped request
+TIMES OUT at the 16 s adapter ceiling, TIMEOUT/PERMANENT) — a live provider
+LATENCY condition, NOT an engine defect, and itself a candidate operator
+action. NOT live-verified end-to-end this pass.
+
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-AI-UX-01` /
 DECISIONS #91, the Business-facing assistant UX («اجعل مساعدك جاهزًا»):** a
 bounded Assistant Settings surface at `/settings/assistant` (name / language /

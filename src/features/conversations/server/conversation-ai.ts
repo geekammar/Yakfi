@@ -111,8 +111,29 @@ function hasPhrase(normalized: string, phrases: string[]): boolean {
   return phrases.some((phrase) => normalized.includes(phrase));
 }
 
+/**
+ * Does the turn carry a first-person request-to-speak cue? Matched against the
+ * RAW normalized tokens (NOT the STOPWORD-filtered `tokenize` output) because
+ * the cue verbs themselves are stopwords («عايز»، «ممكن»، «أبغي»). Used only to
+ * promote a provider TITLE mention into an explicit human request
+ * (PROMPT-AI-OPS-25) — it never fires a handoff on its own.
+ */
+function hasRequestCue(normalized: string): boolean {
+  const rawTokens = normalized.split(" ").filter(Boolean);
+  return rawTokens.some((token) =>
+    HUMAN_REQUEST_CUES_N.some(
+      (cue) => token === cue || (cue.length >= 3 && token.startsWith(cue)),
+    ),
+  );
+}
+
 // ─── Keyword tables (written naturally; normalized at module load) ──────────
 
+// NOTE: provider/professional TITLE words («دكتور»/«دكتورة») live in
+// `HUMAN_TITLE_WORDS` below, NOT here. A bare title NAMES a practitioner
+// (a provider-identity or provider-preference turn) and carries no handoff
+// intent by itself; admitting it here made the deterministic explicit-human
+// precedence fire on ordinary identity questions (PROMPT-AI-OPS-25).
 const HUMAN_WORDS = [
   "موظف",
   "موظفة",
@@ -125,9 +146,55 @@ const HUMAN_WORDS = [
   "مديرة",
   "سكرتير",
   "سكرتيرة",
-  "دكتور",
-  "دكتورة",
   "مساعدة",
+];
+
+/**
+ * Provider/professional TITLE words. A title mention alone is NOT an explicit
+ * human request: «السلام عليكم هو انتو عيادة الدكتورة افنان للاسنان؟» is a
+ * provider-IDENTITY question and «أي دكتور» inside a booking request is a
+ * provider PREFERENCE (already gated by the booking-task mask). A title counts
+ * as the customer's own handoff ONLY when the turn ALSO carries a
+ * request-to-speak cue (`HUMAN_REQUEST_CUES`) — the intent that actually asks
+ * to reach the person (PROMPT-AI-OPS-25).
+ *
+ * Without this split, the deterministic explicit-human precedence
+ * (`turn-planner` rule 2 / `detectTurnControlSignals`) fired on EVERY turn that
+ * merely named the provider, the engine's safe-handoff fallback echoed the
+ * customer-request handoff message, and "Resume AI" could not restore the AI
+ * thread — the next turn re-derived the SAME false signal from the SAME
+ * message text, so the handoff repeated indefinitely.
+ */
+const HUMAN_TITLE_WORDS = ["دكتور", "دكتورة"];
+
+/**
+ * First-person request-to-speak cues that promote a provider-title mention
+ * into an explicit human request («أكلم الدكتور»، «أبغي أتكلم مع الدكتور»،
+ * «ممكن أكلم الدكتور؟»). A closed, high-precision set of request verbs;
+ * a title alone never fires and a title without one of these is a normal
+ * business turn.
+ */
+const HUMAN_REQUEST_CUES = [
+  "أكلم",
+  "اكلم", // I call / speak to
+  "أتكلم",
+  "اتكلم", // I converse with
+  "أبغي",
+  "ابغي",
+  "أبي",
+  "ابي", // I want
+  "عايز",
+  "عايه", // I want (Egyptian)
+  "أحب",
+  "احب", // I would like
+  "محتاج", // I need
+  "ممكن", // may I
+  "لو سمحت", // please
+  "رجاء",
+  "أرجو",
+  "ارجو", // I request
+  "أقدر",
+  "اقدر", // can I
 ];
 
 const HUMAN_PHRASES = [
@@ -345,6 +412,8 @@ function tokenizedKeywords(words: string[]): string[] {
 }
 
 const HUMAN_WORDS_N = tokenizedKeywords(HUMAN_WORDS);
+const HUMAN_TITLE_WORDS_N = tokenizedKeywords(HUMAN_TITLE_WORDS);
+const HUMAN_REQUEST_CUES_N = HUMAN_REQUEST_CUES.map(normalizeArabicText);
 const HUMAN_PHRASES_N = HUMAN_PHRASES.map(normalizeArabicText);
 const SENSITIVE_WORDS_N = tokenizedKeywords(SENSITIVE_WORDS);
 const SENSITIVE_PHRASES_N = SENSITIVE_PHRASES.map(normalizeArabicText);
@@ -418,6 +487,12 @@ export function detectTurnControlSignals(message: string): TurnControlSignals {
     hasPhrase(normalized, SENSITIVE_PHRASES_N);
   const humanRaw =
     hasWord(tokens, HUMAN_WORDS_N) || hasPhrase(normalized, HUMAN_PHRASES_N);
+  // A provider/professional TITLE («دكتور»/«دكتورة») only names a person; it
+  // becomes the customer's own handoff when the turn ALSO asks to reach that
+  // person (PROMPT-AI-OPS-25). Without a request cue the title is a provider
+  // identity/preference mention, never an explicit human request.
+  const humanTitle =
+    hasWord(tokens, HUMAN_TITLE_WORDS_N) && hasRequestCue(normalized);
   // A booking / availability / reschedule / cancellation task carries its own
   // vocabulary. Inside such a request a doctor/provider mention ("أي دكتور") is
   // a PROVIDER PREFERENCE, not an explicit human handoff — the authoritative
@@ -432,12 +507,13 @@ export function detectTurnControlSignals(message: string): TurnControlSignals {
     hasPhrase(normalized, CANCELLATION_PHRASES_N) ||
     hasWord(tokens, RESCHEDULE_MUTATION_N) ||
     hasPhrase(normalized, RESCHEDULE_PHRASES_N);
-  const explicitHuman = humanRaw && !hasBookingTask;
+  const explicitHuman = (humanRaw || humanTitle) && !hasBookingTask;
   // Non-committal ONLY when the fragment carries no other task / safety / human
   // vocabulary — a bare "I don't know" with nothing actionable to clarify.
   const nonCommittal =
     !sensitive &&
     !humanRaw &&
+    !humanTitle &&
     !hasBookingTask &&
     hasPhrase(normalized, NON_COMMITTAL_PHRASES_N);
   return { sensitive, explicitHuman, nonCommittal };
@@ -621,9 +697,14 @@ export function classifyCustomerMessage(
   // Slice 1): "أهلاً، وصلني بموظف" is a HUMAN_REQUEST, not a GREETING. The
   // tokenizer strips the «بـ» clitic so «بموظف» matches «موظف», and the
   // «وصلني بحد» transfer phrase is recognized explicitly.
+  //
+  // A provider/professional TITLE («دكتور»/«دكتورة») is included ONLY with a
+  // request-to-speak cue: naming the practitioner is a provider-identity /
+  // provider-preference turn, not a handoff (PROMPT-AI-OPS-25).
   if (
     hasWord(tokens, HUMAN_WORDS_N) ||
-    hasPhrase(normalized, HUMAN_PHRASES_N)
+    hasPhrase(normalized, HUMAN_PHRASES_N) ||
+    (hasWord(tokens, HUMAN_TITLE_WORDS_N) && hasRequestCue(normalized))
   ) {
     return {
       action: "handoff",

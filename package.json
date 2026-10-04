@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.41.0",
+  "version": "0.41.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -36,6 +36,7 @@
     "check:response-normalizer": "tsx scripts/check-response-normalizer.ts",
     "check:atria-retry": "tsx scripts/check-atria-retry.ts",
     "check:conversation-control": "tsx scripts/check-conversation-control.ts",
+    "check:conversation-ops-25": "tsx scripts/check-conversation-ops-25.ts",
     "check:conversation-handoff": "tsx scripts/check-conversation-handoff.ts",
     "check:handoff-cause": "tsx scripts/check-handoff-cause.ts",
     "check:knowledge-gap": "tsx scripts/check-knowledge-gap.ts",
@@ -56,6 +57,7 @@
     "check:appointments-day-view": "tsx scripts/check-appointments-day-view.ts",
     "check:owner-invitation": "dotenv -e .env.local -e .env -- tsx scripts/check-owner-invitation.ts",
     "probe:atria": "dotenv -e .env.local -e .env -- tsx scripts/probe-atria.ts",
+    "probe:ops-25": "dotenv -e .env.local -e .env -- tsx scripts/probe-ops-25.ts",
     "probe:codecraft": "dotenv -e .env.local -e .env -- tsx scripts/probe-codecraft.ts",
     "release": "bash scripts/release.sh",
     "ship": "node scripts/ship.mjs",
