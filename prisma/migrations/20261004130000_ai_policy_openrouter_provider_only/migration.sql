@@ -1,0 +1,11 @@
+-- AlterTable
+-- PROMPT-AI-OPS-28: ONE additive, nullable column on `platform_ai_policies`.
+-- `open_router_provider_only` holds the OPTIONAL OpenRouter provider
+-- endpoint pin (e.g. `decart/fp4`). Absent (NULL) ⇒ OpenRouter keeps its
+-- default provider routing — the existing behavior is byte-for-byte
+-- unchanged. Meaningful only when the effective provider is OpenRouter;
+-- every other provider ignores the value. It is a routing slug, never a
+-- secret or a key. No backfill (NULL = default routing), no destructive
+-- operation, no NOT NULL constraint, and no index (read only with the
+-- singleton policy row it belongs to).
+ALTER TABLE "platform_ai_policies" ADD COLUMN "open_router_provider_only" TEXT;

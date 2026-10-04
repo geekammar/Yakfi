@@ -30,6 +30,9 @@ export const INITIAL_AI_POLICY: UpdateAiPolicyDto & {
   fallbackEnabled: true,
   primarySecretRef: "OPENROUTER_API_KEY",
   secondarySecretRef: "AGENTROUTER_API_KEY",
+  // PROMPT-AI-OPS-28 — no pin by default: OpenRouter keeps its default
+  // routing until the operator pins a specific provider endpoint.
+  openRouterProviderOnly: null,
 };
 
 export class AiPolicyRepository {

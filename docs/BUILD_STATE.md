@@ -57,6 +57,50 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**PRODUCTION ATRIA-FAILURE FORENSICS (`PROMPT-AI-OPS-27`, read-only; ZERO
+code/prompt/schema/migration/provider-policy change; no production DB write;
+no commit/push/tag/deploy): ROOT CAUSE PROVEN — PROVIDER LATENCY vs the
+16 s adapter bound, NOT an application defect.** Production live-verified at
+**v0.41.1** (`/api/health` → `status:"ok"`, `deploymentReady:true`,
+`database:"connected"`, `missingEnvVars:[]`, 2026-10-04T19:50Z) == HEAD
+`d7062fd` == tag `v0.41.1` (tree clean). The OPS-25 explicit-human fix
+(`HUMAN_TITLE_WORDS`) IS in the deployed tag — confirmed by `git grep` on
+`v0.41.1`; the reported handoff is downstream of the provider failure, as
+the prior pass concluded. **The exact affected turn (conv `f217cf5e`,
+`مركز أفنان`, 2026-10-04T17:21:56Z):** customer «السلام عليكم هو انتو عيادة
+الدكتورة افنان للأسنان؟» → `AI_TURN` **FAILURE `atria`/`Atria-Dawn-Preview`
+`in=null out=null` (zero tokens) at 17:22:29.771Z, wall clock 34 s** →
+deterministic safe-handoff acknowledgment at 17:22:29.890Z. Five such Atria
+failures that day (wall clocks 17/20/33/33/34 s, all zero tokens); the three
+prior Atria **SUCCESSes** on the same conversation (2026-10-03) took 16/27/28 s
+with real tokens — i.e. the provider completes in ~9–16 s and only SOMETIMES
+beats the `ATRIA_TIMEOUT_MS=16000` bound. The 33–34 s failures = **2 × 16 s
+TIMEOUT** (Conversation Control retries TIMEOUT once, hard ceiling 2) →
+EXHAUSTED → fail-safe handoff. **Boundary isolation:** the live `probe:atria`
+6-run through the EXISTING adapter is **6/6 SUCCESS, HTTP 200,
+`DIRECT_PARSE`, avg 8.7 s / max 10.3 s** — endpoint reachable, auth valid,
+model available, request construction + parsing healthy; so the failure is
+NOT credential / auth / model / request-shape / parse / Conversation Control /
+engine — it is the provider response not arriving within 16 s on the full
+engine-shaped request. Contrast: the CodeCraft failures the same week were
+**1–4 s** (fast `CONFIG_ERROR`, non-retryable, dead key) — a different class,
+proving the Atria failures are latency, not auth. **Focused checks:**
+`check:atria-retry` 17/17 (R4a TIMEOUT→SUCCESS two calls; R4c exhaustion →
+ONE handoff, no third attempt), `check:conversation-ops-25` 18/18.
+**Readiness: `PROVIDER_ACTION_REQUIRED`** — the 16 s bound and the
+fallback+secondary capability are BOTH operator-owned (DECISIONS #90 §I
+already considered and declined raising the bound as an engineering change);
+no code change is justified. Operator actions: raise `ATRIA_TIMEOUT_MS` AND/OR
+enable fallback + a secondary, then redeploy and retest ONE live turn.
+**Env-note correction (DECISIONS #90 §B is STALE):** the `.env.local`
+`DATABASE_URL` is now the LIVE production Neon DB (holds the real pilot
+`مركز أفنان` / `صالون سارة` + the `platform_ai_policies` singleton + 45
+`AI_TURN` rows); the `.env` one is an OLD pre-v0.31 snapshot (19 tables, no
+`platform_ai_policies`) — future production forensics MUST load `.env.local`
+(not `.env` first as #90 said). The singleton policy row IS present:
+`primary=atria`/`Atria-Dawn-Preview`, `fallback_enabled:false`,
+`secondary:null` (updatedAt 2026-10-04T17:01:20Z).
+
 **LIVE PILOT / PRODUCT LOOP VERIFICATION WITH ATRIA (`PROMPT-AI-OPS-24`,
 verification-only; ZERO production code/prompt/schema/migration/provider-policy
 change; no commit/push/tag/deploy; read-only production forensics):
@@ -2383,6 +2427,14 @@ needed a one-time HUMAN-ONLY baseline reconciliation
 (`prisma migrate resolve --applied 0_init` → `pnpm db:deploy`). Schema diff
 against `schema.prisma` is empty. Full list: `docs/DATABASE.md`.
 
+**UNAPPLIED (created, pending operator release):**
+`20261004120000_business_assistant_style` (DECISIONS #91) and
+`20261004130000_ai_policy_openrouter_provider_only` (DECISIONS #92 — ONE
+additive nullable `platform_ai_policies.open_router_provider_only`, no
+backfill, no destructive op, no NOT NULL constraint). Both are additive and
+safe to apply together with `pnpm db:deploy`; the production chain is
+otherwise unchanged.
+
 ## Ops State
 
 - **Production:** `https://flowpilot-prod.vercel.app` — Neon production DB
@@ -2473,6 +2525,43 @@ E2E` from a FRESH launch and record whether the whole
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
+
+**JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
+DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**
+The smallest possible cost-routing control: the operator can OPTIONALLY pin
+OpenRouter inference to ONE provider endpoint (e.g. `decart/fp4`). ONE
+additive nullable column `platform_ai_policies.open_router_provider_only`
+(migration `20261004130000_ai_policy_openrouter_provider_only`, created but
+**NOT applied**); the OpenRouter pin is built at the ONE place OpenRouter
+routing semantics may live — the OpenRouter adapter request boundary
+(`provider: { only: [pin], allow_fallbacks: false }`); empty pin ⇒ NO
+`provider` key in the body at all (byte-for-byte the prior behavior); the
+model id is never rewritten; Atria/AgentRouter/CodeCraft are constructed
+without the pin so a present pin never reaches their requests. Verified:
+`check:ai-provider` 75→87/87 (NEW 16a–16j), `check:policy` 13→23/23 (NEW
+28a–28j), NEW `pnpm probe:openrouter` bounded live path (routing-only output,
+no customer channel), `pnpm verify` + `pnpm security` PASS. **Operator
+actions to ship:** review the diff, apply the migration (`pnpm db:deploy`),
+then release (recommended MINOR — a new persisted user-facing Superadmin
+capability). Optionally `OPENROUTER_MODEL=… OPENROUTER_PROVIDER_PIN=decart/fp4
+pnpm probe:openrouter` for the live routing proof.
+
+**AWAITING OPERATOR ACTION — `PROMPT-AI-OPS-27` Atria provider-latency
+forensics COMPLETE; NO code change justified (read-only pass).** Production is
+v0.41.1 and healthy; the failing boundary is the Atria provider response not
+arriving within the adapter's `ATRIA_TIMEOUT_MS = 16000` bound on the full
+engine-shaped request (zero-token TIMEOUT, retried once, then fail-safe
+handoff). The provider itself is reachable and authenticated (`probe:atria`
+6/6 SUCCESS, avg 8.7 s). **The operator's actions are all configuration,
+zero engineering:** (1) **raise the Atria timeout** (Vercel env /
+`ATRIA_TIMEOUT_MS`) toward ~30–40 s to clear the latency tail, and/or (2)
+**enable fallback + configure a secondary provider** so a timed-out Atria
+attempt falls through instead of handing off (an EXISTING, untouched
+capability); (3) **redeploy** (env changes need a redeploy for the adapter
+constant) and (4) **send ONE live turn** on the AI_ACTIVE pilot thread to
+confirm. If failures persist AFTER both, re-open with the turn-evidence
+record. Do NOT raise the bound as a code change — DECISIONS #90 §I already
+classified it as an operator-owned latency trade-off.
 
 **IN-FLIGHT (uncommitted, awaiting operator review): `PROMPT-AI-UX-01` /
 DECISIONS #91 — the Business-facing assistant UX** («اجعل مساعدك جاهزًا»):

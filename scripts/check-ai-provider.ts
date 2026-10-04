@@ -1970,6 +1970,278 @@ async function main(): Promise<void> {
     check("endpoint قابل للتهيئة (للفحص دون شبكة)", res.ok === true);
   }
 
+  // ── 16. OpenRouter provider pin (PROMPT-AI-OPS-28) ────────────────────────
+  // The pin restricts inference to ONE OpenRouter provider endpoint. It is
+  // built at the OpenRouter adapter boundary ONLY: the model id is never
+  // rewritten, an empty pin sends NO provider key, and every non-OpenRouter
+  // adapter is structurally unaware of it. All checks inspect the request
+  // body that actually leaves the adapter — offline, mocked fetch.
+  {
+    // Captures ONLY the routing-relevant keys of the outbound body. The
+    // prompt body itself is never inspected or printed here.
+    function captureRouting(): {
+      fetch: typeof fetch;
+      body: () => Record<string, unknown> | null;
+    } {
+      let sent: Record<string, unknown> | null = null;
+      const f = (async (_url: string, init?: RequestInit) => {
+        sent = JSON.parse(init?.body as string) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch;
+      return { fetch: f, body: () => sent };
+    }
+    const routingOf = (b: Record<string, unknown> | null) => {
+      const provider = b?.provider as
+        { only?: unknown[]; allow_fallbacks?: boolean } | undefined;
+      return {
+        model: b?.model,
+        hasProviderKey: typeof b?.provider === "object" && b?.provider !== null,
+        only: Array.isArray(provider?.only) ? [...provider!.only!] : null,
+        allowFallbacks: provider?.allow_fallbacks,
+        responseFormat: (b?.response_format as { type?: string } | undefined)
+          ?.type,
+        temperature: b?.temperature,
+      };
+    };
+
+    // 16a. Empty/absent pin ⇒ NO `provider` key at all — the existing
+    //      OpenRouter request behavior is preserved byte-for-byte.
+    {
+      const cap = captureRouting();
+      await openrouter
+        .createOpenRouterAdapter({
+          model: "deepseek/deepseek-v4.1-flash",
+          getEnvVar,
+          fetchImpl: cap.fetch,
+        })
+        .call(baseRequest);
+      const r = routingOf(cap.body());
+      check(
+        "16a تقييد فارغ → لا يُرسل مفتاح `provider` (السلوك الحالي محفوظ)",
+        r.hasProviderKey === false &&
+          r.model === "deepseek/deepseek-v4.1-flash" &&
+          r.responseFormat === "json_object" &&
+          r.temperature === 0.2,
+      );
+    }
+    {
+      const cap = captureRouting();
+      await openrouter
+        .createOpenRouterAdapter({
+          model: "deepseek/deepseek-v4.1-flash",
+          getEnvVar,
+          fetchImpl: cap.fetch,
+          providerOnly: "",
+        })
+        .call(baseRequest);
+      check(
+        "16a2 تقييد بسلسلة فارغة → لا يُرسل مفتاح `provider` (لا مصفوفة فارغة)",
+        routingOf(cap.body()).hasProviderKey === false,
+      );
+    }
+
+    // 16b. The exact operator configuration: model untouched, execution pinned.
+    {
+      const cap = captureRouting();
+      await openrouter
+        .createOpenRouterAdapter({
+          model: "deepseek/deepseek-v4.1-flash",
+          getEnvVar,
+          fetchImpl: cap.fetch,
+          providerOnly: "decart/fp4",
+        })
+        .call(baseRequest);
+      const r = routingOf(cap.body());
+      check(
+        "16b `decart/fp4` → provider.only=[decart/fp4] + allow_fallbacks=false + النموذج unchanged",
+        r.hasProviderKey === true &&
+          r.only?.length === 1 &&
+          r.only[0] === "decart/fp4" &&
+          r.allowFallbacks === false &&
+          r.model === "deepseek/deepseek-v4.1-flash",
+      );
+    }
+
+    // 16c. Whitespace around the value is normalized at the adapter boundary.
+    {
+      const cap = captureRouting();
+      await openrouter
+        .createOpenRouterAdapter({
+          model: "deepseek/deepseek-v4.1-flash",
+          getEnvVar,
+          fetchImpl: cap.fetch,
+          providerOnly: "  decart/fp4  ",
+        })
+        .call(baseRequest);
+      const r = routingOf(cap.body());
+      check(
+        "16c مسافات حول التقييد → تُطبعَّم إلى `decart/fp4`",
+        r.only?.length === 1 && r.only[0] === "decart/fp4",
+      );
+    }
+
+    // 16d. Another valid endpoint slug is preserved exactly (full slug, no
+    //      truncation to the owner segment).
+    {
+      const cap = captureRouting();
+      const slug = "google/gemini-2.5-flash";
+      await openrouter
+        .createOpenRouterAdapter({
+          model: "deepseek/deepseek-v4.1-flash",
+          getEnvVar,
+          fetchImpl: cap.fetch,
+          providerOnly: slug,
+        })
+        .call(baseRequest);
+      const r = routingOf(cap.body());
+      check(
+        "16d نقطة نهاية أخرى محفوظة بالكامل (owner/model دون اقتطاع)",
+        r.only?.length === 1 &&
+          r.only[0] === slug &&
+          r.allowFallbacks === false,
+      );
+    }
+
+    // 16e. The pin reaches the adapter through the POLICY FACTORY, for both
+    //      the primary and the OpenRouter secondary slot — and the factory
+    //      still yields the unchanged provider/model/secretRef contract.
+    {
+      const effective: import("../src/lib/validation/platform").EffectiveAiPolicy =
+        {
+          primaryProvider: "openrouter",
+          primaryModel: "deepseek/deepseek-v4.1-flash",
+          secondary: { provider: "openrouter", model: "openrouter/auto" },
+          openRouterProviderOnly: "decart/fp4",
+        };
+      const capPrimary = captureRouting();
+      const { primary, secondary, fallbackEnabled } =
+        factory.adaptersFromEffectivePolicy(effective, {
+          getEnvVar,
+          fetchImpl: capPrimary.fetch,
+        });
+      await primary.call(baseRequest);
+      const rPrimary = routingOf(capPrimary.body());
+      // `primary` is wrapped by the Conversation Control layer; the provider
+      // identity/model/secret it exposes stay the OpenRouter ones.
+      check(
+        "16e المصنع يمرّر التقييد + عقد السياسة الأساسي unchanged",
+        primary.providerId === "openrouter" &&
+          primary.model === "deepseek/deepseek-v4.1-flash" &&
+          primary.secretRef === "OPENROUTER_API_KEY" &&
+          secondary !== null &&
+          secondary.providerId === "openrouter" &&
+          secondary.model === "openrouter/auto" &&
+          fallbackEnabled === true &&
+          rPrimary.only?.[0] === "decart/fp4" &&
+          rPrimary.allowFallbacks === false,
+      );
+      // The secondary slot is pinned too.
+      {
+        const capSecondary = captureRouting();
+        const localSecondary = openrouter.createOpenRouterAdapter({
+          model: "openrouter/auto",
+          getEnvVar,
+          fetchImpl: capSecondary.fetch,
+          providerOnly: "decart/fp4",
+        });
+        await localSecondary.call(baseRequest);
+        check(
+          "16e2 المسار الاحتياطي OpenRouter يُثبَّت على نفس نقطة النهاية",
+          routingOf(capSecondary.body()).only?.[0] === "decart/fp4",
+        );
+      }
+    }
+
+    // 16f. Backward compatibility: an effective policy WITHOUT the pin field
+    //      (a row predating the column) builds an adapter that sends no
+    //      provider restriction.
+    {
+      const cap = captureRouting();
+      const { primary } = factory.adaptersFromEffectivePolicy(
+        {
+          primaryProvider: "openrouter",
+          primaryModel: "openrouter/auto",
+          secondary: null,
+        },
+        { getEnvVar, fetchImpl: cap.fetch },
+      );
+      await primary.call(baseRequest);
+      check(
+        "16f سياسة قديمة (بلا تقييد) → لا مفتاح `provider` (توافق خلفي)",
+        routingOf(cap.body()).hasProviderKey === false,
+      );
+    }
+
+    // 16g–16i. Non-OpenRouter providers ignore the pin: even when the policy
+    //          carries a pin, their request bodies carry NO provider key.
+    // The factory builds the other adapters without forwarding the pin.
+    {
+      const expectedSecretRef: Record<string, string> = {
+        atria: "ATRIA_API_KEY",
+        codecraft: "CODECRAFT_API_KEY",
+        agentrouter: "AGENTROUTER_API_KEY",
+      };
+      for (const provider of ["atria", "codecraft", "agentrouter"] as const) {
+        const effective: import("../src/lib/validation/platform").EffectiveAiPolicy =
+          {
+            primaryProvider: provider,
+            primaryModel: "probe-model",
+            secondary: null,
+            openRouterProviderOnly: "decart/fp4",
+          };
+        const cap = captureRouting();
+        const { primary } = factory.adaptersFromEffectivePolicy(effective, {
+          getEnvVar,
+          fetchImpl: cap.fetch,
+        });
+        await primary.call(baseRequest);
+        const r = routingOf(cap.body());
+        const suffix =
+          provider === "atria" ? "g" : provider === "codecraft" ? "h" : "i";
+        check(
+          `16${suffix} ${provider} مع تقييد موجود → يُتجاهل (لا مفتاح provider، النموذج وسرّه كما هما)`,
+          r.hasProviderKey === false &&
+            r.model === "probe-model" &&
+            primary.providerId === provider &&
+            primary.secretRef === expectedSecretRef[provider],
+        );
+      }
+    }
+
+    // 16j. The shared helper merges the extension without restructuring the
+    //      body: every non-routing contract field is still present.
+    {
+      const cap = captureRouting();
+      await http.callOpenAiCompatible({
+        providerId: "openrouter",
+        model: "deepseek/deepseek-v4.1-flash",
+        secretRef: "OPENROUTER_API_KEY",
+        endpoint: "https://probe.test/v1/chat/completions",
+        getEnvVar,
+        fetchImpl: cap.fetch,
+        timeoutMs: 8000,
+        request: baseRequest,
+        extraBody: {
+          provider: { only: ["decart/fp4"], allow_fallbacks: false },
+        },
+      });
+      const b = cap.body();
+      const r = routingOf(b);
+      check(
+        "16j الدالة المشتركة تدمج التقييد دون إعادة هيكلة الجسم (messages/response_format كما هما)",
+        b !== null &&
+          r.only?.[0] === "decart/fp4" &&
+          r.allowFallbacks === false &&
+          Array.isArray(b.messages) &&
+          b.messages.length === 2 &&
+          r.responseFormat === "json_object",
+      );
+    }
+  }
+
   // ── static scan: no live network in orchestrator/factory ─────────────────
   {
     const scanFiles = [

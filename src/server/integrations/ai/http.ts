@@ -30,6 +30,14 @@ export type CallOpenAiCompatibleParams = {
   /** Optional provider-specific system-message augmentation (Atria only). */
   extraSystemInstructions?: string;
   /**
+   * Optional provider-specific request-body extension, merged AFTER the
+   * shared body (PROMPT-AI-OPS-28). The helper stays provider-neutral: it
+   * only merges the object, so the OpenRouter `provider` pin is BUILT by the
+   * OpenRouter adapter and no routing knowledge lives here. Absent ⇒ the
+   * shared body is sent exactly as before.
+   */
+  extraBody?: Record<string, unknown>;
+  /**
    * Optional provider/model-scoped BOUNDED normalization policy
    * (PROMPT-OPS-AI-JSON-NORMALIZATION-ENGINE-09). The engine — not the
    * wiring — decides whether the policy is in scope, and every candidate it
@@ -107,6 +115,7 @@ export async function callOpenAiCompatible(
     timeoutMs,
     request,
     extraSystemInstructions,
+    extraBody,
     policy,
   } = params;
   const started = Date.now();
@@ -126,7 +135,10 @@ export async function callOpenAiCompatible(
   }
 
   const messages = buildPromptMessages(request, extraSystemInstructions);
-  const body = buildRequestBody(model, messages);
+  const body = buildRequestBody(model, messages) as Record<string, unknown>;
+  // A provider extension (OpenRouter pin) is merged, never restructured —
+  // absent an extension the shared body is serialized exactly as before.
+  const requestBody = extraBody ? { ...body, ...extraBody } : body;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -138,7 +150,7 @@ export async function callOpenAiCompatible(
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
   } catch (err) {

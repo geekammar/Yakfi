@@ -929,6 +929,12 @@ model PlatformAiPolicy {
   fallbackEnabled    Boolean  @default(true) @map("fallback_enabled")
   primarySecretRef   String   @map("primary_secret_ref")
   secondarySecretRef String?  @map("secondary_secret_ref")
+  // PROMPT-AI-OPS-28 — OPTIONAL OpenRouter-only provider endpoint pin
+  // (e.g. `decart/fp4`). Additive + nullable: absent ⇒ OpenRouter keeps its
+  // default routing. Meaningful ONLY when the effective provider is
+  // OpenRouter; every other provider ignores it. Not a secret, not a key —
+  // a routing slug the platform operator owns.
+  openRouterProviderOnly String? @map("open_router_provider_only")
   // Audit reference — the Platform Operator who last changed the policy.
   updatedById        String?  @map("updated_by_id")
   createdAt          DateTime @default(now()) @map("created_at")

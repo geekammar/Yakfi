@@ -41,6 +41,12 @@ type PolicyFormState = {
   fallbackEnabled: boolean;
   primarySecretRef: string;
   secondarySecretRef: string | null;
+  /**
+   * The OpenRouter provider endpoint pin (PROMPT-AI-OPS-28). OpenRouter-only:
+   * edited solely inside the OpenRouter section of this form and submitted
+   * ONLY while the selected provider is OpenRouter.
+   */
+  openRouterProviderOnly: string | null;
 };
 
 /**
@@ -85,6 +91,14 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
       secondaryProvider: state.secondaryProvider,
       secondaryModel: state.secondaryModel,
       fallbackEnabled: state.fallbackEnabled,
+      // PROMPT-AI-OPS-28 — the pin is submitted ONLY for OpenRouter. A pin
+      // left over from an earlier OpenRouter selection is cleared the moment
+      // the operator picks another provider, so it can never reach a
+      // non-OpenRouter runtime path.
+      openRouterProviderOnly:
+        state.primaryProvider === "openrouter"
+          ? state.openRouterProviderOnly?.trim() || null
+          : null,
     } satisfies UpdateAiPolicyInput);
 
     if (!parsed.success) {
@@ -173,6 +187,38 @@ export function AiPolicyForm({ policy }: { policy: PolicyFormState }) {
               — تغيير السياسة هنا يُطبق فوراً.
             </p>
           </div>
+
+          {state.primaryProvider === "openrouter" ? (
+            <div className="space-y-2">
+              <Label htmlFor="openrouter-provider-only">
+                OpenRouter provider endpoint (optional)
+              </Label>
+              <Input
+                id="openrouter-provider-only"
+                dir="ltr"
+                placeholder="decart/fp4"
+                className="text-start font-mono text-xs"
+                value={state.openRouterProviderOnly ?? ""}
+                onChange={(event) =>
+                  update({
+                    openRouterProviderOnly: event.target.value || null,
+                  })
+                }
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                اتركه فارغًا لاستخدام اختيار OpenRouter الافتراضي. أدخل provider
+                endpoint محددًا عندما تريد تثبيت التنفيذ عليه.
+              </p>
+              <p className="text-xs leading-5 text-muted-foreground">
+                مثال:{" "}
+                <span dir="ltr" className="font-mono">
+                  decart/fp4
+                </span>{" "}
+                — يُقيّد التنفيذ على نقطة النهاية هذه فقط دون تغيير معرّف
+                النموذج.
+              </p>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

@@ -54,6 +54,9 @@ function toView(policy: PlatformAiPolicy): AiPolicyView {
     fallbackEnabled: policy.fallbackEnabled,
     primarySecretRef: policy.primarySecretRef,
     secondarySecretRef: policy.secondarySecretRef,
+    // PROMPT-AI-OPS-28 — the OpenRouter provider endpoint pin. A routing
+    // slug, never a secret; shown to the platform operator as entered.
+    openRouterProviderOnly: policy.openRouterProviderOnly,
     updatedAt: policy.updatedAt,
   };
 }
@@ -75,6 +78,7 @@ export function toEffectivePolicy(
     secondaryProvider: policy.secondaryProvider,
     secondaryModel: policy.secondaryModel,
     fallbackEnabled: policy.fallbackEnabled,
+    openRouterProviderOnly: policy.openRouterProviderOnly,
   });
   if (!parsed.success) return null;
 
@@ -84,6 +88,7 @@ export function toEffectivePolicy(
     secondaryProvider,
     secondaryModel,
     fallbackEnabled,
+    openRouterProviderOnly,
   } = parsed.data;
 
   return {
@@ -93,6 +98,9 @@ export function toEffectivePolicy(
       fallbackEnabled && secondaryProvider !== null && secondaryModel
         ? { provider: secondaryProvider, model: secondaryModel }
         : null,
+    // Backward compatible: rows without the pin (NULL / absent) resolve to
+    // null, and the OpenRouter adapter then sends no provider restriction.
+    openRouterProviderOnly: openRouterProviderOnly ?? null,
   };
 }
 

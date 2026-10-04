@@ -46,6 +46,12 @@ function adapterForProvider(
   provider: EffectiveAiPolicy["primaryProvider"],
   model: string,
   env: AiFactoryEnvDeps,
+  /**
+   * The OpenRouter provider endpoint pin (PROMPT-AI-OPS-28). Forwarded to
+   * the OpenRouter adapter ONLY — every other provider never receives it,
+   * so the pin cannot affect non-OpenRouter routing.
+   */
+  openRouterProviderOnly: string | null = null,
 ): AiProviderAdapter {
   if (provider === "openrouter") {
     return createOpenRouterAdapter({
@@ -54,6 +60,7 @@ function adapterForProvider(
       fetchImpl: env.fetchImpl,
       endpoint: env.endpointOverrides?.openrouter,
       timeoutMs: env.timeoutMs,
+      providerOnly: openRouterProviderOnly,
     });
   }
   if (provider === "atria") {
@@ -95,12 +102,17 @@ export function adaptersFromEffectivePolicy(
     effective.primaryProvider,
     effective.primaryModel,
     env,
+    // PROMPT-AI-OPS-28 — the pin is a policy-level value; it reaches the
+    // OpenRouter adapter for BOTH the primary and the secondary slot, so a
+    // pinned OpenRouter fallback executes on the same endpoint.
+    effective.openRouterProviderOnly ?? null,
   );
   const secondary = effective.secondary
     ? adapterForProvider(
         effective.secondary.provider,
         effective.secondary.model,
         env,
+        effective.openRouterProviderOnly ?? null,
       )
     : null;
 

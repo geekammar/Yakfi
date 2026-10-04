@@ -18,6 +18,16 @@ export type OpenRouterDeps = {
   fetchImpl: typeof fetch;
   endpoint?: string;
   timeoutMs?: number;
+  /**
+   * OPTIONAL OpenRouter provider endpoint pin (PROMPT-AI-OPS-28) — a
+   * `owner/model` slug such as `decart/fp4`. When non-empty, inference is
+   * restricted to that ONE provider endpoint (`provider.only` +
+   * `allow_fallbacks: false`). When null/empty, NO provider restriction is
+   * sent and OpenRouter keeps its default routing — byte-for-byte the
+   * prior behavior. This is the ONLY place OpenRouter routing semantics
+   * live; no engine/orchestrator/prompt layer learns them.
+   */
+  providerOnly?: string | null;
 };
 
 export function createOpenRouterAdapter(
@@ -28,6 +38,7 @@ export function createOpenRouterAdapter(
     model: deps.model,
     secretRef: OPENROUTER_SECRET_REF,
     async call(request: AiRequest): Promise<AiProviderResult> {
+      const pinned = deps.providerOnly ? deps.providerOnly.trim() : null;
       return callOpenAiCompatible({
         providerId: "openrouter",
         model: deps.model,
@@ -40,6 +51,13 @@ export function createOpenRouterAdapter(
         // Explicit EMPTY policy: OpenRouter stays on the strict parser +
         // unchanged aiResponseSchema alone (byte-for-byte unchanged).
         policy: OPENROUTER_NORMALIZATION_POLICY,
+        // PROMPT-AI-OPS-28 — the provider pin is built HERE, at the
+        // OpenRouter request boundary. Empty pin ⇒ `extraBody` is absent and
+        // the request body carries no `provider` key at all. The model id is
+        // untouched: the pin is a SEPARATE OpenRouter request parameter.
+        extraBody: pinned
+          ? { provider: { only: [pinned], allow_fallbacks: false } }
+          : undefined,
       });
     },
   };

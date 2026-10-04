@@ -95,6 +95,12 @@ export type AiPolicyView = {
   fallbackEnabled: boolean;
   primarySecretRef: string;
   secondarySecretRef: string | null;
+  /**
+   * The OPTIONAL OpenRouter provider endpoint pin
+   * (PROMPT-AI-OPS-28 — e.g. `decart/fp4`). A routing slug only: not a
+   * secret, not a key, not a credential. Null ⇒ OpenRouter default routing.
+   */
+  openRouterProviderOnly: string | null;
   updatedAt: Date;
 };
 
