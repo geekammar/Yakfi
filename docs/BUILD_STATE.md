@@ -9,12 +9,14 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.40.1** — released and committed (`412976d`, tag `v0.40.1`;
-HEAD == `origin/main`; working tree clean; tags through `v0.40.1`). Release
-v0.40.1 ships the PROMPT-AI-OPS-22 turn-evidence observability seam (DECISIONS
-#88) over v0.40.0. **Production IS DEPLOYED AT v0.40.1** (live-verified
-`GET /api/health` → `version:"0.40.1"`, `status:"ok"`, `deploymentReady:true`,
-`database:"connected"`, `missingEnvVars:[]`, 2026-10-03T21:11Z). Releases
+**Product version: v0.40.2** — released and committed (`b8b8d40`, tag `v0.40.2`;
+HEAD == `origin/main`; tags through `v0.40.2`). Release v0.40.2 ships the
+PROMPT-AI-OPS-23 Superadmin provider display repair (DECISIONS #89) over
+v0.40.1, which itself shipped the PROMPT-AI-OPS-22 turn-evidence observability
+seam (DECISIONS #88) over v0.40.0. **Production IS DEPLOYED AT v0.40.2**
+(live-verified `GET /api/health` → `version:"0.40.2"`, `status:"ok"`,
+`deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`,
+2026-10-03T23:14Z). Releases
 v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
 fixes, the official-creation deep-link + Android launcher fixes, the customer
 `/start` command, and Context Architecture V1). v0.31.1/v0.31.2 carry the
@@ -54,6 +56,59 @@ adapter, webhook, and Conversation-Engine bridge — is now BUILT too
 boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
+
+**LIVE PILOT / PRODUCT LOOP VERIFICATION WITH ATRIA (`PROMPT-AI-OPS-24`,
+verification-only; ZERO production code/prompt/schema/migration/provider-policy
+change; no commit/push/tag/deploy; read-only production forensics):
+VERIFIED — the existing product DOES work as a real pilot with Atria as the
+sole live AI path, the false-handoff defect class is PROVEN RESOLVED, and NO
+code change is justified.** **Source of truth:** HEAD `b8b8d40` = tag
+`v0.40.2`; production live-verified `GET /api/health` → `version:"0.40.2"`,
+`status:"ok"`, `deploymentReady:true`, `database:"connected"`,
+`missingEnvVars:[]` (2026-10-03T22:32Z + 23:14Z). The `.env` `DATABASE_URL` is
+the PRODUCTION Neon DB (19/19 migrations, `business_address` applied); the
+`.env.local` one is a 9-migration DEV DB — production forensics must load
+`.env` FIRST. **Effective policy (production DB, read-only):**
+`atria`/`Atria-Dawn-Preview`, `fallback_enabled:false`, `secondary:null`
+(updatedAt 2026-10-03T21:21:24Z). Atria IS reachable: `pnpm probe:atria`
+8-run → **7/8 SUCCESS** (`DIRECT_PARSE`, avg 11.5 s, p95 16.0 s, 1 TIMEOUT at
+the 16000 ms adapter bound — a provider-latency tail, not a defect).
+**LIVE-VERIFIED customer loop (conv `f217cf5e`, read-only):** with the policy
+on Atria, «أين موقعكم؟» → 20:54:18.096 **DISCLOSED "موقعنا في شارع الاستاد -
+دسوق - كفر الشيخ."** + 21:22:03.989 same reply, and «ما الخدمات المتاحة؟» →
+20:54:53.801 **DISCLOSED "الخدمات المتاحة لدينا هي: استشارة أسنان، جلسة
+تجميلية، حشو عصب، وكشف جراحة."** — both ordinary questions answered, neither
+handed off; the 21:22 reply was delivered (`OUTBOUND_MESSAGE` SUCCESS
+`telegram` at 21:22:04.465). Every CodeCraft turn the same day was a zero-token
+FAILURE, confirming the provider switch — not a code change — was the fix.
+**REAL-LLM 17-class verification (NEW `scripts/eval-run-future-op24.ts`, real
+Atria `Atria-Dawn-Preview`, real pilot data shape, 16 model calls): 17/17
+PASS, 0 provider failures** — greeting (0-call deterministic) → DISCLOSED;
+about/location/service-list/specific-service/description/known-price/range-
+price/known-FAQ → **DISCLOSED replies** (no handoff); missing-address /
+missing-hours / missing-price / missing-FAQ → **honest `NO_KNOWLEDGE` handoff
+with NO fabricated fact**; booking intent → `booking_handoff` (domain
+authority); explicit-human → `HUMAN_REQUEST`; sensitive → `SENSITIVE`;
+ambiguous → `NO_KNOWLEDGE`. **FALSE-HANDOFF CHECK: PASS — no ordinary
+information question became a human handoff.** Working hours stay an honest
+knowledge gap by design (`workingHours` is INTERNAL — availability is
+domain-computed CORE-02; the escape valve is an FAQ). **Observability:** the
+`flowpilot.turn.evidence@v1` record answers all 10 required questions
+(`check:turn-evidence` 27/27); Q9/Q10 are structural (one
+`transport.send` on the inbound path at conversation-engine.ts:2610;
+`providerAttempts ≤ 1`). The record emits to Vercel runtime logs by default
+(kill switch unset) — the emitted line was NOT directly read this pass (no
+Vercel log access from this environment), so emission is BUILT + LIVE-DEPLOYED
+but NOT directly observed. **Pilot evidence (production read-only):** 9
+customers (6 with a conversation), 10 appointments (9 CONFIRMED / 1 PENDING, 0
+NO_SHOW), 6 conversations (all AI_ACTIVE), 109 messages (74 customer / 34 AI /
+1 staff), 3 operator attentions (all resolved; causes null/null/AI_FAILURE),
+40 AI turns (12 SUCCESS / 28 FAILURE across providers; Atria 11 SUCCESS),
+0 knowledge gaps, 4 services (3 now priced — the pilot entered prices since
+OPS-22), WhatsApp CONNECTED + active, one Telegram connection CONNECTED.
+**NO CURRENT DATA SOURCE:** repeat usage (0 customers with >1 conversation),
+no-show rate, willingness to pay, objections, churn reasons, ROI, onboarding
+effort. **Readiness: READY_FOR_PILOT_EVIDENCE.**
 
 **SUPERADMIN AI-PROVIDER POLICY / RUNTIME VERIFICATION (`PROMPT-AI-OPS-23`,
 FORENSICS-FIRST + ONE MINIMAL DISPLAY REPAIR; ZERO engine/provider-gateway/
@@ -2243,30 +2298,31 @@ probe:codecraft` (3 runs) → `GET /v1/models` 200 with the exact model
 Condensed ledger; full per-slice record in
 `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 
-| Area                                                                          | Highlights                                                                                                                                                             | Release / Decision  |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| Foundation                                                                    | Next.js 16 + TS strict + Tailwind v4 + shadcn/ui, Better Auth, Prisma 7 / Neon, feature-based modular monolith, env fail-fast, PWA                                     | v0.1–v0.13          |
-| Design system / RTL / PWA                                                     | Arabic-first RTL tokens, AppShell, status system, PNG PWA icons                                                                                                        | v0.2                |
-| Database layer                                                                | Full Spec A domain model + Invitation, repositories (only Prisma consumers), Zod DTOs, Arabic demo seed                                                                | v0.5–v0.8           |
-| Onboarding wizard                                                             | 4-step operational foundation, smart resume, step guards, `Business.vertical` discovery metadata                                                                       | v0.9                |
-| Dashboard / Conversations / Appointments / Customers / Team / Staff workspace | All Spec A screens incl. NEED_HUMAN handoff queue, takeover, role-aware nav                                                                                            | through v0.19.x     |
-| Smart availability + Smart Create 1–6                                         | Deterministic `getAvailability`; 6-step booking flow; candidate time grid per #56                                                                                      | v0.13–v0.29 / #56   |
-| Architecture hardening (P0)                                                   | Branch model, WhatsAppConnection, Provider relations, `users.accountType`, SERIALIZABLE booking concurrency, durable inbound idempotency, AI contract, usage telemetry | v0.18 / #38         |
-| Migration-chain repair                                                        | `0_init` root baseline + `migration_lock.toml`; empty DB bootstraps via `pnpm db:deploy`                                                                               | ARCH-03 / #40       |
-| Platform control plane                                                        | Public signup closed (403 `SIGNUP_CLOSED`), Platform Operator guards, platform owner invitations, Platform AI policy singleton                                         | OPS-05 / #41        |
-| Meta WhatsApp adapter                                                         | `GET`\|`POST /api/whatsapp/meta`, HMAC verify, Graph outbound, `phone_number_id` authoritative inbound key, tenant-scoped resolution                                   | CORE-03B / #42, #46 |
-| Real LLM provider adapter                                                     | Policy-backed `ConversationAi` (OpenRouter primary / AgentRouter secondary / fallback); secrets via `secretRef` only                                                   | AI-02 / #44         |
-| Prompt Workspace                                                              | `/prompts/**/*.prompt` → `generate:ai-prompts` → committed generated artifact → `prompt-registry.ts`; no inline bodies, no silent fallback                             | v0.19.1 / #48       |
-| Meta Embedded Signup + runtime credentials                                    | OAuth redirect + code exchange, single-use `stateRef` ledger, AES-256-GCM `runtime_credentials` (env grammar unchanged); `CREDENTIAL_MASTER_KEY` optional              | v0.20.0 / #49       |
-| AI knowledge visibility + context builder + disclosure gate                   | Four-level policy (PUBLIC/CONDITIONAL/INTERNAL/FORBIDDEN); "AI may know" ≠ "AI may mention"; structural reply gate                                                     | v0.22.0 / #50–#52   |
-| Human Handoff + Operator Attention                                            | Attention signal derived server-side; visually-hidden label; staff/inbox surfacing                                                                                     | v0.23.0             |
-| Knowledge/FAQ authoring UX                                                    | Suggested-FAQ authoring over the ONE `Business.faqs` store; confirmed removal                                                                                          | v0.24.0             |
-| Service Catalog + Authoring                                                   | Catalog is domain data (not a 2nd KB); soft-delete + duplicate-name guard; `durationMinutes` is INTERNAL                                                               | v0.25.0 / #53       |
-| Appointment Creation UX                                                       | `?customerId=`/`?serviceId=` smart context, relative dates, «أقرب وقت متاح», relative follow-up                                                                        | v0.26.0 / #54       |
-| Booking UX + customer prefill                                                 | Date-step coherence; customer-create prefill from the typed query                                                                                                      | v0.27.0             |
-| Reschedule UX                                                                 | Availability-guided reschedule with self-exclusion (`excludeAppointmentId`)                                                                                            | v0.28.0             |
-| Appointments/Availability coherence                                           | Day-view state reset per selected day; day-capacity chips (مغلق/ممتلئ/غير متاح); date-format consolidation                                                             | v0.29.0 / #55       |
-| Slot presentation                                                             | Known candidate grid; non-returned candidates visible-but-disabled «غير متاح»; no reason inference                                                                     | v0.29.1 / #56       |
+| Area                                                                          | Highlights                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Release / Decision  |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| Foundation                                                                    | Next.js 16 + TS strict + Tailwind v4 + shadcn/ui, Better Auth, Prisma 7 / Neon, feature-based modular monolith, env fail-fast, PWA                                                                                                                                                                                                                                                                                                                                                                                                            | v0.1–v0.13          |
+| Design system / RTL / PWA                                                     | Arabic-first RTL tokens, AppShell, status system, PNG PWA icons                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | v0.2                |
+| Database layer                                                                | Full Spec A domain model + Invitation, repositories (only Prisma consumers), Zod DTOs, Arabic demo seed                                                                                                                                                                                                                                                                                                                                                                                                                                       | v0.5–v0.8           |
+| Onboarding wizard                                                             | 4-step operational foundation, smart resume, step guards, `Business.vertical` discovery metadata                                                                                                                                                                                                                                                                                                                                                                                                                                              | v0.9                |
+| Dashboard / Conversations / Appointments / Customers / Team / Staff workspace | All Spec A screens incl. NEED_HUMAN handoff queue, takeover, role-aware nav                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | through v0.19.x     |
+| Smart availability + Smart Create 1–6                                         | Deterministic `getAvailability`; 6-step booking flow; candidate time grid per #56                                                                                                                                                                                                                                                                                                                                                                                                                                                             | v0.13–v0.29 / #56   |
+| Architecture hardening (P0)                                                   | Branch model, WhatsAppConnection, Provider relations, `users.accountType`, SERIALIZABLE booking concurrency, durable inbound idempotency, AI contract, usage telemetry                                                                                                                                                                                                                                                                                                                                                                        | v0.18 / #38         |
+| Migration-chain repair                                                        | `0_init` root baseline + `migration_lock.toml`; empty DB bootstraps via `pnpm db:deploy`                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ARCH-03 / #40       |
+| Platform control plane                                                        | Public signup closed (403 `SIGNUP_CLOSED`), Platform Operator guards, platform owner invitations, Platform AI policy singleton                                                                                                                                                                                                                                                                                                                                                                                                                | OPS-05 / #41        |
+| Meta WhatsApp adapter                                                         | `GET`\|`POST /api/whatsapp/meta`, HMAC verify, Graph outbound, `phone_number_id` authoritative inbound key, tenant-scoped resolution                                                                                                                                                                                                                                                                                                                                                                                                          | CORE-03B / #42, #46 |
+| Real LLM provider adapter                                                     | Policy-backed `ConversationAi` (OpenRouter primary / AgentRouter secondary / fallback); secrets via `secretRef` only                                                                                                                                                                                                                                                                                                                                                                                                                          | AI-02 / #44         |
+| Prompt Workspace                                                              | `/prompts/**/*.prompt` → `generate:ai-prompts` → committed generated artifact → `prompt-registry.ts`; no inline bodies, no silent fallback                                                                                                                                                                                                                                                                                                                                                                                                    | v0.19.1 / #48       |
+| Meta Embedded Signup + runtime credentials                                    | OAuth redirect + code exchange, single-use `stateRef` ledger, AES-256-GCM `runtime_credentials` (env grammar unchanged); `CREDENTIAL_MASTER_KEY` optional                                                                                                                                                                                                                                                                                                                                                                                     | v0.20.0 / #49       |
+| AI knowledge visibility + context builder + disclosure gate                   | Four-level policy (PUBLIC/CONDITIONAL/INTERNAL/FORBIDDEN); "AI may know" ≠ "AI may mention"; structural reply gate                                                                                                                                                                                                                                                                                                                                                                                                                            | v0.22.0 / #50–#52   |
+| Human Handoff + Operator Attention                                            | Attention signal derived server-side; visually-hidden label; staff/inbox surfacing                                                                                                                                                                                                                                                                                                                                                                                                                                                            | v0.23.0             |
+| Knowledge/FAQ authoring UX                                                    | Suggested-FAQ authoring over the ONE `Business.faqs` store; confirmed removal                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | v0.24.0             |
+| Service Catalog + Authoring                                                   | Catalog is domain data (not a 2nd KB); soft-delete + duplicate-name guard; `durationMinutes` is INTERNAL                                                                                                                                                                                                                                                                                                                                                                                                                                      | v0.25.0 / #53       |
+| Appointment Creation UX                                                       | `?customerId=`/`?serviceId=` smart context, relative dates, «أقرب وقت متاح», relative follow-up                                                                                                                                                                                                                                                                                                                                                                                                                                               | v0.26.0 / #54       |
+| Booking UX + customer prefill                                                 | Date-step coherence; customer-create prefill from the typed query                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | v0.27.0             |
+| Reschedule UX                                                                 | Availability-guided reschedule with self-exclusion (`excludeAppointmentId`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | v0.28.0             |
+| Appointments/Availability coherence                                           | Day-view state reset per selected day; day-capacity chips (مغلق/ممتلئ/غير متاح); date-format consolidation                                                                                                                                                                                                                                                                                                                                                                                                                                    | v0.29.0 / #55       |
+| Slot presentation                                                             | Known candidate grid; non-returned candidates visible-but-disabled «غير متاح»; no reason inference                                                                                                                                                                                                                                                                                                                                                                                                                                            | v0.29.1 / #56       |
+| Assistant readiness + settings + low-friction setup                           | `check:ai-readiness` (OPS-21) + the approved «اجعل مساعدك جاهزًا» UX (UX-01): bounded assistant settings at `/settings/assistant` (name/language/tone/detail/emoji; read-only handoff rules), per-business persisted style over the resident default, 4-state readiness (`isAssistantReady`; description optional, prices/FAQs non-gating), and the knowledge-gap review loop routing to authoritative editors. Preview deferred (no safe seam). Migration `20261004120000_business_assistant_style` **NOT applied**; NOT committed/deployed. | UX-01 / #91         |
 
 ## Key Known Limitations (current)
 
@@ -2418,45 +2474,57 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**PILOT EVIDENCE READINESS — the engineering critical path is DONE; the
-operator critical path is NOT (`PROMPT-AI-OPS-19`, DECISIONS #85).**
-**IMMEDIATE OPERATOR ACTION (`PROMPT-AI-OPS-23`, DECISIONS #89): restore the
-production `CODECRAFT_API_KEY`** — proven dead/missing by the controlled
-production A/B (Atria SUCCESS with tokens vs CodeCraft FAILURE zero tokens
-14/14, while the local probe is 5/5). Set/rotate it as a Vercel environment
-variable, redeploy, then send ONE live turn on an `AI_ACTIVE` thread and read
-the `flowpilot.turn.evidence` line the v0.40.1 seam now emits. If Atria is the
-intended primary instead, leave the policy as-is (already switched) and simply
-keep fallback disabled only while no secondary is configured.
-Every target-architecture production slice (0–9) is BUILT + green and
-**LIVE**: production is at v0.40.1 with all 19 migrations applied and zero
-schema drift, so Slice 6 (service price), Slice 7 (typed handoff cause) and
-Slice 9 (record-only knowledge gaps) are all running. A real pilot is
-already running (`مركز أفنان`, dental, Kafr El Sheikh: CONNECTED WhatsApp
-via the ENV grammar, a provider, 10 appointments, 54 inbound messages).
-The (a) `pnpm db:deploy` and (b) release steps that earlier versions of
-this section listed as next are **DONE — do not redo them**. The remaining
-critical path is operator-owned and non-code: re-verify the live AI
-provider (last 4 live AI turns FAILED, fallback disabled), finish
-onboarding pilot #2, and start logging the strategy's named evidence by
-hand. **The smallest justified ENGINEERING changes — only if the operator
-approves, and ONLY because they break the Spec A exit criterion "a real
-business can be onboarded in < 1 day using the app alone" — are exactly
-two B-class onboarding-repeatability surfaces** (neither was built; both
-reuse existing seams and need no schema change): (1) a **provider
-authoring surface** (`providerRepository.createProfile`/`linkRelation`
-have ZERO app callers today, so every booking turn on an un-provisioned
-business deterministically returns `NO_ELIGIBLE_PROVIDERS` → NEED_HUMAN and
-the AI can never book); (2) a **UI/server-action for the ENV-credential
-WhatsApp connection** (`saveConnection` already implements the documented
-`.env.example` grammar the live pilot uses but is called only from offline
-harness scripts). Both are candidate slices, NOT started. Everything in
-class C (knowledge-gap review UI, out-of-band staff notifications,
-working-hours editing in settings, attention-reason persistence past first
-load, inbox attention-first sorting) and class D (pilot registry / Spec B
-evidence layer, Founder Console, vertical scoring, WTP engine, knowledge-
-gap promotion, RAG, billing, JEV activation) stays explicitly DEFERRED
-until pilot evidence justifies it.
+**IN-FLIGHT (uncommitted, awaiting operator review): `PROMPT-AI-UX-01` /
+DECISIONS #91 — the Business-facing assistant UX** («اجعل مساعدك جاهزًا»):
+`/settings/assistant` bounded settings + per-business persisted style, the
+refined 4-state readiness with a deterministic `isAssistantReady`, and the
+knowledge-gap review loop. ONE additive nullable migration
+(`20261004120000_business_assistant_style`) is created but **NOT applied**;
+preview was deferred (no safe business-facing seam). Verified offline
+(`check:assistant-settings` 38/38, `check:ai-readiness` 29/29, 30 adjacent
+suites, `pnpm verify`, `pnpm security`) + a bounded real-LLM A/B. **The
+operator must review the diff and decide the release** (recommended PATCH);
+then apply the migration with `pnpm db:deploy` before the new style UI can
+persist. No live/browser verification was performed.
+
+**LIVE PILOT VERIFIED WITH ATRIA — engineering is NOT the critical path
+(`PROMPT-AI-OPS-24`, DECISIONS #90); the next phase is evidence collection.**
+The existing product is PROVEN to work end-to-end as a real pilot with Atria
+as the sole live AI path (17/17 real-LLM classes + the two live DISCLOSED
+turns), the false-handoff defect class is RESOLVED by the provider switch, and
+NO code change is justified by the change gate (every candidate is either a
+proven B-class repeatability gap that is NOT necessary for the CURRENT pilot's
+execution, or a provider-latency tuning trade-off the operator owns). **The
+operator's next actions are non-code:** (1) **keep the policy on
+`atria`/`Atria-Dawn-Preview`** (already live and answering correctly); (2)
+**collect the strategy's named evidence by hand from the running pilot** —
+baseline bookings (10 today, 9 CONFIRMED), response time (Atria avg ~11 s,
+measurable), handoff causes (3 attentions, all resolved), service/price
+question volume, unresolved knowledge gaps (0 rows today), then weekly; (3)
+**optionally enable fallback + a secondary** to cut the ~12 % provider-latency
+timeout tail that currently converts an ordinary question into a handoff (an
+EXISTING capability — no engineering needed); (4) **finish onboarding pilot
+#2** (`صالون سارة التجميلي`, beauty — still `AUTHORIZING`/no provider, blocked
+by the two B-class surfaces below). **The smallest justified ENGINEERING
+changes — only if the operator approves, and ONLY because they break the Spec A
+exit criterion "a real business can be onboarded in < 1 day using the app
+alone" — remain exactly two B-class onboarding-repeatability surfaces**
+(neither was built; both reuse existing seams and need no schema change):
+(1) a **provider authoring surface** (`providerRepository.createProfile`/
+`linkRelation` have ZERO app callers today, so every booking turn on an
+un-provisioned business deterministically returns `NO_ELIGIBLE_PROVIDERS` →
+NEED_HUMAN and the AI can never book); (2) a **UI/server-action for the
+ENV-credential WhatsApp connection** (`saveConnection` already implements the
+documented `.env.example` grammar the live pilot uses but is called only from
+offline harness scripts). Both are DOCUMENTED candidate slices, NOT started —
+the change gate defers them (they are desirable for scaling to pilot #2 but
+not necessary for the current pilot's execution), and each needs its own
+approved prompt + DECISIONS entry. Everything in class C (knowledge-gap review
+UI, out-of-band staff notifications, working-hours editing in settings,
+attention-reason persistence past first load, inbox attention-first sorting)
+and class D (pilot registry / Spec B evidence layer, Founder Console, vertical
+scoring, WTP engine, knowledge-gap promotion, RAG, billing, JEV activation)
+stays explicitly DEFERRED until pilot evidence justifies it.
 
 **AI — the target-architecture migration queue (`docs/ai/TARGET_ARCHITECTURE.md
 §17`) is now COMPLETE through Slice 9, and Slice 10 (the evaluation-target

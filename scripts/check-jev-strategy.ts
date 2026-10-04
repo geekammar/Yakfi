@@ -541,6 +541,8 @@ async function main(): Promise<void> {
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    assistantName: null,
+    assistantStyle: null,
     defaultBranchId: "55555555-5555-4555-8555-555555555555",
   };
   const branch = {

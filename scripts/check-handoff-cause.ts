@@ -287,6 +287,8 @@ async function main(): Promise<void> {
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
+      assistantName: null,
+      assistantStyle: null,
       defaultBranchId: BRANCH_A,
     } as unknown as Parameters<
       typeof engine.receiveInboundMessage

@@ -28,6 +28,7 @@ export default async function HomePage() {
       whatsappNumber={business.whatsappNumber}
       timeZone={business.timezone}
       readiness={computeAiReadiness(readinessInput)}
+      assistantName={business.assistantName}
       data={data}
     />
   );

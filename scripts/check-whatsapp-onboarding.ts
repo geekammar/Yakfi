@@ -759,6 +759,8 @@ async function main(): Promise<void> {
     updatedAt: Date;
     deletedAt: Date | null;
     defaultBranchId: string | null;
+    assistantName: string | null;
+    assistantStyle: Record<string, string> | null;
   };
   const makeBusiness = (input: {
     id: string;
@@ -783,6 +785,8 @@ async function main(): Promise<void> {
     createdAt: fixedNow,
     updatedAt: fixedNow,
     deletedAt: null,
+    assistantName: null,
+    assistantStyle: null,
     defaultBranchId: null,
   });
   const businesses = new Map<string, StoredBusiness>();

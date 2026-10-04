@@ -121,6 +121,8 @@ async function main(): Promise<void> {
       createdAt: now(),
       updatedAt: now(),
       deletedAt: null,
+      assistantName: null,
+      assistantStyle: null,
       defaultBranchId: branchId,
     } as unknown as Business;
   }

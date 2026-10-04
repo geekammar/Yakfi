@@ -69,6 +69,8 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     createdAt: NOW,
     updatedAt: NOW,
     deletedAt: null,
+    assistantName: null,
+    assistantStyle: null,
     defaultBranchId: "branch-1",
     ...overrides,
   };
@@ -404,7 +406,9 @@ async function readinessSection(): Promise<void> {
     brokenHours.find((item) => item.key === "hours")?.status === "missing",
   );
 
-  // services partial
+  // services complete on ≥1 ACTIVE service — the description is optional and
+  // NON-GATING (PROMPT-AI-UX-01 §11): the assistant answers a catalog question
+  // from the PUBLIC service names alone.
   const partial = computeAiReadiness({
     ...allMissing,
     services: [
@@ -413,8 +417,9 @@ async function readinessSection(): Promise<void> {
     ],
   });
   record(
-    "13. خدمات نشطة بنقص الوصف → «مكتمل جزئيًا»",
-    partial.find((item) => item.key === "services")?.status === "partial",
+    "13. خدمة نشطة واحدة على الأقل → الخدمات مكتملة (الوصف اختياري وغير مُلزم)",
+    partial.find((item) => item.key === "services")?.status === "complete" &&
+      partial.find((item) => item.key === "services")?.count === 2,
   );
 
   // prices

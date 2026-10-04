@@ -17,12 +17,15 @@
  *    instruction in `prompts/system/booking-assistant.prompt` stays the
  *    immutable contract; the style is carried as REQUEST CONTEXT (exactly
  *    like `businessName`, which is documented "for phrasing only").
- *  - It is NOT operator-persisted yet. There is exactly ONE resident value
- *    (`ASSISTANT_STYLE`), tuned by code review in Git — the same change
- *    path #48 mandates for prompts. Per-business persistence is a future
- *    DOMAIN decision: it needs one nullable column + a nested optional Zod
- *    object, and it must not land before pilot evidence picks a voice.
- *    No migration is added by #62.
+ *  - Per-business persistence IS implemented (PROMPT-AI-UX-01), as ONE
+ *    nullable JSON column (`Business.assistantStyle`) holding the bounded
+ *    `businessAssistantStyleSchema` subset. Only the four safe
+ *    communication dimensions are business-owned; `arabicStyle` and `role`
+ *    stay resident constants. A stored value is always RESOLVED over the
+ *    resident default (`resolveAssistantStyle`) before rendering, so an
+ *    absent/partial/legacy value can never change behavior beyond the
+ *    closed enums. The business-facing surface is `/settings/assistant`;
+ *    there is still no prompt editor anywhere.
  *
  * Invariants the style can NEVER override (DECISIONS #33/#50–#52/#61):
  *  - the disclosure gate (`enforceDisclosure`) never reads the style and
@@ -192,6 +195,207 @@ export function renderAssistantStyleDirective(
 
 /** The resident directive (rendered once; embedded by the context builder). */
 export const ASSISTANT_STYLE_DIRECTIVE = renderAssistantStyleDirective();
+
+// ─── Persisted, per-business style (PROMPT-AI-UX-01) ──────────────────────────
+
+/**
+ * The bounded style subset a Business ADMIN may own and persist.
+ *
+ * This is the "make it your assistant without editing prompts" surface. It
+ * deliberately exposes ONLY the four dimensions that are (a) genuinely
+ * communication-style choices and (b) safe to let a business tune:
+ * `language`, `tone`, `detail`, `emoji`. The two remaining dimensions stay
+ * RESIDENT and are NEVER persisted or editable here:
+ *  - `arabicStyle` — the Discovery voice for the Egyptian pilot (a product
+ *    decision, not a per-business one; see DECISIONS #07/#61);
+ *  - `role` — the assistant's role/persona, kept vertical-agnostic by
+ *    DECISIONS #09 (surfacing it would invite vertical-specific personas
+ *    during discovery).
+ *
+ * Every field is OPTIONAL: a business that never opens Assistant Settings
+ * gets exactly the resident `ASSISTANT_STYLE` (zero behavior change), and a
+ * partial save (only tone, say) leaves the other dimensions on the resident
+ * default. Nothing here is required, and nothing here can widen a closed
+ * enum — the values are validated against the SAME closed sets above.
+ */
+export const businessAssistantStyleSchema = z.object({
+  language: z.enum(assistantLanguageValues).optional(),
+  tone: z.enum(toneValues).optional(),
+  detail: z.enum(detailValues).optional(),
+  emoji: z.enum(emojiValues).optional(),
+});
+
+export type BusinessAssistantStyle = z.infer<
+  typeof businessAssistantStyleSchema
+>;
+
+/**
+ * The BUSINESS-FACING Arabic label for each editable value. Bounded choices
+ * only — never free text, never a prompt body (§7 of the prompt: bounded
+ * choices, no free-form system instructions).
+ */
+export const ASSISTANT_LANGUAGE_CHOICES: ReadonlyArray<{
+  value: AssistantLanguage;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "auto",
+    label: "تلقائي",
+    hint: "يرد المساعد بنفس لغة رسالة العميل.",
+  },
+  { value: "ar", label: "العربية", hint: "يرد المساعد باللغة العربية دائمًا." },
+  {
+    value: "en",
+    label: "English",
+    hint: "The assistant always replies in English.",
+  },
+];
+
+export const ASSISTANT_TONE_CHOICES: ReadonlyArray<{
+  value: AssistantTone;
+  label: string;
+  hint: string;
+}> = [
+  { value: "friendly", label: "ودود", hint: "لهجة دافئة وقريبة من العميل." },
+  {
+    value: "friendly_professional",
+    label: "ودود ومهني",
+    hint: "ودود مع التزام المهنية — الخيار الافتراضي.",
+  },
+  {
+    value: "professional",
+    label: "رسمي",
+    hint: "لهجة مهنية رسمية ومحايدة.",
+  },
+  {
+    value: "concise",
+    label: "مباشر",
+    hint: "لهجة مباشرة ومختصرة بلا تفاصيل زائدة.",
+  },
+];
+
+export const ASSISTANT_DETAIL_CHOICES: ReadonlyArray<{
+  value: AssistantDetail;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "short",
+    label: "مختصر",
+    hint: "جملة أو جملتين فقط — الخيار الافتراضي.",
+  },
+  {
+    value: "balanced",
+    label: "متوسط",
+    hint: "يرد ويوضح الخطوة التالية للعميل.",
+  },
+  {
+    value: "detailed",
+    label: "مفصل",
+    hint: "رد كامل يغطي ما يحتاجه العميل مع التفاصيل.",
+  },
+];
+
+export const ASSISTANT_EMOJI_CHOICES: ReadonlyArray<{
+  value: AssistantEmoji;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: "none",
+    label: "بدون إيموجي",
+    hint: "ردود نظيفة بدون أي رموز تعبيرية — الخيار الافتراضي.",
+  },
+  {
+    value: "light",
+    label: "خفيف",
+    hint: "رمز تعبيري واحد على الأكثر حين يناسب الرد.",
+  },
+  {
+    value: "friendly",
+    label: "أكثر",
+    hint: "رموز تعبيرية قليلة وودّية حين تناسب الرد.",
+  },
+];
+
+/**
+ * Resolve a STORED (untrusted, possibly absent/partial/legacy) business
+ * style into a FULL `AssistantStyle` for directive rendering.
+ *
+ * FAIL-SAFE PER DIMENSION: each stored dimension is validated independently
+ * against its own CLOSED enum, and an invalid/absent dimension degrades to
+ * the resident default on its own. So one retired value (say a future code
+ * change that dropped an enum member) can never erase a still-valid
+ * preference the business saved for another dimension — and an array/scalar
+ * stored value, an unknown key, or `null`/`undefined` all degrade to the full
+ * resident style. It NEVER throws, NEVER invents a value outside the closed
+ * sets, and NEVER widens a dimension. A business that saves nothing gets
+ * byte-for-byte the pre-existing resident directive. The two RESIDENT
+ * dimensions (`arabicStyle`, `role`) are never read from storage — a stored
+ * value for them is ignored by construction.
+ */
+export function resolveAssistantStyle(stored: unknown): AssistantStyle {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+    return ASSISTANT_STYLE;
+  }
+  const record = stored as Record<string, unknown>;
+  const pick = <Value>(
+    values: ReadonlyArray<Value>,
+    key: string,
+    fallback: Value,
+  ): Value => {
+    const value = record[key];
+    return values.includes(value as Value) ? (value as Value) : fallback;
+  };
+  return {
+    language: pick(
+      assistantLanguageValues,
+      "language",
+      ASSISTANT_STYLE.language,
+    ),
+    arabicStyle: ASSISTANT_STYLE.arabicStyle,
+    tone: pick(toneValues, "tone", ASSISTANT_STYLE.tone),
+    detail: pick(detailValues, "detail", ASSISTANT_STYLE.detail),
+    emoji: pick(emojiValues, "emoji", ASSISTANT_STYLE.emoji),
+    role: ASSISTANT_STYLE.role,
+  };
+}
+
+/**
+ * Render the phrasing directive for a STORED business style. This is the
+ * ONLY consumer the context builder needs: it resolves + renders in one
+ * call, so the engine never has to know the style shape.
+ *
+ * The result is composed exclusively from the fixed Arabic fragment maps
+ * over the CLOSED enums — a stored style can never inject free text,
+ * provider identifiers, or machine keys into the request (the S3/S4
+ * properties of the resident directive hold for the resolved one too).
+ */
+export function businessAssistantStyleDirective(stored: unknown): string {
+  return renderAssistantStyleDirective(resolveAssistantStyle(stored));
+}
+
+// ─── The assistant's display name (display copy only — never AI input) ────────
+
+/**
+ * The fixed fallback shown when a business has not named its assistant
+ * (§7 SECTION A: do not require it; fallback «المساعد الذكي»).
+ */
+export const ASSISTANT_NAME_FALLBACK = "المساعد الذكي";
+
+/**
+ * Resolve a stored assistant name for DISPLAY. A blank/null value yields the
+ * fallback. This is UI copy ONLY: it is never placed on `AiRequest`, never
+ * reaches a provider, and never becomes prompt content — the name is free
+ * text, and the AI boundary admits only the closed-enum phrasing directive
+ * above (keeping the request free of unvalidated free text by construction).
+ */
+export function resolveAssistantName(stored: unknown): string {
+  return typeof stored === "string" && stored.trim().length > 0
+    ? stored.trim().slice(0, 60)
+    : ASSISTANT_NAME_FALLBACK;
+}
 
 // ─── Deterministic-voice conformance (asserted, not enforced inline) ─────────
 

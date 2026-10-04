@@ -20,12 +20,15 @@ export function Dashboard({
   whatsappNumber,
   timeZone,
   readiness,
+  assistantName,
   data,
 }: {
   businessName: string;
   whatsappNumber: string;
   timeZone: string;
   readiness: ReadonlyArray<AiReadinessItem>;
+  /** Raw stored `Business.assistantName` (resolved to the fallback in the card). */
+  assistantName?: string | null;
   data: Awaited<ReturnType<typeof getDashboardData>>;
 }) {
   // Zero activity anywhere → onboarding guidance instead of a dead dashboard.
@@ -82,7 +85,7 @@ export function Dashboard({
 
       <QuickActions />
 
-      <AiReadinessCard items={readiness} />
+      <AiReadinessCard items={readiness} assistantName={assistantName} />
 
       <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <TodayAgenda appointments={data.appointments.agenda} />

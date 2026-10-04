@@ -61,7 +61,10 @@ import {
   AI_KNOWLEDGE_ENTRY_LIMIT,
   AI_RECENT_MESSAGE_LIMIT,
 } from "@/features/conversations/server/ai-contract";
-import { ASSISTANT_STYLE_DIRECTIVE } from "@/features/conversations/server/assistant-style";
+import {
+  ASSISTANT_STYLE_DIRECTIVE,
+  businessAssistantStyleDirective,
+} from "@/features/conversations/server/assistant-style";
 import {
   normalizeArabicText,
   stripAffixes,
@@ -118,6 +121,25 @@ export type ContextBusinessSources = {
   /** Discovery metadata — operational only (never customer-visible). */
   readonly vertical?: string | null;
   readonly city?: string | null;
+  /**
+   * Persisted, business-owned assistant style (PROMPT-AI-UX-01) — the raw
+   * `Business.assistantStyle` JSON. UNTRUSTED by construction: the builder
+   * resolves it over the resident default via `businessAssistantStyleDirective`
+   * (fail-safe for absent/partial/legacy/malformed values), so it can only
+   * ever yield a directive composed from the CLOSED enum fragments. It is a
+   * phrasing directive from no source, carries no business facts, and the
+   * budget ledger has nothing to classify for it (same as the resident
+   * voice).
+   */
+  readonly assistantStyle?: unknown;
+  /**
+   * The business's optional display name for its assistant (PROMPT-AI-UX-01).
+   * DISPLAY COPY ONLY — it is NEVER copied into the request (see the name's
+   * free-text rationale in `assistant-style.ts`). Carried on the source type
+   * solely so callers may pass the Business record unchanged; the builder
+   * ignores it.
+   */
+  readonly assistantName?: string | null;
 };
 
 export type ContextServiceFact = {
@@ -1045,10 +1067,14 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     businessName: nameVerdict.included ? sources.business.name : "",
     services: includedServices,
     faqs: faqVerdict.included ? faqs : [],
-    // The resident voice (DECISIONS #62) — a phrasing directive, not
+    // The assistant's VOICE (DECISIONS #62) — a phrasing directive, not
     // knowledge: it comes from no source, carries no business facts, and
-    // the budget ledger has nothing to classify for it.
-    assistantStyle: ASSISTANT_STYLE_DIRECTIVE,
+    // the budget ledger has nothing to classify for it. PROMPT-AI-UX-01:
+    // when the business persisted a style it is resolved over the resident
+    // default (fail-safe); otherwise the resident directive is used.
+    assistantStyle: sources.business.assistantStyle
+      ? businessAssistantStyleDirective(sources.business.assistantStyle)
+      : ASSISTANT_STYLE_DIRECTIVE,
     ...(aboutVerdict.included &&
     sources.business.about &&
     sources.business.about.trim()

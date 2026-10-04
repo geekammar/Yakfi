@@ -489,6 +489,8 @@ async function main(): Promise<void> {
         createdAt: new Date(),
         updatedAt: new Date(),
         deletedAt: null,
+        assistantName: null,
+        assistantStyle: null,
         defaultBranchId: branchId,
       }),
     },

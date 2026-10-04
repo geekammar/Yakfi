@@ -77,6 +77,22 @@ model Business {
   /// JSON FAQ entries: [{ "question": "...", "answer": "..." }]
   faqs                  Json?
   cancellationPolicy    String?
+  // ── Assistant configuration (PROMPT-AI-UX-01) ──────────────────────────
+  // Optional customer-facing name for the assistant ("مساعد عيادة أفنان").
+  // When absent the UI shows the fixed fallback «المساعد الذكي». It is
+  // DISPLAY copy only — it never reaches the AI request and never names a
+  // provider/model (the resident phrasing directive stays the only style the
+  // assistant receives).
+  assistantName         String?   @map("assistant_name")
+  // JSON persisted assistant style: the CLOSED, bounded subset of
+  // `assistantStyleSchema` the Business ADMIN owns (language / tone / detail
+  // / emoji). Provider-neutral, channel-agnostic, validated by Zod on every
+  // read; an unknown/legacy/partial value degrades to the resident default
+  // (never throws, never widens the closed enums). Dimensions the business
+  // does NOT own (arabicStyle, role) are never stored here — they stay
+  // resident, evidence-tuned constants. See
+  // `src/features/conversations/server/assistant-style.ts`.
+  assistantStyle        Json?     @map("assistant_style")
   onboardingCompletedAt DateTime? @map("onboarding_completed_at")
   isActive              Boolean   @default(true)
   createdAt             DateTime  @default(now()) @map("created_at")
@@ -228,12 +244,12 @@ model Conversation {
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?          @map("deleted_at")
 
-  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  branch     Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  messages   Message[]
-  attention  OperatorAttention?
+  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo    User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages      Message[]
+  attention     OperatorAttention?
   knowledgeGaps KnowledgeGap[]
 
   @@index([businessId])
@@ -329,7 +345,9 @@ model KnowledgeGap {
   conversationId    String    @map("conversation_id")
   customerMessageId String    @map("customer_message_id")
   category          String
-  /** Bounded slice of the customer's own question (never model output). */
+  /**
+   * Bounded slice of the customer's own question (never model output).
+   */
   subjectText       String?   @map("subject_text")
   status            String    @default("UNRESOLVED")
   createdAt         DateTime  @default(now()) @map("created_at")
@@ -521,38 +539,38 @@ model WhatsAppOnboardingAuthorization {
 // Two concrete siblings are the smaller, honest step.
 
 model TelegramConnection {
-  id            String    @id @default(uuid())
-  businessId    String    @map("business_id")
-  branchId      String?   @map("branch_id")
-  displayName   String?   @map("display_name")
+  id                String    @id @default(uuid())
+  businessId        String    @map("business_id")
+  branchId          String?   @map("branch_id")
+  displayName       String?   @map("display_name")
   // The managed bot's STABLE Telegram identity (the numeric bot id). The
   // authoritative provider key for this connection — inbound webhook
   // routing resolves this row server-side, never from a client payload.
-  botExternalId String    @map("bot_external_id")
+  botExternalId     String    @map("bot_external_id")
   // The bot's @username — a non-secret, provider-reported label.
-  botUsername   String?   @map("bot_username")
+  botUsername       String?   @map("bot_username")
   // Provider machine key: "telegram_managed" (the only approved
   // provisioning model — Telegram Managed Bots; the customer never pastes
   // a token and never visits BotFather; DECISIONS #63).
-  provider      String    @default("telegram_managed")
-  status        String    @default("PENDING")
+  provider          String    @default("telegram_managed")
+  status            String    @default("PENDING")
   // REFERENCE to the managed bot's token — an opaque `fp:<id>` RUNTIME
   // handle (DECISIONS #49) resolved ONLY inside the Telegram adapter.
   // NEVER the raw token, never an ENV name: managed-bot tokens are
   // obtained at provisioning time and must not require a redeploy.
-  credentialsRef String?  @map("credentials_ref")
-  credentialKind String?  @map("credential_kind")
+  credentialsRef    String?   @map("credentials_ref")
+  credentialKind    String?   @map("credential_kind")
   // SHA-256 hex digest of the per-connection webhook `secret_token`
   // (DECISIONS #63 (E)). A NON-SECRET, non-reversible INDEX: inbound
   // webhook routing looks the connection up by the digest of the
   // `X-Telegram-Bot-Api-Secret-Token` header. The plaintext secret is
   // generated at provisioning, handed to Telegram ONCE via `setWebhook`,
   // and NEVER persisted anywhere.
-  webhookSecretHash String? @unique @map("webhook_secret_hash")
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt     DateTime? @map("deleted_at")
+  webhookSecretHash String?   @unique @map("webhook_secret_hash")
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
 
   // ── ONBOARDING LIFECYCLE ────────────────────────────────────────
   // SEPARATE from the operational `status`/`isActive` gate above, exactly
@@ -586,9 +604,9 @@ model TelegramConnection {
   // EVENT (→ DISCONNECTED / ACTION_REQUIRED, never silent trust).
   creatorTelegramUserId String? @map("creator_telegram_user_id")
 
-  business             Business                    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  branch               Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  provisioningLedgers  TelegramProvisioningLedger[]
+  business            Business                     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  branch              Branch?                      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  provisioningLedgers TelegramProvisioningLedger[]
 
   @@unique([businessId, botExternalId])
   @@index([businessId])
@@ -606,21 +624,21 @@ model TelegramConnection {
 // payload, a query parameter, or the webhook body.
 
 model TelegramProvisioningLedger {
-  id           String    @id @default(uuid())
-  businessId   String    @map("business_id")
+  id                    String    @id @default(uuid())
+  businessId            String    @map("business_id")
   // Set once the `managed_bot` event creates the connection row (the bot
   // id is unknown before Telegram delivers that event) — provenance only.
-  connectionId String?   @map("connection_id")
+  connectionId          String?   @map("connection_id")
   // Opaque single-use start token (the deep-link `?start=<token>` value).
   // The ONLY thing the customer-facing link carries; unguessable, and the
   // raw token is stored ONLY here as a unique lookup key.
-  startToken   String    @unique @map("start_token")
+  startToken            String    @unique @map("start_token")
   // The Telegram `user.id` that opened the deep link and STARTed the
   // Manager Bot — bound at that moment. The later `managed_bot` event's
   // creator `user.id` MUST equal this value, or the callback matches no
   // row and nothing is provisioned (cross-tenant forgery protection).
-  creatorTelegramUserId String? @map("creator_telegram_user_id")
-  expiresAt    DateTime  @map("expires_at")
+  creatorTelegramUserId String?   @map("creator_telegram_user_id")
+  expiresAt             DateTime  @map("expires_at")
   // TERMINAL marker: set exactly once when this attempt leaves the
   // in-flight state — either by a successful `managed_bot` completion
   // (`outcomeCode = "PROVISIONED"` + `connectionId` set) or by a
@@ -630,7 +648,7 @@ model TelegramProvisioningLedger {
   // confirmation". A null `consumedAt` with a past `expiresAt` is an
   // abandoned attempt (the Admin never confirmed) — the UI surfaces that
   // as an actionable, retryable state, never a permanent spinner.
-  consumedAt   DateTime? @map("consumed_at")
+  consumedAt            DateTime? @map("consumed_at")
   // The typed OUTCOME of this attempt once terminal (machine key from the
   // provisioning boundary's result taxonomy; null while in flight). The
   // ONLY failure signal the pre-connection phase has — there is no
@@ -638,12 +656,12 @@ model TelegramProvisioningLedger {
   // id is known, so the honest reason lives HERE. The feature layer maps
   // it to a safe Arabic summary + a retryable flag; a raw provider
   // response never reaches this column or the UI.
-  outcomeCode  String?   @map("outcome_code")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+  outcomeCode           String?   @map("outcome_code")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  business    Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  connection  TelegramConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  business   Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  connection TelegramConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
 
   @@index([businessId])
   @@index([connectionId])

@@ -121,6 +121,14 @@ const createBusinessSchema = z.object({
   confirmationMode: confirmationModeSchema.optional(),
   faqs: z.array(faqEntrySchema).max(50, "الحد الأقصى ٥٠ معلومة").optional(),
   cancellationPolicy: z.string().trim().max(2000).optional(),
+  // Assistant configuration (PROMPT-AI-UX-01): the repository layer carries
+  // the persisted payload permissively; the assistant feature validates it
+  // strictly against the closed `businessAssistantStyleSchema` before it
+  // ever reaches here. Typed as a flat string-keyed JSON object so the value
+  // stays JSON-compatible for the column while the repository stays ignorant
+  // of the feature's closed shape.
+  assistantName: z.string().trim().max(60).nullable().optional(),
+  assistantStyle: z.record(z.string(), z.string()).optional(),
 });
 
 const updateBusinessSchema = createBusinessSchema.partial();

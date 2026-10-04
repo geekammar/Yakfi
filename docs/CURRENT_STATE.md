@@ -6,17 +6,52 @@
 > `docs/BUILD_STATE.md`; decisions in `docs/DECISIONS.md` (routed by
 > `docs/DECISIONS_INDEX.md`); the reading policy is in `docs/AGENT_RULES.md`.
 
-**Version: v0.40.1** — released and committed (`412976d`, tag `v0.40.1`;
+**IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-AI-UX-01` /
+DECISIONS #91, the Business-facing assistant UX («اجعل مساعدك جاهزًا»):** a
+bounded Assistant Settings surface at `/settings/assistant` (name / language /
+tone / response length / emoji; read-only handoff rules), a per-business
+persisted style resolved over the resident default, the refined 4-state
+readiness (`isAssistantReady`; service description optional, prices/FAQs
+non-gating), and a lightweight knowledge-gap review loop routing each gap to
+its authoritative editor. Preview was NOT built (no safe business-facing
+seam). ONE additive nullable migration
+(`20261004120000_business_assistant_style`) is created but **NOT applied**;
+nothing is committed/deployed. Verified offline (`check:assistant-settings`
+38/38, `check:ai-readiness` 29/29, 30 adjacent suites, `pnpm verify`,
+`pnpm security`) + a bounded real-LLM A/B; NOT browser-verified. The version
+paragraph below still describes the last released/deployed state.
+
+**Version: v0.40.2** — released and committed (`b8b8d40`, tag `v0.40.2`;
 HEAD == `origin/main`; working tree clean). **Production IS DEPLOYED AT
-v0.40.1** (`GET /api/health` → `status:"ok"`, `version:"0.40.1"`,
+v0.40.2** (`GET /api/health` → `status:"ok"`, `version:"0.40.2"`,
 `deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`;
-re-verified 2026-10-03T21:11Z), superseding the v0.40.0/v0.39.2/v0.39.0
-checkpoints below — so the PROMPT-AI-OPS-22 turn-evidence observability IS
-live. **All 19 migrations are**
+re-verified 2026-10-03T22:32Z + 23:14Z), so the PROMPT-AI-OPS-22 turn-evidence
+observability IS live. **All 19 migrations are**
 applied, including `20261003150000_business_address` (applied
 2026-10-03T17:33:53Z, before the 17:36:17Z release commit) — the
 `Business.address` column IS live and populated for the dental pilot.
-**The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
+**LIVE PILOT / PRODUCT LOOP VERIFIED WITH ATRIA (DECISIONS #90 /
+`PROMPT-AI-OPS-24`, 2026-10-03): READY_FOR_PILOT_EVIDENCE — the existing
+product DOES work as a real pilot with Atria as the sole live AI path, the
+false-handoff defect class is PROVEN RESOLVED, and NO code change is
+justified.** The effective policy (production read-only) is
+`atria`/`Atria-Dawn-Preview`, `fallback_enabled:false`, `secondary:null`
+(updatedAt 21:21:24Z). Atria is REACHABLE (`probe:atria` 8-run 7/8 SUCCESS,
+avg 11.5 s, p95 16 s). **The live customer loop is verified end-to-end
+(conv `f217cf5e`):** with the policy on Atria, «أين موقعكم؟» → **DISCLOSED
+"موقعنا في شارع الاستاد - دسوق - كفر الشيخ."** (20:54:18 and again 21:22:03,
+the latter DELIVERED as an `OUTBOUND_MESSAGE` SUCCESS via Telegram) and «ما
+الخدمات المتاحة؟» → **DISCLOSED the real service list** (20:54:53) — both
+ordinary questions answered, neither handed off; every CodeCraft turn the
+same day was a zero-token FAILURE, confirming the earlier false-handoffs were
+the provider condition, not an engine defect. **Real-LLM 17-class
+verification (real Atria, real pilot data shape): 17/17 PASS, 0 provider
+failures, FALSE-HANDOFF CHECK PASS** — ordinary info questions get DISCLOSED
+replies; missing address/hours/price/FAQ get honest `NO_KNOWLEDGE` handoffs
+with no fabrication; booking intent → `booking_handoff`; explicit-human →
+`HUMAN_REQUEST`; sensitive → `SENSITIVE`. Observability answers all 10
+required questions (`check:turn-evidence` 27/27). The next phase is
+operator-owned evidence collection, NOT engineering. **The earlier LIVE-VERIFIED AT v0.39.0 (2026-10-03, DECISIONS #85 /
 `PROMPT-AI-OPS-19`):** `GET /api/health` →
 `status:"ok"`, `version:"0.39.0"`, `deploymentReady:true`,
 `database:"connected"`, `missingEnvVars:[]`; all **18** migrations applied
@@ -422,26 +457,28 @@ requests; no second availability engine.**
 
 ## 6. What is the next logical phase?
 
-> **CURRENT (2026-10-03, DECISIONS #85 / `PROMPT-AI-OPS-19`) — RUN THE
-> PILOTS; engineering is no longer the critical path.** The product is
-> operationally ready and a real pilot is already running. The next phase is
-> operator-owned and non-code: (1) **re-verify the live AI provider** (policy
-> `codecraft`/`deepseek-v4-flash-0731`, fallback disabled, last 4 live
-> `AI_TURN` rows were FAILURE, no AI traffic since 2026-09-28); (2) **finish
-> onboarding pilot #2** (`صالون سارة التجميلي`, beauty — WhatsApp stuck
-> `AUTHORIZING`, no provider rows); (3) **start logging the strategy's named
-> evidence by hand** (baseline bookings / response time / no-show rate, then
-> weekly; objections, price reaction, churn reasons — the pilot registry is
-> Spec B, NOT now). The smallest justified ENGINEERING work is exactly two
-> onboarding-repeatability surfaces, ONLY with operator approval: a
-> **provider authoring surface** (today `providerRepository.createProfile`/
-> `linkRelation` have ZERO app callers, so the AI can never book on an
-> un-provisioned business) and a **UI/server-action for the ENV-credential
-> WhatsApp connection** (`saveConnection` is called only from offline
-> harnesses). Neither is built. Everything else (knowledge-gap review UI,
-> staff notifications, the pilot registry, Founder Console, vertical scoring,
-> promotion, RAG, billing, JEV activation) stays DEFERRED. Full verdict +
-> live evidence inventory: DECISIONS #85.
+> **CURRENT (2026-10-03, DECISIONS #90 / `PROMPT-AI-OPS-24`) — LIVE PILOT
+> VERIFIED WITH ATRIA; the next phase is EVIDENCE COLLECTION, not
+> engineering.** The existing product is PROVEN to work end-to-end as a real
+> pilot with Atria as the sole live AI path (17/17 real-LLM classes + two live
+> DISCLOSED turns), the false-handoff defect class is RESOLVED by the provider
+> switch, and the change gate justifies NO code change. The operator's next
+> actions are non-code: (1) **keep the policy on
+> `atria`/`Atria-Dawn-Preview`** (already live and answering correctly);
+> (2) **collect the strategy's named evidence by hand** — baseline bookings
+> (10 today, 9 CONFIRMED), response time (Atria avg ~11 s, measurable),
+> handoff causes (3 attentions, all resolved), service/price question volume,
+> unresolved knowledge gaps (0 rows today), then weekly; (3) **optionally
+> enable fallback + a secondary** to cut the ~12 % provider-latency timeout
+> tail (an EXISTING capability — zero engineering); (4) **finish onboarding
+> pilot #2** (`صالون سارة التجميلي`, beauty — still `AUTHORIZING`/no
+> provider). The two B-class onboarding-repeatability surfaces (provider
+> authoring; ENV-credential WhatsApp connect) remain DOCUMENTED candidate
+> slices only — each needs its own approved prompt + DECISIONS entry.
+> Everything else (knowledge-gap review UI, staff notifications, the pilot
+> registry, Founder Console, vertical scoring, promotion, RAG, billing, JEV
+> activation) stays DEFERRED. Full verdict + the evidence inventory:
+> DECISIONS #90.
 
 1. **Operator — finish the ONE Telegram live E2E (DECISIONS #69):** two
    actions, neither code — (a) **deploy the current head** (the deployed
