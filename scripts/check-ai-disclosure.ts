@@ -474,6 +474,178 @@ async function main(): Promise<void> {
       eq(emptyCatalogTurn.request.services.length, 0),
   );
 
+  // ── 1k–1p. PROMPT-AI-UX-02: the business-IDENTITY channel ────────────────
+  // An authoritative identity ask («ما اسمكم؟») must be answerable from the
+  // canonical Business NAME. The name is PUBLIC and always carried in the
+  // request for phrasing, but before this channel existed the gate had no
+  // family that recognized it, so the reply was refused
+  // (UNAVAILABLE_IN_REQUEST) and the turn fell back to a human. Every fixture
+  // here has an EMPTY FAQ store and no about/address channel, so the name
+  // channel is the ONLY possible support.
+  const identityTurn = gateReply({
+    message: "ما اسم العيادة؟",
+    sources: { business: businessSources({ faqs: [], about: "" }) },
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور لطب الأسنان."),
+  });
+  check(
+    "1k. سؤال هوية يُجاب من اسم المنشأة المعتمد (مخزن فارغ) — يُفصح",
+    eq(identityTurn.decision.kind, "disclosed") &&
+      deepEq(
+        identityTurn.decision.kind === "disclosed"
+          ? identityTurn.decision.support
+          : [],
+        ["business.identity"],
+      ) &&
+      eq(identityTurn.request.businessName, "عيادة النور لطب الأسنان") &&
+      eq(record(identityTurn, "business.identity")?.visibility, "PUBLIC") &&
+      eq(record(identityTurn, "business.identity")?.included, true) &&
+      eq(record(identityTurn, "business.identity")?.disclosable, true),
+  );
+  // Egyptian colloquial + MSA surface forms both arm the family.
+  const colloquialIdentityTurn = gateReply({
+    message: "إيه اسمك؟",
+    sources: { business: businessSources({ faqs: [], about: "" }) },
+    reply: replyOf("FAQ", "اسمي عيادة النور لطب الأسنان."),
+  });
+  const whoIdentityTurn = gateReply({
+    message: "انتو مين؟",
+    sources: { business: businessSources({ faqs: [], about: "" }) },
+    reply: replyOf("FAQ", "إحنا عيادة النور لطب الأسنان."),
+  });
+  check(
+    "1l. صيغتا «إيه اسمك؟» و«انتو مين؟» تُسلّحان قناة الاسم أيضاً",
+    eq(colloquialIdentityTurn.decision.kind, "disclosed") &&
+      eq(
+        colloquialIdentityTurn.decision.kind === "disclosed"
+          ? colloquialIdentityTurn.decision.support[0]
+          : undefined,
+        "business.identity",
+      ) &&
+      eq(whoIdentityTurn.decision.kind, "disclosed") &&
+      eq(
+        whoIdentityTurn.decision.kind === "disclosed"
+          ? whoIdentityTurn.decision.support[0]
+          : undefined,
+        "business.identity",
+      ),
+  );
+  // The name comes from the canonical Business record only — it is never
+  // duplicated into the knowledge store to make this work.
+  check(
+    "1m. الاسم يأتي من سجل المنشأة فقط — لا تكرار له في مخزن الأسئلة",
+    eq(identityTurn.request.faqs.length, 0) &&
+      !JSON.stringify(identityTurn.request.faqs).includes("عيادة النور"),
+  );
+  // MISSING identity → safe fallback stays: no name in the request, nothing to
+  // back the reply → the existing human handoff owns the turn (never silence).
+  const missingNameTurn = gateReply({
+    message: "ما اسم العيادة؟",
+    sources: { business: businessSources({ faqs: [], about: "", name: "" }) },
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور."),
+  });
+  check(
+    "1n. اسم المنشأة غائب ⇒ لا قناة محمولة ⇒ تحويل بشري (لا اختراع اسم)",
+    eq(missingNameTurn.decision.kind, "requires-human") &&
+      eq(
+        missingNameTurn.decision.kind === "requires-human"
+          ? missingNameTurn.decision.reason
+          : null,
+        "UNAVAILABLE_IN_REQUEST",
+      ) &&
+      eq(missingNameTurn.request.businessName, ""),
+  );
+  // THE BACKSTOP (the property the fix had to preserve): the name is carried
+  // on EVERY turn (it is phrasing), yet a NON-identity reply cannot be backed
+  // by it — so a fabricated answer on a price/catalog/hours turn is still
+  // refused exactly as before.
+  const nonIdentityTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: { business: businessSources({ faqs: [], about: "" }) },
+    reply: replyOf("FAQ", "سعر التنظيف ٣٠٠ جنيه."),
+  });
+  check(
+    "1o. دور غير الهوية لا يسند رداً بالاسم المحمول — الحماية كما هي",
+    eq(nonIdentityTurn.decision.kind, "requires-human") &&
+      eq(record(nonIdentityTurn, "business.identity")?.included, false) &&
+      eq(
+        record(nonIdentityTurn, "business.identity")?.omissionReason,
+        "OUTSIDE_CONTEXT_BUDGET",
+      ) &&
+      nonIdentityTurn.request.businessName.length > 0,
+  );
+  // Tenant isolation on the identity channel: another Business's record cannot
+  // back an identity reply (the name is not even carried).
+  const crossIdentityTurn = gateReply({
+    message: "ما اسم العيادة؟",
+    scope: { businessId: TENANT_A },
+    sources: {
+      business: businessSources({
+        faqs: [],
+        about: "",
+        businessId: TENANT_B,
+      }),
+    },
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور."),
+  });
+  check(
+    "1p. سجل منشأة أخرى لا يسند رد هوية (لا اسم محمول، عزل المستأجرين)",
+    eq(crossIdentityTurn.decision.kind, "requires-human") &&
+      eq(
+        record(crossIdentityTurn, "business.identity")?.exclusionReason,
+        "UNPROVEN_TENANT",
+      ) &&
+      eq(crossIdentityTurn.request.businessName, ""),
+  );
+  // The about/address channels are UNCHANGED by the new identity channel: an
+  // identity ask arms ONLY the name family, and a location ask arms ONLY the
+  // address family.
+  const identityAboutTurn = gateReply({
+    message: "ما اسم العيادة؟",
+    sources: {
+      business: businessSources({
+        faqs: [],
+        about: "عيادة متخصصة في طب وتجميل الأسنان",
+        address: "القاهرة — شارع الجمهورية",
+      }),
+    },
+    reply: replyOf("FAQ", "عيادة النور لطب الأسنان."),
+  });
+  const addressTurn = gateReply({
+    message: "العنوان فين؟",
+    sources: {
+      business: businessSources({
+        faqs: [],
+        about: "عيادة متخصصة في طب وتجميل الأسنان",
+        address: "القاهرة — شارع الجمهورية",
+      }),
+    },
+    reply: replyOf("FAQ", "القاهرة — شارع الجمهورية."),
+  });
+  check(
+    "1q. سؤال الهوية لا يُفعّل قنوات «عن المنشأة/العنوان» (كل قناة على بوّابتها)",
+    eq(identityAboutTurn.decision.kind, "disclosed") &&
+      eq(
+        identityAboutTurn.decision.kind === "disclosed"
+          ? identityAboutTurn.decision.support[0]
+          : undefined,
+        "business.identity",
+      ) &&
+      identityAboutTurn.request.businessAbout === undefined &&
+      identityAboutTurn.request.businessAddress === undefined,
+  );
+  check(
+    "1r. قناة العنوان تبقى مدعومة بسؤال الموقع (سلوك العنوان/التعريف كما هو)",
+    eq(addressTurn.decision.kind, "disclosed") &&
+      deepEq(
+        addressTurn.decision.kind === "disclosed"
+          ? addressTurn.decision.support
+          : [],
+        ["business.address"],
+      ) &&
+      eq(addressTurn.request.businessAddress, "القاهرة — شارع الجمهورية") &&
+      eq(record(addressTurn, "business.identity")?.included, false),
+  );
+
   // ── 3. CONDITIONAL: disclosed only when its task allows it ───────────────
   const bookingTurn = gateReply({
     message: "عايز أحجز موعد",

@@ -27,6 +27,7 @@ import type { AssistantActor } from "@/features/assistant/server/assistant-servi
 import {
   KNOWLEDGE_GAP_CATEGORY_LABELS,
   KNOWLEDGE_GAP_DESTINATIONS,
+  buildAnswerFlowHref,
 } from "@/features/assistant/server/gap-destinations";
 import type { KnowledgeGapCategory } from "@/lib/validation";
 import type { KnowledgeGapRepository } from "@/server/repositories";
@@ -106,7 +107,14 @@ export async function listUnresolvedKnowledgeGaps(
       categoryLabel: KNOWLEDGE_GAP_CATEGORY_LABELS[category],
       title: destination.title,
       action: destination.action,
-      href: destination.href,
+      // The ANSWER flow (PROMPT-AI-UX-02): the discovered customer question
+      // travels INTO the existing knowledge editor, prefilled as an editable
+      // draft, together with the gap id that closes the item on save. A
+      // Domain gap (price/hours/description) keeps its plain editor href —
+      // its fact is never duplicated into the FAQ store.
+      href: destination.answerFlow
+        ? buildAnswerFlowHref({ subject: row.subjectText, gapId: row.id })
+        : destination.href,
     };
   });
 }

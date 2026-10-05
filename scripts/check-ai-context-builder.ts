@@ -336,6 +336,33 @@ async function main(): Promise<void> {
       eq(deriveTaskRelevance("انتو مين؟").serviceCatalog, false),
   );
 
+  // BUSINESS IDENTITY relevance (PROMPT-AI-UX-02) — an identity ask arms the
+  // business-name disclosure family. It is deliberately a tight, identity-only
+  // set: catalog / price / booking / location asks do NOT arm it, which is what
+  // keeps the disclosure backstop intact for non-identity questions.
+  check(
+    "UX02-R1. أسئلة الهوية («اسم/اسمك/مين/انتو/عرفني بنفسك») ذات صلة بالهوية",
+    eq(deriveTaskRelevance("ما اسم العيادة؟").businessIdentity, true) &&
+      eq(deriveTaskRelevance("إيه اسمك؟").businessIdentity, true) &&
+      eq(deriveTaskRelevance("انتو مين؟").businessIdentity, true) &&
+      eq(
+        deriveTaskRelevance("عايز أعرف مين الكلام ده؟").businessIdentity,
+        true,
+      ) &&
+      eq(deriveTaskRelevance("what is your name?").businessIdentity, true),
+  );
+  check(
+    "UX02-R2. الأسعار/الحجز/الكتالوج/المواعيد ليست أسئلة هوية",
+    eq(deriveTaskRelevance("تنظيف الأسنان بكام؟").businessIdentity, false) &&
+      eq(deriveTaskRelevance("عايز أحجز موعد").businessIdentity, false) &&
+      eq(
+        deriveTaskRelevance("ايه الخدمات اللي عندكم؟").businessIdentity,
+        false,
+      ) &&
+      eq(deriveTaskRelevance("مواعيد العمل ايه؟").businessIdentity, false) &&
+      eq(deriveTaskRelevance("احكيلي عن العيادة").businessIdentity, false),
+  );
+
   // BUSINESS ABOUT exposure — relevant turn carries it; unrelated does not.
   const aboutBuilt = buildAiContext({
     scope: { businessId: TENANT_A },
@@ -355,6 +382,43 @@ async function main(): Promise<void> {
       eq(
         record(publicBuilt, "business.about")?.omissionReason,
         "OUTSIDE_CONTEXT_BUDGET",
+      ),
+  );
+
+  // BUSINESS IDENTITY exposure (PROMPT-AI-UX-02) — the aggregate name
+  // disclosure family is armed ONLY on an identity ask. The canonical NAME
+  // itself is ALWAYS carried for phrasing (the per-fact `business.name`), so
+  // the family's task gate — not the request — is what keeps an unbacked reply
+  // on any other turn refused.
+  const identityBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: baseSources({ message: "ما اسم العيادة؟" }),
+  });
+  check(
+    "UX02-B1. سؤال الهوية يُسلّح عائلة اسم المنشأة (PUBLIC) ويبقي الاسم محمولاً",
+    eq(record(identityBuilt, "business.identity")?.included, true) &&
+      eq(record(identityBuilt, "business.identity")?.visibility, "PUBLIC") &&
+      eq(record(identityBuilt, "business.identity")?.disclosable, true) &&
+      eq(record(identityBuilt, "business.name")?.included, true) &&
+      eq(identityBuilt.request.businessName, "عيادة النور لطب الأسنان"),
+  );
+  check(
+    "UX02-B2. دور غير الهوية لا يُسلّح العائلة رغم حمل الاسم (الاسم للصياغة فقط)",
+    eq(record(publicBuilt, "business.identity")?.included, false) &&
+      eq(
+        record(publicBuilt, "business.identity")?.omissionReason,
+        "OUTSIDE_CONTEXT_BUDGET",
+      ) &&
+      eq(publicBuilt.request.businessName, "عيادة النور لطب الأسنان"),
+  );
+  // The name is sourced from the canonical Business record ONLY — the identity
+  // family is armed by the relevance of the turn, never by copying the name
+  // into the FAQ store (no duplication into knowledge).
+  check(
+    "UX02-B3. العائلة لا تُكرّر الاسم في مخزن الأسئلة (المصدر سجل المنشأة)",
+    !JSON.stringify(identityBuilt.request.faqs).includes("عيادة النور") &&
+      identityBuilt.request.faqs.every(
+        (entry) => !entry.answer.includes("عيادة النور"),
       ),
   );
 

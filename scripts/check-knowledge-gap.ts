@@ -780,6 +780,7 @@ async function main(): Promise<void> {
       businessInfo: false,
       serviceInfo: false,
       serviceCatalog: false,
+      businessIdentity: false,
     }) === "SERVICE_PRICE" &&
       recorder.deriveKnowledgeGapCategory("FAQ", {
         bookingOrAvailability: false,
@@ -790,6 +791,7 @@ async function main(): Promise<void> {
         businessInfo: true,
         serviceInfo: false,
         serviceCatalog: false,
+        businessIdentity: false,
       }) === "BUSINESS_INFO" &&
       recorder.deriveKnowledgeGapCategory("FAQ", {
         bookingOrAvailability: false,
@@ -800,7 +802,19 @@ async function main(): Promise<void> {
         businessInfo: false,
         serviceInfo: true,
         serviceCatalog: false,
+        businessIdentity: false,
       }) === "SERVICE_INFO" &&
+      recorder.deriveKnowledgeGapCategory("FAQ", {
+        bookingOrAvailability: false,
+        cancellationOrReschedule: false,
+        providerChoice: false,
+        contactOrIdentity: false,
+        priceOrFee: false,
+        businessInfo: false,
+        serviceInfo: false,
+        serviceCatalog: false,
+        businessIdentity: true,
+      }) === "BUSINESS_INFO" &&
       recorder.deriveKnowledgeGapCategory("AVAILABILITY", null) ===
         "AVAILABILITY" &&
       recorder.deriveKnowledgeGapCategory("GREETING", null) === "GENERAL",

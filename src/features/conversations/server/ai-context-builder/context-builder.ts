@@ -202,6 +202,14 @@ export type TaskRelevance = {
   readonly providerChoice: boolean;
   /** Contact / identity / location asks → the `whatsappNumber` fact. */
   readonly contactOrIdentity: boolean;
+  /**
+   * Business-identity asks ("ما اسمكم؟" / "انتو مين؟") → the PUBLIC
+   * `business.name` disclosure family (PROMPT-AI-UX-02). The business name is
+   * ALWAYS carried in the request for phrasing, but this flag gates the
+   * aggregate disclosure family that may BACK a self-authored identity reply —
+   * the same budget-gate pattern `serviceCatalog` uses for `service.name`.
+   */
+  readonly businessIdentity: boolean;
   /** Price / fee / cost asks → the service `price` fact (Slice 6). */
   readonly priceOrFee: boolean;
   /**
@@ -290,6 +298,23 @@ const CONTACT_OR_IDENTITY_WORDS = [
   "أين",
   "اين",
   "وين",
+];
+
+/**
+ * Business-identity vocabulary (PROMPT-AI-UX-02). Matches asks about the
+ * business's OWN identity — "what is your name?", "who are you?" — so the
+ * PUBLIC `business.name` disclosure family is armed ONLY on those turns.
+ * Deliberately a tight, identity-only set: it does not match a booking, price,
+ * location, or catalog ask, so the disclosure backstop stays intact for every
+ * other question (an unbacked answer on those turns is still refused).
+ */
+const BUSINESS_IDENTITY_WORDS = [
+  "اسم", // اسم / اسمك / اسمكم / اسمها / الاسم (name)
+  "مين", // مين / مينكم — "who": «انتو مين؟»
+  "انتو", // انتو / إنتو — "you (plural)"
+  "عرفني", // «عرفني بنفسك»
+  "نفسك", // «عرفني بنفسك»
+  "name", // mixed-language "what is your name"
 ];
 
 /**
@@ -420,6 +445,7 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     cancellationOrReschedule: matches(CANCELLATION_OR_RESCHEDULE_WORDS),
     providerChoice: matches(PROVIDER_CHOICE_WORDS),
     contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
+    businessIdentity: matches(BUSINESS_IDENTITY_WORDS),
     priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
     businessInfo: matches(BUSINESS_INFO_WORDS),
     serviceInfo: matches(SERVICE_INFO_WORDS),
@@ -717,6 +743,28 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     visibility: classifyBusinessField("name"),
     key: "business.name",
     inBudget: true,
+    taskRequired: true,
+  });
+  // Aggregate business-IDENTITY disclosure family (PROMPT-AI-UX-02): the ONE
+  // ledger key the disclosure gate consults to back an identity reply
+  // («ما اسمكم؟» / «انتو مين؟»). The business `name` is PUBLIC and ALWAYS
+  // carried in `request.businessName` (the model needs it for phrasing — the
+  // per-fact `business.name` above), but this AGGREGATE family is armed ONLY
+  // on an identity ask — exactly the budget gate `service.name` uses with
+  // `serviceCatalog`. That is what keeps the disclosure backstop intact for
+  // NON-identity questions: on a price, hours, or location turn the name stays
+  // in the request (still usable for phrasing) but cannot back a self-authored
+  // reply, so an unbacked answer is still refused. The name itself is still
+  // sourced from the canonical Business record — nothing is duplicated into
+  // the FAQ store, and no identity-specific storage exists.
+  evaluateCandidate({
+    ledger,
+    scope,
+    source: "BUSINESS_RECORD",
+    businessId: businessProvenance,
+    visibility: classifyBusinessField("name"),
+    key: "business.identity",
+    inBudget: relevance.businessIdentity,
     taskRequired: true,
   });
   // about is PUBLIC; PROMPT-AI-ARCH-15 (Slice 6) carries it ONLY when the

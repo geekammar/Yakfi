@@ -1,3 +1,7 @@
+import {
+  ANSWER_FLOW_GAP_PARAM,
+  ANSWER_FLOW_QUESTION_PARAM,
+} from "@/features/assistant/server/gap-destinations";
 import { KnowledgeScreen } from "@/features/knowledge/components/knowledge-screen";
 import {
   defaultKnowledgeServiceDeps,
@@ -11,6 +15,7 @@ import type {
 } from "@/features/knowledge/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
+import { faqEntrySchema, uuidSchema } from "@/lib/validation";
 import { requireRole } from "@/server/auth/guards";
 
 import { CircleAlertIcon } from "lucide-react";
@@ -31,8 +36,20 @@ export const metadata: Metadata = {
  * layer enforces the role + tenant scoping server-side on every read
  * and write. Starter suggestions are derived from the SAME business
  * record's vertical — never from client input.
+ *
+ * The ANSWER flow (PROMPT-AI-UX-02): a knowledge-gap review item may open
+ * this editor with the discovered customer question prefilled (`?question=`)
+ * and the unresolved gap to close on save (`?gap=`). Both params are
+ * untrusted URL input — re-validated here against the SAME contracts the
+ * write path uses, so a crafted link can only ever prefill an editable draft.
+ * A question that fails the entry contract is dropped (the editor opens
+ * blank); an invalid gap id is ignored (nothing closes on save).
  */
-export default async function KnowledgePage() {
+export default async function KnowledgePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const session = await requireRole("ADMIN");
   if (!session.user.businessId) redirect("/onboarding");
 
@@ -41,6 +58,16 @@ export default async function KnowledgePage() {
     role: "ADMIN", // asserted by the guard above
     businessId: session.user.businessId,
   };
+
+  const params = await searchParams;
+  const rawQuestion = params[ANSWER_FLOW_QUESTION_PARAM];
+  const rawGap = params[ANSWER_FLOW_GAP_PARAM];
+  const question = typeof rawQuestion === "string" ? rawQuestion : undefined;
+  const gap = typeof rawGap === "string" ? rawGap : undefined;
+  const questionParsed = faqEntrySchema.shape.question.safeParse(
+    question ?? "",
+  );
+  const gapParsed = uuidSchema.safeParse(gap ?? "");
 
   const result = await listKnowledge(defaultKnowledgeServiceDeps, actor);
   if (!Array.isArray(result)) {
@@ -88,6 +115,8 @@ export default async function KnowledgePage() {
     <KnowledgeScreen
       initialEntries={entries}
       initialSuggestions={suggestions}
+      presetQuestion={questionParsed.success ? questionParsed.data : undefined}
+      answerGapId={gapParsed.success ? gapParsed.data : undefined}
     />
   );
 }

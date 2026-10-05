@@ -1,5 +1,6 @@
 "use client";
 
+import { markKnowledgeGapReviewedAction } from "@/features/assistant/actions/assistant-actions";
 import {
   createKnowledgeEntryAction,
   removeKnowledgeEntryAction,
@@ -7,7 +8,9 @@ import {
 } from "@/features/knowledge/actions/knowledge-actions";
 import { KnowledgeFormDialog } from "@/features/knowledge/components/knowledge-form-dialog";
 import { KnowledgeRemoveDialog } from "@/features/knowledge/components/knowledge-remove-dialog";
+import type { KnowledgeFormInput } from "@/features/knowledge/schemas/knowledge-schema";
 import type {
+  KnowledgeActionResult,
   KnowledgeEntryView,
   KnowledgeSuggestionView,
 } from "@/features/knowledge/types";
@@ -40,17 +43,49 @@ import { useMemo, useState } from "react";
 export function KnowledgeScreen({
   initialEntries,
   initialSuggestions,
+  presetQuestion,
+  answerGapId,
 }: {
   initialEntries: KnowledgeEntryView[];
   initialSuggestions?: KnowledgeSuggestionView;
+  /**
+   * The discovered customer question carried in from a knowledge-gap review
+   * (PROMPT-AI-UX-02). Present → the authoring form STARTS OPEN, prefilled
+   * with the question as an EDITABLE draft and an empty answer: the owner only
+   * supplies the answer.
+   */
+  presetQuestion?: string;
+  /**
+   * The unresolved knowledge-gap row the prefilled question belongs to. When
+   * present, saving the answer ALSO closes the gap through its existing
+   * lifecycle (REVIEWED — terminal). Server-side tenant-scoped; an invalid id
+   * closes nothing.
+   */
+  answerGapId?: string;
 }) {
   const [entries, setEntries] = useState(initialEntries);
-  const [formOpen, setFormOpen] = useState(false);
+  /**
+   * The answer flow (PROMPT-AI-UX-02): a knowledge-gap review item opens this
+   * editor with the discovered customer question. The prefilled draft is
+   * derived from the page-load param as INITIAL STATE — identical on the server
+   * and the client — so the form starts open and prefilled with no effect and
+   * no cascading render. The question stays an EDITABLE DRAFT with an empty
+   * answer: the system already knows what the customer asked, so the owner
+   * only types the answer.
+   */
+  const presetFromQuestion = presetQuestion?.trim() || null;
+  const [formOpen, setFormOpen] = useState(Boolean(presetFromQuestion));
   const [editing, setEditing] = useState<KnowledgeEntryView | null>(null);
   const [preset, setPreset] = useState<{
     question: string;
     answer: string;
-  } | null>(null);
+  } | null>(
+    presetFromQuestion ? { question: presetFromQuestion, answer: "" } : null,
+  );
+  /** The form is answering a discovered customer question (vs. a plain create). */
+  const [customerQuestion, setCustomerQuestion] = useState(
+    Boolean(presetFromQuestion),
+  );
   const [formSession, setFormSession] = useState(0);
   const [removing, setRemoving] = useState<KnowledgeEntryView | null>(null);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -59,6 +94,7 @@ export function KnowledgeScreen({
   function openCreate() {
     setEditing(null);
     setPreset(null);
+    setCustomerQuestion(false);
     setFormSession((count) => count + 1);
     setFormOpen(true);
   }
@@ -72,6 +108,7 @@ export function KnowledgeScreen({
   function openSuggestion(suggestion: { question: string; answer: string }) {
     setEditing(null);
     setPreset(suggestion);
+    setCustomerQuestion(false);
     setFormSession((count) => count + 1);
     setFormOpen(true);
   }
@@ -79,6 +116,7 @@ export function KnowledgeScreen({
   function openEdit(entry: KnowledgeEntryView) {
     setEditing(entry);
     setPreset(null);
+    setCustomerQuestion(false);
     setFormSession((count) => count + 1);
     setFormOpen(true);
   }
@@ -91,7 +129,7 @@ export function KnowledgeScreen({
   /** A server-confirmed save replaces the list and confirms calmly. */
   function handleSaved(list: KnowledgeEntryView[]) {
     setEntries(list);
-    setSuccess("تم حفظ المعلومة");
+    setSuccess(customerQuestion ? "تم حفظ الإجابة" : "تم حفظ المعلومة");
   }
 
   /** A server-confirmed remove replaces the list and confirms calmly. */
@@ -101,13 +139,35 @@ export function KnowledgeScreen({
     setSuccess("تم حذف المعلومة");
   }
 
+  /**
+   * The answer flow's save (PROMPT-AI-UX-02): persist through the EXISTING
+   * canonical knowledge path FIRST, then — only after it succeeded — close the
+   * unresolved gap through its existing REVIEWED lifecycle. Ordering matters:
+   * a review failure can never lose the answer, and a refused/duplicate save
+   * never closes the gap. No duplicate question can be created: the canonical
+   * service rejects a question it already stores, and a reviewed gap is
+   * terminal (it can never re-open to be answered twice).
+   */
+  async function submitAnswerFlow(
+    input: KnowledgeFormInput,
+  ): Promise<KnowledgeActionResult> {
+    const result = await createKnowledgeEntryAction(input);
+    if (!result.success) return result;
+    if (answerGapId) {
+      await markKnowledgeGapReviewedAction(answerGapId);
+    }
+    return result;
+  }
+
   const submitForm = editing
-    ? (input: { question: string; answer: string }) =>
+    ? (input: KnowledgeFormInput) =>
         updateKnowledgeEntryAction({
           currentQuestion: editing.question,
           entry: input,
         })
-    : createKnowledgeEntryAction;
+    : answerGapId
+      ? submitAnswerFlow
+      : createKnowledgeEntryAction;
 
   const submitRemove = () =>
     removing
@@ -216,13 +276,16 @@ export function KnowledgeScreen({
 
       {/* key → the dialog remounts on every open, so create starts
           blank and edit prefills the selected entry. A suggestion
-          presets create mode with an editable draft answer. */}
+          presets create mode with an editable draft answer; a discovered
+          customer question presets create mode with the question and an
+          empty answer (the answer flow). */}
       <KnowledgeFormDialog
         key={formSession}
         open={formOpen}
         onOpenChange={setFormOpen}
         entry={editing ?? undefined}
         preset={preset ?? undefined}
+        customerQuestion={customerQuestion}
         submit={submitForm}
         onSaved={handleSaved}
       />

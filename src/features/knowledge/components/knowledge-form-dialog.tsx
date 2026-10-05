@@ -35,12 +35,18 @@ import { useForm } from "react-hook-form";
  * A suggested question (B-05) uses `preset`: create mode with the
  * starter pair prefilled as an EDITABLE DRAFT — the owner must still
  * hit save, so a suggestion never silently becomes a stored fact.
+ *
+ * The answer flow (PROMPT-AI-UX-02) uses `preset` + `customerQuestion`:
+ * the discovered customer question is prefilled as an editable draft with
+ * an EMPTY answer — the system already knows what the customer asked, so
+ * the owner only supplies the answer.
  */
 export function KnowledgeFormDialog({
   open,
   onOpenChange,
   entry,
   preset,
+  customerQuestion,
   submit,
   onSaved,
 }: {
@@ -50,6 +56,8 @@ export function KnowledgeFormDialog({
   entry?: KnowledgeEntryView;
   /** Present → create mode prefilled with a suggested starter pair. */
   preset?: { question: string; answer: string };
+  /** Present → create mode answers a discovered customer question. */
+  customerQuestion?: boolean;
   /** Runs the actual server action (create, or update by current question). */
   submit: (input: KnowledgeFormInput) => Promise<KnowledgeActionResult>;
   onSaved: (entries: KnowledgeEntryView[]) => void;
@@ -83,12 +91,18 @@ export function KnowledgeFormDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "تعديل المعلومة" : "إضافة معلومة"}
+            {isEdit
+              ? "تعديل المعلومة"
+              : customerQuestion
+                ? "إضافة الإجابة"
+                : "إضافة معلومة"}
           </DialogTitle>
           <DialogDescription>
             {isEdit
               ? "عدّل السؤال أو الإجابة ثم احفظ التغييرات."
-              : "اكتب سؤالاً وإجابةً واضحة — زي الأسعار، السياسات، أو تعليمات ما قبل الحجز."}
+              : customerQuestion
+                ? "ده السؤال اللي سأله العميل — عدّله لو محتاج، واكتب الإجابة فقط."
+                : "اكتب سؤالاً وإجابةً واضحة — زي الأسعار، السياسات، أو تعليمات ما قبل الحجز."}
           </DialogDescription>
         </DialogHeader>
 
@@ -148,7 +162,7 @@ export function KnowledgeFormDialog({
               {submitting ? (
                 <LoaderCircleIcon className="animate-spin" />
               ) : null}
-              حفظ المعلومة
+              {customerQuestion && !isEdit ? "حفظ الإجابة" : "حفظ المعلومة"}
             </Button>
           </DialogFooter>
         </form>

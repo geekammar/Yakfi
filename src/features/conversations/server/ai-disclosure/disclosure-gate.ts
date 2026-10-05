@@ -122,6 +122,7 @@ export type SupportChannel =
   | "services"
   | "businessAbout"
   | "businessAddress"
+  | "businessName"
   | "serviceDescriptions"
   | "serviceNames"
   | null;
@@ -268,6 +269,17 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
         typeof request.businessAddress === "string" &&
         request.businessAddress.trim().length > 0
       );
+    case "businessName":
+      // The PUBLIC business-identity channel (PROMPT-AI-UX-02) is carried
+      // whenever the canonical Business record's name reached the request —
+      // B-02 only forwards it when the record's tenant was PROVEN against the
+      // turn's scope, so a foreign or unproven record yields an empty name and
+      // this channel stays empty. An empty channel means the business has no
+      // authoritative name stored → the reply would invent one → refused.
+      return (
+        typeof request.businessName === "string" &&
+        request.businessName.trim().length > 0
+      );
     case "serviceDescriptions":
       // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6) is
       // carried only when the turn was service-info relevant AND at least one
@@ -304,15 +316,16 @@ function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
  * BUSINESS_INFO/SERVICE_INFO/SERVICE_CATALOG intents, so a business-profile,
  * service-detail, price, or services-list question is classified FAQ. A FAQ
  * reply may therefore be backed by the canonical FAQ store OR any of the
- * task-gated Slice-6 channels OR the carried service-catalog names —
- * whichever is included + disclosable + actually carried. This is purely
- * ADDITIVE: a FAQ reply the store already backs is unchanged, and each
- * channel is carried ONLY on its own relevance gate (`businessAbout` on
- * business-info turns, `serviceDescriptions` on service-info turns,
- * `service.price` on price turns) — so a booking or unrelated turn can never
- * carry them. The catalog-name channel is carried whenever the catalog is
- * exposed (B-01 marks names PUBLIC and B-02 always carries them), and it backs
- * ONLY the mention of those carried names.
+ * task-gated Slice-6 channels OR the carried service-catalog names OR the
+ * canonical business NAME on an identity ask (PROMPT-AI-UX-02) — whichever is
+ * included + disclosable + actually carried. This is purely ADDITIVE: a FAQ
+ * reply the store already backs is unchanged, and each channel is carried ONLY
+ * on its own relevance gate (`businessAbout` on business-info turns,
+ * `serviceDescriptions` on service-info turns, `service.price` on price turns,
+ * `business.identity` on identity turns) — so a booking or unrelated turn can
+ * never carry them. The catalog-name channel is carried whenever the catalog
+ * is exposed (B-01 marks names PUBLIC and B-02 always carries them), and it
+ * backs ONLY the mention of those carried names.
  */
 function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
   const primary = TASK_SUPPORT_FAMILIES[intent];
@@ -322,6 +335,7 @@ function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
       { family: "service.price", channel: "services" },
       { family: "business.about", channel: "businessAbout" },
       { family: "business.address", channel: "businessAddress" },
+      { family: "business.identity", channel: "businessName" },
       { family: "service.description", channel: "serviceDescriptions" },
       { family: "service.name", channel: "serviceNames" },
     ];

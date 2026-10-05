@@ -68,6 +68,11 @@ export function deriveKnowledgeGapCategory(
 ): KnowledgeGapCategory {
   if (relevance?.priceOrFee) return "SERVICE_PRICE";
   if (relevance?.businessInfo) return "BUSINESS_INFO";
+  // An identity ask the assistant could not back is ALSO missing Business
+  // record data: the canonical name lives in Business settings, so it routes
+  // there — never to the FAQ editor, which would duplicate the name into the
+  // knowledge store (PROMPT-AI-UX-02 single-source rule).
+  if (relevance?.businessIdentity) return "BUSINESS_INFO";
   if (relevance?.serviceInfo) return "SERVICE_INFO";
   if (intent === "BOOKING" || intent === "AVAILABILITY") return "AVAILABILITY";
   if (intent === "FAQ") return "FAQ";

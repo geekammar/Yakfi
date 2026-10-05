@@ -74,12 +74,17 @@ import type {
   AssistantServiceDeps,
 } from "../src/features/assistant/server/assistant-service";
 import {
+  ANSWER_FLOW_GAP_PARAM,
+  ANSWER_FLOW_QUESTION_PARAM,
   KNOWLEDGE_GAP_CATEGORY_LABELS,
   KNOWLEDGE_GAP_DESTINATIONS,
+  buildAnswerFlowHref,
 } from "../src/features/assistant/server/gap-destinations";
 import { HANDOFF_BEHAVIORS } from "../src/features/assistant/server/handoff-behaviors";
 import type { AssistantSettingsView } from "../src/features/assistant/types";
 import { buildAiContext } from "../src/features/conversations/server/ai-context-builder/context-builder";
+import type { AiResponse } from "../src/features/conversations/server/ai-contract";
+import { enforceDisclosure } from "../src/features/conversations/server/ai-disclosure";
 import {
   ASSISTANT_DETAIL_CHOICES,
   ASSISTANT_EMOJI_CHOICES,
@@ -104,7 +109,14 @@ import {
   type AiReadinessInput,
   type AiReadinessItem,
 } from "../src/lib/ai-readiness";
-import type { BusinessRepository } from "../src/server/repositories";
+import type {
+  KnowledgeGapCategory,
+  KnowledgeGapStatus,
+} from "../src/lib/validation";
+import type {
+  BusinessRepository,
+  KnowledgeGapRepository,
+} from "../src/server/repositories";
 import type { Business, UserRole } from "../src/types/domain";
 
 export {};
@@ -874,6 +886,324 @@ function gapRoutingSection(): void {
   );
 }
 
+// ─── K5–K7: the ANSWER flow href (PROMPT-AI-UX-02) ──────────────────────────
+
+function gapAnswerHrefSection(): void {
+  // K5 — the href carries the discovered customer question (prefilled) and the
+  // gap id (closed on save) into the EXISTING knowledge editor.
+  const href = buildAnswerFlowHref({
+    subject: "كم سعر الكشف؟",
+    gapId: "11111111-1111-4111-8111-111111111111",
+  });
+  const parsed = new URL(href, "http://localhost");
+  record(
+    "K5 رابط «إضافة الإجابة» يحمل سؤال العميل ومعرّف الفجوة لمحرّر المعرفة القائم",
+    parsed.pathname === "/settings/knowledge" &&
+      decodeURIComponent(
+        parsed.searchParams.get(ANSWER_FLOW_QUESTION_PARAM) ?? "",
+      ) === "كم سعر الكشف؟" &&
+      parsed.searchParams.get(ANSWER_FLOW_GAP_PARAM) ===
+        "11111111-1111-4111-8111-111111111111",
+  );
+  // A long/bounded subject (the recorder caps it at 200 chars) round-trips.
+  const longSubject = "سؤال طويل جداً ".repeat(20).trim();
+  const longHref = buildAnswerFlowHref({
+    subject: longSubject,
+    gapId: "11111111-1111-4111-8111-111111111111",
+  });
+  const longParsed = new URL(longHref, "http://localhost");
+  record(
+    "K5b سؤال بطول حدّ التسجيل يصل كاملاً (لا اقتطاع في النقل)",
+    decodeURIComponent(
+      longParsed.searchParams.get(ANSWER_FLOW_QUESTION_PARAM) ?? "",
+    ) === longSubject,
+  );
+  // K6 — a gap with no recorded subject still carries the gap id: the editor
+  // opens blank (the owner types the question), and the item still closes.
+  const blankHref = buildAnswerFlowHref({
+    subject: null,
+    gapId: "11111111-1111-4111-8111-111111111111",
+  });
+  const blankParsed = new URL(blankHref, "http://localhost");
+  record(
+    "K6 فجوة بلا سؤال مسجّل تفتح المحرّر فارغاً ويبقى المعرّف محمولاً للإغلاق",
+    blankParsed.pathname === "/settings/knowledge" &&
+      !blankParsed.searchParams.has(ANSWER_FLOW_QUESTION_PARAM) &&
+      blankParsed.searchParams.get(ANSWER_FLOW_GAP_PARAM) !== null,
+  );
+  // K7 — ONLY the knowledge editor participates in the answer flow: a
+  // price/hours/description/business-info gap keeps its own authoritative
+  // editor so Domain facts are never duplicated into the FAQ store.
+  record(
+    "K7 فقط فجوات الأسئلة (عامة/شائعة) تدخل مسار الإجابة — الباقي لمحرّره الأصلي",
+    KNOWLEDGE_GAP_DESTINATIONS.FAQ.answerFlow === true &&
+      KNOWLEDGE_GAP_DESTINATIONS.GENERAL.answerFlow === true &&
+      KNOWLEDGE_GAP_DESTINATIONS.SERVICE_PRICE.answerFlow !== true &&
+      KNOWLEDGE_GAP_DESTINATIONS.BUSINESS_INFO.answerFlow !== true &&
+      KNOWLEDGE_GAP_DESTINATIONS.SERVICE_INFO.answerFlow !== true &&
+      KNOWLEDGE_GAP_DESTINATIONS.AVAILABILITY.answerFlow !== true,
+  );
+}
+
+// ─── K8–K13: the ANSWER flow end-to-end (offline, real service modules) ─────
+
+/**
+ * The discovered question → answer flow, exercised through the REAL
+ * knowledge service (canonical persistence) and the REAL review module (gap
+ * lifecycle) with in-memory collaborators: the business store is SHARED by
+ * both, so the write and the lifecycle transition provably target the same
+ * tenant.
+ */
+async function gapAnswerFlowSection(): Promise<void> {
+  const BUSINESS_ID = "business-1";
+  const GAP_ID = "22222222-2222-4222-8222-222222222222";
+  const OTHER_GAP_ID = "33333333-3333-4333-8333-333333333333";
+
+  // The business starts with an EMPTY knowledge store — a genuine gap.
+  const business = makeBusiness({ id: BUSINESS_ID, faqs: [] });
+  const businesses = new Map<string, Business>([[business.id, business]]);
+  const businessRepository: Pick<BusinessRepository, "findById" | "update"> = {
+    findById: async (id: string) => businesses.get(id) ?? null,
+    update: async (
+      id: string,
+      data: Parameters<BusinessRepository["update"]>[1],
+    ) => {
+      const current = businesses.get(id);
+      if (!current) throw new Error("not found");
+      // Mutate in place so the shared business reference the section reads
+      // stays in sync with what the service wrote (the canonical store).
+      Object.assign(current, data, { updatedAt: new Date() });
+      return current;
+    },
+  };
+
+  // The unresolved gaps the engine would have recorded.
+  type GapRow = {
+    id: string;
+    businessId: string;
+    conversationId: string;
+    customerMessageId: string;
+    category: KnowledgeGapCategory;
+    subjectText: string | null;
+    status: KnowledgeGapStatus;
+    createdAt: string;
+    reviewedAt: string | null;
+  };
+  const faqGap: GapRow = {
+    id: GAP_ID,
+    businessId: BUSINESS_ID,
+    conversationId: "conv-1",
+    customerMessageId: "msg-1",
+    category: "FAQ",
+    subjectText: "كم سعر الكشف؟",
+    status: "UNRESOLVED",
+    createdAt: new Date("2026-10-05T00:00:00.000Z").toISOString(),
+    reviewedAt: null,
+  };
+  const priceGap: GapRow = {
+    id: OTHER_GAP_ID,
+    businessId: BUSINESS_ID,
+    conversationId: "conv-2",
+    customerMessageId: "msg-2",
+    category: "SERVICE_PRICE",
+    subjectText: "كم سعر التنظيف؟",
+    status: "UNRESOLVED",
+    createdAt: new Date("2026-10-05T00:00:01.000Z").toISOString(),
+    reviewedAt: null,
+  };
+  const gapRows = new Map<string, GapRow>([
+    [faqGap.id, faqGap],
+    [priceGap.id, priceGap],
+  ]);
+  const knowledgeGapRepository: Pick<
+    KnowledgeGapRepository,
+    "list" | "markReviewed"
+  > = {
+    list: async () => [...gapRows.values()],
+    markReviewed: async (input: {
+      id: string;
+      businessId: string;
+      reviewedById: string;
+    }) => {
+      const row = gapRows.get(input.id);
+      // The real repository's guards: tenant-scoped AND terminal.
+      if (!row || row.businessId !== input.businessId) return;
+      if (row.status !== "UNRESOLVED") return;
+      row.status = "REVIEWED";
+      row.reviewedAt = new Date().toISOString();
+    },
+  } as Pick<KnowledgeGapRepository, "list" | "markReviewed">;
+
+  const reviewModule =
+    await import("../src/features/assistant/server/knowledge-gap-review");
+  const knowledgeModule =
+    await import("../src/features/knowledge/server/knowledge-service");
+
+  // K8 — the review item for an unanswered question carries the question and
+  // the gap id into the existing knowledge editor (prefilled answer flow).
+  const reviewItems = await reviewModule.listUnresolvedKnowledgeGaps(
+    { knowledgeGapRepository },
+    ADMIN,
+    10,
+  );
+  const faqItem = Array.isArray(reviewItems)
+    ? reviewItems.find((item) => item.id === GAP_ID)
+    : undefined;
+  const priceItem = Array.isArray(reviewItems)
+    ? reviewItems.find((item) => item.id === OTHER_GAP_ID)
+    : undefined;
+  const parsedFaqHref = new URL(faqItem?.href ?? "/", "http://localhost");
+  record(
+    "K8 عنصر فجوة سؤال غير مجاب يحمل سؤال العميل ومعرّف الفجوة في الرابط",
+    faqItem !== undefined &&
+      faqItem.action === "إضافة الإجابة" &&
+      parsedFaqHref.pathname === "/settings/knowledge" &&
+      decodeURIComponent(
+        parsedFaqHref.searchParams.get(ANSWER_FLOW_QUESTION_PARAM) ?? "",
+      ) === "كم سعر الكشف؟" &&
+      parsedFaqHref.searchParams.get(ANSWER_FLOW_GAP_PARAM) === GAP_ID,
+  );
+  // A DOMAIN gap (price) keeps its own authoritative editor — the question is
+  // NOT carried into the FAQ editor (single source of truth).
+  record(
+    "K8b فجوة السعر تبقى على محرّر الخدمات الأصلي (لا تكرار في الأسئلة الشائعة)",
+    priceItem !== undefined &&
+      priceItem.href === "/services" &&
+      !priceItem.href.includes(ANSWER_FLOW_QUESTION_PARAM),
+  );
+
+  // K9 — the operator EDITS the prefilled question, then saves the answer
+  // through the EXISTING canonical persistence path.
+  const answered = await knowledgeModule.createKnowledgeEntry(
+    { businessRepository },
+    ADMIN,
+    { question: "كم سعر الكشف عندكم؟", answer: "الكشف بـ ٢٠٠ جنيه." },
+  );
+  const stored = business.faqs as Array<{
+    question: string;
+    answer: string;
+  }>;
+  record(
+    "K9 إجابة الفجوة تُحفظ في المخزن القانوني (Business.faqs) بالسؤال المعدل",
+    answered.success === true &&
+      answered.entries.length === 1 &&
+      stored.length === 1 &&
+      stored[0]!.question === "كم سعر الكشف عندكم؟" &&
+      stored[0]!.answer === "الكشف بـ ٢٠٠ جنيه.",
+  );
+  // The prefilled question stays an EDITABLE DRAFT: the stored question is the
+  // one the operator submitted, not the raw customer message.
+  const rawDraft = "كم سعر الكشف؟";
+  record(
+    "K9b السؤال المُخزَّن هو ما أدخله المشغّل (المسودة قابلة للتعديل قبل الحفظ)",
+    stored[0]!.question !== rawDraft,
+  );
+
+  // K10 — the unresolved item closes through its EXISTING lifecycle
+  // (UNRESOLVED → REVIEWED, terminal), server-side tenant-scoped.
+  const reviewed = await reviewModule.markKnowledgeGapReviewed(
+    { knowledgeGapRepository },
+    ADMIN,
+    GAP_ID,
+  );
+  record(
+    "K10 الفجوة غير المحلولة تصبح REVIEWED (دورة الحياة القائمة، طرفية)",
+    reviewed.success === true &&
+      faqGap.status === "REVIEWED" &&
+      faqGap.reviewedAt !== null,
+  );
+
+  // K11 — no duplicate knowledge: answering the same question again is
+  // rejected by the canonical service, and the reviewed gap is terminal.
+  const again = await knowledgeModule.createKnowledgeEntry(
+    { businessRepository },
+    ADMIN,
+    { question: "كم سعر الكشف عندكم؟", answer: "محاولة تكرار" },
+  );
+  const reReviewed = await reviewModule.markKnowledgeGapReviewed(
+    { knowledgeGapRepository },
+    ADMIN,
+    GAP_ID,
+  );
+  record(
+    "K11 إجابة نفس السؤال مرة أخرى لا تنشئ معرفة مكررة والفجوة تبقى REVIEWED",
+    again.success === false &&
+      again.message.length > 0 &&
+      stored.length === 1 &&
+      stored[0]!.answer === "الكشف بـ ٢٠٠ جنيه." &&
+      reReviewed.success === true &&
+      faqGap.status === "REVIEWED",
+  );
+
+  // K12 — the saved answer is available to FUTURE AI turns through the
+  // existing context path: B-02 carries the stored entry and B-03 discloses a
+  // reply backed by the PUBLIC FAQ store.
+  const built = buildAiContext({
+    scope: { businessId: BUSINESS_ID },
+    sources: {
+      business: {
+        businessId: BUSINESS_ID,
+        name: business.name,
+        about: null,
+        address: null,
+        faqs: business.faqs,
+        whatsappNumber: business.whatsappNumber,
+        cancellationPolicy: null,
+        workingHours: null,
+      },
+      services: [],
+      conversation: { status: "AI_ACTIVE" as const, recentMessages: [] },
+      message: "كم سعر الكشف عندكم؟",
+    },
+  });
+  const answer = stored[0]!.answer;
+  const futureReply: AiResponse = {
+    intent: "FAQ",
+    action: "reply",
+    content: answer,
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: null,
+    summary: null,
+  };
+  const futureDecision = enforceDisclosure({
+    response: futureReply,
+    context: { request: built.request, facts: built.facts },
+  });
+  record(
+    "K12 الإجابة المحفوظة تصل أدوار الذكاء القادمة عبر مسار السياق القائم",
+    built.request.faqs.length === 1 &&
+      built.request.faqs[0]!.question === "كم سعر الكشف عندكم؟" &&
+      futureDecision.kind === "disclosed" &&
+      futureDecision.kind === "disclosed" &&
+      futureDecision.support[0] === "business.faqs",
+  );
+
+  // K13 — the existing knowledge editor stays compatible: the list read
+  // returns the answered entry alongside a plain (non-flow) create.
+  const listed = await knowledgeModule.listKnowledge(
+    { businessRepository },
+    ADMIN,
+  );
+  const plain = await knowledgeModule.createKnowledgeEntry(
+    { businessRepository },
+    ADMIN,
+    { question: "هل يجب الحجز المسبق؟", answer: "نعم." },
+  );
+  record(
+    "K13 المحرّر القائم متوافق: القراءة والإضافة العادية تعملان مع المدخل المُجاب",
+    Array.isArray(listed) &&
+      listed.length === 1 &&
+      plain.success === true &&
+      plain.entries.length === 2 &&
+      plain.entries.some((entry) => entry.question === "كم سعر الكشف عندكم؟"),
+  );
+}
+
 // ─── Runner ──────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -897,6 +1227,8 @@ async function main(): Promise<void> {
   readinessSection();
   contextSection();
   gapRoutingSection();
+  gapAnswerHrefSection();
+  await gapAnswerFlowSection();
 
   let failed = 0;
   for (const { label, pass } of checks) {
