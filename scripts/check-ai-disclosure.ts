@@ -1254,7 +1254,7 @@ async function main(): Promise<void> {
     "13f. ترحيب GREETING لا يدّعي البشرية ولا يخترع معلومات",
     greeting.aiMessages.length === 1 &&
       !/بشري|إنسان|موظف|سعر|موعد متاح|السعر/.test(greeting.aiMessages[0]!) &&
-      greeting.aiMessages[0]!.includes("أهلاً") &&
+      greeting.aiMessages[0]!.includes("وعليكم السلام") &&
       greeting.sent[0] === greeting.aiMessages[0],
   );
   // The gate made its decision from the intent alone — an UNKNOWN intent

@@ -25,6 +25,9 @@
  *   E1–E4  end-to-end engine run: the greeting turn stays AI_ACTIVE with
  *          no provider call, and the follow-up turn is still owned by the
  *          assistant with the full history preserved
+ *   UX03B  greeting-etiquette acknowledgements (PROMPT-AI-UX-03B): family
+ *          mapping, classifier↔bypass byte-identity, determinism, real-turn
+ *          precedence, knowledge-free/transparent contract
  *
  * Run: pnpm check:greeting
  */
@@ -188,7 +191,7 @@ async function main(): Promise<void> {
   );
   // The greeting reply is a FIXED template — it does not vary with the
   // business, the services, or the knowledge store.
-  const withFaqs = classifyCustomerMessage("اهلا", [
+  const withFaqs = classifyCustomerMessage("صباح الخير", [
     { question: "كم سعر التنظيف؟", answer: "٣٠٠ جنيه." },
   ]);
   check(
@@ -268,6 +271,71 @@ async function main(): Promise<void> {
       eq(refused.kind, "requires-human"),
     );
   }
+
+  // ── UX03B. greeting etiquette acknowledgement (PROMPT-AI-UX-03B) ─────────
+  // A recognized greeting now receives its culturally-expected acknowledgement
+  // BEFORE the shared invite. It stays deterministic, knowledge-free, and
+  // byte-identical between the classifier and the LLM bypass (ONE shared
+  // builder), and it never claims to be human or invents business knowledge.
+  const salamReply = classifyCustomerMessage("السلام عليكم", []);
+  const salamBypass = bypassDeterministicAi(requestFor("السلام عليكم"));
+  check(
+    "UX03B-1. «السلام عليكم» → إقرار يبدأ بـ «وعليكم السلام» (تهذيب)",
+    eq(salamReply.intent, "GREETING") &&
+      eq(salamReply.action, "reply") &&
+      salamReply.content.startsWith("وعليكم السلام") &&
+      salamBypass !== null &&
+      eq(salamBypass.content, salamReply.content),
+  );
+  const morningReply = classifyCustomerMessage("صباح الخير", []);
+  const eveningReply = classifyCustomerMessage("مساء الخير", []);
+  const genericReply = classifyCustomerMessage("أهلاً", []);
+  check(
+    "UX03B-2. عائلات الترحيب → إقرارها المطابق (صباح/مساء/عام)",
+    morningReply.content.startsWith("صباح النور") &&
+      eveningReply.content.startsWith("مساء النور") &&
+      genericReply.content.startsWith("أهلاً بك"),
+  );
+  check(
+    "UX03B-3. التكرار حتمي — نفس الترحيب يعطي نفس الرد دائماً",
+    deepEq(
+      classifyCustomerMessage("السلام عليكم", []),
+      classifyCustomerMessage("السلام عليكم", []),
+    ) &&
+      deepEq(
+        bypassDeterministicAi(requestFor("السلام عليكم")),
+        bypassDeterministicAi(requestFor("السلام عليكم")),
+      ),
+  );
+  // A greeting mixed with a real question does NOT enter the pure-greeting
+  // path (the question mark disqualifies it) — the normal path owns the turn.
+  const greetingPlusQuestion = "السلام عليكم، هو انتو عيادة الدكتورة أفنان؟";
+  check(
+    "UX03B-4. ترحيب + سؤال حقيقي → ليس مسار الترحيب النقي (لا ابتلاع)",
+    classifyCustomerMessage(greetingPlusQuestion, []).intent !== "GREETING" &&
+      bypassDeterministicAi(requestFor(greetingPlusQuestion)) === null,
+  );
+  // The acknowledgement never invents business knowledge and never claims to
+  // be human — the same knowledge-free contract the generic greeting held.
+  check(
+    "UX03B-5. الإقرار بلا معرفة (لا سعر/موعد/ساعات/عنوان) وبلا انتحال بشري",
+    !/بشري|إنسان|موظف|سعر|أسعار|موعد متاح|ساعات العمل|العنوان|جنيه/i.test(
+      salamReply.content,
+    ) &&
+      salamReply.handoffReason === null &&
+      parseAiResponse(salamReply) !== null,
+  );
+  // A real intent coexisting with a provider-name mention keeps its own
+  // precedence — an identity mention inside a booking turn is still BOOKING.
+  const identityPlusBooking = classifyCustomerMessage(
+    "انتو عيادة الدكتورة أفنان؟ وعايز أحجز",
+    [],
+  );
+  check(
+    "UX03B-6. هوية + حجز → BOOKING (أسبقية الحجز كما هي)",
+    eq(identityPlusBooking.intent, "BOOKING") &&
+      eq(identityPlusBooking.action, "booking_handoff"),
+  );
 
   // ── R1–R6. regressions: nothing else moved ─────────────────────────────
   const unknown = classifyCustomerMessage("دراجة نارية زرقاء", []);
@@ -590,7 +658,7 @@ async function main(): Promise<void> {
     eq(engineAiCalls, 0) &&
       written.filter((message) => message.senderType === "AI").length === 1 &&
       sent.length === 1 &&
-      sent[0]!.includes("أهلاً"),
+      sent[0]!.includes("وعليكم السلام"),
   );
   check(
     "E2b. الترحيب لا يُنتج صف اهتمام للمشغل (النية ليست تحويلاً)",
@@ -625,7 +693,7 @@ async function main(): Promise<void> {
   check(
     "E4. سياق المحادثة محفوظ — ترحيب العميل ورد المساعد لا يُفقدان",
     history.some((content) => content === "السلام عليكم") &&
-      history.some((content) => content.includes("أهلاً")),
+      history.some((content) => content.includes("وعليكم السلام")),
   );
   // No duplicate handoff acknowledgment was ever emitted for the greeting.
   check(

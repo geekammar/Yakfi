@@ -533,14 +533,6 @@ const REPLIES = {
   NO_KNOWLEDGE: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
   AMBIGUOUS:
     "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
-  /**
-   * A knowledge-free social protocol (DECISIONS #61): acknowledges the
-   * customer, states that the assistant is ready, and invites them to
-   * continue. It never claims to be human, never invents business
-   * information, and stays AI_ACTIVE so the next message is handled by
-   * the normal classification path.
-   */
-  GREETING: "أهلاً بك!  أنا مساعدك للحجز والمواعيد — كيف يمكنني مساعدتك اليوم؟",
 } as const;
 
 const BOOKING_SUMMARIES = {
@@ -606,6 +598,58 @@ function isPureGreeting(
     return false;
   }
   return true;
+}
+
+/**
+ * The etiquette ACKNOWLEDGEMENT for a recognized greeting family
+ * (PROMPT-AI-UX-03B). A greeting is a knowledge-free social protocol, so its
+ * acknowledgement names no business fact, service, price, slot, or policy —
+ * exactly the same disclosure boundary the previous generic greeting crossed.
+ * It is chosen DETERMINISTICALLY from the SAME normalized vocabulary that
+ * recognizes the greeting, so the classifier and the LLM bypass can never
+ * disagree on the wording. The salam, morning, and evening openings have a
+ * fixed culturally-expected reply; every other recognized opening falls back
+ * to «أهلاً بك».
+ */
+function greetingAcknowledgement(normalized: string, tokens: string[]): string {
+  if (
+    normalized.includes("السلام عليكم") ||
+    normalized.includes("سلام عليكم") ||
+    tokens.includes("سلام")
+  ) {
+    return "وعليكم السلام ورحمة الله وبركاته";
+  }
+  if (normalized.includes("صباح")) return "صباح النور";
+  if (normalized.includes("مساء")) return "مساء النور";
+  return "أهلاً بك";
+}
+
+/** The ONE knowledge-free invite appended after a greeting acknowledgement. */
+const GREETING_INVITE =
+  "أنا مساعدك للحجز والمواعيد — كيف يمكنني مساعدتك اليوم؟";
+
+/** The complete deterministic GREETING copy for one recognized opening. */
+function buildGreetingContent(message: string): string {
+  const normalized = normalizeArabicText(message);
+  const tokens = tokenize(message);
+  return `${greetingAcknowledgement(normalized, tokens)}! ${GREETING_INVITE}`;
+}
+
+/**
+ * The ONE GREETING response shared by the deterministic classifier and the
+ * LLM bypass (`bypassDeterministicAi`). Both call THIS function, so they can
+ * never diverge on the greeting wording. It stays a `reply` (never a handoff),
+ * names no business knowledge, and keeps the thread AI_ACTIVE.
+ */
+function greetingResponse(message: string): AiResponse {
+  return {
+    action: "reply",
+    intent: "GREETING",
+    content: buildGreetingContent(message),
+    extraction: emptyAiExtraction,
+    handoffReason: null,
+    summary: null,
+  };
 }
 
 /** Distinctive-token overlap score between a message and an FAQ question. */
@@ -725,14 +769,7 @@ export function classifyCustomerMessage(
   // intent vocabulary is not a greeting). This branch never spends an LLM
   // call.
   if (isPureGreeting(message, normalized, tokens)) {
-    return {
-      action: "reply",
-      intent: "GREETING",
-      content: REPLIES.GREETING,
-      extraction: emptyAiExtraction,
-      handoffReason: null,
-      summary: null,
-    };
+    return greetingResponse(message);
   }
 
   // Sensitive / high-stakes language — staff, immediately.
@@ -880,14 +917,7 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
   }
   const tokens = tokenize(request.message);
   if (isPureGreeting(request.message, normalized, tokens)) {
-    return {
-      action: "reply",
-      intent: "GREETING",
-      content: REPLIES.GREETING,
-      extraction: emptyAiExtraction,
-      handoffReason: null,
-      summary: null,
-    };
+    return greetingResponse(request.message);
   }
   return null;
 }

@@ -57,6 +57,50 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-AI-UX-03B`:
+GREETING ETIQUETTE + AUTHORITATIVE BUSINESS IDENTITY — two proven
+customer-facing corrections over the EXISTING seams; ZERO
+schema/migration/provider/architecture change; no commit/push/tag/deploy.**
+**(A) Greeting etiquette:** the deterministic, zero-LLM greeting path now
+answers each recognized greeting family with its culturally-expected
+acknowledgement — «السلام عليكم» → «وعليكم السلام ورحمة الله وبركاته»,
+صباح → «صباح النور», مساء → «مساء النور», otherwise «أهلاً بك» — followed by
+the ONE existing short invite. ONE shared builder (`greetingResponse` in
+`conversation-ai.ts`) is called by BOTH `classifyCustomerMessage` and
+`bypassDeterministicAi`, so the two paths can never diverge on wording; the
+intent GREETING / action reply / zero provider calls / AI_ACTIVE semantics
+are unchanged and the greeting + real-turn precedence is untouched. **(B)
+Business identity:** ONE authoritative instruction added to
+`prompts/system/booking-assistant.prompt` (regenerated artifact): businessName
+is the stored authoritative name; an identity ask may be confirmed with intent
+FAQ / action reply when it is present; a customer wording that differs from
+businessName is explained naturally (the registered/stored name is
+businessName), never treated as unanswerable by itself; no official/legal/
+licensed identity or unstored attribute may be invented; an absent
+businessName falls back to handoff NO_KNOWLEDGE. The already-shipped UX-02
+gate/builder identity channel backs the reply — no `disclosure-gate.ts` or
+`context-builder.ts` change was needed. **Verified:** `check:greeting`
+66→**72/72** (NEW UX03B-1..6: salam/morning/evening/default acknowledgements,
+classifier↔bypass byte-identity, determinism, greeting+question not swallowed,
+knowledge-free / no human claim, identity+booking precedence) +
+`check:ai-prompts` 130→**134/134** (NEW PRODUCER-UX03B clauses) +
+`check:ai-disclosure` 54/54, `check:ai-context-builder` 61/61,
+`check:assistant-style` 27/27, `check:assistant-settings` 50/50,
+`check:conversation-control` 50/50, `check:turn-planner` 31/31, `check:jev`
+28/28, `check:conversation-handoff` 21/21, `check:conversation-ux`,
+`check:whatsapp-inbound` 13/13, `check:knowledge-gap` 24/24,
+`check:turn-evidence` 27/27, `check:clarify` 27/27, `check:multi-intent`
+22/22, `check:ai-architecture` 25/25 + `pnpm verify`
+(lint/typecheck/format/build) + `pnpm security` (1 pre-existing
+both-env-files warning) green. **NOT browser/live-verified; no real-LLM run
+was performed for the prompt line** (the identity wording is pinned
+structurally; a live/real-LLM pass should confirm it). **Files changed:**
+`src/features/conversations/server/conversation-ai.ts`,
+`prompts/system/booking-assistant.prompt` (+ regenerated
+`src/generated/ai-prompts.generated.ts`), `scripts/check-greeting.ts`,
+`scripts/check-ai-prompts.ts`, `scripts/check-ai-disclosure.ts`, docs.
+**Readiness: READY_FOR_OPERATOR_REVIEW.**
+
 **PRODUCTION ATRIA-FAILURE FORENSICS (`PROMPT-AI-OPS-27`, read-only; ZERO
 code/prompt/schema/migration/provider-policy change; no production DB write;
 no commit/push/tag/deploy): ROOT CAUSE PROVEN — PROVIDER LATENCY vs the

@@ -687,6 +687,41 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── PRODUCER: business-identity instruction (PROMPT-AI-UX-03B) ──────────
+  // The canonical system prompt must tell the model that businessName is the
+  // authoritative stored name, that a DIFFERENT customer wording is explained
+  // (not treated as unanswerable on its own), that no official/legal identity
+  // or unstored attribute may be invented, and that an ABSENT name falls back
+  // to NO_KNOWLEDGE. The disclosure gate/builder identity channel (UX-02) is
+  // the backstop; these checks pin the producer-side contract.
+  {
+    const systemPrompt =
+      generated.find((g) => g.id === "system.booking-assistant")?.body ?? "";
+    check(
+      "PRODUCER-UX03B: الموجه يعلن businessName المرجع المعتمد للهوية",
+      /Business identity:/i.test(systemPrompt) &&
+        /businessName is the AUTHORITATIVE stored business name/i.test(
+          systemPrompt,
+        ),
+    );
+    check(
+      "PRODUCER-UX03B: اختلاف صياغة العميل يُشرح (لا يُعامل كسؤال بلا إجابة)",
+      /wording differs from businessName/i.test(systemPrompt) &&
+        /registered\/stored name is businessName/i.test(systemPrompt),
+    );
+    check(
+      "PRODUCER-UX03B: لا ادّعاء هوية رسمية/قانونية ولا استنتاج سمات غير مخزنة",
+      /Do NOT claim an official, legal, licensed, or accredited identity/i.test(
+        systemPrompt,
+      ) && /do NOT infer attributes that are not stored/i.test(systemPrompt),
+    );
+    check(
+      "PRODUCER-UX03B: غياب businessName ⇒ NO_KNOWLEDGE (لا اختراع اسم)",
+      /businessName is empty or absent/i.test(systemPrompt) &&
+        /NEVER invent a name/i.test(systemPrompt),
+    );
+  }
+
   // (1) single-intent output — valid, no goals[] needed.
   {
     const single = parseAiResponse({
