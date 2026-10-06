@@ -687,34 +687,95 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── PRODUCER: business-identity instruction (PROMPT-AI-UX-03B) ──────────
-  // The canonical system prompt must tell the model that businessName is the
-  // authoritative stored name, that a DIFFERENT customer wording is explained
-  // (not treated as unanswerable on its own), that no official/legal identity
-  // or unstored attribute may be invented, and that an ABSENT name falls back
-  // to NO_KNOWLEDGE. The disclosure gate/builder identity channel (UX-02) is
-  // the backstop; these checks pin the producer-side contract.
+  // ── PRODUCER: business-identity instruction (PROMPT-AI-UX-03B / UX-04B-2) ──
+  // The canonical system prompt must make the identity answer an OBLIGATION,
+  // not a permission: when businessName is present the model CONFIRMS it with
+  // intent FAQ + action reply, in confident Egyptian-natural Arabic, and a
+  // differing customer wording is answered by stating the canonical name
+  // (PROMPT-AI-UX-04B-2). The instruction is deliberately OBLIGATION-SHAPED
+  // and concise: it authorizes confident copy instead of forbidding
+  // bureaucratic sentences, and it must NOT enumerate the hedge/disclaimer or
+  // legal/status vocabulary at all — listing «الاسم المسجل عندي هو» or
+  // "official, legal, licensed" in the prompt primes the model to reproduce
+  // exactly that wording, so those strings are asserted ABSENT from the prompt
+  // itself (the failure mode UX-04A documented). The unsupported-attribute
+  // constraint is phrased positively ("the name only", "leave it out when
+  // none is"), a present name is never a handoff reason, an absent name falls
+  // back to NO_KNOWLEDGE, and the multi-intent answer-and-continue rules own
+  // the mixed turn. The disclosure gate/builder identity channel (UX-02) is
+  // the structural backstop; these checks pin the producer-side contract.
   {
     const systemPrompt =
       generated.find((g) => g.id === "system.booking-assistant")?.body ?? "";
+    // (a) businessName is declared the authoritative identity fact.
     check(
       "PRODUCER-UX03B: الموجه يعلن businessName المرجع المعتمد للهوية",
       /Business identity:/i.test(systemPrompt) &&
-        /businessName is the AUTHORITATIVE stored business name/i.test(
+        /businessName is the AUTHORITATIVE business identity fact/i.test(
           systemPrompt,
         ),
     );
+    // (b) The answer is an OBLIGATION phrased positively: confirm the business
+    //     by stating the name plainly, confidently and briefly in natural
+    //     Egyptian Arabic, then invite the customer to continue. Spec case 1.
     check(
-      "PRODUCER-UX03B: اختلاف صياغة العميل يُشرح (لا يُعامل كسؤال بلا إجابة)",
-      /wording differs from businessName/i.test(systemPrompt) &&
-        /registered\/stored name is businessName/i.test(systemPrompt),
-    );
-    check(
-      "PRODUCER-UX03B: لا ادّعاء هوية رسمية/قانونية ولا استنتاج سمات غير مخزنة",
-      /Do NOT claim an official, legal, licensed, or accredited identity/i.test(
+      "PRODUCER-UX04B2-1: الإجابة عن الهوية التزامية — يؤكد businessName بثقة بنية FAQ وفعل reply",
+      /you MUST answer that question yourself with intent FAQ and action reply whenever businessName is present/i.test(
         systemPrompt,
-      ) && /do NOT infer attributes that are not stored/i.test(systemPrompt),
+      ) &&
+        /state businessName plainly, confidently and briefly in natural Egyptian Arabic/i.test(
+          systemPrompt,
+        ) &&
+        /the way the business's own front desk would/i.test(systemPrompt),
     );
+    // (c) A different customer wording is the SAME identity question, answered
+    //     with the canonical name and nothing else. Spec case 2.
+    check(
+      "PRODUCER-UX04B2-2: اختلاف صياغة العميل يُجاب بالاسم المعتمد بثقة (لا يُعامل كسؤال بلا إجابة)",
+      /wording that differs from businessName is the same identity question/i.test(
+        systemPrompt,
+      ) &&
+        /answer it with the canonical businessName, naturally and briefly, and stop there/i.test(
+          systemPrompt,
+        ),
+    );
+    // (d) The prompt must NOT carry the hedge/disclaimer or legal/status
+    //     vocabulary AT ALL: naming what is forbidden primes the model to say
+    //     it. This is the load-bearing "positive authorization over negative
+    //     coaching" rule — the instruction authorizes confident copy and never
+    //     enumerates the bureaucratic alternative.
+    check(
+      "PRODUCER-UX04B2: لا تُدرَج صياغات التحذير/السجل/القانونية/الترخيص في الموجه (لا تلقين للتكرار)",
+      !/الاسم المسجل عندي هو/.test(systemPrompt) &&
+        !/بحسب البيانات الموجودة/.test(systemPrompt) &&
+        !/مش عندي تأكيد رسمي/.test(systemPrompt) &&
+        !/لا أستطيع التأكد/.test(systemPrompt) &&
+        !/جارٍ تحويلك/.test(systemPrompt) &&
+        !/من فضلك تواصل مع الفريق للتأكيد/.test(systemPrompt) &&
+        !/registered\/stored name/i.test(systemPrompt) &&
+        !/stored business name/i.test(systemPrompt) &&
+        !/official, legal, licensed/i.test(systemPrompt) &&
+        !/license, accreditation/i.test(systemPrompt),
+    );
+    // (e) The unsupported-attribute constraint is expressed POSITIVELY: the
+    //     reply carries the name only, an attribute with no value is left out
+    //     (never invented), only THAT attribute stays unasserted, and a present
+    //     businessName is never a handoff reason. Spec cases 3/4/5.
+    check(
+      "PRODUCER-UX04B2-3: السمة غير المدعومة تُترك وحدها (لا اختراع) والاسم الحاضر لا يسبّب تحويلاً",
+      /The identity reply carries the name only/i.test(systemPrompt) &&
+        /every other attribute the customer may add to the question is a separate attribute with its own rule/i.test(
+          systemPrompt,
+        ) &&
+        /never invent one/i.test(systemPrompt) &&
+        /only the attribute with no value stays unasserted/i.test(
+          systemPrompt,
+        ) &&
+        /a present businessName is never by itself a reason to hand the turn off/i.test(
+          systemPrompt,
+        ),
+    );
+    // (f) An absent name keeps the existing safe fallback. Spec case 6.
     check(
       "PRODUCER-UX03B: غياب businessName ⇒ NO_KNOWLEDGE (لا اختراع اسم)",
       /businessName is empty or absent/i.test(systemPrompt) &&

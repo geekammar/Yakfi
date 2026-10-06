@@ -519,6 +519,269 @@ export function detectTurnControlSignals(message: string): TurnControlSignals {
   return { sensitive, explicitHuman, nonCommittal };
 }
 
+// ─── Task relevance (deterministic, text-derived — never AI-derived) ────────
+
+/**
+ * Which task families the current turn makes relevant. The relevance flags are
+ * derived deterministically from the turn's text — never by the AI (DECISIONS
+ * #50). This is NOT the intent classifier above: it does not choose a
+ * response, it only gates CONDITIONAL context facts (the context builder) and
+ * the deterministic identity decision set (`isPureBusinessIdentityQuestion`).
+ *
+ * The derivation lives here, next to the other Arabic text-classification
+ * primitives, so there is exactly ONE place the relevance vocabulary is
+ * defined and every consumer (the context builder, the deterministic seam, the
+ * knowledge-gap recorder) reads the SAME flags for the SAME text.
+ */
+export type TaskRelevance = {
+  /** Booking / availability asks → the `availability` fact family. */
+  readonly bookingOrAvailability: boolean;
+  /** Cancellation / reschedule asks → the `cancellationPolicy` fact. */
+  readonly cancellationOrReschedule: boolean;
+  /** Provider-choice asks → the `providerPreference` fact. */
+  readonly providerChoice: boolean;
+  /** Contact / identity / location asks → the `whatsappNumber` fact. */
+  readonly contactOrIdentity: boolean;
+  /**
+   * Business-identity asks ("ما اسمكم؟" / "انتو مين؟") → the PUBLIC
+   * `business.name` disclosure family (PROMPT-AI-UX-02). The business name is
+   * ALWAYS carried in the request for phrasing, but this flag gates the
+   * aggregate disclosure family that may BACK a self-authored identity reply —
+   * the same budget-gate pattern `serviceCatalog` uses for `service.name`.
+   */
+  readonly businessIdentity: boolean;
+  /** Price / fee / cost asks → the service `price` fact (Slice 6). */
+  readonly priceOrFee: boolean;
+  /**
+   * Business-profile asks ("tell me about you") → the PUBLIC `business.about`
+   * fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so an unrelated turn never
+   * carries the business description.
+   */
+  readonly businessInfo: boolean;
+  /**
+   * Service-detail asks ("what does it include?") → the PUBLIC service
+   * `description` fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so a booking or
+   * price-only turn never carries descriptive catalog copy.
+   */
+  readonly serviceInfo: boolean;
+  /**
+   * Service-catalog listing asks ("what services do you have?") → the PUBLIC
+   * service-catalog `name` family (PROMPT-AI-OPS-20). Gated so ONLY a
+   * catalog-listing turn arms the name disclosure family.
+   */
+  readonly serviceCatalog: boolean;
+};
+
+const BOOKING_OR_AVAILABILITY_WORDS = [
+  "حجز",
+  "احجز",
+  "موعد",
+  "معاد",
+  "ميعاد",
+  "متاح",
+  "متاحين",
+  "فاضي",
+  "فاضيه",
+  "فاضية",
+  "أوقات",
+  "اوقات",
+  "متى",
+  "إمتى",
+  "امتى",
+];
+
+const CANCELLATION_OR_RESCHEDULE_WORDS = [
+  "إلغاء",
+  "الغاء",
+  "ألغي",
+  "الغي",
+  "كنسل",
+  "تغيير",
+  "تأجيل",
+  "تاجيل",
+  "تعديل",
+  "تبديل",
+  "تحويل",
+  "إعادة",
+  "اعادة",
+];
+
+const PROVIDER_CHOICE_WORDS = [
+  "دكتور",
+  "دكتورة",
+  "دكتوره",
+  "طبيب",
+  "طبيبة",
+  "طبيبه",
+  "أخصائي",
+  "اخصائي",
+  "أخصائيه",
+  "مزود",
+  "أي",
+  "اي",
+];
+
+const CONTACT_OR_IDENTITY_WORDS = [
+  "رقم",
+  "هاتف",
+  "واتس",
+  "واتساب",
+  "تواصل",
+  "كلمني",
+  "كلموني",
+  "العنوان",
+  "عنوان",
+  "مكان",
+  "أين",
+  "اين",
+  "وين",
+];
+
+/**
+ * Business-identity vocabulary (PROMPT-AI-UX-02). Matches asks about the
+ * business's OWN identity — "what is your name?", "who are you?" — so the
+ * PUBLIC `business.name` disclosure family is armed ONLY on those turns.
+ * Deliberately a tight, identity-only set: it does not match a booking, price,
+ * location, or catalog ask, so the disclosure backstop stays intact for every
+ * other question (an unbacked answer on those turns is still refused).
+ */
+const BUSINESS_IDENTITY_WORDS = [
+  "اسم", // اسم / اسمك / اسمكم / اسمها / الاسم (name)
+  "مين", // مين / مينكم — "who": «انتو مين؟»
+  "انتو", // انتو / إنتو — "you (plural)"
+  "عرفني", // «عرفني بنفسك»
+  "نفسك", // «عرفني بنفسك»
+  "name", // mixed-language "what is your name"
+];
+
+/**
+ * Price / fee / cost vocabulary (Slice 6). Egyptian colloquial + MSA + the
+ * common Arabizi/English "price". Matched against normalized tokens by exact
+ * equality OR prefix (so "سعر" catches "سعره"/"سعرها", "تكلف" catches
+ * "تكلفه"/"بتكلف"). Deliberately bounded — it gates ONLY the CONDITIONAL
+ * exposure of an already-stored price; it never invents one.
+ */
+const PRICE_OR_FEE_WORDS = [
+  "كام", // بكام / كام — "how much"
+  "بكام",
+  "بكم",
+  "سعر", // سعر / سعره / سعرها / السعر
+  "اسعار", // أسعار / الأسعار (hamza normalized to ا)
+  "الاسعار",
+  "تكلف", // تكلفة / التكلفة / بتكلف / يكلف
+  "التكلفه",
+  "تمن", // ثمن (normalized) / التمن
+  "فلوس",
+  "price",
+  "prices",
+  "pricing",
+  "cost",
+];
+
+/**
+ * Business-profile vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks that
+ * are ABOUT the business itself ("tell me about you", "how old are you",
+ * "how many branches") so the PUBLIC `business.about` fact is carried only on
+ * those turns. Deliberately excludes generic service words (`خدمة`/`خدمات`)
+ * and location words — those stay on their own existing channels.
+ */
+const BUSINESS_INFO_WORDS = [
+  "نبذه", // نبذة / النبذة (ta-marbuta normalized to ه)
+  "احكيلي", // احكيلي عن العيادة
+  "قصه", // قصة / القصة
+  "تابعه", // تابعة / تابعين
+  "فروع", // فروع / الفروع
+  "فرع", // فرع / الفرع
+  "تخصص", // تخصص / التخصص
+  "شغالين", // "من كم سنة أنتم شغالين"
+  "about", // mixed-language "about you"
+];
+
+/**
+ * Service-detail vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks for
+ * what a service INCLUDES / how it is carried out, so the PUBLIC service
+ * `description` is carried only on service-info turns. A plain service NAME
+ * mention is NOT enough (that is discovery/booking), and a price ask is NOT
+ * enough (price has its own channel) — so a booking or price turn never gains
+ * descriptive copy.
+ */
+const SERVICE_INFO_WORDS = [
+  "بتشمل", // "الخدمة دي بتشمل ايه؟"
+  "بيشمل", // بيشمل / بيشملوا
+  "تشمل",
+  "يشمل",
+  "شامل", // شامل
+  "خطوات", // خطواته / الخطوات
+  "بيمشي", // بيمشي إزاي
+  "بيتعمل", // بيعملوا فيه إيه / بيتعمل إزاي
+  "يتعمل",
+  "بيعمل", // بيعملوا فيه إيه
+  "بتعمل", // بتعملوا فيه إيه
+  "بترمم", // الحشو بيترمم إزاي
+  "بيترمم",
+  "تفاصيل", // تفاصيل / التفاصيل
+  "include", // mixed-language "what does it include"
+  "includes",
+  "details",
+  "detail",
+];
+
+/**
+ * Service-catalog listing vocabulary (PROMPT-AI-OPS-20). Matches asks for the
+ * CATALOG ITSELF ("what services do you have?") so the PUBLIC service-name
+ * disclosure family is armed only on those turns. Deliberately a tight,
+ * catalog-only set: it does NOT match a price ask (its own channel), a
+ * service-detail ask (`SERVICE_INFO_WORDS`), or a booking ask — and it does
+ * not match location/hours/about questions, which is what keeps a
+ * self-authored reply on those topics unbacked and refused.
+ */
+const SERVICE_CATALOG_WORDS = [
+  "خدمه", // خدمة / الخدمة (ta-marbuta normalized to ه)
+  "الخدمه",
+  "خدمات", // خدمات / الخدمات
+  "الخدمات",
+  "خدماتكم", // "ايه الخدمات اللي عندكم"
+  "خدماتنا",
+  "service", // mixed-language
+  "services",
+];
+
+/**
+ * Deterministic relevance derivation from the customer message (Arabic
+ * normalized + light morphology, same pipeline the classifier uses for
+ * text). Pure: same input ⇒ same output, no I/O, no LLM.
+ *
+ * The price gate additionally runs the token through the existing Slice-1 F1
+ * `stripAffixes` seam so a price word carrying the Egyptian conjunction «و»
+ * clitic is recognized («وبكام» → «كام»). Scoped to the price family only —
+ * the other relevance families keep their exact previous matching, so the
+ * remediation does not widen task-gated exposure beyond the concrete
+ * EVAL-15R price-relevance edge case.
+ */
+export function deriveTaskRelevance(message: string): TaskRelevance {
+  const normalized = normalizeArabicText(message);
+  const tokens = normalized.split(" ").filter(Boolean);
+  const priceTokens = tokens.map(stripAffixes);
+  const matches = (
+    words: ReadonlyArray<string>,
+    candidates: ReadonlyArray<string> = tokens,
+  ): boolean =>
+    candidates.some((token) =>
+      words.some((word) => token === word || token.startsWith(word)),
+    );
+  return {
+    bookingOrAvailability: matches(BOOKING_OR_AVAILABILITY_WORDS),
+    cancellationOrReschedule: matches(CANCELLATION_OR_RESCHEDULE_WORDS),
+    providerChoice: matches(PROVIDER_CHOICE_WORDS),
+    contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
+    businessIdentity: matches(BUSINESS_IDENTITY_WORDS),
+    priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
+    businessInfo: matches(BUSINESS_INFO_WORDS),
+    serviceInfo: matches(SERVICE_INFO_WORDS),
+    serviceCatalog: matches(SERVICE_CATALOG_WORDS),
+  };
+}
+
 // ─── Reply / summary templates (assistant voice, vertical-agnostic) ─────────
 
 const REPLIES = {
@@ -650,6 +913,98 @@ function greetingResponse(message: string): AiResponse {
     handoffReason: null,
     summary: null,
   };
+}
+
+// ─── Business identity (PROMPT-AI-UX-04B) ───────────────────────────────────
+
+/**
+ * The deterministic BUSINESS-IDENTITY reply — the smallest correct fix for the
+ * proven LLM-hedging failure on a direct identity question
+ * (PROMPT-AI-UX-04A forensics): the LLM was writing hedge/handoff wording
+ * («الاسم المسجل عندي هو…» / «بحسب البيانات الموجودة») for a turn the
+ * repository ALREADY answers authoritatively, and no downstream layer rewrites
+ * provider text. So the turn is answered deterministically, exactly like a
+ * pure greeting, BEFORE any provider is consulted.
+ *
+ * The reply is a FIXED, confident, Egyptian-natural acknowledgement built from
+ * the ONE authoritative fact the turn is about: `request.businessName`
+ * (Business.name, proven + carried by the context builder). It names NOTHING
+ * the business did not store — no owner, specialty, license, accreditation or
+ * legal/official-status claim — and it invites the customer to continue. It
+ * crosses the disclosure boundary as a self-authored `reply` on the existing
+ * `business.identity` channel (intent FAQ → the gate's identity candidate
+ * family), so the gate's backstop stays fully in force: an identity reply is
+ * emitted ONLY when the name is actually carried, and a non-identity turn can
+ * never lean on it.
+ *
+ * Determinism is the point: the wording never varies with the provider, the
+ * model, the catalog or the knowledge store, so the customer always meets the
+ * same confident voice — zero provider calls, one send, AI_ACTIVE.
+ */
+const IDENTITY_INVITE = "تحب نساعدك إزاي؟";
+
+/** The complete deterministic identity copy for one authoritative name. */
+function buildBusinessIdentityContent(businessName: string): string {
+  return `أيوه، ${businessName} معاك. ${IDENTITY_INVITE}`;
+}
+
+/**
+ * The deterministic identity reply. `intent: "FAQ"` is the established
+ * contract label for an identity answer (the same intent the provider prompt
+ * uses), so the disclosure gate backs it from the `business.identity` family
+ * and the resolver classifies it as a plain ANSWER.
+ */
+function businessIdentityResponse(businessName: string): AiResponse {
+  return {
+    action: "reply",
+    intent: "FAQ",
+    content: buildBusinessIdentityContent(businessName),
+    extraction: emptyAiExtraction,
+    handoffReason: null,
+    summary: null,
+  };
+}
+
+/**
+ * Is this turn a PURE business-identity question — an ask (or a confirmation
+ * ask) about the business's OWN identity, with no other task in play?
+ *
+ * Reuses the ONE relevance derivation (`deriveTaskRelevance`) the context
+ * builder runs on the same text, so the deterministic decision set and the
+ * disclosure ledger's `business.identity` arming can never disagree: this
+ * fires ONLY when the turn arms `businessIdentity` (which is what gates the
+ * name disclosure family), and it yields to EVERY other task family. No new
+ * classifier, no new vocabulary, no second inference — a pure projection of
+ * the existing tables.
+ *
+ * MULTI-INTENT RULE (binding): a mixed turn stays on the generative path. A
+ * message that also arms booking/availability, cancellation/reschedule,
+ * provider-choice, contact/location, price, business-profile, service-detail
+ * or service-catalog vocabulary is NOT a pure identity turn — the existing
+ * multi-intent path keeps it so the assistant can confirm the identity AND
+ * continue the other task (answer-and-continue). This branch therefore never
+ * swallows a real task.
+ *
+ * Note on `providerChoice`: its vocabulary («دكتور»/«دكتورة»/«أي») is part of
+ * many businesses' NAMES («هو انتو عيادة الدكتورة أفنان؟»). The relevance
+ * derivation only matches the BARE title (the definite-article form does not
+ * arm it), and a turn that arms provider-choice still yields here — it stays
+ * on the generative path rather than risk answering a provider-choice turn as
+ * a pure identity confirmation.
+ */
+function isPureBusinessIdentityQuestion(message: string): boolean {
+  const relevance = deriveTaskRelevance(message);
+  if (!relevance.businessIdentity) return false;
+  return !(
+    relevance.bookingOrAvailability ||
+    relevance.cancellationOrReschedule ||
+    relevance.providerChoice ||
+    relevance.contactOrIdentity ||
+    relevance.priceOrFee ||
+    relevance.businessInfo ||
+    relevance.serviceInfo ||
+    relevance.serviceCatalog
+  );
 }
 
 /** Distinctive-token overlap score between a message and an FAQ question. */
@@ -895,13 +1250,17 @@ export function classifyCustomerMessage(
  * COMPLETE structured response when the turn is safely decidable
  * without any AI provider call, else null. The engine consults this
  * BEFORE calling the assistant, so deterministic turns never spend an
- * LLM call. Covers two provider-independent cases:
+ * LLM call. Covers three provider-independent cases:
+ *  - a message too short to understand (→ ambiguous handoff),
  *  - a pure Arabic social opening (→ GREETING reply, DECISIONS #61),
- *  - a message too short to understand (→ ambiguous handoff).
+ *  - a pure business-identity question with an authoritative stored name
+ *    (→ confident FAQ reply from `businessName`, PROMPT-AI-UX-04B).
  *
- * Both are classified from the request's own text through the shared
- * `classifyCustomerMessage` classifier, so the deterministic path and
- * the provider path can never diverge on the same message.
+ * All are classified from the request's own text through the shared
+ * classifier / relevance tables, so the deterministic path and the
+ * provider path can never diverge on the same message. A turn that is not
+ * safely decidable here returns null and the single existing generative
+ * call owns it.
  */
 export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
   const normalized = normalizeArabicText(request.message);
@@ -918,6 +1277,23 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
   const tokens = tokenize(request.message);
   if (isPureGreeting(request.message, normalized, tokens)) {
     return greetingResponse(request.message);
+  }
+  // PURE BUSINESS-IDENTITY QUESTION (PROMPT-AI-UX-04B): a direct ask about the
+  // business's own identity is answered here with a FIXED, confident reply
+  // built from the authoritative `businessName` — before any provider is
+  // consulted, so the turn spends ZERO provider calls and never risks the
+  // hedge/disclaimer wording a model authors on this exact turn. The turn must
+  // arm `businessIdentity` and yield to every other task family
+  // (`isPureBusinessIdentityQuestion`), so a mixed turn (identity + booking,
+  // price, catalog, …) stays on the generative multi-intent path. When the
+  // business stored no name there is nothing authoritative to confirm from, so
+  // this yields too — the existing safe path (NO_KNOWLEDGE handoff) owns the
+  // turn and no name is ever invented.
+  if (isPureBusinessIdentityQuestion(request.message)) {
+    const businessName = request.businessName.trim();
+    if (businessName.length > 0) {
+      return businessIdentityResponse(businessName);
+    }
   }
   return null;
 }

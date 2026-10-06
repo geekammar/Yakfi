@@ -307,13 +307,24 @@ async function main(): Promise<void> {
         bypassDeterministicAi(requestFor("السلام عليكم")),
       ),
   );
-  // A greeting mixed with a real question does NOT enter the pure-greeting
-  // path (the question mark disqualifies it) — the normal path owns the turn.
+  // A greeting mixed with a REAL identity question is NOT swallowed by the
+  // pure-greeting path (a generic, knowledge-free acknowledgment would drop the
+  // customer's actual question). PROMPT-AI-UX-04B: the deterministic identity
+  // decision set answers it substantively instead — the turn resolves to the
+  // confident identity reply (intent FAQ, action reply), never to GREETING, so
+  // the real question is answered with ZERO provider calls rather than being
+  // deferred to a handoff or a generative call.
   const greetingPlusQuestion = "السلام عليكم، هو انتو عيادة الدكتورة أفنان؟";
+  const greetingPlusQuestionBypass = bypassDeterministicAi(
+    requestFor(greetingPlusQuestion),
+  );
   check(
-    "UX03B-4. ترحيب + سؤال حقيقي → ليس مسار الترحيب النقي (لا ابتلاع)",
+    "UX03B-4. ترحيب + سؤال هوية → لا يُبتلع كترحيب نقي، بل يُجاب كرد هوية حتمي (لا نداء مزود)",
     classifyCustomerMessage(greetingPlusQuestion, []).intent !== "GREETING" &&
-      bypassDeterministicAi(requestFor(greetingPlusQuestion)) === null,
+      greetingPlusQuestionBypass !== null &&
+      greetingPlusQuestionBypass.intent === "FAQ" &&
+      greetingPlusQuestionBypass.action === "reply" &&
+      greetingPlusQuestionBypass.content.includes("منشأة تجريبية"),
   );
   // The acknowledgement never invents business knowledge and never claims to
   // be human — the same knowledge-free contract the generic greeting held.

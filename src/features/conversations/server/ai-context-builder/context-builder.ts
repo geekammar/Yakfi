@@ -66,8 +66,9 @@ import {
   businessAssistantStyleDirective,
 } from "@/features/conversations/server/assistant-style";
 import {
+  deriveTaskRelevance,
   normalizeArabicText,
-  stripAffixes,
+  type TaskRelevance,
 } from "@/features/conversations/server/conversation-ai";
 import {
   FACT_EXCLUSION_REASONS,
@@ -85,6 +86,17 @@ import { faqEntrySchema } from "@/lib/validation";
 import type { ConversationStatus } from "@/types/domain";
 
 import { z } from "zod";
+
+/**
+ * Re-exported so the builder's public surface stays stable: the relevance
+ * derivation is consumed by the builder (task-gated fact exposure), the
+ * knowledge-gap recorder, the conversation engine and the deterministic
+ * identity decision set — all through this ONE canonical export. The
+ * derivation itself is defined in `conversation-ai.ts`, next to the other
+ * Arabic text-classification primitives, so the relevance vocabulary has
+ * exactly ONE definition site (no second classifier, no duplicated tables).
+ */
+export { deriveTaskRelevance, type TaskRelevance };
 
 // ─── Sources (existing sources only — nothing new is invented) ──────────────
 
@@ -185,230 +197,6 @@ export type ContextSources = {
   readonly providerPreference?: string | null;
 };
 
-// ─── Task relevance (builder-derived, never AI-derived) ─────────────────────
-
-/**
- * Which task families the current turn makes relevant. The relevance flag is
- * supplied BY THE CONTEXT BUILDER from the turn's text — never by the AI
- * (DECISIONS #50). This is NOT the intent classifier (`conversation-ai.ts`):
- * it does not choose a response, it only gates CONDITIONAL context facts.
- */
-export type TaskRelevance = {
-  /** Booking / availability asks → the `availability` fact family. */
-  readonly bookingOrAvailability: boolean;
-  /** Cancellation / reschedule asks → the `cancellationPolicy` fact. */
-  readonly cancellationOrReschedule: boolean;
-  /** Provider-choice asks → the `providerPreference` fact. */
-  readonly providerChoice: boolean;
-  /** Contact / identity / location asks → the `whatsappNumber` fact. */
-  readonly contactOrIdentity: boolean;
-  /**
-   * Business-identity asks ("ما اسمكم؟" / "انتو مين؟") → the PUBLIC
-   * `business.name` disclosure family (PROMPT-AI-UX-02). The business name is
-   * ALWAYS carried in the request for phrasing, but this flag gates the
-   * aggregate disclosure family that may BACK a self-authored identity reply —
-   * the same budget-gate pattern `serviceCatalog` uses for `service.name`.
-   */
-  readonly businessIdentity: boolean;
-  /** Price / fee / cost asks → the service `price` fact (Slice 6). */
-  readonly priceOrFee: boolean;
-  /**
-   * Business-profile asks ("tell me about you") → the PUBLIC
-   * `business.about` fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so an
-   * unrelated turn never carries the business description.
-   */
-  readonly businessInfo: boolean;
-  /**
-   * Service-detail asks ("what does it include?") → the PUBLIC service
-   * `description` fact (PROMPT-AI-ARCH-15 — Slice 6). Gated so a booking or
-   * price-only turn never carries descriptive catalog copy.
-   */
-  readonly serviceInfo: boolean;
-  /**
-   * Service-catalog listing asks ("what services do you have?") → the PUBLIC
-   * service-catalog `name` family (PROMPT-AI-OPS-20). Gated so ONLY a
-   * catalog-listing turn arms the name disclosure family — a location, hours,
-   * about or price turn keeps the names in the base catalog (the model may
-   * still use them for booking) but cannot back a self-authored reply on
-   * them, so the disclosure backstop stays intact for non-catalog questions.
-   */
-  readonly serviceCatalog: boolean;
-};
-
-const BOOKING_OR_AVAILABILITY_WORDS = [
-  "حجز",
-  "احجز",
-  "موعد",
-  "معاد",
-  "ميعاد",
-  "متاح",
-  "متاحين",
-  "فاضي",
-  "فاضيه",
-  "فاضية",
-  "أوقات",
-  "اوقات",
-  "متى",
-  "إمتى",
-  "امتى",
-];
-
-const CANCELLATION_OR_RESCHEDULE_WORDS = [
-  "إلغاء",
-  "الغاء",
-  "ألغي",
-  "الغي",
-  "كنسل",
-  "تغيير",
-  "تأجيل",
-  "تاجيل",
-  "تعديل",
-  "تبديل",
-  "تحويل",
-  "إعادة",
-  "اعادة",
-];
-
-const PROVIDER_CHOICE_WORDS = [
-  "دكتور",
-  "دكتورة",
-  "دكتوره",
-  "طبيب",
-  "طبيبة",
-  "طبيبه",
-  "أخصائي",
-  "اخصائي",
-  "أخصائيه",
-  "مزود",
-  "أي",
-  "اي",
-];
-
-const CONTACT_OR_IDENTITY_WORDS = [
-  "رقم",
-  "هاتف",
-  "واتس",
-  "واتساب",
-  "تواصل",
-  "كلمني",
-  "كلموني",
-  "العنوان",
-  "عنوان",
-  "مكان",
-  "أين",
-  "اين",
-  "وين",
-];
-
-/**
- * Business-identity vocabulary (PROMPT-AI-UX-02). Matches asks about the
- * business's OWN identity — "what is your name?", "who are you?" — so the
- * PUBLIC `business.name` disclosure family is armed ONLY on those turns.
- * Deliberately a tight, identity-only set: it does not match a booking, price,
- * location, or catalog ask, so the disclosure backstop stays intact for every
- * other question (an unbacked answer on those turns is still refused).
- */
-const BUSINESS_IDENTITY_WORDS = [
-  "اسم", // اسم / اسمك / اسمكم / اسمها / الاسم (name)
-  "مين", // مين / مينكم — "who": «انتو مين؟»
-  "انتو", // انتو / إنتو — "you (plural)"
-  "عرفني", // «عرفني بنفسك»
-  "نفسك", // «عرفني بنفسك»
-  "name", // mixed-language "what is your name"
-];
-
-/**
- * Price / fee / cost vocabulary (Slice 6). Egyptian colloquial + MSA + the
- * common Arabizi/English "price". Matched against normalized tokens by exact
- * equality OR prefix (so "سعر" catches "سعره"/"سعرها", "تكلف" catches
- * "تكلفه"/"بتكلف"). Deliberately bounded — it gates ONLY the CONDITIONAL
- * exposure of an already-stored price; it never invents one.
- */
-const PRICE_OR_FEE_WORDS = [
-  "كام", // بكام / كام — "how much"
-  "بكام",
-  "بكم",
-  "سعر", // سعر / سعره / سعرها / السعر
-  "اسعار", // أسعار / الأسعار (hamza normalized to ا)
-  "الاسعار",
-  "تكلف", // تكلفة / التكلفة / بتكلف / يكلف
-  "التكلفه",
-  "تمن", // ثمن (normalized) / التمن
-  "فلوس",
-  "price",
-  "prices",
-  "pricing",
-  "cost",
-];
-
-/**
- * Business-profile vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks that
- * are ABOUT the business itself ("tell me about you", "how old are you",
- * "how many branches") so the PUBLIC `business.about` fact is carried only on
- * those turns. Deliberately excludes generic service words (`خدمة`/`خدمات`)
- * and location words — those stay on their own existing channels.
- */
-const BUSINESS_INFO_WORDS = [
-  "نبذه", // نبذة / النبذة (ta-marbuta normalized to ه)
-  "احكيلي", // احكيلي عن العيادة
-  "قصه", // قصة / القصة
-  "تابعه", // تابعة / تابعين
-  "فروع", // فروع / الفروع
-  "فرع", // فرع / الفرع
-  "تخصص", // تخصص / التخصص
-  "شغالين", // "من كم سنة أنتم شغالين"
-  "about", // mixed-language "about you"
-];
-
-/**
- * Service-detail vocabulary (PROMPT-AI-ARCH-15 — Slice 6). Matches asks for
- * what a service INCLUDES / how it is carried out, so the PUBLIC service
- * `description` is carried only on service-info turns. A plain service NAME
- * mention is NOT enough (that is discovery/booking), and a price ask is NOT
- * enough (price has its own channel) — so a booking or price turn never gains
- * descriptive copy.
- */
-const SERVICE_INFO_WORDS = [
-  "بتشمل", // "الخدمة دي بتشمل ايه؟"
-  "بيشمل", // بيشمل / بيشملوا
-  "تشمل",
-  "يشمل",
-  "شامل", // شامل
-  "خطوات", // خطواته / الخطوات
-  "بيمشي", // بيمشي إزاي
-  "بيتعمل", // بيعملوا فيه إيه / بيتعمل إزاي
-  "يتعمل",
-  "بيعمل", // بيعملوا فيه إيه
-  "بتعمل", // بتعملوا فيه إيه
-  "بترمم", // الحشو بيترمم إزاي
-  "بيترمم",
-  "تفاصيل", // تفاصيل / التفاصيل
-  "include", // mixed-language "what does it include"
-  "includes",
-  "details",
-  "detail",
-];
-
-/**
- * Service-catalog listing vocabulary (PROMPT-AI-OPS-20). Matches asks for the
- * CATALOG ITSELF ("what services do you have?") so the PUBLIC service-name
- * disclosure family is armed only on those turns. Deliberately a tight,
- * catalog-only set: it does NOT match a price ask (its own channel), a
- * service-detail ask (`SERVICE_INFO_WORDS`), or a booking ask — and it does
- * not match location/hours/about questions, which is what keeps a
- * self-authored reply on those topics unbacked and refused.
- */
-const SERVICE_CATALOG_WORDS = [
-  "خدمه", // خدمة / الخدمة (ta-marbuta normalized to ه)
-  "الخدمه",
-  "خدمات", // خدمات / الخدمات
-  "الخدمات",
-  "خدماتكم", // "ايه الخدمات اللي عندكم"
-  "خدماتنا",
-  "service", // mixed-language
-  "services",
-];
-
 /**
  * Upper bound on how many service descriptions a single turn may carry. The
  * catalog names are already bounded by the contract; descriptions are more
@@ -416,42 +204,6 @@ const SERVICE_CATALOG_WORDS = [
  * BOUNDED catalog summary, never an unbounded dump.
  */
 export const AI_SERVICE_DESCRIPTION_LIMIT = 5;
-
-/**
- * Deterministic relevance derivation from the customer message (Arabic
- * normalized + light morphology, same pipeline the classifier uses for
- * text). Pure: same input ⇒ same output, no I/O, no LLM.
- *
- * The price gate additionally runs the token through the existing Slice-1 F1
- * `stripAffixes` seam so a price word carrying the Egyptian conjunction «و»
- * clitic is recognized («وبكام» → «كام»). Scoped to the price family only —
- * the other relevance families keep their exact previous matching, so the
- * remediation does not widen task-gated exposure beyond the concrete
- * EVAL-15R price-relevance edge case.
- */
-export function deriveTaskRelevance(message: string): TaskRelevance {
-  const normalized = normalizeArabicText(message);
-  const tokens = normalized.split(" ").filter(Boolean);
-  const priceTokens = tokens.map(stripAffixes);
-  const matches = (
-    words: ReadonlyArray<string>,
-    candidates: ReadonlyArray<string> = tokens,
-  ): boolean =>
-    candidates.some((token) =>
-      words.some((word) => token === word || token.startsWith(word)),
-    );
-  return {
-    bookingOrAvailability: matches(BOOKING_OR_AVAILABILITY_WORDS),
-    cancellationOrReschedule: matches(CANCELLATION_OR_RESCHEDULE_WORDS),
-    providerChoice: matches(PROVIDER_CHOICE_WORDS),
-    contactOrIdentity: matches(CONTACT_OR_IDENTITY_WORDS),
-    businessIdentity: matches(BUSINESS_IDENTITY_WORDS),
-    priceOrFee: matches(PRICE_OR_FEE_WORDS, priceTokens),
-    businessInfo: matches(BUSINESS_INFO_WORDS),
-    serviceInfo: matches(SERVICE_INFO_WORDS),
-    serviceCatalog: matches(SERVICE_CATALOG_WORDS),
-  };
-}
 
 // ─── Output contract ─────────────────────────────────────────────────────────
 

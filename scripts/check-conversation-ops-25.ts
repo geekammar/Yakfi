@@ -347,10 +347,21 @@ async function main(): Promise<void> {
       eq(turnOf(r1).assistantAction, "AI_REPLY") &&
       eq(turnOf(r1).conversationStatus, "AI_ACTIVE"),
   );
+  // PROMPT-AI-UX-04B: a PURE provider-identity question is now answered by the
+  // deterministic identity seam from the authoritative business name — BEFORE
+  // any provider is consulted. So the customer's question is still answered
+  // (never discarded, never handed off), the reply is the confident
+  // Egyptian-natural name confirmation, and the turn spends ZERO provider
+  // calls. The scripted provider's FAQ reply is no longer the expected copy
+  // for THIS turn; R3b proves the provider reply still ships on an ordinary
+  // turn that genuinely consults it.
   check(
-    "R1b. رد المساعد صدر (لم يُتجاهل)، ولم تُرسل رسالة التحويل",
-    sent.some((content) => content.includes("إجابة المساعد")) &&
-      !sent.some((content) => content.includes("جارٍ تحويلك")),
+    "R1b. رد الهوية صدر حتمياً بالاسم المعتمد (صفر نداءات مزود) ولا رسالة تحويل",
+    sent.some(
+      (content) => content.includes("مركز أفنان") && content.includes("معاك"),
+    ) &&
+      !sent.some((content) => content.includes("جارٍ تحويلك")) &&
+      eq(aiCalls, 0),
   );
   check(
     "R1c. الإشارة الحتمية: ذكر المسمى الوظيفي وحده ليس طلباً بشرياً",
@@ -369,6 +380,16 @@ async function main(): Promise<void> {
       eq(turnOf(r2).assistantAction, "AI_REPLY") &&
       eq(turnOf(r2).conversationStatus, "AI_ACTIVE"),
   );
+  // The repeated identity turn is answered by the SAME deterministic reply and
+  // STILL spends no provider call — the seam is stable after Resume AI, so the
+  // reported repetition cannot recur from either direction (false handoff or
+  // repeated generative hedging).
+  check(
+    "R2b. نفس سؤال الهوية بعد Resume AI → رد حتمي مطابق + صفر نداءات (لا تكرار)",
+    sent[sent.length - 1]!.includes("مركز أفنان") &&
+      sent[sent.length - 1]!.includes("معاك") &&
+      eq(aiCalls, 0),
+  );
 
   // ── R3. a second ordinary question after Resume AI (no slow fallback) ────
   nextReply = faqReply();
@@ -378,6 +399,15 @@ async function main(): Promise<void> {
     r3.ok &&
       eq(turnOf(r3).assistantAction, "AI_REPLY") &&
       eq(turnOf(r3).conversationStatus, "AI_ACTIVE"),
+  );
+  // This is the turn that genuinely consults the provider, so the provider's
+  // own reply must still ship (never discarded) — the coverage R1b held
+  // before the deterministic identity seam, on the turn it belongs to.
+  check(
+    "R3b. رد المزود صدر (لم يُتجاهل) ولم تُرسل رسالة التحويل — نداء واحد",
+    sent.some((content) => content.includes("إجابة المساعد")) &&
+      !sent.some((content) => content.includes("جارٍ تحويلك")) &&
+      eq(aiCalls, 1),
   );
 
   // ── R4. a genuine explicit human request STILL hands off (model-driven) ──
@@ -429,6 +459,9 @@ async function main(): Promise<void> {
   // The provider failure is modelled through the REAL provider-agnostic
   // Conversation Control layer (a failing adapter), exactly as production
   // surfaces it, so the cause taxonomy is exercised end-to-end.
+  // The vehicle is an ORDINARY question, NOT an identity question: a pure
+  // identity turn is now answered by the deterministic seam and never reaches
+  // a provider (PROMPT-AI-UX-04B), so it could not exercise the failure path.
   await resumeAi();
   const { createConversationControl } =
     await import("../src/server/integrations/ai/conversation-control");
@@ -471,7 +504,7 @@ async function main(): Promise<void> {
     {
       to: "+201000000000",
       from: "+201234567890",
-      text: IDENTITY_QUESTION,
+      text: LOCATION_QUESTION,
       receivedAt: now().toISOString(),
       externalId: "ops25-r8",
     },
