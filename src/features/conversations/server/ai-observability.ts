@@ -159,6 +159,16 @@ export type TurnObservability = {
   readonly providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED";
   /** Whether `parseAiResponse` accepted the provider output. */
   readonly parseSuccess?: boolean;
+  /**
+   * Input tokens the provider reported for this turn's successful (else last)
+   * physical attempt (PROMPT-AI-PERF-02). Copied AS-IS from the existing
+   * attempt-level adapter telemetry — never recomputed, never estimated. Absent
+   * when the adapter exposes no token telemetry or no provider was consulted;
+   * never a fabricated zero.
+   */
+  readonly inputTokens?: number;
+  /** See {@link TurnObservability.inputTokens} — the output-token counterpart. */
+  readonly outputTokens?: number;
 };
 
 export type BuildTurnObservabilityInput = {
@@ -215,6 +225,14 @@ export type BuildTurnObservabilityInput = {
   providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED" | null;
   /** Whether `parseAiResponse` accepted the provider output. */
   parseSuccess?: boolean | null;
+  /**
+   * Input tokens from the turn's successful (else last) attempt's existing
+   * adapter telemetry (PROMPT-AI-PERF-02). Null/absent ⇒ no token telemetry
+   * was available; never fabricated.
+   */
+  inputTokens?: number | null;
+  /** See {@link BuildTurnObservabilityInput.inputTokens} — output counterpart. */
+  outputTokens?: number | null;
 };
 
 /**
@@ -284,6 +302,17 @@ export function buildTurnObservability(
     ...(input.providerStatus ? { providerStatus: input.providerStatus } : {}),
     ...(input.parseSuccess !== undefined && input.parseSuccess !== null
       ? { parseSuccess: input.parseSuccess }
+      : {}),
+    // PROMPT-AI-PERF-02 — the ONE token projection. Copied AS-IS from the
+    // attempt-level adapter telemetry the engine already selected (the same
+    // success-then-last selection the AI_TURN usage record uses); never
+    // recomputed from characters and never estimated. Null ⇒ omitted, so a
+    // telemetry-less adapter or a no-call turn carries no fabricated zero.
+    ...(input.inputTokens !== undefined && input.inputTokens !== null
+      ? { inputTokens: input.inputTokens }
+      : {}),
+    ...(input.outputTokens !== undefined && input.outputTokens !== null
+      ? { outputTokens: input.outputTokens }
       : {}),
   };
 }

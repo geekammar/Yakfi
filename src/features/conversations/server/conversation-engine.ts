@@ -150,7 +150,10 @@ import type {
 } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
-import type { AiTelemetry } from "@/server/integrations/ai/types";
+import type {
+  AiTelemetry,
+  AiTelemetryAttempt,
+} from "@/server/integrations/ai/types";
 import type {
   AppointmentRepository,
   BranchRepository,
@@ -1773,16 +1776,19 @@ async function runInboundTurn(
     // WHICH routing produced the turn. It changes no branch.
     const deterministicBypass = turn !== null;
     let turnTelemetry: AiTelemetry | null = null;
+    // PROMPT-AI-PERF-02 — the ONE attempt selection for the whole turn: the
+    // SUCCESSFUL attempt wins, else the last attempt. It sources BOTH the
+    // AI_TURN usage record's token counters AND the turn-evidence token
+    // projection below, so the turn reads one counter, never two. Both stay
+    // absent for a no-call / deterministic-bypass / JEV-deterministic turn.
+    let successAttempt: AiTelemetryAttempt | undefined;
+    let lastAttempt: AiTelemetryAttempt | undefined;
     if (!turn) {
       try {
         turn = await deps.ai.respond(aiRequest);
       } catch {
         turn = null;
       }
-      // Rich AI_TURN telemetry when the adapter exposes it (LLM path);
-      // deterministic / non-telemetry adapters keep the lightweight record.
-      // The orchestrator's deterministic-bypass telemetry is still a bypass
-      // - no AI_TURN fact is recorded (no provider call was spent).
       turnTelemetry = readAiTelemetry(deps.ai);
       const telemetry = turnTelemetry;
       // A JEV deterministic termination (Slice 8) spends no provider call,
@@ -1792,12 +1798,12 @@ async function runInboundTurn(
         telemetry?.finalProvider === "deterministic-bypass" ||
         telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER;
       if (!isBypassTelemetry) {
-        const lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
-        const successAttempt = telemetry
+        lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
+        successAttempt = telemetry
           ? [...telemetry.attempts]
               .reverse()
               .find((a) => a.status === "SUCCESS")
-          : null;
+          : undefined;
         await recordUsage(deps, {
           businessId: business.id,
           kind: "AI_TURN",
@@ -1902,6 +1908,14 @@ async function runInboundTurn(
       contextChannels,
       providerAttempts,
       providerStatus,
+      // PROMPT-AI-PERF-02 — the provider's OWN token counters for this turn,
+      // passed through the single attempt selection above. Null when the
+      // adapter exposes no token telemetry or no provider was consulted; the
+      // evidence record then omits a counter rather than fabricating a zero.
+      inputTokens:
+        successAttempt?.inputTokens ?? lastAttempt?.inputTokens ?? null,
+      outputTokens:
+        successAttempt?.outputTokens ?? lastAttempt?.outputTokens ?? null,
       // Null for a bypass (no provider output existed to parse); true/false
       // only when a provider was actually consulted this turn.
       parseSuccess: deterministicBypass

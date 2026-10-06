@@ -44,6 +44,7 @@ import {
   assertTurnEvidenceContentFree,
   buildTurnEvidence,
 } from "../src/features/conversations/server/turn-evidence";
+import type { AiTelemetry } from "../src/server/integrations/ai/types";
 import type { OpenAttention } from "../src/server/repositories/operator-attention.repository";
 import type {
   Branch,
@@ -142,6 +143,13 @@ async function main(): Promise<void> {
     aiResponse?: unknown;
     aiFails?: boolean;
     sink?: "capture" | "throw" | "disabled";
+    /**
+     * OPTIONAL adapter telemetry the fake provider exposes through
+     * `getLastTelemetry()` (exactly what the engine's `readAiTelemetry` reads).
+     * Absent ⇒ the adapter exposes no telemetry, like the existing fakes.
+     * (PROMPT-AI-PERF-02 — token-observability coverage.)
+     */
+    aiTelemetry?: AiTelemetry | null;
   }) {
     const business = businessRow({
       address: opts.address ?? null,
@@ -352,7 +360,13 @@ async function main(): Promise<void> {
           if (opts.aiFails) throw new Error("provider down");
           return opts.aiResponse as unknown as AiResponse;
         },
-      },
+        // Simulates a real adapter exposing attempt-level telemetry through the
+        // same seam the engine reads (`readAiTelemetry`). When absent the
+        // adapter is telemetry-less, exactly like the pre-existing fakes.
+        ...(opts.aiTelemetry
+          ? { getLastTelemetry: () => opts.aiTelemetry }
+          : {}),
+      } as unknown as ConversationEngineDeps["ai"],
       transport: {
         providerName: "fake-transport",
         send: async () => {
@@ -810,6 +824,333 @@ async function main(): Promise<void> {
       liveCatResult.assistantAction === "AI_REPLY" &&
       liveCatResult.conversationStatus === "AI_ACTIVE" &&
       liveCat.emitted()[0]?.disclosureAllowed === true,
+  );
+
+  // ── 13. TOKEN OBSERVABILITY (PROMPT-AI-PERF-02) ──────────────────────────
+  // The engine already holds attempt-level inputTokens/outputTokens on its AI
+  // telemetry; the evidence projection must now carry them for the SAME turn
+  // as intent / taskRelevance / contextChannels / providerAttempts, without a
+  // parallel telemetry system, without recomputing from characters, and without
+  // copying any prompt body.
+
+  /**
+   * The SEMANTIC evidence fields (decision / context / provider / disclosure /
+   * outcome). Excludes per-run correlation identity and the emission clock
+   * (traceId / conversationId / customerMessageId / emittedAt, which differ by
+   * construction between two runs) and the telemetry-derived `model` (already
+   * richer when an adapter reports telemetry — pre-existing behaviour). This is
+   * the projection PERF-02 must leave untouched.
+   */
+  const semanticEvidence = (
+    record: TurnEvidence | undefined,
+  ): Record<string, unknown> | undefined =>
+    record === undefined
+      ? undefined
+      : {
+          schema: record.schema,
+          environment: record.environment,
+          appVersion: record.appVersion,
+          businessId: record.businessId,
+          intent: record.intent,
+          assistantAction: record.assistantAction,
+          conversationStatus: record.conversationStatus,
+          handoffCause: record.handoffCause,
+          routingDecision: record.routingDecision,
+          taskRelevance: record.taskRelevance,
+          contextChannels: record.contextChannels,
+          knowledgeSourceClass: record.knowledgeSourceClass,
+          provider: record.provider,
+          providerAttempts: record.providerAttempts,
+          providerStatus: record.providerStatus,
+          providerLatencyMs: record.providerLatencyMs,
+          parseSuccess: record.parseSuccess,
+          disclosureChannel: record.disclosureChannel,
+          disclosureAllowed: record.disclosureAllowed,
+          disclosureRefusalReason: record.disclosureRefusalReason,
+          knowledgeGapCategory: record.knowledgeGapCategory,
+          finalOutcome: record.finalOutcome,
+          outboundSendAttempted: record.outboundSendAttempted,
+          outboundSendDelivered: record.outboundSendDelivered,
+        };
+
+  const TOKEN_IN = 1284;
+  const TOKEN_OUT = 312;
+  const TELEMETRY_WITH_TOKENS: AiTelemetry = {
+    attempts: [
+      {
+        provider: "fake-ai",
+        model: "fake-1",
+        latencyMs: 412,
+        inputTokens: TOKEN_IN,
+        outputTokens: TOKEN_OUT,
+        status: "SUCCESS",
+      },
+    ],
+    fallbackUsed: false,
+    finalProvider: "fake-ai",
+    finalModel: "fake-1",
+    finalStatus: "SUCCESS",
+  };
+
+  // 13A. REAL GENERATIVE PATH — tokens present, everything else unchanged.
+  // The SAME harness run twice, differing ONLY in whether the adapter exposes
+  // telemetry; every pre-existing field must stay byte-identical.
+  const tokenHarness = buildHarness({
+    address: PILOT_ADDRESS,
+    about: PILOT_ABOUT,
+    services: PILOT_SERVICES,
+    aiResponse: aiReply(
+      "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+    ),
+    aiTelemetry: TELEMETRY_WITH_TOKENS,
+  });
+  const tokenResult = await run(tokenHarness, {
+    text: "ما الخدمات المتاحة؟",
+    externalId: "token-cat-1",
+  });
+  const tokenEvidence = tokenHarness.emitted()[0];
+  const plainHarness = buildHarness({
+    address: PILOT_ADDRESS,
+    about: PILOT_ABOUT,
+    services: PILOT_SERVICES,
+    aiResponse: aiReply(
+      "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+    ),
+  });
+  const plainResult = await run(plainHarness, {
+    text: "ما الخدمات المتاحة؟",
+    externalId: "plain-cat-1",
+  });
+  const plainEvidence = plainHarness.emitted()[0];
+  check(
+    "13A-1. مسار توليدي حقيقي: inputTokens حاضرًا عند توفّر telemetry المزود",
+    tokenEvidence?.inputTokens === TOKEN_IN,
+  );
+  check(
+    "13A-2. مسار توليدي حقيقي: outputTokens حاضرًا عند توفّر telemetry المزود",
+    tokenEvidence?.outputTokens === TOKEN_OUT,
+  );
+  check(
+    "13A-3. القيمة منسوخة كما هي من telemetry المحاولة (لا إعادة حساب/تقدير)",
+    tokenEvidence?.inputTokens ===
+      TELEMETRY_WITH_TOKENS.attempts[0]?.inputTokens &&
+      tokenEvidence?.outputTokens ===
+        TELEMETRY_WITH_TOKENS.attempts[0]?.outputTokens,
+  );
+  check(
+    "13A-4. intent / taskRelevance / contextChannels / providerAttempts لم تتغير",
+    tokenEvidence !== undefined &&
+      plainEvidence !== undefined &&
+      tokenEvidence.intent === plainEvidence.intent &&
+      JSON.stringify(tokenEvidence.taskRelevance) ===
+        JSON.stringify(plainEvidence.taskRelevance) &&
+      JSON.stringify(tokenEvidence.contextChannels) ===
+        JSON.stringify(plainEvidence.contextChannels) &&
+      tokenEvidence.providerAttempts === plainEvidence.providerAttempts &&
+      tokenEvidence.providerStatus === plainEvidence.providerStatus &&
+      tokenEvidence.providerLatencyMs === plainEvidence.providerLatencyMs &&
+      tokenEvidence.disclosureChannel === plainEvidence.disclosureChannel &&
+      tokenEvidence.disclosureAllowed === plainEvidence.disclosureAllowed &&
+      tokenEvidence.assistantAction === plainEvidence.assistantAction,
+  );
+  check(
+    "13A-5. كل الحقول الدلالية السابقة متطابقة (دلالات التقرير القديم دون تغيير)",
+    tokenEvidence !== undefined &&
+      plainEvidence !== undefined &&
+      JSON.stringify(semanticEvidence(tokenEvidence)) ===
+        JSON.stringify(semanticEvidence(plainEvidence)),
+  );
+  // `model` is telemetry-derived and PRE-EXISTING: present when the adapter
+  // reports it, null otherwise. Asserted positively so the PERF-02 addition
+  // cannot have altered either branch.
+  check(
+    "13A-5b. model كقبلي: حاضر مع telemetry المزود، null بدونه",
+    tokenEvidence?.model === TELEMETRY_WITH_TOKENS.finalModel &&
+      plainEvidence?.model === null,
+  );
+  // The turn itself is unaffected: one call, one send, an answer, AI_ACTIVE.
+  check(
+    "13A-6. الدورة نفسها سلوكيًا: مزود واحد + إرسال واحد + رد مُفصَح عنه",
+    isSuccess(tokenResult) &&
+      isSuccess(plainResult) &&
+      tokenHarness.aiCalls() === 1 &&
+      tokenHarness.sends() === 1 &&
+      tokenResult.assistantAction === "AI_REPLY" &&
+      tokenResult.conversationStatus === "AI_ACTIVE" &&
+      tokenEvidence?.disclosureAllowed === true &&
+      plainResult.assistantAction === "AI_REPLY" &&
+      plainResult.conversationStatus === "AI_ACTIVE",
+  );
+
+  // 13A-7. SUCCESS-preferred selection: a fallback trace [FAILURE(no tokens),
+  // SUCCESS(tokens)] sources the counters from the SUCCESS attempt.
+  const FALLBACK_TELEMETRY: AiTelemetry = {
+    attempts: [
+      {
+        provider: "fake-primary",
+        model: "fake-1",
+        latencyMs: 90,
+        status: "FAILURE",
+        errorCode: "RETRYABLE",
+      },
+      {
+        provider: "fake-secondary",
+        model: "fake-2",
+        latencyMs: 350,
+        inputTokens: TOKEN_IN,
+        outputTokens: TOKEN_OUT,
+        status: "SUCCESS",
+      },
+    ],
+    fallbackUsed: true,
+    finalProvider: "fake-secondary",
+    finalModel: "fake-2",
+    finalStatus: "SUCCESS",
+  };
+  const fallbackHarness = buildHarness({
+    address: PILOT_ADDRESS,
+    services: PILOT_SERVICES,
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiTelemetry: FALLBACK_TELEMETRY,
+  });
+  await run(fallbackHarness, {
+    text: "أين موقعكم؟",
+    externalId: "token-fallback-1",
+  });
+  check(
+    "13A-7. محاولة النجاح هي مصدر العدّادات (fallback: 2 محاولات، عدّادات المحاولة الناجحة)",
+    fallbackHarness.emitted()[0]?.providerAttempts === 2 &&
+      fallbackHarness.emitted()[0]?.inputTokens === TOKEN_IN &&
+      fallbackHarness.emitted()[0]?.outputTokens === TOKEN_OUT,
+  );
+
+  // 13B. DETERMINISTIC ZERO-CALL PATH — no provider call, no fabricated tokens.
+  const greetTokenHarness = buildHarness({
+    services: PILOT_SERVICES,
+    aiTelemetry: TELEMETRY_WITH_TOKENS,
+  });
+  const greetToken = await run(greetTokenHarness, {
+    text: "السلام عليكم",
+    externalId: "token-greet-1",
+  });
+  const greetTokenEvidence = greetTokenHarness.emitted()[0];
+  check(
+    "13B-1. دورة حتمية بلا مزود: السلوك الحالي كما هو (رد + AI_ACTIVE + 0 استدعاءات)",
+    isSuccess(greetToken) &&
+      greetToken.assistantAction === "AI_REPLY" &&
+      greetToken.conversationStatus === "AI_ACTIVE" &&
+      greetTokenHarness.aiCalls() === 0 &&
+      greetTokenEvidence?.routingDecision === "DETERMINISTIC_BYPASS" &&
+      greetTokenEvidence?.providerStatus === "NOT_CALLED" &&
+      greetTokenEvidence?.providerAttempts === 0,
+  );
+  check(
+    "13B-2. عدّادات التوكن غائبة (null) لا أصفارًا مُلفّقة في الدورة الحتمية",
+    greetTokenEvidence?.inputTokens === null &&
+      greetTokenEvidence?.outputTokens === null,
+  );
+  // A provider FAILURE whose attempt carried no token telemetry also stays
+  // null — the record omits a counter rather than inventing a zero.
+  const failNoTokenHarness = buildHarness({
+    address: PILOT_ADDRESS,
+    services: PILOT_SERVICES,
+    aiFails: true,
+    aiTelemetry: {
+      attempts: [
+        {
+          provider: "fake-ai",
+          model: "fake-1",
+          latencyMs: 120,
+          status: "FAILURE",
+          errorCode: "PERMANENT",
+        },
+      ],
+      fallbackUsed: false,
+      finalProvider: "fake-ai",
+      finalModel: "fake-1",
+      finalStatus: "FAILURE",
+    },
+  });
+  await run(failNoTokenHarness, {
+    text: "أين موقعكم؟",
+    externalId: "token-fail-1",
+  });
+  const failNoTokenEvidence = failNoTokenHarness.emitted()[0];
+  check(
+    "13B-3. فشل مزود بلا telemetry توكن → العدّادات null (لا قيم مُلفّقة)",
+    failNoTokenEvidence?.providerStatus === "FAILURE" &&
+      failNoTokenEvidence?.inputTokens === null &&
+      failNoTokenEvidence?.outputTokens === null,
+  );
+  // A telemetry-less adapter (the pre-existing fakes) also omits the counters.
+  check(
+    "13B-4. مزود بلا telemetry إطلاقًا → العدّادات null (fail-open)",
+    plainEvidence?.inputTokens === null && plainEvidence?.outputTokens === null,
+  );
+
+  // 13C. CONTENT-FREE INVARIANT — the counters carry no prompt body.
+  const tokenSerialized = JSON.stringify([
+    tokenEvidence,
+    greetTokenEvidence,
+    failNoTokenEvidence,
+    fallbackHarness.emitted()[0],
+  ]);
+  check(
+    "13C-1. إضافات الـ telemetry لا تنسخ نص الـ prompt (لا أجسام/رؤوس رسائل)",
+    !tokenSerialized.includes("businessName:") &&
+      !tokenSerialized.includes("recentMessages:") &&
+      !tokenSerialized.includes("CURRENT message:") &&
+      !tokenSerialized.includes("services:") &&
+      !tokenSerialized.includes("faqs:"),
+  );
+  check(
+    "13C-2. لا نص رسالة العميل ولا العنوان الحقيقي في سجلات التوكن",
+    !tokenSerialized.includes("ما الخدمات المتاحة؟") &&
+      !tokenSerialized.includes("السلام عليكم") &&
+      !tokenSerialized.includes(PILOT_ADDRESS),
+  );
+  check(
+    "13C-3. سجلات التوكن لا تزال خالية من المحتوى هيكليًا",
+    (() => {
+      const records = [
+        tokenEvidence,
+        greetTokenEvidence,
+        failNoTokenEvidence,
+        fallbackHarness.emitted()[0],
+      ];
+      return records.every((record) => {
+        if (record === undefined) return false;
+        try {
+          assertTurnEvidenceContentFree(record);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    })(),
+  );
+  check(
+    "13C-4. العدّادات أرقام صحيحة فقط (لا نص/كائن/قيمة عشوائية)",
+    tokenEvidence !== undefined &&
+      typeof tokenEvidence.inputTokens === "number" &&
+      typeof tokenEvidence.outputTokens === "number" &&
+      Number.isInteger(tokenEvidence.inputTokens) &&
+      Number.isInteger(tokenEvidence.outputTokens),
+  );
+
+  // 13D. The token records still honour the one-record-per-turn + trace-id
+  // invariant, and the usage record the engine writes carries the same counts.
+  check(
+    "13D-1. سجل توكن واحد لكل دورة بمعرف تتبع ثابت",
+    tokenHarness.emitted().length === 1 &&
+      typeof tokenEvidence?.traceId === "string" &&
+      tokenEvidence.traceId.length > 0 &&
+      greetTokenHarness.emitted().length === 1,
+  );
+  check(
+    "13D-2. نفس ترتيب المخطط: التوكن ضمن الأعداد المغلقة (schema@v1 ثابت)",
+    tokenEvidence?.schema === TURN_EVIDENCE_SCHEMA &&
+      greetTokenEvidence?.schema === TURN_EVIDENCE_SCHEMA,
   );
 
   // ── Report ───────────────────────────────────────────────────────────────

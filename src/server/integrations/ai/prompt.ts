@@ -55,12 +55,23 @@ export function buildPromptMessages(
         .map((f) => `Q: ${f.question}\nA: ${f.answer}`)
         .join("\n---\n")
     : "(none)";
+  // PROMPT-AI-PERF-02 — the two CONDITIONAL blocks are rendered ONLY when a
+  // real value is present. PERF-01 proved the production context source path
+  // carries NEITHER today (the engine never supplies `sources.availability` /
+  // `sources.providerPreference`, so the request fields are always absent),
+  // while the literals were still rendered as dead `"(none / not resolved)" /
+  // `"(none)"` lines on EVERY turn. Omitting an empty line removes the dead
+  // bytes; a real value preserves the exact prior rendering.
   const availability = request.availability?.length
     ? request.availability
         .map((a) => `${a.date}: ${a.slots.join(", ")}`)
         .join(" | ")
-    : "(none / not resolved)";
-  const providerPref = request.providerPreference ?? "(none)";
+    : null;
+  const providerPref =
+    typeof request.providerPreference === "string" &&
+    request.providerPreference.trim().length > 0
+      ? request.providerPreference
+      : null;
 
   const userContent = [
     `businessName: ${request.businessName}`,
@@ -74,8 +85,10 @@ export function buildPromptMessages(
     `recentMessages:\n${recent}`,
     `services: ${services}`,
     `faqs:\n${faqs}`,
-    `providerPreference: ${providerPref}`,
-    `availability: ${availability}`,
+    // PROMPT-AI-PERF-02 — dead literals removed: each line is emitted only
+    // when its request block actually carried a value.
+    ...(providerPref !== null ? [`providerPreference: ${providerPref}`] : []),
+    ...(availability !== null ? [`availability: ${availability}`] : []),
     `CURRENT message: ${request.message}`,
   ].join("\n\n");
 

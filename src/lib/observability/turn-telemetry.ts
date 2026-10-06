@@ -134,6 +134,25 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.provider_latency_ms",
       value: { doubleValue: record.providerLatencyMs ?? 0 },
     },
+    // PROMPT-AI-PERF-02 — the provider's own token counters, exported ONLY when
+    // a real count exists. A telemetry-less or no-call turn exports NO token
+    // attribute rather than a fabricated zero (the log record keeps `null`).
+    ...(record.inputTokens !== null
+      ? [
+          {
+            key: "flowpilot.input_tokens",
+            value: { intValue: String(record.inputTokens) },
+          },
+        ]
+      : []),
+    ...(record.outputTokens !== null
+      ? [
+          {
+            key: "flowpilot.output_tokens",
+            value: { intValue: String(record.outputTokens) },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.parse_success",
       value: { boolValue: record.parseSuccess ?? false },

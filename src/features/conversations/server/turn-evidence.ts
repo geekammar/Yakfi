@@ -24,9 +24,17 @@
  *   customerMessageId · intent · assistantAction · conversationStatus ·
  *   handoffCause · routingDecision · taskRelevance[] · contextChannels ·
  *   knowledgeSourceClass[] · provider · model · providerAttempts ·
- *   providerStatus · providerLatencyMs · parseSuccess · disclosureChannel ·
- *   disclosureAllowed · disclosureRefusalReason · knowledgeGapCategory ·
- *   finalOutcome · outboundSendAttempted · outboundSendDelivered · emittedAt
+ *   providerStatus · providerLatencyMs · inputTokens · outputTokens ·
+ *   parseSuccess · disclosureChannel · disclosureAllowed ·
+ *   disclosureRefusalReason · knowledgeGapCategory · finalOutcome ·
+ *   outboundSendAttempted · outboundSendDelivered · emittedAt
+ *
+ * The token counters (`inputTokens` / `outputTokens`, PROMPT-AI-PERF-02) are
+ * copied AS-IS from the existing attempt-level adapter telemetry the engine
+ * already holds — they are never recomputed from characters, never estimated,
+ * and never a second source of truth. They are `null` when the provider
+ * adapter exposes no token telemetry or no provider was consulted (a
+ * deterministic turn), so an un-instrumented adapter never fabricates a zero.
  *
  * WHAT IT MUST NEVER CARRY (binding):
  *   customer message text · phone numbers · API keys / tokens / secretRefs ·
@@ -74,6 +82,15 @@ export type TurnEvidence = {
   readonly providerAttempts: number | null;
   readonly providerStatus: string | null;
   readonly providerLatencyMs: number | null;
+  /**
+   * Input tokens the provider reported for this turn (PROMPT-AI-PERF-02): the
+   * successful (else last) physical attempt's existing adapter telemetry,
+   * copied as-is. `null` when the adapter exposes no token telemetry or no
+   * provider was consulted — never a fabricated zero.
+   */
+  readonly inputTokens: number | null;
+  /** See {@link TurnEvidence.inputTokens} — the output-token counterpart. */
+  readonly outputTokens: number | null;
   readonly parseSuccess: boolean | null;
   readonly disclosureChannel: string | null;
   readonly disclosureAllowed: boolean | null;
@@ -200,6 +217,12 @@ export function buildTurnEvidence(
     providerStatus:
       observability?.providerStatus ?? (notCalled ? "NOT_CALLED" : null),
     providerLatencyMs: observability?.latencyMs ?? null,
+    // PROMPT-AI-PERF-02 — the ONE token projection onto the evidence record:
+    // pure pass-through of the counter the engine already copied from the
+    // attempt-level adapter telemetry. No recomputation, no estimation, no
+    // second source of truth; absent telemetry stays `null` (never a fake 0).
+    inputTokens: observability?.inputTokens ?? null,
+    outputTokens: observability?.outputTokens ?? null,
     parseSuccess: observability?.parseSuccess ?? null,
     disclosureChannel: observability?.disclosure?.channel ?? null,
     disclosureAllowed: observability?.disclosure?.allowed ?? null,
