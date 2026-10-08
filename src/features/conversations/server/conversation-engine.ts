@@ -1713,6 +1713,28 @@ async function runInboundTurn(
       senderType: message.senderType,
       content: message.content,
     }));
+    // CTX-01 (PERF-04) — the current customer message reaches the assistant
+    // EXACTLY ONCE, through the CURRENT message slot (`sources.message`
+    // below). It is therefore excluded from the bounded history window the
+    // AI additionally receives, so `recentMessages` represents PRIOR turns
+    // only. The deterministic paths below (booking selection, Conversation
+    // State derivation, clarification/continuation reconstruction) keep the
+    // FULL `recentChronological` — only the AI-facing window is narrowed.
+    //
+    // The exclusion is PROVEN, never assumed: the row is matched by its
+    // unique id — the same id the `addMessage` write above returned for this
+    // turn's CUSTOMER row — instead of blindly dropping the trailing
+    // element. Id identity cannot remove an EARLIER message that repeats
+    // the same text (a second "نعم" stays in history), does not depend on
+    // the row being last, and is a no-op if the row is somehow absent from
+    // the page (the message still arrives once via `sources.message`).
+    const recentMessagesBeforeCurrent = recent
+      .filter((message) => message.id !== customerMessage.id)
+      .reverse()
+      .map((message) => ({
+        senderType: message.senderType,
+        content: message.content,
+      }));
     // 7b. Deterministic booking selection close-the-loop (PROMPT-AI-03B):
     // Never calls LLM, never fabricates ids — customer chose 1/2/3 or
     // HH:mm or provider-name after an offer. Re-derive Business/Branch/
@@ -1754,7 +1776,7 @@ async function runInboundTurn(
         services,
         conversation: {
           status: conversation.status,
-          recentMessages: recentChronological,
+          recentMessages: recentMessagesBeforeCurrent,
         },
         message: inbound.text,
       },
