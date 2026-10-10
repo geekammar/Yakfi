@@ -48,8 +48,23 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  handle = false,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /**
+   * UX-LAB-01D-P1 (B3): render Vaul's REAL drag handle
+   * (`<DrawerPrimitive.Handle>`) instead of the decorative bar, so a drawer
+   * that opts into Vaul's `handleOnly` (drag via the handle only) still offers
+   * swipe-to-close. Opt-in, so every other drawer keeps the decorative bar and
+   * the whole-surface drag behaviour exactly as before.
+   *
+   * The `!`-prefixed utilities are deliberate: Vaul injects UNLAYERED
+   * `[data-vaul-handle]` styles at runtime, which outrank Tailwind v4's layered
+   * utilities — so the handle keeps the drawer's existing bar metrics instead
+   * of Vaul's smaller, theme-unaware default.
+   */
+  handle?: boolean;
+}) {
   return (
     <DrawerPortal data-slot="drawer-portal">
       <DrawerOverlay />
@@ -61,7 +76,11 @@ function DrawerContent({
         )}
         {...props}
       >
-        <div className="mx-auto mt-4 hidden h-1.5 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        {handle ? (
+          <DrawerPrimitive.Handle className="mx-auto mt-4 !h-1.5 !w-[100px] shrink-0 !rounded-full !bg-muted !opacity-100" />
+        ) : (
+          <div className="mx-auto mt-4 hidden h-1.5 w-[100px] shrink-0 rounded-full bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        )}
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>

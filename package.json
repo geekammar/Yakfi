@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -111,7 +111,8 @@
     "eval:run-future-arch18": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-arch18.ts",
     "eval:run-future-op21": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-op21.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
-    "eval:coverage": "tsx scripts/eval-coverage.ts"
+    "eval:coverage": "tsx scripts/eval-coverage.ts",
+    "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -154,11 +155,13 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
     "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^30.1.2",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.3"
   },
   "packageManager": "pnpm@11.24.0"
 }

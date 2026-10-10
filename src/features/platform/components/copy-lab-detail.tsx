@@ -215,6 +215,13 @@ export function CopyLabDetail({
   // setState lands in the async continuation, never synchronously in the
   // effect body (the browser mounts this drawer already-open, so this runs
   // once per opened key).
+  //
+  // B1 (UX-LAB-01D-P1): `loading` starts true and ONLY this effect can settle
+  // it on first open — `refresh()` runs after mutations only. The read must
+  // end `loading` in BOTH the success and the failure path (guarded by
+  // `active`, so a drawer that closed mid-read never writes stale state),
+  // otherwise the drawer stays stuck on the loading branch and neither the
+  // effective state nor the editor ever renders.
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -228,6 +235,8 @@ export function CopyLabDetail({
           setEffective(null);
           setHistory(null);
         }
+      } finally {
+        if (active) setLoading(false);
       }
     })();
     return () => {
@@ -285,8 +294,16 @@ export function CopyLabDetail({
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[88vh]">
+    // B3 (UX-LAB-01D-P1): `handleOnly` restricts Vaul's drag to the explicit
+    // handle. Without it the whole drawer surface — including the footer's
+    // Close / Publish buttons — competes for the touch gesture: Vaul calls
+    // `setPointerCapture` on every pointerdown over the content, so a bottom
+    // button tap with any vertical movement becomes a drawer drag, the drawer
+    // steals the gesture, and the button's click never fires. Footer buttons
+    // stay plain tappable controls; body scrolling and swipe-to-close (via the
+    // handle) keep working. Scoped to the Lab only.
+    <Drawer open={open} onOpenChange={onOpenChange} handleOnly>
+      <DrawerContent className="max-h-[88vh]" handle>
         <DrawerHeader className="text-start">
           <div className="flex items-start justify-between gap-3">
             <DrawerTitle className="text-base leading-snug pe-1">
@@ -1081,9 +1098,20 @@ function ClassificationBadge({
   );
 }
 
-function ButtonFullWidth({ label }: { label: string }) {
+/**
+ * The footer's full-width control. It forwards every prop it is given because
+ * `DrawerClose asChild` (Radix Slot) merges its OWN props — the click handler
+ * that closes the drawer, plus `type="button"` — onto THIS element. A
+ * destructured `{ label }` signature silently drops them: the rendered button
+ * then carries no click handler at all, so the Close control is inert (B3,
+ * UX-LAB-01D-P1 — the exact "Close does not respond" symptom).
+ */
+function ButtonFullWidth({
+  label,
+  ...props
+}: { label: string } & React.ComponentProps<typeof Button>) {
   return (
-    <Button className="h-11 w-full" variant="outline">
+    <Button className="h-11 w-full" variant="outline" {...props}>
       <XIcon aria-hidden className="size-4" />
       {label}
     </Button>

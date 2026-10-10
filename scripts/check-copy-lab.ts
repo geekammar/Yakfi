@@ -133,6 +133,11 @@ function isPersistenceLayer(rel: string): boolean {
  * (labels + filter/group/demo projections), and the two client components
  * (browser + detail; the detail renders the preview through renderCopy).
  *
+ * UX-LAB-01D-P1 (B2) adds the detail component's MOUNTED LIFECYCLE TEST: it
+ * imports COPY_REGISTRY to pick real entries (never a duplicated entry list)
+ * and is exercised in jsdom against a MOCKED server boundary, so it is a
+ * Lab-owned, non-runtime consumer of exactly the same class.
+ *
  * The OVERRIDE/persistence layer is deliberately NOT exempted here (M16 still
  * scans these files): this slice is read-only and DB-free, so the Lab must not
  * import it — section N asserts it does not.
@@ -142,6 +147,7 @@ const LAB_UI_FILES = [
   "src/features/platform/components/copy-lab-logic.ts",
   "src/features/platform/components/copy-lab-browser.tsx",
   "src/features/platform/components/copy-lab-detail.tsx",
+  "src/features/platform/components/copy-lab-detail.test.tsx",
 ];
 
 function isLabUi(rel: string): boolean {
@@ -3126,6 +3132,35 @@ async function main(): Promise<void> {
     console.error(
       `   missing guidance: ${[...missingValidation, ...missingOverride].join(", ")}`,
     );
+
+  // ── P — UX-LAB-01D-P1: the REAL mounted component lifecycle (B2) ──────────
+  //
+  // Sections A–O are static / pure-function checks. They stayed green while
+  // B1 was live (an editable entry stuck in first-open loading, with no
+  // editor) because none of them mounts the React component. This check runs
+  // the component-level regression — Vitest + jsdom mounting the real
+  // `CopyLabDetail` against a mocked server boundary — which FAILS against the
+  // pre-patch lifecycle. It needs no database, provider, or network: the
+  // detail component's only seam is the Lab server boundary, which the test
+  // mocks.
+  const { spawnSync } = await import("node:child_process");
+  const lifecycle = spawnSync(
+    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
+    ["test:copy-lab", "--no-color"],
+    { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+  );
+  check(
+    "P1. دورة حياة فتح النص: التحميل يستقر، الحالة الفعالة والمحرر يظهران، والمحمي يبقى للقراءة فقط (اختبار مكوّن حقيقي)",
+    lifecycle.status === 0,
+  );
+  if (lifecycle.status !== 0) {
+    console.error(
+      "   فشل اختبار دورة حياة المكوّن (mounted-component regression):",
+    );
+    console.error(
+      (lifecycle.stdout ?? "").trim() || (lifecycle.stderr ?? "").trim(),
+    );
+  }
 
   // ── Report ───────────────────────────────────────────────────────────────
   let failed = 0;
