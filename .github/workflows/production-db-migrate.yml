@@ -69,7 +69,7 @@ jobs:
           cat status-pre.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-pre.txt
-          if grep -qiE 'up to date|not up to date|pending' status-pre.txt; then
+          if grep -qiE 'up to date|have not yet been applied' status-pre.txt; then
             exit 0
           fi
           echo '::error::prisma migrate status could not read the production database — aborting before any change'
