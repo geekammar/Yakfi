@@ -14,6 +14,7 @@ import { AppointmentRepository } from "./appointment.repository";
 import { BranchRepository } from "./branch.repository";
 import { BusinessRepository } from "./business.repository";
 import { ConversationRepository } from "./conversation.repository";
+import { CopyOverrideRepository } from "./copy-override.repository";
 import { CustomerRepository } from "./customer.repository";
 import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
@@ -52,6 +53,7 @@ export const knowledgeGapRepository = new KnowledgeGapRepository();
 export const platformInvitationRepository = new PlatformInvitationRepository();
 export const aiPolicyRepository = new AiPolicyRepository();
 export const runtimeCredentialRepository = new RuntimeCredentialRepository();
+export const copyOverrideRepository = new CopyOverrideRepository();
 
 export {
   AppointmentRepository,
@@ -59,6 +61,7 @@ export {
   BranchRepository,
   BusinessRepository,
   ConversationRepository,
+  CopyOverrideRepository,
   CustomerRepository,
   InboundDedupeRepository,
   InvitationRepository,

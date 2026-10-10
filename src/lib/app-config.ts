@@ -65,4 +65,9 @@ export const PLATFORM_NAV_ITEMS: NavItem[] = [
   { href: "/platform/businesses", label: "المنشآت", icon: "building" },
   { href: "/platform/invitations", label: "دعوات الملاك", icon: "mail" },
   { href: "/platform/ai-policy", label: "سياسة الذكاء", icon: "settings" },
+  {
+    href: "/platform/conversation-lab",
+    label: "مختبر النصوص",
+    icon: "type",
+  },
 ];

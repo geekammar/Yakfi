@@ -10,6 +10,7 @@ import {
   MessageCircle,
   SettingsIcon,
   Shield,
+  Type,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const ICONS: Record<string, LucideIcon> = {
   layers: Layers,
   settings: SettingsIcon,
   mail: Mail,
+  type: Type,
 };
 
 export function getNavIcon(iconName: string): LucideIcon {

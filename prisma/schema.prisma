@@ -945,6 +945,69 @@ model PlatformAiPolicy {
   @@map("platform_ai_policies")
 }
 
+// ─── Platform Conversation-Copy Overrides (UX-LAB-01C) ────────────
+// PLATFORM-wide (single-tenant-scope-by-design: there is NO businessId
+// anywhere in this block) published overrides for the deterministic
+// customer-facing conversation copy owned by COPY_REGISTRY.
+//
+// The architecture stays CODE DEFAULT + OPTIONAL PLATFORM OVERRIDE:
+// COPY_REGISTRY.defaultText remains the only source of truth. A row here
+// only ever SHADOWS a code default. ABSENCE of a row is the documented
+// "use the code default" state; RESET is a row removal that reveals the
+// code default again. The stored `text` is the founder-edited TEMPLATE
+// (still carrying its `{placeholder}` tokens); rendering happens later
+// (UX-LAB-01E) through the pure render contract, never here.
+//
+// Every write is validated by the UX-LAB-01B contract
+// (validateCopyCandidate) at the SERVICE layer; these tables hold trusted
+// values only. `action` is a Zod-validated plain string on purpose (no
+// Prisma enum — extending the list needs no data migration, matching the
+// KnowledgeGap / handoff-cause convention).
+
+// ONE published override per canonical copy key. The `copyKey` uniqueness
+// makes "the effective override for a key" a single deterministic row.
+model PlatformCopyOverride {
+  id          String   @id @default(uuid())
+  copyKey     String   @unique @map("copy_key")
+  text        String
+  // The Platform Operator who last published this override (audit actor).
+  // SetNull so an operator's past published overrides survive their removal.
+  updatedById String?  @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  updatedBy User? @relation("PlatformCopyOverrideUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("platform_copy_overrides")
+}
+
+// Bounded, append-only audit/history for ONE copy key — enough for
+// Founder-Lab rollback, explicitly NOT a version-control system. Each row
+// records the transition: `previousText` is what was effective before
+// (null ⇒ the code default was in effect) and `resultText` is what became
+// effective after (null ⇒ the override was removed, code default restored).
+// Either side therefore suffices to undo/redo the change. Retention is
+// capped per key by the repository (COPY_OVERRIDE_HISTORY_RETENTION).
+model PlatformCopyOverrideHistory {
+  id           String   @id @default(uuid())
+  copyKey      String   @map("copy_key")
+  // PUBLISH | RESET | RESTORE — validated by the Zod union in
+  // lib/validation/copy-override (no Prisma enum, per project convention).
+  action       String   @map("action")
+  // The text effective BEFORE this change (null ⇒ code default was active).
+  previousText String?  @map("previous_text")
+  // The text effective AFTER this change (null ⇒ override removed).
+  resultText   String?  @map("result_text")
+  // Audit actor when available (null for system-initiated or legacy rows).
+  actorId      String?  @map("actor_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  actor User? @relation("PlatformCopyOverrideHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([copyKey, createdAt])
+  @@map("platform_copy_override_history")
+}
+
 // ─── Users & auth ────────────────────────────────────────────
 // The Better Auth required fields stay untouched; domain fields
 // (business, role) extend the same `users` table.
@@ -978,6 +1041,8 @@ model User {
   invitationsCreated         Invitation[]         @relation("InvitationCreator")
   platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
   aiPolicyUpdates            PlatformAiPolicy[]   @relation("PlatformAiPolicyUpdater")
+  copyOverridesUpdated       PlatformCopyOverride[]      @relation("PlatformCopyOverrideUpdater")
+  copyOverrideHistory        PlatformCopyOverrideHistory[] @relation("PlatformCopyOverrideHistoryActor")
   resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
   reviewedKnowledgeGaps      KnowledgeGap[]       @relation("KnowledgeGapReviewer")
 
