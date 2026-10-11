@@ -57,7 +57,57 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-AI-UX-03B`:
+**IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
+`PROMPT-OPS-REL-01-R`:
+CANONICAL PRE-SHIP GATE + RELEASE CONTRACT — one repository-owned, deterministic
+pre-release checkpoint replacing the procedural "remember to run pnpm verify"
+dependency; the SemVer choice and the shipping action stay explicitly human.
+ZERO product/domain/schema/provider change; no commit/push/tag/deploy.**
+Adds `pnpm pre-ship` (scripts/pre-ship.mjs + scripts/pre-ship-lib.mjs): a
+strictly non-mutating, OFFLINE gate that COMPOSES existing canonical commands —
+git baseline + exact release candidate → `git diff --check` → `pnpm security` →
+`pnpm check:ai-prompts` → `pnpm verify` → a non-mutation witness — and
+classifies risk surfaces over the candidate plus any unpushed commits (DB
+schema, auth/security, release tooling, deploy/CI config, env contract = HIGH →
+`MANUAL_RELEASE_REVIEW_REQUIRED`; AI/provider/conversation/booking/transport/
+copy-lab = elevated → routed `check:*` evidence). Decision vocabulary:
+`PRE_SHIP_GREEN` / `PRE_SHIP_BLOCKED` / `MANUAL_RELEASE_REVIEW_REQUIRED`
+(human stays the SemVer authority; nothing is bumped, committed, or shipped).
+`PROMPT-OPS-REL-01-R` removed one proven contradiction in that contract: the
+gate demanded a CLEAN working tree while `ship` owns the release commit of the
+implementation working tree (`git add -A` + one release commit) — so the
+recommended `pnpm ship patch --ack-manual-review` could never run (reproduced:
+real `pnpm pre-ship` → `PRE_SHIP_BLOCKED` at git-state on the 8 intended
+paths). The invariant is now **EXACT, INSPECTED, STABLE RELEASE CANDIDATE**: the
+candidate is the precise set `git add -A` would commit (`git diff HEAD` +
+`git ls-files -o --exclude-standard`; porcelain is NOT the source of truth
+because it collapses untracked directories), fingerprinted with sha256 per path
+so a gate that mutates it fails closed and ignored build artifacts (`.next/`,
+`*.tsbuildinfo`) cannot create false drift. `scripts/ship.mjs` requires the
+canonical gate before its first mutation, re-checks the fingerprint, and after
+`git add -A` re-proves the stage is exactly the reviewed candidate + the
+version-bump delta. Repository-owned regression proof `pnpm check:pre-ship`
+(scripts/check-pre-ship.mjs): 27/27 green (R1–R12) — dirty tracked candidate
+accepted, untracked files cannot escape inspection, failing gate blocks ship
+before any mutation, mutating gate fails closed, HIGH → manual review + ack
+gate, ambiguous baselines fail closed, the REAL OPS-REL-01 candidate reaches
+`MANUAL_RELEASE_REVIEW_REQUIRED` (not blocked for being dirty), mutation-seam
+exactness, a secret in an untracked candidate file blocked without printing its
+value (the genuine scanner is copied into the fixture), empty candidate fails
+closed, and the real tree is untouched. Real full-gate run on the live working
+tree: all six gates PASS (verify 54.7s; candidate fingerprint stable across
+`next build`) → decision `MANUAL_RELEASE_REVIEW_REQUIRED` (this slice IS
+release tooling) with a bounded PATCH recommendation. docs/RELEASE_PROCESS.md +
+docs/QUALITY_CHECKS.md updated to the ONE corrected contract.
+**Files changed:** `scripts/pre-ship-lib.mjs`, `scripts/pre-ship.mjs`,
+`scripts/check-pre-ship.mjs`, `scripts/ship.mjs`, `package.json`,
+`docs/RELEASE_PROCESS.md`, `docs/QUALITY_CHECKS.md`, this ledger.
+**Readiness: READY_FOR_RELEASE_TOOLING_REVIEW.** High-risk on ship:
+release-tooling (expects `pnpm ship patch --ack-manual-review` after human
+review).
+
+**PREVIOUS (its files shipped incrementally across v0.43.1–v0.44.2; per-prompt
+detail in Git history) — `PROMPT-AI-UX-03B`:
 GREETING ETIQUETTE + AUTHORITATIVE BUSINESS IDENTITY — two proven
 customer-facing corrections over the EXISTING seams; ZERO
 schema/migration/provider/architecture change; no commit/push/tag/deploy.**

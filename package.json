@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.44.2",
+  "version": "0.44.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -66,7 +66,9 @@
     "probe:ops-25": "dotenv -e .env.local -e .env -- tsx scripts/probe-ops-25.ts",
     "probe:codecraft": "dotenv -e .env.local -e .env -- tsx scripts/probe-codecraft.ts",
     "release": "bash scripts/release.sh",
+    "pre-ship": "node scripts/pre-ship.mjs",
     "ship": "node scripts/ship.mjs",
+    "check:pre-ship": "node scripts/check-pre-ship.mjs",
     "vercel:check": "node scripts/vercel-check.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:check": "node scripts/pre-deploy.mjs",

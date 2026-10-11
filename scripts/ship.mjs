@@ -1,31 +1,53 @@
 #!/usr/bin/env node
-// FlowPilot ship — lightweight operator release path (DECISIONS #26).
+// FlowPilot ship — lightweight operator release path (DECISIONS #26), gated
+// by the canonical pre-ship contract (PROMPT-OPS-REL-01).
 //
-// For routine shipping after a finished prompt whose full quality gate
-// (`pnpm verify`) already passed: version bump → one conventional commit
-// (pre-commit hook stays active) → annotated tag vX.Y.Z → push main + tag
-// → published GitHub Release. It does NOT re-run the full build gate, does
-// not deploy, and does not touch the database. The full gated path
-// (`pnpm release`, DECISIONS #18) is unchanged for recovery / high-confidence
-// releases.
+// SHIP OWNS THE RELEASE COMMIT. The human implementation ends as a
+// working-tree release candidate; pre-ship certifies THAT candidate; ship then
+// commits it. A non-clean working tree is therefore expected, not a failure.
+// What ship refuses is a candidate that is not exactly the one pre-ship
+// reviewed.
+//
+// For routine shipping after a finished prompt: the canonical pre-ship gate
+// (`pnpm pre-ship`, scripts/pre-ship.mjs) MUST pass first — it composes git
+// baseline + exact release candidate + `git diff --check` + `pnpm security` +
+// `pnpm check:ai-prompts` + `pnpm verify` and detects high-risk release
+// surfaces. Only then: version bump → `git add -A` → one conventional commit
+// (pre-commit hook stays active) → annotated tag vX.Y.Z → push main + tag →
+// published GitHub Release. Ship never deploys and never touches the database.
+// The full gated path (`pnpm release`, DECISIONS #18) is unchanged for
+// recovery / high-confidence releases.
 //
 // Usage:
 //   pnpm ship patch               0.14.0 → 0.14.1   commit: fix: release …
 //   pnpm ship minor               0.14.0 → 0.15.0   commit: feat: release …
 //   pnpm ship --version 0.14.0    explicit target (must be > current)
+//   pnpm ship patch --ack-manual-review   proceed after a human reviewed a
+//                                        MANUAL_RELEASE_REVIEW_REQUIRED diff
 //   pnpm ship --help
 //
-// Safety: main-branch only; refuses existing tags (local + origin), major
-// bumps, and non-fast-forward pushes; no force flags anywhere; a failure
-// after a successful push prints the exact manual recovery command.
+// Safety: main-branch only; refuses an empty candidate, an ambiguous baseline
+// (unmerged paths / a merge-rebase in progress / origin/main ahead), existing
+// tags (local + origin), major bumps, and non-fast-forward pushes; no force
+// flags anywhere; a failure after a successful push prints the exact manual
+// recovery command. The pre-ship gate runs before ANY mutation — package.json
+// and git state are untouched if it blocks. After `git add -A`, ship re-proves
+// the staged release is exactly the reviewed candidate plus the version-bump
+// delta, and nothing else.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+import {
+  DECISIONS,
+  resolveRoot,
+  runPreShipGate,
+  snapshotCandidate,
+  verifyReleaseStage,
+} from "./pre-ship-lib.mjs";
+
+const root = resolveRoot();
 const pkgPath = join(root, "package.json");
-const SECURITY_SCRIPT = join(root, "scripts", "security-check.mjs");
 const BUILD_STATE = join(root, "docs", "BUILD_STATE.md");
 
 const USAGE = `FlowPilot ship — lightweight operator release
@@ -34,13 +56,24 @@ Usage:
   pnpm ship patch               bump patch   (0.14.0 → 0.14.1)
   pnpm ship minor               bump minor   (0.14.0 → 0.15.0)
   pnpm ship --version 0.14.0    explicit version (must be > current)
+  pnpm ship patch --ack-manual-review   proceed after manually reviewing a
+                                MANUAL_RELEASE_REVIEW_REQUIRED diff
   pnpm ship help                this help (pnpm intercepts --help;
                                pnpm run ship --help also works)
 
-Performs: version bump → one conventional commit (pre-commit hook active)
-→ annotated tag v<version> → push main + tag → published GitHub Release.
-Does NOT re-run the full quality gate (the prompt's \`pnpm verify\` is the
-gate), does not deploy, does not touch the database.
+First runs the canonical pre-ship gate (pnpm pre-ship): git baseline +
+exact release candidate + git diff --check + pnpm security +
+pnpm check:ai-prompts + pnpm verify + non-mutation witness. If it blocks,
+ship exits BEFORE touching package.json or git state. A
+MANUAL_RELEASE_REVIEW_REQUIRED diff (schema/migration, auth/security, release
+tooling, deploy config, env contract) additionally requires
+--ack-manual-review (an acknowledgement never bypasses a failed mandatory
+gate).
+
+Then: version bump → git add -A → re-prove the staged release is exactly the
+reviewed candidate + the version-bump delta → one conventional commit
+(pre-commit hook active) → annotated tag v<version> → push main + tag →
+published GitHub Release. Ship never deploys and never touches the database.
 
 Full gated path (gh auth → doctor → verify → security): pnpm release
 See docs/RELEASE_PROCESS.md → Lightweight Operator Ship.`;
@@ -68,7 +101,7 @@ const fail = (msg, hint) => {
 
 const ok = (msg) => console.log(`  ✓ ${msg}`);
 const warn = (msg) => console.log(`  ⚠ ${msg}`);
-const step = (n, label) => console.log(`\n[${n}/6] ${label}`);
+const step = (n, label) => console.log(`\n[${n}/7] ${label}`);
 
 // ── version math ─────────────────────────────────────────────────────────────
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
@@ -90,35 +123,37 @@ if (args[0] === "help" || args.includes("--help") || args.includes("-h")) {
 
 let bumpKind = null; // "patch" | "minor" | null (explicit version)
 let explicitVersion = null;
+const ackManualReview = args.includes("--ack-manual-review");
+const positional = args.filter((a) => a !== "--ack-manual-review");
 
-if (args.length === 0) {
+if (positional.length === 0) {
   console.error(USAGE);
   process.exit(1);
-} else if (args[0] === "--version") {
-  if (args.length !== 2) {
+} else if (positional[0] === "--version") {
+  if (positional.length !== 2) {
     fail(
       "--version requires exactly one value: pnpm ship --version 0.14.0",
       "or use a bare version: pnpm ship 0.14.0",
     );
   }
-  explicitVersion = args[1];
+  explicitVersion = positional[1];
   if (!VERSION_RE.test(explicitVersion)) {
     fail(`invalid version "${explicitVersion}" — expected X.Y.Z (e.g. 0.14.0)`);
   }
-} else if (args.length !== 1) {
-  fail(`unexpected arguments: ${args.join(" ")}`, USAGE);
-} else if (args[0] === "patch" || args[0] === "minor") {
-  bumpKind = args[0];
-} else if (args[0] === "major") {
+} else if (positional.length !== 1) {
+  fail(`unexpected arguments: ${positional.join(" ")}`, USAGE);
+} else if (positional[0] === "patch" || positional[0] === "minor") {
+  bumpKind = positional[0];
+} else if (positional[0] === "major") {
   fail(
     "major bumps are not supported by pnpm ship — only patch and minor are allowed (pre-1.0; see docs/RELEASE_PROCESS.md → Versioning)",
     "for a major release, make an operator decision first, then use the full gated path: pnpm release",
   );
-} else if (VERSION_RE.test(args[0])) {
-  explicitVersion = args[0];
+} else if (VERSION_RE.test(positional[0])) {
+  explicitVersion = positional[0];
 } else {
   fail(
-    `unknown bump type "${args[0]}" — use: pnpm ship patch | pnpm ship minor | pnpm ship --version X.Y.Z`,
+    `unknown bump type "${positional[0]}" — use: pnpm ship patch | pnpm ship minor | pnpm ship --version X.Y.Z`,
   );
 }
 
@@ -130,12 +165,10 @@ if (!run("git", ["rev-parse", "--is-inside-work-tree"]).ok) {
   fail("not inside a git repository — run ship from the FlowPilot repository");
 }
 
+// branch is read for the plan below; the canonical pre-ship gate (step 1)
+// validates branch=main / baseline / release candidate — ship no longer
+// duplicates that logic.
 const branch = run("git", ["branch", "--show-current"]).stdout;
-if (branch !== "main") {
-  fail(
-    `not on main (currently: ${branch || "detached HEAD"}) — releases happen from main`,
-  );
-}
 
 if (!existsSync(pkgPath)) {
   fail("package.json not found — run ship from the FlowPilot repository");
@@ -222,7 +255,7 @@ const buildNotes = (title, prevTag) => {
   return [
     `## FlowPilot ${targetTag} — ${title}`,
     "",
-    `Shipped with \`pnpm ship\` (${bumpKind ?? "explicit version"} bump) after the prompt's \`pnpm verify\` quality gate passed — ship does not re-run the full gate.`,
+    `Shipped with \`pnpm ship\` (${bumpKind ?? "explicit version"} bump) after the canonical pre-ship gate (\`pnpm pre-ship\`: git baseline + exact release candidate + diff --check + security + ai-prompts + verify) passed and ship re-proved the staged release was exactly that candidate plus the version bump.`,
     "",
     `Commits since ${prevTag ?? "the beginning of history"}:`,
     ...commits,
@@ -241,8 +274,82 @@ console.log(`  target:   v${targetVersion}`);
 console.log(`  tag:      ${targetTag}`);
 console.log(`  branch:   ${branch}`);
 
-// ── [1/6] validate ───────────────────────────────────────────────────────────
-step(1, "Validate");
+// ── [1/7] release candidate + canonical pre-ship gate (before ANY mutation) ──
+// The single repository-owned release gate (scripts/pre-ship-lib.mjs), the
+// same one `pnpm pre-ship` runs. If it blocks, ship exits here — package.json
+// and git state are still untouched.
+step(1, "Release candidate + pre-ship gate (canonical — pnpm pre-ship)");
+
+// Discover the exact candidate this release would commit BEFORE the gate runs,
+// so the gate's own snapshot can be cross-checked against it (contract D).
+const candidateBeforeGate = snapshotCandidate(root);
+if (candidateBeforeGate.count === 0) {
+  fail(
+    "no release candidate — the working tree is identical to HEAD, so there is nothing to release",
+    "finish the intended change first, then: pnpm pre-ship",
+  );
+}
+console.log(
+  `  candidate: ${candidateBeforeGate.count} path(s), fingerprint ${candidateBeforeGate.fingerprint.slice(0, 12)}`,
+);
+
+const gate = runPreShipGate(root);
+for (const g of gate.gates) {
+  const icon = g.status === "PASS" ? "✓" : g.status === "FAIL" ? "✗" : "·";
+  const secs = g.seconds ? ` ${g.seconds}s` : "";
+  const detail = g.detail ? ` — ${g.detail.slice(0, 100)}` : "";
+  console.log(`  ${icon} ${g.label.padEnd(14)} ${g.status}${secs}${detail}`);
+}
+for (const s of gate.risk.high)
+  warn(`HIGH risk surface: ${s.label} — ${s.files.join(", ")}`);
+for (const s of gate.risk.elevated)
+  console.log(
+    `  elevated surface: ${s.label} → review with: ${s.checks.join(", ")}`,
+  );
+
+if (gate.decision === DECISIONS.BLOCKED) {
+  for (const g of gate.gates.filter((g) => g.status === "FAIL" && g.output)) {
+    console.error(`\n── ${g.label} output ──────────────────────`);
+    console.error(g.output.split("\n").slice(-40).join("\n"));
+  }
+  fail(
+    "PRE_SHIP_BLOCKED — the canonical pre-ship gate failed; nothing was changed",
+    gate.nextAction.split("\n")[0],
+  );
+}
+if (gate.decision === DECISIONS.MANUAL && !ackManualReview) {
+  for (const s of gate.risk.high) console.error(`  • ${s.label}: ${s.routing}`);
+  fail(
+    "MANUAL_RELEASE_REVIEW_REQUIRED — a high-risk release surface changed and the machine cannot certify it",
+    "review the surfaces above, then re-run ship with --ack-manual-review (e.g. pnpm ship patch --ack-manual-review)",
+  );
+}
+if (gate.decision === DECISIONS.MANUAL) {
+  warn(
+    "MANUAL_RELEASE_REVIEW_REQUIRED acknowledged by the operator (--ack-manual-review) — proceeding",
+  );
+}
+
+// The candidate ship is about to release must be the exact candidate the gate
+// just certified (contract D). An acknowledgement never licenses a different
+// tree than the one the human reviewed.
+if (gate.candidate.fingerprint !== candidateBeforeGate.fingerprint) {
+  fail(
+    "RELEASE CANDIDATE DRIFT — the candidate changed between discovery and the gate; nothing was changed",
+    "re-run pnpm pre-ship and review the current candidate, then re-run ship",
+  );
+}
+ok(
+  `candidate fingerprint matches the reviewed candidate (${gate.candidate.count} path(s))`,
+);
+ok(
+  gate.decision === DECISIONS.GREEN
+    ? "pre-ship gate green — safe to release"
+    : "pre-ship gate passed with manual review acknowledged",
+);
+
+// ── [2/7] validate publish context (network + tag availability) ──────────────
+step(2, "Validate publish context");
 
 if (run("git", ["rev-parse", "-q", "--verify", `refs/tags/${targetTag}`]).ok) {
   fail(
@@ -326,32 +433,6 @@ if (!run("git", ["config", "core.hooksPath"]).stdout) {
   );
 }
 
-const security = spawnSync(process.execPath, [SECURITY_SCRIPT], {
-  cwd: root,
-  stdio: "inherit",
-});
-if ((security.status ?? 1) !== 0) {
-  fail(
-    "security check found secrets in committable files — nothing was changed yet",
-    "resolve the findings above (move secrets to .env.local), then re-run ship",
-  );
-}
-ok("security check clean");
-
-for (const diffArgs of [
-  ["diff", "--check"],
-  ["diff", "--cached", "--check"],
-]) {
-  const r = run("git", diffArgs);
-  if (!r.ok) {
-    fail(
-      `git ${diffArgs.join(" ")} found problems (conflict markers / whitespace errors)`,
-      r.stdout || r.stderr || undefined,
-    );
-  }
-}
-ok("git diff --check clean (no conflict markers / whitespace errors)");
-
 const latestTag = previousTag();
 if (latestTag && latestTag !== `v${currentVersion}`) {
   warn(
@@ -359,8 +440,8 @@ if (latestTag && latestTag !== `v${currentVersion}`) {
   );
 }
 
-// ── [2/6] version bump ───────────────────────────────────────────────────────
-step(2, "Version bump");
+// ── [3/7] version bump ───────────────────────────────────────────────────────
+step(3, "Version bump");
 const versionLine = /^(\s*"version"\s*:\s*")(\d+\.\d+\.\d+)(")/m;
 if (!versionLine.test(pkgRaw)) {
   fail('could not locate the "version" field in package.json');
@@ -370,8 +451,8 @@ console.log(
   `  package.json: "version": "${currentVersion}" → "${targetVersion}"`,
 );
 
-// ── [3/6] commit ─────────────────────────────────────────────────────────────
-step(3, "Commit");
+// ── [4/7] commit ─────────────────────────────────────────────────────────────
+step(4, "Commit");
 const add = run("git", ["add", "-A"]);
 if (!add.ok) {
   writeFileSync(pkgPath, pkgRaw);
@@ -380,10 +461,32 @@ if (!add.ok) {
 const stagedFiles = run("git", ["diff", "--cached", "--name-only"])
   .stdout.split("\n")
   .filter(Boolean);
+
+// The release-mutation seam: the staged release must be EXACTLY the candidate
+// the canonical gate reviewed, plus the version-bump delta in package.json —
+// no more, no less. Verified with the same canonical module that fingerprinted
+// the candidate, so no path (including an untracked one) can be swept in here.
+const exact = verifyReleaseStage(
+  root,
+  gate.candidate,
+  stagedFiles,
+  pkgRaw,
+  targetVersion,
+);
+if (!exact.ok) {
+  writeFileSync(pkgPath, pkgRaw);
+  for (const problem of exact.problems) console.error(`  ✗ ${problem}`);
+  fail(
+    "the staged release is not exactly the reviewed candidate + version bump — the version bump was rolled back; no commit, no tag, no push, no release",
+    "re-run pnpm pre-ship on the current candidate, then re-run ship",
+  );
+}
+ok("staged release is exactly the reviewed candidate + version bump");
+
 if (stagedFiles.length === 0) {
   writeFileSync(pkgPath, pkgRaw);
   fail(
-    "nothing to commit — a release needs the prompt's changes (or at least the version bump)",
+    "nothing to commit — a release needs the candidate (or at least the version bump)",
     "this should not happen; if it does, inspect: git status",
   );
 }
@@ -404,8 +507,8 @@ if (!commit.ok) {
 const sha = run("git", ["rev-parse", "--short", "HEAD"]).stdout;
 ok(`committed ${sha} — ${commitMessage}`);
 
-// ── [4/6] annotated tag ──────────────────────────────────────────────────────
-step(4, "Annotated tag");
+// ── [5/7] annotated tag ──────────────────────────────────────────────────────
+step(5, "Annotated tag");
 const title = deriveTitle();
 const tagMessage = `FlowPilot ${targetTag} — ${title}`;
 const tag = run("git", ["tag", "-a", targetTag, "-m", tagMessage]);
@@ -418,8 +521,8 @@ if (!tag.ok) {
 }
 ok(`${targetTag} — "${tagMessage}"`);
 
-// ── [5/6] push ───────────────────────────────────────────────────────────────
-step(5, "Push");
+// ── [6/7] push ───────────────────────────────────────────────────────────────
+step(6, "Push");
 const pushMain = run("git", ["push", "origin", "main"]);
 if (!pushMain.ok) {
   if (pushMain.stderr) console.error(pushMain.stderr);
@@ -441,8 +544,8 @@ if (!pushTag.ok) {
 }
 ok(`origin ${targetTag} pushed`);
 
-// ── [6/6] GitHub Release ─────────────────────────────────────────────────────
-step(6, "GitHub Release");
+// ── [7/7] GitHub Release ─────────────────────────────────────────────────────
+step(7, "GitHub Release");
 const notes = buildNotes(title, latestTag);
 const releaseTitle = tagMessage;
 if (run("gh", ["release", "view", targetTag]).ok) {
