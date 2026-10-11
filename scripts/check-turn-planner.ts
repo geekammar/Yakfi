@@ -32,6 +32,16 @@ import { join } from "node:path";
  * 19  ONE resolver module only + reuses the canonical AiTurnPlan
  * 20  resolver is deterministic / pure (same input → same output, no inference)
  *
+ *  PROMPT-AI-SEM-02 (HUMAN_REQUEST + BOOKING precedence — policy proof at the
+ *  resolver seam, signals derived from the REAL message text):
+ *  SEM-02A  explicit human + booking → HANDOFF (EXPLICIT_HUMAN_REQUEST),
+ *           never booking automation (fails if the old uniform suppression
+ *           were restored)
+ *  SEM-02B  provider-preference + booking → DOMAIN_ACTION / DOMAIN_DECISION,
+ *           never a human handoff
+ *  SEM-02C/D the same contract at ENGINE level, each with exactly ONE model
+ *           call (the 0/1 invariant)
+ *
  * Run: pnpm check:turn-planner
  */
 export {};
@@ -725,6 +735,7 @@ async function main(): Promise<void> {
     observability?: {
       turnPlan?: { steps?: Array<{ kind?: string; intent?: string }> };
       routingDecision?: string;
+      providerAttempts?: number;
     };
   };
 
@@ -835,6 +846,119 @@ async function main(): Promise<void> {
         result.conversationStatus === "NEED_HUMAN" &&
         result.intent === "HUMAN_REQUEST" &&
         result.observability?.turnPlan?.steps?.[0]?.kind === "HANDOFF",
+    );
+  }
+
+  // ── PROMPT-AI-SEM-02. HUMAN_REQUEST + BOOKING precedence (policy proof) ───
+  // One authoritative rule (`detectExplicitHumanRequest`) now backs BOTH the
+  // classifier and the deterministic signal, so the two seams cannot drift.
+  // SEM-02A: a turn carrying BOTH an explicit human request AND a booking
+  // intent must resolve to HANDOFF / EXPLICIT_HUMAN_REQUEST — the resolver may
+  // never silently drop it into ordinary booking automation. The signals are
+  // derived from the REAL message text (not hand-set), so this proves the
+  // detection seam and the policy seam together. These cases FAIL if the old
+  // uniform `explicitHuman && !hasBookingTask` suppression were restored.
+  {
+    for (const text of [
+      "وصلني بموظف عشان أحجز", // support-role request + booking stem
+      "عايز موظف يحجزلي",
+      "السلام عليكم عايز موظف يحجزلي", // greeting + human + booking
+    ]) {
+      const signals = convAi.detectTurnControlSignals(text);
+      const r = resolve(convAi.classifyCustomerMessage(text, []), { signals });
+      check(
+        `SEM-02A «${text}»: إنسان صريح + حجز → HANDOFF (EXPLICIT_HUMAN_REQUEST)`,
+        signals.explicitHuman === true &&
+          r.decisionClass === "HANDOFF" &&
+          r.precedenceRule === "EXPLICIT_HUMAN_REQUEST" &&
+          r.handoffReason === "HUMAN_REQUEST",
+      );
+    }
+  }
+  // SEM-02B: the counterexample. A provider/professional title inside a
+  // booking request is a provider PREFERENCE — it must NOT become a human
+  // handoff. The turn resolves through the normal provider/booking path
+  // (DOMAIN_ACTION / DOMAIN_DECISION, no handoff reason).
+  {
+    for (const text of [
+      "عايز أحجز مع دكتور",
+      "عايز ميعاد مع دكتورة",
+      "هل فيه دكتور متاح؟",
+      "عايز أحجز مع أي دكتور",
+      "عايز أحجز تنظيف أسنان أي دكتور يوم 2026-09-14",
+    ]) {
+      const signals = convAi.detectTurnControlSignals(text);
+      const r = resolve(convAi.classifyCustomerMessage(text, []), { signals });
+      check(
+        `SEM-02B «${text}»: تفضيل مزود + حجز → DOMAIN_ACTION (ليس تحويلاً بشرياً)`,
+        signals.explicitHuman === false &&
+          r.decisionClass === "DOMAIN_ACTION" &&
+          r.precedenceRule === "DOMAIN_DECISION" &&
+          r.handoffReason === null,
+      );
+    }
+  }
+  // SEM-02C: engine proof for the composite turn. The customer asked for a
+  // human AND a booking in one turn: the engine hands off, emits the
+  // deterministic handoff message, and spends exactly ONE model call (the
+  // 0/1 invariant — no second judge, no booking automation).
+  {
+    const run = await runTurn({
+      text: "وصلني بموظف عشان أحجز",
+      externalId: "s3-sem02c",
+      ai: {
+        providerName: convAi.deterministicConversationAi.providerName,
+        respond: (request: unknown) =>
+          convAi.deterministicConversationAi.respond(request as never),
+      },
+    });
+    const result = run.result as Obs & {
+      ok?: boolean;
+      assistantAction?: string;
+      conversationStatus?: string;
+      intent?: string;
+    };
+    check(
+      "SEM-02C إنسان + حجز عبر المحرك: NEED_HUMAN + HANDOFF + نداء واحد فقط",
+      result.ok === true &&
+        result.assistantAction === "AI_HANDOFF" &&
+        result.conversationStatus === "NEED_HUMAN" &&
+        result.intent === "HUMAN_REQUEST" &&
+        result.observability?.turnPlan?.steps?.[0]?.kind === "HANDOFF" &&
+        run.aiCalls === 1,
+    );
+  }
+  // SEM-02D: engine proof for the counterexample. A provider-preference
+  // booking continues the ordinary BOOKING journey — it asks its bounded
+  // clarification (which service) and stays AI_ACTIVE with NO handoff cause,
+  // i.e. it is never routed to a human. The proof is the turn's own identity:
+  // intent BOOKING, no handoff cause, a non-HANDOFF plan step, and exactly ONE
+  // provider attempt (this fix adds no extra inference to booking turns).
+  {
+    const run = await runTurn({
+      text: "عايز أحجز مع دكتور",
+      externalId: "s3-sem02d",
+      ai: {
+        providerName: convAi.deterministicConversationAi.providerName,
+        respond: (request: unknown) =>
+          convAi.deterministicConversationAi.respond(request as never),
+      },
+    });
+    const result = run.result as Obs & {
+      ok?: boolean;
+      assistantAction?: string;
+      conversationStatus?: string;
+      intent?: string;
+      handoffCause?: string;
+    };
+    check(
+      "SEM-02D تفضيل مزود عبر المحرك: مسار حجز BOOKING عادي (AI_ACTIVE، لا سبب تحويل، ليست HANDOFF) + نداء واحد",
+      result.ok === true &&
+        result.intent === "BOOKING" &&
+        result.conversationStatus === "AI_ACTIVE" &&
+        result.handoffCause === null &&
+        result.observability?.turnPlan?.steps?.[0]?.kind !== "HANDOFF" &&
+        result.observability?.providerAttempts === 1,
     );
   }
 

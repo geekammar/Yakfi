@@ -46,6 +46,21 @@
  *   R10 the turn-scoped signal cannot be poisoned by a previous handoff:
  *       after Resume AI, an old NEED_HUMAN state/cause forces nothing
  *
+ *   PROMPT-AI-SEM-02 (HUMAN_REQUEST + BOOKING precedence — one authoritative
+ *   rule shared by the classifier and the deterministic signal):
+ *   SEM-02A  explicit human (+ booking / + greeting) stays a genuine explicit
+ *            human request at BOTH seams (would fail if the old uniform
+ *            `explicitHuman && !hasBookingTask` suppression were restored)
+ *   SEM-02B  a provider title INSIDE a booking task is a provider PREFERENCE
+ *            at BOTH seams — never a human handoff
+ *   SEM-02B2 a provider title with no booking task and no request cue is
+ *            provider identity, never explicitHuman
+ *   SEM-02C  booking-only turns are unchanged
+ *   SEM-02D  sensitive precedence is untouched by the booking mask
+ *   SEM-02E  closed-world semantics from AI-SEM-01 stay intact
+ *   SEM-02A2/B3 the same contract at ENGINE level (precedence + typed cause)
+ *   SEM-02F  the composite turn gains no second model call (0/1 invariant)
+ *
  * Run: pnpm check:conversation-ops-25
  */
 export {};
@@ -99,7 +114,7 @@ async function main(): Promise<void> {
 
   const engine =
     await import("../src/features/conversations/server/conversation-engine");
-  const { detectTurnControlSignals } =
+  const { detectTurnControlSignals, classifyCustomerMessage } =
     await import("../src/features/conversations/server/conversation-ai");
 
   const BUSINESS_A = "11111111-1111-4111-8111-111111111111";
@@ -194,6 +209,23 @@ async function main(): Promise<void> {
       },
       handoffReason: "HUMAN_REQUEST",
       summary: null,
+    };
+  }
+
+  /** A model that proposed an ORDINARY booking for the current turn. */
+  function bookingReply(): AiResponse {
+    return {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "سيتواصل معك الفريق",
+      extraction: {
+        service: null,
+        provider: null,
+        date: null,
+        timePreference: null,
+      },
+      handoffReason: null,
+      summary: "طلب العميل حجز موعد جديد",
     };
   }
 
@@ -453,6 +485,117 @@ async function main(): Promise<void> {
     eq(turnOf(r7).conversationStatus, "NEED_HUMAN"),
   );
 
+  // ── PROMPT-AI-SEM-02. HUMAN_REQUEST + BOOKING precedence contract ────────
+  // One authoritative rule (`detectExplicitHumanRequest`) now backs BOTH the
+  // classifier and the deterministic signal. Before it, the two seams had
+  // drifted in OPPOSITE directions on the same message:
+  //   - a genuine support-role request LOST its authoritative deterministic
+  //     signal whenever a booking stem shared the turn (`booking => not human`
+  //     applied uniformly), so a model proposing a booking could route the
+  //     customer's own handoff into ordinary booking automation;
+  //   - a provider TITLE inside a booking simultaneously misfired a
+  //     HUMAN_REQUEST handoff in the classifier (the title+cue check ran with
+  //     no booking gate at all).
+  //
+  // Contract: explicitHuman = supportRequest OR (providerRequest AND NOT
+  // bookingTask). A support-role request is never erased by a booking stem; a
+  // provider title is a PREFERENCE inside a booking task, never a handoff.
+  // The checks below are PURE (no engine turn, no message sent) — the engine
+  // level of the contract is proven after R8b.
+  //
+  // SEM-02A (classes A/C/D): explicit human (+ booking / + greeting) stays a
+  // genuine explicit human request at BOTH seams — this FAILS if the old
+  // uniform `explicitHuman && !hasBookingTask` suppression were restored.
+  for (const text of [
+    "وصلني بموظف عشان أحجز", // support role + booking stem (the drift case)
+    "عايز موظف يحجزلي",
+    "السلام عليكم عايز موظف يحجزلي", // greeting + human + booking
+    "عايز أتكلم مع موظف", // human only (class A) — unchanged
+  ]) {
+    const sig = detectTurnControlSignals(text);
+    const cls = classifyCustomerMessage(text, []);
+    check(
+      `SEM-02A. «${text}» → إشارة طلب بشري صريح + HUMAN_REQUEST/handoff في كلا المسارين`,
+      eq(sig.explicitHuman, true) &&
+        eq(cls.intent, "HUMAN_REQUEST") &&
+        eq(cls.action, "handoff") &&
+        eq(cls.handoffReason, "HUMAN_REQUEST"),
+    );
+  }
+
+  // SEM-02B (class E): a provider/professional title inside a booking task is
+  // a PROVIDER PREFERENCE — never an explicit human request, at either seam.
+  for (const text of [
+    "عايز أحجز مع دكتور",
+    "عايز ميعاد مع دكتورة",
+    "هل فيه دكتور متاح؟",
+    "عايز أحجز مع أي دكتور",
+  ]) {
+    const sig = detectTurnControlSignals(text);
+    const cls = classifyCustomerMessage(text, []);
+    check(
+      `SEM-02B. «${text}» → تفضيل مزود: ليس طلباً بشرياً (حجز/توفر، لا تحويل عميل)`,
+      eq(sig.explicitHuman, false) &&
+        cls.intent !== "HUMAN_REQUEST" &&
+        cls.handoffReason !== "HUMAN_REQUEST",
+    );
+  }
+  // SEM-02B2 (class F): a provider title WITHOUT a booking task and WITHOUT a
+  // request-to-speak cue is provider identity, never explicitHuman.
+  for (const text of [
+    "السلام عليكم هو انتو عيادة الدكتورة افنان للاسنان؟",
+    "ما هي تخصصات الدكتور أحمد؟",
+  ]) {
+    check(
+      `SEM-02B2. «${text}» → المسمى الوظيفي وحده ليس طلباً بشرياً (هوية مقدم الخدمة)`,
+      eq(detectTurnControlSignals(text).explicitHuman, false),
+    );
+  }
+
+  // SEM-02C (class B): booking-only turns are unchanged by this fix.
+  for (const [text, intent] of [
+    ["عايز أحجز موعد", "BOOKING"],
+    ["إيه الأوقات المتاحة؟", "AVAILABILITY"],
+  ] as const) {
+    const cls = classifyCustomerMessage(text, []);
+    check(
+      `SEM-02C. «${text}» → ${intent}/booking_handoff (الحجز وحده دون تغيير)`,
+      eq(cls.intent, intent) && eq(cls.action, "booking_handoff"),
+    );
+  }
+
+  // SEM-02D (class G): sensitive precedence is untouched by the booking mask —
+  // sensitive is NOT gated by a booking task, and still hands off.
+  const sensitivePlusBooking = "عايز أحجز وعندي ألم شديد جداً";
+  check(
+    "SEM-02D. حساس + حجز → الإشارة الحساسة موجودة وغير مُقنّعة (أسبقية السلامة)",
+    eq(detectTurnControlSignals(sensitivePlusBooking).sensitive, true) &&
+      eq(
+        classifyCustomerMessage(sensitivePlusBooking, []).handoffReason,
+        "SENSITIVE",
+      ),
+  );
+
+  // SEM-02E (class H): closed-world semantics from AI-SEM-01 stay intact — an
+  // unrecognized / dialectal residual is NOT promoted to a human request by
+  // this fix, and the two seams still AGREE on it.
+  for (const text of [
+    // A vocabulary gap (no lexical entry for «خدمة العملاء»), NOT a precedence
+    // defect — the fix is deliberately not a vocabulary-growth exercise.
+    "عايز حد من خدمة العملاء يحجزلي",
+    "دراجة نارية زرقاء",
+  ]) {
+    const sig = detectTurnControlSignals(text);
+    const cls = classifyCustomerMessage(text, []);
+    check(
+      `SEM-02E. «${text}» → العالم المغلق سليم: AMBIGUOUS/handoff، لا طلب بشري، والمساران متفقان`,
+      eq(sig.explicitHuman, false) &&
+        eq(cls.intent, "AMBIGUOUS") &&
+        eq(cls.action, "handoff") &&
+        eq(cls.handoffReason, "AMBIGUOUS"),
+    );
+  }
+
   // ── R8. a genuine provider failure fails safe with a TYPED cause ────────
   // The failure must never be relabeled as the customer's own request, and
   // the stored handoff cause must represent the provider failure accurately.
@@ -521,6 +664,72 @@ async function main(): Promise<void> {
     "R8b. العميل لا يرى رسالة «طلب العميل» عند فشل المزود",
     !sent.some((content) => content.includes("جارٍ تحويلك")),
   );
+
+  // ── PROMPT-AI-SEM-02 (engine level). Placed AFTER R8b on purpose: these
+  // turns legitimately hand off a genuine human request, so they emit the
+  // deterministic customer-request handoff copy («جارٍ تحويلك»). R8b scans the
+  // whole `sent` history for that copy to prove a PROVIDER FAILURE never
+  // surfaces it — a scope the turns below would pollute, since they are
+  // supposed to send it. R8b's assertion is kept byte-for-byte, unweakened.
+  //
+  // SEM-02A2 (class C): even when the MODEL proposed an ordinary booking, the
+  // authoritative deterministic signal wins → NEED_HUMAN via turn-planner rule
+  // 2, never booking automation. The stored cause is the CUSTOMER's own
+  // request — the sharpest contrast with SEM-02B3 below.
+  await resumeAi();
+  nextReply = bookingReply();
+  const sem02a2 = await run("وصلني بموظف عشان أحجز", "ops25-sem02a2");
+  check(
+    "SEM-02A2. إنسان + حجز: النموذج اقترح حجزاً → NEED_HUMAN + سبب طلب العميل (الإشارة الحتمية تغلب)",
+    sem02a2.ok &&
+      eq(turnOf(sem02a2).conversationStatus, "NEED_HUMAN") &&
+      eq(turnOf(sem02a2).handoffCause, "CUSTOMER_REQUESTED_HUMAN"),
+  );
+
+  // SEM-02B3 (class E): a provider-preference booking keeps the ordinary
+  // booking journey — a bounded clarification, or a staff routing to complete
+  // the booking — but never a CUSTOMER-REQUESTED human handoff.
+  await resumeAi();
+  nextReply = bookingReply();
+  const sem02b3 = await run("عايز أحجز مع دكتور", "ops25-sem02b3");
+  check(
+    "SEM-02B3. تفضيل مزود عبر المحرك: مسار حجز/مجال، ليس طلب عميل بشري",
+    sem02b3.ok && turnOf(sem02b3).handoffCause !== "CUSTOMER_REQUESTED_HUMAN",
+  );
+
+  // SEM-02F (section 7): the composite human+booking turn must not gain a
+  // SECOND model call — the 0/1 invariant is preserved (no second judge, no
+  // classifier→LLM chain). The thread is resumed first so the AI is actually
+  // consulted, and the call count is asserted to be exactly ONE.
+  await resumeAi();
+  {
+    let calls = 0;
+    const countingDeps = {
+      ...deps,
+      ai: {
+        providerName: "scripted-counting",
+        async respond(): Promise<AiResponse> {
+          calls += 1;
+          return humanHandoff();
+        },
+      },
+    } as unknown as ConversationEngineDeps;
+    const res = await engine.receiveInboundMessage(
+      countingDeps,
+      {
+        to: "+201000000000",
+        from: "+201234567890",
+        text: "وصلني بموظف عشان أحجز",
+        receivedAt: now().toISOString(),
+        externalId: "ops25-sem02f",
+      },
+      { businessId: BUSINESS_A, connectionId: null, branchId: BRANCH_A },
+    );
+    check(
+      "SEM-02F. إنسان + حجز → نداء نموذج واحد فقط (الثابت 0/1 سليم)",
+      res.ok && eq(calls, 1),
+    );
+  }
 
   // ── R9. NEED_HUMAN → Resume AI → AI_ACTIVE is durable across turns ──────
   await takeOver();
