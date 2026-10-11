@@ -478,6 +478,109 @@ async function main(): Promise<void> {
       f1NoOverStrip.intent !== "GREETING",
   );
 
+  // ── SEM1. CLOSED-WORLD PURE-GREETING PROOF (PROMPT-AI-SEM-01) ──────────
+  // The deterministic greeting bypass must be CLOSED-WORLD: it may terminate
+  // a turn ONLY when the COMPLETE meaningful utterance is POSITIVELY proven to
+  // be a pure social opening. Greeting vocabulary alone is not evidence that
+  // no second intent exists — unknown language must never be treated as proof
+  // of absence. The motivating failure was open-world («السلام عليكم عايزك
+  // تحجزلي» terminated as GREETING purely because no booking table listed
+  // «تحجزلي»), so a booking request never reached the semantic/generative
+  // path at all. This bank proves the residual rule, NOT a wider dictionary.
+  //
+  // SEM1-1..4: a known-complete pure greeting stays a zero-call deterministic
+  // GREETING (the invariant the fast path exists for).
+  for (const variant of [
+    "السلام عليكم",
+    "أهلا",
+    "صباح الخير",
+    "مساء الخير",
+    "السلام عليكم ورحمة الله", // bounded social allowance: canonical benediction
+  ]) {
+    const classified = classifyCustomerMessage(variant, []);
+    const bypassed = bypassDeterministicAi(requestFor(variant));
+    check(
+      `SEM1-1. «${variant}» → GREETING حتمي (zero-call fast path قائمة)`,
+      eq(classified.intent, "GREETING") &&
+        eq(classified.action, "reply") &&
+        bypassed !== null &&
+        eq(bypassed.intent, "GREETING") &&
+        eq(bypassed.action, "reply"),
+    );
+  }
+  // SEM1-2: a greeting + KNOWN intent vocabulary is not a pure greeting. This
+  // was already correct under the old open-world test; it must stay correct.
+  for (const [text, intent] of [
+    ["السلام عليكم عايز أحجز", "BOOKING"],
+    ["السلام عليكم عايز معاد", "BOOKING"],
+  ] as const) {
+    const classified = classifyCustomerMessage(text, []);
+    const bypassed = bypassDeterministicAi(requestFor(text));
+    check(
+      `SEM1-2. «${text}» → ${intent} (نية معروفة تسبق الترحيب)`,
+      eq(classified.intent, intent) &&
+        classified.intent !== "GREETING" &&
+        bypassed === null, // the deterministic layer did not terminate it
+    );
+  }
+  // SEM1-3: THE MOTIVATING FAILURE. A greeting + MEANINGFUL UNKNOWN RESIDUAL
+  // must NOT terminate as a greeting. The decisive evidence that this pass
+  // comes from the closed-world residual rule and NOT from any dictionary:
+  // the turn matches NO known intent family at all (it resolves to AMBIGUOUS,
+  // not BOOKING), so nothing in the intent tables disqualified it — only the
+  // unexplained residual did. Growing the dialect tables is not the fix here;
+  // the turn now reaches the single existing semantic/generative path.
+  for (const variant of [
+    "السلام عليكم عايزك تحجزلي", // تحجزلي: not in any booking table
+    "صباح الخير book me tomorrow", // unknown Latin residual after a greeting
+  ]) {
+    const classified = classifyCustomerMessage(variant, []);
+    const bypassed = bypassDeterministicAi(requestFor(variant));
+    check(
+      `SEM1-3. «${variant}» → ليست GREETING (بقايا غير مفسَّرة → المسار الدلالي)`,
+      classified.intent !== "GREETING" &&
+        eq(classified.action, "handoff") &&
+        bypassed === null, // no deterministic termination → the model path owns it
+    );
+    // The proof that no known intent vocabulary was involved: had the pass
+    // relied on the booking dictionary, this turn would be BOOKING. It is
+    // AMBIGUOUS instead — the residual rule is what kept it out of GREETING.
+    check(
+      `SEM1-3b. «${variant}» لا تطابق أي نية معروفة (الإثبات سلبي حقيقي)`,
+      eq(classified.intent, "AMBIGUOUS") &&
+        eq(classified.handoffReason, "AMBIGUOUS"),
+    );
+  }
+  // SEM1-4: the bounded social allowance can never mask a second intent — a
+  // benediction plus an unexplained task residual is still NOT a greeting.
+  const allowancePlusTask = "السلام عليكم ورحمة الله، عايزك تحجزلي";
+  check(
+    `SEM1-4. «${allowancePlusTask}» → ليست GREETING (السماحية لا تخفي نية)`,
+    classifyCustomerMessage(allowancePlusTask, []).intent !== "GREETING" &&
+      bypassDeterministicAi(requestFor(allowancePlusTask)) === null,
+  );
+  // SEM1-5: unknown residual that belongs to a DIFFERENT task family (price,
+  // contact) also breaks purity — the rule is not booking-specific.
+  for (const variant of [
+    "أهلا، الأسعار كام؟", // price residual
+    "مرحبا، عندكم عنوان؟", // contact/location residual
+  ]) {
+    check(
+      `SEM1-5. «${variant}» → ليست GREETING (بقايا مهمة أخرى)`,
+      classifyCustomerMessage(variant, []).intent !== "GREETING" &&
+        bypassDeterministicAi(requestFor(variant)) === null,
+    );
+  }
+  // SEM1-6: the pure-greeting set did not silently shrink — every RECOGNIZED
+  // greeting variant the repository intentionally supports stays a greeting.
+  for (const variant of GREETING_VARIANTS) {
+    check(
+      `SEM1-6. «${variant}» لا يزال GREETING (لم يتقلص المجموع المدعوم)`,
+      eq(classifyCustomerMessage(variant, []).intent, "GREETING") &&
+        bypassDeterministicAi(requestFor(variant)) !== null,
+    );
+  }
+
   // ── S1–S3. structural discipline ───────────────────────────────────────
   check(
     "S1. عائلة النيات زادت بعضو واحد فقط (GREETING) — لا نيات أخرى جديدة",
@@ -711,6 +814,51 @@ async function main(): Promise<void> {
     "E4b. لا تكرار لإقرار التحويل (الترحيب ليس تحويلاً)",
     !sent.some((content) => content.includes("سيتواصل معك أحد أعضاء الفريق")) ||
       history.filter((message) => message.includes("أعضاء الفريق")).length <= 1,
+  );
+
+  // ── E5. CLOSED-WORLD end-to-end: unknown residual reaches the ONE model ─
+  // The motivating failure terminated the turn as a GREETING before any model
+  // saw it. This proves the repaired boundary instead: the turn is NOT
+  // terminated deterministically, the engine consults the assistant exactly
+  // ONCE (the existing single model path — no new second inference, no
+  // JEV→LLM chain), and exactly ONE customer send occurs (no duplicate). The
+  // same scripted adapter also answers, proving the safe fallback still owns
+  // the turn when the model path is what decides it.
+  written.length = 0;
+  sent.length = 0;
+  engineAiCalls = 0;
+  conversation = {
+    id: "conv-sem1-1",
+    businessId,
+    status: "AI_ACTIVE",
+    assignedUserId: null,
+  };
+  const residualTurn = await engine.receiveInboundMessage(
+    engineDeps,
+    {
+      to: "+201000000000",
+      from: "+201234567890",
+      text: "السلام عليكم عايزك تحجزلي",
+      receivedAt: nowIso(),
+      externalId: "ext-sem1-1",
+    },
+    { businessId, connectionId: null, branchId },
+  );
+  check(
+    "E5a. ترحيب + بقايا غير مفسَّرة → ليست GREETING (الحد لم ينهِ الدورة حتمياً)",
+    residualTurn.ok &&
+      !residualTurn.duplicate &&
+      residualTurn.intent !== "GREETING" &&
+      residualTurn.intent !== null,
+  );
+  check(
+    "E5b. ... → نداء مزود واحد فقط (مسار النموذج الواحد القائم)",
+    eq(engineAiCalls, 1),
+  );
+  check(
+    "E5c. ... → رسالة AI واحدة فقط (لا تكرار في الإرسال)",
+    written.filter((message) => message.senderType === "AI").length === 1 &&
+      sent.length === 1,
   );
 
   // ── report ─────────────────────────────────────────────────────────────

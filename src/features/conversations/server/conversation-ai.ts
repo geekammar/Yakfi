@@ -356,6 +356,27 @@ const GREETING_PHRASES = [
  */
 const GREETING_TIME_WORDS = ["صباح", "مساء"];
 
+/**
+ * A BOUNDED, explicit allowance of harmless social-protocol phrases that may
+ * accompany a recognized Arabic greeting WITHOUT turning the turn into a task
+ * — the canonical religious benedictions that trail «السلام عليكم»
+ * («ورحمة الله» / the full «ورحمة الله وبركاته»). These are purely social
+ * openings: they name no service, price, slot, person, place, or fact and
+ * carry no request, so a greeting that carries one is still a knowledge-free
+ * social protocol (DECISIONS #61) and still costs zero provider calls.
+ *
+ * Deliberately PHRASE-level, never a bare token list, and deliberately tiny:
+ * an entry explains ONLY its OWN tokens, and ONLY when the phrase actually
+ * occurs in the turn. So «السلام عليكم، عايزك تحجزلي» keeps «تحجزلي» as
+ * unexplained residual and falls through to the semantic path — the allowance
+ * can never mask a second intent, because it claims nothing about any word it
+ * did not itself bring.
+ *
+ * Widening this is an explicit, evidence-gated decision; it is NOT the growth
+ * path for new dialects or new intents (the semantic path owns those).
+ */
+const GREETING_SOCIAL_ALLOWANCE = ["ورحمة الله", "ورحمة الله وبركاته"];
+
 /** Small Egyptian/MSA stopword set (normalized) for FAQ token scoring. */
 const STOPWORDS = new Set(
   [
@@ -429,6 +450,8 @@ const AVAILABILITY_PHRASES_N = AVAILABILITY_PHRASES.map(normalizeArabicText);
 const GREETING_WORDS_N = tokenizedKeywords(GREETING_WORDS);
 const GREETING_PHRASES_N = GREETING_PHRASES.map(normalizeArabicText);
 const GREETING_TIME_WORDS_N = tokenizedKeywords(GREETING_TIME_WORDS);
+const GREETING_SOCIAL_ALLOWANCE_N =
+  GREETING_SOCIAL_ALLOWANCE.map(normalizeArabicText);
 
 /**
  * Bare NON-COMMITTAL fragments ("مش عارف" / "I don't know", "مش متأكد" /
@@ -808,16 +831,71 @@ const BOOKING_SUMMARIES = {
 // ─── FAQ matching ────────────────────────────────────────────────────────────
 
 /**
- * A whole message is a GREETING only when it carries no other intent
- * vocabulary (DECISIONS #61). This is what keeps the greeting path from
- * swallowing real turns: "عايز أحجز" and "كم سعر التنظيف" contain no
- * greeting token at all (verified below), while "السلام عليكم، عايز أحجز"
- * keeps its booking intent because a booking word is present.
+ * The tokens the greeting vocabulary ITSELF accounts for — the positive
+ * coverage basis for the closed-world pure-greeting proof below.
  *
- * A bare time-of-day noun (صباح / مساء) is deliberately NOT a greeting —
- * the canonical forms are the phrases (صباح الخير / مساء الخير), so a
- * one-word "صباح" falls through to the normal path rather than being
- * answered as a greeting.
+ * Derived exclusively from the SAME greeting tables the detection uses
+ * (`GREETING_WORDS` + the `GREETING_PHRASES` that actually occur in the turn),
+ * so it is never a parallel dictionary and can never drift from the detection:
+ * any token the greeting detector claimed is, by construction, explained here.
+ *
+ * Coverage uses the SAME light-morphology rule `hasWord` applies (exact, or a
+ * prefix of a stem ≥ 3 chars), so the proof never contradicts the detection.
+ * Phrase constituents are explained ONLY for a phrase that actually matched
+ * the turn — that match is the positive evidence that the trailing noun
+ * («الخير» / «النور» / «عليكم») belongs to the recognized social opening and
+ * is not a second, unexplained intent.
+ */
+function greetingExplainedTokens(
+  normalized: string,
+  tokens: string[],
+): Set<string> {
+  const explained = new Set<string>();
+  const cover = (stem: string): void => {
+    for (const token of tokens) {
+      if (token === stem || (stem.length >= 3 && token.startsWith(stem))) {
+        explained.add(token);
+      }
+    }
+  };
+  for (const word of GREETING_WORDS) {
+    for (const stem of tokenize(word)) cover(stem);
+  }
+  for (const phrase of GREETING_PHRASES_N) {
+    if (!normalized.includes(phrase)) continue;
+    for (const stem of tokenize(phrase)) cover(stem);
+  }
+  return explained;
+}
+
+/**
+ * The whole meaningful utterance is a PURE social opening (DECISIONS #61).
+ *
+ * CLOSED-WORLD POSITIVE PROOF (PROMPT-AI-SEM-01): a deterministic greeting
+ * bypass is allowed ONLY when the complete meaningful turn is POSITIVELY
+ * proven to belong to the safe greeting family. Greeting vocabulary alone is
+ * NOT sufficient — the turn may ALSO carry a second intent the tables do not
+ * know. So after the greeting is recognized, every remaining MEANINGFUL token
+ * must be accounted for, either by the greeting vocabulary itself or by the
+ * bounded harmless-social allowance above. Any unexplained residual means the
+ * turn is NOT a pure greeting and this returns false, yielding the turn to the
+ * existing semantic/generative path.
+ *
+ * This is fail-open-to-SEMANTICS, not fail-open-to-handoff: unknown language
+ * is never treated as proof that no second intent exists. «السلام عليكم
+ * عايزك تحجزلي» recognizes the greeting but cannot explain «تحجزلي», so it is
+ * NOT answered as a greeting; the single existing model call sees it instead.
+ * The product then grows across phrasings, dialects, and languages WITHOUT a
+ * dictionary of every possible booking expression.
+ *
+ * A greeting is the one conversational turn safely answerable without business
+ * knowledge, so a PROVEN pure greeting crosses the disclosure boundary as a
+ * declared knowledge-free social protocol (the gate passes it by intent, never
+ * by inspecting text) and costs zero provider calls.
+ *
+ * A bare time-of-day noun (صباح / مساء) is deliberately NOT a greeting — the
+ * canonical forms are the phrases (صباح الخير / مساء الخير), so a one-word
+ * «صباح» falls through to the normal path rather than being answered as one.
  */
 function isPureGreeting(
   message: string,
@@ -829,25 +907,6 @@ function isPureGreeting(
   );
   const hasGreetingWord = hasWord(tokens, GREETING_WORDS_N);
   if (!hasGreetingPhrase && !hasGreetingWord) return false;
-  // The greeting vocabulary is the ONLY intent vocabulary in the message.
-  // Any booking / availability / cancellation / reschedule / human /
-  // sensitive word disqualifies the pure-greeting reading.
-  if (
-    hasWord(tokens, BOOKING_WORDS_N) ||
-    hasPhrase(normalized, BOOKING_PHRASES_N) ||
-    hasWord(tokens, AVAILABILITY_WORDS_N) ||
-    hasPhrase(normalized, AVAILABILITY_PHRASES_N) ||
-    hasWord(tokens, CANCELLATION_WORDS_N) ||
-    hasPhrase(normalized, CANCELLATION_PHRASES_N) ||
-    hasWord(tokens, RESCHEDULE_MUTATION_N) ||
-    hasPhrase(normalized, RESCHEDULE_PHRASES_N) ||
-    hasWord(tokens, HUMAN_WORDS_N) ||
-    hasPhrase(normalized, HUMAN_PHRASES_N) ||
-    hasWord(tokens, SENSITIVE_WORDS_N) ||
-    hasPhrase(normalized, SENSITIVE_PHRASES_N)
-  ) {
-    return false;
-  }
   // A question mark means the turn is asking something, not opening a
   // conversation — never answer it as a greeting. (The normalized form
   // strips punctuation, so the RAW message is the only reliable signal.)
@@ -860,7 +919,19 @@ function isPureGreeting(
   ) {
     return false;
   }
-  return true;
+  // THE CLOSED-WORLD TEST: every meaningful token must be positively accounted
+  // for by the recognized greeting itself (or the bounded social allowance).
+  // Anything the greeting vocabulary cannot explain is a possible second
+  // intent — including vocabulary no table here has ever listed — so the turn
+  // is not proven pure and the semantic path owns it.
+  const explained = greetingExplainedTokens(normalized, tokens);
+  if (explained.size === 0) return false;
+  const allowance = new Set<string>();
+  for (const phrase of GREETING_SOCIAL_ALLOWANCE_N) {
+    if (!normalized.includes(phrase)) continue;
+    for (const token of tokenize(phrase)) allowance.add(token);
+  }
+  return tokens.every((token) => explained.has(token) || allowance.has(token));
 }
 
 /**
@@ -1117,12 +1188,11 @@ export function classifyCustomerMessage(
 
   // GREETING (DECISIONS #61) — a pure social opening is answered
   // deterministically and stays AI_ACTIVE. It runs AFTER the safety
-  // intents (an explicit human request above, and sensitive language whose
-  // vocabulary isPureGreeting also disqualifies) and BEFORE booking/FAQ: a
-  // real booking or knowledge turn carries its own keywords and does not
-  // match a pure greeting (see isPureGreeting — a message with any other
-  // intent vocabulary is not a greeting). This branch never spends an LLM
-  // call.
+  // intents (an explicit human request above; sensitive language below) and
+  // BEFORE booking/FAQ: a real booking or knowledge turn carries meaningful
+  // tokens the greeting vocabulary cannot explain, so the closed-world proof
+  // in `isPureGreeting` yields it to this branch instead of answering it as a
+  // greeting (see `isPureGreeting`). This branch never spends an LLM call.
   if (isPureGreeting(message, normalized, tokens)) {
     return greetingResponse(message);
   }
