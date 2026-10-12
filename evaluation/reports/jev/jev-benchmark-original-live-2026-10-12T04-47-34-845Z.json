@@ -1,0 +1,6746 @@
+{
+  "mode": "live",
+  "pinnedModel": "typesafe/jev-1.13",
+  "requestedModel": "typesafe/jev-1.13",
+  "questionContractId": "flowpilot.jev-questions@v2",
+  "contractFingerprint": "sha256:944db02b0993f920",
+  "policyFingerprint": "sha256:a01c368d17e5629e",
+  "policyId": "flowpilot.jev-policy@v2",
+  "bank": "original",
+  "sliceFingerprints": {
+    "original": "sha256:69341a65821179a9",
+    "calibration": "sha256:8a76f9e4deeb94f8",
+    "holdout": "sha256:d3f4a90715c80066"
+  },
+  "plannedRequests": 40,
+  "executedRequests": 40,
+  "fixtures": 40,
+  "scoredQuestions": 125,
+  "rows": [
+    {
+      "fixtureId": "greeting-pure-salam",
+      "classes": [
+        "pure-greeting"
+      ],
+      "message": "السلام عليكم",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.03,
+        "providerRequested": 0.03,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.06,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.09,
+        "greetingOnly": 0.97,
+        "ambiguousTurn": 0.04,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "greeting",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 268,
+      "inputTokens": 2648,
+      "outputTokens": 317,
+      "cost": 0.000111216
+    },
+    {
+      "fixtureId": "greeting-pure-sabah",
+      "classes": [
+        "pure-greeting"
+      ],
+      "message": "صباح الخير",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": true,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.03,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.06,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.97,
+        "ambiguousTurn": 0.04,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "greeting",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 165,
+      "inputTokens": 2646,
+      "outputTokens": 317,
+      "cost": 0.000111132
+    },
+    {
+      "fixtureId": "greeting-pure-ahlan",
+      "classes": [
+        "pure-greeting"
+      ],
+      "message": "أهلاً وسهلاً",
+      "expected": {
+        "supportRequested": null,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": true,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.02,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.06,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.97,
+        "ambiguousTurn": 0.05,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "greeting",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 168,
+      "inputTokens": 2653,
+      "outputTokens": 317,
+      "cost": 0.000111426
+    },
+    {
+      "fixtureId": "greeting-plus-residual-booking",
+      "classes": [
+        "greeting-plus-unknown-residual",
+        "egyptian-arabic-variant"
+      ],
+      "message": "السلام عليكم عايزك تحجزلي",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.08,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.95,
+        "availabilityAsked": 0.1,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.12,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.95,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 163,
+      "inputTokens": 2659,
+      "outputTokens": 315,
+      "cost": 0.000111678
+    },
+    {
+      "fixtureId": "greeting-plus-residual-english-mixed",
+      "classes": [
+        "greeting-plus-unknown-residual",
+        "mixed-arabic-english"
+      ],
+      "message": "Hello, I want to book an appointment please",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.98,
+        "availabilityAsked": 0.1,
+        "cancellationRequested": 0.01,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.05,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.05,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.98,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.01,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 164,
+      "inputTokens": 2650,
+      "outputTokens": 315,
+      "cost": 0.0001113
+    },
+    {
+      "fixtureId": "booking-only-ahegez",
+      "classes": [
+        "booking-only",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز أحجز موعد",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.97,
+        "availabilityAsked": 0.14,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.06,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.06,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.14,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 149,
+      "inputTokens": 2650,
+      "outputTokens": 315,
+      "cost": 0.0001113
+    },
+    {
+      "fixtureId": "booking-only-mawid-jadid",
+      "classes": [
+        "booking-only"
+      ],
+      "message": "أبي موعد جديد",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.09,
+        "providerRequested": 0.07,
+        "bookingRequested": 0.94,
+        "availabilityAsked": 0.34,
+        "cancellationRequested": 0.04,
+        "rescheduleRequested": 0.2,
+        "providerPreferenceExpressed": 0.06,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.04,
+        "ambiguousTurn": 0.09,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.34,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.2,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.92,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 192,
+      "inputTokens": 2646,
+      "outputTokens": 315,
+      "cost": 0.000111132
+    },
+    {
+      "fixtureId": "booking-only-english",
+      "classes": [
+        "booking-only"
+      ],
+      "message": "I'd like to book an appointment",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.98,
+        "availabilityAsked": 0.1,
+        "cancellationRequested": 0.01,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.05,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.05,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.98,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.01,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 171,
+      "inputTokens": 2648,
+      "outputTokens": 315,
+      "cost": 0.000111216
+    },
+    {
+      "fixtureId": "availability-mata-momken",
+      "classes": [
+        "availability",
+        "egyptian-arabic-variant"
+      ],
+      "message": "إمتى ممكن أجي؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.1,
+        "bookingRequested": 0.14,
+        "availabilityAsked": 0.89,
+        "cancellationRequested": 0.03,
+        "rescheduleRequested": 0.12,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.04,
+        "serviceOrPriceAsked": 0.3,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.13,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.14,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.89,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.3,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.13,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "availability",
+      "goalConfidence": 0.76,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 176,
+      "inputTokens": 2650,
+      "outputTokens": 315,
+      "cost": 0.0001113
+    },
+    {
+      "fixtureId": "availability-fe-mawid",
+      "classes": [
+        "availability"
+      ],
+      "message": "هل عندكم معادين الأسبوع الجاي؟",
+      "expected": {
+        "supportRequested": null,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.06,
+        "bookingRequested": 0.11,
+        "availabilityAsked": 0.96,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.1,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.12,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.07,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "availability",
+      "goalConfidence": 0.98,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 169,
+      "inputTokens": 2667,
+      "outputTokens": 315,
+      "cost": 0.000112014
+    },
+    {
+      "fixtureId": "reschedule-taghyeer-mawid",
+      "classes": [
+        "reschedule",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز أغير موعدى",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": false,
+        "rescheduleRequested": true,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": true,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.16,
+        "cancellationRequested": 0.04,
+        "rescheduleRequested": 0.97,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.05,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.09,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.16,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "reschedule",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 138,
+      "inputTokens": 2655,
+      "outputTokens": 317,
+      "cost": 0.00011151
+    },
+    {
+      "fixtureId": "reschedule-maad-tani",
+      "classes": [
+        "reschedule"
+      ],
+      "message": "ممكن نأجل الموعد للأسبوع الجاي؟",
+      "expected": {
+        "supportRequested": null,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": true,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": true,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.06,
+        "availabilityAsked": 0.51,
+        "cancellationRequested": 0.03,
+        "rescheduleRequested": 0.95,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.06,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.06,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.51,
+          "fact": false,
+          "confidence": "low",
+          "source": "family-competition",
+          "note": "suppressed by family competition; rescheduleRequested scored higher (0.95 > 0.51)"
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.95,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "reschedule",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 151,
+      "inputTokens": 2670,
+      "outputTokens": 317,
+      "cost": 0.00011214
+    },
+    {
+      "fixtureId": "cancellation-ilghaa",
+      "classes": [
+        "cancellation",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز ألغى الحجز",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": true,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": true,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.03,
+        "bookingRequested": 0.02,
+        "availabilityAsked": 0.03,
+        "cancellationRequested": 0.96,
+        "rescheduleRequested": 0.05,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.04,
+        "serviceOrPriceAsked": 0.04,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.08,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "cancellation",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 163,
+      "inputTokens": 2654,
+      "outputTokens": 318,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "cancellation-mesh-hahdar",
+      "classes": [
+        "cancellation",
+        "egyptian-arabic-variant"
+      ],
+      "message": "مش هقدر أحضر بكرة",
+      "expected": {
+        "supportRequested": null,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": true,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": true,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.1,
+        "availabilityAsked": 0.15,
+        "cancellationRequested": 0.82,
+        "rescheduleRequested": 0.28,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.07,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.04,
+        "ambiguousTurn": 0.21,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.15,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.82,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.28,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.21,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "reschedule",
+      "goalConfidence": 0.55,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 161,
+      "inputTokens": 2655,
+      "outputTokens": 317,
+      "cost": 0.00011151
+    },
+    {
+      "fixtureId": "human-only-mwathaf",
+      "classes": [
+        "explicit-human-only",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز أكلم موظف",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.93,
+        "providerRequested": 0.17,
+        "bookingRequested": 0.04,
+        "availabilityAsked": 0.06,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.06,
+        "sensitiveTurn": 0.12,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.21,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.93,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.17,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.21,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 160,
+      "inputTokens": 2654,
+      "outputTokens": 318,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "human-only-customer-service",
+      "classes": [
+        "explicit-human-only",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز حد من خدمة العملاء",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.96,
+        "providerRequested": 0.07,
+        "bookingRequested": 0.07,
+        "availabilityAsked": 0.07,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.06,
+        "sensitiveTurn": 0.1,
+        "serviceOrPriceAsked": 0.16,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.16,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.16,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.16,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 154,
+      "inputTokens": 2649,
+      "outputTokens": 318,
+      "cost": 0.000111258
+    },
+    {
+      "fixtureId": "human-only-wsali-bhad",
+      "classes": [
+        "explicit-human-only",
+        "egyptian-arabic-variant"
+      ],
+      "message": "وصلني بحد",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": true,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.52,
+        "providerRequested": 0.3,
+        "bookingRequested": 0.2,
+        "availabilityAsked": 0.37,
+        "cancellationRequested": 0.12,
+        "rescheduleRequested": 0.22,
+        "providerPreferenceExpressed": 0.1,
+        "sensitiveTurn": 0.43,
+        "serviceOrPriceAsked": 0.21,
+        "greetingOnly": 0.67,
+        "ambiguousTurn": 0.5,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.52,
+          "fact": true,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.3,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.2,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.37,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.22,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.43,
+          "fact": false,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.21,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.67,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.5,
+          "fact": true,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 0.42,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 141,
+      "inputTokens": 2649,
+      "outputTokens": 318,
+      "cost": 0.000111258
+    },
+    {
+      "fixtureId": "human-plus-booking-mwathaf",
+      "classes": [
+        "explicit-human-plus-booking",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز موظف يحجزلي",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.83,
+        "providerRequested": 0.06,
+        "bookingRequested": 0.94,
+        "availabilityAsked": 0.18,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.48,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.13,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.83,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.18,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.48,
+          "fact": false,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.13,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.67,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 233,
+      "inputTokens": 2657,
+      "outputTokens": 315,
+      "cost": 0.000111594
+    },
+    {
+      "fixtureId": "human-plus-booking-wsali",
+      "classes": [
+        "explicit-human-plus-booking",
+        "egyptian-arabic-variant"
+      ],
+      "message": "وصلني بموظف عشان أحجز",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.7,
+        "providerRequested": 0.11,
+        "bookingRequested": 0.93,
+        "availabilityAsked": 0.14,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.1,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.09,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.7,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.93,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.14,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.69,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 183,
+      "inputTokens": 2659,
+      "outputTokens": 315,
+      "cost": 0.000111678
+    },
+    {
+      "fixtureId": "human-plus-booking-customer-service",
+      "classes": [
+        "explicit-human-plus-booking",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز حد من خدمة العملاء يحجزلي",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.94,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.95,
+        "availabilityAsked": 0.13,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.13,
+        "sensitiveTurn": 0.04,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.11,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.95,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.13,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.13,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 0.44,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 153,
+      "inputTokens": 2656,
+      "outputTokens": 318,
+      "cost": 0.000111552
+    },
+    {
+      "fixtureId": "greeting-human-booking",
+      "classes": [
+        "greeting-plus-explicit-human-plus-booking",
+        "greeting-plus-unknown-residual",
+        "egyptian-arabic-variant"
+      ],
+      "message": "السلام عليكم، عايز موظف يحجزلي",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.84,
+        "providerRequested": 0.06,
+        "bookingRequested": 0.93,
+        "availabilityAsked": 0.2,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.41,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.12,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.84,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.93,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.2,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.41,
+          "fact": false,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.7,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 187,
+      "inputTokens": 2665,
+      "outputTokens": 315,
+      "cost": 0.00011193
+    },
+    {
+      "fixtureId": "provider-pref-plus-booking",
+      "classes": [
+        "provider-preference-plus-booking",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز احجز مع دكتور",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": true,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": true,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.06,
+        "bookingRequested": 0.96,
+        "availabilityAsked": 0.18,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.83,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.08,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.1,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.18,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.83,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 155,
+      "inputTokens": 2655,
+      "outputTokens": 315,
+      "cost": 0.00011151
+    },
+    {
+      "fixtureId": "provider-pref-plus-booking-female",
+      "classes": [
+        "provider-preference-plus-booking",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز ميعاد مع دكتورة",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": true,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": true,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.12,
+        "bookingRequested": 0.94,
+        "availabilityAsked": 0.38,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.87,
+        "sensitiveTurn": 0.04,
+        "serviceOrPriceAsked": 0.09,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.1,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.38,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.87,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.99,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 141,
+      "inputTokens": 2658,
+      "outputTokens": 315,
+      "cost": 0.000111636
+    },
+    {
+      "fixtureId": "provider-availability",
+      "classes": [
+        "provider-availability",
+        "egyptian-arabic-variant"
+      ],
+      "message": "هل فيه دكتور متاح؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": true,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.08,
+        "bookingRequested": 0.11,
+        "availabilityAsked": 0.96,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.08,
+        "sensitiveTurn": 0.09,
+        "serviceOrPriceAsked": 0.21,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.1,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.21,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "availability",
+      "goalConfidence": 0.98,
+      "disagreements": [
+        "providerPreferenceExpressed: expected true, model false"
+      ],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 155,
+      "inputTokens": 2654,
+      "outputTokens": 315,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "provider-title-identity-question",
+      "classes": [
+        "provider-title-without-request-cue",
+        "greeting-plus-unknown-residual"
+      ],
+      "message": "السلام عليكم، هو انتو عيادة الدكتورة افنان للاسنان؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": null,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.61,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.06,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.33,
+        "greetingOnly": 0.04,
+        "ambiguousTurn": 0.11,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.61,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.33,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "service_info",
+      "goalConfidence": 0.89,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 185,
+      "inputTokens": 2681,
+      "outputTokens": 316,
+      "cost": 0.000112602
+    },
+    {
+      "fixtureId": "service-question",
+      "classes": [
+        "service-question",
+        "egyptian-arabic-variant"
+      ],
+      "message": "ما هي الخدمات اللي بتقدموها؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.02,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.02,
+        "availabilityAsked": 0.39,
+        "cancellationRequested": 0.01,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.97,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.04,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.39,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.01,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "service_info",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 160,
+      "inputTokens": 2654,
+      "outputTokens": 316,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "price-question",
+      "classes": [
+        "price-question",
+        "egyptian-arabic-variant"
+      ],
+      "message": "بكم تنظيف الأسنان؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.03,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.04,
+        "availabilityAsked": 0.05,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.97,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.09,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "service_info",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 142,
+      "inputTokens": 2647,
+      "outputTokens": 316,
+      "cost": 0.000111174
+    },
+    {
+      "fixtureId": "sensitive-severe-pain",
+      "classes": [
+        "sensitive-turn",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عندي ألم شديد في ضرسى ومش قادر أنام",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.04,
+        "providerRequested": 0.08,
+        "bookingRequested": 0.06,
+        "availabilityAsked": 0.08,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.96,
+        "serviceOrPriceAsked": 0.15,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.11,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.15,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.89,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 175,
+      "inputTokens": 2661,
+      "outputTokens": 315,
+      "cost": 0.000111762
+    },
+    {
+      "fixtureId": "sensitive-complaint",
+      "classes": [
+        "sensitive-turn",
+        "egyptian-arabic-variant"
+      ],
+      "message": "أنا زعلان جداً من المعاملة اللي حصلت",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": null,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.08,
+        "providerRequested": 0.03,
+        "bookingRequested": 0.03,
+        "availabilityAsked": 0.03,
+        "cancellationRequested": 0.04,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.87,
+        "serviceOrPriceAsked": 0.05,
+        "greetingOnly": 0.07,
+        "ambiguousTurn": 0.35,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.87,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.35,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 0.46,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 186,
+      "inputTokens": 2664,
+      "outputTokens": 318,
+      "cost": 0.000111888
+    },
+    {
+      "fixtureId": "ambiguous-too-short",
+      "classes": [
+        "ambiguous-unsupported",
+        "egyptian-arabic-variant"
+      ],
+      "message": "اه",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": true,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.05,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.06,
+        "availabilityAsked": 0.12,
+        "cancellationRequested": 0.04,
+        "rescheduleRequested": 0.05,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.08,
+        "serviceOrPriceAsked": 0.19,
+        "greetingOnly": 0.79,
+        "ambiguousTurn": 0.43,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.12,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.19,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.79,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.43,
+          "fact": false,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "greeting",
+      "goalConfidence": 0.61,
+      "disagreements": [
+        "ambiguousTurn: expected true, model false"
+      ],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 229,
+      "inputTokens": 2642,
+      "outputTokens": 317,
+      "cost": 0.000110964
+    },
+    {
+      "fixtureId": "ambiguous-unsupported-topic",
+      "classes": [
+        "ambiguous-unsupported"
+      ],
+      "message": "ما رأيك في الطقس اليوم؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": null,
+        "ambiguousTurn": true,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": true,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.03,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.02,
+        "availabilityAsked": 0.03,
+        "cancellationRequested": 0.01,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.03,
+        "greetingOnly": 0.06,
+        "ambiguousTurn": 0.7,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.01,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.7,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "greeting",
+      "goalConfidence": 0.5,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 139,
+      "inputTokens": 2654,
+      "outputTokens": 317,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "mixed-arabic-english-booking",
+      "classes": [
+        "mixed-arabic-english",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز أحجز appointment بكرة",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.05,
+        "bookingRequested": 0.97,
+        "availabilityAsked": 0.16,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.06,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.06,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.97,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.16,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 150,
+      "inputTokens": 2654,
+      "outputTokens": 315,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "mixed-arabic-english-human",
+      "classes": [
+        "mixed-arabic-english",
+        "egyptian-arabic-variant"
+      ],
+      "message": "ممكن أتكلم مع حد please؟",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": true,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.83,
+        "providerRequested": 0.55,
+        "bookingRequested": 0.06,
+        "availabilityAsked": 0.09,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.05,
+        "sensitiveTurn": 0.1,
+        "serviceOrPriceAsked": 0.09,
+        "greetingOnly": 0.04,
+        "ambiguousTurn": 0.27,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.83,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.55,
+          "fact": true,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.05,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.27,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 1,
+      "disagreements": [
+        "providerRequested: expected false, model true"
+      ],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 218,
+      "inputTokens": 2654,
+      "outputTokens": 318,
+      "cost": 0.000111468
+    },
+    {
+      "fixtureId": "egyptian-variant-ayeh",
+      "classes": [
+        "egyptian-arabic-variant",
+        "booking-only"
+      ],
+      "message": "عايز أحجز معاد يعني",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.07,
+        "providerRequested": 0.06,
+        "bookingRequested": 0.96,
+        "availabilityAsked": 0.2,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.04,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.09,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.2,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 169,
+      "inputTokens": 2655,
+      "outputTokens": 315,
+      "cost": 0.00011151
+    },
+    {
+      "fixtureId": "egyptian-variant-3ayez",
+      "classes": [
+        "egyptian-arabic-variant",
+        "booking-only"
+      ],
+      "message": "عايز موعد ضروري",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.1,
+        "providerRequested": 0.09,
+        "bookingRequested": 0.88,
+        "availabilityAsked": 0.38,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.08,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.38,
+        "serviceOrPriceAsked": 0.07,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.1,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.88,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.38,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.38,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.95,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 191,
+      "inputTokens": 2651,
+      "outputTokens": 315,
+      "cost": 0.000111342
+    },
+    {
+      "fixtureId": "multi-intent-booking-plus-service",
+      "classes": [
+        "multi-intent",
+        "egyptian-arabic-variant"
+      ],
+      "message": "عايز أحجز تنظيف، وبكام الحشو كمان؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": true,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": true,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.04,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.94,
+        "availabilityAsked": 0.2,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.87,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.06,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.2,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.87,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "booking",
+      "goalConfidence": 0.74,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 152,
+      "inputTokens": 2668,
+      "outputTokens": 315,
+      "cost": 0.000112056
+    },
+    {
+      "fixtureId": "multi-intent-greeting-plus-availability",
+      "classes": [
+        "multi-intent",
+        "greeting-plus-unknown-residual",
+        "egyptian-arabic-variant"
+      ],
+      "message": "أهلاً، إمتى في معاد فاضي؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": null,
+        "availabilityAsked": true,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": false,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.08,
+        "providerRequested": 0.11,
+        "bookingRequested": 0.09,
+        "availabilityAsked": 0.94,
+        "cancellationRequested": 0.03,
+        "rescheduleRequested": 0.1,
+        "providerPreferenceExpressed": 0.04,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.3,
+        "greetingOnly": 0.04,
+        "ambiguousTurn": 0.11,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.08,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.09,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.94,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.1,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.3,
+          "fact": false,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "availability",
+      "goalConfidence": 0.95,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 146,
+      "inputTokens": 2663,
+      "outputTokens": 315,
+      "cost": 0.000111846
+    },
+    {
+      "fixtureId": "broad-support-role-modir-no-request",
+      "classes": [
+        "broad-support-role-false-positive",
+        "egyptian-arabic-variant"
+      ],
+      "message": "سمعت إن مدير العيادة جديد، إمتى تفتحوا؟",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": null,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": true,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": true,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.06,
+        "providerRequested": 0.04,
+        "bookingRequested": 0.06,
+        "availabilityAsked": 0.9,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.06,
+        "sensitiveTurn": 0.03,
+        "serviceOrPriceAsked": 0.78,
+        "greetingOnly": 0.03,
+        "ambiguousTurn": 0.11,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.9,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.06,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.78,
+          "fact": true,
+          "confidence": "moderate",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "availability",
+      "goalConfidence": 0.6,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 143,
+      "inputTokens": 2667,
+      "outputTokens": 315,
+      "cost": 0.000112014
+    },
+    {
+      "fixtureId": "broad-support-role-musaaada-no-request",
+      "classes": [
+        "broad-support-role-false-positive",
+        "egyptian-arabic-variant"
+      ],
+      "message": "شكراً على المساعدة، الخدمة كانت ممتازة",
+      "expected": {
+        "supportRequested": false,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": false,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": false,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": true,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.02,
+        "providerRequested": 0.02,
+        "bookingRequested": 0.02,
+        "availabilityAsked": 0.03,
+        "cancellationRequested": 0.02,
+        "rescheduleRequested": 0.02,
+        "providerPreferenceExpressed": 0.03,
+        "sensitiveTurn": 0.02,
+        "serviceOrPriceAsked": 0.04,
+        "greetingOnly": 0.55,
+        "ambiguousTurn": 0.14,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.55,
+          "fact": true,
+          "confidence": "low",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.14,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "ambiguous",
+      "goalConfidence": 0.55,
+      "disagreements": [],
+      "expectedExplicitHuman": false,
+      "modelExplicitHuman": false,
+      "precedenceDerivation": "none",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 190,
+      "inputTokens": 2665,
+      "outputTokens": 317,
+      "cost": 0.00011193
+    },
+    {
+      "fixtureId": "broad-support-role-modir-complaint-context",
+      "classes": [
+        "broad-support-role-false-positive",
+        "sensitive-turn",
+        "egyptian-arabic-variant"
+      ],
+      "message": "الخدمة كانت سيئة ومحتاج أتكلم مع المدير",
+      "expected": {
+        "supportRequested": true,
+        "providerRequested": null,
+        "bookingRequested": false,
+        "availabilityAsked": null,
+        "cancellationRequested": null,
+        "rescheduleRequested": null,
+        "providerPreferenceExpressed": null,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": null,
+        "greetingOnly": null,
+        "ambiguousTurn": null,
+        "conversationGoal": null
+      },
+      "model": {
+        "supportRequested": true,
+        "providerRequested": false,
+        "bookingRequested": false,
+        "availabilityAsked": false,
+        "cancellationRequested": false,
+        "rescheduleRequested": false,
+        "providerPreferenceExpressed": false,
+        "sensitiveTurn": true,
+        "serviceOrPriceAsked": false,
+        "greetingOnly": false,
+        "ambiguousTurn": false,
+        "conversationGoal": null
+      },
+      "rawProbabilities": {
+        "supportRequested": 0.96,
+        "providerRequested": 0.07,
+        "bookingRequested": 0.02,
+        "availabilityAsked": 0.03,
+        "cancellationRequested": 0.03,
+        "rescheduleRequested": 0.03,
+        "providerPreferenceExpressed": 0.11,
+        "sensitiveTurn": 0.93,
+        "serviceOrPriceAsked": 0.04,
+        "greetingOnly": 0.02,
+        "ambiguousTurn": 0.15,
+        "conversationGoal": null
+      },
+      "policyDecisions": [
+        {
+          "key": "supportRequested",
+          "probability": 0.96,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerRequested",
+          "probability": 0.07,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "bookingRequested",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "availabilityAsked",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "cancellationRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "rescheduleRequested",
+          "probability": 0.03,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "providerPreferenceExpressed",
+          "probability": 0.11,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "sensitiveTurn",
+          "probability": 0.93,
+          "fact": true,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "serviceOrPriceAsked",
+          "probability": 0.04,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "greetingOnly",
+          "probability": 0.02,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "ambiguousTurn",
+          "probability": 0.15,
+          "fact": false,
+          "confidence": "high",
+          "source": "direct",
+          "note": null
+        },
+        {
+          "key": "conversationGoal",
+          "probability": null,
+          "fact": null,
+          "confidence": null,
+          "source": "absent",
+          "note": null
+        }
+      ],
+      "goalChoice": "human_handoff",
+      "goalConfidence": 1,
+      "disagreements": [],
+      "expectedExplicitHuman": true,
+      "modelExplicitHuman": true,
+      "precedenceDerivation": "supportRequest",
+      "ok": true,
+      "errorCode": null,
+      "errorMessage": null,
+      "requestedModel": "typesafe/jev-1.13",
+      "servedModel": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "latencyMs": 143,
+      "inputTokens": 2666,
+      "outputTokens": 318,
+      "cost": 0.000111972
+    }
+  ],
+  "totals": {
+    "inputTokens": 106253,
+    "outputTokens": 12645,
+    "cost": 0.004462625999999998,
+    "errors": 0,
+    "disagreements": 3,
+    "latency": {
+      "min": 138,
+      "p50": 163,
+      "p95": 233,
+      "max": 268
+    }
+  },
+  "byClass": {
+    "pure-greeting": {
+      "cases": 3,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "greeting-plus-unknown-residual": {
+      "cases": 5,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "egyptian-arabic-variant": {
+      "cases": 30,
+      "disagreements": 3,
+      "errors": 0
+    },
+    "mixed-arabic-english": {
+      "cases": 3,
+      "disagreements": 1,
+      "errors": 0
+    },
+    "booking-only": {
+      "cases": 5,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "availability": {
+      "cases": 2,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "reschedule": {
+      "cases": 2,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "cancellation": {
+      "cases": 2,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "explicit-human-only": {
+      "cases": 3,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "explicit-human-plus-booking": {
+      "cases": 3,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "greeting-plus-explicit-human-plus-booking": {
+      "cases": 1,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "provider-preference-plus-booking": {
+      "cases": 2,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "provider-availability": {
+      "cases": 1,
+      "disagreements": 1,
+      "errors": 0
+    },
+    "provider-title-without-request-cue": {
+      "cases": 1,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "service-question": {
+      "cases": 1,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "price-question": {
+      "cases": 1,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "sensitive-turn": {
+      "cases": 3,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "ambiguous-unsupported": {
+      "cases": 2,
+      "disagreements": 1,
+      "errors": 0
+    },
+    "multi-intent": {
+      "cases": 2,
+      "disagreements": 0,
+      "errors": 0
+    },
+    "broad-support-role-false-positive": {
+      "cases": 3,
+      "disagreements": 0,
+      "errors": 0
+    }
+  },
+  "classCoverage": {
+    "pure-greeting": 3,
+    "greeting-plus-unknown-residual": 5,
+    "booking-only": 5,
+    "availability": 2,
+    "reschedule": 2,
+    "cancellation": 2,
+    "explicit-human-only": 3,
+    "explicit-human-plus-booking": 3,
+    "greeting-plus-explicit-human-plus-booking": 1,
+    "provider-preference-plus-booking": 2,
+    "provider-availability": 1,
+    "provider-title-without-request-cue": 1,
+    "provider-direct-contact": 0,
+    "provider-identity": 0,
+    "provider-availability-plus-greeting": 0,
+    "provider-availability-plus-service": 0,
+    "booking-with-named-provider": 0,
+    "reschedule-cancel-paraphrase": 0,
+    "non-attendance-cancellation": 0,
+    "non-attendance-reschedule": 0,
+    "sensitive-plus-booking": 0,
+    "sensitive-no-booking": 0,
+    "service-question": 1,
+    "price-question": 1,
+    "sensitive-turn": 3,
+    "ambiguous-unsupported": 2,
+    "unknown-residual": 0,
+    "mixed-arabic-english": 3,
+    "egyptian-arabic-variant": 30,
+    "msa-variant": 0,
+    "multi-intent": 2,
+    "broad-support-role-false-positive": 3
+  },
+  "missingClasses": [
+    "provider-direct-contact",
+    "provider-identity",
+    "provider-availability-plus-greeting",
+    "provider-availability-plus-service",
+    "booking-with-named-provider",
+    "reschedule-cancel-paraphrase",
+    "non-attendance-cancellation",
+    "non-attendance-reschedule",
+    "sensitive-plus-booking",
+    "sensitive-no-booking",
+    "unknown-residual",
+    "msa-variant"
+  ],
+  "credentialPresent": true
+}

@@ -46,6 +46,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { config } from "dotenv";
 
@@ -77,11 +78,26 @@ const LIVE = args.includes("--live");
 const WRITE_ARTIFACT = args.includes("--write-artifact");
 const modelArg = readFlag("--model");
 const limitArg = Number(readFlag("--limit") ?? "0") || 0;
+const bankArg = readFlag("--bank");
 
 function readFlag(name: string): string | null {
   const i = args.indexOf(name);
   return i >= 0 ? (args[i + 1] ?? "") : null;
 }
+
+// ── Bank-slice selection (PROMPT-AI-JEV-02 §8/§9) ─────────────────────────────
+// `original`    the frozen AI-JEV-01 bank — the before/after comparison set.
+// `calibration` STAGE A only: evaluate candidate definitions + select policy.
+// `holdout`     STAGE B only: frozen, run exactly once after the freeze.
+// `all`         every slice (the full PROMPT-AI-JEV-02 bank).
+type BankSelection = "original" | "calibration" | "holdout" | "all";
+const BANK: BankSelection =
+  bankArg === "calibration" ||
+  bankArg === "holdout" ||
+  bankArg === "original" ||
+  bankArg === "all"
+    ? (bankArg as BankSelection)
+    : "original";
 
 // ─── Row shape (the benchmark's evidence record) ─────────────────────────────
 
@@ -99,6 +115,15 @@ type BenchmarkRow = {
   goalConfidence: number | null;
   /** Disagreements on scored questions only. */
   disagreements: string[];
+  /** The policy decisions for each derived fact (auditable). */
+  policyDecisions: Array<{
+    key: string;
+    probability: number | null;
+    fact: boolean | null;
+    confidence: string | null;
+    source: string;
+    note: string | null;
+  }>;
   /** The server-owned precedence verdict derived from each fact set. */
   expectedExplicitHuman: boolean;
   modelExplicitHuman: boolean;
@@ -124,6 +149,15 @@ type BenchmarkReport = {
   executedRequests: number;
   fixtures: number;
   scoredQuestions: number;
+  /** The frozen contract + policy fingerprints this run is bound to (§9/§10). */
+  contractFingerprint: string;
+  policyFingerprint: string;
+  /** The probability→fact policy id that derived the model facts. */
+  policyId: string;
+  /** The bank slice(s) this run measured. */
+  bank: BankSelection;
+  /** Slice fingerprints, so a frozen set is provably identified. */
+  sliceFingerprints: Record<string, string>;
   rows: BenchmarkRow[];
   totals: {
     inputTokens: number;
@@ -229,15 +263,21 @@ async function main(): Promise<void> {
   const adapterMod = await import("../evaluation/jev/jev-decisions-adapter");
   const contractMod = await import("../evaluation/jev/jev-question-contract");
   const bankMod = await import("../evaluation/jev/jev-fixture-bank");
+  const policyMod = await import("../evaluation/jev/jev-probability-policy");
 
   const PINNED = adapterMod.JEV_PINNED_MODEL;
   const requestedModel = modelArg && modelArg.length > 0 ? modelArg : PINNED;
   const questions = contractMod.jevQuestionSet();
   const keys = contractMod.jevQuestionKeys;
-  const fixtures =
-    limitArg > 0
-      ? bankMod.JEV_FIXTURES.slice(0, limitArg)
-      : bankMod.JEV_FIXTURES;
+  const bankAll =
+    BANK === "original"
+      ? bankMod.JEV_FIXTURES
+      : BANK === "calibration"
+        ? bankMod.JEV_CALIBRATION_FIXTURES
+        : BANK === "holdout"
+          ? bankMod.JEV_HOLDOUT_FIXTURES
+          : bankMod.JEV_FIXTURES_V2;
+  const fixtures = limitArg > 0 ? bankAll.slice(0, limitArg) : bankAll;
   const fixturesById = new Map(fixtures.map((f) => [f.message, f]));
 
   // ── Credential gate (PRESENT/MISSING only; the value is never touched) ────
@@ -263,10 +303,11 @@ async function main(): Promise<void> {
 
   // ── Planned-call accounting (computed BEFORE any call is made) ────────────
   const plannedRequests = bankMod.plannedRequestCount(fixtures);
-  console.log("PROMPT-AI-JEV-01 — Jev benchmark");
+  console.log("PROMPT-AI-JEV-02 — Jev benchmark");
   console.log(
     `mode: ${mode}${mode === "live" ? " (REAL calls)" : " (NO external calls)"}`,
   );
+  console.log(`bank slice: ${BANK} (${fixtures.length} fixtures)`);
   console.log(`pinned model: ${PINNED}`);
   console.log(
     `requested model: ${requestedModel}${requestedModel === PINNED ? "" : " (NON-PRIMARY — not comparable to a pinned run)"}`,
@@ -274,6 +315,11 @@ async function main(): Promise<void> {
   console.log(
     `question contract: ${contractMod.JEV_QUESTION_CONTRACT_ID} (${keys.length} questions)`,
   );
+  console.log(`probability policy: ${policyMod.JEV_POLICY_ID}`);
+  console.log(
+    `contract fingerprint: ${policyMod.contractFingerprint(questions)}`,
+  );
+  console.log(`policy fingerprint: ${policyMod.policyFingerprint()}`);
   console.log(`fixtures: ${fixtures.length}`);
   console.log(
     `planned Jev requests: ${plannedRequests} (one request per fixture; all questions batched)`,
@@ -328,13 +374,16 @@ async function main(): Promise<void> {
     const expectedVerdict = bankMod.applyServerPrecedence(expectedProj);
 
     // Model-derived facts → the SAME server formula.
-    const modelFacts: Record<string, boolean | null> = {};
+    // The raw Noul probabilities are reduced to facts by the EXPLICIT
+    // probability→fact policy (PROMPT-AI-JEV-02 §7), never by a bare 0.5 cut
+    // inline. The policy records a decision per fact so every derived value
+    // is auditable.
     const rawProbs: Record<string, number | null> = {};
     for (const key of keys) {
-      const prob = adapterMod.noulProbability(result, key);
-      rawProbs[key] = prob;
-      modelFacts[key] = prob === null ? null : prob >= 0.5;
+      rawProbs[key] = adapterMod.noulProbability(result, key);
     }
+    const policyResult = policyMod.applyProbabilityPolicy(rawProbs, keys);
+    const modelFacts: Record<string, boolean | null> = policyResult.facts;
     const modelProj = bankMod.projectPrecedenceFacts(
       modelFacts as Partial<Record<JevQuestionKey, boolean>>,
     );
@@ -366,6 +415,14 @@ async function main(): Promise<void> {
       expected: expectedOrientation(f, keys),
       model: modelFacts,
       rawProbabilities: rawProbs,
+      policyDecisions: policyResult.decisions.map((d) => ({
+        key: d.key,
+        probability: d.probability,
+        fact: d.fact,
+        confidence: d.confidence,
+        source: d.source,
+        note: d.note,
+      })),
       goalChoice,
       goalConfidence,
       disagreements,
@@ -423,14 +480,27 @@ async function main(): Promise<void> {
     pinnedModel: PINNED,
     requestedModel,
     questionContractId: contractMod.JEV_QUESTION_CONTRACT_ID,
+    contractFingerprint: policyMod.contractFingerprint(questions),
+    policyFingerprint: policyMod.policyFingerprint(),
+    policyId: policyMod.JEV_POLICY_ID,
+    bank: BANK,
+    sliceFingerprints: bankMod.sliceFingerprints(),
     plannedRequests,
     executedRequests: rows.filter((r) => r.ok).length,
     fixtures: fixtures.length,
+    // SCORED-QUESTION ACCOUNTING (PROMPT-AI-JEV-02 §4).
+    // Count the question/expectation pairs the bank actually asserts an
+    // expectation for. A row's serialized `expected` maps every question key
+    // to `null` when the fixture asserts nothing for it (see
+    // `expectedOrientation`), so "scored" is exactly "expected is non-null".
+    // NOTE: this MUST be read off `row.expected`, never off the row object's
+    // own property set — the row has top-level fields named `expected`,
+    // `model`, …, and NO field named after a question key, so a
+    // `hasOwnProperty(row, questionKey)` test is identically FALSE and
+    // silently reports zero. That was the AI-JEV-01-S accounting defect
+    // (reported scoredQuestions = 0 while the rows recompute to 125).
     scoredQuestions: rows.reduce(
-      (n, r) =>
-        n +
-        keys.filter((k) => fixtureAsserts(rows[rows.indexOf(r)] as never, k))
-          .length,
+      (n, r) => n + keys.filter((k) => r.expected[k] !== null).length,
       0,
     ),
     rows,
@@ -467,6 +537,9 @@ async function main(): Promise<void> {
   console.log(`scored questions: ${report.scoredQuestions}`);
   console.log(`disagreements: ${totalDisagreements}`);
   console.log(
+    `contract fingerprint: ${report.contractFingerprint} (policy ${report.policyFingerprint})`,
+  );
+  console.log(
     `tokens: input=${totalInput} output=${totalOutput} (Jev bills input; output is free)`,
   );
   console.log(`usage.cost total: $${totalCost.toFixed(8)} USD`);
@@ -499,7 +572,7 @@ async function main(): Promise<void> {
     mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const suffix = mode === "live" ? "live" : "offline";
-    const file = join(dir, `jev-benchmark-${suffix}-${stamp}.json`);
+    const file = join(dir, `jev-benchmark-${BANK}-${suffix}-${stamp}.json`);
     writeFileSync(file, JSON.stringify(report, null, 2) + "\n", "utf8");
     console.log(`\nartifact: ${file}`);
   }
@@ -512,8 +585,43 @@ async function main(): Promise<void> {
   console.log("\nRESULT: OK");
 }
 
-function fixtureAsserts(row: never, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(row, key);
+/**
+ * Recompute the scored-question count directly from a report's rows, WITHOUT
+ * trusting the report's own `scoredQuestions` field. This is the independent
+ * recomputation path (PROMPT-AI-JEV-02 §4): the committed AI-JEV-01 live
+ * artifact reports `scoredQuestions: 0` while its rows recompute to 125, so
+ * the repair must remain verifiable from rows alone.
+ */
+export function recomputeScoredQuestionsFromRows(
+  rows: ReadonlyArray<{ expected: Record<string, boolean | null> }>,
+  keys: ReadonlyArray<string>,
+): number {
+  return rows.reduce(
+    (n, r) => n + keys.filter((k) => r.expected[k] !== null).length,
+    0,
+  );
+}
+
+/**
+ * The regression guard (PROMPT-AI-JEV-02 §4): a report that contains scored
+ * expectations may NEVER report `scoredQuestions: 0`. Returns a violation
+ * description, or `null` when the accounting is consistent.
+ */
+export function scoredQuestionsAccountingDefect(
+  report: {
+    scoredQuestions: number;
+    rows: ReadonlyArray<{ expected: Record<string, boolean | null> }>;
+  },
+  keys: ReadonlyArray<string>,
+): string | null {
+  const recomputed = recomputeScoredQuestionsFromRows(report.rows, keys);
+  if (report.scoredQuestions !== recomputed) {
+    return `scoredQuestions=${report.scoredQuestions} but rows recompute to ${recomputed}`;
+  }
+  if (recomputed > 0 && report.scoredQuestions === 0) {
+    return `scoredQuestions is 0 while ${recomputed} expectations exist`;
+  }
+  return null;
 }
 
 function expectedOrientation(
@@ -550,8 +658,15 @@ function unique(values: Array<string | null>): string[] {
   return [...new Set(values.filter((v): v is string => v !== null))];
 }
 
-main().catch((error: Error) => {
-  console.error(`benchmark crashed: ${error.message}`);
-  console.error(error.stack ?? "");
-  process.exit(1);
-});
+// ── Entry point ──────────────────────────────────────────────────────────────
+// Guarded so the exported accounting helpers can be imported by the offline
+// check (`check:jev-eval`) WITHOUT executing a benchmark run.
+const isMainModule =
+  import.meta.url === pathToFileURL(process.argv[1] ?? "").href;
+if (isMainModule) {
+  main().catch((error: Error) => {
+    console.error(`benchmark crashed: ${error.message}`);
+    console.error(error.stack ?? "");
+    process.exit(1);
+  });
+}
