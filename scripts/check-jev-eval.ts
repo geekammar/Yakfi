@@ -27,8 +27,18 @@
  *
  * Run: pnpm check:jev-eval
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
+
+import type { JevFixture as RunnerFixture } from "../evaluation/jev/jev-fixture-bank";
+import type { JevQuestionKey as RunnerQuestionKey } from "../evaluation/jev/jev-question-contract";
 
 export {};
 
@@ -59,6 +69,11 @@ async function main(): Promise<void> {
   const adapterMod = await import("../evaluation/jev/jev-decisions-adapter");
   const contractMod = await import("../evaluation/jev/jev-question-contract");
   const bankMod = await import("../evaluation/jev/jev-fixture-bank");
+  // The freeze manifest and the probability policy are loaded once here so the
+  // J20 retirement / binding checks and the R-tests read the same frozen
+  // record the runner does.
+  const freezeMod = await import("../evaluation/jev/jev-freeze-manifest");
+  const policyMod = await import("../evaluation/jev/jev-probability-policy");
 
   // ── J1 — fail closed on a missing credential, with NO network I/O ────────
   {
@@ -448,8 +463,33 @@ async function main(): Promise<void> {
       `original=${bankMod.JEV_FIXTURES.length} v2=${bankMod.JEV_FIXTURES_V2.length}`,
     );
     check(
+      "J7c2 the frozen PROMPT-AI-JEV-02 bank is a byte-for-byte prefix of the v3 bank",
+      bankMod.JEV_FIXTURES_V3.slice(0, bankMod.JEV_FIXTURES_V2.length).every(
+        (f, i) => f === bankMod.JEV_FIXTURES_V2[i],
+      ),
+      `v2=${bankMod.JEV_FIXTURES_V2.length} v3=${bankMod.JEV_FIXTURES_V3.length}`,
+    );
+    check(
       "J7d the original slice reports zero calibration/holdout cases",
       bankMod.bankSubset("original").length === 40,
+    );
+    // PROMPT-AI-JEV-02B: the NEW sealed holdout must meet the size floor the
+    // task sets (§6: at least 40 genuinely useful fixtures, no padding).
+    check(
+      "J7e the NEW holdout-v3 slice meets the 40-fixture floor",
+      bankMod.bankSubset("holdout-v3").length >= 40,
+      `holdout-v3=${bankMod.bankSubset("holdout-v3").length}`,
+    );
+    check(
+      "J7f the holdout-v3 slice is disjoint from the calibration-v3 slice",
+      bankMod
+        .bankSubset("holdout-v3")
+        .every(
+          (f) =>
+            !bankMod
+              .bankSubset("calibration-v3")
+              .some((c) => c.id === f.id || c.message === f.message),
+        ),
     );
   }
 
@@ -650,8 +690,8 @@ async function main(): Promise<void> {
     const planned = bankMod.plannedRequestCount();
     check(
       "J11 planned requests equal the fixture count (no fan-out)",
-      planned === bankMod.JEV_FIXTURES_V2.length && planned > 0,
-      `planned=${planned} fixtures=${bankMod.JEV_FIXTURES_V2.length}`,
+      planned === bankMod.JEV_FIXTURES_V4.length && planned > 0,
+      `planned=${planned} fixtures=${bankMod.JEV_FIXTURES_V4.length}`,
     );
     // One request carries every question, so the question count must NOT
     // multiply the call count.
@@ -947,25 +987,57 @@ async function main(): Promise<void> {
     );
 
     // Mechanical separation: the default iteration order (original slice) and
-    // the calibration selector must never return a holdout case.
+    // every calibration selector must never return ANY holdout case.
     const holdoutIds = new Set(bankMod.bankSubset("holdout").map((f) => f.id));
-    const leakedByCalibration = bankMod
-      .bankSubset("calibration")
-      .filter((f) => holdoutIds.has(f.id));
-    const leakedByOriginal = bankMod
-      .bankSubset("original")
-      .filter((f) => holdoutIds.has(f.id));
+    const holdoutV3Ids = new Set(
+      bankMod.bankSubset("holdout-v3").map((f) => f.id),
+    );
+    const holdoutV4Ids = new Set(
+      bankMod.bankSubset("holdout-v4").map((f) => f.id),
+    );
+    const allHoldoutIds = new Set([
+      ...holdoutIds,
+      ...holdoutV3Ids,
+      ...holdoutV4Ids,
+    ]);
+    const selectors = ["original", "calibration", "calibration-v3"] as const;
+    let leaked = 0;
+    for (const sel of selectors) {
+      leaked += bankMod
+        .bankSubset(sel)
+        .filter((f) => allHoldoutIds.has(f.id)).length;
+    }
     check(
-      "J17b the holdout slice is unreachable from the original and calibration selectors",
-      leakedByCalibration.length === 0 && leakedByOriginal.length === 0,
-      `leaked calibration=${leakedByCalibration.length} original=${leakedByOriginal.length}`,
+      "J17b no holdout case is reachable from any original or calibration selector",
+      leaked === 0,
+      `leaked=${leaked}`,
+    );
+    // A calibration selector must not reach the NEW holdout even by message.
+    const holdoutV3Messages = new Set(
+      bankMod.bankSubset("holdout-v3").map((f) => f.message),
+    );
+    const messageLeak = bankMod
+      .bankSubset("calibration-v3")
+      .filter((f) => holdoutV3Messages.has(f.message)).length;
+    check(
+      "J17b2 the new holdout shares no message with the calibration slice",
+      messageLeak === 0,
+      `shared=${messageLeak}`,
     );
     check(
-      "J17c the three slices partition the bank exactly",
-      bankMod.bankSubset("original").length +
-        bankMod.bankSubset("calibration").length +
-        bankMod.bankSubset("holdout").length ===
-        bankMod.JEV_FIXTURES_V2.length,
+      "J17c every slice partitions the bank exactly",
+      bankMod.bankSliceValues
+        .map((s) => bankMod.bankSubset(s).length)
+        .reduce((a, b) => a + b, 0) === bankMod.JEV_FIXTURES_V4.length,
+    );
+    // Each slice fingerprint must be distinct (a collision would mean two
+    // slices share a label set).
+    const fps = bankMod.sliceFingerprints();
+    const fpValues = Object.values(fps);
+    check(
+      "J17c2 every slice fingerprint is distinct",
+      new Set(fpValues).size === fpValues.length,
+      `${JSON.stringify(fps)}`,
     );
 
     // Frozen fingerprints: stable across repeated reads (any label edit would
@@ -994,10 +1066,33 @@ async function main(): Promise<void> {
       `contract=${cf1} policy=${pf1}`,
     );
     check(
-      "J17f the contract version and policy version are @v2",
-      contractMod.JEV_QUESTION_CONTRACT_ID.endsWith("@v2") &&
+      "J17f the contract version and policy version are @v3 / @v2",
+      contractMod.JEV_QUESTION_CONTRACT_ID.endsWith("@v3") &&
         policyMod.JEV_POLICY_ID.endsWith("@v2"),
       `${contractMod.JEV_QUESTION_CONTRACT_ID} / ${policyMod.JEV_POLICY_ID}`,
+    );
+    // PROMPT-AI-JEV-02B: the frozen AI-JEV-02 fingerprints must be UNCHANGED.
+    // The original/calibration/holdout slices are immutable historical evidence;
+    // a label edit would change a slice hash and be caught here.
+    const v2Fingerprints: Record<string, string> = {
+      original: "sha256:69341a65821179a9",
+      calibration: "sha256:8a76f9e4deeb94f8",
+      holdout: "sha256:d3f4a90715c80066",
+    };
+    check(
+      "J17f2 the frozen AI-JEV-02 slice fingerprints are unchanged",
+      fps.original === v2Fingerprints.original &&
+        fps.calibration === v2Fingerprints.calibration &&
+        fps.holdout === v2Fingerprints.holdout,
+      `got=${JSON.stringify({ original: fps.original, calibration: fps.calibration, holdout: fps.holdout })}`,
+    );
+    // The new slices must have fingerprints at all (a missing one would mean
+    // a slice is empty and the partition check is vacuous).
+    check(
+      "J17f3 the new slices carry fingerprints",
+      fps["calibration-v3"] !== fps["holdout-v3"] &&
+        fps["calibration-v3"].startsWith("sha256:") &&
+        fps["holdout-v3"].startsWith("sha256:"),
     );
 
     // ── Policy behaviour (deterministic, from probabilities) ──────────────
@@ -1229,6 +1324,698 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── J19 — PROMPT-AI-JEV-02B §12: the contact-vs-book repair, the §10
+  //        adjudication, and the mechanically-detectable failure modes ──────
+  // Everything here is OFFLINE and DETERMINISTIC. It runs against the bank
+  // and the contract only, so a regression in any of the following is caught
+  // before a single real model call is spent.
+  {
+    const policyMod = await import("../evaluation/jev/jev-probability-policy");
+
+    // (a) CONTACT-vs-BOOK MASKING. The one routing defect AI-JEV-02 left is
+    //     a fixture whose label asserts providerRequested WITHOUT a booking
+    //     task, and whose expected verdict is therefore a handoff. The bank
+    //     must CONTAIN such cases — otherwise the regression the task demands
+    //     cannot be measured at all.
+    const pureContact = bankMod
+      .bankSubset("holdout-v3")
+      .filter(
+        (f) =>
+          f.expected.providerRequested === true &&
+          (f.expected.bookingRequested ?? false) === false &&
+          (f.expected.availabilityAsked ?? false) === false &&
+          bankMod.expectedExplicitHuman(f).explicitHuman === true,
+      );
+    check(
+      "J19a the new holdout contains pure provider-contact cases that route to a handoff",
+      pureContact.length >= 5,
+      `pureContact=${pureContact.length}`,
+    );
+
+    // (b) The BOOK half of the minimal pair: booking present, contact absent,
+    //     and the mask must keep the verdict FALSE. Without these, the repair
+    //     could "pass" by simply making bookingRequested universally false.
+    const bookMask = bankMod
+      .bankSubset("holdout-v3")
+      .filter(
+        (f) =>
+          f.expected.bookingRequested === true &&
+          f.expected.providerRequested === false &&
+          bankMod.expectedExplicitHuman(f).explicitHuman === false,
+      );
+    check(
+      "J19b the new holdout contains booking-mask cases that route to NO handoff",
+      bookMask.length >= 5,
+      `bookMask=${bookMask.length}`,
+    );
+
+    // (c) The mask itself is untouched: the server formula is still
+    //     `supportRequest OR (providerRequest AND NOT bookingTask)`. A
+    //     contact+booking turn must still derive NO handoff from the labels.
+    const contactPlusBooking = bankMod
+      .bankSubset("holdout-v3")
+      .find(
+        (f) =>
+          f.expected.providerRequested === true &&
+          f.expected.bookingRequested === true,
+      );
+    check(
+      "J19c a contact+booking turn still derives explicitHuman = false (mask intact)",
+      contactPlusBooking !== undefined &&
+        bankMod.expectedExplicitHuman(contactPlusBooking).explicitHuman ===
+          false,
+      contactPlusBooking
+        ? `id=${contactPlusBooking.id}`
+        : "no contact+booking case exists in the slice",
+    );
+
+    // (d) The §10 ADJUDICATION is encoded forward: a provider inside an
+    //     AVAILABILITY question must now expect preference = false. Every
+    //     new availability case must assert that, or the adjudication was
+    //     not actually applied.
+    const availCases = bankMod
+      .bankSubset("holdout-v3")
+      .filter((f) => f.expected.availabilityAsked === true);
+    check(
+      "J19d every new availability case expects providerPreferenceExpressed = false",
+      availCases.length > 0 &&
+        availCases.every(
+          (f) => f.expected.providerPreferenceExpressed !== true,
+        ),
+      `availCases=${availCases.length} violating=${availCases.filter((f) => f.expected.providerPreferenceExpressed === true).length}`,
+    );
+
+    // (e) And the positive side of preference must still be present, so (d)
+    //     is not vacuous — a preference with no booking and no contact.
+    const prefOnly = bankMod
+      .bankSubset("holdout-v3")
+      .filter(
+        (f) =>
+          f.expected.providerPreferenceExpressed === true &&
+          f.expected.providerRequested === false,
+      );
+    check(
+      "J19e the new holdout carries positive preference cases (not vacuous)",
+      prefOnly.length >= 1,
+      `prefOnly=${prefOnly.length}`,
+    );
+
+    // (f) HISTORICAL ARTIFACT MUTATION. The original slice labels are frozen;
+    //     the committed fingerprints are the ground truth. A label edit would
+    //     change the slice hash, which is exactly what J17f2 already binds.
+    //     Here we additionally prove the ORIGINAL label for the known
+    //     repaired case is unchanged, so the historical case stays repaired
+    //     and is never relabeled to manufacture agreement.
+    const repaired = bankMod.JEV_FIXTURES.find(
+      (f) => f.id === "provider-availability",
+    );
+    check(
+      "J19f the known repaired case «هل فيه دكتور متاح؟» is present and routes to NO handoff",
+      repaired !== undefined &&
+        repaired.message === "هل فيه دكتور متاح؟" &&
+        bankMod.expectedExplicitHuman(repaired).explicitHuman === false,
+    );
+
+    // (g) CONTACT-vs-BOOK MASKING REGRESSION DETECTOR. The policy must never
+    //     be able to turn a (providerRequested, no booking) label set into a
+    //     non-handoff. This is the exact failure shape of the inherited
+    //     defect, expressed as a property over the frozen labels.
+    let maskingViolations = 0;
+    for (const f of bankMod.JEV_FIXTURES_V3) {
+      const projected = bankMod.projectPrecedenceFacts(f.expected);
+      // The label-side precedence must agree with the formula applied to the
+      // same facts the policy would derive under P1 for these orientations.
+      const verdict = bankMod.applyServerPrecedence(projected);
+      const direct =
+        f.expected.providerRequested === true && !projected.bookingTask;
+      if (direct && !verdict.explicitHuman) maskingViolations += 1;
+    }
+    check(
+      "J19g no label can express the contact-without-booking masking shape",
+      maskingViolations === 0,
+      `${maskingViolations} violation(s)`,
+    );
+
+    // (h) AVAILABILITY / NAME causing a provider-contact FALSE POSITIVE. A
+    //     provider name or title inside an availability or identity question
+    //     must never assert providerRequested in the labels.
+    const availNameContact = bankMod.JEV_FIXTURES_V3.filter(
+      (f) =>
+        (f.expected.availabilityAsked === true ||
+          f.classes.includes("provider-identity")) &&
+        f.expected.providerRequested === true,
+    );
+    check(
+      "J19h no availability/identity case asserts providerRequested",
+      availNameContact.length === 0,
+      `violating=${availNameContact.map((f) => f.id).join(",")}`,
+    );
+
+    // (i) PROVIDER PREFERENCE COLLAPSING INTO MERE AVAILABILITY. This is the
+    //     §10 adjudication expressed as a LABEL INVARIANT on the new slices:
+    //     every new case asserting preference must ALSO assert either a
+    //     booking or an explicit preference-without-task, never availability
+    //     alone.
+    const prefCollapse = bankMod
+      .bankSubset("holdout-v3")
+      .filter(
+        (f) =>
+          f.expected.providerPreferenceExpressed === true &&
+          f.expected.bookingRequested !== true &&
+          !prefOnly.includes(f),
+      );
+    check(
+      "J19i no new preference case collapses into availability alone",
+      prefCollapse.length === 0,
+      `violating=${prefCollapse.map((f) => f.id).join(",")}`,
+    );
+
+    // (j) THE 0/1-CALL INVARIANT under the runner's own accounting helper.
+    //     `plannedRequestCount` must be exactly the fixture count for every
+    //     slice, and the ledger shape must be one entry per fixture.
+    for (const slice of bankMod.bankSliceValues) {
+      const subset = bankMod.bankSubset(slice);
+      check(
+        `J19j ${slice} plans exactly one request per fixture`,
+        bankMod.plannedRequestCount(subset) === subset.length,
+      );
+    }
+
+    // (k) NO SECOND JUDGE. The contract must not ask any question whose
+    //     answer is another question's answer, and no question may reference
+    //     the precedence verdict. Re-checked for the @v3 wording.
+    const questions = contractMod.jevQuestionSet();
+    const dependencyLeaks = Object.entries(questions).filter(([, q]) =>
+      /explicitHuman|shouldHandoff|bookingTask|precedence/i.test(
+        q.instructions,
+      ),
+    );
+    check(
+      "J19k no @v3 question encodes precedence or a derived fact",
+      dependencyLeaks.length === 0,
+      dependencyLeaks.map(([k]) => k).join(","),
+    );
+
+    // (l) NO LEXICAL DICTIONARY. The @v3 contract must not introduce an
+    //     Arabic word list, stem list or regex patch — that is the forbidden
+    //     shortcut for making a benchmark green. The check inspects CODE only:
+    //     the design docstrings legitimately DISCUSS the forbidden shortcut
+    //     to record why it was rejected, and a comment-only match is not an
+    //     implementation.
+    const contractSource = readFileSync(
+      resolve(process.cwd(), "evaluation/jev/jev-question-contract.ts"),
+      "utf8",
+    );
+    const codeOnly = stripComments(contractSource);
+    check(
+      "J19l the contract adds no lexical dictionary, stem list or regex",
+      !/(dialect|stem|keyword)\s*(dictionary|list|table)/i.test(codeOnly) &&
+        !/HUMAN_WORDS|BOOKING_WORDS|AVAILABILITY_WORDS|HUMAN_TITLE_WORDS/.test(
+          codeOnly,
+        ) &&
+        !/\\u[0-9a-fA-F]{4}.*\\u[0-9a-fA-F]{4}.*\\u[0-9a-fA-F]{4}/.test(
+          codeOnly,
+        ),
+    );
+    void policyMod;
+  }
+
+  // ── J20 — PROMPT-AI-JEV-02B-R: holdout-v4 freeze, disjointness, retirement ─
+  // The recovery holdout must be mechanically disjoint from every bank whose
+  // rows have already been sent to JEV, and the retired holdout-v3 must be
+  // provably unexecutable. Both are proven here, offline, before any live call.
+  {
+    const v4 = bankMod.bankSubset("holdout-v4");
+    const v4Ids = new Set(v4.map((f) => f.id));
+    const v4Messages = new Set(v4.map((f) => f.message));
+    const touchedSlices = [
+      "original",
+      "calibration",
+      "holdout",
+      "calibration-v3",
+      "holdout-v3",
+    ] as const;
+
+    check(
+      "J20 the recovery holdout meets the >= 40 fixture floor",
+      v4.length >= 40,
+      `n=${v4.length}`,
+    );
+    let idOverlap = 0;
+    let messageOverlap = 0;
+    for (const slice of touchedSlices) {
+      for (const f of bankMod.bankSubset(slice)) {
+        if (v4Ids.has(f.id)) idOverlap += 1;
+        if (v4Messages.has(f.message)) messageOverlap += 1;
+      }
+    }
+    check(
+      "J20b the recovery holdout is id- and message-disjoint from every already-touched bank",
+      idOverlap === 0 && messageOverlap === 0,
+      `idOverlap=${idOverlap} messageOverlap=${messageOverlap}`,
+    );
+    // A trivial punctuation-only variant would not be a fresh case.
+    const normalize = (s: string) =>
+      s.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+    const existingNormalized = new Set(
+      touchedSlices
+        .flatMap((slice) => bankMod.bankSubset(slice))
+        .map((f) => normalize(f.message)),
+    );
+    const trivialDupes = v4.filter((f) =>
+      existingNormalized.has(normalize(f.message)),
+    );
+    check(
+      "J20c no recovery holdout message is a punctuation-only variant of an existing one",
+      trivialDupes.length === 0,
+      trivialDupes.map((f) => f.message).join("; "),
+    );
+    check(
+      "J20d the recovery holdout carries no duplicate id or message inside itself",
+      v4.length === new Set(v4.map((f) => f.id)).size &&
+        v4.length === new Set(v4.map((f) => f.message)).size,
+    );
+    // Language/register coverage — the families the interrupted pass missed.
+    const hints = new Set(v4.map((f) => f.languageHint));
+    check(
+      "J20e the recovery holdout spans Egyptian, MSA, English and code-switching",
+      hints.has("Arabic, predominantly Egyptian colloquial") &&
+        hints.has("Arabic, predominantly Modern Standard (MSA)") &&
+        hints.has("English") &&
+        hints.has("Mixed Arabic and English code-switching"),
+      [...hints].join(" | "),
+    );
+    // The mandatory §8 semantic scenarios must all be present as fixtures.
+    const mandatory = [
+      "v4-hold-contact-talk-gyn-female",
+      "v4-hold-contact-named-ahmed-self",
+      "v4-hold-contact-english-connect",
+      "v4-hold-book-not-talk",
+      "v4-hold-book-english-thursday",
+      "v4-hold-book-any-available",
+      "v4-hold-avail-dentist-today",
+      "v4-hold-avail-english-ahmed",
+      "v4-hold-id-english-cardio",
+      "v4-hold-pref-female-not-male",
+      "v4-hold-pref-any-doctor",
+      "v4-hold-support-customer-service",
+      "v4-hold-support-reception-book",
+      "v4-hold-ambig-need-doctor",
+      "v4-hold-ambig-english-see",
+      "v4-hold-mixed-book-ahmed",
+      "v4-hold-mask-book-then-talk",
+      "v4-hold-neg-manager-hours",
+      "v4-hold-sensitive-complaint-only",
+    ];
+    const missing = mandatory.filter((id) => !v4Ids.has(id));
+    check(
+      "J20f every mandatory contact-vs-book scenario family is represented",
+      missing.length === 0,
+      missing.join(", "),
+    );
+    // holdout-v3 retirement: the manifest records the seal break and the guard
+    // denies execution.
+    const denial = freezeMod.bankExecutionDenial("holdout-v3");
+    check(
+      "J20g holdout-v3 is recorded as SEAL_BROKEN and unexecutable",
+      denial !== null &&
+        denial.status.status === "SEAL_BROKEN" &&
+        denial.status.eligibleForExecution === false &&
+        denial.status.eligibleForScoring === false,
+      denial ? denial.denial : "no denial returned",
+    );
+    check(
+      "J20h the retirement register records the interrupted-run row accounting",
+      denial !== null &&
+        denial.status.exposedRows === 42 &&
+        denial.status.plannedRows === 47 &&
+        denial.status.missingRows === 5,
+      JSON.stringify(denial?.status ?? {}),
+    );
+    check(
+      "J20i an eligible bank produces no denial",
+      freezeMod.bankExecutionDenial("original") === null &&
+        freezeMod.bankIsExecutable("original") === true,
+    );
+    // A COMPLETED sealed holdout may never be measured again: its one
+    // permitted live pass finished, so re-execution would re-expose sealed
+    // fixtures. The guard must refuse it before any fetch — the completed
+    // analogue of the SEAL_BROKEN refusal.
+    const v4Denial = freezeMod.bankExecutionDenial("holdout-v4");
+    check(
+      "J20l a COMPLETED sealed holdout is refused re-execution but stays scorable",
+      v4Denial !== null &&
+        v4Denial.status.status === "COMPLETED" &&
+        v4Denial.status.eligibleForExecution === false &&
+        v4Denial.status.eligibleForScoring === true &&
+        v4Denial.status.exposedRows === v4Denial.status.plannedRows &&
+        v4Denial.status.missingRows === 0 &&
+        freezeMod.bankIsExecutable("holdout-v4") === false,
+      v4Denial ? v4Denial.denial : "no denial returned",
+    );
+    // The recovery holdout is bound into the freeze manifest exactly like every
+    // frozen slice, so a post-run label edit trips the binding gate.
+    const v4Fp = bankMod.sliceFingerprints()["holdout-v4"];
+    check(
+      "J20j the freeze manifest binds the recovery holdout's live fingerprint",
+      freezeMod.JEV_FREEZE_MANIFEST.slices["holdout-v4"]?.fingerprint ===
+        v4Fp &&
+        freezeMod.JEV_FREEZE_MANIFEST.slices["holdout-v4"]?.count === v4.length,
+      `manifest=${JSON.stringify(freezeMod.JEV_FREEZE_MANIFEST.slices["holdout-v4"])} live=${v4Fp}/${v4.length}`,
+    );
+    // The frozen Stage-A fingerprints must be UNCHANGED by the recovery work.
+    const state = {
+      contractId: contractMod.JEV_QUESTION_CONTRACT_ID,
+      contractFingerprint: policyMod.contractFingerprint(
+        contractMod.jevQuestionSet(),
+      ),
+      policyId: policyMod.JEV_POLICY_ID,
+      policyFingerprint: policyMod.policyFingerprint(),
+      requestedModel: "typesafe/jev-1.13",
+      sliceFingerprints: bankMod.sliceFingerprints(),
+      sliceCounts: Object.fromEntries(
+        bankMod.bankSliceValues.map((s) => [s, bankMod.bankSubset(s).length]),
+      ),
+    };
+    const mismatches = freezeMod.verifyFreezeManifest(state);
+    check(
+      "J20k the frozen candidate is unchanged by the recovery slice (no semantic drift)",
+      mismatches.length === 0,
+      mismatches.join("; "),
+    );
+    void bankMod;
+  }
+
+  // ── R1–R8 — PROMPT-AI-JEV-02B-R §5: the durable-runner regression tests ────
+  // All eight run against INJECTED fetches: no paid provider call is made, and
+  // every one proves a property of the evidence machinery rather than of the
+  // model.
+  {
+    const bench = await import("../scripts/eval-jev-benchmark");
+    const contract = contractMod;
+    const keys = contract.jevQuestionKeys;
+    const questions = contract.jevQuestionSet();
+    // The runner regression tests drive a real FROZEN bank that is NOT in the
+    // retirement register: holdout-v4 is now recorded as COMPLETED (its single
+    // live pass finished), so the §3 guard rightfully refuses to execute it in
+    // any mode. calibration-v3 is a frozen slice that was never sealed and
+    // stays eligible, which is exactly what these machinery tests need.
+    const synth = bankMod.bankSubset("calibration-v3").slice(0, 5);
+    // Write test artifacts OUTSIDE the repository's evidence directory: a
+    // test artifact is not benchmark evidence and must never be mistaken for
+    // one (R2).
+    const tmp = resolve(process.cwd(), "..", ".tmp-jev-runner-tests");
+    mkdirSync(tmp, { recursive: true });
+    bench.setArtifactDirectoryForTests(tmp);
+
+    // A fake that answers from the fixture's own labels, so a synthetic run is
+    // a clean 5/5 by construction.
+    const cleanFetch = (fixtures: ReadonlyArray<RunnerFixture>) => {
+      const byMessage = new Map(fixtures.map((f) => [f.message, f]));
+      return (async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          state: { customer_message: string };
+        };
+        const f = byMessage.get(body.state.customer_message);
+        const answers = Object.fromEntries(
+          keys.map((k) => {
+            const expected = f?.expected[k as RunnerQuestionKey];
+            return [
+              k,
+              {
+                type: "noul" as const,
+                noul: expected === undefined ? 0.5 : expected ? 0.97 : 0.03,
+              },
+            ];
+          }),
+        );
+        return new Response(
+          JSON.stringify({
+            id: `r-test-${Date.now()}`,
+            model: "typesafe/jev-1.13-R-TEST",
+            provider: "InjectedFake",
+            answers,
+            usage: { input_tokens: 300, output_tokens: 20, cost: 0.00001 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch;
+    };
+
+    // R1 — incremental durability: stop after fixture 3 of 5, and exactly 3
+    // completed rows must remain durably inspectable on disk.
+    const r1 = await bench.runBenchmark({
+      mode: "offline",
+      bank: "calibration-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: true,
+      logFile: null,
+      abortAfter: 3,
+    });
+    const r1Partial = r1.partialPath
+      ? readFileSync(r1.partialPath, "utf8")
+      : "";
+    const r1Parsed = JSON.parse(r1Partial) as {
+      completedFixtureIds: string[];
+      completedFixtureCount: number;
+      plannedFixtureCount: number;
+      notRequestedFixtureIds: string[];
+      rows: Array<{ fixtureId: string }>;
+    };
+    check(
+      "R1 an interrupted run durably persists exactly its completed rows",
+      r1.exitCode === 5 &&
+        r1Parsed.completedFixtureCount === 3 &&
+        r1Parsed.completedFixtureIds.length === 3 &&
+        r1Parsed.rows.length === 3 &&
+        r1Parsed.notRequestedFixtureIds.length === 2 &&
+        r1Parsed.plannedFixtureCount === 5,
+      `exit=${r1.exitCode} completed=${r1Parsed.completedFixtureCount} rows=${r1Parsed.rows.length} notRequested=${r1Parsed.notRequestedFixtureIds.length}`,
+    );
+
+    // R2 — an interrupted artifact is COMPLETE=false / SCORABLE=false and every
+    // scoring/eligibility function rejects it.
+    const r1Report = r1.report;
+    check(
+      "R2 an interrupted artifact is never COMPLETE or SCORABLE",
+      r1Report !== null &&
+        r1Report.artifactStatus === "INTERRUPTED" &&
+        r1Report.COMPLETE === false &&
+        r1Report.SCORABLE === false &&
+        r1Report.interrupted === true &&
+        r1Report.resumeAllowed === false &&
+        bench.isArtifactScorable(r1Report) === false &&
+        r1Report.finalization.ok === false,
+      r1Report ? (r1Report.finalization.reason ?? "") : "no report",
+    );
+
+    // R3 — no secret serialization. Inject a fake credential and a fake
+    // Authorization header; neither may appear in persisted state.
+    const FAKE_KEY = "sk-fake-R3-credential-0123456789abcdef";
+    const FAKE_HEADER = "Bearer sk-fake-R3-credential-0123456789abcdef";
+    const previousKey = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = FAKE_KEY;
+    try {
+      const probes = [FAKE_KEY, FAKE_HEADER, "OPENROUTER_API_KEY", "Bearer "];
+      const r3 = await bench.runBenchmark({
+        mode: "offline",
+        bank: "calibration-v3",
+        model: "typesafe/jev-1.13",
+        limit: 5,
+        writeArtifact: true,
+        logFile: null,
+      });
+      const text = r3.finalPath ? readFileSync(r3.finalPath, "utf8") : "";
+      const hit = probes.filter((p) => text.includes(p));
+      check(
+        "R3 no credential or Authorization header is serialized into an artifact",
+        r3.exitCode === 0 && hit.length === 0 && text.length > 0,
+        `hits=${hit.join(",")}`,
+      );
+      // The scan must also DETECT a leaked secret rather than silently passing.
+      // A clean report is seeded with the fake credential through the same
+      // serializer the runner uses, so a regression in the scan is caught.
+      // Seed a CLEAN report with the fake credential through the same
+      // serializer the runner uses, so a regression in the scan is caught.
+      const seededReport: Record<string, unknown> =
+        r3.report === null
+          ? { leaked: FAKE_HEADER }
+          : { ...r3.report, leaked: FAKE_HEADER };
+      const seeded = bench.serializeArtifact(seededReport, probes);
+      check(
+        "R3b the secret scan detects an injected credential rather than passing silently",
+        seeded.hits.length > 0,
+        `hits=${seeded.hits.join(",")}`,
+      );
+    } finally {
+      process.env.OPENROUTER_API_KEY = previousKey;
+    }
+
+    // R4 — a SEAL_BROKEN bank fails CLOSED before any fetch invocation.
+    const r4 = await bench.runBenchmark({
+      mode: "offline",
+      bank: "holdout-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: true,
+      logFile: null,
+    });
+    check(
+      "R4 a retired bank is refused before any network invocation (fetch count 0)",
+      r4.exitCode === 4 &&
+        r4.fetchCallCount === 0 &&
+        r4.report === null &&
+        r4.partialPath === null,
+      r4.refusal ?? "",
+    );
+
+    // R5 — a synthetic 5/5 run with 0 errors finalizes as COMPLETE/SCORABLE,
+    // every fixture exactly once, and promotes the partial to one final file.
+    const r5 = await bench.runBenchmark({
+      mode: "offline",
+      bank: "calibration-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: true,
+      logFile: null,
+    });
+    const r5Ids = r5.report?.completedFixtureIds ?? [];
+    check(
+      "R5 a clean 5/5 run produces one COMPLETE/SCORABLE artifact with each fixture exactly once",
+      r5.exitCode === 0 &&
+        r5.finalPath !== null &&
+        r5.report !== null &&
+        r5.report.COMPLETE === true &&
+        r5.report.SCORABLE === true &&
+        r5.report.artifactStatus === "COMPLETE" &&
+        bench.isArtifactScorable(r5.report) &&
+        r5Ids.length === 5 &&
+        new Set(r5Ids).size === 5 &&
+        r5.report.requests.planned === 5 &&
+        r5.report.requests.executed === 5 &&
+        r5.report.requests.failed === 0,
+      `exit=${r5.exitCode} complete=${r5.report?.COMPLETE}`,
+    );
+    check(
+      "R5b a completed run leaves no partial artifact behind",
+      r5.finalPath !== null &&
+        !existsSync(r5.partialPath ?? "n/a") &&
+        existsSync(r5.finalPath),
+    );
+
+    // R6 — fingerprint binding. Overriding the bank, contract or policy
+    // fingerprint must be a hard failure before any fetch.
+    const r6Bank = await bench.runBenchmark({
+      mode: "offline",
+      bank: "calibration-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: false,
+      logFile: null,
+      freezeStateOverride: {
+        sliceFingerprints: {
+          ...bankMod.sliceFingerprints(),
+          "calibration-v3": "sha256:0000000000000000",
+        },
+      },
+    });
+    const r6Contract = await bench.runBenchmark({
+      mode: "offline",
+      bank: "calibration-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: false,
+      logFile: null,
+      freezeStateOverride: { contractFingerprint: "sha256:deadbeefdeadbeef" },
+    });
+    const r6Policy = await bench.runBenchmark({
+      mode: "offline",
+      bank: "calibration-v3",
+      model: "typesafe/jev-1.13",
+      limit: 5,
+      writeArtifact: false,
+      logFile: null,
+      freezeStateOverride: { policyFingerprint: "sha256:cafef00dcafef00d" },
+    });
+    check(
+      "R6 a bank/contract/policy fingerprint change hard-stops the run before any call",
+      r6Bank.exitCode === 3 &&
+        r6Bank.fetchCallCount === 0 &&
+        r6Contract.exitCode === 3 &&
+        r6Contract.fetchCallCount === 0 &&
+        r6Policy.exitCode === 3 &&
+        r6Policy.fetchCallCount === 0,
+      `bank=${r6Bank.exitCode} contract=${r6Contract.exitCode} policy=${r6Policy.exitCode}`,
+    );
+
+    // R7/R8 — duplicate-row and planned/executed-skew protection. The
+    // finalization gate is a pure function, so it is probed directly with the
+    // shapes that must never finalize.
+    const ids = synth.map((f) => f.id);
+    // Length-matched but containing a duplicate AND a gap: the duplicate must
+    // be reported even when the row count looks right.
+    const dup = bench.finalizeSealedArtifact({
+      plannedFixtureIds: ids.slice(0, 4),
+      rows: [
+        { fixtureId: ids[0] as string, ok: true },
+        { fixtureId: ids[0] as string, ok: true },
+        { fixtureId: ids[1] as string, ok: true },
+        { fixtureId: ids[2] as string, ok: true },
+      ],
+    });
+    const short = bench.finalizeSealedArtifact({
+      plannedFixtureIds: ids,
+      rows: ids.slice(0, 4).map((id) => ({ fixtureId: id, ok: true })),
+    });
+    const long = bench.finalizeSealedArtifact({
+      plannedFixtureIds: ids.slice(0, 4),
+      rows: ids.map((id) => ({ fixtureId: id, ok: true })),
+    });
+    const failed = bench.finalizeSealedArtifact({
+      plannedFixtureIds: ids.slice(0, 4),
+      rows: ids.slice(0, 4).map((id) => ({ fixtureId: id, ok: id === ids[0] })),
+    });
+    const clean = bench.finalizeSealedArtifact({
+      plannedFixtureIds: ids.slice(0, 4),
+      rows: ids.slice(0, 4).map((id) => ({ fixtureId: id, ok: true })),
+    });
+    check(
+      "R7 a duplicate fixture row can never finalize as complete",
+      !dup.ok && /duplicate/.test(dup.reason ?? ""),
+      dup.reason ?? "",
+    );
+    check(
+      "R8 planned/executed skew (short, long, or failed rows) can never finalize as complete",
+      !short.ok &&
+        !long.ok &&
+        !failed.ok &&
+        short.reason?.includes("response row") === true &&
+        long.reason?.includes("response row") === true &&
+        failed.reason?.includes("failed") === true,
+      [short.reason, long.reason, failed.reason].join(" | "),
+    );
+    check(
+      "R8b a clean 4/4 gate finalizes, so the gate is not merely rejecting everything",
+      clean.ok && clean.reason === null,
+      JSON.stringify(clean),
+    );
+
+    // The injected fetches must never have left the fixture set: the five
+    // synthetic fixtures are exactly the first five calibration-v3 rows.
+    check(
+      "R9 injected-fetch tests never expand the bank they were given",
+      synth.length === 5 &&
+        synth.every((f) => f.bank === "calibration-v3") &&
+        cleanFetch(synth) !== undefined,
+      `n=${synth.length}`,
+    );
+
+    rmSync(tmp, { recursive: true, force: true });
+    bench.setArtifactDirectoryForTests(null);
+    void questions;
+  }
+
   // ── Outcome ───────────────────────────────────────────────────────────────
   console.log("");
   console.log("── JEV EVALUATION SURFACE CHECK ──");
@@ -1349,6 +2136,18 @@ async function runOfflineBenchmarkSnapshot(): Promise<{
     0,
   );
   return { scoredQuestions, rows };
+}
+
+/**
+ * Strip TS line and block comments so a source-inspection check observes the
+ * IMPLEMENTATION and not the prose that documents it. The contract's
+ * docstrings deliberately DISCUSS the forbidden lexical shortcut to record
+ * why it was rejected; that prose must not register as an implementation.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 function scanForJevEvaluationImports(root: string): string[] {

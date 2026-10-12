@@ -14,6 +14,88 @@
  * SAME keys the adapter sends.
  *
  *
+ * ── WHAT CHANGED IN @v3 (PROMPT-AI-JEV-02B) ────────────────────────────────
+ *
+ * The field set is STILL unchanged — eleven independent facts plus the one
+ * bounded `conversationGoal` choice. No field was added or removed: the
+ * residual evidence gap left by @v2 is a CONTACT-vs-BOOK masking defect and
+ * a provider-preference label/contract disagreement, and both are defects in
+ * the DEFINITIONS of existing facts, not missing fields.
+ *
+ * THE CONTACT-vs-BOOK DEFECT. The frozen @v2 holdout routed «عايز أشوف
+ * دكتور» ("I want to see a doctor") to NO handoff, when the customer is
+ * asking for direct provider contact. The model returned
+ * providerRequested 0.79 (correctly high) but ALSO bookingRequested 0.58
+ * (moderate). Because the server precedence masks the provider path with
+ * `bookingTask` — `explicitHuman = supportRequest OR (providerRequest AND
+ * NOT bookingTask)` — a booking fact that should not be there SILENCED a
+ * contact request the model had correctly identified. Root cause, per §4's
+ * differential: NOT a probability-near-0.5 problem. It is CONTRACT WORDING.
+ * The @v2 `bookingRequested` question enumerated four exclusions
+ * (availability, symptoms, an existing appointment, describing a condition)
+ * and NOT ONE of them contrasted the booking reading with the CONTACT
+ * reading. "Seeing a provider" is exactly the verb that carries both: it is
+ * contact when it is the requested MODE OF RESOLUTION ("I want to see a
+ * doctor"), and it is booking when it is the PURPOSE OF AN ARRANGEMENT ("I
+ * want to book so I can see a doctor"). @v3 makes that contrast explicit in
+ * BOTH questions, as a minimal pair over the RELATIONSHIP, never over a
+ * word: booking requires the customer to ask for an ARRANGEMENT to be made;
+ * a desire to personally see/speak/meet a provider, with no arrangement
+ * asked for, is contact and is NOT a booking.
+ *
+ * THE PRECEDENCE-SAFETY CONSTRAINT on that repair. The booking mask must not
+ * be weakened: «عايز الدكتور يكلمني عشان أحجز» ("have the doctor call me so
+ * I can book") carries a GENUINE contact request inside a GENUINE booking,
+ * and its expected verdict is still NO handoff, because the booking is the
+ * task and the contact is its vehicle. The @v3 wording therefore keeps both
+ * facts TRUE together when the customer asks for BOTH, and lets the server
+ * formula — not the contract — apply the mask. The contract never encodes
+ * precedence; it only makes each fact's own boundary precise.
+ *
+ * THE providerPreferenceExpressed ADJUDICATION (§10). @v2 and its bank
+ * labelled a GENERIC provider inside an AVAILABILITY question
+ * («هل فيه دكتور متاح؟») as providerPreferenceExpressed = true. The model
+ * consistently answered false (0.07–0.10) on every such case across all
+ * three slices — 7 fixtures, one direction, zero counter-examples. Audited
+ * against the product definition — "a constraint/preference on WHO should
+ * perform the service/booking", with the explicit note that a NAMED provider
+ * inside an availability question does not automatically create the fact —
+ * the model is RIGHT and the historical label is a LABEL DEFECT: asking what
+ * is free constrains nothing about who performs the service. The historical
+ * artifacts are NOT rewritten (§10 forbids it); the disagreement is recorded
+ * in the adjudication register and the NEW slices carry the
+ * contract-consistent expectation. @v3 sharpens the wording so the
+ * availability/presence exclusion names BOTH the named and the unnamed
+ * provider case, and so preference requires a constraint on the SERVICE.
+ *
+ * THE availabilityAsked CONTACT EXCLUSION (the second STAGE A finding). The
+ * first live @v3 calibration repaired `bookingRequested` cleanly — contact
+ * cases then scored booking 0.06–0.20, and the mask stopped firing there.
+ * But the SAME defect migrated: «محتاج أشوف دكتور دلوقتي» returned
+ * availabilityAsked 0.53, and because the server precedence folds
+ * availability into `bookingTask`, the mask engaged anyway and the contact
+ * was routed to no handoff. The cause is identical in kind — the @v3
+ * `availabilityAsked` question enumerated what availability COVERS and never
+ * contrasted it with a REQUEST FOR AN INTERACTION. "I need to see a doctor"
+ * is not a question about what is open; it is a request for the contact
+ * itself. @v3 therefore states the same exclusion on this fact: a turn that
+ * ASKS FOR an interaction is not a turn that ASKS WHETHER something is free.
+ * This is the second and last member of the family, and it is again a
+ * CONTRACT repair on a family of cases, not a threshold move.
+ *
+ * THE greetingOnly/ambiguous BOUNDARY. Three fragments across two slices
+ * («اه»، «أها»، «امم») were answered greetingOnly = true while the labels
+ * say ambiguousTurn = true. A hesitation or filler is not a social opening;
+ * a greeting must carry GREETING CONTENT. @v3 states that boundary so a
+ * minimal vocalization is neither a greeting nor a task.
+ *
+ * Every repair above is a SEMANTIC/CONTRACT repair on a family of cases
+ * (contact-vs-book: the whole contact family; preference: 7 fixtures one
+ * direction; greeting: 3 fragments two slices). No threshold was moved, no
+ * per-question cut point was introduced, and no dialect dictionary, stem or
+ * keyword list appears anywhere.
+ *
+ *
  * ── WHAT CHANGED IN @v2 (PROMPT-AI-JEV-02) ─────────────────────────────────
  *
  * The field set is UNCHANGED from @v1 — eleven independent facts plus the one
@@ -159,8 +241,14 @@ import type { JevQuestion } from "./jev-decisions-adapter";
  * @v1 — PROMPT-AI-JEV-01 (frozen; the shipped live artifact used this).
  * @v2 — PROMPT-AI-JEV-02: hardened provider/support/availability/ambiguity
  *       semantics. Same eleven facts + one choice; no field added or removed.
+ * @v3 — PROMPT-AI-JEV-02B: the contact-vs-book minimal-pair contrast in
+ *       `bookingRequested` and `providerRequested` (the «عايز أشوف دكتور»
+ *       masking defect), the `providerPreferenceExpressed` availability
+ *       exclusion sharpened for named AND unnamed providers (the §10
+ *       adjudication), and the `greetingOnly` greeting-content boundary
+ *       (hesitation vs social opening). Same eleven facts + one choice.
  */
-export const JEV_QUESTION_CONTRACT_ID = "flowpilot.jev-questions@v2";
+export const JEV_QUESTION_CONTRACT_ID = "flowpilot.jev-questions@v3";
 
 /** The stable key of every question in the contract (machine-readable). */
 export const jevQuestionKeys = [
@@ -198,31 +286,31 @@ export const JEV_QUESTIONS: Readonly<Record<JevQuestionKey, JevQuestion>> = {
   providerRequested: {
     type: "noul",
     instructions:
-      "The customer is asking to DIRECTLY COMMUNICATE WITH a provider or professional — a doctor, dentist, specialist or any CLINICIAN who delivers the service. TRUE only when the turn asks for two-way personal contact with that person: to SPEAK with, TALK to, SEE, MEET, be TRANSFERRED to, be CONNECTED to, or be CALLED BACK by a provider. A provider title by itself NEVER makes this true. In particular this is FALSE when the customer merely: books or schedules an appointment with a provider; asks whether a provider is AVAILABLE, free, present, or working; expresses a PREFERENCE for which provider they would see; asks a provider's NAME, identity, or information; or asks about the business through a provider's name. Non-clinical staff (a receptionist, manager, secretary or support agent) are NOT providers — a request to reach them is a support request, not this fact. The distinction is the relationship, not the vocabulary: 'I want to speak with a doctor' and 'I want to book with a doctor' mention the same title, but only the first asks for contact.",
+      "The customer is asking to DIRECTLY COMMUNICATE WITH a provider or professional — a doctor, dentist, specialist or any CLINICIAN who delivers the service. TRUE only when the turn asks for two-way personal contact with that person: to SPEAK with, TALK to, SEE, MEET, be TRANSFERRED to, be CONNECTED to, or be CALLED BACK by a provider, where that interaction ITSELF is what the customer is asking for. This question asks about the MODE of the request — whether the customer wants the interaction — and NOT about its timing: attaching a when ('now', 'tomorrow', 'next week') does not convert a contact request into something else, because the customer is still asking for the interaction, only at a stated time. A provider title by itself NEVER makes this true. In particular this is FALSE when the customer merely: books or schedules an appointment with a provider; asks whether a provider is AVAILABLE, free, present, or working; expresses a PREFERENCE for which provider they would see; asks a provider's NAME, identity, or information; or asks about the business through a provider's name. Non-clinical staff (a receptionist, manager, secretary or support agent) are NOT providers — a request to reach them is a support request, not this fact. The distinction is the RELATIONSHIP, not the vocabulary, and it is not altered by mixing languages either: 'I need to see a doctor tomorrow' asks for the interaction at a time, and is still contact. 'I want to speak with a doctor' and 'I want to book with a doctor' mention the same title, but only the first asks for contact. The same contrast runs through 'see' and 'meet': wanting to SEE a provider as the requested mode of resolution — with NO appointment, slot or arrangement asked for — IS contact, because the customer is asking for that personal interaction itself; asking to ARRANGE an appointment whose PURPOSE is to see a provider is NOT contact, because what the customer is asking for is the arrangement, and the contact is only what the arrangement is for. Ask which thing the turn is REQUESTING: the interaction, or a commitment to be scheduled.",
     criteria: {
-      true: "The customer asks for a personal, two-way interaction with a clinician — speak, talk, see, meet, be connected, transferred, or called back by that provider.",
+      true: "The customer asks for a personal, two-way interaction with a clinician — speak, talk, see, meet, be connected, transferred, or called back by that provider — where the interaction itself is the request.",
       false:
-        "The turn only books, schedules, asks availability or presence, expresses a provider preference, identifies a provider, or asks to reach non-clinical staff. A provider title inside any of those is not a request for contact.",
+        "The turn only books, schedules, asks availability or presence, expresses a provider preference, identifies a provider, asks to arrange an appointment in order to later see a provider, or asks to reach non-clinical staff. A provider title inside any of those is not a request for contact. The relationship is NOT changed by mixing languages or by attaching a time: 'I need to see a doctor tomorrow' still asks for the interaction, not for an arrangement.",
     },
   },
   bookingRequested: {
     type: "noul",
     instructions:
-      "The customer is asking to BOOK, RESERVE or CREATE a new appointment. TRUE only when the turn asks for a NEW appointment to be made — a commitment to be scheduled. Asking WHEN a slot is free, or whether booking is possible, is not itself a booking request. Describing symptoms, pain, urgency or a condition is not a booking request either, even when the customer plainly needs care; the request to book must be asked for. Changing, moving or cancelling an appointment that already exists is NOT a new booking.",
+      "The customer is asking to BOOK, RESERVE, SCHEDULE or CREATE a new appointment — to have a NEW commitment arranged. TRUE only when the turn asks for an ARRANGEMENT to be made: an appointment, a reservation, a slot held, a time set. The request must be for the ARRANGEMENT ITSELF. Asking WHEN a slot is free, or whether booking is possible, is not itself a booking request. Describing symptoms, pain, urgency or a condition is not a booking request either, even when the customer plainly needs care; the request to book must be asked for. Changing, moving or cancelling an appointment that already exists is NOT a new booking. Crucially, merely WANTING TO SEE, SPEAK WITH or MEET a provider is NOT a booking, even though an appointment would be the usual way to get there: 'I want to see a doctor' asks for the INTERACTION, not for an arrangement, and is not this fact. Only when the customer asks to ARRANGE something — 'book so I can see the doctor', 'set up a time to meet the doctor' — is this TRUE. The customer must be asking for a commitment to be scheduled, not only for the outcome the commitment would deliver.",
     criteria: {
-      true: "The customer wants a new appointment created for them.",
+      true: "The customer wants a new appointment, reservation or slot arranged for them.",
       false:
-        "The customer is only asking about availability, is only describing a condition or symptoms, or is asking about an appointment they already have.",
+        "The customer is only asking about availability, is only describing a condition or symptoms, is asking about an appointment they already have, or only wants to see, speak with or meet a provider without asking for any arrangement to be made.",
     },
   },
   availabilityAsked: {
     type: "noul",
     instructions:
-      "The customer is asking WHETHER something can be booked, is FREE, is AVAILABLE, is OPEN, or is PRESENT — an appointment slot, a time, a date, a day, a service, or a provider. TRUE for questions about when a slot is open, whether a provider works there or is present, and whether a service can be booked at all. The customer is not yet committing to book; they are asking what is possible. Note that asking whether a provider is available is an AVAILABILITY question, not a request to communicate with that provider.",
+      "The customer is ASKING WHETHER something can be booked, is FREE, is AVAILABLE, is OPEN, or is PRESENT — an appointment slot, a time, a date, a day, a service, or a provider. TRUE only for a QUESTION about bookability or presence: when a slot is open, whether a provider works there or is present, and whether a service can be booked at all. The customer is not yet committing to book; they are asking what is possible. Note that asking whether a provider is available is an AVAILABILITY question, not a request to communicate with that provider. Crucially, a REQUEST to personally SEE, SPEAK with or MEET a provider is NOT an availability question, even though the customer implicitly needs the provider to be free: 'I need to see a doctor' is a request for the interaction, not a question about what is open, and belongs to the contact fact. Only a turn that ASKS whether something is free, open, present or bookable is TRUE here — a turn that ASKS FOR an interaction is not.",
     criteria: {
-      true: "The customer wants to know what is free, open, present, or bookable.",
+      true: "The customer asks whether something is free, open, present, or bookable.",
       false:
-        "The customer is ready to book right now, or is not asking about bookability, presence or times at all.",
+        "The customer is ready to book right now, asks to personally see/speak/meet a provider rather than asking whether one is free, or is not asking about bookability, presence or times at all.",
     },
   },
   cancellationRequested: {
@@ -248,11 +336,11 @@ export const JEV_QUESTIONS: Readonly<Record<JevQuestionKey, JevQuestion>> = {
   providerPreferenceExpressed: {
     type: "noul",
     instructions:
-      "The turn places a CONSTRAINT on WHICH provider performs the service — a specific provider by NAME, or a provider by GENDER, TITLE, SPECIALTY, seniority, or language — for a task the customer is requesting. TRUE when the customer states which provider, or which kind of provider, they would have perform the service. This is a constraint on the SERVICE, and is NEVER automatically a request to communicate with that provider: 'book with a doctor' expresses a preference, while 'let me speak to a doctor' asks for contact. Asking whether a provider is AVAILABLE or PRESENT is NOT a preference — it asks what is free, and does not itself constrain the choice. A provider mentioned only to IDENTIFY the business ('is this Dr X's clinic?') is not a preference either.",
+      "The turn places a CONSTRAINT on WHICH provider performs a SERVICE OR BOOKING the customer is requesting — a specific provider by NAME, or a provider by GENDER, TITLE, SPECIALTY, seniority, or language. TRUE when the customer states which provider, or which kind of provider, they would have perform the service, so the choice among providers is itself restricted. This is a constraint on the SERVICE, and is NEVER automatically a request to communicate with that provider: 'book with a doctor' expresses a preference, while 'let me speak to a doctor' asks for contact. Asking whether a provider is AVAILABLE or PRESENT is NOT a preference, whether the provider is NAMED or merely described generically: an availability question asks what is FREE and restricts nothing about who performs the service, so 'is Dr Ahmed available?' and 'is a doctor available?' are both availability and neither is a preference. A provider mentioned only to IDENTIFY the business ('is this Dr X's clinic?') is not a preference either. The constraint must be about the PROVIDER, not about TIME: attaching a when — 'tomorrow', 'now', 'this week' — to a request to see or speak with a provider does not create a preference, because it says nothing about which provider performs the service. The test is whether the turn narrows the SET OF PROVIDERS who may perform a requested service — not whether a provider is merely named, discussed, asked about, or given a time.",
     criteria: {
-      true: "The customer states which provider, or which kind of provider, they would prefer to perform a task they are requesting.",
+      true: "The customer states which provider, or which kind of provider, they would prefer to perform a service or booking they are requesting, narrowing the set of acceptable providers.",
       false:
-        "The turn names no provider, names one only to identify the business, only asks whether a provider is available or present, or is asking to communicate with a provider (a contact request, not a preference).",
+        "The turn names no provider, names one only to identify the business, only asks whether a provider is available or present (named or generic), merely attaches a time to a contact request, or is asking to communicate with a provider (a contact request, not a preference).",
     },
   },
   sensitiveTurn: {
@@ -278,11 +366,11 @@ export const JEV_QUESTIONS: Readonly<Record<JevQuestionKey, JevQuestion>> = {
   greetingOnly: {
     type: "noul",
     instructions:
-      "The message is purely a social greeting or opening — a hello, a time-of-day greeting, a wellbeing pleasantry — and carries no request, question or task at all. TRUE when the whole message is a social opening. A greeting followed by any request, question or task makes this FALSE.",
+      "The message is purely a social greeting or opening — a hello, a time-of-day greeting, a wellbeing pleasantry — and carries no request, question or task at all. TRUE when the whole message is a social opening that actually contains GREETING CONTENT. A bare hesitation, filler or minimal vocalization ('hmm', 'uh', 'yeah', a grunt of acknowledgement) is NOT a greeting: it carries no greeting content and no task, and such a fragment falls to the ambiguity question instead. A greeting followed by any request, question or task makes this FALSE.",
     criteria: {
-      true: "The whole message is a social opening with no task behind it.",
+      true: "The whole message is a social opening, carrying actual greeting content and no task behind it.",
       false:
-        "The message contains a greeting but also carries a request, question or task.",
+        "The message contains a greeting but also carries a request, question or task, or is only a hesitation or filler with no greeting content at all.",
     },
   },
   ambiguousTurn: {
