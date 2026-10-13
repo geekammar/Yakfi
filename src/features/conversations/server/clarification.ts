@@ -60,6 +60,14 @@ export const clarificationTypeValues = [
   "CLARIFY_PROVIDER",
   "CLARIFY_INTENT",
   "CLARIFY_DISAMBIGUATE_MULTI_INTENT",
+  /**
+   * The bounded contact-vs-book ambiguity (PROMPT-AI-JEV-03B §9): the customer's
+   * intent is plausibly to REACH a provider OR to BOOK, and the semantic model
+   * could not commit to either. ONE bounded question disambiguates it instead
+   * of guessing a handoff or a booking. Proposed ONLY from the semantic path —
+   * never from lexical keyword/regex tables.
+   */
+  "CLARIFY_CONTACT_OR_BOOK",
   "CONFIRM_UNDERSTOOD_REQUEST",
   "NONE",
 ] as const;
@@ -88,6 +96,20 @@ export type ClarificationPlan = {
 /** The generic intent clarification — the smallest useful question. */
 export const CLARIFY_INTENT_QUESTION =
   "لم أفهم طلبك تماماً — ممكن توضّح أكثر؟ أقدر أساعدك في حجز موعد، أو معرفة الأوقات المتاحة، أو الرد على استفساراتك.";
+
+/**
+ * The bounded CONTACT-VS-BOOK clarification question
+ * (PROMPT-AI-JEV-03B §9). A fixed, knowledge-free template naming ONLY the two
+ * bounded supported actions the turn is genuinely ambiguous between — reach a
+ * team member, or book an appointment. It names NO service, price, slot,
+ * provider, policy, or any business fact, so it crosses the customer boundary
+ * on its declared knowledge-free class exactly like the other clarification
+ * protocols (B-03 §16). It asks exactly ONE question. It is deliberately NOT
+ * business-specific copy: the generic intent wording stays the default until a
+ * Product copy decision is made.
+ */
+export const CLARIFY_CONTACT_OR_BOOK_QUESTION =
+  "ممكن توضّح طلبك أكثر — تحب تتكلم مع أحد أعضاء الفريق مباشرة، ولا تحب نحجز لك موعد؟";
 
 /**
  * The INTERRUPTION-RECOVERY acknowledgment (PROMPT-AI-ARCH-08). A fixed,
@@ -122,6 +144,7 @@ export const CONTINUE_DOMAIN_INVITE =
 
 const QUESTION_BY_TYPE: Partial<Record<ClarificationType, string>> = {
   CLARIFY_INTENT: CLARIFY_INTENT_QUESTION,
+  CLARIFY_CONTACT_OR_BOOK: CLARIFY_CONTACT_OR_BOOK_QUESTION,
   CLARIFY_SERVICE:
     "يرجى تحديد الخدمة المطلوبة — أخبرنا باسم الخدمة التي ترغب بحجزها.",
   CLARIFY_DATE: CLARIFY_DATE_QUESTION,
@@ -310,6 +333,13 @@ export function derivePendingClarification(
   }
   if (lastAi.includes("يرجى تحديد التاريخ المطلوب")) {
     return { type: "CLARIFY_DATE", missingFacts: ["date"] };
+  }
+  // PROMPT-AI-JEV-03B §9 — the bounded contact-vs-book question is a pending
+  // clarification too: recognizing it here lets the EXISTING anti-repeat +
+  // resume machinery re-ask it (precedence rule 6) instead of escalating, and
+  // lets a later supplied fact resume the task through the ONE merge path.
+  if (lastAi.includes("تحب تتكلم مع أحد أعضاء الفريق")) {
+    return { type: "CLARIFY_CONTACT_OR_BOOK", missingFacts: [] };
   }
   return null;
 }

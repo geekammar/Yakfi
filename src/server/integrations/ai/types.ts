@@ -12,6 +12,7 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 
 import type { ConversationControlOutcome } from "./conversation-control/types";
+import type { JevSemanticEvidence } from "./jev-semantic-strategy";
 import type { JevDecisionMode, JevDecisionReason } from "./jev-strategy";
 import type { NormalizerTrace } from "./response-normalizer/types";
 
@@ -199,5 +200,14 @@ export type AiTelemetry = {
   jevDecision?: {
     readonly mode: JevDecisionMode;
     readonly reason: JevDecisionReason;
+    /**
+     * The semantic evidence block (PROMPT-AI-JEV-03B §12). Present only when a
+     * semantic JEV strategy was configured AND produced a reading for this
+     * turn — closed machine keys only: derived facts, sanitized probabilities,
+     * the shared precedence derivation, the contact-vs-book boundary and the
+     * resolver signals. Never content, provider raw output, secrets, or
+     * chain-of-thought.
+     */
+    readonly semantic?: JevSemanticEvidence;
   };
 };

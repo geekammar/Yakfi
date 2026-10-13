@@ -24,6 +24,7 @@
  */
 
 import type {
+  AiIntent,
   AiRequest,
   AiResponse,
 } from "@/features/conversations/server/ai-contract";
@@ -550,6 +551,50 @@ export type ExplicitHumanRequest = {
   readonly explicitHuman: boolean;
 };
 
+/**
+ * The ONE server-owned precedence derivation over the three independent
+ * explicit-human facts (AI-SEM-02; extracted as a shared derivation by
+ * PROMPT-AI-JEV-03B §2):
+ *
+ *     explicitHuman = supportRequest OR (providerRequest AND NOT bookingTask)
+ *
+ * Extracted so the lexical detector (`detectExplicitHumanRequest`, facts from
+ * the keyword tables) and the semantic JEV strategy (facts from the JEV
+ * decisions model) call the SAME server-owned derivation. The formula exists
+ * exactly once in production; a lexical reading and a semantic reading can
+ * never apply two different formulas to the same three facts. Pure, total,
+ * zero model calls.
+ */
+export function explicitHumanFromFacts(facts: {
+  readonly supportRequest: boolean;
+  readonly providerRequest: boolean;
+  readonly bookingTask: boolean;
+}): boolean {
+  return facts.supportRequest || (facts.providerRequest && !facts.bookingTask);
+}
+
+/**
+ * The booking-task family fold: booking / availability / cancellation /
+ * reschedule stems all mask the provider-title path in the precedence formula
+ * (the same mask the lexical detector always applied as one OR). Extracted as
+ * a shared derivation by PROMPT-AI-JEV-03B §2 so the semantic JEV strategy
+ * folds its own four semantic family facts through the SAME function —
+ * `bookingTask` means one thing on both paths. Pure, total, zero model calls.
+ */
+export function bookingTaskFromFamily(family: {
+  readonly bookingRequested: boolean;
+  readonly availabilityAsked: boolean;
+  readonly cancellationRequested: boolean;
+  readonly rescheduleAsked: boolean;
+}): boolean {
+  return (
+    family.bookingRequested ||
+    family.availabilityAsked ||
+    family.cancellationRequested ||
+    family.rescheduleAsked
+  );
+}
+
 export function detectExplicitHumanRequest(
   message: string,
 ): ExplicitHumanRequest {
@@ -559,16 +604,25 @@ export function detectExplicitHumanRequest(
     hasWord(tokens, HUMAN_WORDS_N) || hasPhrase(normalized, HUMAN_PHRASES_N);
   const providerRequest =
     hasWord(tokens, HUMAN_TITLE_WORDS_N) && hasRequestCue(normalized);
-  const bookingTask =
-    hasWord(tokens, BOOKING_WORDS_N) ||
-    hasPhrase(normalized, BOOKING_PHRASES_N) ||
-    hasWord(tokens, AVAILABILITY_WORDS_N) ||
-    hasPhrase(normalized, AVAILABILITY_PHRASES_N) ||
-    hasWord(tokens, CANCELLATION_WORDS_N) ||
-    hasPhrase(normalized, CANCELLATION_PHRASES_N) ||
-    hasWord(tokens, RESCHEDULE_MUTATION_N) ||
-    hasPhrase(normalized, RESCHEDULE_PHRASES_N);
-  const explicitHuman = supportRequest || (providerRequest && !bookingTask);
+  const bookingTask = bookingTaskFromFamily({
+    bookingRequested:
+      hasWord(tokens, BOOKING_WORDS_N) ||
+      hasPhrase(normalized, BOOKING_PHRASES_N),
+    availabilityAsked:
+      hasWord(tokens, AVAILABILITY_WORDS_N) ||
+      hasPhrase(normalized, AVAILABILITY_PHRASES_N),
+    cancellationRequested:
+      hasWord(tokens, CANCELLATION_WORDS_N) ||
+      hasPhrase(normalized, CANCELLATION_PHRASES_N),
+    rescheduleAsked:
+      hasWord(tokens, RESCHEDULE_MUTATION_N) ||
+      hasPhrase(normalized, RESCHEDULE_PHRASES_N),
+  });
+  const explicitHuman = explicitHumanFromFacts({
+    supportRequest,
+    providerRequest,
+    bookingTask,
+  });
   return { supportRequest, providerRequest, bookingTask, explicitHuman };
 }
 
@@ -1370,6 +1424,52 @@ export function classifyCustomerMessage(
     handoffReason: "AMBIGUOUS",
     summary: null,
   };
+}
+
+// ─── Shared deterministic template accessors (PROMPT-AI-JEV-03B) ──────────────
+
+/**
+ * Does the message carry a STRONG FAQ match against the carried knowledge
+ * store — the exact condition under which `classifyCustomerMessage` answers
+ * verbatim from `Business.faqs`? Exposed so the semantic JEV eligibility gate
+ * asks the SAME question the lexical classifier already answers, and the two
+ * paths can never disagree on what a "strong FAQ match" is. Pure, total, and
+ * performs ZERO model calls.
+ */
+export function strongFaqMatch(
+  message: string,
+  faqs: ReadonlyArray<{ question: string; answer: string }>,
+): boolean {
+  return matchFaq(tokenize(message), faqs) !== null;
+}
+
+/**
+ * The deterministic customer-facing reply + staff summary for ONE routing
+ * intent, drawn from the SAME fixed templates the lexical classifier uses
+ * (`REPLIES` / `BOOKING_SUMMARIES` / the greeting acknowledgement). Exposed by
+ * PROMPT-AI-JEV-03B so the semantic JEV strategy maps semantic facts into an
+ * `AiResponse`-compatible proposal WITHOUT ever authoring customer prose: its
+ * `content` is always one of these knowledge-free, engine-owned templates, so
+ * no model text and no chain-of-thought can reach the customer through the
+ * semantic channel. `GREETING` builds the same acknowledgement the greeting
+ * bypass emits. `FAQ` carries no template here (a strong-FAQ turn is JEV-
+ * ineligible by construction), so it resolves to the safe knowledge-gap
+ * refusal. Pure, total, zero model calls.
+ */
+export function deterministicReplyForIntent(
+  intent: AiIntent,
+  message: string,
+): { readonly content: string; readonly summary: string | null } {
+  if (intent === "GREETING") {
+    return { content: buildGreetingContent(message), summary: null };
+  }
+  if (intent === "FAQ") {
+    return { content: REPLIES.NO_KNOWLEDGE, summary: null };
+  }
+  const content = REPLIES[intent as keyof typeof REPLIES];
+  const summary =
+    BOOKING_SUMMARIES[intent as keyof typeof BOOKING_SUMMARIES] ?? null;
+  return { content, summary };
 }
 
 /**

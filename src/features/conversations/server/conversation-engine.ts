@@ -689,13 +689,31 @@ function resolveFinishedTurn(
   currentMessage: string,
   now: Date,
   timezone: string,
+  /**
+   * The turn's provider telemetry (PROMPT-AI-JEV-03B §8). For a semantic-JEV
+   * turn it carries the validated JEV-derived resolver signals; for every other
+   * turn it is unused and the lexical detector stays authoritative.
+   */
+  turnTelemetry?: AiTelemetry | null,
 ): { plan: ResolvedTurn; state: ConversationState } | null {
   if (!decision) return null;
   try {
     // Deterministic, authoritative control/safety signals for THIS turn
     // (PROMPT-AI-EVAL-07). Reused by value from the SAME keyword tables the
     // deterministic classifier applies — no new classifier, no model call.
-    const signals = detectTurnControlSignals(currentMessage);
+    //
+    // PROMPT-AI-JEV-03B §8: for a turn the SEMANTIC JEV strategy owns, the
+    // validated JEV-derived signals are fed to the ONE resolver instead. The
+    // lexical detector MUST NOT run afterward and overwrite the JEV semantic
+    // reading for a JEV-owned turn — but the ONE resolver still runs exactly
+    // once and still decides the actual action (JEV never calls it). For every
+    // other turn the lexical detector stays authoritative (the exact
+    // pre-AI-JEV-03 behaviour).
+    const semanticSignals =
+      routing === "JEV"
+        ? turnTelemetry?.jevDecision?.semantic?.signals
+        : undefined;
+    const signals = semanticSignals ?? detectTurnControlSignals(currentMessage);
 
     const base = deriveConversationStateFromHistory(recentChronological);
     // Reconstruct a pending clarification from history (migration-safe §9) so
@@ -1888,6 +1906,7 @@ async function runInboundTurn(
       inbound.text,
       new Date(),
       business.timezone,
+      turnTelemetry,
     );
     const resolvedTurn = resolution?.plan ?? null;
     const resolvedState = resolution?.state ?? null;
@@ -1905,6 +1924,14 @@ async function runInboundTurn(
       deterministicBypass
         ? "NOT_CALLED"
         : (turnTelemetry?.finalStatus ?? (validated ? "SUCCESS" : "FAILURE"));
+    // PROMPT-AI-JEV-03B §12 — the TOTAL LOGICAL MODEL-CALL COUNT, INCLUDING a
+    // JEV inference. A semantic JEV turn that spent one JEV call reports 1 even
+    // though the generative provider's `providerAttempts` is [] (no LLM ran);
+    // a deterministic turn reports 0; an ordinary generative turn reports its
+    // physical attempt count. This is the ONE counter that makes the 0/1
+    // model-call invariant measurable end-to-end.
+    const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
+    const modelCallCount = providerAttempts + (jevCallSpent ? 1 : 0);
     let turnObservability: TurnObservability = buildTurnObservability({
       routingDecision: turnRouting,
       response: validated,
@@ -1964,6 +1991,15 @@ async function runInboundTurn(
       // PROMPT-AI-ARCH-17 (Slice 8) — the JEV gateway decision, auditable as
       // closed machine keys. Additive only; never customer-visible.
       jev: turnTelemetry?.jevDecision ?? null,
+      // PROMPT-AI-JEV-03B §12 — the total logical model-call count (JEV +
+      // generative). See `modelCallCount` above.
+      modelCallCount,
+      // PROMPT-AI-JEV-03B §12 — clarification anti-repeat / resume state: true
+      // when the ONE resolver PRESERVED a pending task by re-asking its bounded
+      // question instead of escalating (precedence rule 6).
+      ...(resolvedTurn?.precedenceRule === "PENDING_TASK_PRESERVED"
+        ? { clarifyAntiRepeat: true }
+        : {}),
     });
     if (!validated) {
       const safeHandoff = classifyCustomerMessage(

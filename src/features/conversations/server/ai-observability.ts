@@ -135,6 +135,14 @@ export type TurnObservability = {
   readonly jev?: {
     readonly mode: "DETERMINISTIC" | "GENERATIVE";
     readonly reason: string;
+    /**
+     * The semantic evidence block (PROMPT-AI-JEV-03B §12). Present only when a
+     * semantic JEV strategy produced a reading for this turn. Closed machine
+     * keys only — derived facts, sanitized probabilities, the shared precedence
+     * derivation, the contact-vs-book boundary and the resolver signals. Never
+     * content, provider raw output, secrets, or chain-of-thought.
+     */
+    readonly semantic?: unknown;
   } | null;
   /**
    * ONE correlation id for the whole inbound turn (PROMPT-AI-OPS-22): born at
@@ -159,6 +167,20 @@ export type TurnObservability = {
   readonly providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED";
   /** Whether `parseAiResponse` accepted the provider output. */
   readonly parseSuccess?: boolean;
+  /**
+   * The TOTAL LOGICAL MODEL-CALL COUNT for the turn, JEV + generative
+   * (PROMPT-AI-JEV-03B §12). 0 for a deterministic turn; 1 for an ordinary
+   * generative turn; 1 for a semantic JEV turn that spent one JEV inference
+   * (even though the generative provider's attempt trace is empty). This is the
+   * counter that makes the 0/1 model-call invariant measurable end-to-end.
+   */
+  readonly modelCallCount?: number;
+  /**
+   * True when the ONE resolver PRESERVED a pending task by re-asking its
+   * bounded clarification instead of escalating (precedence rule 6) — the
+   * clarification anti-repeat / resume state (PROMPT-AI-JEV-03B §12).
+   */
+  readonly clarifyAntiRepeat?: boolean;
   /**
    * Input tokens the provider reported for this turn's successful (else last)
    * physical attempt (PROMPT-AI-PERF-02). Copied AS-IS from the existing
@@ -210,6 +232,8 @@ export type BuildTurnObservabilityInput = {
   jev?: {
     readonly mode: "DETERMINISTIC" | "GENERATIVE";
     readonly reason: string;
+    /** The semantic evidence block (PROMPT-AI-JEV-03B §12), when produced. */
+    readonly semantic?: unknown;
   } | null;
   /** One correlation id for the turn (PROMPT-AI-OPS-22). */
   traceId?: string | null;
@@ -233,6 +257,13 @@ export type BuildTurnObservabilityInput = {
   inputTokens?: number | null;
   /** See {@link BuildTurnObservabilityInput.inputTokens} — output counterpart. */
   outputTokens?: number | null;
+  /**
+   * The total logical model-call count for the turn, JEV + generative
+   * (PROMPT-AI-JEV-03B §12). Copied as-is; never recomputed.
+   */
+  modelCallCount?: number | null;
+  /** Clarification anti-repeat / resume state (PROMPT-AI-JEV-03B §12). */
+  clarifyAntiRepeat?: boolean | null;
 };
 
 /**
@@ -314,5 +345,11 @@ export function buildTurnObservability(
     ...(input.outputTokens !== undefined && input.outputTokens !== null
       ? { outputTokens: input.outputTokens }
       : {}),
+    // PROMPT-AI-JEV-03B §12 — the ONE total model-call counter, copied as-is.
+    // A semantic JEV turn reports 1 here while `providerAttempts` is 0.
+    ...(input.modelCallCount !== undefined && input.modelCallCount !== null
+      ? { modelCallCount: input.modelCallCount }
+      : {}),
+    ...(input.clarifyAntiRepeat ? { clarifyAntiRepeat: true } : {}),
   };
 }

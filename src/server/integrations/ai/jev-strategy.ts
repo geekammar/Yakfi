@@ -51,6 +51,8 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 
+import type { JevSemanticEvidence } from "./jev-semantic-strategy";
+
 // ─── The bounded decision contract (the smallest justified representation) ──
 
 export const jevDecisionModeValues = [
@@ -79,6 +81,46 @@ export const jevDecisionReasonValues = [
    * ambiguity never terminates deterministically.
    */
   "GENERATIVE_REQUIRED",
+
+  // ── Semantic-strategy reasons (PROMPT-AI-JEV-03B §6/§7). A semantic JEV
+  //    strategy terminates DETERMINISTICALLY on these too: after its ONE JEV
+  //    attempt the turn NEVER falls through to the LLM (fail-closed), so each
+  //    of these is a zero-LLM-call termination. The closed keys are the
+  //    auditable outcome class of the turn.
+  /**
+   * A JEV attempt was SPENT and then failed (timeout / network / provider /
+   * malformed / missing field). The turn terminated on the deterministic
+   * lexical baseline: 1 JEV call, 0 LLM calls.
+   */
+  "JEV_FAILURE_FAIL_CLOSED",
+  /**
+   * A spent JEV call produced NO actionable semantic reading at all, so the
+   * deterministic lexical baseline owns the turn: 1 JEV call, 0 LLM calls.
+   */
+  "JEV_NO_READING_BASELINE",
+  /**
+   * A spent JEV call produced a semantic domain-task reading (booking /
+   * availability / cancellation / reschedule) proposed to the ONE resolver:
+   * 1 JEV call, 0 LLM calls.
+   */
+  "SEMANTIC_DOMAIN",
+  /**
+   * A spent JEV call produced a semantic handoff reading (safety / explicit
+   * human / ambiguity / knowledge gap): 1 JEV call, 0 LLM calls.
+   */
+  "SEMANTIC_HANDOFF",
+  /**
+   * A spent JEV call produced the bounded contact-vs-book boundary and the
+   * strategy proposed ONE bounded clarification instead of guessing a handoff
+   * or a booking: 1 JEV call, 0 LLM calls.
+   */
+  "SEMANTIC_CLARIFY",
+  /**
+   * A spent JEV call produced a knowledge-free semantic answer (a proven-pure
+   * social opening) drawn from the fixed engine-owned templates: 1 JEV call,
+   * 0 LLM calls.
+   */
+  "SEMANTIC_ANSWER",
 ] as const;
 
 export type JevDecisionReason = (typeof jevDecisionReasonValues)[number];
@@ -87,18 +129,34 @@ export type JevDecisionReason = (typeof jevDecisionReasonValues)[number];
  * The decision the strategy made for one turn. `response` is a COMPLETE,
  * contract-valid `AiResponse` present IFF `mode === "DETERMINISTIC"` — the
  * gateway returns it without any provider call.
+ *
+ * `semantic` carries the closed machine-key evidence block a semantic strategy
+ * produces (PROMPT-AI-JEV-03B §12): derived facts, sanitized probabilities,
+ * the shared precedence derivation, and — when the JEV reading owns the turn —
+ * the resolver signals the engine feeds `resolveTurnPlan`. Absent for the
+ * conservative strategy and for every non-semantic decision; it is additive
+ * observability and never customer-visible.
  */
 export type JevDecision = {
   readonly mode: JevDecisionMode;
   readonly reason: JevDecisionReason;
   readonly response: AiResponse | null;
+  readonly semantic?: JevSemanticEvidence | null;
 };
 
 export type JevStrategy = {
   /** Stable strategy identity for telemetry / audit (machine key). */
   readonly strategyId: string;
-  /** Pure, synchronous, total: no I/O, no model call, never throws. */
-  decide(request: AiRequest): JevDecision;
+  /**
+   * Pure, total and never throws. PROMPT-AI-JEV-03B §6: the seam is async so a
+   * semantic strategy may perform its ONE async JEV decision; the conservative
+   * strategy still performs NO I/O and NO model call (it resolves without
+   * awaiting anything). The gateway (`orchestrator.ts`) owns the call budget:
+   * a DETERMINISTIC decision terminates the turn with zero provider attempts
+   * and a GENERATIVE decision leaves the budget untouched for the gateway's
+   * single existing call.
+   */
+  decide(request: AiRequest): Promise<JevDecision>;
 };
 
 /**
@@ -147,7 +205,15 @@ export const CONSERVATIVE_JEV_STRATEGY_ID = "jev-conservative@v1";
 export function createConservativeJevStrategy(): JevStrategy {
   return {
     strategyId: CONSERVATIVE_JEV_STRATEGY_ID,
-    decide(request: AiRequest): JevDecision {
+    /**
+     * PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may make
+     * its one async JEV call. The CONSERVATIVE strategy keeps its exact
+     * synchronous, pure, zero-I/O, zero-model-call behaviour: this body awaits
+     * nothing, performs no I/O, and resolves on the same turn — so a
+     * conservative strategy is still the pure no-op decision it always was,
+     * and a semantic turn can never hide behind it.
+     */
+    async decide(request: AiRequest): Promise<JevDecision> {
       const proven = bypassDeterministicAi(request);
       if (!proven) {
         return {

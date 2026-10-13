@@ -22,6 +22,8 @@ import { createCodeCraftAdapter } from "./codecraft";
 import { createLlmConversationAi } from "./conversation-ai";
 import { createConversationControl } from "./conversation-control";
 import type { ConversationControl } from "./conversation-control";
+import { createJevDecisionsProvider } from "./jev-decisions-provider";
+import { createSemanticJevStrategy } from "./jev-semantic-strategy";
 import { createConservativeJevStrategy } from "./jev-strategy";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
@@ -157,12 +159,57 @@ export async function createPolicyBackedAi(
   // already proves decidable without a provider; every other turn continues to
   // the single existing generative call. Removing this one argument is the
   // complete rollback.
+  //
+  // PROMPT-AI-JEV-03B §11 — the SEMANTIC JEV strategy is wired through the SAME
+  // dependency-injected seam, gated by ONE explicit environment-controlled kill
+  // switch that is DISABLED BY DEFAULT (ABSENT ⇒ OFF; any non-positive value ⇒
+  // OFF). When disabled, customer-visible behavior reproduces the exact
+  // pre-AI-JEV-03 production behavior (the conservative strategy), and the
+  // semantic strategy's `enabled: false` branch never consults the provider —
+  // so not supplying it is a complete rollback with no schema, migration or DB
+  // coordination. The switch is NOT activated in any environment here.
+  const decisionStrategy = isSemanticJevEnabled(deps.getEnvVar)
+    ? createSemanticJevStrategy({
+        provider: createJevDecisionsProvider({
+          getEnvVar: deps.getEnvVar,
+          fetchImpl: deps.fetchImpl,
+          ...(deps.endpointOverrides?.openrouter
+            ? { endpoint: deps.endpointOverrides.openrouter }
+            : {}),
+          ...(deps.timeoutMs ? { timeoutMs: deps.timeoutMs } : {}),
+        }),
+        enabled: true,
+      })
+    : createConservativeJevStrategy();
   return createLlmConversationAi({
     primary,
     secondary,
     fallbackEnabled,
-    decisionStrategy: createConservativeJevStrategy(),
+    decisionStrategy,
   });
+}
+
+/**
+ * The ONE explicit environment-controlled kill switch for the semantic JEV
+ * strategy (PROMPT-AI-JEV-03B §11). DISABLED BY DEFAULT:
+ *  · ABSENT            ⇒ OFF
+ *  · any non-value     ⇒ OFF
+ *  · "0"/"false"/"no"  ⇒ OFF
+ *  · "1"/"true"/"yes"  ⇒ ON (the ONLY enablement)
+ *
+ * No schema, no DB policy row, no tenant-level widening. A disabled switch
+ * yields the exact pre-AI-JEV-03 production behavior.
+ */
+export const SEMANTIC_JEV_FLAG = "FLOWPILOT_JEV_SEMANTIC_ENABLED";
+
+const SEMANTIC_JEV_ENABLEMENTS = new Set(["1", "true", "yes"]);
+
+export function isSemanticJevEnabled(
+  getEnvVar: (name: string) => string | undefined,
+): boolean {
+  const raw = getEnvVar(SEMANTIC_JEV_FLAG);
+  if (!raw) return false;
+  return SEMANTIC_JEV_ENABLEMENTS.has(raw.trim().toLowerCase());
 }
 
 /** Alias matching the BUILD_STATE seam name. */

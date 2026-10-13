@@ -121,19 +121,24 @@ async function main(): Promise<void> {
 
   const strategy = jev.createConservativeJevStrategy();
 
-  // A1 — the contract is bounded (closed enums, exactly two modes / 3 reasons).
+  // A1 — the contract is bounded (closed enums, exactly two modes). The reason
+  // set is a fixed closed tuple: the 3 conservative reasons plus the 6 semantic
+  // reasons a semantic JEV strategy terminates on (PROMPT-AI-JEV-03B §6/§7 —
+  // every one of them is a ZERO-LLM-call DETERMINISTIC termination).
   check(
-    "A1 the decision contract is bounded: 2 modes, 3 reasons, closed enums",
+    "A1 the decision contract is bounded: 2 modes, 9 reasons, closed enums",
     jev.jevDecisionModeValues.length === 2 &&
       jev.jevDecisionModeValues.includes("DETERMINISTIC") &&
       jev.jevDecisionModeValues.includes("GENERATIVE") &&
-      jev.jevDecisionReasonValues.length === 3 &&
-      jev.jevDecisionReasonValues.includes("GENERATIVE_REQUIRED"),
+      jev.jevDecisionReasonValues.length === 9 &&
+      jev.jevDecisionReasonValues.includes("GENERATIVE_REQUIRED") &&
+      jev.jevDecisionReasonValues.includes("JEV_FAILURE_FAIL_CLOSED") &&
+      jev.jevDecisionReasonValues.includes("SEMANTIC_CLARIFY"),
   );
 
   // A2 — a proven deterministic greeting terminates with a complete response.
   {
-    const d = strategy.decide(req("السلام عليكم"));
+    const d = await strategy.decide(req("السلام عليكم"));
     check(
       "A2 proven greeting → DETERMINISTIC / DETERMINISTIC_ACKNOWLEDGEMENT with a complete contract response",
       d.mode === "DETERMINISTIC" &&
@@ -147,7 +152,7 @@ async function main(): Promise<void> {
   // A3 — a proven undecidable (too short) turn terminates as a safe ambiguity
   // handoff — never a guess, never a fabricated answer.
   {
-    const d = strategy.decide(req("م"));
+    const d = await strategy.decide(req("م"));
     check(
       "A3 proven undecidable (too short) → DETERMINISTIC / DETERMINISTIC_UNDECIDABLE as a safe handoff",
       d.mode === "DETERMINISTIC" &&
@@ -160,7 +165,7 @@ async function main(): Promise<void> {
 
   // A4 — a normal language-understanding turn continues to the generative call.
   {
-    const d = strategy.decide(req("ما مواعيد العمل لديكم؟"));
+    const d = await strategy.decide(req("ما مواعيد العمل لديكم؟"));
     check(
       "A4 normal question → GENERATIVE / GENERATIVE_REQUIRED, no fabricated response",
       d.mode === "GENERATIVE" &&
@@ -171,7 +176,7 @@ async function main(): Promise<void> {
 
   // A5 — an ambiguous natural-language turn does NOT bypass incorrectly.
   {
-    const d = strategy.decide(req("عايز أحجز موعد بكرة لو سمحت"));
+    const d = await strategy.decide(req("عايز أحجز موعد بكرة لو سمحت"));
     check(
       "A5 ambiguous booking language → GENERATIVE (never bypasses incorrectly)",
       d.mode === "GENERATIVE",
@@ -180,7 +185,7 @@ async function main(): Promise<void> {
 
   // A6 — an explicit human request is never terminated by JEV (handoff path).
   {
-    const d = strategy.decide(req("أريد التحدث إلى موظف لو سمحت"));
+    const d = await strategy.decide(req("أريد التحدث إلى موظف لو سمحت"));
     check(
       "A6 explicit human request → GENERATIVE (the existing handoff path owns it)",
       d.mode === "GENERATIVE",
@@ -189,7 +194,7 @@ async function main(): Promise<void> {
 
   // A7 — a sensitive turn is never terminated by JEV (safety precedence).
   {
-    const d = strategy.decide(
+    const d = await strategy.decide(
       req("عندي ألم شديد جداً في أسناني ولا أعرف ماذا أفعل"),
     );
     check(
@@ -222,7 +227,7 @@ async function main(): Promise<void> {
     for (const message of corpus) {
       const request = req(message);
       const proven = bypassDeterministicAi(request);
-      const decision = strategy.decide(request);
+      const decision = await strategy.decide(request);
       const strategyTerminates = decision.mode === "DETERMINISTIC";
       if (proven === null && strategyTerminates) divergence += 1;
       if (proven !== null && !strategyTerminates) divergence += 1;
@@ -246,47 +251,60 @@ async function main(): Promise<void> {
   }
 
   // A9 — the strategy introduces NO second resolver / judge / classifier: it
-  //      imports only the contract + the shared deterministic classifier, and
-  //      its decision is a pure synchronous value (no `await`, no second
-  //      inference path, no provider adapter, no domain/resolver/state module).
+  //      imports only the contract + the shared deterministic classifier (plus
+  //      a TYPE-ONLY sibling import for the semantic evidence block), and its
+  //      decision performs no I/O. PROMPT-AI-JEV-03B §6 makes the SEAM async so
+  //      a SEMANTIC strategy may spend its ONE JEV call; the CONSERVATIVE
+  //      strategy still awaits nothing — `async` is the seam's shape only, and
+  //      its body holds no provider call, no fetch and no model call.
   {
     const source = readFileSync(
       resolvePath(__dirname, "../src/server/integrations/ai/jev-strategy.ts"),
       "utf8",
     );
-    // The only source imports must be the AI contract + the shared classifier.
-    const importLines = source
-      .split("\n")
-      .filter((line) => line.trim().startsWith("import"));
-    const forbiddenImport = importLines.some(
-      (line) =>
-        /\/(atria|openrouter|agentrouter|codecraft)["']/.test(line) ||
+    // The only source imports must be the AI contract, the shared classifier,
+    // or the type-only sibling evidence import. Statements (not lines) — the
+    // contract import spans several lines.
+    const importStatements =
+      source.match(/import[\s\S]*?from\s*["'][^"']+["'];/g) ?? [];
+    const forbiddenImport = importStatements.some(
+      (statement) =>
+        /\/(atria|openrouter|agentrouter|codecraft)["']/.test(statement) ||
         /\/(orchestrator|factory|conversation-control|prompt-registry|prompt)["']/.test(
-          line,
+          statement,
         ) ||
         /\/(turn-planner|conversation-state|conversation-engine|booking-|appointment-)/.test(
-          line,
+          statement,
         ),
     );
-    // `decide` must be synchronous: no await inside the strategy body.
-    const decideBody = source.slice(
-      source.indexOf("decide(request: AiRequest)"),
-      source.indexOf("CONSERVATIVE_JEV_STRATEGY_ID"),
+    const everyImportAllowed = importStatements.every(
+      (statement) =>
+        /ai-contract/.test(statement) ||
+        /conversation-ai/.test(statement) ||
+        /jev-semantic-strategy/.test(statement),
+    );
+    // The conservative body must perform no I/O: no await, no provider call,
+    // no injected dependency — a pure value resolved on the same turn. The
+    // slice is the strategy's own definition (the last export in the module).
+    const conservativeBody = source.slice(
+      source.indexOf("export function createConservativeJevStrategy"),
     );
     check(
-      "A9 the JEV module adds no second resolver/judge/classifier (contract + classifier only; decide is synchronous)",
+      "A9 the JEV module adds no second resolver/judge/classifier (contract + classifier only; the conservative decide performs no I/O)",
       !forbiddenImport &&
-        importLines.length === 2 &&
-        !/await\s/.test(decideBody) &&
-        /export function createConservativeJevStrategy/.test(source),
+        everyImportAllowed &&
+        importStatements.length === 3 &&
+        !/await\s/.test(conservativeBody) &&
+        !/(\.call\(|fetchImpl|deps\.|\.evaluate\()/.test(conservativeBody) &&
+        /async decide\(request: AiRequest\)/.test(conservativeBody),
     );
   }
 
   // A10 — provider NEUTRALITY: the decision is identical regardless of which
   //       vendor the gateway is configured for (the strategy never sees it).
   {
-    const d1 = strategy.decide(req("السلام عليكم"));
-    const d2 = strategy.decide(req("السلام عليكم"));
+    const d1 = await strategy.decide(req("السلام عليكم"));
+    const d2 = await strategy.decide(req("السلام عليكم"));
     check(
       "A10 the decision contract carries no provider identity and is stable across invocations",
       d1.mode === d2.mode &&

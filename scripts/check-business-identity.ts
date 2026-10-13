@@ -417,7 +417,7 @@ async function main(): Promise<void> {
     for (const message of corpus) {
       const request = requestFor(message);
       const proven = bypassDeterministicAi(request);
-      const decision = strategy.decide(request);
+      const decision = await strategy.decide(request);
       const terminates = decision.mode === "DETERMINISTIC";
       if (proven === null && terminates) divergence += 1;
       if (proven !== null && !terminates) divergence += 1;
@@ -436,7 +436,7 @@ async function main(): Promise<void> {
       `J1. استراتيجية JEV المحافِظة تطابق مجموعة الـ bypass (0 انحراف على ${corpus.length} رسائل)`,
       divergence === 0,
     );
-    const identityDecision = strategy.decide(
+    const identityDecision = await strategy.decide(
       requestFor("هو انتو عيادة الدكتورة أفنان؟"),
     );
     check(

@@ -75,15 +75,32 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
   async function callWithFallback(
     request: AiRequest,
   ): Promise<OrchestratorResult> {
-    // JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8): an OPTIONAL,
-    // provider-neutral decision behind this gateway. A DETERMINISTIC decision
-    // terminates the turn with a complete response and ZERO provider attempts;
-    // a GENERATIVE decision falls through to the gateway's single existing
-    // call. The strategy never calls a model, so the one-call budget is held
-    // HERE (the gateway), never by the strategy.
-    const jev = decisionStrategy ? decisionStrategy.decide(request) : null;
+    // JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8; PROMPT-AI-JEV-03B):
+    // an OPTIONAL, provider-neutral decision behind this gateway. A
+    // DETERMINISTIC decision terminates the turn with a complete response and
+    // ZERO provider attempts; a GENERATIVE decision falls through to the
+    // gateway's single existing call. The strategy never calls the generative
+    // provider, so the one-call budget is held HERE (the gateway), never by the
+    // strategy.
+    //
+    // PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may spend
+    // its ONE JEV call inside `decide`. The truth table is then exact:
+    //   · a proven 0-call bypass (or a JEV success / fail-closed termination)
+    //     returns DETERMINISTIC → ZERO generative attempts;
+    //   · a pre-attempt unavailability or a JEV-ineligible turn returns
+    //     GENERATIVE → the gateway's ONE existing call;
+    //   · a JEV failure AFTER an attempt was spent also returns DETERMINISTIC
+    //     (the strategy terminates on the lexical baseline) → the LLM is NEVER
+    //     called after a spent JEV attempt. There is no two-call row.
+    const jev = decisionStrategy
+      ? await decisionStrategy.decide(request)
+      : null;
     const jevDecision = jev
-      ? { mode: jev.mode, reason: jev.reason }
+      ? {
+          mode: jev.mode,
+          reason: jev.reason,
+          ...(jev.semantic ? { semantic: jev.semantic } : {}),
+        }
       : undefined;
     if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
       return {
