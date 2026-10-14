@@ -37,6 +37,7 @@ import {
   synthesizeDecisionGoals,
   synthesizeTurnPlan,
 } from "@/features/conversations/server/ai-contract";
+import type { JevSemanticEvidence } from "@/server/integrations/ai/jev-semantic-strategy";
 
 /** Where the turn's decision came from (target §14 `routingDecision`). */
 export const aiRoutingDecisionValues = [
@@ -92,6 +93,111 @@ export type TurnDisclosureObservation = {
 };
 
 /**
+ * The NON-AUTHORITATIVE shadow JEV evidence projected from the
+ * `AiTelemetry.shadow` slot (PROMPT-AI-JEV-03D — OPTION E). Pure projection:
+ * it re-labels closed keys the shadow already produced and Derives the
+ * DISJOINT `shadowModelCallCount` (0|1) from the shadow's own
+ * `jevCallSpent`. It never influences any decision, and it is the projection
+ * the turn-evidence record flattens into its bounded `shadow*` keys.
+ *
+ * Language / dialect precision (binding): `languageHint` is a Unicode
+ * script-block key ∈ {ar, en, mixed}. It CANNOT distinguish Egyptian Arabic
+ * from MSA and no dialect accuracy is claimed from it; the design measures
+ * the CONSEQUENCE of language variation, not dialect identity.
+ */
+export type TurnShadowObservation = {
+  /** The role discriminator; always "SHADOW" on this slot. */
+  readonly evidenceRole: string;
+  /** True iff the shadow eligibility gate selected the JEV route for the turn. */
+  readonly selected: boolean;
+  /** True iff the deterministic sampler admitted this turn. */
+  readonly sampled: boolean;
+  /** The shadow outcome class (audit only), or the ineligibility/not-sampled reason. */
+  readonly resultClass: string;
+  /** True iff a shadow network attempt was actually spent this turn. */
+  readonly jevCallSpent: boolean;
+  /**
+   * The DISJOINT shadow model-call count (0|1). This NEVER contributes to the
+   * authoritative `modelCallCount` — a shadowed generative turn reads
+   * modelCallCount=1 (serving) and shadowModelCallCount=1 (evidence), so the
+   * allowed experiment can never be confused with the forbidden JEV→LLM
+   * serving chain.
+   */
+  readonly shadowModelCallCount: number;
+  /** The closed provider failure code, when the shadow attempt failed. */
+  readonly failureCode: string | null;
+  /** The model id the shadow provider reported (machine key). */
+  readonly servedModel: string | null;
+  /** The script-block language hint ∈ {ar, en, mixed} — NOT a dialect classifier. */
+  readonly languageHint: string | null;
+  /** The confidence band of the decisive facts (P3; reporting only). */
+  readonly confidence: string;
+  /** The contact-vs-book boundary indicator. */
+  readonly contactVsBook: boolean;
+  /** True iff the shadow proposed the bounded contact-vs-book clarification. */
+  readonly clarifyContactOrBookProposed: boolean;
+  /**
+   * The handoff agreement classification vs the deterministic lexical
+   * baseline: SEMANTIC_ONLY_HANDOFF is the false-handoff proxy,
+   * LEXICAL_ONLY_HANDOFF the missed-human proxy.
+   */
+  readonly handoffAgreement: string;
+  /** The conversationGoal selection (non-authoritative evidence only). */
+  readonly conversationGoal: string | null;
+  /** The shadow evaluation's own reported latency (ms). */
+  readonly latencyMs: number | null;
+  /** The derived semantic facts as closed booleans. */
+  readonly facts: Readonly<Record<string, boolean>>;
+  /** The sanitized probabilities the model returned (evidence only). */
+  readonly probabilities: Readonly<Record<string, number>>;
+  /** The shared server precedence inputs + the derivation that fired. */
+  readonly precedence: {
+    readonly supportRequest: boolean;
+    readonly providerRequest: boolean;
+    readonly bookingTask: boolean;
+    readonly explicitHuman: boolean;
+    readonly derivation: string;
+  };
+  /** The evidence bucket (default OBSERVATION). */
+  readonly bucket: string;
+  /** The closed reason an eligible turn was NOT sampled, when applicable. */
+  readonly notSampledReason: string | null;
+};
+
+/**
+ * Project a SHADOW-marked evidence block into its observability record.
+ * Pure and total; no I/O, no inference, no re-derivation of any business
+ * formula. `shadowModelCallCount` is derived HERE so the authoritative
+ * `modelCallCount` never needs to know the shadow slot exists.
+ */
+export function projectShadowEvidence(
+  evidence: JevSemanticEvidence,
+): TurnShadowObservation {
+  return {
+    evidenceRole: evidence.evidenceRole ?? "AUTHORITATIVE",
+    selected: evidence.selected,
+    sampled: evidence.sampled ?? true,
+    resultClass: evidence.resultClass,
+    jevCallSpent: evidence.jevCallSpent,
+    shadowModelCallCount: evidence.jevCallSpent ? 1 : 0,
+    failureCode: evidence.failureCode,
+    servedModel: evidence.servedModel,
+    languageHint: evidence.languageHint ?? null,
+    confidence: evidence.confidence,
+    contactVsBook: evidence.contactVsBook,
+    clarifyContactOrBookProposed: evidence.clarifyContactOrBookProposed,
+    handoffAgreement: evidence.handoffAgreement,
+    conversationGoal: evidence.conversationGoal?.selection ?? null,
+    latencyMs: evidence.latencyMs ?? null,
+    facts: evidence.facts,
+    probabilities: evidence.probabilities,
+    precedence: { ...evidence.precedence },
+    bucket: evidence.bucket ?? "OBSERVATION",
+    notSampledReason: evidence.notSampledReason ?? null,
+  };
+}
+
+/**
  * The additive, optional observable record for ONE turn. Every member is
  * optional: a producer that cannot observe a field simply omits it, so the
  * current system populates exactly what its existing seams expose and nothing
@@ -144,6 +250,15 @@ export type TurnObservability = {
      */
     readonly semantic?: unknown;
   } | null;
+  /**
+   * The NON-AUTHORITATIVE shadow JEV evaluation for this turn
+   * (PROMPT-AI-JEV-03D — OPTION E). Present only when a shadow strategy was
+   * installed. Closed machine keys only — never content, provider raw output,
+   * secrets, or chain-of-thought — and read by NOTHING on any decision,
+   * resolver, routing or transport path: pure comparison evidence for a future
+   * promotion gate.
+   */
+  readonly shadow?: TurnShadowObservation | null;
   /**
    * ONE correlation id for the whole inbound turn (PROMPT-AI-OPS-22): born at
    * turn start, carried on every downstream observation of the same turn so a
@@ -235,6 +350,13 @@ export type BuildTurnObservabilityInput = {
     /** The semantic evidence block (PROMPT-AI-JEV-03B §12), when produced. */
     readonly semantic?: unknown;
   } | null;
+  /**
+   * The NON-AUTHORITATIVE shadow JEV evidence block (PROMPT-AI-JEV-03D —
+   * OPTION E), when a shadow strategy was installed for this turn. Absent ⇒
+   * no shadow ran; a SHADOW-marked block (including the pure zero-call
+   * not-sampled marker) is projected into the disjoint `shadow` observation.
+   */
+  shadow?: JevSemanticEvidence | null;
   /** One correlation id for the turn (PROMPT-AI-OPS-22). */
   traceId?: string | null;
   /** Armed task-relevance family names (PROMPT-AI-OPS-22). */
@@ -319,6 +441,10 @@ export function buildTurnObservability(
       ? { answerAndContinue: input.answerAndContinue }
       : {}),
     ...(input.jev ? { jev: input.jev } : {}),
+    // PROMPT-AI-JEV-03D — the NON-AUTHORITATIVE shadow slot. Pure projection
+    // into the disjoint observation; nothing else in this builder (and nothing
+    // anywhere on a decision path) reads the shadow evidence.
+    ...(input.shadow ? { shadow: projectShadowEvidence(input.shadow) } : {}),
     ...(input.traceId ? { traceId: input.traceId } : {}),
     ...(input.taskRelevance && input.taskRelevance.length > 0
       ? { taskRelevance: [...input.taskRelevance] }

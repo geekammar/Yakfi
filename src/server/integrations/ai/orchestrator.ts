@@ -13,6 +13,12 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 
+import type { JevSemanticEvidence } from "./jev-semantic-strategy";
+import type { ShadowJevStrategy } from "./jev-shadow-strategy";
+import {
+  JEV_SHADOW_TIMEOUT_MS,
+  shadowMarkerEvidence,
+} from "./jev-shadow-strategy";
 import type { JevStrategy } from "./jev-strategy";
 import { JEV_DETERMINISTIC_PROVIDER } from "./jev-strategy";
 import type {
@@ -35,6 +41,21 @@ export type CreateAiOrchestratorParams = {
    * continues to the gateway's SINGLE existing generative call.
    */
   decisionStrategy?: JevStrategy | null;
+  /**
+   * OPTIONAL NON-AUTHORITATIVE shadow JEV strategy
+   * (PROMPT-AI-JEV-03D — OPTION E). NEVER consulted for any decision: the
+   * authoritative `decisionStrategy` (or the built-in bypass) always decides,
+   * and the shadow's result is attached ONLY to the `telemetry.shadow`
+   * evidence slot that no decision / resolver / routing / transport code
+   * reads. Absent ⇒ the gateway keeps its exact prior behaviour.
+   */
+  shadowStrategy?: ShadowJevStrategy | null;
+  /**
+   * The shadow join deadline (PROMPT-AI-JEV-03C §13.4). Bounds how long the
+   * gateway waits for shadow evidence AFTER the authoritative result; it
+   * never bounds or delays the authoritative call itself.
+   */
+  shadowTimeoutMs?: number;
 };
 
 export type OrchestratorResult = {
@@ -70,7 +91,44 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
 }
 
 export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
-  const { primary, secondary, fallbackEnabled, decisionStrategy } = params;
+  const {
+    primary,
+    secondary,
+    fallbackEnabled,
+    decisionStrategy,
+    shadowStrategy,
+  } = params;
+  const shadowTimeoutMs = params.shadowTimeoutMs ?? JEV_SHADOW_TIMEOUT_MS;
+
+  /**
+   * PROMPT-AI-JEV-03D — OPTION E: join the NON-AUTHORITATIVE shadow evaluation
+   * exactly once, at a single choke point, UNDER TOTAL ISOLATION. This can
+   * only ever yield `JevSemanticEvidence | null`: the shadow promise is
+   * pre-guarded against rejection, the race is bounded by the shadow deadline
+   * (cleared on settle so no timer outlives the turn), and any escape is
+   * swallowed. A `null` result is a LOST evidence record (funnel
+   * not-completed), NEVER a customer-visible event: the authoritative result
+   * was already computed from data the shadow never touched.
+   */
+  async function joinShadow(
+    shadowPromise: Promise<JevSemanticEvidence | null> | null,
+    shadowMarker: JevSemanticEvidence | null,
+  ): Promise<JevSemanticEvidence | null> {
+    if (shadowPromise === null) return shadowMarker;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        shadowPromise,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), shadowTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 
   async function callWithFallback(
     request: AiRequest,
@@ -115,7 +173,6 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         },
       };
     }
-
     // No strategy configured: the built-in deterministic bypass is the exact
     // prior behaviour (disabling JEV changes nothing but the audit field).
     const bypass = !decisionStrategy ? bypassDeterministicAi(request) : null;
@@ -132,6 +189,35 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         },
       };
     }
+
+    // PROMPT-AI-JEV-03D — OPTION E: the NON-AUTHORITATIVE shadow seam. The
+    // authoritative decision ALREADY returned GENERATIVE above, so this turn
+    // provably spends the gateway's one generative call — exactly the turn
+    // class a semantic activation would replace. Admission is PURE and
+    // zero-cost (the ACTIVE eligibility gate + a deterministic sampler), and
+    // when admitted the shadow evaluation is STARTED BUT NOT AWAITED right
+    // here, so it overlaps `primary.call` instead of serializing after it:
+    // the turn's wall clock is max(serving, shadow), never serving + shadow.
+    // A deterministic bypass turn (both early returns above) and an ACTIVE
+    // semantic turn (the factory installs no shadow in that state) NEVER
+    // reach here, so neither can start a shadow model call.
+    const shadowAdmission = shadowStrategy
+      ? shadowStrategy.admit(request)
+      : null;
+    const shadowWillRun =
+      shadowAdmission !== null &&
+      shadowAdmission.eligible &&
+      shadowAdmission.sampled;
+    const shadowPromise =
+      shadowStrategy && shadowWillRun
+        ? shadowStrategy.evaluate(request).catch(() => null)
+        : null;
+    // The pure zero-call marker keeps the eligible → sampled → completed
+    // funnel observable for turns that were NOT evaluated.
+    const shadowMarker =
+      shadowAdmission !== null && !shadowWillRun
+        ? shadowMarkerEvidence(shadowAdmission, request)
+        : null;
 
     const first = await primary.call(request);
     const firstAttempt = toAttempt(first);
@@ -154,6 +240,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           retryTrace,
           conversationControl,
           jevDecision,
+          shadow: await joinShadow(shadowPromise, shadowMarker),
         },
       };
     }
@@ -172,6 +259,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           retryTrace,
           conversationControl,
           jevDecision,
+          shadow: await joinShadow(shadowPromise, shadowMarker),
         },
         lastErrorCode: first.error.code,
       };
@@ -192,6 +280,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           conversationControl:
             conversationControl ?? second.conversationControl,
           jevDecision,
+          shadow: await joinShadow(shadowPromise, shadowMarker),
         },
       };
     }
@@ -206,6 +295,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         retryTrace: retryTrace ?? second.retryTrace,
         conversationControl: conversationControl ?? second.conversationControl,
         jevDecision,
+        shadow: await joinShadow(shadowPromise, shadowMarker),
       },
       lastErrorCode: second.error.code,
     };

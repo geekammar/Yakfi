@@ -12,6 +12,7 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 
+import type { ShadowJevStrategy } from "./jev-shadow-strategy";
 import type { JevStrategy } from "./jev-strategy";
 import { createAiOrchestrator } from "./orchestrator";
 import type { AiProviderAdapter, AiTelemetry } from "./types";
@@ -31,12 +32,26 @@ export function createLlmConversationAi(params: {
    * existing generative call.
    */
   decisionStrategy?: JevStrategy | null;
+  /**
+   * OPTIONAL NON-AUTHORITATIVE shadow JEV strategy (PROMPT-AI-JEV-03D —
+   * OPTION E). Absent ⇒ no shadow evaluation ever runs. Present ⇒ it runs
+   * concurrently with the gateway's single generative call for admitted
+   * eligible turns and attaches EVIDENCE-ONLY output to telemetry; it never
+   * participates in any decision.
+   */
+  shadowStrategy?: ShadowJevStrategy | null;
+  /** The shadow join deadline (PROMPT-AI-JEV-03C §13.4). */
+  shadowTimeoutMs?: number;
 }): LlmConversationAi {
   const orchestrator = createAiOrchestrator({
     primary: params.primary,
     secondary: params.secondary ?? null,
     fallbackEnabled: params.fallbackEnabled,
     decisionStrategy: params.decisionStrategy ?? null,
+    shadowStrategy: params.shadowStrategy ?? null,
+    ...(params.shadowTimeoutMs !== undefined
+      ? { shadowTimeoutMs: params.shadowTimeoutMs }
+      : {}),
   });
 
   let lastTelemetry: AiTelemetry | null = null;

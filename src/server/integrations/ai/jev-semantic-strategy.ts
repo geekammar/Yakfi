@@ -85,6 +85,7 @@ import {
 import type {
   JevAnswer,
   JevDecisionsProvider,
+  JevDecisionsResult,
   JevEvaluationRequest,
   JevQuestion,
 } from "./jev-decisions-provider";
@@ -723,13 +724,52 @@ export type JevSemanticEvidence = {
    * Present IFF the JEV reading owns the turn (a semantic target was
    * produced). Absent when the turn terminated on the deterministic lexical
    * baseline, so the engine then uses the lexical detector — the two never
-   * overwrite each other (§8).
+   * overwrite each other (§8). A SHADOW record (PROMPT-AI-JEV-03D) NEVER
+   * carries this field: the shadow reading owns no turn and must never be
+   * feedable to a resolver.
    */
   readonly signals?: {
     readonly sensitive: boolean;
     readonly explicitHuman: boolean;
     readonly nonCommittal: boolean;
   };
+  /**
+   * The SHADOW/AUTHORITATIVE discriminator (PROMPT-AI-JEV-03D §3.1). Absent ⇒
+   * `AUTHORITATIVE`, so every existing ACTIVE record keeps its exact prior
+   * shape and a sink can refuse to score a SHADOW record as authoritative
+   * (and vice versa). Only SHADOW records set this to `"SHADOW"`.
+   */
+  readonly evidenceRole?: "AUTHORITATIVE" | "SHADOW";
+  /**
+   * The script-block language hint that was sent to the provider
+   * (`languageHint`), hoisted onto the evidence block
+   * (PROMPT-AI-JEV-03D §11.4 — the AI-JEV-03C observability gap). One closed
+   * key ∈ {ar, en, mixed}: a Unicode script-block test, NOT a dialect
+   * classifier — it cannot distinguish Egyptian Arabic from MSA, and no
+   * dialect accuracy is claimed from it.
+   */
+  readonly languageHint?: string;
+  /** The JEV evaluation's own reported latency (ms), when the provider ran. */
+  readonly latencyMs?: number | null;
+  /**
+   * SHADOW-only (PROMPT-AI-JEV-03D §8): true iff the turn's opaque traceId was
+   * ADMITTED by the deterministic sampler; false on the pure zero-call marker
+   * records emitted for eligible-but-not-sampled turns. Absent on every
+   * AUTHORITATIVE record.
+   */
+  readonly sampled?: boolean;
+  /**
+   * SHADOW-only (PROMPT-AI-JEV-03D §7.2): the evidence bucket — one closed key
+   * tracking whether this observation is fresh, under investigation,
+   * tuning-contaminated or evaluation-reserved. Absent ⇒ `OBSERVATION`.
+   */
+  readonly bucket?: string;
+  /**
+   * SHADOW-only: the closed machine reason an eligible turn was NOT sampled
+   * (`NOT_SAMPLED` / `DAILY_CEILING_REACHED` / `SHADOW_CIRCUIT_OPEN` /
+   * `NO_TRACE_ID`), or null. Absent on every AUTHORITATIVE record.
+   */
+  readonly notSampledReason?: string | null;
 };
 
 // ─── 6. The strategy identity + the async decision (§6) ──────────────────────
@@ -871,36 +911,22 @@ export function createSemanticJevStrategy(deps: SemanticJevStrategyDeps): {
         buildSemanticRequest(request),
       );
 
+      // The shared semantic reading (PROMPT-AI-JEV-03D §4.2): the evidence
+      // block and the outcome class are computed by the ONE pure derivation
+      // used by BOTH the authoritative strategy and a non-authoritative
+      // shadow, so the two can never diverge for the same provider result.
+      const reading = evaluateSemanticReading(request, evaluation);
+
       // ── 3. PRE-ATTEMPT UNAVAILABILITY: the only path that may still reach
       //    the LLM. A missing credential short-circuits BEFORE any network
       //    I/O, so zero JEV network calls were spent and the turn may retain
       //    the existing generative route (truth-table row D).
-      if (!evaluation.ok && !evaluation.attemptSpent) {
+      if (reading.outcome.kind === "UNAVAILABLE_PRE_ATTEMPT") {
         return {
           mode: "GENERATIVE",
           reason: "GENERATIVE_REQUIRED",
           response: null,
-          semantic: {
-            selected: true,
-            resultClass: "UNAVAILABLE_PRE_ATTEMPT",
-            jevCallSpent: false,
-            facts: {},
-            probabilities: {},
-            confidence: "low",
-            precedence: {
-              supportRequest: false,
-              providerRequest: false,
-              bookingTask: false,
-              explicitHuman: false,
-              derivation: "none",
-            },
-            conversationGoal: null,
-            contactVsBook: false,
-            clarifyContactOrBookProposed: false,
-            handoffAgreement: "AGREE_NO_HANDOFF",
-            failureCode: evaluation.errorCode,
-            servedModel: null,
-          },
+          semantic: reading.evidence,
         };
       }
 
@@ -909,119 +935,35 @@ export function createSemanticJevStrategy(deps: SemanticJevStrategyDeps): {
       //    It terminates on the DETERMINISTIC LEXICAL BASELINE — 1 JEV
       //    attempt, 0 LLM calls, total budget 1. Malformed content is never
       //    coerced into a semantic fact.
-      if (!evaluation.ok) {
-        const baseline = classifyCustomerMessage(request.message, request.faqs);
+      if (reading.outcome.kind === "FAILURE_FAIL_CLOSED") {
         return {
           mode: "DETERMINISTIC",
           reason: "JEV_FAILURE_FAIL_CLOSED",
-          response: baseline,
-          semantic: {
-            selected: true,
-            resultClass: "FAILURE_FAIL_CLOSED",
-            jevCallSpent: true,
-            facts: {},
-            probabilities: {},
-            confidence: "low",
-            precedence: {
-              supportRequest: false,
-              providerRequest: false,
-              bookingTask: false,
-              explicitHuman: false,
-              derivation: "none",
-            },
-            conversationGoal: null,
-            contactVsBook: false,
-            clarifyContactOrBookProposed: false,
-            handoffAgreement:
-              baseline.action === "handoff"
-                ? "AGREE_HANDOFF"
-                : "AGREE_NO_HANDOFF",
-            failureCode: evaluation.errorCode,
-            servedModel: evaluation.servedModel,
-          },
+          response: reading.outcome.response,
+          semantic: reading.evidence,
         };
       }
 
-      // ── 5. SUCCESS: derive the facts (P1/P2), apply the SHARED server
-      //    precedence, map to an AiResponse-compatible proposal.
-      const facts = deriveSemanticFacts(evaluation.answers);
-      const target = semanticTarget(facts, evaluation.answers);
-      const contactVsBook = contactVsBookBoundary(facts, evaluation.answers);
-
-      const goalAnswer = evaluation.answers["conversationGoal"];
-      const conversationGoal =
-        goalAnswer && goalAnswer.type === "choice"
-          ? {
-              selection: goalAnswer.choice,
-              confidence: goalAnswer.confidence,
-            }
-          : null;
-
-      // No actionable semantic reading → the deterministic lexical baseline
-      // owns the turn (still 1 JEV call, 0 LLM calls).
-      if (!target) {
-        const baseline = classifyCustomerMessage(request.message, request.faqs);
+      // ── 5. SUCCESS: no actionable reading → the deterministic lexical
+      //    baseline owns the turn (still 1 JEV call, 0 LLM calls).
+      if (reading.outcome.kind === "NO_READING_BASELINE") {
         return {
           mode: "DETERMINISTIC",
           reason: "JEV_NO_READING_BASELINE",
-          response: baseline,
-          semantic: {
-            selected: true,
-            resultClass: "NO_READING_BASELINE",
-            jevCallSpent: true,
-            facts: closedFacts(facts),
-            probabilities: closedProbabilities(evaluation.answers),
-            confidence: decisiveConfidence(evaluation.answers),
-            precedence: precedenceEvidence(facts),
-            conversationGoal,
-            contactVsBook,
-            clarifyContactOrBookProposed: false,
-            handoffAgreement: handoffAgreementFor(
-              baseline.action === "handoff",
-              false,
-            ),
-            failureCode: null,
-            servedModel: evaluation.servedModel,
-          },
+          response: reading.outcome.response,
+          semantic: reading.evidence,
         };
       }
 
-      const response = semanticResponse(request, target);
-      const semanticHandoff = target.action === "handoff";
-      const lexicalBaseline = classifyCustomerMessage(
-        request.message,
-        request.faqs,
-      );
-
+      // A semantic target owns the turn: terminate on the fixed-template
+      // proposal and attach the resolver signals the ONE resolver consumes.
       return {
         mode: "DETERMINISTIC",
-        reason: semanticResultClass(target),
-        response,
+        reason: reading.outcome.reason,
+        response: reading.outcome.response,
         semantic: {
-          selected: true,
-          resultClass: semanticResultClass(target),
-          jevCallSpent: true,
-          facts: closedFacts(facts),
-          probabilities: closedProbabilities(evaluation.answers),
-          confidence: decisiveConfidence(evaluation.answers),
-          precedence: precedenceEvidence(facts),
-          conversationGoal,
-          contactVsBook,
-          clarifyContactOrBookProposed: !!target.clarification,
-          handoffAgreement: handoffAgreementFor(
-            lexicalBaseline.action === "handoff",
-            semanticHandoff,
-          ),
-          failureCode: null,
-          servedModel: evaluation.servedModel,
-          signals: {
-            sensitive: facts.sensitiveTurn === true,
-            explicitHuman: facts.explicitHuman,
-            // The semantic equivalent of the lexical non-committal fragment: a
-            // turn too thin to map to ANY supported action. Used by the
-            // resolver only to suppress an UNNECESSARY CLARIFY_INTENT.
-            nonCommittal: facts.ambiguousTurn === true,
-          },
+          ...reading.evidence,
+          signals: reading.outcome.signals,
         },
       };
     },
@@ -1030,8 +972,19 @@ export function createSemanticJevStrategy(deps: SemanticJevStrategyDeps): {
 
 // ─── 7. Helpers (pure, total, no I/O) ─────────────────────────────────────────
 
-/** A neutral language hint for the semantic state (never a dialect dictionary). */
-function languageHint(message: string): string {
+/**
+ * A neutral language hint for the semantic state (never a dialect dictionary).
+ *
+ * PROMPT-AI-JEV-03D §11.4 — now EXPORTED so it can be hoisted onto the
+ * evidence block (`JevSemanticEvidence.languageHint`) as the closed
+ * real-language observable. It is a Unicode script-block test:
+ *   hasArabic ∧ hasLatin ⇒ "mixed"
+ *   hasArabic             ⇒ "ar"
+ *   otherwise             ⇒ "en"
+ * It CANNOT distinguish Egyptian Arabic from MSA (both write in the Arabic
+ * block) and no dialect accuracy is ever claimed from it.
+ */
+export function languageHint(message: string): string {
   const hasArabic = /[\u0600-\u06FF]/.test(message);
   const hasLatin = /[A-Za-z]/.test(message);
   if (hasArabic && hasLatin) return "mixed";
@@ -1040,7 +993,7 @@ function languageHint(message: string): string {
 }
 
 /** Build the provider-neutral JEV evaluation request from an assembled AiRequest. */
-function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
+export function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
   return {
     state: {
       customerMessage: request.message,
@@ -1050,6 +1003,208 @@ function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
       languageHint: languageHint(request.message),
     },
     questions: { ...SEMANTIC_QUESTIONS },
+  };
+}
+
+/**
+ * The NONE precedence block shared by every non-reading evidence variant.
+ * Frozen so no evidence record can mutate it.
+ */
+const NONE_PRECEDENCE: JevSemanticEvidence["precedence"] = Object.freeze({
+  supportRequest: false,
+  providerRequest: false,
+  bookingTask: false,
+  explicitHuman: false,
+  derivation: "none",
+}) as JevSemanticEvidence["precedence"];
+
+/**
+ * The outcome of one JEV evaluation, structured for the strategy that OWNS
+ * the turn. `response` is the `AiResponse`-compatible proposal the ACTIVE
+ * strategy terminates on; SHADOW callers use ONLY `evidence` and never
+ * `outcome` (the shadow owns no turn, never materializes a response, and
+ * never produces resolver signals).
+ */
+export type SemanticReadingOutcome =
+  | { readonly kind: "UNAVAILABLE_PRE_ATTEMPT" }
+  | {
+      readonly kind: "FAILURE_FAIL_CLOSED";
+      readonly response: AiResponse;
+    }
+  | {
+      readonly kind: "NO_READING_BASELINE";
+      readonly response: AiResponse;
+    }
+  | {
+      readonly kind: "SEMANTIC";
+      readonly reason: JevDecisionReason;
+      readonly response: AiResponse;
+      readonly signals: {
+        readonly sensitive: boolean;
+        readonly explicitHuman: boolean;
+        readonly nonCommittal: boolean;
+      };
+    };
+
+export type SemanticReading = {
+  readonly evidence: JevSemanticEvidence;
+  readonly outcome: SemanticReadingOutcome;
+};
+
+/**
+ * Read ONE completed JEV evaluation into evidence + outcome (PROMPT-AI-JEV-03D
+ * §4.2). Extracted verbatim from the ACTIVE `decide()` body so the AUTHORITATIVE
+ * strategy and a non-authoritative SHADOW evaluation compute the IDENTICAL
+ * evidence for the same provider result — 1:1 comparability is the entire
+ * point of the shadow experiment. PURE and total: no I/O, no model calls.
+ *
+ * The evidence block deliberately carries NO `signals` here; the ACTIVE
+ * strategy attaches them on the SEMANTIC outcome only (the JEV reading owns
+ * the turn), and the SHADOW never attaches them at all.
+ */
+export function evaluateSemanticReading(
+  request: AiRequest,
+  evaluation: JevDecisionsResult,
+): SemanticReading {
+  const language = languageHint(request.message);
+
+  // ── PRE-ATTEMPT UNAVAILABILITY: zero network calls were spent.
+  if (!evaluation.ok && !evaluation.attemptSpent) {
+    return {
+      evidence: {
+        selected: true,
+        resultClass: "UNAVAILABLE_PRE_ATTEMPT",
+        jevCallSpent: false,
+        facts: {},
+        probabilities: {},
+        confidence: "low",
+        precedence: NONE_PRECEDENCE,
+        conversationGoal: null,
+        contactVsBook: false,
+        clarifyContactOrBookProposed: false,
+        handoffAgreement: "AGREE_NO_HANDOFF",
+        failureCode: evaluation.errorCode,
+        servedModel: null,
+        languageHint: language,
+        latencyMs: evaluation.latencyMs,
+      },
+      outcome: { kind: "UNAVAILABLE_PRE_ATTEMPT" },
+    };
+  }
+
+  // ── FAILURE AFTER THE ATTEMPT WAS SPENT: the lexical baseline owns the
+  //    reading (fail-closed; the turn never falls through to the LLM).
+  if (!evaluation.ok) {
+    const baseline = classifyCustomerMessage(request.message, request.faqs);
+    return {
+      evidence: {
+        selected: true,
+        resultClass: "FAILURE_FAIL_CLOSED",
+        jevCallSpent: true,
+        facts: {},
+        probabilities: {},
+        confidence: "low",
+        precedence: NONE_PRECEDENCE,
+        conversationGoal: null,
+        contactVsBook: false,
+        clarifyContactOrBookProposed: false,
+        handoffAgreement: handoffAgreementFor(
+          baseline.action === "handoff",
+          false,
+        ),
+        failureCode: evaluation.errorCode,
+        servedModel: evaluation.servedModel,
+        languageHint: language,
+        latencyMs: evaluation.latencyMs,
+      },
+      outcome: { kind: "FAILURE_FAIL_CLOSED", response: baseline },
+    };
+  }
+
+  // ── SUCCESS: derive the facts (P1/P2), map the target, build the evidence.
+  const facts = deriveSemanticFacts(evaluation.answers);
+  const target = semanticTarget(facts, evaluation.answers);
+  const contactVsBook = contactVsBookBoundary(facts, evaluation.answers);
+
+  const goalAnswer = evaluation.answers["conversationGoal"];
+  const conversationGoal =
+    goalAnswer && goalAnswer.type === "choice"
+      ? {
+          selection: goalAnswer.choice,
+          confidence: goalAnswer.confidence,
+        }
+      : null;
+
+  // No actionable semantic reading → the deterministic lexical baseline owns
+  // the turn (still 1 JEV call, 0 LLM calls).
+  if (!target) {
+    const baseline = classifyCustomerMessage(request.message, request.faqs);
+    return {
+      evidence: {
+        selected: true,
+        resultClass: "NO_READING_BASELINE",
+        jevCallSpent: true,
+        facts: closedFacts(facts),
+        probabilities: closedProbabilities(evaluation.answers),
+        confidence: decisiveConfidence(evaluation.answers),
+        precedence: precedenceEvidence(facts),
+        conversationGoal,
+        contactVsBook,
+        clarifyContactOrBookProposed: false,
+        handoffAgreement: handoffAgreementFor(
+          baseline.action === "handoff",
+          false,
+        ),
+        failureCode: null,
+        servedModel: evaluation.servedModel,
+        languageHint: language,
+        latencyMs: evaluation.latencyMs,
+      },
+      outcome: { kind: "NO_READING_BASELINE", response: baseline },
+    };
+  }
+
+  const response = semanticResponse(request, target);
+  const semanticHandoff = target.action === "handoff";
+  const lexicalBaseline = classifyCustomerMessage(
+    request.message,
+    request.faqs,
+  );
+
+  return {
+    evidence: {
+      selected: true,
+      resultClass: semanticResultClass(target),
+      jevCallSpent: true,
+      facts: closedFacts(facts),
+      probabilities: closedProbabilities(evaluation.answers),
+      confidence: decisiveConfidence(evaluation.answers),
+      precedence: precedenceEvidence(facts),
+      conversationGoal,
+      contactVsBook,
+      clarifyContactOrBookProposed: !!target.clarification,
+      handoffAgreement: handoffAgreementFor(
+        lexicalBaseline.action === "handoff",
+        semanticHandoff,
+      ),
+      failureCode: null,
+      servedModel: evaluation.servedModel,
+      languageHint: language,
+      latencyMs: evaluation.latencyMs,
+    },
+    outcome: {
+      kind: "SEMANTIC",
+      reason: semanticResultClass(target),
+      response,
+      signals: {
+        sensitive: facts.sensitiveTurn === true,
+        explicitHuman: facts.explicitHuman,
+        // The semantic equivalent of the lexical non-committal fragment: a
+        // turn too thin to map to ANY supported action. Used by the resolver
+        // only to suppress an UNNECESSARY CLARIFY_INTENT.
+        nonCommittal: facts.ambiguousTurn === true,
+      },
+    },
   };
 }
 

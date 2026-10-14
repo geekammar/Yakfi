@@ -1799,7 +1799,12 @@ async function runInboundTurn(
         message: inbound.text,
       },
     });
-    const aiRequest: AiRequest = builtContext.request;
+    // PROMPT-AI-JEV-03D — stamp the turn's OPAQUE correlation id onto the
+    // request so a non-authoritative shadow evaluation can sample and
+    // correlate turns deterministically without deriving anything from
+    // content. Additive: the field is optional in the contract and every
+    // downstream consumer behaves exactly as before when it is absent.
+    const aiRequest: AiRequest = { ...builtContext.request, traceId };
 
     // PROMPT-AI-OPS-22 — the deterministic, text-derived task families and the
     // bounded channel facts of the ASSEMBLED request. Both are machine keys /
@@ -1991,6 +1996,11 @@ async function runInboundTurn(
       // PROMPT-AI-ARCH-17 (Slice 8) — the JEV gateway decision, auditable as
       // closed machine keys. Additive only; never customer-visible.
       jev: turnTelemetry?.jevDecision ?? null,
+      // PROMPT-AI-JEV-03D — the NON-AUTHORITATIVE shadow JEV evidence
+      // (OPTION E). Additive projection only: the slot is disjoint from
+      // `jev` above and from the `modelCallCount` counter, which keeps
+      // counting ONLY the customer-serving calls exactly as before.
+      shadow: turnTelemetry?.shadow ?? null,
       // PROMPT-AI-JEV-03B §12 — the total logical model-call count (JEV +
       // generative). See `modelCallCount` above.
       modelCallCount,

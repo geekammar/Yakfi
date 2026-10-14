@@ -210,4 +210,15 @@ export type AiTelemetry = {
      */
     readonly semantic?: JevSemanticEvidence;
   };
+  /**
+   * The NON-AUTHORITATIVE shadow JEV evidence slot (PROMPT-AI-JEV-03D —
+   * OPTION E). Present only when a shadow strategy was installed for this
+   * turn. This slot is DISJOINT from `jevDecision`: it carries a SHADOW-marked
+   * `JevSemanticEvidence` (or a pure zero-call marker for a non-sampled turn)
+   * and is read by NOTHING on any decision, resolver, routing or transport
+   * path — it projects purely into observability. It must NEVER contribute to
+   * `modelCallCount` (the serving counter); the disjoint
+   * `shadowModelCallCount` accounts for shadow calls instead.
+   */
+  readonly shadow?: JevSemanticEvidence | null;
 };

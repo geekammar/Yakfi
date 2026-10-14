@@ -24,6 +24,11 @@ import { createConversationControl } from "./conversation-control";
 import type { ConversationControl } from "./conversation-control";
 import { createJevDecisionsProvider } from "./jev-decisions-provider";
 import { createSemanticJevStrategy } from "./jev-semantic-strategy";
+import {
+  createShadowJevStrategy,
+  createShadowSampler,
+  parseShadowTimeoutMs,
+} from "./jev-shadow-strategy";
 import { createConservativeJevStrategy } from "./jev-strategy";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
@@ -168,7 +173,8 @@ export async function createPolicyBackedAi(
   // semantic strategy's `enabled: false` branch never consults the provider —
   // so not supplying it is a complete rollback with no schema, migration or DB
   // coordination. The switch is NOT activated in any environment here.
-  const decisionStrategy = isSemanticJevEnabled(deps.getEnvVar)
+  const semanticEnabled = isSemanticJevEnabled(deps.getEnvVar);
+  const decisionStrategy = semanticEnabled
     ? createSemanticJevStrategy({
         provider: createJevDecisionsProvider({
           getEnvVar: deps.getEnvVar,
@@ -181,11 +187,47 @@ export async function createPolicyBackedAi(
         enabled: true,
       })
     : createConservativeJevStrategy();
+  // PROMPT-AI-JEV-03D — OPTION E: the NON-AUTHORITATIVE shadow JEV evaluation.
+  // The shadow switch is a SEPARATE kill switch, intentionally distinct from
+  // the AUTHORITY switch above: the {DISABLED, SHADOW, ACTIVE} lifecycle needs
+  // two bits, and turning the shadow off must NEVER change customer routing.
+  // The shadow is installed ONLY in the `else` arm of the semantic branch, so:
+  //   · semantic=OFF, shadow=OFF ⇒ DISABLED (exact v0.45.0 behaviour);
+  //   · semantic=OFF, shadow=ON  ⇒ SHADOW (evidence only, conservative remains
+  //     authoritative);
+  //   · semantic=ON (any shadow) ⇒ ACTIVE and NO shadow is installed at all —
+  //     the real JEV call IS the evidence, so no duplicate evaluation exists.
+  // The pair therefore collapses deterministically to ACTIVE; there is no
+  // fourth state and no code path from the shadow flag to the semantic
+  // strategy.
+  const shadowTimeoutMs = parseShadowTimeoutMs(deps.getEnvVar);
+  const shadowStrategy =
+    !semanticEnabled && isShadowJevEnabled(deps.getEnvVar)
+      ? createShadowJevStrategy({
+          // The shadow's JEV provider is the SAME pinned, zero-retry Decisions
+          // seam the ACTIVE path would use, with the SHADOW deadline as its
+          // own request timeout — the provider's AbortController is the shadow
+          // deadline, so a slow provider still yields a complete TIMEOUT
+          // evidence record instead of a hanging join.
+          provider: createJevDecisionsProvider({
+            getEnvVar: deps.getEnvVar,
+            fetchImpl: deps.fetchImpl,
+            ...(deps.endpointOverrides?.openrouter
+              ? { endpoint: deps.endpointOverrides.openrouter }
+              : {}),
+            timeoutMs: shadowTimeoutMs,
+          }),
+          sampler: createShadowSampler({ getEnvVar: deps.getEnvVar }),
+          timeoutMs: shadowTimeoutMs,
+        })
+      : null;
   return createLlmConversationAi({
     primary,
     secondary,
     fallbackEnabled,
     decisionStrategy,
+    shadowStrategy,
+    shadowTimeoutMs,
   });
 }
 
@@ -202,12 +244,40 @@ export async function createPolicyBackedAi(
  */
 export const SEMANTIC_JEV_FLAG = "FLOWPILOT_JEV_SEMANTIC_ENABLED";
 
-const SEMANTIC_JEV_ENABLEMENTS = new Set(["1", "true", "yes"]);
+/**
+ * The SEPARATE, NON-AUTHORITATIVE shadow switch (PROMPT-AI-JEV-03D §15.2).
+ * Reuses the IDENTICAL positive-enablement set as the semantic flag so the two
+ * switches can never drift in what they accept:
+ *  · ABSENT            ⇒ OFF
+ *  · any non-value     ⇒ OFF
+ *  · "0"/"false"/"no"  ⇒ OFF
+ *  · "1"/"true"/"yes"  ⇒ ON (the ONLY enablement)
+ *
+ * ON can NEVER activate authoritative Semantic JEV: the shadow is installed
+ * only in the `else` arm of the semantic branch above, and its output reaches
+ * only the disjoint telemetry evidence slot. OFF (the default in every
+ * environment) yields the exact v0.45.0 customer-serving behavior.
+ */
+export const SHADOW_JEV_FLAG = "FLOWPILOT_JEV_SHADOW_ENABLED";
+
+export const SEMANTIC_JEV_ENABLEMENTS = new Set(["1", "true", "yes"]);
 
 export function isSemanticJevEnabled(
   getEnvVar: (name: string) => string | undefined,
 ): boolean {
   const raw = getEnvVar(SEMANTIC_JEV_FLAG);
+  if (!raw) return false;
+  return SEMANTIC_JEV_ENABLEMENTS.has(raw.trim().toLowerCase());
+}
+
+/**
+ * The shadow kill switch — a sibling of {@link isSemanticJevEnabled} sharing
+ * the identical enablement set (PROMPT-AI-JEV-03C §15.2).
+ */
+export function isShadowJevEnabled(
+  getEnvVar: (name: string) => string | undefined,
+): boolean {
+  const raw = getEnvVar(SHADOW_JEV_FLAG);
   if (!raw) return false;
   return SEMANTIC_JEV_ENABLEMENTS.has(raw.trim().toLowerCase());
 }

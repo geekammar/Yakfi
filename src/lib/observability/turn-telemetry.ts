@@ -173,6 +173,74 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.outbound_delivered",
       value: { boolValue: record.outboundSendDelivered ?? false },
     },
+    // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E), exported only
+    // when a shadow evaluation ran this turn. Closed machine keys only; the
+    // shadowModelCallCount attribute is the experimental counter that must
+    // never be summed into the serving model-call accounting.
+    ...(record.shadowEvidenceRole !== null
+      ? [
+          {
+            key: "flowpilot.shadow_evidence_role",
+            value: { stringValue: record.shadowEvidenceRole ?? "null" },
+          },
+        ]
+      : []),
+    ...(record.shadowResultClass !== null
+      ? [
+          {
+            key: "flowpilot.shadow_result_class",
+            value: { stringValue: record.shadowResultClass ?? "null" },
+          },
+        ]
+      : []),
+    ...(record.shadowModelCallCount !== null
+      ? [
+          {
+            key: "flowpilot.shadow_model_call_count",
+            value: { intValue: String(record.shadowModelCallCount) },
+          },
+        ]
+      : []),
+    ...(record.shadowLanguageHint !== null
+      ? [
+          {
+            key: "flowpilot.shadow_language_hint",
+            value: { stringValue: record.shadowLanguageHint },
+          },
+        ]
+      : []),
+    ...(record.shadowFailureCode !== null
+      ? [
+          {
+            key: "flowpilot.shadow_failure_code",
+            value: { stringValue: record.shadowFailureCode },
+          },
+        ]
+      : []),
+    ...(record.shadowHandoffAgreement !== null
+      ? [
+          {
+            key: "flowpilot.shadow_handoff_agreement",
+            value: { stringValue: record.shadowHandoffAgreement },
+          },
+        ]
+      : []),
+    ...(record.shadowServedModel !== null
+      ? [
+          {
+            key: "flowpilot.shadow_served_model",
+            value: { stringValue: record.shadowServedModel },
+          },
+        ]
+      : []),
+    ...(record.shadowLatencyMs !== null
+      ? [
+          {
+            key: "flowpilot.shadow_latency_ms",
+            value: { doubleValue: record.shadowLatencyMs },
+          },
+        ]
+      : []),
   ];
 
   const payload = {

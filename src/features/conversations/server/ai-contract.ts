@@ -214,6 +214,20 @@ export const aiRequestSchema = z.object({
   assistantStyle: z.string().trim().min(1).max(400).optional(),
   /** Domain-computed availability results, when already resolved. */
   availability: z.array(availabilityResultSchema).max(14).nullish(),
+  /**
+   * ONE opaque correlation id for the turn (PROMPT-AI-JEV-03D — OPTION E).
+   * Optional and additive: the engine stamps the turn's existing `traceId`
+   * here so a NON-AUTHORITATIVE shadow JEV evaluation can admit and correlate
+   * turns deterministically WITHOUT deriving anything from message content.
+   * It is never customer-visible, never a routing input, and absent on every
+   * pre-03D request (so all existing producers keep validating unchanged).
+   */
+  traceId: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^[0-9a-f]+$/)
+    .optional(),
 });
 
 export type AiRequest = z.infer<typeof aiRequestSchema>;

@@ -99,6 +99,48 @@ export type TurnEvidence = {
   readonly finalOutcome: string;
   readonly outboundSendAttempted: boolean;
   readonly outboundSendDelivered: boolean | null;
+  /**
+   * The NON-AUTHORITATIVE shadow JEV evidence (PROMPT-AI-JEV-03D — OPTION E).
+   * Present only when a shadow strategy was installed this turn. DISJOINT from
+   * the serving counters: `shadowModelCallCount` (0|1) accounts for the
+   * experimental shadow call and NEVER contributes to the authoritative
+   * `providerAttempts` / model-call accounting (the serving path's counters
+   * live above and are unchanged). Closed machine keys, sanitized
+   * probabilities and booleans only — never raw customer text, prompt text,
+   * raw provider payload, secrets, Authorization headers, chain-of-thought,
+   * or model prose (enforced by `assertTurnEvidenceContentFree`).
+   *
+   * Language/dialect precision: `shadowLanguageHint` is a Unicode script-block
+   * key ∈ {ar, en, mixed}. It CANNOT distinguish Egyptian Arabic from MSA and
+   * no dialect accuracy is claimed from it; the record measures the
+   * CONSEQUENCE of language variation, not dialect identity.
+   */
+  readonly shadowEvidenceRole: string | null;
+  readonly shadowSelected: boolean | null;
+  readonly shadowSampled: boolean | null;
+  readonly shadowResultClass: string | null;
+  readonly shadowJevCallSpent: boolean | null;
+  readonly shadowModelCallCount: number | null;
+  readonly shadowFailureCode: string | null;
+  readonly shadowServedModel: string | null;
+  readonly shadowLanguageHint: string | null;
+  readonly shadowConfidence: string | null;
+  readonly shadowContactVsBook: boolean | null;
+  readonly shadowClarifyContactOrBookProposed: boolean | null;
+  readonly shadowHandoffAgreement: string | null;
+  readonly shadowConversationGoal: string | null;
+  readonly shadowLatencyMs: number | null;
+  readonly shadowFacts: Readonly<Record<string, boolean>> | null;
+  readonly shadowProbabilities: Readonly<Record<string, number>> | null;
+  readonly shadowPrecedence: {
+    readonly supportRequest: boolean;
+    readonly providerRequest: boolean;
+    readonly bookingTask: boolean;
+    readonly explicitHuman: boolean;
+    readonly derivation: string;
+  } | null;
+  readonly shadowBucket: string | null;
+  readonly shadowNotSampledReason: string | null;
   readonly emittedAt: string;
 };
 
@@ -234,6 +276,32 @@ export function buildTurnEvidence(
     outboundSendAttempted:
       input.delivery !== null && input.delivery !== undefined,
     outboundSendDelivered: input.delivery ? input.delivery.delivered : null,
+    // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E). Pure
+    // pass-through of the projection
+    // (`projectShadowEvidence` → `TurnShadowObservation`); no recomputation,
+    // no business formula duplication, and no contribution to any serving
+    // counter.
+    shadowEvidenceRole: observability?.shadow?.evidenceRole ?? null,
+    shadowSelected: observability?.shadow?.selected ?? null,
+    shadowSampled: observability?.shadow?.sampled ?? null,
+    shadowResultClass: observability?.shadow?.resultClass ?? null,
+    shadowJevCallSpent: observability?.shadow?.jevCallSpent ?? null,
+    shadowModelCallCount: observability?.shadow?.shadowModelCallCount ?? null,
+    shadowFailureCode: observability?.shadow?.failureCode ?? null,
+    shadowServedModel: observability?.shadow?.servedModel ?? null,
+    shadowLanguageHint: observability?.shadow?.languageHint ?? null,
+    shadowConfidence: observability?.shadow?.confidence ?? null,
+    shadowContactVsBook: observability?.shadow?.contactVsBook ?? null,
+    shadowClarifyContactOrBookProposed:
+      observability?.shadow?.clarifyContactOrBookProposed ?? null,
+    shadowHandoffAgreement: observability?.shadow?.handoffAgreement ?? null,
+    shadowConversationGoal: observability?.shadow?.conversationGoal ?? null,
+    shadowLatencyMs: observability?.shadow?.latencyMs ?? null,
+    shadowFacts: observability?.shadow?.facts ?? null,
+    shadowProbabilities: observability?.shadow?.probabilities ?? null,
+    shadowPrecedence: observability?.shadow?.precedence ?? null,
+    shadowBucket: observability?.shadow?.bucket ?? null,
+    shadowNotSampledReason: observability?.shadow?.notSampledReason ?? null,
     emittedAt: (meta.emittedAt ?? new Date()).toISOString(),
   };
 }
@@ -267,6 +335,24 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "knowledgeGapCategory",
   "finalOutcome",
   "emittedAt",
+  // PROMPT-AI-JEV-03D — the disjoint shadow slot's CLOSED string keys. Each
+  // carries only a bounded machine vocabulary (a result class, a JEV error
+  // code, a pinned model id, a script-block language hint, a confidence band,
+  // a handoff-agreement class, a bounded conversationGoal choice, a precedence
+  // derivation, an evidence bucket, or a not-sampled reason) — never customer
+  // content, never model prose, never a secret or header.
+  "shadowEvidenceRole",
+  "shadowResultClass",
+  "shadowFailureCode",
+  "shadowServedModel",
+  "shadowLanguageHint",
+  "shadowConfidence",
+  "shadowHandoffAgreement",
+  "shadowConversationGoal",
+  "shadowBucket",
+  "shadowNotSampledReason",
+  // Nested inside `shadowPrecedence`: the closed precedence derivation.
+  "derivation",
 ]);
 
 /** Recursively assert the record (and any nested object) is content-free. */
