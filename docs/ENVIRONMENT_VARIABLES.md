@@ -17,9 +17,10 @@ The first optional variable was `INBOUND_WEBHOOK_TOKEN` (PROMPT-19); the
 full optional set (WhatsApp/Meta, AI provider keys, demo mode, credential
 master key) is tabled below under "Optional Variables":
 
-| Variable                | Scope  | Example                | Used by                                                                   |
-| ----------------------- | ------ | ---------------------- | ------------------------------------------------------------------------- |
-| `INBOUND_WEBHOOK_TOKEN` | server | 32+ char random string | `POST /api/conversations/inbound` gate — unset ⇒ inbound webhook disabled |
+| Variable                       | Scope  | Example                | Used by                                                                   |
+| ------------------------------ | ------ | ---------------------- | ------------------------------------------------------------------------- |
+| `INBOUND_WEBHOOK_TOKEN`        | server | 32+ char random string | `POST /api/conversations/inbound` gate — unset ⇒ inbound webhook disabled |
+| `FLOWPILOT_TEST_INGRESS_TOKEN` | server | 32+ char random string | `POST /api/conversations/inbound` operator test ingress gate              |
 
 While `INBOUND_WEBHOOK_TOKEN` is unset, the provider-neutral inbound
 webhook answers 503 and no external message can enter the system

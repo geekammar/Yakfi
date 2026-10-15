@@ -18,6 +18,15 @@ const serverEnvSchema = z.object({
     z.string().min(32).optional(),
   ),
   /**
+   * Secret gating the operator test ingress (PROMPT-AI-JEV-03F-I).
+   * Optional: when unset and INBOUND_WEBHOOK_TOKEN is also unset, the
+   * test ingress route is DISABLED (503).
+   */
+  FLOWPILOT_TEST_INGRESS_TOKEN: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32).optional(),
+  ),
+  /**
    * AI provider API keys (PROMPT-OPS-05) — environment-backed SECRETS,
    * optional until the provider integration phase. They are NEVER
    * stored in the database, returned by any API, or logged: the
@@ -128,6 +137,7 @@ const parsedServer = serverEnvSchema.safeParse({
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
   BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
   INBOUND_WEBHOOK_TOKEN: process.env.INBOUND_WEBHOOK_TOKEN,
+  FLOWPILOT_TEST_INGRESS_TOKEN: process.env.FLOWPILOT_TEST_INGRESS_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   AGENTROUTER_API_KEY: process.env.AGENTROUTER_API_KEY,
   WHATSAPP_META_VERIFY_TOKEN: process.env.WHATSAPP_META_VERIFY_TOKEN,

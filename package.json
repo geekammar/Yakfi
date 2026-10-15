@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.46.0",
+  "version": "0.46.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -46,6 +46,7 @@
     "check:jev": "tsx scripts/check-jev-strategy.ts",
     "check:jev-semantic": "tsx scripts/check-jev-semantic.ts",
     "check:jev-shadow": "tsx scripts/check-jev-shadow.ts",
+    "check:test-ingress": "tsx scripts/check-test-ingress.ts",
     "check:jev-eval": "tsx scripts/check-jev-eval.ts",
     "eval:jev": "tsx scripts/eval-jev-benchmark.ts",
     "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
@@ -97,6 +98,7 @@
     "db:seed": "dotenv -e .env.local -e .env -- tsx prisma/seed.ts",
     "bootstrap:admin": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-production-admin.ts",
     "bootstrap:operator": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-platform-operator.ts",
+    "bootstrap:test-business": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-test-business.ts",
     "icons": "node scripts/generate-pwa-icons.mjs",
     "context": "node scripts/context.mjs",
     "context:check": "node scripts/context-check.mjs",

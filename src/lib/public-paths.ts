@@ -35,6 +35,10 @@ const PUBLIC_PATH_PREFIXES = [
   // BEFORE any parsing or processing (the same model as `/invite/<token>`,
   // where the token in the path is the credential).
   "/api/telegram",
+  // Provider-neutral inbound webhook / operator test ingress (PROMPT-19 /
+  // PROMPT-AI-JEV-03F-I). Authenticated via FLOWPILOT_TEST_INGRESS_TOKEN or
+  // INBOUND_WEBHOOK_TOKEN header; failing closed 401/503 before any processing.
+  "/api/conversations/inbound",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {
