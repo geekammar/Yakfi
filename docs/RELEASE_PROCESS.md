@@ -284,19 +284,22 @@ gh release create v0.1.0 --verify-tag --title "FlowPilot v0.1.0" \
 
 ## Versioning
 
-- `v0.x.x` — Spec A pilot iterations (current line: **v0.44.2**)
+- `v0.x.x` — Spec A pilot iterations (current line: **v0.46.1**)
 - Bump MINOR when a roadmap milestone completes (e.g., Spec A exit criteria
   met → `v1.0.0`); PATCH for fixes within a milestone.
 - No semver ceremony while pre-1.0 — the tag notes carry the narrative.
 
 ## Rollback / Recovery
 
-| Situation                      | Recovery                                                                                        |
-| ------------------------------ | ----------------------------------------------------------------------------------------------- |
-| Tag pushed but release wrong   | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo                         |
-| Repo created but push rejected | Fix locally, `git push -u origin main` again (script is re-runnable)                            |
-| Secret leaked in a commit      | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval |
-| Everything wrong               | Delete the repo (`gh repo delete --yes`) — it is private and re-creatable                       |
+| Situation                        | Recovery / Limitations                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Tag pushed but release wrong     | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo                                 |
+| Defective commit pushed to main  | Revert with `git revert <commit>` and push forward to `main`; never force-push                          |
+| Vercel deployment broken         | Instant rollback in Vercel project dashboard to previous stable deployment                              |
+| Production DB migration rollback | Prisma has no automated down-migrations; apply forward-fix migrations or restore backup in Neon console |
+| Repo created but push rejected   | Fix locally, `git push -u origin main` again (script is re-runnable)                                    |
+| Secret leaked in a commit        | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval         |
+| Catastrophic failure             | Re-clone from remote or restore from backup; repo is private and re-creatable                           |
 
 ## See Also
 

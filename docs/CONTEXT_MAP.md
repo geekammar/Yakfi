@@ -123,8 +123,8 @@ Docs:
 
 The Conversation Engine and the AI boundary: inbound orchestration, the
 provider-agnostic AI adapter/factory, the minimal AI context builder (knowledge
-visibility), and the customer disclosure gate. AI interprets; Domain decides;
-Conversation orchestrates (DECISIONS #33).
+visibility), customer disclosure gate, booking selection mapper, and semantic
+decision boundary. AI interprets; Domain decides; Conversation orchestrates (DECISIONS #33).
 Docs:
 
 - docs/ai/README.md
@@ -136,9 +136,13 @@ Docs:
 - src/features/conversations/server/ai-observability.ts
 - src/features/conversations/server/ai-context-builder/context-builder.ts
 - src/features/conversations/server/ai-disclosure/disclosure-gate.ts
+- src/features/conversations/server/booking-selection.ts
+- src/features/conversations/server/booking-mapper.ts
+- src/features/appointments/server/booking-options-service.ts
 - src/server/integrations/ai/factory.ts
 - src/server/integrations/ai/prompt-registry.ts
 - src/server/integrations/ai/response-normalizer/pipeline.ts
+- src/server/integrations/ai/jev-semantic-strategy.ts
 - src/lib/ai-knowledge-visibility/knowledge-visibility.ts
   Tests:
 - scripts/check-ai-provider.ts
@@ -146,13 +150,16 @@ Docs:
 - scripts/check-ai-disclosure.ts
 - scripts/check-ai-architecture.ts
 - scripts/check-conversation-booking.ts
+- scripts/check-booking-confirm.ts
+- scripts/check-jev-semantic.ts
 
 ### booking.appointments
 
 The booking domain: the ONE availability/scheduling authority, appointment
-creation, the multi-step booking flow, and the Smart Create UI. Availability
-authority returns only genuinely selectable slots; booking is
-server-authoritative; there is no second availability engine.
+creation, provider eligibility, provider-aware booking options, the multi-step
+booking flow, and the Smart Create UI. Availability authority returns only
+genuinely selectable slots; booking is server-authoritative; there is no second
+availability engine.
 Docs:
 
 - docs/ARCHITECTURE.md
@@ -162,12 +169,37 @@ Docs:
 - src/features/appointments/server/availability-service.ts
 - src/features/appointments/server/appointment-create-service.ts
 - src/features/appointments/server/booking-flow-service.ts
+- src/features/appointments/server/booking-options-service.ts
+- src/features/appointments/server/provider-eligibility-service.ts
+- src/features/appointments/actions/appointment-actions.ts
+- src/features/appointments/actions/booking-flow-actions.ts
 - src/features/appointments/components/smart-create/smart-create-appointment.tsx
 - src/server/repositories/appointment.repository.ts
   Tests:
 - scripts/check-appointment-creation.ts
 - scripts/check-booking-ux.ts
 - scripts/check-reschedule.ts
+- scripts/check-booking-options.ts
+- scripts/check-provider-eligibility.ts
+- scripts/check-booking-confirm.ts
+
+### platform.conversation-lab
+
+The Founder Conversation Lab: platform-level copy override registry, copy
+customization services, founder UI, and database persistence.
+Docs:
+
+- docs/ARCHITECTURE.md
+  Code:
+- src/app/(platform)/platform/conversation-lab/page.tsx
+- src/features/platform/actions/copy-lab-actions.ts
+- src/features/platform/components/copy-lab-browser.tsx
+- src/features/conversation-copy/override-service.ts
+- src/features/conversation-copy/registry.ts
+- src/server/repositories/copy-override.repository.ts
+  Tests:
+- scripts/check-copy-lab.ts
+- scripts/check-copy-lab-db.ts
 
 ### auth
 
@@ -213,7 +245,8 @@ These areas exist but do not yet have a clean, single-doorway boundary worth a
 precise map entry. Add one only when a task proves the boundary:
 
 - **platform / control plane** (`src/features/platform`, signup policy, operator
-  guards) — overlaps `auth`; map separately only if it grows its own tasks.
+  guards) — overlaps `auth`; the Founder Conversation Lab is mapped separately
+  under `platform.conversation-lab`.
 - **knowledge / services authoring** (`src/features/knowledge`,
   `src/features/services`) — currently reachable via `ai.conversation-engine`
   (knowledge) and `booking.appointments` (services) starting points.

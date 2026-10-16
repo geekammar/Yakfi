@@ -2,25 +2,35 @@
 
 > Binding rules for every AI agent (and human contributor) working on
 > FlowPilot. They exist so any agent can continue safely after total
-> context loss. Every prompt runs in a FRESH OpenCode session with NO
+> context loss. Every prompt runs in a FRESH OpenCode/AGY session with NO
 > prior conversation memory — recover context through the tier model
 > below and read as FEW lines as possible. Token efficiency is a hard
-> requirement, not a preference. Last updated: DOC-NORMALIZE-V029
-> (DECISIONS #57).
+> requirement, not a preference.
 
 ## Context Tiers (the reading policy)
 
-**TIER 0 — COLD START (always, every session):** read `docs/AGENT_RULES.md`
-(this file) + `docs/CURRENT_STATE.md` + `docs/DECISIONS_INDEX.md` (the
-one-line decision routing index — read it INSTEAD of the full `DECISIONS.md`).
-Purpose: identify what FlowPilot is, the current strategic/architectural state,
-the hard rules, which decisions exist, and where to continue. Nothing else by
-default.
+**COLD-START RULE:** A fresh Agent session must NOT read the entire repository
+or all documentation merely to initialize. It must recover only enough trusted
+context to classify the requested work and enforce safety constraints.
 
-**TIER 1 — IMPLEMENTATION ROUTING (only when implementation work
-begins):** read `docs/BUILD_STATE.md` (the authoritative implementation
-ledger — `Current State` summary + `Next Step`, not the full history)
-plus ONE canonical topic document matching the task:
+**TIER 0 — COLD START (always, every session):**
+Read strictly:
+
+1. `docs/AGENT_RULES.md` (this file — safety invariants & loading contract)
+2. `docs/CURRENT_STATE.md` (compact baseline & current orientation)
+3. `docs/DECISIONS_INDEX.md` (one-line decision router — read INSTEAD of `DECISIONS.md`)
+
+_Tier 0 Purpose:_ Identify repository identity, current baseline, hard safety
+rules, available decisions, and context-routing instructions. Nothing else by
+default. Avoid automatically loading full historical narratives or large decision
+tables. Target total mandatory Tier 0 reading volume below 70 KB where safely
+achievable.
+
+**TIER 1 — TASK-SPECIFIC CONTEXT (only when implementation work begins):**
+Identify ONE primary task context via `docs/CONTEXT_MAP.md` or
+`pnpm context <name>`. Read only the `Current State` summary + `Next Step`
+from `docs/BUILD_STATE.md` (never read the entire ledger), plus at most ONE
+canonical topic document matching the task:
 
 | Task                       | Document                                                                                                                                                                                                                                                                      |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -32,170 +42,139 @@ plus ONE canonical topic document matching the task:
 | Roadmap / plan sequence    | `docs/ROADMAP.md`                                                                                                                                                                                                                                                             |
 | AI / context               | `docs/ai/README.md` (rules) → `docs/ai/ARCHITECTURE.md` (boundary); only the `…@v1` definition being changed in `docs/ai/PROMPTS.md`; `docs/ai/PROVIDERS.md` / `EVALUATIONS.md` only when directly relevant; general boundary also in `docs/ARCHITECTURE.md` + `ECONOMICS.md` |
 | Release / deploy / ops     | ONLY the required ops document (`RELEASE_PROCESS.md`, `VERCEL_DEPLOYMENT.md`, `GITHUB_WORKFLOW.md`, `DEVELOPMENT.md`, `QUALITY_CHECKS.md`, `ENVIRONMENT_VARIABLES.md`, `TROUBLESHOOTING.md`)                                                                                  |
-| External integration holds | `docs/INTEGRATION_CHECKPOINTS.md` (one entry per external provider whose completion boundary is owned by an outside party — e.g. the Meta WhatsApp Embedded Signup DEFERRED/HOLD)                                                                                             |
+| External integration holds | `docs/INTEGRATION_CHECKPOINTS.md` (one entry per external provider whose completion boundary is owned by an outside party — e.g. Meta WhatsApp Embedded Signup DEFERRED/HOLD)                                                                                                 |
 
-**TIER 2 — DECISION DEEP DIVE (only when a current decision is
-involved, an architectural conflict is found, or the topic cannot be
-resolved from Tier 0 + Tier 1):** the specific `docs/DECISIONS.md` entry
-identified by `docs/DECISIONS_INDEX.md` (append-only authority) plus the
-relevant canonical topic document. Never read the whole log.
+Use metadata, headings, and targeted line ranges before opening large documents.
 
-**TIER 3 — HISTORICAL (never read automatically):** Git history, tags,
-release notes, and `docs/archive/IMPLEMENTATION_HISTORY.md` (the superseded
-per-slice implementation + verification narrative) — only when historical
-implementation detail, forensics, or migration reasoning is explicitly
-required.
+**TIER 2 — DECISION DEEP DIVE (on demand only):**
+Load individual entries from `docs/DECISIONS.md` ONLY when:
 
-There is NO `DOCS_INDEX.md`, NO `CORE_CONTEXT.md`, NO
-`CONTEXT_RECOVERY.md` — do not recreate them; this tier model IS the
-navigation layer. `DECISIONS_INDEX.md` is the ONE exception: a narrow
-decision-routing index re-introduced by DECISIONS #57 to keep the cold start
-cheap. Never read all memory documents in a session.
+- The files being changed are directly governed by that decision.
+- An architectural constraint is in conflict or ambiguous.
+- A requirement contradicts existing documentation.
 
-## How Agents Read the Docs (the loading protocol)
+Never load the entire append-only `DECISIONS.md` log by default.
 
-The objective is **minimal sufficient context, not maximal context.** Follow
-these steps in order and stop as soon as the task is actionable:
+**TIER 3 — HISTORICAL ARCHIVE (never read automatically):**
+Git history, tags, release notes, and `docs/archive/IMPLEMENTATION_HISTORY.md`
+are accessed ONLY when:
 
-- **STEP 1 — orient:** read the Tier 0 triple — `AGENT_RULES.md` +
-  `CURRENT_STATE.md` + `DECISIONS_INDEX.md`. Nothing else.
-- **STEP 2 — route to the ledger:** read `docs/BUILD_STATE.md` (the
-  `Current State` summary + `Next Step` only, not the reference tables).
-- **STEP 3 — load ONLY task-specific canonical docs:** pick at most ONE
-  canonical topic document matching the task (the Tier 1 table below).
-- **STEP 4 — go deep only on real need:** load a full `DECISIONS.md` entry,
-  deep architecture docs, or Tier 3 history ONLY if the task actually requires
-  it (a decision is being changed, documents conflict, or historical
-  comparison is needed).
+- Investigating regressions or forensics.
+- Resolving historical architectural decisions.
+- Recovering relevant past implementation details.
 
-**NEVER (context discipline):**
+There is NO `DOCS_INDEX.md`, NO `CORE_CONTEXT.md`, NO `CONTEXT_RECOVERY.md`.
+Do not recreate them.
 
-- ❌ Load all documentation by default, or "to be safe".
-- ❌ Read duplicate continuity snapshots or the Tier 3 archive at cold start.
-- ❌ Read historical prompts / old release narratives as current state.
-- ❌ Re-read the entire `DECISIONS.md` when `DECISIONS_INDEX.md` answers the
-  question.
-- ❌ Treat a `Last updated: PROMPT-*` marker or an old release narrative as
-  truth — the repository is the truth; a stale doc never overrides the code.
+## Task-Scoped Source Reading Rules
 
-## Context Map — code-level starting points (DECISIONS #75)
+This is a mandatory workflow rule for every implementation task, not a new
+context framework:
 
-Beneath the doc tiers there is a CODE-level starting index: `docs/CONTEXT_MAP.md`
-plus `pnpm context <name>`. It tells you which handful of source files, docs, and
-focused tests to START from for a feature area so you do not re-scan `src/`.
+### Required Task Workflow
 
-The workflow (do this, not "read everything first"):
+1. **Identify the exact task** and expected behavior.
+2. **Select the closest existing context entrypoint** using `pnpm context <name>` or `docs/CONTEXT_MAP.md`.
+3. **Inspect repository paths** and narrow search results with targeted tools (`rg -n`, `rg --files`, `git diff`).
+4. **Read the primary files** likely to be modified.
+5. **Read direct dependencies ONLY** when needed to understand contracts (follow real imports one hop at a time).
+6. **Read related tests** and relevant architectural decisions.
+7. **Expand scope ONLY** when concrete evidence requires additional files.
+8. **Implement the smallest safe change**.
+9. **Run focused tests** and required release gates (`pnpm verify`).
+10. **Report changed files** and scope justification in the final report.
 
-```
-TASK
- → read the Tier 0 triple (always)
- → identify the context (pnpm context <name>, e.g. telegram.customer)
- → read the mapped docs
- → read the mapped source
- → discover direct dependencies ONLY when a mapped file requires it
-   (follow a real import one hop at a time — the code is the truth)
- → inspect the focused tests
- → implement
- → verify (pnpm verify)
-```
+### Prohibited Default Behaviors
 
-Explicitly DISCOURAGED: `TASK → read all docs → read all source files → then
-start`. The map is a STARTING-POINT INDEX, not a dependency graph and not a
-second architecture doc — it holds no code, no token counts, no telemetry. When
-you add or move a mapped file, update the entry and run `pnpm context:check`. Add
-a new context only for a boundary that already obviously exists; record unclear
-boundaries under "Boundaries needing later refinement" instead of fabricating an
-entry.
+- ❌ Reading every source file in the repository.
+- ❌ Recursively loading entire directories into context.
+- ❌ Reading all documentation on every fresh session.
+- ❌ Re-reading large files unnecessarily.
+- ❌ Loading unrelated features or context boundaries.
+- ❌ Dumping full Git history or large git logs.
+- ❌ Running broad repository searches when a precise path is known.
+- ❌ Copying large source files into task reports.
+- ❌ Automatically expanding every import transitively.
+
+### Allowed Scope Expansion (Exceptions)
+
+This is not a rigid maximum-file-count limit. Agents may read additional files
+when justified by:
+
+- Security and authentication boundaries.
+- Multi-tenant data isolation (`businessId`).
+- Booking correctness and scheduling concurrency invariants.
+- Database schema and repository contracts.
+- Cross-feature shared APIs and shared TypeScript types.
+- Regression investigation.
+- Explicitly requested comprehensive audits.
+
+_Requirement:_ When a task expands beyond its initial context entrypoint, provide
+a clear scope justification in the task report.
+
+### Preferred Retrieval Techniques
+
+- Use targeted commands: `rg -n`, `rg --files`, `sed -n`, `git diff`, `git log -- <path>`, `wc -c`, `pnpm context <name>`.
+- Use bounded outputs (e.g. `head -n`, line ranges) rather than full dumps.
+- Do not introduce artificial context budgets that prevent necessary engineering investigation.
+
+## Context Map — Code-Level Entrypoints (DECISIONS #75)
+
+`docs/CONTEXT_MAP.md` provides code-level starting points (`pnpm context <name>`)
+for each feature boundary. It tells you which handful of source files, docs, and
+focused tests to START from so you do not re-scan `src/`.
+
+The map is a STARTING-POINT INDEX, not a dependency graph and not a second
+architecture document. When you add or move a mapped file, update the entry and
+run `pnpm context:check`.
 
 ## Before Making Any Changes
 
-1. Read the Tier 0 triple above (`AGENT_RULES.md` + `CURRENT_STATE.md` +
-   `DECISIONS_INDEX.md`). That is the complete cold-start set.
-2. Follow the loading protocol ("How Agents Read the Docs"): Tier 1 by task;
-   Tier 2 only on conflict/decision; Tier 3 only on explicit historical need.
+1. Read the Tier 0 triple (`AGENT_RULES.md` + `CURRENT_STATE.md` + `DECISIONS_INDEX.md`).
+2. Follow the loading protocol: Tier 1 by task; Tier 2 only on conflict/decision; Tier 3 only on explicit historical need.
 3. Read `docs/BUILD_STATE.md → Current State + Next Step` and do exactly that.
-   Never rebuild completed work recorded there.
-4. If documents conflict, authority order is: latest `DECISIONS.md`
-   entry → `BUILD_STATE.md` → canonical topic docs → derived
-   summaries. If a conflict is unclear, escalate instead of guessing.
-   The repository itself is the implementation truth — never trust a
-   stale doc over the code.
+4. Authority order on conflict: latest `DECISIONS.md` entry → `BUILD_STATE.md` → canonical topic docs → derived summaries. The repository code is the implementation truth.
 
 ## NEVER
 
-- ❌ Add features outside `SPEC_A.md` / the current accepted scope (log
-  requests as Spec B evidence instead of building them)
-- ❌ Redesign the architecture or stack recorded in `ARCHITECTURE.md` /
-  `DECISIONS.md`
-- ❌ Introduce complexity: no microservices, event buses, queues, Redis,
-  message brokers, global stores, new ORMs, extra API layers, RAG/vector
-  DBs, generic workflow engines, omnichannel infrastructure
-- ❌ Add infrastructure not approved in `ARCHITECTURE.md` (Vercel + Neon
-  only)
-- ❌ Treat AI output as authoritative for availability, provider
-  eligibility, conflicts, or booking (AI interprets; Domain decides and
-  executes; Conversation orchestrates — DECISIONS #33)
-- ❌ Add `branchId` to tables outside the selective scoping list, use
-  `User.branchId`, or hard-code "one Business = one WhatsApp number"
-  (DECISIONS #30–#32)
-- ❌ Build billing, subscriptions, invoices, payments, or hard-code plan
-  limits in business logic (DECISIONS #36; `ECONOMICS.md`)
-- ❌ Modify or delete historical entries in `DECISIONS.md` (append-only;
-  reversals are new entries referencing the old one)
-- ❌ Redo or reimplement completed work recorded in `BUILD_STATE.md`
-  ("if it works, leave it")
-- ❌ Break RTL/Arabic-first behavior or accessibility guarantees
-- ❌ Commit secrets or real credentials; `.env` stays local (pre-commit
-  hook active)
-- ❌ Skip verification: `pnpm verify` (+ `pnpm security` when touching
-  anything sensitive) must pass before finishing a prompt
-- ❌ Recreate duplicate documentation: no second current-state doc
-  (`BUILD_STATE.md` is the only implementation ledger, `CURRENT_STATE.md`
-  the only snapshot), no per-prompt reports, no competing summaries of
-  canonical files, no second decision log (`DECISIONS_INDEX.md` routes the
-  ONE `DECISIONS.md`; historical narrative goes to `docs/archive/`, not a
-  new current-state doc)
-- ❌ Commit, tag, push, or run GitHub publishing operations (`pnpm ship`,
-  `pnpm release`) — the human operator owns all shipping/versioning/
-  release actions unless the prompt explicitly instructs otherwise
+- ❌ Add features outside `SPEC_A.md` / the current accepted scope.
+- ❌ Redesign the architecture or stack recorded in `ARCHITECTURE.md` / `DECISIONS.md`.
+- ❌ Introduce complexity: no microservices, event buses, queues, Redis, message brokers, global stores, new ORMs, extra API layers, RAG/vector DBs, generic workflow engines.
+- ❌ Add infrastructure not approved in `ARCHITECTURE.md` (Vercel + Neon only).
+- ❌ Treat AI output as authoritative for availability, provider eligibility, conflicts, or booking (AI interprets; Domain decides and executes; Conversation orchestrates — DECISIONS #33).
+- ❌ Add `branchId` to tables outside the selective scoping list, use `User.branchId`, or hard-code "one Business = one WhatsApp number" (DECISIONS #30–#32).
+- ❌ Build billing, subscriptions, invoices, payments, or hard-code plan limits in business logic (DECISIONS #36; `ECONOMICS.md`).
+- ❌ Modify or delete historical entries in `DECISIONS.md` (append-only; reversals are new entries referencing the old one).
+- ❌ Redo or reimplement completed work recorded in `BUILD_STATE.md`.
+- ❌ Break RTL/Arabic-first behavior or accessibility guarantees.
+- ❌ Commit secrets or real credentials; `.env` stays local (pre-commit hook active).
+- ❌ Skip verification: `pnpm verify` (+ `pnpm security` when touching sensitive areas) must pass before finishing.
+- ❌ Recreate duplicate documentation or competing summaries.
+- ❌ Commit, tag, push, or run GitHub publishing operations (`pnpm ship`, `pnpm release`) — the human operator owns all shipping/versioning/release actions unless explicitly instructed.
 
 ## ALWAYS
 
-- ✅ Update `BUILD_STATE.md` after every prompt — MINIMALLY: status,
-  completed work (one entry), known issues, next step. It is a ledger, not
-  a diary; per-prompt detail belongs to Git history
-- ✅ Append to `DECISIONS.md` when a decision is made (never overwrite)
-- ✅ Create a new document ONLY when a real long-term need exists and no
-  canonical file covers the topic
-- ✅ Preserve strategy: when in conflict, vision > strategy > scope >
-  implementation detail
-- ✅ Keep feature isolation, repository-only DB access, Zod-validated DTOs,
-  server-side tenant scoping (UI visibility is not authorization)
-- ✅ Write Arabic-first, vertical-agnostic UI copy (rules:
-  `DESIGN_SYSTEM.md`; terms: `PRODUCT_GLOSSARY.md`)
-- ✅ Report final status honestly — distinguish BUILT code from DOCUMENTED
-  or NOT built
-- ✅ Ask/escalate instead of guessing when scope is ambiguous
+- ✅ Update `BUILD_STATE.md` after every prompt — MINIMALLY: status, completed work (one entry), known issues, next step.
+- ✅ Append to `DECISIONS.md` when a decision is made (never overwrite).
+- ✅ Create a new document ONLY when a real long-term need exists and no canonical file covers the topic.
+- ✅ Preserve strategy: when in conflict, vision > strategy > scope > implementation detail.
+- ✅ Keep feature isolation, repository-only DB access, Zod-validated DTOs, server-side tenant scoping.
+- ✅ Write Arabic-first, vertical-agnostic UI copy (rules: `DESIGN_SYSTEM.md`; terms: `PRODUCT_GLOSSARY.md`).
+- ✅ Report final status honestly — distinguish BUILT code from DOCUMENTED or NOT built.
+- ✅ Ask/escalate instead of guessing when scope is ambiguous.
 
 ## Prompt Lifecycle Process
 
-1. **Recover** via the context tiers — every prompt is a fresh OpenCode
-   session: Tier 0 first, then task-selective Tier 1 only.
+1. **Recover** via context tiers: Tier 0 cold start, then task-selective Tier 1.
 2. **Inspect the current implementation** before changing anything.
-3. **Plan** against `BUILD_STATE.md → Next Step`; produce a concise plan
-   and TODO list before editing.
-4. **Implement** ONLY the current prompt's scope, following
-   `ARCHITECTURE.md` dependency rules.
-5. **Verify** with the quality gate: `pnpm verify` (lint + typecheck +
-   format + build). Commands reference: `QUALITY_CHECKS.md`.
-6. **Update docs** — `BUILD_STATE.md` always (minimal); `DECISIONS.md`
-   when a decision was made (append only).
-7. **Report honestly** and leave the repository where the next fresh
-   session can continue from the Tier 0 cold start.
+3. **Plan** against `BUILD_STATE.md → Next Step`; produce a concise plan before editing.
+4. **Implement** ONLY the current prompt's scope, following `ARCHITECTURE.md` dependency rules.
+5. **Verify** with the quality gate: `pnpm verify` (lint + typecheck + format + build).
+6. **Update docs** — `BUILD_STATE.md` always (minimal); `DECISIONS.md` when a decision was made.
+7. **Report honestly** and leave the repository ready for the next fresh session.
 
 ## Escalation Path
 
-If a task seems to require something marked ❌ above or outside the
-accepted scope, STOP. Record the request as a candidate decision in your
-response to the human operator and wait for approval. Approved changes get
-a `DECISIONS.md` entry before implementation begins.
+If a task seems to require something marked ❌ above or outside the accepted scope,
+STOP. Record the request as a candidate decision in your response to the human
+operator and wait for approval.
