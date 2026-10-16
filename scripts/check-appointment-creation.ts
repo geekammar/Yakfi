@@ -319,6 +319,7 @@ async function main(): Promise<void> {
           findById: async () => businessRow(BUSINESS_A, mode),
         },
         branchRepository: deps.branchRepository,
+        now: () => new Date("2026-09-19T08:00:00.000Z"),
         appointmentRepository: {
           createWithConflictCheck: async (dto: never) => {
             const payload = dto as {

@@ -260,7 +260,11 @@ export class AppointmentRepository {
               ...notDeleted,
               date: toDate(date),
               status: { in: ["PENDING", "CONFIRMED"] },
-              ...(assignedUserId ? { assignedUserId } : {}),
+              ...(assignedUserId
+                ? {
+                    OR: [{ assignedUserId }, { assignedUserId: null }],
+                  }
+                : {}),
               startTime: { lt: toTime(endTime) },
               endTime: { gt: toTime(startTime) },
             },
@@ -327,7 +331,12 @@ export class AppointmentRepository {
               date: toDate(input.date),
               status: { in: ["PENDING", "CONFIRMED"] },
               ...(appointment.assignedUserId
-                ? { assignedUserId: appointment.assignedUserId }
+                ? {
+                    OR: [
+                      { assignedUserId: appointment.assignedUserId },
+                      { assignedUserId: null },
+                    ],
+                  }
                 : {}),
               startTime: { lt: toTime(input.endTime) },
               endTime: { gt: toTime(input.startTime) },
@@ -408,6 +417,7 @@ export class AppointmentRepository {
     businessId: string,
     date: string,
     assignedUserIds: string[],
+    excludeAppointmentId?: string,
   ): Promise<
     Array<{ assignedUserId: string; startTime: string; endTime: string }>
   > {
@@ -418,7 +428,11 @@ export class AppointmentRepository {
         ...notDeleted,
         date: toDate(date),
         status: { in: ["PENDING", "CONFIRMED"] as AppointmentStatus[] },
-        assignedUserId: { in: assignedUserIds },
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
+        OR: [
+          { assignedUserId: { in: assignedUserIds } },
+          { assignedUserId: null },
+        ],
       },
       select: { assignedUserId: true, startTime: true, endTime: true },
       orderBy: { startTime: "asc" },
@@ -430,12 +444,25 @@ export class AppointmentRepository {
       endTime: string;
     }> = [];
     for (const row of rows) {
-      if (!row.assignedUserId) continue;
-      result.push({
-        assignedUserId: row.assignedUserId,
-        startTime: toWallClock(row.startTime),
-        endTime: toWallClock(row.endTime),
-      });
+      const startTime = toWallClock(row.startTime);
+      const endTime = toWallClock(row.endTime);
+      if (row.assignedUserId) {
+        result.push({
+          assignedUserId: row.assignedUserId,
+          startTime,
+          endTime,
+        });
+      } else {
+        // Legacy unassigned appointment: conservative blocking policy
+        // blocks all queried assignees for this slot.
+        for (const assigneeId of assignedUserIds) {
+          result.push({
+            assignedUserId: assigneeId,
+            startTime,
+            endTime,
+          });
+        }
+      }
     }
     return result;
   }
@@ -458,7 +485,12 @@ export class AppointmentRepository {
           in: ["PENDING", "CONFIRMED"] as AppointmentStatus[],
         },
         ...(params.assignedUserId
-          ? { assignedUserId: params.assignedUserId }
+          ? {
+              OR: [
+                { assignedUserId: params.assignedUserId },
+                { assignedUserId: null },
+              ],
+            }
           : {}),
         ...(params.excludeAppointmentId
           ? { id: { not: params.excludeAppointmentId } }

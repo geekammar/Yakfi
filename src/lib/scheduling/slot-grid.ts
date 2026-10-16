@@ -156,3 +156,41 @@ export function generateCandidateGrid(params: {
   });
   return candidates.length > 0 ? candidates : null;
 }
+
+/**
+ * Current calendar date (ISO "YYYY-MM-DD") in the business timezone.
+ */
+export function todayInTimeZone(now: Date, timeZone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(now);
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Current wall-clock time ("HH:mm") in the business timezone (24-hour).
+ */
+export function nowTimeInTimeZone(now: Date, timeZone: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
+    const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
+    const h = hour === "24" ? "00" : hour.padStart(2, "0");
+    return `${h}:${minute.padStart(2, "0")}`;
+  } catch {
+    return now.toISOString().slice(11, 16);
+  }
+}

@@ -720,6 +720,7 @@ async function main(): Promise<void> {
         return row;
       },
     },
+    now: () => new Date("2026-09-19T00:00:00.000Z"),
   } as unknown as Parameters<typeof createAppointmentRecord>[0];
 
   const createActor = {

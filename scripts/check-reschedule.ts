@@ -817,6 +817,7 @@ async function main(): Promise<void> {
       serviceRepository: deps.serviceRepository,
       businessRepository: deps.businessRepository,
       branchRepository: deps.branchRepository,
+      now: () => new Date("2026-10-01T08:00:00.000Z"),
       appointmentRepository: {
         createWithConflictCheck: async (dto: never) => {
           const payload = dto as {
@@ -878,6 +879,7 @@ async function main(): Promise<void> {
       serviceRepository: deps.serviceRepository,
       businessRepository: deps.businessRepository,
       branchRepository: deps.branchRepository,
+      now: () => new Date("2026-10-01T08:00:00.000Z"),
       appointmentRepository: {
         createWithConflictCheck: async () => null,
       },

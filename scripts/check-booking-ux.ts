@@ -306,6 +306,7 @@ async function main(): Promise<void> {
         return row as unknown as Appointment;
       },
     },
+    now: () => new Date("2026-09-19T08:00:00.000Z"),
   } as unknown as Parameters<typeof createAppointmentRecord>[0];
 
   const actor = {

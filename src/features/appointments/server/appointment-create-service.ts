@@ -29,11 +29,13 @@
 
 import { createAppointmentFormSchema } from "@/features/appointments/schemas/appointment-schema";
 import type { CreateAppointmentActionResult } from "@/features/appointments/types";
+import { nowTimeInTimeZone, todayInTimeZone } from "@/lib/scheduling/slot-grid";
 import type {
   AppointmentRepository,
   BranchRepository,
   BusinessRepository,
   CustomerRepository,
+  ProviderRepository,
   ServiceRepository,
 } from "@/server/repositories";
 import {
@@ -41,6 +43,7 @@ import {
   branchRepository,
   businessRepository,
   customerRepository,
+  providerRepository,
   serviceRepository,
 } from "@/server/repositories";
 import type { UserRole } from "@/types/domain";
@@ -62,6 +65,11 @@ export type AppointmentCreateServiceDeps = {
   businessRepository: Pick<BusinessRepository, "findById">;
   branchRepository: Pick<BranchRepository, "findDefaultByBusiness">;
   appointmentRepository: Pick<AppointmentRepository, "createWithConflictCheck">;
+  providerRepository?: Pick<
+    ProviderRepository,
+    "listEligibleForService" | "listAssignmentSeams"
+  >;
+  now?: () => Date;
 };
 
 /** Production dependencies (app singletons). */
@@ -72,6 +80,8 @@ export const defaultAppointmentCreateServiceDeps: AppointmentCreateServiceDeps =
     businessRepository,
     branchRepository,
     appointmentRepository,
+    providerRepository,
+    now: () => new Date(),
   };
 
 /**
@@ -172,6 +182,65 @@ export async function createAppointmentRecord(
       message: "تعذر إنشاء الموعد الآن",
     };
   }
+
+  // Server-side past-date and same-day past-time validation using business timezone
+  const now = deps.now ? deps.now() : new Date();
+  const todayIso = todayInTimeZone(now, business.timezone);
+  if (parsed.data.date < todayIso) {
+    return {
+      success: false,
+      code: "PAST_TIME",
+      message: "لا يمكن حجز موعد في تاريخ سابق",
+    };
+  }
+  if (parsed.data.date === todayIso) {
+    const currentTime = nowTimeInTimeZone(now, business.timezone);
+    if (parsed.data.startTime < currentTime) {
+      return {
+        success: false,
+        code: "PAST_TIME",
+        message: "لا يمكن حجز موعد في وقت سابق",
+      };
+    }
+  }
+
+  // Resolve explicit provider selection server-side (never use actor.userId)
+  let assignedUserId: string | null = null;
+  if (parsed.data.providerId) {
+    if (!deps.providerRepository) {
+      return {
+        success: false,
+        code: "CREATE_FAILED",
+        message: "تعذر التحقق من المزود المحدد",
+      };
+    }
+    const eligible = await deps.providerRepository.listEligibleForService(
+      actor.businessId,
+      service.id,
+    );
+    const matched = eligible.find((p) => p.id === parsed.data.providerId);
+    if (!matched) {
+      return {
+        success: false,
+        code: "PROVIDER_NOT_ELIGIBLE",
+        message: "هذا المزود غير متاح لهذه الخدمة",
+      };
+    }
+    const seams = await deps.providerRepository.listAssignmentSeams(
+      actor.businessId,
+      [parsed.data.providerId],
+    );
+    const seam = seams.find((s) => s.providerId === parsed.data.providerId);
+    if (!seam || !seam.userId) {
+      return {
+        success: false,
+        code: "PROVIDER_NOT_ELIGIBLE",
+        message: "هذا المزود غير متاح لهذه الخدمة",
+      };
+    }
+    assignedUserId = seam.userId;
+  }
+
   const initialStatus =
     business.confirmationMode === "automatic" ? "CONFIRMED" : "PENDING";
 
@@ -182,7 +251,7 @@ export async function createAppointmentRecord(
         customerId: customer.id,
         serviceId: service.id,
         branchId: defaultBranch.id,
-        assignedUserId: actor.userId,
+        assignedUserId: assignedUserId ?? (null as unknown as string),
         date: parsed.data.date,
         startTime: parsed.data.startTime,
         endTime,

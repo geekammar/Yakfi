@@ -20,6 +20,7 @@ import { z } from "zod";
 export const getAvailabilityInputSchema = z.object({
   date: appointmentDateSchema,
   serviceId: uuidSchema,
+  providerId: uuidSchema.optional(),
   excludeAppointmentId: uuidSchema.optional(),
 });
 

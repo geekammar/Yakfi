@@ -53,11 +53,13 @@ import type { Weekday } from "@/lib/scheduling/slot-grid";
 import type {
   AppointmentRepository,
   BusinessRepository,
+  ProviderRepository,
   ServiceRepository,
 } from "@/server/repositories";
 import {
   appointmentRepository,
   businessRepository,
+  providerRepository,
   serviceRepository,
 } from "@/server/repositories";
 import type { Business, UserRole } from "@/types/domain";
@@ -88,6 +90,11 @@ export type AvailabilityServiceDeps = {
   appointmentRepository: Pick<
     AppointmentRepository,
     "findById" | "listBlockingForDate"
+  > &
+    Partial<Pick<AppointmentRepository, "listBlockingByAssignees">>;
+  providerRepository?: Pick<
+    ProviderRepository,
+    "listEligibleForService" | "listAssignmentSeams"
   >;
 };
 
@@ -96,6 +103,7 @@ export const defaultAvailabilityServiceDeps: AvailabilityServiceDeps = {
   businessRepository,
   serviceRepository,
   appointmentRepository,
+  providerRepository,
 };
 
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
@@ -270,6 +278,142 @@ export async function getAvailability(
       },
       reason: "SERVICE_TOO_LONG",
     };
+  }
+
+  const { date, providerId } = parsed.data;
+
+  // Provider-scoped availability if providerId is requested
+  if (providerId) {
+    if (!deps.providerRepository) {
+      return {
+        success: false,
+        error: {
+          code: "PROVIDER_NOT_ELIGIBLE",
+          message: "هذا المزود غير متاح لهذه الخدمة",
+        },
+      };
+    }
+    const eligible = await deps.providerRepository.listEligibleForService(
+      business.id,
+      service.id,
+    );
+    const matched = eligible.find((p) => p.id === providerId);
+    if (!matched) {
+      return {
+        success: false,
+        error: {
+          code: "PROVIDER_NOT_ELIGIBLE",
+          message: "هذا المزود غير متاح لهذه الخدمة",
+        },
+      };
+    }
+    const seams = await deps.providerRepository.listAssignmentSeams(
+      business.id,
+      [providerId],
+    );
+    const seam = seams.find((s) => s.providerId === providerId);
+    if (!seam || !seam.userId) {
+      return {
+        success: false,
+        error: {
+          code: "PROVIDER_NOT_ELIGIBLE",
+          message: "هذا المزود غير متاح لهذه الخدمة",
+        },
+      };
+    }
+    let blocking: Array<{ startTime: string; endTime: string }> = [];
+    if (deps.appointmentRepository.listBlockingByAssignees) {
+      const assigneeRows =
+        await deps.appointmentRepository.listBlockingByAssignees(
+          business.id,
+          date,
+          [seam.userId],
+          excludeAppointmentId ?? undefined,
+        );
+      blocking = assigneeRows.map((r) => ({
+        startTime: r.startTime,
+        endTime: r.endTime,
+      }));
+    } else {
+      blocking = await deps.appointmentRepository.listBlockingForDate(
+        business.id,
+        date,
+        excludeAppointmentId ?? undefined,
+      );
+    }
+    const slots = filterConflictingSlots(candidates, blocking);
+    const reason: AvailabilityNoSlotsReason | null =
+      slots.length > 0 ? null : "FULLY_BOOKED";
+
+    return {
+      success: true,
+      data: {
+        date,
+        timezone: business.timezone,
+        serviceId: service.id,
+        serviceDurationMinutes: service.durationMinutes,
+        slots,
+      },
+      reason,
+    };
+  }
+
+  // Any-provider availability when providerRepository is available
+  if (
+    deps.providerRepository &&
+    deps.appointmentRepository.listBlockingByAssignees
+  ) {
+    const eligible = await deps.providerRepository.listEligibleForService(
+      business.id,
+      service.id,
+    );
+    if (eligible.length > 0) {
+      const seams = await deps.providerRepository.listAssignmentSeams(
+        business.id,
+        eligible.map((p) => p.id),
+      );
+      const seamUserIds = [
+        ...new Set(seams.map((s) => s.userId).filter(Boolean)),
+      ];
+      if (seamUserIds.length > 0) {
+        const blockingRows =
+          await deps.appointmentRepository.listBlockingByAssignees(
+            business.id,
+            date,
+            seamUserIds,
+            excludeAppointmentId ?? undefined,
+          );
+        const blockingByAssignee = new Map<
+          string,
+          Array<{ startTime: string; endTime: string }>
+        >();
+        for (const row of blockingRows) {
+          const list = blockingByAssignee.get(row.assignedUserId) ?? [];
+          list.push({ startTime: row.startTime, endTime: row.endTime });
+          blockingByAssignee.set(row.assignedUserId, list);
+        }
+        const slots = candidates.filter((candidate) => {
+          const candidateSlot = [candidate];
+          return seamUserIds.some((assigneeId) => {
+            const blocks = blockingByAssignee.get(assigneeId) ?? [];
+            return filterConflictingSlots(candidateSlot, blocks).length > 0;
+          });
+        });
+        const reason: AvailabilityNoSlotsReason | null =
+          slots.length > 0 ? null : "FULLY_BOOKED";
+        return {
+          success: true,
+          data: {
+            date,
+            timezone: business.timezone,
+            serviceId: service.id,
+            serviceDurationMinutes: service.durationMinutes,
+            slots,
+          },
+          reason,
+        };
+      }
+    }
   }
 
   const blocking = await deps.appointmentRepository.listBlockingForDate(

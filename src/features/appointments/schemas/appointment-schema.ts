@@ -12,6 +12,7 @@ export const agendaStatusSchema = z.enum(appointmentStatusValues);
 export const createAppointmentFormSchema = z.object({
   customerId: uuidSchema,
   serviceId: uuidSchema,
+  providerId: uuidSchema.optional(),
   date: appointmentDateSchema,
   startTime: timeSchema,
   notes: z.string().trim().max(2000, "الملاحظة طويلة جداً"),

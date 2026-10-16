@@ -102,6 +102,8 @@ export type CreateAppointmentErrorCode =
   | "SERVICE_UNAVAILABLE"
   | "END_OF_DAY"
   | "SLOT_CONFLICT"
+  | "PROVIDER_NOT_ELIGIBLE"
+  | "PAST_TIME"
   | "CREATE_FAILED";
 
 /**
@@ -246,7 +248,8 @@ export type AvailabilityErrorCode =
   | "NO_BUSINESS"
   | "SERVICE_NOT_FOUND"
   | "SERVICE_INACTIVE"
-  | "APPOINTMENT_NOT_ACTIVE";
+  | "APPOINTMENT_NOT_ACTIVE"
+  | "PROVIDER_NOT_ELIGIBLE";
 
 export type AvailabilityResult =
   | {
