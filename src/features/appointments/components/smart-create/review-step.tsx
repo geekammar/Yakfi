@@ -91,6 +91,8 @@ export function ReviewStep({
   date,
   selectedSlot,
   checkState,
+  providerName,
+  isSingleProvider,
   onGoToCustomer,
   onGoToService,
   onGoToDate,
@@ -102,6 +104,8 @@ export function ReviewStep({
   date: string | null;
   selectedSlot: SelectedSlot | null;
   checkState: ReviewCheckState;
+  providerName?: string | null;
+  isSingleProvider?: boolean;
   onGoToCustomer: () => void;
   onGoToService: () => void;
   onGoToDate: () => void;
@@ -241,6 +245,30 @@ export function ReviewStep({
           دقيقة
         </p>
       </section>
+
+      {providerName ? (
+        <section
+          aria-label="تفاصيل الموظف"
+          className="rounded-xl border bg-card p-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold">الموظف</h3>
+            {!isSingleProvider ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={onGoToSlot}
+                aria-label="تعديل الموظف"
+              >
+                تعديل
+              </Button>
+            ) : null}
+          </div>
+          <p className="mt-2 truncate text-sm font-medium">{providerName}</p>
+        </section>
+      ) : null}
 
       <section
         aria-label="تفاصيل التاريخ"

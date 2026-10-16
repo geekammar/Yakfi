@@ -4,7 +4,7 @@ import { getAvailabilityAction } from "@/features/appointments/actions/availabil
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import {
   derivePresentSlots,
-  earliestSlot,
+  deriveSmartSuggestions,
   formatSlotTime,
   groupSlotsByPeriod,
   slotExistsIn,
@@ -30,7 +30,7 @@ import {
   HourglassIcon,
   ZapIcon,
 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /** Copy for the explicit no-slots reasons from the availability layer. */
 const NO_SLOTS_CONTENT = {
@@ -59,28 +59,21 @@ const NO_SLOTS_CONTENT = {
 const UNAVAILABLE_LABEL = "غير متاح";
 
 /**
- * Step 4 — الوقت. Real available-slot selection (DECISIONS #56):
+ * Step 4 — الوقت (UX001-R1 Adaptive Quick Booking).
  *
- * The step renders the KNOWN candidate time grid for the chosen day —
- * derived from the business's stored working-hours week + slot
- * granularity through the ONE grid rule (`@/lib/scheduling/slot-grid`,
- * the same one the availability authority uses) — and derives only a
- * PRESENTATIONAL state per candidate against the authority's single
- * result:
- *
- *   candidate exists in the available set  → AVAILABLE / selectable
- *   candidate is not returned              → UNAVAILABLE / disabled /
- *                                             muted / non-clickable,
- *                                             labelled «غير متاح»
- *
- * The authority itself still returns ONLY genuinely selectable slots
- * (the contract is unchanged); the frontend never infers WHY a
- * candidate is missing — it never labels one «مشغول» or assigns a
- * reason. One `getAvailabilityAction` request serves the whole step (no
- * per-candidate requests), and selecting still funnels through the
- * wizard into the canonical write path. When the grid inputs are absent
- * the step honestly falls back to showing the authority's selectable
- * slots only — nothing is invented.
+ * Implements:
+ * 1. Adaptive Provider Selection:
+ *    - ZERO providers: neutral empty state, no misleading times, link back to service.
+ *    - ONE provider: auto-selected, no selector UI, no 'Any', no switching.
+ *    - TWO+ providers: 'Any available provider' + specific providers, same-time
+ *      alternatives when occupied, no silent substitutions.
+ * 2. Smart Time Suggestions:
+ *    - Small group of 2–3 genuinely useful distinct suggestions.
+ *    - Earliest suitable time, same time with another provider, nearby time.
+ *    - 'View all times' progressive disclosure for full schedule.
+ * 3. Mobile-First & Responsive:
+ *    - Arabic RTL, large comfortable touch targets (h-11), no horizontal overflow at 320–390px.
+ *    - Clear accessible states, color-independent availability labels.
  */
 export function SlotStep({
   serviceId,
@@ -93,6 +86,10 @@ export function SlotStep({
   excludeAppointmentId,
   workingHours,
   slotDurationMinutes,
+  eligibleProviders = [],
+  selectedProviderId = null,
+  onSelectProvider,
+  isEligibleProvidersLoading = false,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -105,29 +102,28 @@ export function SlotStep({
   onSlotUnavailable: () => void;
   onGoToDate: () => void;
   onGoToService: () => void;
-  /**
-   * B-08 — the id of the appointment being rescheduled, so it is
-   * excluded from its OWN conflict set (the availability layer
-   * re-resolves it against the actor's Business). Absent for the
-   * create flow (unchanged behavior).
-   */
   excludeAppointmentId?: string;
-  /**
-   * The candidate time grid (DECISIONS #56 — Spec A slot presentation):
-   * the business's stored working-hours week + slot granularity, both
-   * server-derived. When both are present, the step renders the KNOWN
-   * candidate times for the chosen day and derives only a
-   * PRESENTATIONAL state per candidate — present in the authority's
-   * available set → selectable; absent → visibly muted, disabled and
-   * labelled «غير متاح» (never a reason — the authority returns
-   * selectable slots only and the frontend infers nothing from
-   * absence). Absent inputs → the step falls back to showing the
-   * authority's selectable slots only (nothing is invented).
-   */
   workingHours?: unknown;
   slotDurationMinutes?: number | null;
+  eligibleProviders?: Array<{ providerId: string; displayName: string }>;
+  selectedProviderId?: string | null;
+  onSelectProvider?: (providerId: string | null) => void;
+  isEligibleProvidersLoading?: boolean;
 }) {
+  const [showAllTimes, setShowAllTimes] = useState(false);
+  const [alternativePrompt, setAlternativePrompt] = useState<{
+    startTime: string;
+    altProviderId: string;
+    altProviderName: string;
+    nearbyTime?: string;
+  } | null>(null);
+
+  const isZeroProviders =
+    !isEligibleProvidersLoading && eligibleProviders.length === 0;
+  const isMultipleProviders = eligibleProviders.length >= 2;
+
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
+
   const availability = useQuery({
     queryKey: [
       "booking-availability",
@@ -141,7 +137,7 @@ export function SlotStep({
         serviceId,
         ...(excludeAppointmentId ? { excludeAppointmentId } : {}),
       }),
-    enabled: dateIsValid,
+    enabled: dateIsValid && !isZeroProviders,
     retry: 1,
   });
 
@@ -161,33 +157,63 @@ export function SlotStep({
         }
       : null;
 
-  // A success result with at least one bookable slot.
-  const slotsResult =
-    result && result.success && result.data.slots.length > 0 ? result : null;
-  const slots = slotsResult ? slotsResult.data.slots : null;
-  // B-07 §C — the earliest server-provided slot (null when none).
-  const earliest = slots ? earliestSlot(slots) : null;
-  // Zero-slot success always carries an explicit reason by contract;
-  // FULLY_BOOKED is the defensive fallback for a reasonless empty list.
+  // Raw server slots containing all bookable slots across eligible providers
+  const rawSlots =
+    result && result.success && result.data.slots.length > 0
+      ? result.data.slots
+      : null;
+
+  // Filter slots for the currently selected provider (if a specific provider is chosen)
+  const slots = useMemo(() => {
+    if (!rawSlots) return null;
+    if (!selectedProviderId) return rawSlots;
+    return rawSlots.filter((slot) =>
+      slot.availableProviderIds
+        ? slot.availableProviderIds.includes(selectedProviderId)
+        : true,
+    );
+  }, [rawSlots, selectedProviderId]);
+
+  // Current slot is valid only if it exists in the active filtered slots
+  const currentSlot =
+    slots && slotExistsIn(selectedSlot, slots) ? selectedSlot : null;
+
+  // Provider display name
+  const selectedProviderName = useMemo(() => {
+    if (selectedProviderId) {
+      return (
+        eligibleProviders.find((p) => p.providerId === selectedProviderId)
+          ?.displayName ?? null
+      );
+    }
+    if (eligibleProviders.length === 1) {
+      return eligibleProviders[0]?.displayName ?? null;
+    }
+    return null;
+  }, [selectedProviderId, eligibleProviders]);
+
+  // Smart suggestions derived from all available slots
+  const smartSuggestions = useMemo(() => {
+    if (!rawSlots || rawSlots.length === 0) return [];
+    return deriveSmartSuggestions({
+      slots: rawSlots,
+      eligibleProviders,
+      selectedProviderId,
+      requestedTime: selectedSlot?.startTime,
+      maxSuggestions: 3,
+    });
+  }, [
+    rawSlots,
+    eligibleProviders,
+    selectedProviderId,
+    selectedSlot?.startTime,
+  ]);
+
   const emptyReason: AvailabilityNoSlotsReason | null =
     result && result.success && result.data.slots.length === 0
       ? (result.reason ?? "FULLY_BOOKED")
       : null;
-  // Stale-selection guard: the wizard clears the selection when service
-  // or date changes; membership in the CURRENT result is the backstop.
-  const currentSlot =
-    slots && slotExistsIn(selectedSlot, slots) ? selectedSlot : null;
 
-  /**
-   * The candidate time grid for the chosen day, derived from the SAME
-   * rule the availability authority uses (`@/lib/scheduling/slot-grid`)
-   * over the server-derived working-hours week + slot granularity and
-   * the AUTHORITY's own `serviceDurationMinutes`. This is pure
-   * presentation: a candidate is bookable ONLY when the authority's
-   * result contains it (`available`), and every other candidate is
-   * shown disabled — the frontend never decides WHY a candidate is
-   * missing, and never invents candidates.
-   */
   const serviceDurationMinutes = result?.success
     ? result.data.serviceDurationMinutes
     : null;
@@ -201,13 +227,6 @@ export function SlotStep({
     });
   }, [workingHours, date, serviceDurationMinutes, slotDurationMinutes]);
 
-  /**
-   * What the step renders as chips (DECISIONS #56): the candidate grid
-   * when it can be derived — each candidate flagged by its authority
-   * membership — or the authority's selectable slots when the grid
-   * cannot be derived (the honest fallback). null → no chips. Pure
-   * derivation (`derivePresentSlots`), so the behavior is unit-verified.
-   */
   const presentSlots = useMemo(
     () => derivePresentSlots({ candidateGrid, availableSlots: slots }),
     [candidateGrid, slots],
@@ -220,9 +239,7 @@ export function SlotStep({
     : 0;
   const timezone = result?.success ? result.data.timezone : null;
 
-  // A fresh successful result that lost the preserved slot (booked by
-  // someone else meanwhile) clears it in the wizard's own state too —
-  // otherwise a stale slot could survive into the review summary.
+  // Stale selection guard
   useEffect(() => {
     if (
       result?.success &&
@@ -233,8 +250,62 @@ export function SlotStep({
     }
   }, [result, selectedSlot, onSlotUnavailable]);
 
+  // ZERO providers state: clear neutral empty state, no misleading booking times
+  if (isZeroProviders) {
+    return (
+      <EmptyState
+        icon={CalendarXIcon}
+        title="لا يوجد موظفون مؤهلون لتقديم هذه الخدمة"
+        description="لا يتوفر أي مزود خدمة مؤهل لتقديم هذه الخدمة حالياً. يمكنك اختيار خدمة أخرى."
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button type="button" size="sm" onClick={onGoToService}>
+              تغيير الخدمة
+            </Button>
+          </div>
+        }
+      />
+    );
+  }
+
+  function handleCandidateClick(candidate: {
+    startTime: string;
+    endTime: string;
+    available: boolean;
+  }) {
+    if (candidate.available) {
+      const match = slots?.find((s) => s.startTime === candidate.startTime);
+      if (match) onSelectSlot(match);
+      setAlternativePrompt(null);
+      return;
+    }
+
+    // Candidate is not available with current provider. Check if another provider is free at same time.
+    if (selectedProviderId && rawSlots) {
+      const altMatch = rawSlots.find(
+        (s) => s.startTime === candidate.startTime,
+      );
+      const altId = altMatch?.availableProviderIds?.[0];
+      if (altId) {
+        const altProvider = eligibleProviders.find(
+          (p) => p.providerId === altId,
+        );
+        const nearbySlot = slots?.find(
+          (s) => s.startTime > candidate.startTime,
+        );
+        setAlternativePrompt({
+          startTime: candidate.startTime,
+          altProviderId: altId,
+          altProviderName: altProvider?.displayName ?? "موظف آخر",
+          nearbyTime: nearbySlot?.startTime,
+        });
+      }
+    }
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="w-full max-w-full space-y-5 overflow-hidden">
+      {/* Date header bar */}
       <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3">
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">التاريخ المحدد</p>
@@ -252,6 +323,124 @@ export function SlotStep({
           تغيير التاريخ
         </Button>
       </div>
+
+      {/* Provider selection: shown ONLY when 2 or more eligible providers exist */}
+      {isMultipleProviders ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground">
+            اختيار الموظف
+          </label>
+          <div
+            className="flex flex-wrap gap-2"
+            role="radiogroup"
+            aria-label="اختيار الموظف"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedProviderId === null}
+              onClick={() => {
+                onSelectProvider?.(null);
+                setAlternativePrompt(null);
+              }}
+              className={cn(
+                "flex h-11 items-center justify-center rounded-xl border px-4 text-sm font-medium transition-colors",
+                selectedProviderId === null
+                  ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                  : "border-border bg-card text-foreground hover:bg-accent/60",
+              )}
+            >
+              أي موظف متاح
+            </button>
+            {eligibleProviders.map((provider) => {
+              const isSelected = selectedProviderId === provider.providerId;
+              return (
+                <button
+                  key={provider.providerId}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => {
+                    onSelectProvider?.(provider.providerId);
+                    setAlternativePrompt(null);
+                  }}
+                  className={cn(
+                    "flex h-11 items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
+                    isSelected
+                      ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                      : "border-border bg-card text-foreground hover:bg-accent/60",
+                  )}
+                >
+                  <span>{provider.displayName}</span>
+                  {isSelected ? (
+                    <CheckCircle2Icon aria-hidden className="size-4 shrink-0" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Alternative suggestion banner when user inquires an occupied slot */}
+      {alternativePrompt ? (
+        <div
+          role="alert"
+          className="space-y-2.5 rounded-xl border border-primary/30 bg-primary/5 p-3.5 text-sm"
+        >
+          <p className="font-medium text-foreground">
+            الوقت {formatSlotTime(alternativePrompt.startTime)} غير متاح مع{" "}
+            {selectedProviderName}، لكنه متاح مع{" "}
+            {alternativePrompt.altProviderName}.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                const match = rawSlots?.find(
+                  (s) => s.startTime === alternativePrompt.startTime,
+                );
+                if (match) {
+                  onSelectProvider?.(alternativePrompt.altProviderId);
+                  onSelectSlot(match);
+                  setAlternativePrompt(null);
+                }
+              }}
+            >
+              الحجز مع {alternativePrompt.altProviderName} في{" "}
+              {formatSlotTime(alternativePrompt.startTime)}
+            </Button>
+            {alternativePrompt.nearbyTime ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const match = slots?.find(
+                    (s) => s.startTime === alternativePrompt.nearbyTime,
+                  );
+                  if (match) {
+                    onSelectSlot(match);
+                    setAlternativePrompt(null);
+                  }
+                }}
+              >
+                أقرب وقت مع {selectedProviderName} (
+                {formatSlotTime(alternativePrompt.nearbyTime)})
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setAlternativePrompt(null)}
+            >
+              إلغاء
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {availability.isPending ? (
         <div className="space-y-5" aria-busy="true">
@@ -295,21 +484,87 @@ export function SlotStep({
           </div>
         </div>
       ) : presentSlots ? (
-        <>
-          <p className="text-xs text-muted-foreground" aria-live="polite">
-            {arabicCount(availableCount, SLOT_NOUNS)}
-            {unavailableCount > 0 ? (
-              <span className="text-muted-foreground/80">
-                {" · "}
-                {unavailableCount} {UNAVAILABLE_LABEL}
-              </span>
-            ) : null}
-            {timezone ? ` · بتوقيت ${timezoneLabel(timezone)}` : null}
-          </p>
-          {/* A day whose candidates are all unselectable: the grid is
-           * still shown (everything disabled) so the user sees what the
-           * day looks like, with one honest recovery action. The state
-           * is never explained with a reason the backend did not give. */}
+        <div className="space-y-5">
+          {/* Smart suggestions section: up to 2–3 valid suggestions displayed first */}
+          {smartSuggestions.length > 0 ? (
+            <section aria-label="الأوقات المقترحة" className="space-y-2.5">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                <ZapIcon aria-hidden className="size-3.5 text-primary" />
+                <span>أوقات مقترحة سريعة</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {smartSuggestions.map((suggestion) => {
+                  const isSelected =
+                    currentSlot?.startTime === suggestion.slot.startTime &&
+                    (!selectedProviderId ||
+                      selectedProviderId === suggestion.providerId ||
+                      selectedProviderId === null);
+                  return (
+                    <button
+                      key={`${suggestion.slot.startTime}-${suggestion.providerId ?? "any"}`}
+                      type="button"
+                      onClick={() => {
+                        if (
+                          suggestion.providerId &&
+                          suggestion.providerId !== selectedProviderId &&
+                          eligibleProviders.length > 1
+                        ) {
+                          onSelectProvider?.(suggestion.providerId);
+                        }
+                        onSelectSlot(suggestion.slot);
+                        setAlternativePrompt(null);
+                      }}
+                      aria-pressed={isSelected}
+                      aria-label={`${formatSlotTime(suggestion.slot.startTime)} — ${suggestion.badge}`}
+                      className={cn(
+                        "flex min-h-[44px] flex-col items-start justify-center gap-1 rounded-xl border p-3 text-start transition-colors",
+                        isSelected
+                          ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary"
+                          : "border-border bg-card hover:bg-accent/60",
+                      )}
+                    >
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="text-sm font-semibold tabular-nums">
+                          {formatSlotTime(suggestion.slot.startTime)}
+                        </span>
+                        <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {suggestion.badge}
+                        </span>
+                      </div>
+                      {suggestion.providerName ? (
+                        <span className="text-xs text-muted-foreground">
+                          مع {suggestion.providerName}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          {/* Schedule status & 'View all times' progressive disclosure action */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {arabicCount(availableCount, SLOT_NOUNS)}
+              {unavailableCount > 0 ? (
+                <span className="text-muted-foreground/80">
+                  {" · "}
+                  {unavailableCount} {UNAVAILABLE_LABEL}
+                </span>
+              ) : null}
+              {timezone ? ` · بتوقيت ${timezoneLabel(timezone)}` : null}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAllTimes((prev) => !prev)}
+            >
+              {showAllTimes ? "إخفاء جدول اليوم" : "عرض جميع الأوقات"}
+            </Button>
+          </div>
+
           {availableCount === 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3">
               <p className="text-sm">لا توجد أوقات متاحة في هذا اليوم.</p>
@@ -324,83 +579,85 @@ export function SlotStep({
               </Button>
             </div>
           ) : null}
-          {/* B-07 §C — the availability-first fast path: one tap books
-           * the earliest valid time. The availability contract returns
-           * slots ascending, so this is always the FIRST server-provided
-           * slot — nothing invented on the client. */}
-          {earliest ? (
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onClick={() => onSelectSlot(earliest)}
-            >
-              <ZapIcon aria-hidden />
-              أقرب وقت متاح · {formatSlotTime(earliest.startTime)}
-            </Button>
-          ) : null}
-          {groupSlotsByPeriod(presentSlots).map((group) => (
-            <section
-              key={group.period}
-              aria-label={group.label}
-              className="space-y-2"
-            >
-              <h3 className="text-sm font-medium">{group.label}</h3>
-              <ul className="flex list-none flex-wrap gap-2">
-                {group.slots.map((slot) => {
-                  const isSelected =
-                    slot.available && currentSlot?.startTime === slot.startTime;
-                  return (
-                    <li key={slot.startTime}>
-                      {slot.available ? (
-                        <button
-                          type="button"
-                          onClick={() => onSelectSlot(slot)}
-                          aria-pressed={isSelected}
-                          aria-label={`حجز من ${formatSlotTime(slot.startTime)} إلى ${formatSlotTime(slot.endTime)}`}
-                          className={cn(
-                            "flex h-11 min-w-[5.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border bg-card text-foreground hover:bg-accent/60",
+
+          {/* Full candidate time grid (shown when expanded or if no suggestions exist) */}
+          {showAllTimes || smartSuggestions.length === 0 ? (
+            <div className="space-y-4 pt-1">
+              {groupSlotsByPeriod(presentSlots).map((group) => (
+                <section
+                  key={group.period}
+                  aria-label={group.label}
+                  className="space-y-2"
+                >
+                  <h3 className="text-sm font-medium">{group.label}</h3>
+                  <ul className="flex list-none flex-wrap gap-2">
+                    {group.slots.map((slot) => {
+                      const isSelected =
+                        slot.available &&
+                        currentSlot?.startTime === slot.startTime;
+                      return (
+                        <li key={slot.startTime}>
+                          {slot.available ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCandidateClick({
+                                  startTime: slot.startTime,
+                                  endTime: slot.endTime,
+                                  available: true,
+                                })
+                              }
+                              aria-pressed={isSelected}
+                              aria-label={`حجز من ${formatSlotTime(slot.startTime)} إلى ${formatSlotTime(slot.endTime)}`}
+                              className={cn(
+                                "flex h-11 min-w-[5.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
+                                isSelected
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-card text-foreground hover:bg-accent/60",
+                              )}
+                            >
+                              <span className="tabular-nums">
+                                {formatSlotTime(slot.startTime)}
+                              </span>
+                              {isSelected ? (
+                                <CheckCircle2Icon
+                                  aria-hidden
+                                  className="size-4 shrink-0"
+                                />
+                              ) : null}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCandidateClick({
+                                  startTime: slot.startTime,
+                                  endTime: slot.endTime,
+                                  available: false,
+                                })
+                              }
+                              aria-disabled
+                              aria-label={`${formatSlotTime(slot.startTime)} — ${UNAVAILABLE_LABEL}`}
+                              className="flex h-11 min-w-[5.25rem] cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground transition-colors hover:border-border"
+                            >
+                              <span className="text-sm tabular-nums line-through">
+                                {formatSlotTime(slot.startTime)}
+                              </span>
+                              <span className="text-[10px] leading-none">
+                                {UNAVAILABLE_LABEL}
+                              </span>
+                            </button>
                           )}
-                        >
-                          <span className="tabular-nums">
-                            {formatSlotTime(slot.startTime)}
-                          </span>
-                          {isSelected ? (
-                            <CheckCircle2Icon
-                              aria-hidden
-                              className="size-4 shrink-0"
-                            />
-                          ) : null}
-                        </button>
-                      ) : (
-                        /* A candidate the authority did NOT return. It
-                         * stays visible and visibly NOT selectable —
-                         * muted, inert and labelled «غير متاح» — but no
-                         * reason is ever inferred (never «مشغول»), and
-                         * `aria-disabled` keeps it announced rather than
-                         * erased from the accessibility tree. */
-                        <button
-                          type="button"
-                          aria-disabled
-                          aria-label={`${formatSlotTime(slot.startTime)} — ${UNAVAILABLE_LABEL}`}
-                          className="flex h-11 min-w-[5.25rem] cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground"
-                        >
-                          <span className="text-sm tabular-nums line-through">
-                            {formatSlotTime(slot.startTime)}
-                          </span>
-                          <span className="text-[10px] leading-none">
-                            {UNAVAILABLE_LABEL}
-                          </span>
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Current selected slot confirmation banner */}
           {currentSlot ? (
             <div
               role="status"
@@ -418,13 +675,36 @@ export function SlotStep({
                   {formatSlotTime(currentSlot.startTime)} –{" "}
                   {formatSlotTime(currentSlot.endTime)}
                 </span>
+                {selectedProviderName ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · مع {selectedProviderName}
+                  </span>
+                ) : null}
               </p>
+              {/* Show which eligible providers are available for this selected time */}
+              {eligibleProviders.length > 1 &&
+              !selectedProviderId &&
+              currentSlot.availableProviderIds &&
+              currentSlot.availableProviderIds.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  الموظفون المتاحون في هذا الوقت:{" "}
+                  {currentSlot.availableProviderIds
+                    .map(
+                      (id) =>
+                        eligibleProviders.find((p) => p.providerId === id)
+                          ?.displayName,
+                    )
+                    .filter(Boolean)
+                    .join("، ")}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 تابع إلى المراجعة للتأكد من تفاصيل الموعد قبل التأكيد.
               </p>
             </div>
           ) : null}
-        </>
+        </div>
       ) : emptyReason ? (
         <EmptyState
           icon={NO_SLOTS_CONTENT[emptyReason].icon}

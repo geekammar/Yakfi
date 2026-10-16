@@ -172,3 +172,237 @@ export function timezoneLabel(timezone: string): string {
     "توقيت المنشأة"
   );
 }
+
+export type SmartTimeSuggestion = {
+  slot: AvailabilitySlot;
+  providerId: string | null;
+  providerName?: string;
+  badge: string;
+  reason:
+    | "earliest"
+    | "same_time_alternative"
+    | "preferred_provider_alternative"
+    | "nearby";
+};
+
+/**
+ * Derive a small group (normally 2–3) of genuinely useful, valid
+ * suggestions first (UX001-R1 Requirement 2).
+ *
+ * Prioritizes:
+ * - Closest requested time when provided.
+ * - Earliest suitable time otherwise.
+ * - Same time with another eligible provider if relevant.
+ * - Nearby time with the preferred provider.
+ * Avoids redundant suggestions if more useful distinct alternatives exist.
+ * Pure derivation over the server's availability slots — no N+1 queries.
+ */
+export function deriveSmartSuggestions(params: {
+  slots: AvailabilitySlot[];
+  eligibleProviders: Array<{ providerId: string; displayName: string }>;
+  selectedProviderId: string | null;
+  requestedTime?: string | null;
+  maxSuggestions?: number;
+}): SmartTimeSuggestion[] {
+  const {
+    slots,
+    eligibleProviders,
+    selectedProviderId,
+    requestedTime,
+    maxSuggestions = 3,
+  } = params;
+  if (!slots || slots.length === 0) return [];
+
+  const providerMap = new Map(
+    eligibleProviders.map((p) => [p.providerId, p.displayName]),
+  );
+  const isSingleProvider = eligibleProviders.length === 1;
+  const suggestions: SmartTimeSuggestion[] = [];
+  const addedKeys = new Set<string>();
+
+  function addSuggestion(
+    slot: AvailabilitySlot,
+    providerId: string | null,
+    badge: string,
+    reason: SmartTimeSuggestion["reason"],
+  ) {
+    const key = `${slot.startTime}:${providerId ?? "any"}`;
+    if (!addedKeys.has(key) && suggestions.length < maxSuggestions) {
+      addedKeys.add(key);
+      const providerName = providerId ? providerMap.get(providerId) : undefined;
+      suggestions.push({ slot, providerId, providerName, badge, reason });
+    }
+  }
+
+  // Case 1: Single eligible provider — no alternative provider suggestions
+  if (isSingleProvider) {
+    const onlyProvider = eligibleProviders[0];
+    const pid = onlyProvider?.providerId ?? null;
+    const first = slots[0];
+    if (first) {
+      addSuggestion(first, pid, "أقرب وقت متاح", "earliest");
+    }
+    // Pick spaced distinct slots if available
+    for (
+      let i = 1;
+      i < slots.length && suggestions.length < maxSuggestions;
+      i++
+    ) {
+      const slot = slots[i];
+      if (slot) {
+        addSuggestion(slot, pid, "وقت متاح", "nearby");
+      }
+    }
+    return suggestions;
+  }
+
+  // Case 2: Specific provider selected among multiple
+  if (selectedProviderId) {
+    const preferredName =
+      providerMap.get(selectedProviderId) ?? "الموظف المفضل";
+
+    // 2a. If requested time provided, check if it's available or offer same-time alternative
+    if (requestedTime) {
+      const targetSlot = slots.find((s) => s.startTime === requestedTime);
+      if (targetSlot) {
+        const canPreferred =
+          targetSlot.availableProviderIds?.includes(selectedProviderId) ??
+          false;
+        if (canPreferred) {
+          addSuggestion(
+            targetSlot,
+            selectedProviderId,
+            "الوقت المطلوب",
+            "earliest",
+          );
+        } else {
+          // Same time with another eligible provider
+          const altId = targetSlot.availableProviderIds?.find(
+            (id) => id !== selectedProviderId,
+          );
+          if (altId) {
+            const altName = providerMap.get(altId) ?? "موظف آخر";
+            addSuggestion(
+              targetSlot,
+              altId,
+              `متاح مع ${altName}`,
+              "same_time_alternative",
+            );
+          }
+        }
+      }
+    }
+
+    // 2b. Earliest available slot with preferred provider
+    const preferredSlots = slots.filter((s) =>
+      s.availableProviderIds
+        ? s.availableProviderIds.includes(selectedProviderId)
+        : true,
+    );
+    const earliestPreferred = preferredSlots[0];
+    if (earliestPreferred) {
+      addSuggestion(
+        earliestPreferred,
+        selectedProviderId,
+        `أقرب وقت مع ${preferredName}`,
+        "preferred_provider_alternative",
+      );
+    }
+
+    // 2c. If the earliest day slot is with another provider (and not preferred)
+    const dayFirst = slots[0];
+    if (
+      dayFirst &&
+      (!dayFirst.availableProviderIds ||
+        !dayFirst.availableProviderIds.includes(selectedProviderId))
+    ) {
+      const altId = dayFirst.availableProviderIds?.[0] ?? null;
+      const altName = altId ? providerMap.get(altId) : null;
+      addSuggestion(
+        dayFirst,
+        altId,
+        altName ? `أقرب وقت اليوم (مع ${altName})` : "أقرب وقت متاح",
+        "same_time_alternative",
+      );
+    }
+
+    // 2d. Backfill with remaining preferred provider slots
+    for (
+      let i = 1;
+      i < preferredSlots.length && suggestions.length < maxSuggestions;
+      i++
+    ) {
+      const nextSlot = preferredSlots[i];
+      if (nextSlot) {
+        addSuggestion(
+          nextSlot,
+          selectedProviderId,
+          `متاح مع ${preferredName}`,
+          "nearby",
+        );
+      }
+    }
+
+    // 2e. If still not full, backfill with any available slots
+    for (const slot of slots) {
+      if (suggestions.length >= maxSuggestions) break;
+      const altId = slot.availableProviderIds?.[0] ?? null;
+      const altName = altId ? providerMap.get(altId) : null;
+      addSuggestion(
+        slot,
+        altId,
+        altName ? `متاح مع ${altName}` : "وقت متاح",
+        "nearby",
+      );
+    }
+
+    return suggestions;
+  }
+
+  // Case 3: "Any available provider" selected among multiple
+  const firstSlot = slots[0];
+  if (firstSlot) {
+    const firstPid = firstSlot.availableProviderIds?.[0] ?? null;
+    const firstPname = firstPid ? providerMap.get(firstPid) : null;
+    addSuggestion(
+      firstSlot,
+      firstPid,
+      firstPname ? `أقرب وقت · مع ${firstPname}` : "أقرب وقت متاح",
+      "earliest",
+    );
+  }
+
+  // Prioritize diverse providers for distinct suggestions
+  const seenProviders = new Set<string>();
+  if (firstSlot?.availableProviderIds?.[0]) {
+    seenProviders.add(firstSlot.availableProviderIds[0]);
+  }
+
+  // Try to find earliest slot for each other provider
+  for (const slot of slots.slice(1)) {
+    if (suggestions.length >= maxSuggestions) break;
+    const otherPid = slot.availableProviderIds?.find(
+      (pid) => !seenProviders.has(pid),
+    );
+    if (otherPid) {
+      seenProviders.add(otherPid);
+      const otherName = providerMap.get(otherPid);
+      addSuggestion(
+        slot,
+        otherPid,
+        otherName ? `متاح مع ${otherName}` : "وقت متاح",
+        "nearby",
+      );
+    }
+  }
+
+  // Backfill with chronologically earliest remaining slots
+  for (const slot of slots.slice(1)) {
+    if (suggestions.length >= maxSuggestions) break;
+    const pid = slot.availableProviderIds?.[0] ?? null;
+    const pname = pid ? providerMap.get(pid) : null;
+    addSuggestion(slot, pid, pname ? `متاح مع ${pname}` : "وقت متاح", "nearby");
+  }
+
+  return suggestions;
+}

@@ -2,6 +2,7 @@
 
 import { createAppointment } from "@/features/appointments/actions/appointment-actions";
 import { getAvailabilityAction } from "@/features/appointments/actions/availability-actions";
+import { resolveEligibleProvidersAction } from "@/features/appointments/actions/provider-eligibility-actions";
 import { BookingFlowProgress } from "@/features/appointments/components/smart-create/booking-flow-progress";
 import { ConfirmStep } from "@/features/appointments/components/smart-create/confirm-step";
 import {
@@ -34,10 +35,10 @@ import type {
 import { Button } from "@/components/ui/button";
 import { appointmentDateSchema } from "@/lib/validation";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftIcon, ArrowRightIcon, LoaderCircleIcon } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 const STEP_HEADINGS: Record<
   BookingFlowScreen,
@@ -169,6 +170,9 @@ export function SmartCreateAppointment({
   );
   const [date, setDate] = useState(defaultDate);
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    null,
+  );
   const [reviewCheck, setReviewCheck] = useState<ReviewCheckState>({
     status: "idle",
   });
@@ -188,15 +192,69 @@ export function SmartCreateAppointment({
   const service = services.find((item) => item.id === serviceId) ?? null;
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
 
+  // Resolve eligible providers for the selected service (UX001-R1)
+  const eligibleProvidersQuery = useQuery({
+    queryKey: ["booking-eligible-providers", serviceId],
+    queryFn: () => resolveEligibleProvidersAction({ serviceId: serviceId! }),
+    enabled: Boolean(serviceId),
+    staleTime: 60_000,
+  });
+
+  const eligibleProviders = useMemo(() => {
+    if (eligibleProvidersQuery.data?.success) {
+      return eligibleProvidersQuery.data.data.providers;
+    }
+    return [];
+  }, [eligibleProvidersQuery.data]);
+
+  // Derived active provider ID for the selector UI (resets safely if provider is no longer eligible)
+  const activeSelectedProviderId = useMemo(() => {
+    if (
+      selectedProviderId &&
+      eligibleProviders.some((p) => p.providerId === selectedProviderId)
+    ) {
+      return selectedProviderId;
+    }
+    return null;
+  }, [selectedProviderId, eligibleProviders]);
+
+  /** The provider ID to be persisted by the canonical booking engine. */
+  const effectiveProviderId = useMemo(() => {
+    if (activeSelectedProviderId) return activeSelectedProviderId;
+    if (eligibleProviders.length === 1 && eligibleProviders[0]) {
+      return eligibleProviders[0].providerId;
+    }
+    if (
+      selectedSlot?.availableProviderIds &&
+      selectedSlot.availableProviderIds.length > 0 &&
+      selectedSlot.availableProviderIds[0]
+    ) {
+      return selectedSlot.availableProviderIds[0];
+    }
+    return undefined;
+  }, [activeSelectedProviderId, eligibleProviders, selectedSlot]);
+
+  /** Human-readable provider name for summaries and reviews. */
+  const selectedProviderName = useMemo(() => {
+    if (effectiveProviderId) {
+      return (
+        eligibleProviders.find((p) => p.providerId === effectiveProviderId)
+          ?.displayName ?? null
+      );
+    }
+    return null;
+  }, [effectiveProviderId, eligibleProviders]);
+
   /** Any change to the revalidated inputs resets the review check. */
   function resetReviewCheck() {
     setReviewCheck({ status: "idle" });
   }
 
-  /** Changing the service invalidates any slot chosen for another one. */
+  /** Changing the service invalidates any slot and provider chosen for another one. */
   function handleSelectService(nextServiceId: string) {
     if (nextServiceId !== serviceId) {
       setSelectedSlot(null);
+      setSelectedProviderId(null);
       resetReviewCheck();
     }
     setServiceId(nextServiceId);
@@ -209,6 +267,22 @@ export function SmartCreateAppointment({
       resetReviewCheck();
     }
     setDate(nextDate);
+  }
+
+  /** Selecting or switching a provider. Does NOT preserve invalid slots. */
+  function handleSelectProvider(nextProviderId: string | null) {
+    if (nextProviderId !== selectedProviderId) {
+      if (
+        selectedSlot &&
+        nextProviderId &&
+        selectedSlot.availableProviderIds &&
+        !selectedSlot.availableProviderIds.includes(nextProviderId)
+      ) {
+        setSelectedSlot(null);
+      }
+      setSelectedProviderId(nextProviderId);
+      resetReviewCheck();
+    }
   }
 
   /** Selecting a fresh slot gives the review a new state to verify. */
@@ -290,7 +364,11 @@ export function SmartCreateAppointment({
     setReviewCheck({ status: "checking" });
     let result;
     try {
-      result = await getAvailabilityAction({ date, serviceId: service.id });
+      result = await getAvailabilityAction({
+        date,
+        serviceId: service.id,
+        providerId: effectiveProviderId,
+      });
     } catch {
       setReviewCheck({ status: "failed" });
       return;
@@ -331,6 +409,7 @@ export function SmartCreateAppointment({
       result = await createAppointment({
         customerId: customer.id,
         serviceId: service.id,
+        providerId: effectiveProviderId,
         date,
         startTime: selectedSlot.startTime,
         // The wizard collects no notes (PROMPT-14 scope decision) —
@@ -392,6 +471,7 @@ export function SmartCreateAppointment({
    */
   function handleCreateAnother() {
     setServiceId(null);
+    setSelectedProviderId(null);
     setDate(defaultDate);
     setSelectedSlot(null);
     resetReviewCheck();
@@ -427,6 +507,7 @@ export function SmartCreateAppointment({
       availability = await getAvailabilityAction({
         date: resolved,
         serviceId: service.id,
+        providerId: effectiveProviderId,
       });
     } catch {
       followUpInFlight.current = false;
@@ -453,6 +534,7 @@ export function SmartCreateAppointment({
       result = await createAppointment({
         customerId: customer.id,
         serviceId: service.id,
+        providerId: effectiveProviderId,
         date: resolved,
         startTime: selectedSlot.startTime,
         notes: "",
@@ -590,6 +672,10 @@ export function SmartCreateAppointment({
             onGoToService={() => setScreen("service")}
             workingHours={workingHours}
             slotDurationMinutes={slotDurationMinutes}
+            eligibleProviders={eligibleProviders}
+            selectedProviderId={activeSelectedProviderId}
+            onSelectProvider={handleSelectProvider}
+            isEligibleProvidersLoading={eligibleProvidersQuery.isPending}
           />
         ) : screen === "review" ? (
           <ReviewStep
@@ -598,6 +684,8 @@ export function SmartCreateAppointment({
             date={date}
             selectedSlot={selectedSlot}
             checkState={reviewCheck}
+            providerName={selectedProviderName}
+            isSingleProvider={eligibleProviders.length === 1}
             onGoToCustomer={() => setScreen("customer")}
             onGoToService={() => setScreen("service")}
             onGoToDate={() => setScreen("date")}
@@ -611,6 +699,7 @@ export function SmartCreateAppointment({
             selectedSlot={selectedSlot}
             timezone={businessTimezone}
             confirmationMode={confirmationMode}
+            providerName={selectedProviderName}
             submitState={submitState}
             followUpState={followUp}
             resolvedFollowUpDate={followUpDate}

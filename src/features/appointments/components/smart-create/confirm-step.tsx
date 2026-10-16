@@ -68,6 +68,7 @@ export function ConfirmStep({
   selectedSlot,
   timezone,
   confirmationMode,
+  providerName,
   submitState,
   followUpState,
   resolvedFollowUpDate,
@@ -84,6 +85,7 @@ export function ConfirmStep({
   /** Business timezone (server-derived prop — never client input). */
   timezone: string;
   confirmationMode: "automatic" | "manual";
+  providerName?: string | null;
   submitState: ConfirmSubmitState;
   /** Follow-up scheduling state after a confirmed creation (B-07 §6). */
   followUpState: FollowUpState;
@@ -208,6 +210,12 @@ export function ConfirmStep({
               {service.name} · {service.durationMinutes} دقيقة
             </dd>
           </div>
+          {providerName ? (
+            <div className="flex items-center justify-between gap-3">
+              <dt className="shrink-0 text-muted-foreground">الموظف</dt>
+              <dd className="truncate font-medium">{providerName}</dd>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <dt className="shrink-0 text-muted-foreground">التاريخ</dt>
             <dd className="truncate font-medium">{formatArabicDate(date)}</dd>

@@ -341,7 +341,11 @@ export async function getAvailability(
         excludeAppointmentId ?? undefined,
       );
     }
-    const slots = filterConflictingSlots(candidates, blocking);
+    const filteredSlots = filterConflictingSlots(candidates, blocking);
+    const slots: AvailabilitySlot[] = filteredSlots.map((slot) => ({
+      ...slot,
+      availableProviderIds: [providerId],
+    }));
     const reason: AvailabilityNoSlotsReason | null =
       slots.length > 0 ? null : "FULLY_BOOKED";
 
@@ -367,52 +371,86 @@ export async function getAvailability(
       business.id,
       service.id,
     );
-    if (eligible.length > 0) {
-      const seams = await deps.providerRepository.listAssignmentSeams(
-        business.id,
-        eligible.map((p) => p.id),
-      );
-      const seamUserIds = [
-        ...new Set(seams.map((s) => s.userId).filter(Boolean)),
-      ];
-      if (seamUserIds.length > 0) {
-        const blockingRows =
-          await deps.appointmentRepository.listBlockingByAssignees(
-            business.id,
-            date,
-            seamUserIds,
-            excludeAppointmentId ?? undefined,
-          );
-        const blockingByAssignee = new Map<
-          string,
-          Array<{ startTime: string; endTime: string }>
-        >();
-        for (const row of blockingRows) {
-          const list = blockingByAssignee.get(row.assignedUserId) ?? [];
-          list.push({ startTime: row.startTime, endTime: row.endTime });
-          blockingByAssignee.set(row.assignedUserId, list);
-        }
-        const slots = candidates.filter((candidate) => {
-          const candidateSlot = [candidate];
-          return seamUserIds.some((assigneeId) => {
-            const blocks = blockingByAssignee.get(assigneeId) ?? [];
-            return filterConflictingSlots(candidateSlot, blocks).length > 0;
-          });
-        });
-        const reason: AvailabilityNoSlotsReason | null =
-          slots.length > 0 ? null : "FULLY_BOOKED";
-        return {
-          success: true,
-          data: {
-            date,
-            timezone: business.timezone,
-            serviceId: service.id,
-            serviceDurationMinutes: service.durationMinutes,
-            slots,
-          },
-          reason,
-        };
+    if (eligible.length === 0) {
+      return {
+        success: true,
+        data: {
+          date,
+          timezone: business.timezone,
+          serviceId: service.id,
+          serviceDurationMinutes: service.durationMinutes,
+          slots: [],
+        },
+        reason: "FULLY_BOOKED",
+      };
+    }
+    const seams = await deps.providerRepository.listAssignmentSeams(
+      business.id,
+      eligible.map((p) => p.id),
+    );
+    const seamUserIds = [
+      ...new Set(seams.map((s) => s.userId).filter(Boolean)),
+    ];
+    if (seamUserIds.length > 0) {
+      const blockingRows =
+        await deps.appointmentRepository.listBlockingByAssignees(
+          business.id,
+          date,
+          seamUserIds,
+          excludeAppointmentId ?? undefined,
+        );
+      const blockingByAssignee = new Map<
+        string,
+        Array<{ startTime: string; endTime: string }>
+      >();
+      for (const row of blockingRows) {
+        const list = blockingByAssignee.get(row.assignedUserId) ?? [];
+        list.push({ startTime: row.startTime, endTime: row.endTime });
+        blockingByAssignee.set(row.assignedUserId, list);
       }
+
+      // Map userId back to providerId(s)
+      const providerIdByUserId = new Map<string, string[]>();
+      for (const seam of seams) {
+        if (seam.userId) {
+          const list = providerIdByUserId.get(seam.userId) ?? [];
+          list.push(seam.providerId);
+          providerIdByUserId.set(seam.userId, list);
+        }
+      }
+
+      const slots: AvailabilitySlot[] = [];
+      for (const candidate of candidates) {
+        const candidateSlot = [candidate];
+        const availableProviderIds: string[] = [];
+        for (const assigneeId of seamUserIds) {
+          const blocks = blockingByAssignee.get(assigneeId) ?? [];
+          if (filterConflictingSlots(candidateSlot, blocks).length > 0) {
+            const pIds = providerIdByUserId.get(assigneeId) ?? [];
+            availableProviderIds.push(...pIds);
+          }
+        }
+        if (availableProviderIds.length > 0) {
+          slots.push({
+            startTime: candidate.startTime,
+            endTime: candidate.endTime,
+            availableProviderIds: [...new Set(availableProviderIds)],
+          });
+        }
+      }
+      const reason: AvailabilityNoSlotsReason | null =
+        slots.length > 0 ? null : "FULLY_BOOKED";
+      return {
+        success: true,
+        data: {
+          date,
+          timezone: business.timezone,
+          serviceId: service.id,
+          serviceDurationMinutes: service.durationMinutes,
+          slots,
+        },
+        reason,
+      };
     }
   }
 

@@ -224,6 +224,8 @@ export type AvailabilitySlot = {
   startTime: string;
   /** Slot end time — start + Service.durationMinutes, "HH:mm". */
   endTime: string;
+  /** Available provider IDs for this slot (when provider-scoped). */
+  availableProviderIds?: string[];
 };
 
 export type AvailabilityData = {
