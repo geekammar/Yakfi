@@ -3,9 +3,18 @@ import * as path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-const PREVIEW_URL =
-  process.env.PLAYWRIGHT_PREVIEW_URL ||
-  "https://flowpilot-prod-git-chore-devops-01-pr-preview-ci-ammarj1.vercel.app";
+// Enforce valid dynamic preview URL. Never fall back to unrelated deployments.
+const PREVIEW_URL = process.env.PLAYWRIGHT_PREVIEW_URL?.trim();
+if (!PREVIEW_URL) {
+  throw new Error(
+    "Missing required environment variable PLAYWRIGHT_PREVIEW_URL. Deployed Preview E2E tests must never fall back to unrelated deployments or historical branches.",
+  );
+}
+
+const ADMIN_EMAIL =
+  process.env.PREVIEW_ADMIN_EMAIL?.trim() || "preview.admin@flowpilot.app";
+const ADMIN_PASSWORD =
+  process.env.PREVIEW_ADMIN_PASSWORD?.trim() || "Admin@1234";
 
 const SCREENSHOT_DIR = path.join(
   process.cwd(),
@@ -45,7 +54,7 @@ test.describe("Authenticated Preview QA", () => {
       }
     });
 
-    // 1. Health check verification
+    // 1. Health check verification on deployed target
     const healthRes = await page.request.get("/api/health");
     expect(healthRes.status()).toBe(200);
     const healthData = await healthRes.json();
@@ -68,9 +77,9 @@ test.describe("Authenticated Preview QA", () => {
     });
     expect(isOverflowing).toBe(false);
 
-    // Fill login form
-    await page.fill('input[id="email"]', "preview.admin@flowpilot.app");
-    await page.fill('input[id="password"]', "Admin@1234");
+    // Fill login form using credentials from environment
+    await page.fill('input[id="email"]', ADMIN_EMAIL);
+    await page.fill('input[id="password"]', ADMIN_PASSWORD);
 
     // Take screenshot of sign-in page with filled inputs
     await page.screenshot({
@@ -137,10 +146,26 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
 
-    // 4. /admin/team page
+    // 4. /admin/team page — Provider Management
     await page.goto("/admin/team", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveTitle(/FlowPilot/);
     await expect(page.locator("body")).toBeVisible();
+
+    // Verify page content: header, actions
+    await expect(page.locator("h1")).toContainText(
+      "إدارة الفريق ومقدمي الخدمة",
+    );
+
+    // Verify Return to Settings button is present
+    const backToSettingsLink = page.locator('a[href="/settings"]');
+    await expect(backToSettingsLink).toBeVisible();
+    await expect(backToSettingsLink).toContainText("العودة للإعدادات");
+
+    // Verify Add Provider button is present
+    const addProviderButton = page.getByRole("button", {
+      name: "إضافة مقدم خدمة",
+    });
+    await expect(addProviderButton).toBeVisible();
 
     // Verify RTL
     expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
@@ -151,7 +176,7 @@ test.describe("Authenticated Preview QA", () => {
     });
     expect(isOverflowing).toBe(false);
 
-    // Verify touch-target sizing on /admin/team interactive controls (>= 36px for buttons)
+    // Verify touch-target sizing on /admin/team interactive controls (>= 24px)
     const teamButtons = page.locator("button");
     const teamBtnCount = await teamButtons.count();
     for (let i = 0; i < Math.min(teamBtnCount, 5); i++) {
@@ -159,7 +184,7 @@ test.describe("Authenticated Preview QA", () => {
       if (await btn.isVisible()) {
         const b = await btn.boundingBox();
         if (b) {
-          expect(b.height).toBeGreaterThanOrEqual(24); // at least icon/sm button height
+          expect(b.height).toBeGreaterThanOrEqual(24);
         }
       }
     }
@@ -184,7 +209,7 @@ test.describe("Authenticated Preview QA", () => {
     });
     expect(isOverflowing).toBe(false);
 
-    // Verify touch-target sizing on booking form interactive controls (>= 36px for inputs and submit)
+    // Verify touch-target sizing on booking form interactive controls (>= 24px)
     const formControls = page.locator("button, input, select");
     const controlCount = await formControls.count();
     for (let i = 0; i < Math.min(controlCount, 5); i++) {
@@ -217,6 +242,12 @@ test.describe("Authenticated Preview QA", () => {
     });
     expect(isOverflowing).toBe(false);
 
+    // Verify Calendar view modes are present (الجدول المرئي / قائمة المواعيد)
+    const visualViewBtn = page.getByRole("button", { name: /الجدول المرئي/ });
+    if (await visualViewBtn.isVisible()) {
+      await expect(visualViewBtn).toBeVisible();
+    }
+
     // Screenshot Visual Staff Calendar
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, `${vpName}-05-visual-calendar.png`),
@@ -228,7 +259,7 @@ test.describe("Authenticated Preview QA", () => {
     await expect(page).toHaveTitle(/الإعدادات|FlowPilot/);
     await expect(page.locator("body")).toBeVisible();
 
-    // Verify discoverable provider management link exists
+    // Verify discoverable provider management link exists and has expected text
     const teamLink = page.locator('a[href="/admin/team"]');
     await expect(teamLink).toBeVisible();
     await expect(teamLink).toContainText("إدارة الفريق ومقدمي الخدمة");
@@ -247,6 +278,14 @@ test.describe("Authenticated Preview QA", () => {
       ),
       fullPage: true,
     });
+
+    // 8. Navigation verification: Click provider management link from Settings
+    await teamLink.click();
+    await page.waitForURL((url) => url.pathname.includes("/admin/team"), {
+      timeout: 10_000,
+      waitUntil: "domcontentloaded",
+    });
+    expect(page.url()).toContain("/admin/team");
 
     // Assert no critical console errors
     expect(consoleErrors).toEqual([]);

@@ -19,6 +19,9 @@ const BASE_URL =
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: process.env.PLAYWRIGHT_PREVIEW_URL?.trim()
+    ? []
+    : ["**/preview-auth-qa.spec.ts"],
   timeout: 30_000,
   expect: {
     timeout: 5000,
@@ -30,7 +33,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { open: "never", outputFolder: "playwright-report/html" }],
-    ["json", { outputFile: "playwright-report/ux-summary.json" }],
+    ["json", { outputFile: "playwright-report/playwright-results.json" }],
   ],
   use: {
     baseURL: BASE_URL,
