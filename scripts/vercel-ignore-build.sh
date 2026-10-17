@@ -48,7 +48,7 @@ if [[ "$COMMIT_SUBJECT" =~ \(#[0-9]+\)$ ]] || [[ "$COMMIT_SUBJECT" =~ ^Merge\ pu
 fi
 
 # B. Check for multi-parent merge commits
-if git rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
+if git rev-parse -q --verify "${COMMIT_SHA}^2" >/dev/null 2>&1; then
   echo "🛑 MULTI-PARENT COMMIT DETECTED:"
   echo "   Commit has multiple parents (merge commit). Production releases must be single-parent commits."
   exit 0
