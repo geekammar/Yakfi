@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.46.8",
+  "version": "0.47.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -70,6 +70,7 @@
     "check:book-core-03": "tsx scripts/check-book-core-03.ts",
     "check:staff-provider-01": "tsx scripts/check-staff-provider-01.ts",
     "check:appointments-day-view": "tsx scripts/check-appointments-day-view.ts",
+    "check:ux001-r2": "tsx scripts/check-ux001-r2.ts",
     "check:owner-invitation": "dotenv -e .env.local -e .env -- tsx scripts/check-owner-invitation.ts",
     "probe:atria": "dotenv -e .env.local -e .env -- tsx scripts/probe-atria.ts",
     "probe:openrouter": "dotenv -e .env.local -e .env -- tsx scripts/probe-openrouter.ts",
@@ -130,7 +131,9 @@
     "eval:coverage": "tsx scripts/eval-coverage.ts",
     "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:local": "playwright test tests/e2e/booking-flows.spec.ts tests/e2e/ux-viewports.spec.ts",
+    "test:e2e:preview": "node scripts/run-ux-qa.mjs tests/e2e/preview-auth-qa.spec.ts"
   },
   "engines": {
     "node": ">=20.9.0"

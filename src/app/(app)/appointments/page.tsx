@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { appointmentDateSchema } from "@/lib/validation";
 import { requireUser } from "@/server/auth/guards";
-import { businessRepository } from "@/server/repositories";
+import { businessRepository, providerRepository } from "@/server/repositories";
 
 import { PlusIcon } from "lucide-react";
 import type { Metadata } from "next";
@@ -32,7 +32,15 @@ export default async function AppointmentsPage({
   const parsedDate = appointmentDateSchema.safeParse(params.date);
   const date = parsedDate.success ? parsedDate.data : today;
   if (params.create === "true") redirect(`/appointments/new?date=${date}`);
-  const appointments = await getAppointmentAgenda(business.id, date);
+  const [appointments, providerProfiles] = await Promise.all([
+    getAppointmentAgenda(business.id, date),
+    providerRepository.listProfilesByBusiness(business.id),
+  ]);
+  const providers = providerProfiles.map((p) => ({
+    id: p.id,
+    name: p.name,
+    displayName: p.displayName,
+  }));
 
   return (
     <div className="animate-fade-in-up space-y-6">
@@ -61,6 +69,9 @@ export default async function AppointmentsPage({
         initialItems={appointments}
         date={date}
         today={today}
+        workingHours={business.workingHours}
+        slotDurationMinutes={business.slotDurationMinutes}
+        providers={providers}
       />
     </div>
   );

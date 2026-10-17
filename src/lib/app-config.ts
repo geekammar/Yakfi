@@ -45,7 +45,7 @@ export const APP_NAV_ITEMS: NavItem[] = [
 /** Admin area navigation. */
 export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: "/admin", label: "لوحة الإدارة", icon: "shield" },
-  { href: "/admin/team", label: "الفريق", icon: "users" },
+  { href: "/admin/team", label: "إدارة الفريق ومقدمي الخدمة", icon: "users" },
 ];
 
 /** Staff area navigation — the workspace plus the shared operational screens. */

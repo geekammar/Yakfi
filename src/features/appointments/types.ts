@@ -9,6 +9,7 @@ export type AppointmentAgendaItem = {
   notes: string | null;
   customer: { id: string; name: string; phone: string };
   service: { id: string; name: string; durationMinutes: number };
+  provider?: { id: string; name: string; displayName?: string | null } | null;
 };
 
 export type AppointmentDetailData = AppointmentAgendaItem & {
@@ -243,6 +244,12 @@ export type AvailabilityData = {
   serviceDurationMinutes: number;
   /** Bookable start times, ascending, chronologically ordered. */
   slots: AvailabilitySlot[];
+  /** Intervals blocked by existing appointments on this date */
+  blockedIntervals?: Array<{
+    startTime: string;
+    endTime: string;
+    providerId?: string | null;
+  }>;
 };
 
 /** Why zero slots exist — present ONLY when `slots` is empty. */

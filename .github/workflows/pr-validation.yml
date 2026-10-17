@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
+  issues: read
+  statuses: read
 
 concurrency:
   group: pr-validate-${{ github.event.pull_request.number || github.ref }}
@@ -141,6 +144,14 @@ jobs:
       - name: Build Next.js application
         if: steps.change-check.outputs.should_run == 'true'
         run: pnpm build
+
+      - name: Resolve dynamic Vercel Preview URL
+        if: steps.change-check.outputs.should_run == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/resolve-preview-url.mjs || echo "⚠️ Preview URL resolution skipped or unavailable; proceeding with local browser tests."
 
       - name: Run Automated UX QA Suite
         if: steps.change-check.outputs.should_run == 'true'

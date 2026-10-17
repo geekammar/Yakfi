@@ -16,6 +16,7 @@ function serializeAppointment(appointment: {
   notes: string | null;
   customer: AppointmentAgendaItem["customer"];
   service: AppointmentAgendaItem["service"];
+  provider?: { id: string; name: string; displayName?: string | null } | null;
 }): AppointmentAgendaItem {
   return {
     id: appointment.id,
@@ -26,6 +27,13 @@ function serializeAppointment(appointment: {
     notes: appointment.notes,
     customer: appointment.customer,
     service: appointment.service,
+    provider: appointment.provider
+      ? {
+          id: appointment.provider.id,
+          name: appointment.provider.name,
+          displayName: appointment.provider.displayName ?? null,
+        }
+      : null,
   };
 }
 

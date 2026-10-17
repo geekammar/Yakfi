@@ -349,6 +349,11 @@ export async function getAvailability(
         serviceId: service.id,
         serviceDurationMinutes: service.durationMinutes,
         slots,
+        blockedIntervals: blocking.map((b) => ({
+          startTime: b.startTime,
+          endTime: b.endTime,
+          providerId,
+        })),
       },
       reason,
     };
@@ -455,6 +460,23 @@ export async function getAvailability(
         serviceId: service.id,
         serviceDurationMinutes: service.durationMinutes,
         slots,
+        blockedIntervals: blockingRows.flatMap((r) => {
+          const pIds = providerIdByAssigneeId.get(r.assignedUserId);
+          if (pIds && pIds.length > 0) {
+            return pIds.map((pId) => ({
+              startTime: r.startTime,
+              endTime: r.endTime,
+              providerId: pId,
+            }));
+          }
+          return [
+            {
+              startTime: r.startTime,
+              endTime: r.endTime,
+              providerId: r.assignedUserId,
+            },
+          ];
+        }),
       },
       reason,
     };
@@ -484,6 +506,10 @@ export async function getAvailability(
       serviceId: service.id,
       serviceDurationMinutes: service.durationMinutes,
       slots,
+      blockedIntervals: blocking.map((b) => ({
+        startTime: b.startTime,
+        endTime: b.endTime,
+      })),
     },
     reason,
   };

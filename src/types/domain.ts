@@ -74,4 +74,5 @@ export type ConversationWithCustomer = Conversation & {
 export type AppointmentWithRelations = Appointment & {
   customer: Pick<Customer, "id" | "name" | "phone">;
   service: Pick<Service, "id" | "name" | "durationMinutes">;
+  provider?: Pick<ProviderProfile, "id" | "name" | "displayName"> | null;
 };

@@ -28,9 +28,9 @@ export default function AdminPage() {
           <UsersRoundIcon aria-hidden className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold">الفريق</h2>
+          <h2 className="font-semibold">إدارة الفريق ومقدمي الخدمة</h2>
           <p className="text-muted-foreground mt-0.5 text-sm leading-6">
-            أدعُ موظفيك للانضمام وتابع حالة حساباتهم وأدوارهم.
+            إدارة الموظفين ومقدمي الخدمات وتحديد صلاحياتهم.
           </p>
         </div>
         <ChevronLeftIcon
