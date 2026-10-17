@@ -1,4 +1,10 @@
 import { env } from "@/lib/env";
+import {
+  getAuthorizedPreviewHosts,
+  getTrustedOrigins,
+  isVercelPreview,
+  resolveAppUrl,
+} from "@/lib/url-resolver";
 import { db } from "@/server/db";
 
 import { betterAuth } from "better-auth";
@@ -6,9 +12,15 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 
 export const auth = betterAuth({
   appName: "FlowPilot",
-  baseURL: env.BETTER_AUTH_URL,
+  baseURL: isVercelPreview()
+    ? {
+        allowedHosts: getAuthorizedPreviewHosts(),
+        fallback: resolveAppUrl(),
+        protocol: "https",
+      }
+    : env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
-  trustedOrigins: [env.NEXT_PUBLIC_APP_URL],
+  trustedOrigins: getTrustedOrigins(),
   database: prismaAdapter(db, {
     provider: "postgresql",
     // User + credential-account writes (e.g. signUpEmail) run in ONE

@@ -24,7 +24,12 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: ["prisma/**/*.ts", "scripts/**/*.mjs", "scripts/**/*.ts"],
+    files: [
+      "prisma/**/*.ts",
+      "scripts/**/*.mjs",
+      "scripts/**/*.ts",
+      "tests/**/*.ts",
+    ],
     rules: {
       // Seed & codegen scripts are CLI tools; console output is intentional.
       "no-console": "off",

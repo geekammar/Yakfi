@@ -1,0 +1,163 @@
+name: Pull Request Validation & UX QA
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PR Quality Gates & Regression Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Security scan (secrets hygiene)
+        run: pnpm security
+
+      - name: AI prompt contract check
+        run: pnpm check:ai-prompts
+
+      - name: Setup local environment
+        run: node scripts/setup-env.mjs
+
+      - name: Verify code quality (lint, typecheck, format, build)
+        run: pnpm verify
+
+      - name: Release Guard Threat Model & Cutover verification
+        run: pnpm check:release-guard
+
+      - name: PR Semantic Versioning validation
+        run: pnpm check:version
+
+      - name: Check for database schema changes
+        shell: bash
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD || true)
+          if echo "$CHANGED" | grep -qE '^prisma/'; then
+            echo "⚠️ DATABASE SCHEMA CHANGES DETECTED IN THIS PR."
+            echo "Operator must apply production migrations before merging this PR to main."
+            {
+              echo "### ⚠️ Database Schema Notice"
+              echo "This PR contains modifications in \`prisma/\`."
+              echo "Before merging to \`main\`, execute the **Production DB Migration** workflow targeting this branch ref."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ No database schema changes detected in PR. Standard automatic merge-to-deploy applies."
+          fi
+
+      - name: Booking & provider regression checks
+        run: |
+          pnpm check:booking-ux
+          pnpm check:appointment-creation
+          pnpm check:reschedule
+          pnpm check:booking-options
+          pnpm check:booking-modes
+          pnpm check:staff-provider-01
+          pnpm check:eligibility
+          pnpm check:appointments-day-view
+
+  ux-qa:
+    name: Automated Browser UX QA (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for UI / UX changes
+        id: change-check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Compare with merge base of target branch
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD || true)
+          echo "Changed files in PR:"
+          echo "$CHANGED_FILES"
+          if echo "$CHANGED_FILES" | grep -qE '(src/app/|src/features/|src/components/|styles/|tests/e2e/|playwright|package.json)'; then
+            echo "UI/UX paths detected — triggering Playwright suite."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Backend-only change — skipping full visual test suite."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.change-check.outputs.should_run == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        if: steps.change-check.outputs.should_run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        if: steps.change-check.outputs.should_run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium browser
+        if: steps.change-check.outputs.should_run == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Setup local environment
+        if: steps.change-check.outputs.should_run == 'true'
+        run: node scripts/setup-env.mjs
+
+      - name: Build Next.js application
+        if: steps.change-check.outputs.should_run == 'true'
+        run: pnpm build
+
+      - name: Run Automated UX QA Suite
+        if: steps.change-check.outputs.should_run == 'true'
+        run: node scripts/run-ux-qa.mjs
+
+      - name: Append UX QA report to Job Summary
+        if: steps.change-check.outputs.should_run == 'true' && always()
+        shell: bash
+        run: |
+          if [ -f "playwright-report/ux-summary.md" ]; then
+            cat playwright-report/ux-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload UX QA Artifacts & Screenshots
+        if: steps.change-check.outputs.should_run == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-ux-report
+          path: playwright-report/
+          retention-days: 7

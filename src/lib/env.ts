@@ -1,3 +1,4 @@
+import { populatePreviewEnvIfNeeded } from "./url-resolver";
 import { z } from "zod";
 
 const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
@@ -131,6 +132,8 @@ const serverEnvSchema = z.object({
 const clientEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.url(),
 });
+
+populatePreviewEnvIfNeeded();
 
 const parsedServer = serverEnvSchema.safeParse({
   DATABASE_URL: process.env.DATABASE_URL,

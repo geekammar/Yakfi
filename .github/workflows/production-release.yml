@@ -1,0 +1,177 @@
+name: Production Release & Post-Deploy Verification
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_tag:
+        description: "Re-verify and tag current main without redeploying"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  verify-and-release:
+    name: Verify Vercel Production & Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract target release version from package.json
+        id: version-info
+        shell: bash
+        run: |
+          TARGET_VERSION=$(node -e "try { console.log(require('./package.json').version || '') } catch(e) {}")
+          if [ -z "$TARGET_VERSION" ] || ! [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid or missing SemVer version in package.json: '$TARGET_VERSION'"
+            exit 1
+          fi
+          COMMIT_SHA=$(git rev-parse HEAD)
+          TAG_NAME="v${TARGET_VERSION}"
+          echo "Target Version: $TARGET_VERSION"
+          echo "Target Tag: $TAG_NAME"
+          echo "Target Commit SHA: $COMMIT_SHA"
+          echo "target_version=$TARGET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "target_tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Check if Git tag already exists
+        id: check-tag
+        shell: bash
+        run: |
+          TAG="${{ steps.version-info.outputs.target_tag }}"
+          COMMIT="${{ steps.version-info.outputs.commit_sha }}"
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            EXISTING_TAG_SHA=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+            echo "ℹ️ Tag $TAG already exists on origin (SHA: $EXISTING_TAG_SHA)."
+            if [ "$EXISTING_TAG_SHA" = "$COMMIT" ] || [[ "$COMMIT" == "$EXISTING_TAG_SHA"* ]]; then
+              echo "already_tagged=true" >> "$GITHUB_OUTPUT"
+              echo "✅ Tag $TAG already points to this exact commit. Workflow will verify health idempotently."
+            else
+              if [ "${{ inputs.force_tag }}" = "true" ]; then
+                echo "⚠️ Force tag input specified — continuing."
+                echo "already_tagged=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::Tag $TAG already exists on origin pointing to a different commit. Releases are immutable!"
+                exit 1
+              fi
+            fi
+          else
+            echo "already_tagged=false" >> "$GITHUB_OUTPUT"
+            echo "✅ Tag $TAG is free."
+          fi
+
+      - name: Poll Vercel Production health endpoint
+        id: verify-prod
+        shell: bash
+        run: |
+          TARGET_VERSION="${{ steps.version-info.outputs.target_version }}"
+          TARGET_SHA="${{ steps.version-info.outputs.commit_sha }}"
+          PROD_HEALTH_URL="https://flowpilot-prod.vercel.app/api/health"
+          echo "🔍 Polling Production health endpoint to confirm Vercel deployment: $PROD_HEALTH_URL"
+          echo "   Target Version: $TARGET_VERSION"
+          echo "   Target Commit SHA: $TARGET_SHA"
+
+          # Wait for Vercel to pick up the commit, build, and deploy (up to 4 minutes / 24 attempts)
+          MAX_ATTEMPTS=24
+          ATTEMPT=1
+          DEPLOYED=0
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking $PROD_HEALTH_URL..."
+            HEALTH_JSON=$(curl -s -S --max-time 10 "$PROD_HEALTH_URL" || echo "")
+            echo "Response: $HEALTH_JSON"
+
+            if [ -n "$HEALTH_JSON" ]; then
+              STATUS=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.status || ""); } catch { console.log(""); }')
+              LIVE_VERSION=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.version || ""); } catch { console.log(""); }')
+              READY=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.deploymentReady === true ? "true" : ""); } catch { console.log(""); }')
+              LIVE_SHA=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.commitSha || ""); } catch { console.log(""); }')
+
+              if [ "$STATUS" = "ok" ] && [ "$READY" = "true" ] && [ "$LIVE_VERSION" = "$TARGET_VERSION" ]; then
+                if [ -n "$LIVE_SHA" ] && [ "$LIVE_SHA" != "$TARGET_SHA" ] && [[ "$TARGET_SHA" != "$LIVE_SHA"* ]] && [[ "$LIVE_SHA" != "$TARGET_SHA"* ]]; then
+                  echo "⏳ Live commit SHA ($LIVE_SHA) does not match target ($TARGET_SHA) yet. Waiting..."
+                else
+                  echo "✅ Vercel Production deployment verified successfully!"
+                  echo "   - Live Version: $LIVE_VERSION (matches target $TARGET_VERSION)"
+                  echo "   - Deployment Ready: true"
+                  echo "   - Application Health: ok"
+                  if [ -n "$LIVE_SHA" ]; then
+                    echo "   - Running Commit SHA: $LIVE_SHA"
+                  fi
+                  DEPLOYED=1
+                  break
+                fi
+              fi
+            fi
+
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $DEPLOYED -ne 1 ]; then
+            echo "::error::Vercel Production deployment did not become active with version $TARGET_VERSION within timeout."
+            echo "::error::Production release verification FAILED. Do NOT publish release notes or tag."
+            exit 1
+          fi
+          echo "prod_verified=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create Git tag & publish GitHub Release
+        if: steps.verify-prod.outputs.prod_verified == 'true' && steps.check-tag.outputs.already_tagged != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ steps.version-info.outputs.target_tag }}"
+          COMMIT="${{ steps.version-info.outputs.commit_sha }}"
+          VERSION="${{ steps.version-info.outputs.target_version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "🏷️ Tagging commit $COMMIT as $TAG..."
+          git tag -a "$TAG" -m "FlowPilot $TAG — Production Release"
+          git push origin "$TAG"
+
+          echo "📢 Creating GitHub Release for $TAG..."
+          gh release create "$TAG" \
+            --title "FlowPilot $TAG" \
+            --notes "Automated production release of commit \`${COMMIT}\`. Deployed via Vercel Production and verified live." \
+            --verify-tag
+
+      - name: Production Release Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## 🚀 FlowPilot Production Release Summary"
+            echo ""
+            if [ "${{ steps.verify-prod.outputs.prod_verified }}" = "true" ]; then
+              echo "- **Status**: ✅ RELEASE VERIFIED & PUBLISHED LIVE ON PRODUCTION"
+              echo "- **Tag**: \`${{ steps.version-info.outputs.target_tag }}\`"
+              echo "- **Version**: \`${{ steps.version-info.outputs.target_version }}\`"
+              echo "- **Commit SHA**: \`${{ steps.version-info.outputs.commit_sha }}\`"
+              echo "- **Vercel Production**: Active & Ready"
+              echo "- **Application Health**: OK (\`https://flowpilot-prod.vercel.app/api/health\`)"
+            else
+              echo "- **Status**: ❌ DEPLOYMENT VERIFICATION FAILED OR TIMED OUT"
+              echo "- **Target Version**: \`${{ steps.version-info.outputs.target_version }}\`"
+              echo "- **Commit SHA**: \`${{ steps.version-info.outputs.commit_sha }}\`"
+              echo "- **Reason**: Vercel deployment did not become active with target version within timeout."
+              echo "- **Action Required**: Inspect Vercel Dashboard for build logs or promote previous deployment."
+            fi
+            echo "- **Timestamp**: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          } >> "$GITHUB_STEP_SUMMARY"
