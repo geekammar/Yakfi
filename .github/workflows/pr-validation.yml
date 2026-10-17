@@ -44,6 +44,9 @@ jobs:
       - name: AI prompt contract check
         run: pnpm check:ai-prompts
 
+      - name: Setup local environment
+        run: node scripts/setup-env.mjs
+
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
@@ -108,6 +111,10 @@ jobs:
       - name: Install Playwright Chromium browser
         if: steps.change-check.outputs.should_run == 'true'
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Setup local environment
+        if: steps.change-check.outputs.should_run == 'true'
+        run: node scripts/setup-env.mjs
 
       - name: Build Next.js application
         if: steps.change-check.outputs.should_run == 'true'

@@ -80,6 +80,9 @@ jobs:
       - name: Run AI prompt sync verification
         run: pnpm check:ai-prompts
 
+      - name: Setup local environment
+        run: node scripts/setup-env.mjs
+
       - name: Run full verify gate (lint, typecheck, format, build)
         run: pnpm verify
 
