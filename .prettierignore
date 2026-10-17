@@ -9,3 +9,5 @@ next-env.d.ts
 # eval tooling, not hand-edited — same rule as src/generated
 evaluation/datasets/*/*.dataset.json
 evaluation/reports
+playwright-report
+test-results
