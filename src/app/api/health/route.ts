@@ -189,6 +189,7 @@ export async function GET() {
   return Response.json({
     status: "ok",
     version: pkg.version,
+    commitSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
     environment: process.env.NODE_ENV ?? "development",
     timestamp: new Date().toISOString(),
     deploymentReady,

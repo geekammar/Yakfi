@@ -53,6 +53,25 @@ jobs:
       - name: Release Guard Threat Model & Cutover verification
         run: pnpm check:release-guard
 
+      - name: PR Semantic Versioning validation
+        run: pnpm check:version
+
+      - name: Check for database schema changes
+        shell: bash
+        run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD || true)
+          if echo "$CHANGED" | grep -qE '^prisma/'; then
+            echo "⚠️ DATABASE SCHEMA CHANGES DETECTED IN THIS PR."
+            echo "Operator must apply production migrations before merging this PR to main."
+            {
+              echo "### ⚠️ Database Schema Notice"
+              echo "This PR contains modifications in \`prisma/\`."
+              echo "Before merging to \`main\`, execute the **Production DB Migration** workflow targeting this branch ref."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ No database schema changes detected in PR. Standard automatic merge-to-deploy applies."
+          fi
+
       - name: Booking & provider regression checks
         run: |
           pnpm check:booking-ux
