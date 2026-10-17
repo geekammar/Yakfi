@@ -46,6 +46,48 @@ export async function GET() {
   const deploymentReady =
     missingEnvVars.length === 0 && database === "connected";
 
+  let previewDiagnostics: Record<string, unknown> | undefined;
+  if (process.env.VERCEL_ENV === "preview" && database === "connected") {
+    try {
+      const { db } = await import("@/server/db");
+      const dbUrl = process.env.DATABASE_URL
+        ? new URL(process.env.DATABASE_URL)
+        : null;
+      const dbHost = dbUrl?.hostname ?? "unknown";
+      const isProductionDb = dbHost.includes("ep-tiny-grass-a5e63jev");
+      const users = await db.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          isActive: true,
+          accountType: true,
+          businessId: true,
+        },
+      });
+      const accounts = await db.account.findMany({
+        select: {
+          id: true,
+          userId: true,
+          providerId: true,
+          issuer: true,
+        },
+      });
+      previewDiagnostics = {
+        dbHost,
+        isProductionDb,
+        userCount: users.length,
+        users,
+        accountCount: accounts.length,
+        accounts,
+      };
+    } catch (e: unknown) {
+      previewDiagnostics = {
+        error: e instanceof Error ? e.message : "query failed",
+      };
+    }
+  }
+
   return Response.json({
     status: "ok",
     version: pkg.version,
@@ -54,5 +96,6 @@ export async function GET() {
     deploymentReady,
     database,
     missingEnvVars,
+    ...(previewDiagnostics ? { previewDiagnostics } : {}),
   });
 }
