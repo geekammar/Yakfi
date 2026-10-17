@@ -85,7 +85,8 @@ Each bootstrap script:
 ```bash
 pnpm run doctor      # health check: tools, env, DB connection, build readiness
 bash scripts/dev.sh  # or dev.ps1 / dev-termux.sh — install→generate→db push→dev
-pnpm verify          # full quality gate before finishing any work
+pnpm verify:local    # lightweight local quality gate (security + prompt + types + lint + format)
+pnpm verify:fast     # ultra-fast iteration gate (security + prompt + types, sub-15s)
 pnpm security        # secret scan (also runs automatically on every commit)
 ```
 
@@ -123,12 +124,22 @@ via `core.hooksPath`). Every commit is checked for:
 Bypass (last resort, not recommended): `git commit --no-verify`.
 Reinstall after a fresh clone: `pnpm run hooks:install`.
 
-## Quality Gates (binding)
+## Quality Gates & Verification Model (DEVOPS-01E)
 
-Per `AGENT_RULES.md`, finish any work only when this passes:
+Per `AGENT_RULES.md`, FlowPilot follows a **CI-first verification strategy**:
 
-```bash
-pnpm verify   # = lint + typecheck + format:check + build (Termux-aware)
-```
+- **Local VPS Iteration:** Use lightweight commands (`pnpm verify:local` or `pnpm verify:fast`). Do **NOT** invoke `next build` or run Playwright test suites locally during routine edits.
+- **CI Ownership:** GitHub Actions (`pr-validation.yml`) executes the full quality gate (`pnpm verify` including production Next.js build) and automated browser UX QA in isolated CI runners.
+- **Vercel Ownership:** Vercel builds and deploys Preview environments upon PR updates, and Production releases upon merge to `main`.
+
+## VPS Resource Safety & Process Inspection
+
+The VPS runs with limited RAM and 0B Swap. To avoid memory starvation and unresponsive sessions:
+
+- **Never run concurrent heavy builds**: Avoid running `next build`, `typecheck`, and `eslint` concurrently.
+- **Inspect Memory:** `free -h` (check `available` memory; beware of available < 200MB).
+- **Inspect Processes:** `ps aux --sort=-%mem | head -n 10` (find memory-heavy processes).
+- **Check Running Jobs:** `pgrep -af "next|eslint|tsc|playwright|node"`
+- **Distinguish Slow Build vs Freeze:** Use `ps -o pid,stat,time,%cpu,comm -p <PID>` over a 3-5 second interval. If the `time` counter is progressing or `%cpu` is active, the process is making steady CPU progress and is NOT hung.
 
 What each check covers: `QUALITY_CHECKS.md`. Stuck? `TROUBLESHOOTING.md`.

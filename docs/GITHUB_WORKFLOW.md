@@ -14,42 +14,29 @@
 | Branch      | `main` (single-branch model while solo + agent-driven)          |
 | Description | WhatsApp Appointment Conversion System — book more, chase less. |
 
-## GitHub Actions & CI Status
+## GitHub Actions & CI Status (DEVOPS-01D/E)
 
-- **Manual Production DB Migration:** A dedicated GitHub Actions workflow exists
-  (`.github/workflows/production-db-migrate.yml`) for operator-dispatched database
-  migrations (`workflow_dispatch`), running with the `Production` environment.
-- **No General Automated CI:** There is no automated continuous integration (CI)
-  running test suites or builds on push or pull requests. Quality gating is
-  repository-owned and enforced locally via `pnpm verify` and `pnpm pre-ship`.
+- **PR Validation & UX QA (`pr-validation.yml`):** Runs on every PR targeting `main`.
+  Executes security scan, AI prompt contract, full `pnpm verify` (lint, typecheck, format,
+  Next.js production build), release guard verification, SemVer version increment check,
+  database schema change detection, domain regression checks, and automated Playwright browser UX QA.
+- **Production Release & Cutover (`production-release.yml`):** Runs on push to `main` (merge).
+  Verifies Vercel production deployment health (`GET /api/health`), validates production commit SHA,
+  and publishes an immutable GitHub Release with the corresponding version tag.
+- **Manual Production DB Migration (`production-db-migrate.yml`):** Dedicated operator-dispatched
+  workflow (`workflow_dispatch`) targeting specified branch/commit for Neon production database migrations.
 
-## GitHub CLI (gh)
+## Branch & PR Model (Mobile-First Developer Experience)
 
-Install: https://cli.github.com (bootstraps install it best-effort).
+FlowPilot uses a GitHub PR-based workflow optimized for lightweight VPS development:
 
-```bash
-gh auth status        # verify login
-gh auth login         # GitHub.com → HTTPS → "Login with a web browser"
-gh repo view          # open repo in browser: gh repo view --web
-gh release list       # releases
-```
-
-Everything the release process needs gh for (repo create, push access,
-release creation) requires a successful `gh auth login` first.
-
-## Branch & Commit Model (pilot stage)
-
-- **`main` is the only branch.** Solo founder + agent development makes PR
-  flow overhead; every prompt/ops pass lands as a commit on `main` after the
-  quality gates pass.
-- **Commit messages**: conventional style —
-  `feat:`, `fix:`, `docs:`, `ops:`, `chore:`, `refactor:`.
-  Examples: `feat: initial pilot-ready release`, `ops: health tooling`.
-- **Never commit secrets**: the pre-commit hook blocks env/key files and
-  secret-looking content (`pnpm run hooks:install` after a fresh clone).
-- **Tags mark releases**: `v0.1.0`, `v0.1.1`, … from `main`, annotated.
-  Routine shipping uses `pnpm ship patch|minor` (gated by `pnpm pre-ship`),
-  while full recovery gates use `pnpm release`.
+1. **Development on VPS:** Agent or operator writes code on a feature branch (`feat/*`, `fix/*`, `chore/*`).
+2. **Lightweight Local Check:** Run `pnpm verify:local` (or `pnpm verify:fast`). Do **not** run full production builds locally.
+3. **Version Bump:** Increment SemVer via `pnpm version:bump patch` (or `minor`) before pushing.
+4. **Push & PR:** Push to origin and open a PR via `gh pr create`.
+5. **CI & Vercel Preview:** GitHub Actions runs complete quality gates and Playwright suites; Vercel deploys preview.
+6. **Operator Review & Merge:** Operator reviews PR summary and preview on mobile phone, then merges to `main`.
+7. **Automated Production Release:** `production-release.yml` monitors cutover and tags release automatically.
 
 ## Shipping vs. Deployment vs. Migrations
 

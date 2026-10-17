@@ -55,6 +55,15 @@
 | Secret was committed anyway                         | Rotate it immediately (Neon password, auth secret, tokens), then remove from tracking: `git rm --cached .env.local`. History scrubbing is only needed for real credentials — ask the operator.               |
 | Hooks not running after clone                       | `pnpm run hooks:install` (also runs automatically in `pnpm run setup`). Check: `git config core.hooksPath` → `.githooks`.                                                                                    |
 
+## VPS Performance & Memory Diagnostics (DEVOPS-01E)
+
+| Symptom                                             | Cause                                                                            | Diagnostic Command                                | Fix                                                                                                                                              |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Terminal or AGY session lags / becomes unresponsive | VPS memory saturation; zero swap space means Linux freezes under memory pressure | `free -h`                                         | Avoid running full `next build` or full `pnpm verify` locally; use `pnpm verify:local` or `pnpm verify:fast`.                                    |
+| ESLint consumes excessive RAM (>1GB) or pegs CPU    | Parsing large generated assets (e.g. `playwright-report` trace bundles)          | `ps aux --sort=-%mem \| head -n 10`               | Ensure `playwright-report/**` and `test-results/**` are in `globalIgnores` in `eslint.config.mjs` and in `.prettierignore`.                      |
+| Cannot tell if build is frozen or just slow         | Long Next.js compilation or TypeScript check                                     | `ps -o pid,stat,time,%cpu,comm -p <PID>`          | Check if `time` advances over 3-5 seconds. If advancing, process is active. If stalled and `available` memory < 100MB, process may be thrashing. |
+| Duplicate / runaway Node processes                  | Background or abandoned build/dev processes                                      | `pgrep -af "next\|eslint\|tsc\|playwright\|node"` | Gracefully terminate specific stale process: `kill <PID>` (or `kill -9 <PID>` as last resort). Never kill active database or AGY session.        |
+
 ## Still stuck?
 
 1. `pnpm run doctor` — read every `→ fix:` line; it covers the common cases.

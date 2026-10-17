@@ -81,7 +81,7 @@ context framework:
 6. **Read related tests** and relevant architectural decisions.
 7. **Expand scope ONLY** when concrete evidence requires additional files.
 8. **Implement the smallest safe change**.
-9. **Run focused tests** and required release gates (`pnpm verify`).
+9. **Run focused tests** for changed modules (`pnpm check:<module>`) and lightweight local verification (`pnpm verify:local` or `pnpm verify:fast`). Do NOT automatically run full `pnpm verify` or `next build` after every edit on the VPS.
 10. **Report changed files** and scope justification in the final report.
 
 ### Prohibited Default Behaviors
@@ -95,6 +95,10 @@ context framework:
 - ❌ Running broad repository searches when a precise path is known.
 - ❌ Copying large source files into task reports.
 - ❌ Automatically expanding every import transitively.
+- ❌ Running `next build` or full production `pnpm verify` locally after every edit.
+- ❌ Running multiple resource-intensive build/typecheck/lint processes concurrently on the VPS.
+- ❌ Repeating an unchanged test suite unnecessarily.
+- ❌ Starting local headless browser/Playwright suites or redundant dev servers unless strictly required.
 
 ### Allowed Scope Expansion (Exceptions)
 
@@ -148,9 +152,12 @@ run `pnpm context:check`.
 - ❌ Redo or reimplement completed work recorded in `BUILD_STATE.md`.
 - ❌ Break RTL/Arabic-first behavior or accessibility guarantees.
 - ❌ Commit secrets or real credentials; `.env` stays local (pre-commit hook active).
-- ❌ Skip verification: `pnpm verify` (+ `pnpm security` when touching sensitive areas) must pass before finishing.
+- ❌ Skip verification: `pnpm verify:local` (or targeted checks + `pnpm verify:fast`) must pass locally before committing or opening a PR. Full `pnpm verify` runs in GitHub Actions CI.
+- ❌ Run multiple resource-heavy processes concurrently on the VPS (e.g., simultaneous builds/typechecks/test suites).
 - ❌ Recreate duplicate documentation or competing summaries.
 - ❌ Commit, tag, push, or run GitHub publishing operations (`pnpm ship`, `pnpm release`) — the human operator owns all shipping/versioning/release actions unless explicitly instructed.
+- ❌ Claim a feature or PR is complete before relevant required GitHub Actions CI checks pass.
+- ❌ Execute production database migrations automatically from local development.
 
 ## ALWAYS
 
@@ -169,9 +176,50 @@ run `pnpm context:check`.
 2. **Inspect the current implementation** before changing anything.
 3. **Plan** against `BUILD_STATE.md → Next Step`; produce a concise plan before editing.
 4. **Implement** ONLY the current prompt's scope, following `ARCHITECTURE.md` dependency rules.
-5. **Verify** with the quality gate: `pnpm verify` (lint + typecheck + format + build).
+5. **Verify** with the lightweight gate: targeted domain checks (`pnpm check:<module>`) + `pnpm verify:local` (or `pnpm verify:fast`). Full build is delegated to GitHub Actions CI upon PR push.
 6. **Update docs** — `BUILD_STATE.md` always (minimal); `DECISIONS.md` when a decision was made.
 7. **Report honestly** and leave the repository ready for the next fresh session.
+
+## CI-First PR Workflow & VPS Safety (DEVOPS-01E)
+
+FlowPilot operates on a resource-constrained Linux VPS. Full Next.js production builds and browser testing are owned by GitHub Actions CI and Vercel, not the local VPS.
+
+### During Active Development
+
+- Run targeted checks for touched modules (e.g. `pnpm check:booking-ux`, `pnpm check:eligibility`).
+- Run lightweight local verification (`pnpm verify:local` or `pnpm verify:fast`).
+- **Do NOT** automatically run `next build` or full production `pnpm verify` after every edit.
+- **Do NOT** repeat unchanged test suites unnecessarily.
+- **Do NOT** run multiple resource-intensive verification processes concurrently.
+
+### Before Creating or Updating a PR
+
+- Ensure targeted checks pass locally.
+- Validate version increment with `pnpm check:version`.
+- Push changes to the feature branch.
+- Allow GitHub Actions CI (`pr-validation.yml`) to execute the full quality gate (`pnpm verify` including production build) and Playwright browser UX QA in isolated CI runners.
+- **Do NOT** claim a feature is accepted until required CI checks pass.
+
+### For UI/UX Changes
+
+- Use GitHub Actions automated Playwright UX QA and Vercel Preview deployments.
+- Review generated screenshots and authenticated workflow artifacts.
+- Avoid running local production servers or local browser suites unless strictly necessary.
+- Preserve mobile-first Arabic RTL requirements.
+
+### For Database Changes
+
+- Preserve safe migration process: dev migrations locally (`pnpm db:migrate`), never execute production migrations automatically from VPS.
+- Note schema changes in the PR; operator applies production migrations via `.github/workflows/production-db-migrate.yml`.
+
+### VPS Resource Inspection Guidelines
+
+When checking VPS load or diagnosing apparent freezes:
+
+- Memory: `free -h` (check `available` memory; note swap is 0B).
+- Top memory processes: `ps aux --sort=-%mem | head -n 10`
+- Active Node/build processes: `pgrep -af "next|eslint|tsc|playwright|node"`
+- Distinguish slow progress from freezes: check if CPU time is advancing (`ps -o pid,stat,time,%cpu,comm -p <PID>` over a 3-5s window). If time ticks up, process is computing, not hung.
 
 ## Escalation Path
 

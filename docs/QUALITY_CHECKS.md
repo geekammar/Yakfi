@@ -10,7 +10,9 @@
 | `pnpm pre-ship`       | **Canonical pre-release gate**: git baseline + exact release candidate + `git diff --check` + security (tracked **and** untracked candidate files) + prompt-contract + `pnpm verify` + non-mutation witness → `PRE_SHIP_GREEN` / `PRE_SHIP_BLOCKED` / `MANUAL_RELEASE_REVIEW_REQUIRED` | Before EVERY release; `ship` enforces it automatically                               |
 | `pnpm check:pre-ship` | Non-vacuous regression proof of the gate + ship integration (throwaway fixture repos; real CLIs and real secret scanner; real tree untouched)                                                                                                                                          | After touching release tooling (`ship`/`pre-ship`/gate)                              |
 | `pnpm check:services` | Service Catalog + authoring boundary (offline, in-memory): list/create/edit/remove, tenant isolation, duplicate guard, duration-is-operational                                                                                                                                         | After touching `/services` or the service domain                                     |
-| `pnpm verify`         | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                                                                                                                                                       | Before finishing ANY work (binding)                                                  |
+| `pnpm verify`         | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                                                                                                                                                       | In GitHub Actions CI (PR validation & release cutover) and optional full local gate  |
+| `pnpm verify:local`   | **Lightweight local quality gate**: security + ai-prompts + typecheck + lint + format:check (never invokes `next build`, no browser startup)                                                                                                                                           | Before pushing feature branch or opening PR; during local VPS development            |
+| `pnpm verify:fast`    | **Ultra-fast local quality gate**: security + ai-prompts + typecheck (sub-15s, <850MB RSS, skips lint/format)                                                                                                                                                                          | During rapid coding iteration loops on VPS                                           |
 | `pnpm run doctor`     | Project health: OS, node, pnpm, git, gh, env, Prisma, DB connection, deps, build readiness → READY / NOT READY                                                                                                                                                                         | After setup, after env changes, when anything feels off                              |
 | `pnpm security`       | Secret scan: env-file hygiene, secret quality, secret-shaped content in committable files                                                                                                                                                                                              | Before pushing; runs automatically pre-commit                                        |
 | `pnpm vercel:check`   | Deployment env validation (4 required vars, per-var fixes)                                                                                                                                                                                                                             | Before configuring Vercel / part of every deploy                                     |
@@ -73,7 +75,20 @@ summary table (step, pass/fail, duration, exit code):
 4. **build** — `next build` (`--webpack` automatically on Termux, where
    Turbopack has no Android bindings)
 
-Exit code is non-zero if any step fails — CI-friendly.
+Exit code is non-zero if any step fails — mandatory in GitHub Actions CI (`pr-validation.yml`).
+
+## verify:local & verify:fast — lightweight local development gates (DEVOPS-01E)
+
+`scripts/verify-local.mjs` runs fast, memory-safe checks on the VPS without triggering `next build` or launching browsers:
+
+1. **security** — `pnpm security` (secret scanning)
+2. **ai-prompts** — `pnpm check:ai-prompts` (prompt contract verification)
+3. **typecheck** — `pnpm typecheck` (`tsc --noEmit`, type errors without build)
+4. **lint** — `pnpm lint` (`eslint .`, style and React hooks checks; skipped in `--fast`)
+5. **format** — `pnpm format:check` (`prettier --check .`; skipped in `--fast`)
+
+- `pnpm verify:local` — full lightweight gate (~40s).
+- `pnpm verify:fast` — ultra-fast iteration gate (~14s, skips lint/format).
 
 ## doctor — health verification
 
