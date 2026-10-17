@@ -21,4 +21,6 @@ export type BusinessSettingsView = {
   address: string;
   confirmationMode: string;
   cancellationPolicy: string;
+  /** Candidate appointment start-time interval in minutes (UX001-R3). */
+  slotDurationMinutes: number;
 };

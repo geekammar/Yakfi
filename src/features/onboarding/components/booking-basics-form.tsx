@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { BOOKING_INTERVAL_OPTIONS } from "@/lib/validation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeftIcon, ArrowRightIcon, LoaderCircleIcon } from "lucide-react";
@@ -25,7 +26,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 
-const SLOT_OPTIONS = [15, 20, 30, 45, 60, 90, 120];
+const SLOT_OPTIONS = BOOKING_INTERVAL_OPTIONS;
 
 export function BookingBasicsForm({
   defaultValues,

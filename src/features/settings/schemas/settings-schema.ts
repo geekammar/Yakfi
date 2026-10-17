@@ -13,7 +13,7 @@ const TIMEZONE_VALUES = TIMEZONES.map((tz) => tz.value) as [
 ];
 
 /**
- * Business Settings form input (operator PROMPT-09). The client NEVER
+ * Business Settings form input (operator PROMPT-09, UX001-R3). The client NEVER
  * sends a `businessId`, role, or account-state field — the Business is
  * always derived server-side from the authenticated actor. Zod strips
  * every unknown key, so hostile extra fields cannot become trusted
@@ -43,6 +43,20 @@ export const businessSettingsSchema = z.object({
   address: z.string().trim().max(500, "العنوان طويل جداً").optional(),
   // Booking behavior — إعدادات الحجز
   confirmationMode: z.enum(CONFIRMATION_MODE_VALUES, "اختر طريقة تأكيد الحجز"),
+  slotDurationMinutes: z
+    .union(
+      [
+        z.literal(15),
+        z.literal(20),
+        z.literal(30),
+        z.literal(45),
+        z.literal(60),
+        z.literal(90),
+        z.literal(120),
+      ],
+      { error: "اختر فاصلاً زمنياً صالحاً من القائمة" },
+    )
+    .optional(),
   cancellationPolicy: z
     .string({ error: "اكتب سياسة إلغاء مختصرة" })
     .trim()

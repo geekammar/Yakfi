@@ -57,6 +57,7 @@ function toView(business: Business): BusinessSettingsView {
     address: business.address ?? "",
     confirmationMode: business.confirmationMode,
     cancellationPolicy: business.cancellationPolicy ?? "",
+    slotDurationMinutes: business.slotDurationMinutes ?? 30,
   };
 }
 
@@ -114,6 +115,9 @@ export async function updateBusinessSettings(
       address: blankToEmpty(parsed.data.address),
       confirmationMode: parsed.data.confirmationMode,
       cancellationPolicy: parsed.data.cancellationPolicy,
+      ...(parsed.data.slotDurationMinutes !== undefined
+        ? { slotDurationMinutes: parsed.data.slotDurationMinutes }
+        : {}),
     });
     return { success: true };
   } catch {

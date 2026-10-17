@@ -264,6 +264,22 @@ test.describe("Authenticated Preview QA", () => {
     await expect(teamLink).toBeVisible();
     await expect(teamLink).toContainText("إدارة الفريق ومقدمي الخدمة");
 
+    // Verify configurable booking interval selector (UX001-R3)
+    const slotDurationLabel = page.getByText(
+      "الفاصل الزمني بين بدايات المواعيد",
+    );
+    await expect(slotDurationLabel).toBeVisible();
+    const slotDurationHelper = page.getByText(
+      "يحدد عدد الدقائق بين أوقات بدء الحجز المعروضة، ولا يغيّر مدة الخدمة أو المواعيد المحجوزة مسبقًا.",
+    );
+    await expect(slotDurationHelper).toBeVisible();
+    const slotDurationTrigger = page.locator("#settings-slot-duration");
+    await expect(slotDurationTrigger).toBeVisible();
+    const triggerBox = await slotDurationTrigger.boundingBox();
+    if (triggerBox) {
+      expect(triggerBox.height).toBeGreaterThanOrEqual(24);
+    }
+
     // Verify no horizontal overflow
     isOverflowing = await page.evaluate(() => {
       return document.documentElement.scrollWidth > window.innerWidth;
