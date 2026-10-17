@@ -53,6 +53,13 @@ const NO_SLOTS_CONTENT = {
     description: "لا يمكن حجز أي وقت في هذا التاريخ حالياً. جرّب تاريخاً آخر.",
     showServiceAction: false,
   },
+  NO_ELIGIBLE_PROVIDERS: {
+    icon: CalendarXIcon,
+    title: "أضف مقدم خدمة لبدء الحجز",
+    description:
+      "تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل قبل استقبال المواعيد.",
+    showServiceAction: true,
+  },
 } as const;
 
 /** The only label an unselectable candidate ever gets — never a reason. */
@@ -89,7 +96,7 @@ export function SlotStep({
   eligibleProviders = [],
   selectedProviderId = null,
   onSelectProvider,
-  isEligibleProvidersLoading = false,
+  isEligibleProvidersLoading: _isEligibleProvidersLoading = false,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -110,6 +117,7 @@ export function SlotStep({
   onSelectProvider?: (providerId: string | null) => void;
   isEligibleProvidersLoading?: boolean;
 }) {
+  void _isEligibleProvidersLoading;
   const [showAllTimes, setShowAllTimes] = useState(false);
   const [alternativePrompt, setAlternativePrompt] = useState<{
     startTime: string;
@@ -118,8 +126,6 @@ export function SlotStep({
     nearbyTime?: string;
   } | null>(null);
 
-  const isZeroProviders =
-    !isEligibleProvidersLoading && eligibleProviders.length === 0;
   const isMultipleProviders = eligibleProviders.length >= 2;
 
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
@@ -137,7 +143,7 @@ export function SlotStep({
         serviceId,
         ...(excludeAppointmentId ? { excludeAppointmentId } : {}),
       }),
-    enabled: dateIsValid && !isZeroProviders,
+    enabled: dateIsValid,
     retry: 1,
   });
 
@@ -250,17 +256,20 @@ export function SlotStep({
     }
   }, [result, selectedSlot, onSlotUnavailable]);
 
-  // ZERO providers state: clear neutral empty state, no misleading booking times
-  if (isZeroProviders) {
+  // When server determines no eligible providers exist for a provider-aware service:
+  if (
+    emptyReason === "NO_ELIGIBLE_PROVIDERS" ||
+    eligibleProviders.length === 0
+  ) {
     return (
       <EmptyState
         icon={CalendarXIcon}
-        title="لا يوجد موظفون مؤهلون لتقديم هذه الخدمة"
-        description="لا يتوفر أي مزود خدمة مؤهل لتقديم هذه الخدمة حالياً. يمكنك اختيار خدمة أخرى."
+        title="أضف مقدم خدمة لبدء الحجز"
+        description="تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل قبل استقبال المواعيد."
         action={
           <div className="flex flex-wrap justify-center gap-2">
             <Button type="button" size="sm" onClick={onGoToService}>
-              تغيير الخدمة
+              اختيار خدمة أخرى
             </Button>
           </div>
         }
@@ -638,7 +647,12 @@ export function SlotStep({
                               }
                               aria-disabled
                               aria-label={`${formatSlotTime(slot.startTime)} — ${UNAVAILABLE_LABEL}`}
-                              className="flex h-11 min-w-[5.25rem] cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground transition-colors hover:border-border"
+                              className={cn(
+                                "flex h-11 min-w-[5.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground transition-colors",
+                                selectedProviderId
+                                  ? "cursor-pointer hover:border-border"
+                                  : "cursor-not-allowed",
+                              )}
                             >
                               <span className="text-sm tabular-nums line-through">
                                 {formatSlotTime(slot.startTime)}

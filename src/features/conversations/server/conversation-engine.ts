@@ -1338,11 +1338,9 @@ async function completeBookingSelection(
   const initialStatus =
     scope.business.confirmationMode === "automatic" ? "CONFIRMED" : "PENDING";
   const resolvedBranchId = branchId ?? scope.business.defaultBranchId ?? null;
-  const assigneeId = await resolveAssigneeId(
-    deps,
-    scope.business.id,
-    chosen.providerId,
-  );
+  const assigneeId = chosen.providerId
+    ? await resolveAssigneeId(deps, scope.business.id, chosen.providerId)
+    : null;
   if (!resolvedBranchId || !assigneeId) {
     // The booking cannot be routed — the business's branch/assignee setup
     // cannot accept it. An operator can fix this configuration gap.

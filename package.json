@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.46.4",
+  "version": "0.46.5",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -24,6 +24,7 @@
     "check:assistant-style": "tsx scripts/check-assistant-style.ts",
     "check:eligibility": "tsx scripts/check-provider-eligibility.ts",
     "check:booking-options": "tsx scripts/check-booking-options.ts",
+    "check:booking-modes": "tsx scripts/check-booking-modes.ts",
     "check:whatsapp-transport": "tsx scripts/check-whatsapp-transport.ts",
     "check:whatsapp-inbound": "tsx scripts/check-whatsapp-inbound.ts",
     "check:telegram": "tsx scripts/check-telegram.ts",

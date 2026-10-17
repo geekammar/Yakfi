@@ -31,7 +31,7 @@ import type { AvailabilityResult } from "@/features/appointments/types";
  *   authority for the chosen day.
  */
 export type DayCapacityState =
-  "available" | "closed" | "full" | "too-long" | "unknown";
+  "available" | "closed" | "full" | "too-long" | "no-providers" | "unknown";
 
 /** Arabic labels — never rely on color alone to convey the state. */
 export const DAY_CAPACITY_LABELS: Record<
@@ -42,13 +42,19 @@ export const DAY_CAPACITY_LABELS: Record<
   closed: "مغلق",
   full: "ممتلئ",
   "too-long": "غير متاح",
+  "no-providers": "غير متاح",
 };
 
 /** A day is not selectable when the authority reported zero capacity. */
 export function isDayUnselectable(
   state: DayCapacityState,
-): state is "closed" | "full" | "too-long" {
-  return state === "closed" || state === "full" || state === "too-long";
+): state is "closed" | "full" | "too-long" | "no-providers" {
+  return (
+    state === "closed" ||
+    state === "full" ||
+    state === "too-long" ||
+    state === "no-providers"
+  );
 }
 
 /**
@@ -67,5 +73,6 @@ export function dayCapacityState(
   // free capacity) never "closed".
   if (result.reason === "BUSINESS_CLOSED") return "closed";
   if (result.reason === "SERVICE_TOO_LONG") return "too-long";
+  if (result.reason === "NO_ELIGIBLE_PROVIDERS") return "no-providers";
   return "full";
 }

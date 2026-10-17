@@ -257,7 +257,18 @@ export async function resolveBookingOptions(
     reason,
   });
 
-  if (eligible.length === 0) return toEmpty("NO_ELIGIBLE_PROVIDERS");
+  if (eligible.length === 0) {
+    if (providerId) {
+      return {
+        success: false,
+        error: {
+          code: "PROVIDER_NOT_ELIGIBLE",
+          message: PROVIDER_NOT_ELIGIBLE_MESSAGE,
+        },
+      };
+    }
+    return toEmpty("NO_ELIGIBLE_PROVIDERS");
+  }
 
   const scoped = providerId
     ? eligible.filter((provider) => provider.providerId === providerId)

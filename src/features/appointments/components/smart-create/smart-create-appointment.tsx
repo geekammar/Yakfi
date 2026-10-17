@@ -15,6 +15,7 @@ import {
   type RelativeDateOption,
 } from "@/features/appointments/components/smart-create/date-format";
 import { DateStep } from "@/features/appointments/components/smart-create/date-step";
+import { ProviderSetupDialog } from "@/features/appointments/components/smart-create/provider-setup-dialog";
 import {
   ReviewStep,
   getMissingReviewFields,
@@ -32,11 +33,18 @@ import type {
   ReviewCheckState,
   SelectedSlot,
 } from "@/features/appointments/types";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { appointmentDateSchema } from "@/lib/validation";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftIcon, ArrowRightIcon, LoaderCircleIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CalendarXIcon,
+  LoaderCircleIcon,
+  UserPlusIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
@@ -207,6 +215,26 @@ export function SmartCreateAppointment({
     return [];
   }, [eligibleProvidersQuery.data]);
 
+  const [providerSetupOpen, setProviderSetupOpen] = useState(false);
+
+  const isZeroEligibleProviders =
+    Boolean(serviceId) &&
+    eligibleProvidersQuery.isSuccess &&
+    eligibleProviders.length === 0;
+
+  function handleProviderSetupSuccess(newProviderId: string) {
+    if (serviceId) {
+      void queryClient.invalidateQueries({
+        queryKey: ["booking-eligible-providers", serviceId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["booking-availability", serviceId],
+      });
+    }
+    setSelectedProviderId(newProviderId);
+    setScreen("date");
+  }
+
   // Derived active provider ID for the selector UI (resets safely if provider is no longer eligible)
   const activeSelectedProviderId = useMemo(() => {
     if (
@@ -328,9 +356,9 @@ export function SmartCreateAppointment({
       : screen === "service"
         ? serviceId !== null
         : screen === "date"
-          ? dateIsValid
+          ? dateIsValid && !isZeroEligibleProviders
           : screen === "slot"
-            ? selectedSlot !== null
+            ? selectedSlot !== null && !isZeroEligibleProviders
             : reviewIsValid;
 
   function goBack() {
@@ -654,6 +682,37 @@ export function SmartCreateAppointment({
             onSelect={handleSelectService}
             canManageServices={canManageServices}
           />
+        ) : (screen === "date" || screen === "slot") &&
+          isZeroEligibleProviders ? (
+          <EmptyState
+            icon={CalendarXIcon}
+            title="أضف مقدم خدمة لبدء الحجز"
+            description="تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل قبل استقبال المواعيد."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {canManageServices ? (
+                  <Button
+                    type="button"
+                    onClick={() => setProviderSetupOpen(true)}
+                  >
+                    <UserPlusIcon aria-hidden className="size-4" />
+                    إعداد مقدم خدمة
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    اطلب من مدير المنشأة إضافة مقدم خدمة لهذه الخدمة.
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setScreen("service")}
+                >
+                  اختيار خدمة أخرى
+                </Button>
+              </div>
+            }
+          />
         ) : screen === "date" ? (
           <DateStep
             selectedDate={date}
@@ -799,6 +858,16 @@ export function SmartCreateAppointment({
           </>
         )}
       </div>
+
+      {service && canManageServices ? (
+        <ProviderSetupDialog
+          open={providerSetupOpen}
+          onOpenChange={setProviderSetupOpen}
+          serviceId={service.id}
+          serviceName={service.name}
+          onSuccess={handleProviderSetupSuccess}
+        />
+      ) : null}
     </div>
   );
 }

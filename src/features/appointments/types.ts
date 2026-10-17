@@ -103,6 +103,7 @@ export type CreateAppointmentErrorCode =
   | "END_OF_DAY"
   | "SLOT_CONFLICT"
   | "PROVIDER_NOT_ELIGIBLE"
+  | "NO_ELIGIBLE_PROVIDERS"
   | "PAST_TIME"
   | "CREATE_FAILED";
 
@@ -187,11 +188,15 @@ export type BookingContextPrefill = {
   serviceId: string | null;
 };
 
+export type ServiceReadinessStatus = "READY_TO_BOOK" | "SETUP_REQUIRED";
+
 /** Active service option for the booking flow. */
 export type BookingServiceOption = {
   id: string;
   name: string;
   durationMinutes: number;
+  readinessStatus?: ServiceReadinessStatus;
+  eligibleProviderCount?: number;
 };
 
 export type BookingCustomerSearchResult =
@@ -242,7 +247,10 @@ export type AvailabilityData = {
 
 /** Why zero slots exist — present ONLY when `slots` is empty. */
 export type AvailabilityNoSlotsReason =
-  "BUSINESS_CLOSED" | "SERVICE_TOO_LONG" | "FULLY_BOOKED";
+  | "BUSINESS_CLOSED"
+  | "SERVICE_TOO_LONG"
+  | "FULLY_BOOKED"
+  | "NO_ELIGIBLE_PROVIDERS";
 
 export type AvailabilityErrorCode =
   | "INVALID_INPUT"

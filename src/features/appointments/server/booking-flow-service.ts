@@ -30,9 +30,14 @@ import type {
 } from "@/features/appointments/types";
 import type {
   CustomerRepository,
+  ProviderRepository,
   ServiceRepository,
 } from "@/server/repositories";
-import { customerRepository, serviceRepository } from "@/server/repositories";
+import {
+  customerRepository,
+  providerRepository,
+  serviceRepository,
+} from "@/server/repositories";
 import type { UserRole } from "@/types/domain";
 
 /** Authorization context derived from the authenticated session. */
@@ -45,12 +50,14 @@ export type BookingFlowActor = {
 export type BookingFlowServiceDeps = {
   customerRepository: Pick<CustomerRepository, "findById" | "listByBusiness">;
   serviceRepository: Pick<ServiceRepository, "findById" | "listByBusiness">;
+  providerRepository?: Pick<ProviderRepository, "listEligibleForService">;
 };
 
 /** Production dependencies (app singletons). */
 export const defaultBookingFlowServiceDeps: BookingFlowServiceDeps = {
   customerRepository,
   serviceRepository,
+  providerRepository,
 };
 
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
@@ -129,7 +136,27 @@ export async function listBookingServices(
       actor.businessId,
       { rawPagination: { pageSize: 100 } },
     );
-    return services.map(toServiceOption);
+    if (!deps.providerRepository) {
+      return services.map(toServiceOption);
+    }
+    const withEligibility = await Promise.all(
+      services.map(async (service) => {
+        const eligible = await deps.providerRepository!.listEligibleForService(
+          actor.businessId!,
+          service.id,
+        );
+        const count = eligible.length;
+        return {
+          ...toServiceOption(service),
+          eligibleProviderCount: count,
+          readinessStatus:
+            count > 0
+              ? ("READY_TO_BOOK" as const)
+              : ("SETUP_REQUIRED" as const),
+        };
+      }),
+    );
+    return withEligibility;
   } catch {
     return { message: "تعذر تحميل الخدمات الآن، حاول مرة أخرى" };
   }

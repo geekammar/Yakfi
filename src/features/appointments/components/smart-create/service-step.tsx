@@ -75,6 +75,15 @@ export function ServiceStep({
                 {service.name}
               </span>
             </span>
+            {service.readinessStatus === "SETUP_REQUIRED" ? (
+              <span className="shrink-0 rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                تحتاج إعداد
+              </span>
+            ) : service.readinessStatus === "READY_TO_BOOK" ? (
+              <span className="shrink-0 rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                جاهزة للحجز
+              </span>
+            ) : null}
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               <Clock3Icon aria-hidden className="size-3.5" />
               <span className="tabular-nums">{service.durationMinutes}</span>

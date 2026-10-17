@@ -64,7 +64,11 @@ export type AppointmentCreateServiceDeps = {
   serviceRepository: Pick<ServiceRepository, "findById">;
   businessRepository: Pick<BusinessRepository, "findById">;
   branchRepository: Pick<BranchRepository, "findDefaultByBusiness">;
-  appointmentRepository: Pick<AppointmentRepository, "createWithConflictCheck">;
+  appointmentRepository: Pick<
+    AppointmentRepository,
+    "createWithConflictCheck"
+  > &
+    Partial<Pick<AppointmentRepository, "hasConflict">>;
   providerRepository?: Pick<
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
@@ -239,6 +243,67 @@ export async function createAppointmentRecord(
       };
     }
     assignedUserId = seam.userId;
+  } else if (deps.providerRepository) {
+    const eligible = await deps.providerRepository.listEligibleForService(
+      actor.businessId,
+      service.id,
+    );
+    if (eligible.length === 0) {
+      return {
+        success: false,
+        code: "NO_ELIGIBLE_PROVIDERS",
+        message:
+          "تحتاج هذه الخدمة إلى مقدم خدمة مؤهل واحد على الأقل قبل استقبال المواعيد",
+      };
+    }
+    if (eligible.length === 1 && eligible[0]) {
+      // Automatically selects the provider when exactly one is eligible
+      const seams = await deps.providerRepository.listAssignmentSeams(
+        actor.businessId,
+        [eligible[0].id],
+      );
+      const seam = seams.find((s) => s.providerId === eligible[0]?.id);
+      if (seam?.userId) {
+        assignedUserId = seam.userId;
+      } else {
+        return {
+          success: false,
+          code: "PROVIDER_NOT_ELIGIBLE",
+          message: "هذا المزود غير متاح لهذه الخدمة",
+        };
+      }
+    } else if (eligible.length > 1) {
+      // Multiple eligible providers with no explicit preference: pick first available
+      const seams = await deps.providerRepository.listAssignmentSeams(
+        actor.businessId,
+        eligible.map((p) => p.id),
+      );
+      let pickedAssigneeId: string | null = null;
+      for (const seam of seams) {
+        if (!seam.userId) continue;
+        const isConflicted = deps.appointmentRepository.hasConflict
+          ? await deps.appointmentRepository.hasConflict({
+              businessId: actor.businessId,
+              date: parsed.data.date,
+              startTime: parsed.data.startTime,
+              endTime,
+              assignedUserId: seam.userId,
+            })
+          : false;
+        if (!isConflicted) {
+          pickedAssigneeId = seam.userId;
+          break;
+        }
+      }
+      if (!pickedAssigneeId) {
+        return {
+          success: false,
+          code: "SLOT_CONFLICT",
+          message: "الوقت المطلوب غير متاح حالياً",
+        };
+      }
+      assignedUserId = pickedAssigneeId;
+    }
   }
 
   const initialStatus =
@@ -250,7 +315,9 @@ export async function createAppointmentRecord(
         businessId: actor.businessId,
         customerId: customer.id,
         serviceId: service.id,
-        branchId: defaultBranch.id,
+        branchId: defaultBranch
+          ? defaultBranch.id
+          : (null as unknown as string),
         assignedUserId: assignedUserId ?? (null as unknown as string),
         date: parsed.data.date,
         startTime: parsed.data.startTime,

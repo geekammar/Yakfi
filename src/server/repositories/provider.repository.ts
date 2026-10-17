@@ -101,6 +101,30 @@ export class ProviderRepository {
   }
 
   /**
+   * Returns true if the business has configured any provider profiles
+   * (including inactive ones, so established provider-aware businesses
+   * are never silently downgraded to basic booking).
+   */
+  async hasConfiguredProviders(businessId: string): Promise<boolean> {
+    const count = await db.providerProfile.count({
+      where: { businessId },
+    });
+    return count > 0;
+  }
+
+  async countProfilesByBusiness(
+    businessId: string,
+    options?: { includeInactive?: boolean },
+  ): Promise<number> {
+    return db.providerProfile.count({
+      where: {
+        businessId,
+        ...(options?.includeInactive ? {} : { isActive: true }),
+      },
+    });
+  }
+
+  /**
    * Creates a ProviderProfile for a Business member. The User must
    * belong to the SAME Business — a provider profile can never be
    * attached to another tenant's user. One profile per user (unique).

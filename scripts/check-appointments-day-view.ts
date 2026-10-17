@@ -229,8 +229,20 @@ async function main(): Promise<void> {
     DAY_CAPACITY_LABELS.closed.length > 0 &&
       DAY_CAPACITY_LABELS.full.length > 0 &&
       DAY_CAPACITY_LABELS["too-long"].length > 0 &&
+      DAY_CAPACITY_LABELS["no-providers"].length > 0 &&
       eq(DAY_CAPACITY_LABELS.closed, "مغلق") &&
       eq(DAY_CAPACITY_LABELS.full, "ممتلئ"),
+  );
+  check(
+    "3i a NO_ELIGIBLE_PROVIDERS day is no-providers (not falsely «ممتلئ»)",
+    eq(
+      dayCapacityState({
+        success: true,
+        data: { ...slotsResult([]).data, slots: [] },
+        reason: "NO_ELIGIBLE_PROVIDERS",
+      }),
+      "no-providers",
+    ) && isDayUnselectable("no-providers"),
   );
 
   // The date step paints capacity from the authority result ONLY — no
