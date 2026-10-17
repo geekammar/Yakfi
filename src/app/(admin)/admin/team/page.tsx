@@ -3,6 +3,7 @@ import { listInvitations } from "@/features/invitations/server/invitation-servic
 import { TeamScreen } from "@/features/staff/components/team-screen";
 import {
   defaultTeamServiceDeps,
+  listProviders,
   listTeam,
   type TeamActor,
 } from "@/features/staff/server/team-service";
@@ -10,6 +11,7 @@ import type { TeamInvitationItem } from "@/features/staff/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageHeader } from "@/components/shared/page-header";
 import { requireRole } from "@/server/auth/guards";
+import { branchRepository, serviceRepository } from "@/server/repositories";
 
 import { CircleAlertIcon } from "lucide-react";
 import type { Metadata } from "next";
@@ -17,39 +19,50 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "الفريق",
+  title: "إدارة الفريق ومقدمي الخدمة",
 };
 
 /**
- * Team management (PROMPT-16) — ADMIN-only (STAFF is redirected by the
- * `(admin)` guard). The route composes two features: the staff
- * feature's team directory (members + activation states) and the
- * invitations feature's open-invitation listing + invite dialog
- * (feature isolation preserved — composition happens here, at the
- * route layer). The Business is ALWAYS the actor's own, derived from
- * the authenticated session; the service layers enforce role + tenant
- * scoping server-side.
+ * Team and provider management (STAFF-PROVIDER-01) — ADMIN-only.
+ * The route composes:
+ * 1. Staff directory & invitations
+ * 2. Independent service provider management
  */
 export default async function TeamPage() {
   const session = await requireRole("ADMIN");
   if (!session.user.businessId) redirect("/onboarding");
+  const businessId: string = session.user.businessId;
 
   const actor: TeamActor = {
     userId: session.user.id,
-    role: "ADMIN", // asserted by the guard above
-    businessId: session.user.businessId,
+    role: "ADMIN",
+    businessId,
   };
 
-  const [memberResult, invitationResult] = await Promise.all([
-    listTeam(defaultTeamServiceDeps, actor),
-    listInvitations({ businessId: actor.businessId }),
-  ]);
+  const [memberResult, invitationResult, providerResult, services, branches] =
+    await Promise.all([
+      listTeam(defaultTeamServiceDeps, actor),
+      listInvitations({ businessId }),
+      listProviders(defaultTeamServiceDeps, actor),
+      serviceRepository.listByBusiness(businessId, {
+        includeInactive: false,
+      }),
+      branchRepository.listByBusiness(businessId),
+    ]);
 
-  if (!memberResult.success || !invitationResult.success) {
+  if (
+    !memberResult.success ||
+    !invitationResult.success ||
+    !providerResult.success
+  ) {
     // Honest failure state — never an empty list pretending success.
     return (
       <div className="animate-fade-in-up space-y-6">
-        <PageHeader title="الفريق" description="فريق منشأتك وأدوارهم." />
+        <PageHeader
+          title="إدارة الفريق ومقدمي الخدمة"
+          description="فريق منشأتك ومقدمو الخدمات وإعداداتهم."
+        />
+
         <EmptyState
           className="bg-card min-h-72"
           icon={CircleAlertIcon}
@@ -93,6 +106,9 @@ export default async function TeamPage() {
     <TeamScreen
       members={memberResult.members}
       invitations={invitations}
+      providers={providerResult.providers}
+      services={services.map((s) => ({ id: s.id, name: s.name }))}
+      branches={branches.map((b) => ({ id: b.id, name: b.name }))}
       currentUserId={session.user.id}
       InviteDialog={StaffInviteDialog}
     />

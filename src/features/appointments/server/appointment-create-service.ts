@@ -210,6 +210,8 @@ export async function createAppointmentRecord(
 
   // Resolve explicit provider selection server-side (never use actor.userId)
   let assignedUserId: string | null = null;
+  let providerId: string | null = null;
+
   if (parsed.data.providerId) {
     if (!deps.providerRepository) {
       return {
@@ -230,19 +232,15 @@ export async function createAppointmentRecord(
         message: "هذا المزود غير متاح لهذه الخدمة",
       };
     }
+    providerId = matched.id;
     const seams = await deps.providerRepository.listAssignmentSeams(
       actor.businessId,
       [parsed.data.providerId],
     );
     const seam = seams.find((s) => s.providerId === parsed.data.providerId);
-    if (!seam || !seam.userId) {
-      return {
-        success: false,
-        code: "PROVIDER_NOT_ELIGIBLE",
-        message: "هذا المزود غير متاح لهذه الخدمة",
-      };
+    if (seam?.userId) {
+      assignedUserId = seam.userId;
     }
-    assignedUserId = seam.userId;
   } else if (deps.providerRepository) {
     const eligible = await deps.providerRepository.listEligibleForService(
       actor.businessId,
@@ -258,6 +256,7 @@ export async function createAppointmentRecord(
     }
     if (eligible.length === 1 && eligible[0]) {
       // Automatically selects the provider when exactly one is eligible
+      providerId = eligible[0].id;
       const seams = await deps.providerRepository.listAssignmentSeams(
         actor.businessId,
         [eligible[0].id],
@@ -265,12 +264,6 @@ export async function createAppointmentRecord(
       const seam = seams.find((s) => s.providerId === eligible[0]?.id);
       if (seam?.userId) {
         assignedUserId = seam.userId;
-      } else {
-        return {
-          success: false,
-          code: "PROVIDER_NOT_ELIGIBLE",
-          message: "هذا المزود غير متاح لهذه الخدمة",
-        };
       }
     } else if (eligible.length > 1) {
       // Multiple eligible providers with no explicit preference: pick first available
@@ -278,30 +271,35 @@ export async function createAppointmentRecord(
         actor.businessId,
         eligible.map((p) => p.id),
       );
+      const seamMap = new Map(seams.map((s) => [s.providerId, s.userId]));
+      let pickedProviderId: string | null = null;
       let pickedAssigneeId: string | null = null;
-      for (const seam of seams) {
-        if (!seam.userId) continue;
+      for (const p of eligible) {
+        const seamUserId = seamMap.get(p.id);
         const isConflicted = deps.appointmentRepository.hasConflict
           ? await deps.appointmentRepository.hasConflict({
               businessId: actor.businessId,
               date: parsed.data.date,
               startTime: parsed.data.startTime,
               endTime,
-              assignedUserId: seam.userId,
+              providerId: p.id,
+              assignedUserId: seamUserId ?? null,
             })
           : false;
         if (!isConflicted) {
-          pickedAssigneeId = seam.userId;
+          pickedProviderId = p.id;
+          pickedAssigneeId = seamUserId ?? null;
           break;
         }
       }
-      if (!pickedAssigneeId) {
+      if (!pickedProviderId) {
         return {
           success: false,
           code: "SLOT_CONFLICT",
           message: "الوقت المطلوب غير متاح حالياً",
         };
       }
+      providerId = pickedProviderId;
       assignedUserId = pickedAssigneeId;
     }
   }
@@ -319,6 +317,7 @@ export async function createAppointmentRecord(
           ? defaultBranch.id
           : (null as unknown as string),
         assignedUserId: assignedUserId ?? (null as unknown as string),
+        providerId: providerId ?? (null as unknown as string),
         date: parsed.data.date,
         startTime: parsed.data.startTime,
         endTime,

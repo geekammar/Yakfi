@@ -17,7 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { AlertCircleIcon, Loader2Icon, UserPlusIcon } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 export function ProviderSetupDialog({
@@ -36,6 +35,7 @@ export function ProviderSetupDialog({
   const [users, setUsers] = useState<
     Array<{ id: string; name: string; email: string }>
   >([]);
+  const [name, setName] = useState<string>("");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [displayName, setDisplayName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +45,9 @@ export function ProviderSetupDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setError(null);
+      setName("");
+      setSelectedUserId("");
+      setDisplayName("");
     }
     onOpenChange(nextOpen);
   }
@@ -60,10 +63,6 @@ export function ProviderSetupDialog({
       setIsLoading(false);
       if (res.success) {
         setUsers(res.users);
-        if (res.users.length > 0 && res.users[0]) {
-          setSelectedUserId(res.users[0].id);
-          setDisplayName(res.users[0].name);
-        }
       } else {
         setError(res.message);
       }
@@ -77,21 +76,24 @@ export function ProviderSetupDialog({
     setSelectedUserId(userId);
     const chosen = users.find((u) => u.id === userId);
     if (chosen) {
+      if (!name) setName(chosen.name);
       setDisplayName(chosen.name);
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedUserId) {
-      setError("يرجى اختيار عضو من الفريق");
+    const finalName = name.trim();
+    if (!finalName && !selectedUserId) {
+      setError("يرجى إدخال اسم مقدم الخدمة أو اختيار عضو من الفريق");
       return;
     }
     setIsSubmitting(true);
     setError(null);
     try {
       const res = await setupServiceProviderAction({
-        userId: selectedUserId,
+        name: finalName || undefined,
+        userId: selectedUserId || undefined,
         displayName: displayName.trim() || undefined,
         serviceId,
       });
@@ -117,7 +119,7 @@ export function ProviderSetupDialog({
             إعداد مقدم خدمة
           </DialogTitle>
           <DialogDescription>
-            اربط عضواً من الفريق بخدمة &laquo;{serviceName}&raquo; لبدء استقبال
+            أضف مقدم خدمة لخدمة &laquo;{serviceName}&raquo; لبدء استقبال
             المواعيد.
           </DialogDescription>
         </DialogHeader>
@@ -132,35 +134,47 @@ export function ProviderSetupDialog({
         {isLoading ? (
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
             <Loader2Icon className="size-5 animate-spin" />
-            <span className="mr-2">جاري تحميل أعضاء الفريق...</span>
-          </div>
-        ) : users.length === 0 ? (
-          <div className="space-y-4 py-4 text-center">
-            <p className="text-sm text-muted-foreground">
-              لا يوجد أعضاء في الفريق حالياً. يمكنك دعوة عضو جديد لإعداده كمقدم
-              خدمة.
-            </p>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/admin/team">الانتقال لإدارة الفريق</Link>
-            </Button>
+            <span className="mr-2">جاري التحميل...</span>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="provider-user-select">عضو الفريق</Label>
-              <select
-                id="provider-user-select"
-                value={selectedUserId}
-                onChange={(e) => handleUserChange(e.target.value)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.email})
-                  </option>
-                ))}
-              </select>
+              <Label htmlFor="provider-name">
+                اسم مقدم الخدمة <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="provider-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="مثال: د. أحمد أو سارة محمد"
+                required
+              />
             </div>
+
+            {users.length > 0 ? (
+              <div className="space-y-2">
+                <Label htmlFor="provider-user-select">
+                  ربط بحساب من الفريق (اختياري)
+                </Label>
+                <select
+                  id="provider-user-select"
+                  value={selectedUserId}
+                  onChange={(e) => handleUserChange(e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">بدون ربط (مقدم خدمة مستقل)</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  يمكن لمقدم الخدمة أن يكون مستقلاً دون الحاجة لحساب مستخدم أو
+                  بريد إلكتروني.
+                </p>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="provider-display-name">
@@ -181,7 +195,7 @@ export function ProviderSetupDialog({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleOpenChange(false)}
                 disabled={isSubmitting}
               >
                 إلغاء

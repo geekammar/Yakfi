@@ -67,7 +67,8 @@ export async function listAssignableUsersAction(): Promise<
  * ADMIN-only action.
  */
 export async function setupServiceProviderAction(input: {
-  userId: string;
+  name?: string;
+  userId?: string;
   displayName?: string;
   serviceId: string;
 }): Promise<
@@ -82,41 +83,57 @@ export async function setupServiceProviderAction(input: {
   }
   const businessId = session.user.businessId;
 
-  // Validate user belongs to the same business
-  const user = await userRepository.findById(input.userId);
-  if (!user || user.businessId !== businessId || !user.isActive) {
-    return { success: false, message: "الموظف غير موجود أو غير نشط" };
-  }
-
   // Validate service belongs to the same business
-  const { serviceRepository, branchRepository } =
+  const { serviceRepository, branchRepository, providerRepository } =
     await import("@/server/repositories");
   const service = await serviceRepository.findById(input.serviceId);
   if (!service || service.businessId !== businessId || !service.isActive) {
     return { success: false, message: "الخدمة غير موجودة أو غير نشطة" };
   }
 
-  // Find existing profile or create one
-  const { providerRepository } = await import("@/server/repositories");
-  let profile = await providerRepository.findProfileByUser(user.id);
-  if (!profile) {
+  let profile = null;
+  if (input.userId) {
+    // Validate user belongs to the same business
+    const user = await userRepository.findById(input.userId);
+    if (!user || user.businessId !== businessId || !user.isActive) {
+      return { success: false, message: "الموظف غير موجود أو غير نشط" };
+    }
+    profile = await providerRepository.findProfileByUser(user.id);
+    if (!profile) {
+      profile = await providerRepository.createProfile(businessId, {
+        name: input.name?.trim() || user.name,
+        userId: user.id,
+        displayName: input.displayName?.trim() || user.name,
+        servicePolicy: "ALL_SERVICES",
+      });
+    }
+  } else if (input.name?.trim()) {
     profile = await providerRepository.createProfile(businessId, {
-      userId: user.id,
-      displayName: input.displayName?.trim() || user.name,
+      name: input.name.trim(),
+      displayName: input.displayName?.trim() || undefined,
+      servicePolicy: "ALL_SERVICES",
     });
+  } else {
+    return {
+      success: false,
+      message: "يرجى تحديد اسم مقدم الخدمة أو اختيار عضو من الفريق",
+    };
   }
+
   if (!profile) {
     return { success: false, message: "تعذر إنشاء مِلف مقدم الخدمة" };
   }
 
-  // Link to service
-  const serviceLink = await providerRepository.addServiceEligibility(
-    businessId,
-    profile.id,
-    service.id,
-  );
-  if (!serviceLink.ok && serviceLink.code !== "ALREADY_LINKED") {
-    return { success: false, message: "تعذر ربط مقدم الخدمة بالخدمة" };
+  // If profile is on SPECIFIC_SERVICES, explicitly link the service
+  if (profile.servicePolicy === "SPECIFIC_SERVICES") {
+    const serviceLink = await providerRepository.addServiceEligibility(
+      businessId,
+      profile.id,
+      service.id,
+    );
+    if (!serviceLink.ok && serviceLink.code !== "ALREADY_LINKED") {
+      return { success: false, message: "تعذر ربط مقدم الخدمة بالخدمة" };
+    }
   }
 
   // Link to default branch if exists

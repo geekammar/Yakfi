@@ -11,14 +11,33 @@
  * workflow logic can be verified without a live database.
  */
 
-import { setTeamMemberActiveSchema } from "@/features/staff/schemas/team-schema";
+import {
+  createProviderSchema,
+  setTeamMemberActiveSchema,
+  toggleProviderActiveSchema,
+  updateProviderSchema,
+} from "@/features/staff/schemas/team-schema";
 import type {
+  ProviderItem,
+  ProviderListResult,
+  ProviderMutationResult,
   SetTeamMemberActiveResult,
   TeamListResult,
   TeamMemberItem,
 } from "@/features/staff/types";
-import type { UserRepository } from "@/server/repositories";
-import { userRepository } from "@/server/repositories";
+import type {
+  BranchRepository,
+  ProviderRepository,
+  ServiceRepository,
+  UserRepository,
+} from "@/server/repositories";
+import {
+  branchRepository,
+  providerRepository,
+  serviceRepository,
+  userRepository,
+} from "@/server/repositories";
+import type { ProviderWithDetails } from "@/server/repositories/provider.repository";
 import type { UserRole } from "@/types/domain";
 
 /** Authorization context derived from the authenticated session. */
@@ -30,11 +49,25 @@ export type TeamActor = {
 
 export type TeamServiceDeps = {
   users: Pick<UserRepository, "listByBusiness" | "findById" | "setActive">;
+  providers?: Pick<
+    ProviderRepository,
+    | "listWithDetailsByBusiness"
+    | "findProfileWithinBusiness"
+    | "createProfile"
+    | "updateProfile"
+    | "setServiceExclusions"
+    | "setBranchEligibility"
+  >;
+  branches?: Pick<BranchRepository, "listByBusiness">;
+  services?: Pick<ServiceRepository, "listByBusiness">;
 };
 
 /** Production dependencies (app singletons). */
 export const defaultTeamServiceDeps: TeamServiceDeps = {
   users: userRepository,
+  providers: providerRepository,
+  branches: branchRepository,
+  services: serviceRepository,
 };
 
 const FORBIDDEN_MESSAGE = "إدارة الفريق متاحة للمدير فقط";
@@ -150,5 +183,205 @@ export async function setTeamMemberActive(
       code: "UPDATE_FAILED",
       message: UPDATE_FAILED_MESSAGE,
     };
+  }
+}
+
+function toProviderItem(p: ProviderWithDetails): ProviderItem {
+  return {
+    id: p.id,
+    name: p.name || p.displayName || p.user?.name || "مقدم خدمة",
+    displayName: p.displayName,
+    servicePolicy: p.servicePolicy as "ALL_SERVICES" | "SPECIFIC_SERVICES",
+    isActive: p.isActive,
+    userId: p.userId,
+    user: p.user
+      ? { id: p.user.id, name: p.user.name, email: p.user.email }
+      : null,
+    branchId: p.branches[0]?.branchId ?? null,
+    branchName: p.branches[0]?.branch?.name ?? null,
+    excludedServiceIds: p.exclusions.map((e) => e.serviceId),
+    excludedServiceNames: p.exclusions.map((e) => e.service.name),
+    includedServiceIds: p.services.map((s) => s.serviceId),
+    includedServiceNames: p.services.map((s) => s.service.name),
+  };
+}
+
+/** List all service providers for the actor's Business — ADMIN-only read. */
+export async function listProviders(
+  deps: TeamServiceDeps,
+  actor: TeamActor,
+): Promise<ProviderListResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) return { success: false, message: scope.message };
+
+  try {
+    const providersRepo = deps.providers ?? providerRepository;
+    const providers = await providersRepo.listWithDetailsByBusiness(
+      scope.businessId,
+    );
+    return { success: true, providers: providers.map(toProviderItem) };
+  } catch {
+    return { success: false, message: "تعذر تحميل مقدمي الخدمة الآن" };
+  }
+}
+
+/** Create a new service provider (independent or user-linked) — ADMIN-only. */
+export async function createProvider(
+  deps: TeamServiceDeps,
+  actor: TeamActor,
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) return { success: false, message: scope.message };
+
+  const parsed = createProviderSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      message:
+        parsed.error.issues[0]?.message ?? "بيانات مقدم الخدمة غير صالحة",
+    };
+  }
+
+  try {
+    const providersRepo = deps.providers ?? providerRepository;
+    const profile = await providersRepo.createProfile(scope.businessId, {
+      name: parsed.data.name,
+      displayName: parsed.data.displayName ?? undefined,
+      userId: parsed.data.userId,
+      servicePolicy: parsed.data.servicePolicy,
+      isActive: parsed.data.isActive,
+    });
+    if (!profile) {
+      return { success: false, message: "تعذر إنشاء مقدم الخدمة" };
+    }
+
+    if (parsed.data.excludedServiceIds) {
+      await providersRepo.setServiceExclusions(
+        scope.businessId,
+        profile.id,
+        parsed.data.excludedServiceIds,
+      );
+    }
+
+    if (parsed.data.branchId) {
+      await providersRepo.setBranchEligibility(
+        scope.businessId,
+        profile.id,
+        parsed.data.branchId,
+      );
+    }
+
+    const all = await providersRepo.listWithDetailsByBusiness(scope.businessId);
+    const created = all.find((p) => p.id === profile.id);
+    if (!created) {
+      return { success: false, message: "تعذر تحميل مقدم الخدمة بعد إنشائه" };
+    }
+
+    return { success: true, provider: toProviderItem(created) };
+  } catch {
+    return { success: false, message: "تعذر إنشاء مقدم الخدمة الآن" };
+  }
+}
+
+/** Update an existing service provider — ADMIN-only. */
+export async function updateProvider(
+  deps: TeamServiceDeps,
+  actor: TeamActor,
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) return { success: false, message: scope.message };
+
+  const parsed = updateProviderSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: parsed.error.issues[0]?.message ?? "بيانات التعديل غير صالحة",
+    };
+  }
+
+  try {
+    const providersRepo = deps.providers ?? providerRepository;
+    const profile = await providersRepo.updateProfile(
+      parsed.data.providerId,
+      scope.businessId,
+      {
+        name: parsed.data.name,
+        displayName: parsed.data.displayName,
+        userId: parsed.data.userId,
+        servicePolicy: parsed.data.servicePolicy,
+        isActive: parsed.data.isActive,
+      },
+    );
+    if (!profile) {
+      return { success: false, message: "مقدم الخدمة غير موجود" };
+    }
+
+    if (parsed.data.excludedServiceIds !== undefined) {
+      await providersRepo.setServiceExclusions(
+        scope.businessId,
+        profile.id,
+        parsed.data.excludedServiceIds,
+      );
+    }
+
+    if (parsed.data.branchId !== undefined) {
+      await providersRepo.setBranchEligibility(
+        scope.businessId,
+        profile.id,
+        parsed.data.branchId,
+      );
+    }
+
+    const all = await providersRepo.listWithDetailsByBusiness(scope.businessId);
+    const updated = all.find((p) => p.id === profile.id);
+    if (!updated) {
+      return { success: false, message: "تعذر تحميل بيانات مقدم الخدمة" };
+    }
+
+    return { success: true, provider: toProviderItem(updated) };
+  } catch {
+    return { success: false, message: "تعذر تحديث بيانات مقدم الخدمة الآن" };
+  }
+}
+
+/** Toggle active status for a service provider — ADMIN-only. */
+export async function setProviderActive(
+  deps: TeamServiceDeps,
+  actor: TeamActor,
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) return { success: false, message: scope.message };
+
+  const parsed = toggleProviderActiveSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: parsed.error.issues[0]?.message ?? "الطلب غير صالح",
+    };
+  }
+
+  try {
+    const providersRepo = deps.providers ?? providerRepository;
+    const profile = await providersRepo.updateProfile(
+      parsed.data.providerId,
+      scope.businessId,
+      { isActive: parsed.data.isActive },
+    );
+    if (!profile) {
+      return { success: false, message: "مقدم الخدمة غير موجود" };
+    }
+
+    const all = await providersRepo.listWithDetailsByBusiness(scope.businessId);
+    const updated = all.find((p) => p.id === profile.id);
+    if (!updated) {
+      return { success: false, message: "تعذر تحميل بيانات مقدم الخدمة" };
+    }
+
+    return { success: true, provider: toProviderItem(updated) };
+  } catch {
+    return { success: false, message: "تعذر تعديل حالة مقدم الخدمة الآن" };
   }
 }

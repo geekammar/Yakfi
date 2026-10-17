@@ -157,16 +157,20 @@ async function main(): Promise<void> {
   type LooseWhere = {
     businessId?: string;
     isActive?: boolean;
-    services?: {
-      some?: {
-        serviceId?: string;
-        service?: {
-          businessId?: string;
-          isActive?: boolean;
-          deletedAt?: Date | null;
+    OR?: Array<{
+      servicePolicy?: string;
+      exclusions?: { none?: { serviceId?: string } };
+      services?: {
+        some?: {
+          serviceId?: string;
+          service?: {
+            businessId?: string;
+            isActive?: boolean;
+            deletedAt?: Date | null;
+          };
         };
       };
-    };
+    }>;
     branches?: {
       some?: {
         branchId?: string;
@@ -187,31 +191,40 @@ async function main(): Promise<void> {
   );
   // Rule 2: the provider must be active.
   check("الاستعلام يشترط مزوداً نشطاً", whereNoBranch.isActive === true);
+
+  const allServicesBranch = whereNoBranch.OR?.find(
+    (b) => b.servicePolicy === "ALL_SERVICES",
+  );
+  const specificServicesBranch = whereNoBranch.OR?.find(
+    (b) => b.servicePolicy === "SPECIFIC_SERVICES",
+  );
+
   // Rules 5/3/4: the ProviderService relation + the Service's own validity.
   check(
-    "الاستعلام يشترط علاقة ProviderService بالخدمة المطلوبة",
-    whereNoBranch.services?.some?.serviceId === SERVICE_A,
+    "الاستعلام يشترط سياسة ALL_SERVICES واستبعاد الاستثناءات أو علاقة ProviderService",
+    allServicesBranch?.exclusions?.none?.serviceId === SERVICE_A &&
+      specificServicesBranch?.services?.some?.serviceId === SERVICE_A,
   );
   check(
     "علاقة الأهلية ترفض خدمة منشأة أخرى",
-    whereNoBranch.services?.some?.service?.businessId === BUSINESS_A,
+    specificServicesBranch?.services?.some?.service?.businessId === BUSINESS_A,
   );
   check(
     "علاقة الأهلية تشترط خدمة نشطة وغير محذوفة",
-    whereNoBranch.services?.some?.service?.isActive === true &&
-      whereNoBranch.services?.some?.service?.deletedAt === null,
+    specificServicesBranch?.services?.some?.service?.isActive === true &&
+      specificServicesBranch?.services?.some?.service?.deletedAt === null,
   );
   // Rule 6 (no Branch scope): ProviderBranch must NOT be required.
   check(
     "بدون نطاق فرع لا يُشترط ProviderBranch",
     whereNoBranch.branches === undefined,
   );
-  // Rule 9: the filter is an existence filter (some), never a join —
+  // Rule 9: the filter is an existence filter (some/none), never a join —
   // a repeated relation cannot multiply provider rows.
   check(
     "مرشح الأهلية وجودي (some) — صف فريد لكل مزود",
-    whereNoBranch.services?.some !== undefined &&
-      !Array.isArray(whereNoBranch.services.some),
+    specificServicesBranch?.services?.some !== undefined &&
+      !Array.isArray(specificServicesBranch.services.some),
   );
 
   const whereBranch = eligibleProvidersWhere(BUSINESS_A, SERVICE_A, {

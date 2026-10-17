@@ -1,11 +1,19 @@
 "use server";
 
 import {
+  createProvider,
   defaultTeamServiceDeps,
+  listProviders,
+  setProviderActive,
   setTeamMemberActive,
+  updateProvider,
   type TeamActor,
 } from "@/features/staff/server/team-service";
-import type { SetTeamMemberActiveResult } from "@/features/staff/types";
+import type {
+  ProviderListResult,
+  ProviderMutationResult,
+  SetTeamMemberActiveResult,
+} from "@/features/staff/types";
 import { requireUser } from "@/server/auth/guards";
 import { userRepository } from "@/server/repositories";
 
@@ -37,6 +45,56 @@ export async function setTeamMemberActiveAction(
   input: unknown,
 ): Promise<SetTeamMemberActiveResult> {
   const result = await setTeamMemberActive(
+    defaultTeamServiceDeps,
+    await currentActor(),
+    input,
+  );
+  if (result.success) {
+    revalidatePath("/admin/team");
+  }
+  return result;
+}
+
+/** List providers for the current business — ADMIN-only. */
+export async function listProvidersAction(): Promise<ProviderListResult> {
+  return listProviders(defaultTeamServiceDeps, await currentActor());
+}
+
+/** Create a new service provider — ADMIN-only. */
+export async function createProviderAction(
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const result = await createProvider(
+    defaultTeamServiceDeps,
+    await currentActor(),
+    input,
+  );
+  if (result.success) {
+    revalidatePath("/admin/team");
+  }
+  return result;
+}
+
+/** Update an existing service provider — ADMIN-only. */
+export async function updateProviderAction(
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const result = await updateProvider(
+    defaultTeamServiceDeps,
+    await currentActor(),
+    input,
+  );
+  if (result.success) {
+    revalidatePath("/admin/team");
+  }
+  return result;
+}
+
+/** Toggle active status of a service provider — ADMIN-only. */
+export async function setProviderActiveAction(
+  input: unknown,
+): Promise<ProviderMutationResult> {
+  const result = await setProviderActive(
     defaultTeamServiceDeps,
     await currentActor(),
     input,

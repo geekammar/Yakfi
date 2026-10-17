@@ -228,7 +228,15 @@ export class AppointmentRepository {
   }
 
   async create(input: CreateAppointmentDto): Promise<Appointment> {
-    const { date, startTime, endTime, assignedUserId, notes, ...rest } = input;
+    const {
+      date,
+      startTime,
+      endTime,
+      assignedUserId,
+      providerId,
+      notes,
+      ...rest
+    } = input;
     return db.appointment.create({
       data: {
         ...rest,
@@ -236,6 +244,7 @@ export class AppointmentRepository {
         startTime: toTime(startTime),
         endTime: toTime(endTime),
         ...(assignedUserId != null ? { assignedUserId } : {}),
+        ...(providerId != null ? { providerId } : {}),
         ...(notes !== undefined ? { notes } : {}),
       },
     });
@@ -250,7 +259,15 @@ export class AppointmentRepository {
   async createWithConflictCheck(
     input: CreateAppointmentDto,
   ): Promise<Appointment | null> {
-    const { date, startTime, endTime, assignedUserId, notes, ...rest } = input;
+    const {
+      date,
+      startTime,
+      endTime,
+      assignedUserId,
+      providerId,
+      notes,
+      ...rest
+    } = input;
     return withSerializableRetry(() =>
       db.$transaction(
         async (tx) => {
@@ -260,9 +277,13 @@ export class AppointmentRepository {
               ...notDeleted,
               date: toDate(date),
               status: { in: ["PENDING", "CONFIRMED"] },
-              ...(assignedUserId
+              ...(providerId || assignedUserId
                 ? {
-                    OR: [{ assignedUserId }, { assignedUserId: null }],
+                    OR: [
+                      ...(providerId ? [{ providerId }] : []),
+                      ...(assignedUserId ? [{ assignedUserId }] : []),
+                      { providerId: null, assignedUserId: null },
+                    ],
                   }
                 : {}),
               startTime: { lt: toTime(endTime) },
@@ -278,6 +299,7 @@ export class AppointmentRepository {
               startTime: toTime(startTime),
               endTime: toTime(endTime),
               ...(assignedUserId != null ? { assignedUserId } : {}),
+              ...(providerId != null ? { providerId } : {}),
               ...(notes !== undefined ? { notes } : {}),
             },
           });
@@ -293,7 +315,15 @@ export class AppointmentRepository {
   }
 
   async update(id: string, input: UpdateAppointmentDto): Promise<Appointment> {
-    const { date, startTime, endTime, assignedUserId, notes, ...rest } = input;
+    const {
+      date,
+      startTime,
+      endTime,
+      assignedUserId,
+      providerId,
+      notes,
+      ...rest
+    } = input;
     return db.appointment.update({
       where: { id },
       data: {
@@ -302,6 +332,7 @@ export class AppointmentRepository {
         ...(startTime !== undefined ? { startTime: toTime(startTime) } : {}),
         ...(endTime !== undefined ? { endTime: toTime(endTime) } : {}),
         ...(assignedUserId !== undefined ? { assignedUserId } : {}),
+        ...(providerId !== undefined ? { providerId } : {}),
         ...(notes !== undefined ? { notes } : {}),
       },
     });
@@ -330,11 +361,16 @@ export class AppointmentRepository {
               id: { not: id },
               date: toDate(input.date),
               status: { in: ["PENDING", "CONFIRMED"] },
-              ...(appointment.assignedUserId
+              ...(appointment.providerId || appointment.assignedUserId
                 ? {
                     OR: [
-                      { assignedUserId: appointment.assignedUserId },
-                      { assignedUserId: null },
+                      ...(appointment.providerId
+                        ? [{ providerId: appointment.providerId }]
+                        : []),
+                      ...(appointment.assignedUserId
+                        ? [{ assignedUserId: appointment.assignedUserId }]
+                        : []),
+                      { providerId: null, assignedUserId: null },
                     ],
                   }
                 : {}),
@@ -430,11 +466,17 @@ export class AppointmentRepository {
         status: { in: ["PENDING", "CONFIRMED"] as AppointmentStatus[] },
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
         OR: [
+          { providerId: { in: assignedUserIds } },
           { assignedUserId: { in: assignedUserIds } },
-          { assignedUserId: null },
+          { providerId: null, assignedUserId: null },
         ],
       },
-      select: { assignedUserId: true, startTime: true, endTime: true },
+      select: {
+        providerId: true,
+        assignedUserId: true,
+        startTime: true,
+        endTime: true,
+      },
       orderBy: { startTime: "asc" },
       take: 200,
     });
@@ -446,13 +488,28 @@ export class AppointmentRepository {
     for (const row of rows) {
       const startTime = toWallClock(row.startTime);
       const endTime = toWallClock(row.endTime);
-      if (row.assignedUserId) {
+      let matched = false;
+      if (row.providerId && assignedUserIds.includes(row.providerId)) {
+        result.push({
+          assignedUserId: row.providerId,
+          startTime,
+          endTime,
+        });
+        matched = true;
+      }
+      if (
+        row.assignedUserId &&
+        assignedUserIds.includes(row.assignedUserId) &&
+        row.assignedUserId !== row.providerId
+      ) {
         result.push({
           assignedUserId: row.assignedUserId,
           startTime,
           endTime,
         });
-      } else {
+        matched = true;
+      }
+      if (!matched && !row.providerId && !row.assignedUserId) {
         // Legacy unassigned appointment: conservative blocking policy
         // blocks all queried assignees for this slot.
         for (const assigneeId of assignedUserIds) {
@@ -467,12 +524,38 @@ export class AppointmentRepository {
     return result;
   }
 
-  /** Overlap check for a staff member (or the whole business when unassigned). */
+  /**
+   * Blocking appointments for provider-scoped availability (STAFF-PROVIDER-01).
+   * Direct providerId counterpart of listBlockingByAssignees.
+   */
+  async listBlockingByProviders(
+    businessId: string,
+    date: string,
+    providerIds: string[],
+    excludeAppointmentId?: string,
+  ): Promise<
+    Array<{ providerId: string; startTime: string; endTime: string }>
+  > {
+    const blocking = await this.listBlockingByAssignees(
+      businessId,
+      date,
+      providerIds,
+      excludeAppointmentId,
+    );
+    return blocking.map((b) => ({
+      providerId: b.assignedUserId,
+      startTime: b.startTime,
+      endTime: b.endTime,
+    }));
+  }
+
+  /** Overlap check for a staff member or provider (or the whole business when unassigned). */
   async hasConflict(params: {
     businessId: string;
     date: string;
     startTime: string;
     endTime: string;
+    providerId?: string | null;
     assignedUserId?: string | null;
     excludeAppointmentId?: string;
   }): Promise<boolean> {
@@ -484,11 +567,16 @@ export class AppointmentRepository {
         status: {
           in: ["PENDING", "CONFIRMED"] as AppointmentStatus[],
         },
-        ...(params.assignedUserId
+        ...(params.providerId || params.assignedUserId
           ? {
               OR: [
-                { assignedUserId: params.assignedUserId },
-                { assignedUserId: null },
+                ...(params.providerId
+                  ? [{ providerId: params.providerId }]
+                  : []),
+                ...(params.assignedUserId
+                  ? [{ assignedUserId: params.assignedUserId }]
+                  : []),
+                { providerId: null, assignedUserId: null },
               ],
             }
           : {}),

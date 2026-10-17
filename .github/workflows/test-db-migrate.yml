@@ -1,0 +1,104 @@
+name: Test DB Migration Validation
+
+on:
+  pull_request:
+    paths:
+      - "prisma/**"
+      - ".github/workflows/test-db-migrate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-db-migrate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-migrations:
+    name: Validate pending Prisma migrations (disposable test DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout pull request ref
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Fail closed if TEST_DATABASE_URL is missing
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.TEST_DATABASE_URL }}" ]; then
+            echo "::error::TEST_DATABASE_URL secret is not configured. Migration validation fails closed to prevent unverified schema changes from entering main."
+            exit 1
+          fi
+
+      - name: Pre-migration status check
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        shell: bash
+        run: |
+          set +e
+          pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
+          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-pre.raw.txt > status-pre.txt
+          echo "### Pre-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-pre.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-pre.txt
+          if grep -qiE 'up to date|have not yet been applied' status-pre.txt; then
+            exit 0
+          fi
+          echo '::error::prisma migrate status could not read the test database — aborting'
+          exit 1
+
+      - name: Apply migrations to test database
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        shell: bash
+        run: |
+          set +e
+          pnpm db:deploy > deploy.raw.txt 2>&1
+          code=$?
+          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' deploy.raw.txt > deploy.txt
+          echo "### Migration deploy output (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat deploy.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat deploy.txt
+          exit "$code"
+
+      - name: Post-migration status verification
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        shell: bash
+        run: |
+          set +e
+          pnpm exec prisma migrate status > status-post.raw.txt 2>&1
+          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-post.raw.txt > status-post.txt
+          echo "### Post-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-post.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-post.txt
+          if grep -qi 'Database schema is up to date' status-post.txt; then
+            echo '✅ Test migration validated: schema is up to date'
+            exit 0
+          fi
+          echo '::error::Post-migration status on test DB does not report up to date'
+          exit 1

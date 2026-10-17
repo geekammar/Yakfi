@@ -50,7 +50,8 @@ export type BookingFlowActor = {
 export type BookingFlowServiceDeps = {
   customerRepository: Pick<CustomerRepository, "findById" | "listByBusiness">;
   serviceRepository: Pick<ServiceRepository, "findById" | "listByBusiness">;
-  providerRepository?: Pick<ProviderRepository, "listEligibleForService">;
+  providerRepository?: Pick<ProviderRepository, "listEligibleForService"> &
+    Partial<Pick<ProviderRepository, "countEligiblePerService">>;
 };
 
 /** Production dependencies (app singletons). */
@@ -125,6 +126,7 @@ export async function searchBookingCustomers(
 /**
  * Step 2 — the actor's Business bookable services. Active services
  * only: inactive services are never selectable in a booking flow.
+ * Batched resolution eliminates per-service N+1 queries.
  */
 export async function listBookingServices(
   deps: BookingFlowServiceDeps,
@@ -138,6 +140,23 @@ export async function listBookingServices(
     );
     if (!deps.providerRepository) {
       return services.map(toServiceOption);
+    }
+    if (deps.providerRepository.countEligiblePerService) {
+      const counts = await deps.providerRepository.countEligiblePerService(
+        actor.businessId,
+        services.map((s) => s.id),
+      );
+      return services.map((service) => {
+        const count = counts.get(service.id) ?? 0;
+        return {
+          ...toServiceOption(service),
+          eligibleProviderCount: count,
+          readinessStatus:
+            count > 0
+              ? ("READY_TO_BOOK" as const)
+              : ("SETUP_REQUIRED" as const),
+        };
+      });
     }
     const withEligibility = await Promise.all(
       services.map(async (service) => {

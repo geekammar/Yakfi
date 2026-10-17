@@ -151,7 +151,11 @@ export async function resolveEligibleProviders(
 
   const providers: EligibleProvider[] = rows.map((row) => ({
     providerId: row.id,
-    displayName: row.displayName ?? row.user.name,
+    displayName:
+      row.displayName?.trim() ||
+      row.name?.trim() ||
+      row.user?.name ||
+      "مقدم خدمة",
   }));
 
   return {

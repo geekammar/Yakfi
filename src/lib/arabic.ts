@@ -88,3 +88,11 @@ export const KNOWLEDGE_NOUNS: ArabicCountNouns = {
   few: "معلومات",
   many: "معلومة",
 };
+
+export const PROVIDER_NOUNS: ArabicCountNouns = {
+  zero: "لا يوجد مقدمو خدمة",
+  one: "مقدم خدمة واحد",
+  two: "مقدما خدمة",
+  few: "مقدمي خدمة",
+  many: "مقدم خدمة",
+};

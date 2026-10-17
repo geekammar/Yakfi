@@ -309,7 +309,11 @@ export async function resolveBookingOptions(
   // ONE batched provider-scoped conflict read — the read counterpart
   // of the booking write path's assignee scoping. Grouped by assignee
   // in application memory (no N+1).
-  const assigneeIds = [...new Set(seamByProvider.values())];
+  const assigneeIds = [
+    ...new Set(
+      scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId),
+    ),
+  ];
   const blockingRows = await deps.appointmentRepository.listBlockingByAssignees(
     actor.businessId,
     date,
@@ -327,7 +331,8 @@ export async function resolveBookingOptions(
 
   const pairs: RankedBookingPair[] = [];
   scoped.forEach((provider, providerOrder) => {
-    const assigneeId = seamByProvider.get(provider.providerId);
+    const assigneeId =
+      seamByProvider.get(provider.providerId) || provider.providerId;
     if (!assigneeId) return;
     const available = filterConflictingSlots(
       candidates,

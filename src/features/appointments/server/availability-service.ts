@@ -312,22 +312,14 @@ export async function getAvailability(
       [providerId],
     );
     const seam = seams.find((s) => s.providerId === providerId);
-    if (!seam || !seam.userId) {
-      return {
-        success: false,
-        error: {
-          code: "PROVIDER_NOT_ELIGIBLE",
-          message: "هذا المزود غير متاح لهذه الخدمة",
-        },
-      };
-    }
+    const assigneeId = seam?.userId || providerId;
     let blocking: Array<{ startTime: string; endTime: string }> = [];
     if (deps.appointmentRepository.listBlockingByAssignees) {
       const assigneeRows =
         await deps.appointmentRepository.listBlockingByAssignees(
           business.id,
           date,
-          [seam.userId],
+          [assigneeId],
           excludeAppointmentId ?? undefined,
         );
       blocking = assigneeRows.map((r) => ({
@@ -388,8 +380,11 @@ export async function getAvailability(
       business.id,
       eligible.map((p) => p.id),
     );
+    const seamMap = new Map(seams.map((s) => [s.providerId, s.userId]));
     const seamUserIds = [
-      ...new Set(seams.map((s) => s.userId).filter(Boolean)),
+      ...new Set(
+        eligible.map((p) => seamMap.get(p.id) || p.id).filter(Boolean),
+      ),
     ];
     if (seamUserIds.length === 0) {
       return {
@@ -422,14 +417,13 @@ export async function getAvailability(
       blockingByAssignee.set(row.assignedUserId, list);
     }
 
-    // Map userId back to providerId(s)
-    const providerIdByUserId = new Map<string, string[]>();
-    for (const seam of seams) {
-      if (seam.userId) {
-        const list = providerIdByUserId.get(seam.userId) ?? [];
-        list.push(seam.providerId);
-        providerIdByUserId.set(seam.userId, list);
-      }
+    // Map assigneeId back to providerId(s)
+    const providerIdByAssigneeId = new Map<string, string[]>();
+    for (const p of eligible) {
+      const assigneeId = seamMap.get(p.id) || p.id;
+      const list = providerIdByAssigneeId.get(assigneeId) ?? [];
+      list.push(p.id);
+      providerIdByAssigneeId.set(assigneeId, list);
     }
 
     const slots: AvailabilitySlot[] = [];
@@ -439,7 +433,7 @@ export async function getAvailability(
       for (const assigneeId of seamUserIds) {
         const blocks = blockingByAssignee.get(assigneeId) ?? [];
         if (filterConflictingSlots(candidateSlot, blocks).length > 0) {
-          const pIds = providerIdByUserId.get(assigneeId) ?? [];
+          const pIds = providerIdByAssigneeId.get(assigneeId) ?? [];
           availableProviderIds.push(...pIds);
         }
       }

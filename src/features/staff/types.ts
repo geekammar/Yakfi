@@ -60,6 +60,31 @@ export type SetTeamMemberActiveResult =
   | { success: true; member: TeamMemberItem }
   | { success: false; code: SetTeamMemberActiveErrorCode; message: string };
 
+/** Serializable provider item for unified staff and provider management. */
+export type ProviderItem = {
+  id: string;
+  name: string;
+  displayName: string | null;
+  servicePolicy: "ALL_SERVICES" | "SPECIFIC_SERVICES";
+  isActive: boolean;
+  userId: string | null;
+  user: { id: string; name: string; email: string } | null;
+  branchId: string | null;
+  branchName: string | null;
+  excludedServiceIds: string[];
+  excludedServiceNames: string[];
+  includedServiceIds: string[];
+  includedServiceNames: string[];
+};
+
+export type ProviderListResult =
+  | { success: true; providers: ProviderItem[] }
+  | { success: false; message: string };
+
+export type ProviderMutationResult =
+  | { success: true; provider: ProviderItem }
+  | { success: false; message: string };
+
 /**
  * Structural contract for the route-composed invite dialog (the
  * invitations feature's `StaffInviteDialog` satisfies it — composition

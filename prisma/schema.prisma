@@ -194,9 +194,10 @@ model Service {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointments     Appointment[]
-  providerServices ProviderService[]
+  business           Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments       Appointment[]
+  providerServices   ProviderService[]
+  providerExclusions ProviderServiceExclusion[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -376,6 +377,7 @@ model Appointment {
   // today; resolved SERVER-side, never client input.
   branchId       String            @map("branch_id")
   assignedUserId String?           @map("assigned_user_id")
+  providerId     String?           @map("provider_id")
   date           DateTime          @db.Date
   startTime      DateTime          @map("start_time") @db.Time
   endTime        DateTime          @map("end_time") @db.Time
@@ -385,15 +387,18 @@ model Appointment {
   updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?         @map("deleted_at")
 
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  service    Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  branch     Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo User?    @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  business   Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service    Service          @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  branch     Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo User?            @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  provider   ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
   @@index([businessId])
   @@index([businessId, date])
   @@index([branchId, date])
+  @@index([providerId])
+  @@index([businessId, providerId])
   @@index([status])
   @@index([customerId])
   @@index([serviceId])
@@ -718,21 +723,41 @@ model RuntimeCredential {
 // assignedUserId seam — unchanged in this pass).
 
 model ProviderProfile {
-  id          String   @id @default(uuid())
-  userId      String   @unique @map("user_id")
-  businessId  String   @map("business_id")
-  displayName String?  @map("display_name")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  userId        String?  @unique @map("user_id")
+  businessId    String   @map("business_id")
+  name          String   @default("")
+  displayName   String?  @map("display_name")
+  servicePolicy String   @default("ALL_SERVICES") @map("service_policy")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
 
-  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  services ProviderService[]
-  branches ProviderBranch[]
+  user         User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business     Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services     ProviderService[]
+  exclusions   ProviderServiceExclusion[]
+  branches     ProviderBranch[]
+  appointments Appointment[]
 
   @@index([businessId])
+  @@index([businessId, isActive])
   @@map("provider_profiles")
+}
+
+model ProviderServiceExclusion {
+  id         String   @id @default(uuid())
+  providerId String   @map("provider_id")
+  serviceId  String   @map("service_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, serviceId])
+  @@index([serviceId])
+  @@map("provider_service_exclusions")
 }
 
 model ProviderService {

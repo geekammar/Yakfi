@@ -37,6 +37,7 @@ const createAppointmentSchema = z
      */
     branchId: uuidSchema,
     assignedUserId: uuidSchema.nullish(),
+    providerId: uuidSchema.nullish(),
     date: appointmentDateSchema,
     startTime: timeSchema,
     endTime: timeSchema,
@@ -57,6 +58,7 @@ const createAppointmentSchema = z
 const updateAppointmentSchema = z
   .object({
     assignedUserId: uuidSchema.nullish(),
+    providerId: uuidSchema.nullish(),
     date: appointmentDateSchema,
     startTime: timeSchema,
     endTime: timeSchema,
@@ -77,6 +79,7 @@ const listAppointmentsSchema = z.object({
   toDate: appointmentDateSchema.optional(),
   status: z.enum(appointmentStatusValues).optional(),
   customerId: uuidSchema.optional(),
+  providerId: uuidSchema.optional(),
 });
 
 export type CreateAppointmentDto = z.infer<typeof createAppointmentSchema>;

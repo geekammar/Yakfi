@@ -33,4 +33,12 @@ export class BranchRepository {
   ): Promise<Branch | null> {
     return db.branch.findFirst({ where: { id, businessId, ...notDeleted } });
   }
+
+  /** All active branches for a business. */
+  async listByBusiness(businessId: string): Promise<Branch[]> {
+    return db.branch.findMany({
+      where: { businessId, ...notDeleted },
+      orderBy: { createdAt: "asc" },
+    });
+  }
 }

@@ -1,7 +1,12 @@
 "use client";
 
-import { setTeamMemberActiveAction } from "@/features/staff/actions/team-actions";
+import {
+  setProviderActiveAction,
+  setTeamMemberActiveAction,
+} from "@/features/staff/actions/team-actions";
+import { ProviderDialog } from "@/features/staff/components/provider-dialog";
 import type {
+  ProviderItem,
   StaffInviteDialogComponent,
   TeamInvitationItem,
   TeamMemberItem,
@@ -12,12 +17,17 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MEMBER_NOUNS, arabicCount } from "@/lib/arabic";
+import { MEMBER_NOUNS, PROVIDER_NOUNS, arabicCount } from "@/lib/arabic";
 
 import {
+  Edit2Icon,
   MailIcon,
   PauseCircleIcon,
   PlayCircleIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  UserCheckIcon,
+  UserPlusIcon,
   UserRoundPlusIcon,
   UsersRoundIcon,
 } from "lucide-react";
@@ -40,35 +50,54 @@ function formatInvitationDate(iso: string) {
 }
 
 /**
- * Team directory (PROMPT-16): who operates the business — members with
- * their role and active state, plus open invitations on their way in.
- * One primary action (دعوة موظف — the route-composed invitations
- * feature dialog), a small explicit deactivate/reactivate action for
- * STAFF members only, and honest empty/error states. Not an HR system.
+ * Unified Team & Provider Management Screen (STAFF-PROVIDER-01).
+ *
+ * Provides a mobile-first, consolidated interface for:
+ * 1. Independent Service Providers (creation without auth, ALL_SERVICES policy, exclusions)
+ * 2. Team Members & Roles (Admin, Staff)
+ * 3. Open Team Invitations
  */
 export function TeamScreen({
   members: initialMembers,
   invitations: initialInvitations,
+  providers: initialProviders = [],
+  services = [],
+  branches = [],
   currentUserId,
   InviteDialog,
 }: {
   members: TeamMemberItem[];
-  /** Open invitations (PENDING/ACCEPTED) preloaded by the page. */
   invitations: TeamInvitationItem[];
-  /** The viewing ADMIN's user id — marks their own row. */
+  providers?: ProviderItem[];
+  services?: Array<{ id: string; name: string }>;
+  branches?: Array<{ id: string; name: string }>;
   currentUserId: string;
-  /**
-   * The invite-staff dialog (composed at the route layer from the
-   * invitations feature — feature isolation is preserved).
-   */
   InviteDialog: StaffInviteDialogComponent;
 }) {
   const [members, setMembers] = useState(initialMembers);
   const [invitations, setInvitations] = useState(initialInvitations);
+  const [providers, setProviders] = useState(initialProviders);
+
+  // Invitation dialog state
   const [inviteOpen, setInviteOpen] = useState(false);
   const [dialogSession, setDialogSession] = useState(0);
+
+  // Provider dialog state
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [providerDialogMode, setProviderDialogMode] = useState<
+    "create" | "edit"
+  >("create");
+  const [editingProvider, setEditingProvider] = useState<ProviderItem | null>(
+    null,
+  );
+
   const [error, setError] = useState<string | null>(null);
-  const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);
+  const [pendingMemberToggleId, setPendingMemberToggleId] = useState<
+    string | null
+  >(null);
+  const [pendingProviderToggleId, setPendingProviderToggleId] = useState<
+    string | null
+  >(null);
 
   function openInvite() {
     setError(null);
@@ -76,16 +105,38 @@ export function TeamScreen({
     setInviteOpen(true);
   }
 
-  /** A server-confirmed invitation joins the pending list. */
+  function openCreateProvider() {
+    setError(null);
+    setEditingProvider(null);
+    setProviderDialogMode("create");
+    setProviderDialogOpen(true);
+  }
+
+  function openEditProvider(provider: ProviderItem) {
+    setError(null);
+    setEditingProvider(provider);
+    setProviderDialogMode("edit");
+    setProviderDialogOpen(true);
+  }
+
+  function handleProviderSaved(saved: ProviderItem) {
+    setProviders((current) => {
+      const exists = current.some((p) => p.id === saved.id);
+      if (exists) {
+        return current.map((p) => (p.id === saved.id ? saved : p));
+      }
+      return [saved, ...current];
+    });
+  }
+
   function handleInvitationCreated(invitation: TeamInvitationItem) {
     setInvitations((current) => [invitation, ...current]);
   }
 
-  function toggleActive(member: TeamMemberItem) {
+  function toggleMemberActive(member: TeamMemberItem) {
     const nextActive = !member.isActive;
     setError(null);
-    setPendingToggleId(member.id);
-    // Optimistic transition — rolled back if the server rejects it.
+    setPendingMemberToggleId(member.id);
     setMembers((current) =>
       current.map((item) =>
         item.id === member.id ? { ...item, isActive: nextActive } : item,
@@ -95,7 +146,7 @@ export function TeamScreen({
       memberId: member.id,
       isActive: nextActive,
     }).then((result) => {
-      setPendingToggleId(null);
+      setPendingMemberToggleId(null);
       if (!result.success) {
         setMembers((current) =>
           current.map((item) =>
@@ -109,123 +160,343 @@ export function TeamScreen({
     });
   }
 
+  function toggleProviderActive(provider: ProviderItem) {
+    const nextActive = !provider.isActive;
+    setError(null);
+    setPendingProviderToggleId(provider.id);
+    setProviders((current) =>
+      current.map((item) =>
+        item.id === provider.id ? { ...item, isActive: nextActive } : item,
+      ),
+    );
+    void setProviderActiveAction({
+      providerId: provider.id,
+      isActive: nextActive,
+    }).then((result) => {
+      setPendingProviderToggleId(null);
+      if (!result.success) {
+        setProviders((current) =>
+          current.map((item) =>
+            item.id === provider.id
+              ? { ...item, isActive: provider.isActive }
+              : item,
+          ),
+        );
+        setError(result.message);
+      }
+    });
+  }
+
   const hasStaff = members.some((member) => member.role === "STAFF");
-  const showEmptyState = !hasStaff && invitations.length === 0;
 
   return (
-    <div className="animate-fade-in-up space-y-6">
+    <div className="animate-fade-in-up space-y-8">
       <PageHeader
-        title="الفريق"
-        description="من ضمن فريق منشأتك — الأدوار وحالة كل عضو والدعوات المعلقة."
+        title="إدارة الفريق ومقدمي الخدمة"
+        description="إدارة مقدمي الخدمات والأهلية للمواعيد، وفريق عمل المنشأة ودعوات الانضمام."
         actions={
-          <Button onClick={openInvite}>
-            <UserRoundPlusIcon />
-            دعوة موظف
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={openCreateProvider}>
+              <UserPlusIcon className="size-4" />
+              إضافة مقدم خدمة
+            </Button>
+            <Button variant="outline" onClick={openInvite}>
+              <UserRoundPlusIcon className="size-4" />
+              دعوة موظف
+            </Button>
+          </div>
         }
       />
 
-      {showEmptyState ? (
-        <EmptyState
-          className="bg-card min-h-56"
-          icon={UsersRoundIcon}
-          title="لم تُضف موظفون بعد"
-          description="أنت مدير المنشأة. أدعُ موظفيك عبر بريدهم لينضموا إلى الفريق ويشاركوك المحادثات والمواعيد."
-          action={
-            <Button size="sm" onClick={openInvite}>
-              <UserRoundPlusIcon aria-hidden className="size-4" />
-              دعوة موظف
-            </Button>
-          }
-        />
+      {error ? (
+        <div
+          className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </div>
       ) : null}
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">أعضاء الفريق</h2>
-        <p className="text-xs text-muted-foreground" aria-live="polite">
-          {arabicCount(members.length, MEMBER_NOUNS)}
-        </p>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <ul className="space-y-3">
-          {members.map((member) => (
-            <li key={member.id}>
-              <article className="rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <Avatar className="size-10 shrink-0">
-                      <AvatarFallback className="text-sm font-semibold">
-                        {initials(member.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate font-semibold">
-                          {member.name}
-                        </h3>
-                        {member.id === currentUserId ? (
-                          <Badge variant="outline">أنت</Badge>
-                        ) : null}
+      {/* 1. Providers Section */}
+      <section className="space-y-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">مقدمو الخدمة</h2>
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {arabicCount(providers.length, PROVIDER_NOUNS)} · مؤهلون لتنفيذ
+              الخدمات واستقبال حجوزات العملاء
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={openCreateProvider}
+            className="self-start sm:self-auto"
+          >
+            <UserPlusIcon className="size-3.5" />
+            مقدم خدمة جديد
+          </Button>
+        </div>
+
+        {providers.length === 0 ? (
+          <EmptyState
+            className="bg-card min-h-52 border"
+            icon={UserCheckIcon}
+            title="لم يتم إضافة مقدمي خدمة بعد"
+            description="أضف مقدم خدمة لتمكين حجز المواعيد. لا يُشترط وجود حساب تسجيل دخول أو بريد إلكتروني لمقدم الخدمة."
+            action={
+              <Button size="sm" onClick={openCreateProvider}>
+                <UserPlusIcon aria-hidden className="size-4" />
+                إضافة مقدم خدمة الآن
+              </Button>
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {providers.map((p) => {
+              const hasExclusions =
+                p.excludedServiceNames && p.excludedServiceNames.length > 0;
+              return (
+                <article
+                  key={p.id}
+                  className="flex flex-col justify-between rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <Avatar className="size-10 shrink-0">
+                          <AvatarFallback className="text-sm font-semibold">
+                            {initials(p.displayName || p.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <h3 className="truncate font-semibold text-foreground">
+                              {p.name}
+                            </h3>
+                            {p.displayName && p.displayName !== p.name ? (
+                              <span className="text-xs text-muted-foreground truncate">
+                                ({p.displayName})
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            {p.user ? (
+                              <Badge variant="secondary" className="text-xs">
+                                مرتبط بـ {p.user.name}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-xs text-muted-foreground"
+                              >
+                                مستقل (بدون حساب)
+                              </Badge>
+                            )}
+
+                            {p.branchName ? (
+                              <Badge variant="outline" className="text-xs">
+                                {p.branchName}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
-                      <p
-                        dir="ltr"
-                        className="truncate text-start text-sm text-muted-foreground"
+
+                      <Badge
+                        variant={p.isActive ? "default" : "secondary"}
+                        className={
+                          p.isActive
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "text-muted-foreground"
+                        }
                       >
-                        {member.email}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                        <Badge
-                          variant={
-                            member.role === "ADMIN" ? "default" : "secondary"
-                          }
-                        >
-                          {ROLE_LABELS[member.role]}
-                        </Badge>
-                        <StatusBadge
-                          status={
-                            member.isActive
-                              ? "member-active"
-                              : "member-inactive"
-                          }
-                        />
-                      </div>
+                        {p.isActive ? "نشط للحجوزات" : "متوقف مؤقتاً"}
+                      </Badge>
                     </div>
-                  </div>
-                  {member.role === "STAFF" ? (
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => toggleActive(member)}
-                        disabled={pendingToggleId === member.id}
-                      >
-                        {member.isActive ? (
+
+                    {/* Coverage badge / summary */}
+                    <div className="rounded-lg bg-muted/40 p-2 text-xs space-y-1">
+                      <div className="flex items-center gap-1 font-medium">
+                        {p.servicePolicy === "ALL_SERVICES" ? (
                           <>
-                            <PauseCircleIcon />
-                            إيقاف
+                            <SparklesIcon className="size-3.5 text-primary shrink-0" />
+                            <span>مؤهل لجميع الخدمات</span>
                           </>
                         ) : (
-                          <>
-                            <PlayCircleIcon />
-                            تنشيط
-                          </>
+                          <span>
+                            خدمات محددة ({p.includedServiceIds.length})
+                          </span>
                         )}
-                      </Button>
+                      </div>
+
+                      {hasExclusions ? (
+                        <p className="text-destructive font-normal flex items-start gap-1">
+                          <ShieldCheckIcon className="size-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            مستثنى من: {p.excludedServiceNames.join("، ")}
+                          </span>
+                        </p>
+                      ) : p.servicePolicy === "ALL_SERVICES" ? (
+                        <p className="text-muted-foreground text-[11px]">
+                          يشمل تلقائياً أي خدمات جديدة تُضاف مستقبلاً.
+                        </p>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </article>
-            </li>
-          ))}
-        </ul>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t mt-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEditProvider(p)}
+                    >
+                      <Edit2Icon className="size-3.5" />
+                      تعديل
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => toggleProviderActive(p)}
+                      disabled={pendingProviderToggleId === p.id}
+                    >
+                      {p.isActive ? (
+                        <>
+                          <PauseCircleIcon className="size-3.5" />
+                          إيقاف
+                        </>
+                      ) : (
+                        <>
+                          <PlayCircleIcon className="size-3.5" />
+                          تنشيط
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
+      {/* 2. Team Members Section */}
+      <section className="space-y-4 pt-4 border-t">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">
+              أعضاء المنشأة (حسابات الدخول)
+            </h2>
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {arabicCount(members.length, MEMBER_NOUNS)} · يمتلكون صلاحية
+              الدخول للمنصة وإدارة المحادثات
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={openInvite}
+            className="self-start sm:self-auto"
+          >
+            <UserRoundPlusIcon className="size-3.5" />
+            دعوة عضو جديد
+          </Button>
+        </div>
+
+        {!hasStaff && invitations.length === 0 ? (
+          <EmptyState
+            className="bg-card min-h-44 border"
+            icon={UsersRoundIcon}
+            title="لم تُضف موظفين بعد"
+            description="أنت مدير المنشأة. يمكنك دعوة موظفيك عبر البريد الإلكتروني ليشاركونك إدارة المواعيد والمحادثات."
+            action={
+              <Button size="sm" onClick={openInvite}>
+                <UserRoundPlusIcon aria-hidden className="size-4" />
+                دعوة موظف
+              </Button>
+            }
+          />
+        ) : (
+          <ul className="space-y-3">
+            {members.map((member) => (
+              <li key={member.id}>
+                <article className="rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <Avatar className="size-10 shrink-0">
+                        <AvatarFallback className="text-sm font-semibold">
+                          {initials(member.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate font-semibold">
+                            {member.name}
+                          </h3>
+                          {member.id === currentUserId ? (
+                            <Badge variant="outline">أنت</Badge>
+                          ) : null}
+                        </div>
+                        <p
+                          dir="ltr"
+                          className="truncate text-start text-sm text-muted-foreground"
+                        >
+                          {member.email}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                          <Badge
+                            variant={
+                              member.role === "ADMIN" ? "default" : "secondary"
+                            }
+                          >
+                            {ROLE_LABELS[member.role]}
+                          </Badge>
+                          <StatusBadge
+                            status={
+                              member.isActive
+                                ? "member-active"
+                                : "member-inactive"
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    {member.role === "STAFF" ? (
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toggleMemberActive(member)}
+                          disabled={pendingMemberToggleId === member.id}
+                        >
+                          {member.isActive ? (
+                            <>
+                              <PauseCircleIcon className="size-3.5" />
+                              إيقاف
+                            </>
+                          ) : (
+                            <>
+                              <PlayCircleIcon className="size-3.5" />
+                              تنشيط
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* 3. Pending Invitations Section */}
       {invitations.length > 0 ? (
-        <section className="space-y-3">
+        <section className="space-y-3 pt-4 border-t">
           <h2 className="text-sm font-semibold">دعوات معلقة</h2>
           <ul className="divide-y overflow-hidden rounded-xl border bg-card shadow-xs">
             {invitations.map((invitation) => (
@@ -266,8 +537,24 @@ export function TeamScreen({
         </section>
       ) : null}
 
-      {/* key → the dialog remounts on every open, so it always starts
-          blank (same pattern as the services/customers form dialogs). */}
+      {/* Provider Add/Edit Dialog */}
+      <ProviderDialog
+        key={
+          providerDialogOpen
+            ? (editingProvider?.id ?? `create-${dialogSession}`)
+            : "closed"
+        }
+        open={providerDialogOpen}
+        onOpenChange={setProviderDialogOpen}
+        mode={providerDialogMode}
+        provider={editingProvider}
+        services={services}
+        branches={branches}
+        members={members}
+        onSaved={handleProviderSaved}
+      />
+
+      {/* Staff Invite Dialog */}
       <InviteDialog
         key={dialogSession}
         open={inviteOpen}
