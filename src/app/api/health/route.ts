@@ -55,6 +55,72 @@ export async function GET() {
         : null;
       const dbHost = dbUrl?.hostname ?? "unknown";
       const isProductionDb = dbHost.includes("ep-tiny-grass-a5e63jev");
+
+      let migrationApplied = false;
+      if (!isProductionDb) {
+        const colCheck = await db.$queryRaw<Array<{ column_name: string }>>`
+          SELECT column_name FROM information_schema.columns 
+          WHERE table_name = 'appointments' AND column_name = 'provider_id'
+        `;
+        if (colCheck.length === 0) {
+          await db.$executeRawUnsafe(`
+            ALTER TABLE "provider_profiles" ALTER COLUMN "user_id" DROP NOT NULL;
+            ALTER TABLE "provider_profiles" ADD COLUMN IF NOT EXISTS "name" TEXT NOT NULL DEFAULT '';
+            ALTER TABLE "provider_profiles" ADD COLUMN IF NOT EXISTS "service_policy" TEXT NOT NULL DEFAULT 'ALL_SERVICES';
+            UPDATE "provider_profiles" p
+            SET "name" = COALESCE(NULLIF(p."display_name", ''), u."name", 'مقدم خدمة')
+            FROM "users" u
+            WHERE p."user_id" = u."id" AND (p."name" = '' OR p."name" IS NULL);
+            UPDATE "provider_profiles"
+            SET "name" = COALESCE(NULLIF("display_name", ''), 'مقدم خدمة')
+            WHERE "name" = '' OR "name" IS NULL;
+            UPDATE "provider_profiles"
+            SET "service_policy" = 'SPECIFIC_SERVICES'
+            WHERE "id" IN (SELECT DISTINCT "provider_id" FROM "provider_services");
+            ALTER TABLE "provider_profiles" DROP CONSTRAINT IF EXISTS "provider_profiles_user_id_fkey";
+            ALTER TABLE "provider_profiles" ADD CONSTRAINT "provider_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+            CREATE INDEX IF NOT EXISTS "provider_profiles_business_id_isActive_idx" ON "provider_profiles"("business_id", "isActive");
+
+            ALTER TABLE "appointments" ADD COLUMN IF NOT EXISTS "provider_id" TEXT;
+            UPDATE "appointments" a
+            SET "provider_id" = p."id"
+            FROM "provider_profiles" p
+            WHERE a."assigned_user_id" = p."user_id"
+              AND a."business_id" = p."business_id"
+              AND a."provider_id" IS NULL;
+            ALTER TABLE "appointments" DROP CONSTRAINT IF EXISTS "appointments_provider_id_fkey";
+            ALTER TABLE "appointments" ADD CONSTRAINT "appointments_provider_id_fkey" FOREIGN KEY ("provider_id") REFERENCES "provider_profiles"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+            CREATE INDEX IF NOT EXISTS "appointments_provider_id_idx" ON "appointments"("provider_id");
+            CREATE INDEX IF NOT EXISTS "appointments_business_id_provider_id_idx" ON "appointments"("business_id", "provider_id");
+
+            CREATE TABLE IF NOT EXISTS "provider_service_exclusions" (
+                "id" TEXT NOT NULL,
+                "provider_id" TEXT NOT NULL,
+                "service_id" TEXT NOT NULL,
+                "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT "provider_service_exclusions_pkey" PRIMARY KEY ("id")
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "provider_service_exclusions_provider_id_service_id_key" ON "provider_service_exclusions"("provider_id", "service_id");
+            CREATE INDEX IF NOT EXISTS "provider_service_exclusions_service_id_idx" ON "provider_service_exclusions"("service_id");
+
+            DO $$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'provider_service_exclusions_provider_id_fkey'
+              ) THEN
+                ALTER TABLE "provider_service_exclusions" ADD CONSTRAINT "provider_service_exclusions_provider_id_fkey" FOREIGN KEY ("provider_id") REFERENCES "provider_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+              END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'provider_service_exclusions_service_id_fkey'
+              ) THEN
+                ALTER TABLE "provider_service_exclusions" ADD CONSTRAINT "provider_service_exclusions_service_id_fkey" FOREIGN KEY ("service_id") REFERENCES "services"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+              END IF;
+            END $$;
+          `);
+          migrationApplied = true;
+        }
+      }
       const users = await db.user.findMany({
         select: {
           id: true,
@@ -108,10 +174,9 @@ export async function GET() {
       previewDiagnostics = {
         dbHost,
         isProductionDb,
+        migrationApplied,
         userCount: users.length,
-        users,
         accountCount: accounts.length,
-        accounts,
         previewTestAccountReady: true,
       };
     } catch (e: unknown) {
