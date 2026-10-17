@@ -94,6 +94,7 @@ export function groupSlotsByPeriod<T extends AvailabilitySlot>(
  */
 export type PresentSlot = AvailabilitySlot & {
   available: boolean;
+  blockedByAppointment?: boolean;
 };
 
 /**
@@ -116,19 +117,57 @@ export type PresentSlot = AvailabilitySlot & {
 export function derivePresentSlots(params: {
   candidateGrid: CandidateSlot[] | null;
   availableSlots: AvailabilitySlot[] | null;
+  blockedIntervals?: Array<{
+    startTime: string;
+    endTime: string;
+    providerId?: string | null;
+  }> | null;
+  selectedProviderId?: string | null;
 }): PresentSlot[] | null {
-  const { candidateGrid, availableSlots } = params;
+  const {
+    candidateGrid,
+    availableSlots,
+    blockedIntervals,
+    selectedProviderId,
+  } = params;
   if (candidateGrid && candidateGrid.length > 0) {
-    return candidateGrid.map((candidate) => ({
-      startTime: candidate.startTime,
-      endTime: candidate.endTime,
-      available: availableSlots
+    return candidateGrid.map((candidate) => {
+      const isAvailable = availableSlots
         ? slotExistsIn(candidate, availableSlots)
-        : false,
-    }));
+        : false;
+
+      let isBlocked = false;
+      if (!isAvailable && blockedIntervals && blockedIntervals.length > 0) {
+        const candStart = toMinutes(candidate.startTime);
+        const candEnd = toMinutes(candidate.endTime);
+        isBlocked = blockedIntervals.some((block) => {
+          if (
+            selectedProviderId &&
+            block.providerId &&
+            block.providerId !== selectedProviderId
+          ) {
+            return false;
+          }
+          const bStart = toMinutes(block.startTime);
+          const bEnd = toMinutes(block.endTime);
+          return candStart < bEnd && bStart < candEnd;
+        });
+      }
+
+      return {
+        startTime: candidate.startTime,
+        endTime: candidate.endTime,
+        available: isAvailable,
+        blockedByAppointment: isBlocked,
+      };
+    });
   }
   if (availableSlots && availableSlots.length > 0) {
-    return availableSlots.map((slot) => ({ ...slot, available: true }));
+    return availableSlots.map((slot) => ({
+      ...slot,
+      available: true,
+      blockedByAppointment: false,
+    }));
   }
   return null;
 }

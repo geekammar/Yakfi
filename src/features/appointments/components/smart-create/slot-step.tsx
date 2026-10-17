@@ -30,6 +30,7 @@ import {
   HourglassIcon,
   ZapIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 /** Copy for the explicit no-slots reasons from the availability layer. */
@@ -234,8 +235,14 @@ export function SlotStep({
   }, [workingHours, date, serviceDurationMinutes, slotDurationMinutes]);
 
   const presentSlots = useMemo(
-    () => derivePresentSlots({ candidateGrid, availableSlots: slots }),
-    [candidateGrid, slots],
+    () =>
+      derivePresentSlots({
+        candidateGrid,
+        availableSlots: slots,
+        blockedIntervals: result?.success ? result.data.blockedIntervals : null,
+        selectedProviderId,
+      }),
+    [candidateGrid, slots, result, selectedProviderId],
   );
   const availableCount = presentSlots
     ? presentSlots.filter((slot) => slot.available).length
@@ -268,7 +275,15 @@ export function SlotStep({
         description="تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل قبل استقبال المواعيد."
         action={
           <div className="flex flex-wrap justify-center gap-2">
-            <Button type="button" size="sm" onClick={onGoToService}>
+            <Button asChild size="sm">
+              <Link href="/admin/team">إدارة الفريق ومقدمي الخدمة</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onGoToService}
+            >
               اختيار خدمة أخرى
             </Button>
           </div>
@@ -592,6 +607,24 @@ export function SlotStep({
           {/* Full candidate time grid (shown when expanded or if no suggestions exist) */}
           {showAllTimes || smartSuggestions.length === 0 ? (
             <div className="space-y-4 pt-1">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground pb-1">
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  متاح
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-primary" />
+                  المحدد
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-amber-500" />
+                  غير متاح (موعد قائم)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-muted-foreground/40" />
+                  غير متاح
+                </span>
+              </div>
               {groupSlotsByPeriod(presentSlots).map((group) => (
                 <section
                   key={group.period}
@@ -621,7 +654,7 @@ export function SlotStep({
                               className={cn(
                                 "flex h-11 min-w-[5.25rem] items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors",
                                 isSelected
-                                  ? "border-primary bg-primary text-primary-foreground"
+                                  ? "border-primary bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2 ring-offset-background shadow-xs"
                                   : "border-border bg-card text-foreground hover:bg-accent/60",
                               )}
                             >
@@ -648,7 +681,10 @@ export function SlotStep({
                               aria-disabled
                               aria-label={`${formatSlotTime(slot.startTime)} — ${UNAVAILABLE_LABEL}`}
                               className={cn(
-                                "flex h-11 min-w-[5.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 px-3 text-muted-foreground transition-colors",
+                                "flex h-11 min-w-[5.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border px-3 text-muted-foreground transition-colors",
+                                slot.blockedByAppointment
+                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-300 dark:border-amber-500/20"
+                                  : "border-border/50 bg-muted/40",
                                 selectedProviderId
                                   ? "cursor-pointer hover:border-border"
                                   : "cursor-not-allowed",

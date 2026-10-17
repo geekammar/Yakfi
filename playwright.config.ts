@@ -48,6 +48,14 @@ export default defineConfig({
       },
     },
     {
+      name: "mobile-360",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 360, height: 640 },
+        isMobile: true,
+      },
+    },
+    {
       name: "mobile-390",
       use: {
         browserName: "chromium",

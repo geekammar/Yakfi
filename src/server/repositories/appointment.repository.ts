@@ -102,6 +102,9 @@ export class AppointmentRepository {
         service: {
           select: { id: true, name: true, durationMinutes: true },
         },
+        provider: {
+          select: { id: true, name: true, displayName: true },
+        },
       },
     });
   }
@@ -116,6 +119,9 @@ export class AppointmentRepository {
         customer: { select: { id: true, name: true, phone: true } },
         service: {
           select: { id: true, name: true, durationMinutes: true },
+        },
+        provider: {
+          select: { id: true, name: true, displayName: true },
         },
       },
     });
@@ -139,6 +145,9 @@ export class AppointmentRepository {
         service: {
           select: { id: true, name: true, durationMinutes: true },
         },
+        provider: {
+          select: { id: true, name: true, displayName: true },
+        },
       },
       orderBy: [{ date: "asc" }, { startTime: "asc" }],
       ...paginationToSkipTake(pagination),
@@ -152,6 +161,9 @@ export class AppointmentRepository {
         customer: { select: { id: true, name: true, phone: true } },
         service: {
           select: { id: true, name: true, durationMinutes: true },
+        },
+        provider: {
+          select: { id: true, name: true, displayName: true },
         },
       },
       orderBy: { startTime: "asc" },

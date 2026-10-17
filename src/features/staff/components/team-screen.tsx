@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { MEMBER_NOUNS, PROVIDER_NOUNS, arabicCount } from "@/lib/arabic";
 
 import {
+  ChevronRightIcon,
   Edit2Icon,
   MailIcon,
   PauseCircleIcon,
@@ -31,6 +32,7 @@ import {
   UserRoundPlusIcon,
   UsersRoundIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 const ROLE_LABELS: Record<TeamMemberItem["role"], string> = {
@@ -196,6 +198,12 @@ export function TeamScreen({
         description="إدارة مقدمي الخدمات والأهلية للمواعيد، وفريق عمل المنشأة ودعوات الانضمام."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/settings">
+                <ChevronRightIcon className="size-4" />
+                العودة للإعدادات
+              </Link>
+            </Button>
             <Button onClick={openCreateProvider}>
               <UserPlusIcon className="size-4" />
               إضافة مقدم خدمة

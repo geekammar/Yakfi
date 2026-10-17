@@ -203,6 +203,51 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
 
+    // 6. Visual Staff Calendar (/appointments)
+    await page.goto("/appointments", { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveTitle(/المواعيد|FlowPilot/);
+    await expect(page.locator("body")).toBeVisible();
+
+    // Verify RTL
+    expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+
+    // Verify no horizontal overflow
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
+
+    // Screenshot Visual Staff Calendar
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `${vpName}-05-visual-calendar.png`),
+      fullPage: true,
+    });
+
+    // 7. Settings Screen with Discoverable Provider Management Link (/settings)
+    await page.goto("/settings", { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveTitle(/الإعدادات|FlowPilot/);
+    await expect(page.locator("body")).toBeVisible();
+
+    // Verify discoverable provider management link exists
+    const teamLink = page.locator('a[href="/admin/team"]');
+    await expect(teamLink).toBeVisible();
+    await expect(teamLink).toContainText("إدارة الفريق ومقدمي الخدمة");
+
+    // Verify no horizontal overflow
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
+
+    // Screenshot Settings
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${vpName}-06-settings-provider-link.png`,
+      ),
+      fullPage: true,
+    });
+
     // Assert no critical console errors
     expect(consoleErrors).toEqual([]);
   });
