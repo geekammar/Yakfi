@@ -73,6 +73,38 @@ export async function GET() {
           issuer: true,
         },
       });
+      const testEmail = "preview.admin@flowpilot.app";
+      let testUser = await db.user.findUnique({ where: { email: testEmail } });
+      if (!testUser) {
+        const { hashPassword } = await import("better-auth/crypto");
+        const { createLocalAccountIssuer } = await import("better-auth/db");
+        const business = await db.business.findFirst();
+        const businessId =
+          business?.id ?? "f5314115-ae8c-46ea-9d7e-080ef5e7366d";
+        testUser = await db.user.create({
+          data: {
+            id: crypto.randomUUID(),
+            name: "مشرف المعاينة",
+            email: testEmail,
+            emailVerified: true,
+            role: "ADMIN",
+            isActive: true,
+            accountType: "BUSINESS",
+            businessId,
+          },
+        });
+        await db.account.create({
+          data: {
+            id: crypto.randomUUID(),
+            userId: testUser.id,
+            accountId: testUser.id,
+            providerId: "credential",
+            issuer: createLocalAccountIssuer("credential"),
+            password: await hashPassword("Admin@1234"),
+          },
+        });
+      }
+
       previewDiagnostics = {
         dbHost,
         isProductionDb,
@@ -80,6 +112,7 @@ export async function GET() {
         users,
         accountCount: accounts.length,
         accounts,
+        previewTestAccountReady: true,
       };
     } catch (e: unknown) {
       previewDiagnostics = {
