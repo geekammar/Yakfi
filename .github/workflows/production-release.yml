@@ -14,6 +14,10 @@ on:
         description: "Explicit version (e.g. 0.47.0) — overrides bump type if provided"
         required: false
         type: string
+      expected_sha:
+        description: "Expected main commit SHA (optional, prevents releasing an unexpected commit)"
+        required: false
+        type: string
       apply_migration:
         description: "Apply pending database migrations to Production before release"
         required: false
@@ -54,6 +58,20 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify expected commit SHA (if specified)
+        shell: bash
+        run: |
+          CURRENT_SHA=$(git rev-parse HEAD)
+          echo "Current main branch SHA: $CURRENT_SHA"
+          EXPECTED="${{ inputs.expected_sha }}"
+          if [ -n "$EXPECTED" ]; then
+            if [ "$CURRENT_SHA" != "$EXPECTED" ] && [[ "$CURRENT_SHA" != "$EXPECTED"* ]]; then
+              echo "::error::Current main SHA ($CURRENT_SHA) does not match expected SHA ($EXPECTED). Aborting release."
+              exit 1
+            fi
+            echo "✅ Main commit SHA matches expected SHA ($EXPECTED)."
+          fi
+
       - name: Setup Git user
         shell: bash
         run: |
@@ -86,6 +104,17 @@ jobs:
       - name: Run full verify gate (lint, typecheck, format, build)
         run: pnpm verify
 
+      - name: Booking & provider regression checks
+        run: |
+          pnpm check:booking-ux
+          pnpm check:appointment-creation
+          pnpm check:reschedule
+          pnpm check:booking-options
+          pnpm check:booking-modes
+          pnpm check:staff-provider-01
+          pnpm check:eligibility
+          pnpm check:appointments-day-view
+
       - name: Apply Production DB migration (if requested)
         if: ${{ inputs.apply_migration }}
         env:
@@ -106,7 +135,19 @@ jobs:
             const current = pkg.version;
             const explicit = "${{ inputs.explicit_version }}".trim();
             let next = explicit;
-            if (!next) {
+            if (explicit) {
+              if (!/^\d+\.\d+\.\d+$/.test(explicit)) {
+                console.error(`Invalid explicit version format: ${explicit}`);
+                process.exit(1);
+              }
+              const [cMaj, cMin, cPat] = current.split(".").map(Number);
+              const [tMaj, tMin, tPat] = explicit.split(".").map(Number);
+              const isGreater = tMaj > cMaj || (tMaj === cMaj && (tMin > cMin || (tMin === cMin && tPat > cPat)));
+              if (!isGreater) {
+                console.error(`Explicit version (${explicit}) must be strictly greater than current version (${current})`);
+                process.exit(1);
+              }
+            } else {
               const [major, minor, patch] = current.split(".").map(Number);
               const bump = "${{ inputs.bump }}";
               if (bump === "minor") next = `${major}.${minor + 1}.0`;
@@ -151,7 +192,7 @@ jobs:
         run: |
           TAG="${{ steps.versioning.outputs.target_tag }}"
           VERSION="${{ steps.versioning.outputs.target_version }}"
-          # Commit message includes [release] tag to trigger Vercel Ignored Build Step authorization
+          # Commit message matches exact release guard regex: ^chore\(release\):\ v[0-9]+\.[0-9]+\.[0-9]+ \[release\]$
           COMMIT_MSG="chore(release): $TAG [release]"
           git add package.json
           git commit -m "$COMMIT_MSG"
@@ -162,7 +203,53 @@ jobs:
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "✅ Pushed commit $RELEASE_SHA and tag $TAG to origin."
 
+      - name: Verify Vercel Production deployment & live application health
+        id: verify-prod
+        shell: bash
+        run: |
+          TARGET_VERSION="${{ steps.versioning.outputs.target_version }}"
+          PROD_HEALTH_URL="https://flowpilot-prod.vercel.app/api/health"
+          echo "🔍 Polling Production health endpoint to confirm Vercel deployment: $PROD_HEALTH_URL"
+          echo "   Target Version: $TARGET_VERSION"
+
+          # Wait for Vercel to pick up the commit, build, and deploy (up to 3 minutes / 18 attempts)
+          MAX_ATTEMPTS=18
+          ATTEMPT=1
+          DEPLOYED=0
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking $PROD_HEALTH_URL..."
+            HEALTH_JSON=$(curl -s -S --max-time 10 "$PROD_HEALTH_URL" || echo "")
+            echo "Response: $HEALTH_JSON"
+
+            if [ -n "$HEALTH_JSON" ]; then
+              STATUS=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.status || ""); } catch { console.log(""); }')
+              LIVE_VERSION=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.version || ""); } catch { console.log(""); }')
+              READY=$(echo "$HEALTH_JSON" | node -e 'try { const d = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(d.deploymentReady === true ? "true" : ""); } catch { console.log(""); }')
+
+              if [ "$STATUS" = "ok" ] && [ "$READY" = "true" ] && [ "$LIVE_VERSION" = "$TARGET_VERSION" ]; then
+                echo "✅ Vercel Production deployment verified successfully!"
+                echo "   - Live Version: $LIVE_VERSION (matches target $TARGET_VERSION)"
+                echo "   - Deployment Ready: true"
+                echo "   - Application Health: ok"
+                DEPLOYED=1
+                break
+              fi
+            fi
+
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $DEPLOYED -ne 1 ]; then
+            echo "::error::Vercel Production deployment did not become active with version $TARGET_VERSION within timeout."
+            echo "::error::Production release verification FAILED. Do NOT publish release notes."
+            exit 1
+          fi
+          echo "prod_verified=true" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
+        if: steps.verify-prod.outputs.prod_verified == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -170,7 +257,7 @@ jobs:
           TAG="${{ steps.versioning.outputs.target_tag }}"
           gh release create "$TAG" \
             --title "FlowPilot $TAG" \
-            --notes "Controlled production release of commit \`${{ steps.git-publish.outputs.release_sha }}\`. Authorized by operator." \
+            --notes "Controlled production release of commit \`${{ steps.git-publish.outputs.release_sha }}\`. Authorized by operator, deployed and verified live on Vercel Production." \
             --verify-tag
 
       - name: Production Release Summary
@@ -180,14 +267,19 @@ jobs:
           {
             echo "## 🚀 FlowPilot Production Release Summary"
             echo ""
-            echo "- **Status**: ✅ RELEASE PUBLISHED"
-            echo "- **Tag**: \`${{ steps.versioning.outputs.target_tag }}\`"
-            echo "- **Version**: \`${{ steps.versioning.outputs.target_version }}\`"
-            echo "- **Release Commit SHA**: \`${{ steps.git-publish.outputs.release_sha }}\`"
-            echo "- **Vercel Production Guard**: Authorized via \`[release]\` commit message"
+            if [ "${{ steps.verify-prod.outputs.prod_verified }}" = "true" ]; then
+              echo "- **Status**: ✅ RELEASE PUBLISHED & VERIFIED LIVE ON PRODUCTION"
+              echo "- **Tag**: \`${{ steps.versioning.outputs.target_tag }}\`"
+              echo "- **Version**: \`${{ steps.versioning.outputs.target_version }}\`"
+              echo "- **Release Commit SHA**: \`${{ steps.git-publish.outputs.release_sha }}\`"
+              echo "- **Vercel Production Deployment**: Verified Active"
+              echo "- **Application Health**: OK (\`https://flowpilot-prod.vercel.app/api/health\`)"
+            else
+              echo "- **Status**: ❌ INCOMPLETE OR FAILED PRODUCTION RELEASE"
+              echo "- **Target Version**: \`${{ steps.versioning.outputs.target_version }}\`"
+              echo "- **Release Commit SHA**: \`${{ steps.git-publish.outputs.release_sha }}\`"
+              echo "- **Reason**: Vercel deployment verification timed out or failed health check."
+              echo "- **Action Required**: Check Vercel Dashboard for build logs and redeploy if needed."
+            fi
             echo "- **Timestamp**: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-            echo ""
-            echo "### Next Verification Steps (Mobile):"
-            echo "1. Monitor Vercel deployment: [Vercel Dashboard](https://vercel.com/ammarj1/flowpilot-prod)"
-            echo "2. Verify health endpoint: \`https://flowpilot-prod.vercel.app/api/health\`"
           } >> "$GITHUB_STEP_SUMMARY"

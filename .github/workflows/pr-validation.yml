@@ -50,6 +50,9 @@ jobs:
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
+      - name: Release Guard Threat Model & Cutover verification
+        run: pnpm check:release-guard
+
       - name: Booking & provider regression checks
         run: |
           pnpm check:booking-ux

@@ -78,6 +78,7 @@
     "ship": "node scripts/ship.mjs",
     "check:pre-ship": "node scripts/check-pre-ship.mjs",
     "vercel:check": "node scripts/vercel-check.mjs",
+    "check:release-guard": "node scripts/test-release-guard.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:check": "node scripts/pre-deploy.mjs",
     "deploy:preview": "node scripts/deploy.mjs preview",
