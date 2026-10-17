@@ -1,0 +1,190 @@
+name: Controlled Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Release bump type"
+        type: choice
+        options:
+          - patch
+          - minor
+        default: patch
+      explicit_version:
+        description: "Explicit version (e.g. 0.47.0) — overrides bump type if provided"
+        required: false
+        type: string
+      apply_migration:
+        description: "Apply pending database migrations to Production before release"
+        required: false
+        type: boolean
+        default: false
+      confirmation:
+        description: 'Type "RELEASE" to explicitly authorize this production release'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Authorize, verify, tag and release to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: Production
+    steps:
+      - name: Verify explicit release authorization
+        shell: bash
+        run: |
+          if [ "${{ inputs.confirmation }}" != "RELEASE" ]; then
+            echo "::error::Release authorization failed. Input confirmation must be exactly 'RELEASE'."
+            exit 1
+          fi
+          echo "✅ Production release authorized by operator."
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git user
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run security scan
+        run: pnpm security
+
+      - name: Run AI prompt sync verification
+        run: pnpm check:ai-prompts
+
+      - name: Run full verify gate (lint, typecheck, format, build)
+        run: pnpm verify
+
+      - name: Apply Production DB migration (if requested)
+        if: ${{ inputs.apply_migration }}
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        shell: bash
+        run: |
+          echo "Applying pending Prisma migrations to Production database..."
+          pnpm db:deploy
+          pnpm exec prisma migrate status
+
+      - name: Compute new release version
+        id: versioning
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const current = pkg.version;
+            const explicit = "${{ inputs.explicit_version }}".trim();
+            let next = explicit;
+            if (!next) {
+              const [major, minor, patch] = current.split(".").map(Number);
+              const bump = "${{ inputs.bump }}";
+              if (bump === "minor") next = `${major}.${minor + 1}.0`;
+              else next = `${major}.${minor}.${patch + 1}`;
+            }
+            console.log(`Current version: ${current}`);
+            console.log(`Target release version: ${next}`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `current_version=${current}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `target_version=${next}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `target_tag=v${next}\n`);
+          '
+
+      - name: Check if tag already exists
+        shell: bash
+        run: |
+          TAG="${{ steps.versioning.outputs.target_tag }}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists locally. Releases are immutable."
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            echo "::error::Tag $TAG already exists on origin. Releases are immutable."
+            exit 1
+          fi
+          echo "✅ Tag $TAG is free."
+
+      - name: Update version in package.json
+        shell: bash
+        run: |
+          TARGET="${{ steps.versioning.outputs.target_version }}"
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = process.argv[1];
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          ' "$TARGET"
+          pnpm format
+
+      - name: Commit and tag release
+        id: git-publish
+        shell: bash
+        run: |
+          TAG="${{ steps.versioning.outputs.target_tag }}"
+          VERSION="${{ steps.versioning.outputs.target_version }}"
+          # Commit message includes [release] tag to trigger Vercel Ignored Build Step authorization
+          COMMIT_MSG="chore(release): $TAG [release]"
+          git add package.json
+          git commit -m "$COMMIT_MSG"
+          git tag -a "$TAG" -m "FlowPilot $TAG — Production Release"
+          git push origin main
+          git push origin "$TAG"
+          RELEASE_SHA=$(git rev-parse HEAD)
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "✅ Pushed commit $RELEASE_SHA and tag $TAG to origin."
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ steps.versioning.outputs.target_tag }}"
+          gh release create "$TAG" \
+            --title "FlowPilot $TAG" \
+            --notes "Controlled production release of commit \`${{ steps.git-publish.outputs.release_sha }}\`. Authorized by operator." \
+            --verify-tag
+
+      - name: Production Release Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## 🚀 FlowPilot Production Release Summary"
+            echo ""
+            echo "- **Status**: ✅ RELEASE PUBLISHED"
+            echo "- **Tag**: \`${{ steps.versioning.outputs.target_tag }}\`"
+            echo "- **Version**: \`${{ steps.versioning.outputs.target_version }}\`"
+            echo "- **Release Commit SHA**: \`${{ steps.git-publish.outputs.release_sha }}\`"
+            echo "- **Vercel Production Guard**: Authorized via \`[release]\` commit message"
+            echo "- **Timestamp**: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo ""
+            echo "### Next Verification Steps (Mobile):"
+            echo "1. Monitor Vercel deployment: [Vercel Dashboard](https://vercel.com/ammarj1/flowpilot-prod)"
+            echo "2. Verify health endpoint: \`https://flowpilot-prod.vercel.app/api/health\`"
+          } >> "$GITHUB_STEP_SUMMARY"

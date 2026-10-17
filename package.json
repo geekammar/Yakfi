@@ -123,7 +123,9 @@
     "eval:run-future-op21": "dotenv -e .env.local -e .env -- tsx scripts/eval-run-future-op21.ts",
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts",
-    "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx"
+    "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx",
+    "test:ux": "node scripts/run-ux-qa.mjs",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -157,6 +159,7 @@
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
