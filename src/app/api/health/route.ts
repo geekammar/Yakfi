@@ -1,3 +1,5 @@
+import { populatePreviewEnvIfNeeded } from "@/lib/url-resolver";
+
 import pkg from "../../../../package.json";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +40,7 @@ async function checkDatabase(): Promise<DatabaseStatus> {
 }
 
 export async function GET() {
+  populatePreviewEnvIfNeeded();
   const missingEnvVars = REQUIRED_ENV_VARS.filter((name) => !process.env[name]);
   const database = await checkDatabase();
   const deploymentReady =
