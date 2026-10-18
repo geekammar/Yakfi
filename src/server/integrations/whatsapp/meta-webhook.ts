@@ -86,6 +86,11 @@ type MetaTextMessage = {
   audio?: { id?: string; mime_type?: string };
   video?: { id?: string; mime_type?: string };
   document?: { id?: string; mime_type?: string };
+  interactive?: {
+    type?: string;
+    button_reply?: { id?: string; title?: string };
+    list_reply?: { id?: string; title?: string; description?: string };
+  };
 };
 
 type MetaWebhookPayload = {
@@ -180,7 +185,7 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
         const isoTimestamp = new Date(providerTimestampMs).toISOString();
 
         const kind =
-          meta.type === "text"
+          meta.type === "text" || meta.type === "interactive"
             ? "TEXT"
             : meta.type === "image" ||
                 meta.type === "audio" ||
@@ -201,7 +206,13 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
           normalizedInput.recipientProviderId = recipientProviderId;
         }
         if (kind === "TEXT") {
-          const body = meta.text?.body;
+          const body =
+            meta.type === "interactive"
+              ? meta.interactive?.button_reply?.title ||
+                meta.interactive?.button_reply?.id ||
+                meta.interactive?.list_reply?.title ||
+                meta.interactive?.list_reply?.id
+              : meta.text?.body;
           if (!body || typeof body !== "string" || !body.trim()) {
             throw new TransportError(
               "MALFORMED_PROVIDER_PAYLOAD",

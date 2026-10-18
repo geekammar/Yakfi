@@ -160,6 +160,7 @@ import type {
   BusinessRepository,
   ConversationRepository,
   CustomerRepository,
+  FollowUpRequestRepository,
   InboundDedupeRepository,
   KnowledgeGapRepository,
   OperatorAttentionRepository,
@@ -173,6 +174,7 @@ import {
   businessRepository,
   conversationRepository,
   customerRepository,
+  followUpRequestRepository,
   inboundDedupeRepository,
   knowledgeGapRepository,
   operatorAttentionRepository,
@@ -334,6 +336,10 @@ export type ConversationEngineDeps = {
     "listBlockingByAssignees"
   > &
     Partial<Pick<AppointmentRepository, "createWithConflictCheck">>;
+  followUpRequestRepository?: Pick<
+    FollowUpRequestRepository,
+    "getEligibleForChannel" | "findById" | "updateStatus"
+  >;
   ai: ConversationAi;
   transport: MessageTransport;
 };
@@ -352,6 +358,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   turnTelemetry: turnTelemetrySink,
   providerRepository,
   appointmentRepository,
+  followUpRequestRepository,
   ai: policyBackedAi,
   transport: offlineMessageTransport,
 };
@@ -522,17 +529,28 @@ function bookingEmptyReasonMessage(reason: string, date: string): string {
       return "لا تتوفر مواعيد حالياً — سيتواصل معك أحد أعضاء الفريق.";
   }
 }
-function formatBookingOptionsMessage(
+export function formatBookingOptionsMessage(
   serviceName: string,
   date: string,
-  options: Array<{ displayName: string; startAt: string; endAt: string }>,
+  options: Array<{
+    displayName: string;
+    startAt?: string;
+    endAt?: string;
+    start?: string;
+    end?: string;
+  }>,
+  followUpRequestId?: string | null,
 ): string {
   const lines = options.map((opt, idx) => {
-    const start = opt.startAt.slice(11, 16);
-    const end = opt.endAt.slice(11, 16);
+    const start = opt.startAt ? opt.startAt.slice(11, 16) : (opt.start ?? "");
+    const end = opt.endAt ? opt.endAt.slice(11, 16) : (opt.end ?? "");
     return `${idx + 1}. ${opt.displayName} — ${start} إلى ${end}`;
   });
-  return `تتوفر المواعيد التالية لخدمة "${serviceName}" يوم ${date}:\n${lines.join("\n")}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
+  const followUpTag = followUpRequestId
+    ? `\n[متابعة: ${followUpRequestId}]`
+    : "";
+  const prefix = followUpRequestId ? "لمتابعة" : "لخدمة";
+  return `تتوفر المواعيد التالية ${prefix} "${serviceName}" يوم ${date}:\n${lines.join("\n")}${followUpTag}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
 }
 
 /** Canonical phone form for the number-mapping lookup (digits + leading +). */
@@ -830,11 +848,30 @@ function resumeBookingExtraction(
   state: ConversationState,
 ): AiResponse {
   const e = response.extraction;
+  const serviceChanged = Boolean(
+    e.service &&
+    state.knownFacts.service &&
+    e.service !== state.knownFacts.service,
+  );
+  const dateChanged = Boolean(
+    e.date && state.knownFacts.date && e.date !== state.knownFacts.date,
+  );
+  const providerChanged = Boolean(
+    e.provider &&
+    state.knownFacts.provider &&
+    e.provider !== state.knownFacts.provider,
+  );
+
   const service = e.service ?? state.knownFacts.service ?? null;
-  const provider = e.provider ?? state.knownFacts.provider ?? null;
+  const provider = serviceChanged
+    ? (e.provider ?? null)
+    : (e.provider ?? state.knownFacts.provider ?? null);
   const timePreference =
-    e.timePreference ?? state.knownFacts.timePreference ?? null;
-  const stateDate = state.knownFacts.date ?? null;
+    serviceChanged || dateChanged || providerChanged
+      ? (e.timePreference ?? null)
+      : (e.timePreference ?? state.knownFacts.timePreference ?? null);
+
+  const stateDate = serviceChanged ? null : (state.knownFacts.date ?? null);
   const date =
     e.date ?? (stateDate && RESUME_ISO_DATE.test(stateDate) ? stateDate : null);
   if (
@@ -1036,6 +1073,7 @@ async function resolveAssigneeId(
 type BookingCreationOutcome =
   | { status: "created"; appointmentId: string }
   | { status: "conflict" }
+  | { status: "invalid_follow_up" }
   | { status: "failed" };
 
 /**
@@ -1054,10 +1092,12 @@ async function createAppointmentForSelection(
     serviceId: string;
     branchId: string;
     assignedUserId: string;
+    providerId?: string;
     date: string;
     startTime: string;
     endTime: string;
     status: string;
+    followUpRequestId?: string | null;
   },
 ): Promise<BookingCreationOutcome> {
   const repo = deps.appointmentRepository ?? appointmentRepository;
@@ -1073,7 +1113,14 @@ async function createAppointmentForSelection(
     const appointment = await create.call(repo, dto);
     if (!appointment) return { status: "conflict" };
     return { status: "created", appointmentId: appointment.id };
-  } catch {
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      (err.message === "FOLLOW_UP_NOT_PENDING" ||
+        err.message === "FOLLOW_UP_DATE_OUT_OF_RANGE")
+    ) {
+      return { status: "invalid_follow_up" };
+    }
     return { status: "failed" };
   }
 }
@@ -1347,21 +1394,50 @@ async function completeBookingSelection(
     return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "TENANT_CONFIGURATION");
   }
 
+  const followUpRequestId = context.followUpRequestId ?? null;
+  if (followUpRequestId && deps.followUpRequestRepository?.findById) {
+    const followUp = await deps.followUpRequestRepository.findById(
+      followUpRequestId,
+      scope.business.id,
+    );
+    if (!followUp || followUp.status !== "PENDING") {
+      return reply(
+        "عذراً، طلب المتابعة لم يعد متاحاً للجدولة (تم إلغاؤه أو جدولته مسبقاً أو خارج الفترة المحددة). يمكنك حجز موعد جديد مباشرة باختيار الخدمة المطلوبة.",
+        "AI_ACTIVE",
+      );
+    }
+    if (followUp.customerId !== scope.customer.id) {
+      return reply(
+        BOOKING_RETRY_MESSAGE,
+        "NEED_HUMAN",
+        "DOMAIN_REQUIRES_HUMAN",
+      );
+    }
+  }
+
   const created = await createAppointmentForSelection(deps, {
     businessId: scope.business.id,
     customerId: scope.customer.id,
     serviceId,
     branchId: resolvedBranchId,
     assignedUserId: assigneeId,
+    providerId: chosen.providerId ?? providerId,
     date,
     startTime,
     endTime,
     status: initialStatus,
+    followUpRequestId,
   });
 
   if (created.status === "failed") {
     // Unexpected booking failure — NEVER a success confirmation.
     return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "DOMAIN_REQUIRES_HUMAN");
+  }
+  if (created.status === "invalid_follow_up") {
+    return reply(
+      "عذراً، طلب المتابعة لم يعد متاحاً للجدولة (تم إلغاؤه أو جدولته مسبقاً أو خارج الفترة المحددة). يمكنك حجز موعد جديد مباشرة باختيار الخدمة المطلوبة.",
+      "AI_ACTIVE",
+    );
   }
   if (created.status === "conflict") {
     // SLOT_CONFLICT (concurrent close) — retry-safe: refresh + re-offer.
@@ -1372,7 +1448,7 @@ async function completeBookingSelection(
     );
     if (retry.success && retry.data.options.length > 0) {
       return reply(
-        `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options)}`,
+        `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options, followUpRequestId)}`,
         "AI_ACTIVE",
       );
     }
@@ -1386,8 +1462,11 @@ async function completeBookingSelection(
   // 7. BOOKED transition + authoritative confirmation. The confirmation
   //    uses ONLY the created appointment's resolved values, and is
   //    persisted/delivered only AFTER creation succeeded.
-  const confirmation =
-    initialStatus === "CONFIRMED"
+  const confirmation = followUpRequestId
+    ? initialStatus === "CONFIRMED"
+      ? `تم تأكيد حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}.`
+      : `تم استلام طلب حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}. سيتواصل معك الفريق لتأكيد الموعد.`
+    : initialStatus === "CONFIRMED"
       ? `تم تأكيد حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}.`
       : `تم استلام طلب حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}. سيتواصل معك الفريق لتأكيد الموعد.`;
   return reply(confirmation, "BOOKED");
@@ -2186,9 +2265,266 @@ async function runInboundTurn(
       // verbatim; a date is supplemented ONLY when ISO-shaped (the domain's
       // required form) — the DOMAIN still re-verifies and executes. The AI's
       // own extraction always wins when present (never overwritten).
-      const bookingAiResponse = resolvedState
+      let bookingAiResponse = resolvedState
         ? resumeBookingExtraction(validated, resolvedState)
         : validated;
+
+      if (!bookingAiResponse.extraction.date) {
+        const todayIso = todayIsoInTimeZone(
+          new Date(),
+          business.timezone ?? "UTC",
+        );
+        const relDate = resolveEgyptianRelativeDate(inbound.text, todayIso);
+        if (relDate) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              date: relDate,
+            },
+          };
+        }
+      }
+
+      let activeFollowUpId: string | null =
+        resolvedState?.knownFacts?.followUpRequestId ?? null;
+
+      const isExplicitFollowUp = /(?:متابعة|متابعه)/.test(inbound.text);
+
+      if (
+        deps.followUpRequestRepository &&
+        (isExplicitFollowUp || activeFollowUpId)
+      ) {
+        const eligibleFollowUps =
+          await deps.followUpRequestRepository.getEligibleForChannel(
+            business.id,
+            customer.id,
+          );
+
+        if (
+          isExplicitFollowUp &&
+          eligibleFollowUps.length === 0 &&
+          !activeFollowUpId
+        ) {
+          const noFollowUpMsg =
+            "لا يوجد طلب متابعة معلّق مسجل لك حالياً لدى العيادة. يمكنك حجز موعد جديد مباشرة باختيار الخدمة المطلوبة.";
+          const assistantMessage = await persistAssistantReply(
+            deps,
+            conversation.id,
+            noFollowUpMsg,
+            "AI_ACTIVE",
+          );
+          const delivery = await deliverAssistantReply(
+            deps,
+            customer.phone,
+            business.name,
+            conversation.id,
+            noFollowUpMsg,
+            assistantMessage.id,
+            business.id,
+            outboundConnectionId,
+          );
+          return {
+            ok: true,
+            duplicate: false,
+            businessId: business.id,
+            conversationId: conversation.id,
+            customerId: customer.id,
+            customerMessageId: customerMessage.id,
+            assistantAction: "AI_REPLY",
+            intent: validated.intent,
+            conversationStatus: "AI_ACTIVE",
+            handoffCause: null,
+            assistantProvider: deps.ai.providerName,
+            observability: turnObservability,
+            delivery,
+          };
+        }
+
+        let targetFollowUp = activeFollowUpId
+          ? eligibleFollowUps.find((fu) => fu.id === activeFollowUpId)
+          : null;
+
+        if (!targetFollowUp && eligibleFollowUps.length === 1) {
+          targetFollowUp = eligibleFollowUps[0]!;
+        } else if (!targetFollowUp && eligibleFollowUps.length > 1) {
+          const listText = eligibleFollowUps
+            .map((fu, idx) => {
+              const sName = fu.serviceName ?? "خدمة طبية";
+              const pName = fu.preferredProviderName
+                ? ` مع ${fu.preferredProviderName}`
+                : "";
+              const range =
+                fu.startDate && fu.endDate
+                  ? ` (الفترة المتاحة: من ${fu.startDate} إلى ${fu.endDate})`
+                  : "";
+              return `${idx + 1}. متابعة ${sName}${pName}${range}`;
+            })
+            .join("\n");
+          const multiMsg = `لديك أكثر من طلب متابعة معلّق:\n${listText}\nيرجى تحديد أي متابعة ترغب في جدولتها.`;
+          const assistantMessage = await persistAssistantReply(
+            deps,
+            conversation.id,
+            multiMsg,
+            "AI_ACTIVE",
+          );
+          const delivery = await deliverAssistantReply(
+            deps,
+            customer.phone,
+            business.name,
+            conversation.id,
+            multiMsg,
+            assistantMessage.id,
+            business.id,
+            outboundConnectionId,
+          );
+          return {
+            ok: true,
+            duplicate: false,
+            businessId: business.id,
+            conversationId: conversation.id,
+            customerId: customer.id,
+            customerMessageId: customerMessage.id,
+            assistantAction: "AI_REPLY",
+            intent: validated.intent,
+            conversationStatus: "AI_ACTIVE",
+            handoffCause: null,
+            assistantProvider: deps.ai.providerName,
+            observability: turnObservability,
+            delivery,
+          };
+        }
+
+        if (targetFollowUp) {
+          activeFollowUpId = targetFollowUp.id;
+
+          const updatedExtraction = { ...bookingAiResponse.extraction };
+          if (!updatedExtraction.service && targetFollowUp.serviceName) {
+            updatedExtraction.service = targetFollowUp.serviceName;
+          }
+          if (
+            !updatedExtraction.provider &&
+            targetFollowUp.preferredProviderName
+          ) {
+            updatedExtraction.provider = targetFollowUp.preferredProviderName;
+          }
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: updatedExtraction,
+          };
+
+          if (!bookingAiResponse.extraction.date) {
+            const rangeDesc =
+              targetFollowUp.startDate && targetFollowUp.endDate
+                ? `متاح في الفترة من ${targetFollowUp.startDate} إلى ${targetFollowUp.endDate}`
+                : targetFollowUp.startDate
+                  ? `ابتداءً من ${targetFollowUp.startDate}`
+                  : null;
+            const promptMsg = rangeDesc
+              ? `لديك طلب متابعة مسجل لخدمة "${targetFollowUp.serviceName ?? "المتابعة"}" (${rangeDesc}). ما هو اليوم أو الوقت المناسب لك؟`
+              : `لديك طلب متابعة مسجل لخدمة "${targetFollowUp.serviceName ?? "المتابعة"}". ما هو اليوم المناسب لك لحجز الموعد؟`;
+
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              promptMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              promptMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              observability: {
+                ...turnObservability,
+                turnPlan: {
+                  steps: [{ kind: "CLARIFY", intent: validated.intent }],
+                },
+                clarification: {
+                  type: "CLARIFY_DATE",
+                  missingFacts: ["date"],
+                },
+              },
+              delivery,
+            };
+          }
+
+          const targetDate = bookingAiResponse.extraction.date;
+          const isOutOfRange =
+            (targetFollowUp.startDate &&
+              targetDate < targetFollowUp.startDate) ||
+            (targetFollowUp.endDate && targetDate > targetFollowUp.endDate);
+
+          if (isOutOfRange) {
+            const rangeDesc =
+              targetFollowUp.startDate && targetFollowUp.endDate
+                ? `من ${targetFollowUp.startDate} إلى ${targetFollowUp.endDate}`
+                : targetFollowUp.startDate
+                  ? `ابتداءً من ${targetFollowUp.startDate}`
+                  : `حتى ${targetFollowUp.endDate}`;
+            const outOfRangeMsg = `تاريخ الموعد المطلوب (${targetDate}) خارج الفترة المحددة للمتابعة من قِبل الطبيب (${rangeDesc}). يرجى اختيار تاريخ ضمن هذه الفترة.`;
+
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              outOfRangeMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              outOfRangeMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              observability: {
+                ...turnObservability,
+                turnPlan: {
+                  steps: [{ kind: "CLARIFY", intent: validated.intent }],
+                },
+                clarification: {
+                  type: "CLARIFY_DATE",
+                  missingFacts: ["date"],
+                },
+              },
+              delivery,
+            };
+          }
+        }
+      }
+
       const mapped = mapAiResponseToBookingInput({
         businessId: business.id,
         branchId,
@@ -2453,6 +2789,7 @@ async function runInboundTurn(
         mapped.serviceName,
         mapped.date!,
         bookingResult.data.options,
+        activeFollowUpId,
       );
       const assistantMessage = await persistAssistantReply(
         deps,
