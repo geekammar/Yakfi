@@ -16,6 +16,7 @@ export const createAppointmentFormSchema = z.object({
   date: appointmentDateSchema,
   startTime: timeSchema,
   notes: z.string().trim().max(2000, "الملاحظة طويلة جداً"),
+  followUpRequestId: uuidSchema.optional(),
 });
 
 export const rescheduleAppointmentSchema = z.object({

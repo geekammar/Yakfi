@@ -29,12 +29,18 @@
 
 import { createAppointmentFormSchema } from "@/features/appointments/schemas/appointment-schema";
 import type { CreateAppointmentActionResult } from "@/features/appointments/types";
-import { nowTimeInTimeZone, todayInTimeZone } from "@/lib/scheduling/slot-grid";
+import {
+  nowTimeInTimeZone,
+  resolveWorkingHours,
+  toMinutes,
+  todayInTimeZone,
+} from "@/lib/scheduling/slot-grid";
 import type {
   AppointmentRepository,
   BranchRepository,
   BusinessRepository,
   CustomerRepository,
+  FollowUpRequestRepository,
   ProviderRepository,
   ServiceRepository,
 } from "@/server/repositories";
@@ -43,6 +49,7 @@ import {
   branchRepository,
   businessRepository,
   customerRepository,
+  followUpRequestRepository,
   providerRepository,
   serviceRepository,
 } from "@/server/repositories";
@@ -73,6 +80,7 @@ export type AppointmentCreateServiceDeps = {
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
   >;
+  followUpRequestRepository?: Pick<FollowUpRequestRepository, "findById">;
   now?: () => Date;
 };
 
@@ -85,6 +93,7 @@ export const defaultAppointmentCreateServiceDeps: AppointmentCreateServiceDeps =
     branchRepository,
     appointmentRepository,
     providerRepository,
+    followUpRequestRepository,
     now: () => new Date(),
   };
 
@@ -208,6 +217,83 @@ export async function createAppointmentRecord(
     }
   }
 
+  // Business working hours & closed day validation
+  if (business.workingHours) {
+    const workingDay = resolveWorkingHours(
+      business.workingHours,
+      parsed.data.date,
+    );
+    if (!workingDay) {
+      return {
+        success: false,
+        code: "BUSINESS_CLOSED",
+        message: "المنشأة مغلقة في هذا اليوم",
+      };
+    }
+    const startMinutes = toMinutes(parsed.data.startTime);
+    const endMinutes = toMinutes(endTime);
+    if (
+      startMinutes < workingDay.openMinutes ||
+      endMinutes > workingDay.closeMinutes
+    ) {
+      return {
+        success: false,
+        code: "OUTSIDE_WORKING_HOURS",
+        message: "الوقت المحدد خارج ساعات العمل",
+      };
+    }
+  }
+
+  // Follow-up request validation if linked
+  if (parsed.data.followUpRequestId) {
+    if (deps.followUpRequestRepository) {
+      const followUp = await deps.followUpRequestRepository.findById(
+        parsed.data.followUpRequestId,
+        actor.businessId,
+      );
+      if (!followUp || followUp.status !== "PENDING") {
+        return {
+          success: false,
+          code: "FOLLOW_UP_NOT_PENDING",
+          message: "طلب المتابعة غير متاح أو تم حجزه مسبقاً",
+        };
+      }
+      if (followUp.customerId !== customer.id) {
+        return {
+          success: false,
+          code: "VALIDATION",
+          message: "طلب المتابعة لا يطابق العميل المحدد",
+        };
+      }
+      if (followUp.startDate) {
+        const startStr =
+          typeof followUp.startDate === "string"
+            ? followUp.startDate
+            : followUp.startDate.toISOString().slice(0, 10);
+        if (parsed.data.date < startStr) {
+          return {
+            success: false,
+            code: "DATE_OUT_OF_RANGE",
+            message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
+          };
+        }
+      }
+      if (followUp.endDate) {
+        const endStr =
+          typeof followUp.endDate === "string"
+            ? followUp.endDate
+            : followUp.endDate.toISOString().slice(0, 10);
+        if (parsed.data.date > endStr) {
+          return {
+            success: false,
+            code: "DATE_OUT_OF_RANGE",
+            message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
+          };
+        }
+      }
+    }
+  }
+
   // Resolve explicit provider selection server-side (never use actor.userId)
   let assignedUserId: string | null = null;
   let providerId: string | null = null;
@@ -323,6 +409,7 @@ export async function createAppointmentRecord(
         endTime,
         notes: parsed.data.notes || undefined,
         status: initialStatus,
+        followUpRequestId: parsed.data.followUpRequestId,
       });
     if (!appointment) {
       return {

@@ -277,7 +277,7 @@ export function AppointmentAgenda({
                         ) : null}
                         <Button asChild variant="outline" size="sm">
                           <Link
-                            href={`/appointments/new?customerId=${appointment.customer.id}&serviceId=${appointment.service.id}${appointment.provider?.id ? `&providerId=${appointment.provider.id}` : ""}`}
+                            href={`/appointments/${appointment.id}?followUp=true`}
                           >
                             <CalendarPlusIcon className="size-3.5" />
                             إضافة متابعة
@@ -535,7 +535,7 @@ export function AppointmentAgenda({
                           ) : null}
                           <Button asChild variant="outline" size="sm">
                             <Link
-                              href={`/appointments/new?customerId=${appointment.customer.id}&serviceId=${appointment.service.id}${appointment.provider?.id ? `&providerId=${appointment.provider.id}` : ""}`}
+                              href={`/appointments/${appointment.id}?followUp=true`}
                             >
                               <CalendarPlusIcon className="size-3.5" />
                               إضافة متابعة

@@ -12,6 +12,8 @@ import type {
   Conversation,
   ConversationStatus,
   Customer,
+  FollowUpRequest,
+  FollowUpRequestStatus,
   InboundMessageDedupe,
   Invitation,
   KnowledgeGap,
@@ -40,6 +42,8 @@ export type {
   Conversation,
   ConversationStatus,
   Customer,
+  FollowUpRequest,
+  FollowUpRequestStatus,
   InboundMessageDedupe,
   Invitation,
   KnowledgeGap,
@@ -75,4 +79,22 @@ export type AppointmentWithRelations = Appointment & {
   customer: Pick<Customer, "id" | "name" | "phone">;
   service: Pick<Service, "id" | "name" | "durationMinutes">;
   provider?: Pick<ProviderProfile, "id" | "name" | "displayName"> | null;
+};
+
+/** FollowUpRequest with customer + service + provider + appointments (detail & list views). */
+export type FollowUpRequestWithRelations = FollowUpRequest & {
+  customer: Pick<Customer, "id" | "name" | "phone">;
+  service?: Pick<Service, "id" | "name" | "durationMinutes"> | null;
+  preferredProvider?: Pick<
+    ProviderProfile,
+    "id" | "name" | "displayName"
+  > | null;
+  sourceAppointment?: Pick<
+    Appointment,
+    "id" | "date" | "startTime" | "endTime"
+  > | null;
+  scheduledAppointment?: Pick<
+    Appointment,
+    "id" | "date" | "startTime" | "endTime" | "status"
+  > | null;
 };

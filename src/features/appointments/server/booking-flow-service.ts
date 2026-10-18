@@ -30,11 +30,13 @@ import type {
 } from "@/features/appointments/types";
 import type {
   CustomerRepository,
+  FollowUpRequestRepository,
   ProviderRepository,
   ServiceRepository,
 } from "@/server/repositories";
 import {
   customerRepository,
+  followUpRequestRepository,
   providerRepository,
   serviceRepository,
 } from "@/server/repositories";
@@ -57,6 +59,7 @@ export type BookingFlowServiceDeps = {
         "countEligiblePerService" | "findProfileWithinBusiness"
       >
     >;
+  followUpRequestRepository?: Pick<FollowUpRequestRepository, "findById">;
 };
 
 /** Production dependencies (app singletons). */
@@ -64,6 +67,7 @@ export const defaultBookingFlowServiceDeps: BookingFlowServiceDeps = {
   customerRepository,
   serviceRepository,
   providerRepository,
+  followUpRequestRepository,
 };
 
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
@@ -207,22 +211,46 @@ export async function resolveBookingContext(
 ): Promise<BookingContextPrefill> {
   const parsed = bookingContextSchema.safeParse(input);
   if (!parsed.success || !actor.businessId) {
-    return { customer: null, serviceId: null, providerId: null };
+    return {
+      customer: null,
+      serviceId: null,
+      providerId: null,
+      followUpContext: null,
+    };
   }
+
+  const followUp =
+    parsed.data.followUpId && deps.followUpRequestRepository
+      ? await deps.followUpRequestRepository.findById(
+          parsed.data.followUpId,
+          actor.businessId,
+        )
+      : null;
+
+  const validFollowUp =
+    followUp && followUp.status === "PENDING" ? followUp : null;
+
+  const targetCustomerId = parsed.data.customerId || validFollowUp?.customerId;
+  const targetServiceId =
+    parsed.data.serviceId || validFollowUp?.serviceId || undefined;
+  const targetProviderId =
+    parsed.data.providerId || validFollowUp?.preferredProviderId || undefined;
+
   const [customer, service, provider] = await Promise.all([
-    parsed.data.customerId
-      ? deps.customerRepository.findById(parsed.data.customerId)
+    targetCustomerId
+      ? deps.customerRepository.findById(targetCustomerId)
       : Promise.resolve(null),
-    parsed.data.serviceId
-      ? deps.serviceRepository.findById(parsed.data.serviceId)
+    targetServiceId
+      ? deps.serviceRepository.findById(targetServiceId)
       : Promise.resolve(null),
-    parsed.data.providerId && deps.providerRepository?.findProfileWithinBusiness
+    targetProviderId && deps.providerRepository?.findProfileWithinBusiness
       ? deps.providerRepository.findProfileWithinBusiness(
-          parsed.data.providerId,
+          targetProviderId,
           actor.businessId,
         )
       : Promise.resolve(null),
   ]);
+
   return {
     customer:
       customer && customer.businessId === actor.businessId
@@ -236,6 +264,21 @@ export async function resolveBookingContext(
       provider && provider.businessId === actor.businessId && provider.isActive
         ? provider.id
         : null,
+    followUpContext: validFollowUp
+      ? {
+          id: validFollowUp.id,
+          startDate: validFollowUp.startDate
+            ? typeof validFollowUp.startDate === "string"
+              ? validFollowUp.startDate
+              : validFollowUp.startDate.toISOString().slice(0, 10)
+            : null,
+          endDate: validFollowUp.endDate
+            ? typeof validFollowUp.endDate === "string"
+              ? validFollowUp.endDate
+              : validFollowUp.endDate.toISOString().slice(0, 10)
+            : null,
+        }
+      : null,
   };
 }
 

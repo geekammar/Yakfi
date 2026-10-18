@@ -129,6 +129,7 @@ export function SmartCreateAppointment({
   CustomerCreateDialog,
   workingHours,
   slotDurationMinutes,
+  followUpContext,
 }: {
   initialCustomers: BookingCustomerOption[];
   services: BookingServiceOption[];
@@ -168,6 +169,11 @@ export function SmartCreateAppointment({
    */
   workingHours?: unknown;
   slotDurationMinutes?: number | null;
+  followUpContext?: {
+    id: string;
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
 }) {
   const [screen, setScreen] = useState<BookingFlowScreen>(
     initialScreen ?? "customer",
@@ -445,6 +451,7 @@ export function SmartCreateAppointment({
         // The wizard collects no notes (PROMPT-14 scope decision) —
         // the schema requires the key, so an empty note is submitted.
         notes: "",
+        followUpRequestId: followUpContext?.id,
       });
     } catch {
       submitInFlight.current = false;
@@ -722,6 +729,14 @@ export function SmartCreateAppointment({
             onSelect={handleSelectDate}
             serviceId={serviceId ?? undefined}
             workingHours={workingHours}
+            allowedRange={
+              followUpContext
+                ? {
+                    startDate: followUpContext.startDate,
+                    endDate: followUpContext.endDate,
+                  }
+                : undefined
+            }
           />
         ) : screen === "slot" && service ? (
           <SlotStep
