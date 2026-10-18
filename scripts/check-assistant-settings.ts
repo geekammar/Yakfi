@@ -163,6 +163,9 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     updatedAt: NOW,
     deletedAt: null,
     defaultBranchId: "branch-1",
+    reminderEnabled: false,
+    reminderLeadHours: 24,
+    reminderTemplateId: "standard",
     ...overrides,
   };
 }

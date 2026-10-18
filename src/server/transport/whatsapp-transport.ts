@@ -272,9 +272,15 @@ export function toEngineInboundMessage(
 
 // ─── Normalized outbound contract ────────────────────────────────────────────
 
+export type OutboundTemplateMessage = {
+  name: string;
+  language: string;
+  parameters: string[];
+};
+
 /** One outbound assistant reply to deliver to a customer. */
 export type OutboundMessage = {
-  /** Customer phone number (E.164-ish, as received inbound). */
+  /** Customer phone number (E.164-ish, as received inbound) or Telegram chat id. */
   to: string;
   /** The sending Business — REQUIRED for tenant-scoped send resolution:
    *  an adapter must be able to prove the connection belongs to this
@@ -282,7 +288,7 @@ export type OutboundMessage = {
   businessId: string;
   /** Display name of the sending business. */
   businessName: string;
-  /** Conversation the reply belongs to. */
+  /** Conversation the reply belongs to, or empty/system string for scheduled reminders. */
   conversationId: string;
   /** Reply text exactly as persisted. */
   content: string;
@@ -290,11 +296,13 @@ export type OutboundMessage = {
    *  resolved server-side; a connection of ANOTHER Business is unusable
    *  (see `resolveConnectionForSend`). */
   connectionId?: string;
-  /** Internal correlation id (the persisted Message id) — outbound
+  /** Internal correlation id (the persisted Message id or Reminder id) — outbound
    *  idempotency/audit metadata, never a provider id. */
   correlationId?: string;
-  /** Normalized message kind — TEXT is the only kind Core sends today. */
-  kind?: "TEXT";
+  /** Normalized message kind — TEXT is default; TEMPLATE for pre-approved templates. */
+  kind?: "TEXT" | "TEMPLATE";
+  /** Approved template descriptor when sending via approved-template pathway (e.g. Meta Cloud API). */
+  template?: OutboundTemplateMessage;
 };
 
 /** Result of one delivery attempt. */
@@ -306,6 +314,8 @@ export type TransportSendResult = {
   /** Normalized error category when not delivered — the adapter maps
    *  provider-specific failures onto the taxonomy. */
   errorCode?: WhatsAppTransportErrorCode;
+  /** Provider message reference/id if returned upon successful acceptance. */
+  providerMessageId?: string;
 };
 
 /** Provider-neutral outbound transport. */

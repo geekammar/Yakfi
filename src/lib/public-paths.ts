@@ -39,6 +39,9 @@ const PUBLIC_PATH_PREFIXES = [
   // PROMPT-AI-JEV-03F-I). Authenticated via FLOWPILOT_TEST_INGRESS_TOKEN or
   // INBOUND_WEBHOOK_TOKEN header; failing closed 401/503 before any processing.
   "/api/conversations/inbound",
+  // Scheduled cron endpoints (BOOK-REM-01). Authenticated via CRON_SECRET
+  // bearer token / header; answering 401 if missing or unauthorized.
+  "/api/cron",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

@@ -163,7 +163,11 @@ export function createTelegramMessageTransport(
           errorCode: result.error.code,
         };
       }
-      return { provider: "telegram", delivered: true };
+      return {
+        provider: "telegram",
+        delivered: true,
+        providerMessageId: String(result.result.message_id),
+      };
     },
   };
 }

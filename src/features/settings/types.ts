@@ -23,4 +23,18 @@ export type BusinessSettingsView = {
   cancellationPolicy: string;
   /** Candidate appointment start-time interval in minutes (UX001-R3). */
   slotDurationMinutes: number;
+  /** Automated appointment reminder enabled state (BOOK-REM-01). */
+  reminderEnabled: boolean;
+  /** Lead hours before appointment to send reminder (BOOK-REM-01). */
+  reminderLeadHours: number;
+  /** Selected message template/style id (BOOK-REM-01). */
+  reminderTemplateId: string;
+  /** Global server-side feature operational status (Discovery mode: false). */
+  remindersOperational: boolean;
+  /** Messaging channel readiness status for automated reminders. */
+  channelReadiness: {
+    whatsapp: boolean;
+    telegram: boolean;
+    hasActiveChannel: boolean;
+  };
 };

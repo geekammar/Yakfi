@@ -72,6 +72,9 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     assistantName: null,
     assistantStyle: null,
     defaultBranchId: "branch-1",
+    reminderEnabled: false,
+    reminderLeadHours: 24,
+    reminderTemplateId: "standard",
     ...overrides,
   };
 }

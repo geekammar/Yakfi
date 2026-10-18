@@ -2,13 +2,17 @@
 
 import { updateBusinessSettingsAction } from "@/features/settings/actions/settings-actions";
 import {
+  REMINDER_LEAD_HOURS_OPTIONS,
+  REMINDER_TEMPLATE_OPTIONS,
   businessSettingsSchema,
   type BusinessSettingsInput,
 } from "@/features/settings/schemas/settings-schema";
 import type { BusinessSettingsView } from "@/features/settings/types";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -20,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   BOOKING_INTERVAL_OPTIONS,
   CONFIRMATION_MODES,
@@ -29,6 +34,7 @@ import {
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  BellIcon,
   BookOpenIcon,
   CheckCircleIcon,
   ChevronLeftIcon,
@@ -44,11 +50,11 @@ import { Controller, useForm } from "react-hook-form";
 
 /**
  * Business Settings screen (operator PROMPT-09): how the business
- * operates. Two clearly separated sections — بيانات المنشأة and
- * إعدادات الحجز — with ONE primary save action, inline Arabic
- * validation, and visible save success/failure states. The form never
- * carries a businessId; the server derives the Business from the
- * authenticated actor.
+ * operates. Three clearly separated sections — بيانات المنشأة,
+ * معلومات المساعد, إعدادات الحجز, and التذكير بالمواعيد — with ONE primary
+ * save action, inline Arabic validation, and visible save success/failure states.
+ * The form never carries a businessId; the server derives the Business from
+ * the authenticated actor.
  */
 export function SettingsScreen({
   initialSettings,
@@ -74,6 +80,11 @@ export function SettingsScreen({
       slotDurationMinutes:
         initialSettings.slotDurationMinutes as BusinessSettingsInput["slotDurationMinutes"],
       cancellationPolicy: initialSettings.cancellationPolicy,
+      reminderEnabled: initialSettings.reminderEnabled ?? false,
+      reminderLeadHours: (initialSettings.reminderLeadHours ??
+        24) as BusinessSettingsInput["reminderLeadHours"],
+      reminderTemplateId: (initialSettings.reminderTemplateId ??
+        "standard") as BusinessSettingsInput["reminderTemplateId"],
     },
     mode: "onChange",
   });
@@ -453,6 +464,236 @@ export function SettingsScreen({
           </div>
         </section>
 
+        {/* ─── Section 4: التذكير بالمواعيد (BOOK-REM-01) ─── */}
+        <section
+          aria-labelledby="settings-reminders-section"
+          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <SectionHeader
+              title="التذكير بالمواعيد"
+              description="ذكّر عملاءك تلقائيًا قبل موعدهم."
+            />
+            {!initialSettings.remindersOperational ? (
+              <Badge
+                variant="outline"
+                className="w-fit text-xs border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              >
+                مرحلة الإعداد (غير مفعّل)
+              </Badge>
+            ) : null}
+          </div>
+          <div className="space-y-6 pt-2">
+            {/* Informative Status when feature is globally disabled */}
+            {!initialSettings.remindersOperational ? (
+              <div
+                role="status"
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+              >
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <span className="size-2 rounded-full bg-amber-500" />
+                  <span>التذكير التلقائي غير مفعّل حاليًا</span>
+                </div>
+                <p className="text-muted-foreground dark:text-amber-200/80">
+                  يمكنك استعراض إعدادات التذكير وتجهيزها، لكن لن يتم إرسال رسائل
+                  تلقائية خلال المرحلة الحالية.
+                </p>
+              </div>
+            ) : null}
+
+            {/* Setting A: Enable reminder */}
+            <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
+              <Controller
+                control={form.control}
+                name="reminderEnabled"
+                render={({ field }) => (
+                  <Checkbox
+                    id="settings-reminder-enabled"
+                    checked={
+                      initialSettings.remindersOperational ? field.value : false
+                    }
+                    onCheckedChange={
+                      initialSettings.remindersOperational
+                        ? field.onChange
+                        : undefined
+                    }
+                    disabled={
+                      !initialSettings.remindersOperational ||
+                      !initialSettings.channelReadiness.hasActiveChannel
+                    }
+                    aria-describedby="reminder-enabled-desc"
+                  />
+                )}
+              />
+              <div className="space-y-1 leading-none">
+                <Label
+                  htmlFor="settings-reminder-enabled"
+                  className={cn(
+                    "text-base font-semibold",
+                    initialSettings.remindersOperational
+                      ? "cursor-pointer"
+                      : "cursor-not-allowed opacity-75",
+                  )}
+                >
+                  تفعيل التذكير التلقائي
+                </Label>
+                <p
+                  id="reminder-enabled-desc"
+                  className="text-xs text-muted-foreground leading-5"
+                >
+                  {initialSettings.remindersOperational
+                    ? "إرسال رسالة تذكير تلقائية للعميل قبل موعده لتقليل نسبة عدم الحضور."
+                    : "التذكير التلقائي معطل حالياً في هذه المرحلة التجريبية. يمكنك تجهيز خيارات التوقيت والنموذج بالأسفل وحفظها للمستقبل."}
+                </p>
+              </div>
+            </div>
+
+            {/* Setting C: Channel readiness */}
+            <div className="space-y-2">
+              <span className="text-sm font-medium">حالة قنوات المراسلة</span>
+              {!initialSettings.channelReadiness.hasActiveChannel ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-destructive/30 bg-destructive/10 p-3.5 text-xs leading-5 text-destructive space-y-2"
+                >
+                  <p className="font-semibold">
+                    لا توجد قناة مراسلة جاهزة حالياً لإرسال التذكيرات.
+                  </p>
+                  <p>
+                    لتفعيل التذكير التلقائي، يجب أن يكون رقم واتساب أو بوت
+                    تيليجرام متصلاً ومفعلاً.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <Link
+                      href="/settings/whatsapp"
+                      className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
+                    >
+                      <MessageCircleIcon className="size-3.5" />
+                      إعداد واتساب
+                    </Link>
+                    <span>·</span>
+                    <Link
+                      href="/settings/telegram"
+                      className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
+                    >
+                      <SendIcon className="size-3.5" />
+                      إعداد تيليجرام
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  {initialSettings.channelReadiness.whatsapp ? (
+                    <Badge
+                      variant="outline"
+                      className="border-success/30 bg-success/10 text-success gap-1.5 py-1 px-2.5"
+                    >
+                      <MessageCircleIcon className="size-3.5" />
+                      واتساب متصل ومؤهل
+                    </Badge>
+                  ) : null}
+                  {initialSettings.channelReadiness.telegram ? (
+                    <Badge
+                      variant="outline"
+                      className="border-info/30 bg-info/10 text-info gap-1.5 py-1 px-2.5"
+                    >
+                      <SendIcon className="size-3.5" />
+                      تيليجرام متصل ومؤهل
+                    </Badge>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* Setting B: Reminder lead time */}
+            <div className="max-w-sm space-y-2">
+              <Label htmlFor="settings-reminder-lead">
+                إرسال التذكير قبل الموعد
+              </Label>
+              <Controller
+                control={form.control}
+                name="reminderLeadHours"
+                render={({ field }) => (
+                  <Select
+                    value={String(field.value)}
+                    onValueChange={(val) => field.onChange(Number(val))}
+                  >
+                    <SelectTrigger
+                      id="settings-reminder-lead"
+                      className="w-full"
+                    >
+                      <SelectValue placeholder="اختر وقت التذكير" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REMINDER_LEAD_HOURS_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={String(opt.value)}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {fieldError(form.formState.errors.reminderLeadHours?.message)}
+              <p className="text-xs leading-5 text-muted-foreground">
+                يتم حساب وقت الإرسال بدقة بحسب المنطقة الزمنية المعتمدة للمنشأة.
+              </p>
+            </div>
+
+            {/* Setting D: Message style and live preview */}
+            <div className="max-w-sm space-y-2">
+              <Label htmlFor="settings-reminder-template">
+                نموذج رسالة التذكير
+              </Label>
+              <Controller
+                control={form.control}
+                name="reminderTemplateId"
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger
+                      id="settings-reminder-template"
+                      className="w-full"
+                    >
+                      <SelectValue placeholder="اختر نموذج التذكير" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REMINDER_TEMPLATE_OPTIONS.map((tpl) => (
+                        <SelectItem key={tpl.id} value={tpl.id}>
+                          {tpl.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {fieldError(form.formState.errors.reminderTemplateId?.message)}
+            </div>
+
+            {/* Live Message Preview */}
+            <div className="space-y-2 rounded-xl border bg-muted/30 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                  <BellIcon className="size-3.5" />
+                  معاينة رسالة التذكير (مثال للعميل):
+                </span>
+                <Badge variant="secondary" className="text-[10px] font-normal">
+                  معاينة فقط
+                </Badge>
+              </div>
+              <div className="rounded-lg border bg-card p-3.5 text-sm leading-6 shadow-xs whitespace-pre-wrap">
+                {form.watch("reminderTemplateId") === "compact"
+                  ? `تذكير بموعدك: لدى ${form.watch("name") || "عيادة الأمل"} يوم غداً (الأحد، 25 أكتوبر) الساعة 10:00 ص لخدمة كشف واستشارة. نرجو الحضور قبل الموعد بـ 10 دقائق.`
+                  : `مرحباً بك! نود تذكيرك بموعدك لدى ${form.watch("name") || "عيادة الأمل"} يوم غداً (الأحد، 25 أكتوبر) الساعة 10:00 ص (خدمة: كشف واستشارة). يسعدنا حضورك في الموعد المحدد.`}
+              </div>
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                * معاينة تجريبية لشكل النص فقط — لن يتم إرسال أي رسائل للعملاء
+                خلال هذه المرحلة. في المستقبل، سيتم الإرسال عبر القالب المعتمد
+                رسمياً دون أي بيانات خاصة.
+              </p>
+            </div>
+          </div>
+        </section>
+
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
@@ -470,7 +711,9 @@ export function SettingsScreen({
 
         <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ.
+            {initialSettings.remindersOperational
+              ? "تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ."
+              : "تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ (إعدادات التذكير تبقى مُجهّزة لحين تفعيل الخدمة مستقبلاً)."}
           </p>
           <Button type="submit" size="lg" disabled={isSubmitting}>
             {isSubmitting ? (

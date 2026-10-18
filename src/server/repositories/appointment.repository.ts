@@ -1,3 +1,8 @@
+import { areAppointmentRemindersOperational } from "@/features/appointments/server/reminder-config";
+import {
+  calculateReminderDueTime,
+  isLateBooking,
+} from "@/lib/scheduling/reminder-time";
 import type {
   CreateAppointmentDto,
   ListAppointmentsDto,
@@ -405,6 +410,42 @@ export class AppointmentRepository {
             });
           }
 
+          // Automated reminder scheduling (BOOK-REM-01)
+          if (areAppointmentRemindersOperational()) {
+            const business = await tx.business.findUnique({
+              where: { id: input.businessId },
+              select: {
+                reminderEnabled: true,
+                reminderLeadHours: true,
+                reminderTemplateId: true,
+                timezone: true,
+              },
+            });
+            if (business?.reminderEnabled) {
+              const leadHours = business.reminderLeadHours ?? 24;
+              const timezone = business.timezone || "Asia/Riyadh";
+              if (!isLateBooking({ date, startTime, leadHours, timezone })) {
+                const dueAt = calculateReminderDueTime({
+                  date,
+                  startTime,
+                  leadHours,
+                  timezone,
+                });
+                await tx.appointmentReminder.create({
+                  data: {
+                    businessId: input.businessId,
+                    appointmentId: appointment.id,
+                    channel: "WHATSAPP",
+                    status: "PENDING",
+                    dueAt,
+                    leadHours,
+                    templateId: business.reminderTemplateId ?? "standard",
+                  },
+                });
+              }
+            }
+          }
+
           return appointment;
         },
         { isolationLevel: "Serializable" },
@@ -478,6 +519,57 @@ export class AppointmentRepository {
           });
           if (conflict > 0) return null;
 
+          // Reconcile automated reminder on reschedule (BOOK-REM-01)
+          await tx.appointmentReminder.updateMany({
+            where: {
+              appointmentId: id,
+              status: { in: ["PENDING", "CLAIMED", "FAILED_RETRYABLE"] },
+            },
+            data: { status: "CANCELLED", lastError: "RESCHEDULED" },
+          });
+
+          if (areAppointmentRemindersOperational()) {
+            const business = await tx.business.findUnique({
+              where: { id: appointment.businessId },
+              select: {
+                reminderEnabled: true,
+                reminderLeadHours: true,
+                reminderTemplateId: true,
+                timezone: true,
+              },
+            });
+            if (business?.reminderEnabled) {
+              const leadHours = business.reminderLeadHours ?? 24;
+              const timezone = business.timezone || "Asia/Riyadh";
+              if (
+                !isLateBooking({
+                  date: input.date,
+                  startTime: input.startTime,
+                  leadHours,
+                  timezone,
+                })
+              ) {
+                const dueAt = calculateReminderDueTime({
+                  date: input.date,
+                  startTime: input.startTime,
+                  leadHours,
+                  timezone,
+                });
+                await tx.appointmentReminder.create({
+                  data: {
+                    businessId: appointment.businessId,
+                    appointmentId: id,
+                    channel: "WHATSAPP",
+                    status: "PENDING",
+                    dueAt,
+                    leadHours,
+                    templateId: business.reminderTemplateId ?? "standard",
+                  },
+                });
+              }
+            }
+          }
+
           return tx.appointment.update({
             where: { id },
             data: {
@@ -493,7 +585,25 @@ export class AppointmentRepository {
   }
 
   async setStatus(id: string, status: AppointmentStatus) {
-    return db.appointment.update({ where: { id }, data: { status } });
+    if (
+      status === "CANCELLED" ||
+      status === "COMPLETED" ||
+      status === "NO_SHOW"
+    ) {
+      await (this.client ?? db).appointmentReminder.updateMany({
+        where: {
+          appointmentId: id,
+          status: { in: ["PENDING", "CLAIMED", "FAILED_RETRYABLE"] },
+        },
+        data: { status: "CANCELLED", lastError: `APPOINTMENT_${status}` },
+      });
+    }
+    return (this.client ?? db).appointmentReminder
+      ? (this.client ?? db).appointment.update({
+          where: { id },
+          data: { status },
+        })
+      : db.appointment.update({ where: { id }, data: { status } });
   }
 
   /**

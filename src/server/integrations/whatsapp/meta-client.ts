@@ -107,6 +107,31 @@ export function buildMetaTextPayload(to: string, text: string): unknown {
   };
 }
 
+export function buildMetaTemplatePayload(
+  to: string,
+  template: { name: string; language: string; parameters: string[] },
+): unknown {
+  return {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "template",
+    template: {
+      name: template.name,
+      language: { code: template.language },
+      components: [
+        {
+          type: "body",
+          parameters: template.parameters.map((param) => ({
+            type: "text",
+            text: param,
+          })),
+        },
+      ],
+    },
+  };
+}
+
 // ─── Error mapping ─────────────────────────────────────────────────────────
 
 export type MetaApiErrorBody = {
@@ -254,7 +279,9 @@ export function createMetaWhatsAppTransport(
         config.apiVersion,
         phoneNumberId,
       );
-      const body = buildMetaTextPayload(message.to, message.content);
+      const body = message.template
+        ? buildMetaTemplatePayload(message.to, message.template)
+        : buildMetaTextPayload(message.to, message.content);
 
       let response: Response;
       try {
@@ -285,8 +312,11 @@ export function createMetaWhatsAppTransport(
         } catch {
           // no-op: delivery already succeeded
         }
-        void providerMessageId;
-        return { provider: "meta-whatsapp", delivered: true };
+        return {
+          provider: "meta-whatsapp",
+          delivered: true,
+          ...(providerMessageId ? { providerMessageId } : {}),
+        };
       }
 
       let errorBody: MetaApiErrorBody | null = null;

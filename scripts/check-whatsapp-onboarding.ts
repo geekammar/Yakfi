@@ -761,6 +761,9 @@ async function main(): Promise<void> {
     defaultBranchId: string | null;
     assistantName: string | null;
     assistantStyle: Record<string, string> | null;
+    reminderEnabled: boolean;
+    reminderLeadHours: number;
+    reminderTemplateId: string;
   };
   const makeBusiness = (input: {
     id: string;
@@ -788,6 +791,9 @@ async function main(): Promise<void> {
     assistantName: null,
     assistantStyle: null,
     defaultBranchId: null,
+    reminderEnabled: false,
+    reminderLeadHours: 24,
+    reminderTemplateId: "standard",
   });
   const businesses = new Map<string, StoredBusiness>();
   businesses.set(
