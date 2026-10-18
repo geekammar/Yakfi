@@ -20,7 +20,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CONFIRMATION_MODES, TIMEZONES, VERTICALS } from "@/lib/validation";
+import {
+  BOOKING_INTERVAL_OPTIONS,
+  CONFIRMATION_MODES,
+  TIMEZONES,
+  VERTICALS,
+} from "@/lib/validation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -66,6 +71,8 @@ export function SettingsScreen({
       address: initialSettings.address,
       confirmationMode:
         initialSettings.confirmationMode as BusinessSettingsInput["confirmationMode"],
+      slotDurationMinutes:
+        initialSettings.slotDurationMinutes as BusinessSettingsInput["slotDurationMinutes"],
       cancellationPolicy: initialSettings.cancellationPolicy,
     },
     mode: "onChange",
@@ -391,6 +398,46 @@ export function SettingsScreen({
               />
               {fieldError(form.formState.errors.confirmationMode?.message)}
             </fieldset>
+
+            <div className="max-w-sm space-y-2">
+              <Label htmlFor="settings-slot-duration">
+                الفاصل الزمني بين بدايات المواعيد
+              </Label>
+              <Controller
+                control={form.control}
+                name="slotDurationMinutes"
+                render={({ field }) => (
+                  <Select
+                    value={
+                      field.value !== undefined ? String(field.value) : "30"
+                    }
+                    onValueChange={(val) => field.onChange(Number(val))}
+                  >
+                    <SelectTrigger
+                      id="settings-slot-duration"
+                      className="w-full"
+                      aria-invalid={Boolean(
+                        form.formState.errors.slotDurationMinutes,
+                      )}
+                    >
+                      <SelectValue placeholder="اختر الفاصل الزمني" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BOOKING_INTERVAL_OPTIONS.map((minutes) => (
+                        <SelectItem key={minutes} value={String(minutes)}>
+                          {minutes} دقيقة
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {fieldError(form.formState.errors.slotDurationMinutes?.message)}
+              <p className="text-xs leading-5 text-muted-foreground">
+                يحدد عدد الدقائق بين أوقات بدء الحجز المعروضة، ولا يغيّر مدة
+                الخدمة أو المواعيد المحجوزة مسبقًا.
+              </p>
+            </div>
 
             <div className="space-y-2">
               <Label htmlFor="settings-cancellation">سياسة الإلغاء</Label>

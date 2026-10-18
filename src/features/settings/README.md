@@ -43,6 +43,11 @@ vertical-agnostic; the vertical field is discovery metadata only.
   status of newly created appointments in the appointments feature:
   `automatic` → `CONFIRMED`, `manual` (default) → `PENDING`. The status
   is derived server-side from the Business record, never client input.
+- `Business.slotDurationMinutes` (UX001-R3) drives the candidate appointment
+  start-time interval offered to customers and staff across booking surfaces
+  (`generateCandidateSlots` / `generateCandidateGrid`). Allowed intervals:
+  `[15, 20, 30, 45, 60, 90, 120]` minutes. This setting is strictly independent
+  of service duration (`Service.durationMinutes`) and historical appointments.
 
 ## Out of scope (documented follow-ups)
 
@@ -50,11 +55,6 @@ vertical-agnostic; the vertical field is discovery metadata only.
   surface for hours is a follow-up slice).
 - Business account activate/deactivate (Spec A §3 — deliberate separate
   action with its own guardrails).
-- Default appointment duration — intentionally NOT exposed here: the
-  domain stores per-service durations (`Service.durationMinutes`) and a
-  slot-granularity default (`Business.slotDurationMinutes`); neither is
-  "default appointment duration", and no safe representation exists, so
-  per the prompt rule it is documented rather than invented.
 
 ## Related surfaces
 

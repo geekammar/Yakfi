@@ -68,6 +68,10 @@ export const CONFIRMATION_MODES: ReadonlyArray<{
   },
 ];
 
+/** Canonical choices for appointment candidate start-time intervals in minutes (UX001-R3). */
+export const BOOKING_INTERVAL_OPTIONS = [15, 20, 30, 45, 60, 90, 120] as const;
+export type BookingIntervalMinutes = (typeof BOOKING_INTERVAL_OPTIONS)[number];
+
 export const confirmationModeSchema = z.enum(
   CONFIRMATION_MODE_VALUES,
   "اختر طريقة تأكيد الحجز",
