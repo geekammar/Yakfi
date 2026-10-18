@@ -189,7 +189,10 @@ async function main(): Promise<void> {
 
   const business = {
     businessName: "عيادة التقييم",
-    services: [{ name: "تنظيف أسنان", durationMinutes: 30 }],
+    services: [
+      { name: "تنظيف أسنان", durationMinutes: 30 },
+      { name: "تبييض أسنان", durationMinutes: 45 },
+    ],
     faqs: [{ question: "مواعيد العمل", answer: "من 9 صباحاً حتى 6 مساءً" }],
   };
   const TEST_DATE = "2026-09-14";

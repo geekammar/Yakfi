@@ -331,6 +331,12 @@ export function derivePendingClarification(
   if (lastAi.includes("هناك أكثر من خدمة تطابق")) {
     return { type: "CLARIFY_SERVICE", missingFacts: ["service"] };
   }
+  if (lastAi.includes("الخدمة المطلوبة لم تعد متاحة")) {
+    return { type: "CLARIFY_SERVICE", missingFacts: ["service"] };
+  }
+  if (lastAi.includes("الخدمات المتاحة لدينا")) {
+    return { type: "CLARIFY_SERVICE", missingFacts: ["service"] };
+  }
   if (lastAi.includes("يرجى تحديد التاريخ المطلوب")) {
     return { type: "CLARIFY_DATE", missingFacts: ["date"] };
   }

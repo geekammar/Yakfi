@@ -79,11 +79,42 @@ export type ServiceMatchResult =
   | { status: "missing" }
   | { status: "ambiguous"; candidates: Array<{ id: string; name: string }> };
 
+const SERVICE_ORDINALS: Record<string, number> = {
+  "1": 1,
+  "2": 2,
+  "3": 3,
+  "4": 4,
+  "5": 5,
+  "6": 6,
+  "7": 7,
+  "8": 8,
+  "9": 9,
+  "١": 1,
+  "٢": 2,
+  "٣": 3,
+  "٤": 4,
+  "٥": 5,
+  "٦": 6,
+  "٧": 7,
+  "٨": 8,
+  "٩": 9,
+  الاول: 1,
+  الاولاني: 1,
+  التاني: 2,
+  الثاني: 2,
+  التالت: 3,
+  الثالث: 3,
+  الرابع: 4,
+  الخامس: 5,
+  السادس: 6,
+};
+
 /**
  * Deterministic service matcher: free-form `extraction.service` text vs
  * the business's own services (`serviceRepository.listByBusiness`).
  *
  * - null/empty -> missing (needs clarification)
+ * - index/ordinal/button id -> matches corresponding service by 1-indexed order
  * - normalized exact/substring match -> ok when exactly one candidate
  * - zero candidates -> missing
  * - >1 candidates -> ambiguous (needs clarification)
@@ -93,8 +124,40 @@ export function matchServiceByName(
   services: ReadonlyArray<{ id: string; name: string }>,
 ): ServiceMatchResult {
   if (!serviceText) return { status: "missing" };
+  const trimmed = serviceText.trim();
+  if (trimmed.length === 0) return { status: "missing" };
+
+  // Check structured button / callback or index pattern first
+  const callbackMatch = trimmed.match(
+    /^(?:service|serv|opt|choice)[_:]([1-9]\d*)$/i,
+  );
+  if (callbackMatch && callbackMatch[1]) {
+    const idx = parseInt(callbackMatch[1], 10);
+    if (idx >= 1 && idx <= services.length && services[idx - 1]) {
+      const found = services[idx - 1]!;
+      return { status: "ok", serviceId: found.id, serviceName: found.name };
+    }
+  }
+
   const needle = normalizeArabicText(serviceText);
   if (needle.length === 0) return { status: "missing" };
+
+  const bareOrdinal = needle.startsWith("الخيار ")
+    ? needle.replace("الخيار ", "").trim()
+    : needle.startsWith("رقم ")
+      ? needle.replace("رقم ", "").trim()
+      : needle.startsWith("خدمة ")
+        ? needle.replace("خدمة ", "").trim()
+        : needle;
+
+  if (SERVICE_ORDINALS[bareOrdinal] !== undefined) {
+    const idx = SERVICE_ORDINALS[bareOrdinal]!;
+    if (idx >= 1 && idx <= services.length && services[idx - 1]) {
+      const found = services[idx - 1]!;
+      return { status: "ok", serviceId: found.id, serviceName: found.name };
+    }
+  }
+
   const candidates = services.filter((service) => {
     const hay = normalizeArabicText(service.name);
     if (hay.length === 0) return false;
@@ -191,6 +254,7 @@ export type BookingMapperInput = {
   branchId: string | null;
   services: ReadonlyArray<{ id: string; name: string }>;
   aiResponse: AiResponse;
+  defaultServiceId?: string | null;
 };
 
 export type BookingMapperOutput =
@@ -219,28 +283,44 @@ export type BookingMapperOutput =
 export function mapAiResponseToBookingInput(
   input: BookingMapperInput,
 ): BookingMapperOutput {
-  const { services, aiResponse, branchId } = input;
+  const { services, aiResponse, branchId, defaultServiceId } = input;
   const extraction = aiResponse.extraction;
 
   let serviceMatch = matchServiceByName(extraction.service, services);
-  if (
-    serviceMatch.status === "missing" &&
-    services.length === 1 &&
-    services[0]
-  ) {
-    serviceMatch = {
-      status: "ok",
-      serviceId: services[0].id,
-      serviceName: services[0].name,
-    };
-  }
   if (serviceMatch.status === "missing") {
-    return {
-      kind: "needs_clarification",
-      message:
-        "يرجى تحديد الخدمة المطلوبة — أخبرنا باسم الخدمة التي ترغب بحجزها.",
-      reason: "MISSING_SERVICE",
-    };
+    // 1. Configured default booking service if valid and active (Rule A)
+    const defaultService = defaultServiceId
+      ? services.find((s) => s.id === defaultServiceId)
+      : null;
+    if (defaultService) {
+      serviceMatch = {
+        status: "ok",
+        serviceId: defaultService.id,
+        serviceName: defaultService.name,
+      };
+    } else if (services.length === 1 && services[0]) {
+      // 2. Single active service auto-resolution (Rule A)
+      serviceMatch = {
+        status: "ok",
+        serviceId: services[0].id,
+        serviceName: services[0].name,
+      };
+    } else if (services.length > 1) {
+      // 3. Multiple services without default: show concise real service catalog (Rule A, B)
+      const list = services.map((s, idx) => `${idx + 1}. ${s.name}`).join("\n");
+      return {
+        kind: "needs_clarification",
+        message: `يرجى تحديد الخدمة المطلوبة — الخدمات المتاحة لدينا:\n${list}\nأخبرنا باسم أو رقم الخدمة التي ترغب بحجزها.`,
+        reason: "MISSING_SERVICE",
+      };
+    } else {
+      return {
+        kind: "needs_clarification",
+        message:
+          "يرجى تحديد الخدمة المطلوبة — أخبرنا باسم الخدمة التي ترغب بحجزها.",
+        reason: "MISSING_SERVICE",
+      };
+    }
   }
   if (serviceMatch.status === "ambiguous") {
     const names = serviceMatch.candidates.map((c) => c.name).join("، ");
