@@ -222,6 +222,7 @@ export function ReschedulePanel({
             onSelect={handleSelectDate}
             serviceId={appointment.service.id}
             excludeAppointmentId={appointment.id}
+            workingHours={workingHours}
           />
           <div className="flex gap-2 border-t pt-4">
             <Button type="button" variant="ghost" onClick={onCancel}>
@@ -271,22 +272,36 @@ export function ReschedulePanel({
           {resolvedSlot ? (
             <div
               role="status"
-              className="space-y-1.5 rounded-xl border border-primary/40 bg-primary/5 p-4"
+              className="space-y-2.5 rounded-xl border border-primary/40 bg-primary/5 p-4"
             >
-              <p className="flex items-center gap-2 text-sm font-semibold">
+              <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <CheckCircle2Icon
                   aria-hidden
                   className="size-5 shrink-0 text-primary"
                 />
-                الوقت المختار
+                مراجعة التغيير قبل التأكيد
               </p>
-              <p className="text-sm tabular-nums">
-                {formatArabicDate(date)} ·{" "}
-                <span className="font-medium">
-                  {formatSlotTime(resolvedSlot.startTime)} –{" "}
-                  {formatSlotTime(resolvedSlot.endTime)}
-                </span>
-              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs">
+                <div className="rounded-lg border bg-background/90 p-2.5">
+                  <span className="text-muted-foreground block mb-0.5">
+                    الموعد الحالي:
+                  </span>
+                  <p className="font-medium text-foreground tabular-nums">
+                    {formatArabicDate(appointment.date)} ·{" "}
+                    {formatSlotTime(toWallClock(appointment.startTime))}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-primary/30 bg-primary/10 p-2.5">
+                  <span className="text-primary block font-medium mb-0.5">
+                    الموعد الجديد:
+                  </span>
+                  <p className="font-semibold text-primary tabular-nums">
+                    {formatArabicDate(date)} ·{" "}
+                    {formatSlotTime(resolvedSlot.startTime)} –{" "}
+                    {formatSlotTime(resolvedSlot.endTime)}
+                  </p>
+                </div>
+              </div>
             </div>
           ) : null}
           {submitState.status === "error" ? (
@@ -315,7 +330,7 @@ export function ReschedulePanel({
               ) : (
                 <CalendarClockIcon aria-hidden />
               )}
-              تأكيد الموعد الجديد
+              تأكيد تغيير الموعد
             </Button>
           </div>
         </>

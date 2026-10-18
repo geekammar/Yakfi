@@ -15,12 +15,15 @@ export const metadata: Metadata = {
 
 export default async function AppointmentDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ reschedule?: string }>;
 }) {
   const session = await requireUser();
   if (!session.user.businessId) redirect("/onboarding");
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const appointment = await getAppointmentDetail(session.user.businessId, id);
   if (!appointment) notFound();
 
@@ -37,6 +40,7 @@ export default async function AppointmentDetailPage({
       timezone={business.timezone}
       workingHours={business.workingHours}
       slotDurationMinutes={business.slotDurationMinutes}
+      initialRescheduling={resolvedSearchParams?.reschedule === "true"}
     />
   );
 }
