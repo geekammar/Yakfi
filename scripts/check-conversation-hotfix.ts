@@ -36,7 +36,12 @@ import type {
 type Check = { num: number; label: string; pass: boolean; detail?: string };
 const checks: Check[] = [];
 
-function check(num: number, label: string, pass: boolean, detail?: string): void {
+function check(
+  num: number,
+  label: string,
+  pass: boolean,
+  detail?: string,
+): void {
   checks.push({ num, label, pass, detail });
 }
 
@@ -47,12 +52,10 @@ async function run(): Promise<void> {
   process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 
-  const { receiveInboundMessage } = await import(
-    "../src/features/conversations/server/conversation-engine"
-  );
-  const { resolveEgyptianRelativeDate } = await import(
-    "../src/features/conversations/server/relative-date"
-  );
+  const { receiveInboundMessage } =
+    await import("../src/features/conversations/server/conversation-engine");
+  const { resolveEgyptianRelativeDate } =
+    await import("../src/features/conversations/server/relative-date");
 
   const BIZ_ID_A = "11111111-1111-4111-8111-111111111111";
   const BIZ_ID_B = "22222222-2222-4222-8222-222222222222";
@@ -99,7 +102,8 @@ async function run(): Promise<void> {
 
     const business: Business = {
       id: businessId,
-      name: businessId === BIZ_ID_A ? "عيادة النور لطب الأسنان" : "عيادة الشفاء",
+      name:
+        businessId === BIZ_ID_A ? "عيادة النور لطب الأسنان" : "عيادة الشفاء",
       slug: businessId === BIZ_ID_A ? "al-noor" : "al-shifa",
       timezone: "Africa/Cairo",
       workingHours: openWeek(),
@@ -143,40 +147,42 @@ async function run(): Promise<void> {
     const deliveredOutbound: any[] = [];
     const dedupeLedger = new Set<string>();
 
-    const services = options?.customServices ?? (noServices
-      ? []
-      : singleService
-        ? [
-            {
-              id: SERV_DENTAL,
-              businessId,
-              name: "كشف أسنان",
-              durationMinutes: 30,
-              isActive: true,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ]
-        : [
-            {
-              id: SERV_DENTAL,
-              businessId,
-              name: "كشف أسنان",
-              durationMinutes: 30,
-              isActive: true,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-            {
-              id: SERV_CLEAN,
-              businessId,
-              name: "تنظيف أسنان",
-              durationMinutes: 30,
-              isActive: true,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ]);
+    const services =
+      options?.customServices ??
+      (noServices
+        ? []
+        : singleService
+          ? [
+              {
+                id: SERV_DENTAL,
+                businessId,
+                name: "كشف أسنان",
+                durationMinutes: 30,
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ]
+          : [
+              {
+                id: SERV_DENTAL,
+                businessId,
+                name: "كشف أسنان",
+                durationMinutes: 30,
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+              {
+                id: SERV_CLEAN,
+                businessId,
+                name: "تنظيف أسنان",
+                durationMinutes: 30,
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ]);
 
     const allProviders =
       providersCount === 0
@@ -344,9 +350,8 @@ async function run(): Promise<void> {
         providerName: "deterministic",
         respond: async (req: any) => {
           llmCallCount += 1;
-          const { deterministicConversationAi } = await import(
-            "../src/features/conversations/server/conversation-ai"
-          );
+          const { deterministicConversationAi } =
+            await import("../src/features/conversations/server/conversation-ai");
           return deterministicConversationAi.respond(req);
         },
       } as any,
@@ -371,15 +376,15 @@ async function run(): Promise<void> {
         const to = phone.startsWith("tg:")
           ? "6000000000"
           : business.whatsappNumber;
-        const from = phone.startsWith("tg:")
-          ? phone.replace("tg:", "")
-          : phone;
+        const from = phone.startsWith("tg:") ? phone.replace("tg:", "") : phone;
         const res = await receiveInboundMessage(deps, {
           to,
           from,
           text,
           receivedAt: new Date().toISOString(),
-          externalId: externalId ?? `ext-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          externalId:
+            externalId ??
+            `ext-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         });
         return {
           ...res,
@@ -392,7 +397,9 @@ async function run(): Promise<void> {
     };
   }
 
-  console.log("Starting UX001-C2-HOTFIX 16 Multi-Turn Regression Scenarios...\n");
+  console.log(
+    "Starting UX001-C2-HOTFIX 16 Multi-Turn Regression Scenarios...\n",
+  );
 
   // ── 1. Booking without service with configured default ──────────────────────
   {
@@ -401,12 +408,15 @@ async function run(): Promise<void> {
       providersCount: 1,
     });
     const res = await h.sendMessage("عايز أحجز بكره");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
       res.assistantAction === "AI_REPLY" &&
-      (lastOut.includes("كشف أسنان") || lastOut.includes("المواعيد المتاحة") || lastOut.includes("اختيار"));
+      (lastOut.includes("كشف أسنان") ||
+        lastOut.includes("المواعيد المتاحة") ||
+        lastOut.includes("اختيار"));
     check(
       1,
       "Booking without service with configured default resolves default service directly",
@@ -422,12 +432,15 @@ async function run(): Promise<void> {
       providersCount: 1,
     });
     const res = await h.sendMessage("عايز أحجز بكره");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
       res.assistantAction === "AI_REPLY" &&
-      (lastOut.includes("كشف أسنان") || lastOut.includes("المواعيد المتاحة") || lastOut.includes("اختيار"));
+      (lastOut.includes("كشف أسنان") ||
+        lastOut.includes("المواعيد المتاحة") ||
+        lastOut.includes("اختيار"));
     check(
       2,
       "Booking without service with one eligible service selects it automatically",
@@ -443,7 +456,8 @@ async function run(): Promise<void> {
       defaultBookingServiceId: null,
     });
     const res = await h.sendMessage("عايز أحجز بكره");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
@@ -464,7 +478,8 @@ async function run(): Promise<void> {
       singleService: false,
     });
     const res = await h.sendMessage("ايه الخدمات اللي موجوده عندكم؟");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
@@ -488,14 +503,17 @@ async function run(): Promise<void> {
     });
     await h.sendMessage("عايز أحجز بكره");
     const res = await h.sendMessage("كشف");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
       res.assistantAction === "AI_REPLY" &&
       !lastOut.includes("يرجى تحديد الخدمة المطلوبة") &&
       !lastOut.includes("لم أفهم طلبك") &&
-      (lastOut.includes("كشف أسنان") || lastOut.includes("اختيار 1") || lastOut.includes("المواعيد"));
+      (lastOut.includes("كشف أسنان") ||
+        lastOut.includes("اختيار 1") ||
+        lastOut.includes("المواعيد"));
     check(
       5,
       "Customer answers 'كشف' after clarification matches 'كشف أسنان' and advances",
@@ -513,7 +531,8 @@ async function run(): Promise<void> {
     });
     await h.sendMessage("عايز أحجز بكره");
     const res = await h.sendMessage("كشف أسنان");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
@@ -539,11 +558,14 @@ async function run(): Promise<void> {
     await h.sendMessage("اهلا انا عايز احجز بكره الصبح");
     // Turn 2: Customer specifies service
     const res = await h.sendMessage("كشف أسنان");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     const pass =
       res.ok &&
       res.conversationStatus === "AI_ACTIVE" &&
-      (lastOut.includes("09:00") || lastOut.includes("10:00") || lastOut.includes("11:00")) &&
+      (lastOut.includes("09:00") ||
+        lastOut.includes("10:00") ||
+        lastOut.includes("11:00")) &&
       !lastOut.includes("يرجى تحديد الخدمة المطلوبة") &&
       !lastOut.includes("لم أفهم طلبك");
     check(
@@ -563,7 +585,8 @@ async function run(): Promise<void> {
     });
     await h.sendMessage("عايز أحجز");
     const t2 = await h.sendMessage("كشف");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     // On turn 2, the bot must NOT repeat "يرجى تحديد الخدمة المطلوبة"
     const pass =
       t2.ok &&
@@ -595,7 +618,9 @@ async function run(): Promise<void> {
 
     // 9c: multiple providers -> accepts "أي دكتور متاح"
     const h2 = createHarness({ providersCount: 2 });
-    const res2 = await h2.sendMessage("عايز أحجز كشف أسنان بكره مع أي دكتور متاح");
+    const res2 = await h2.sendMessage(
+      "عايز أحجز كشف أسنان بكره مع أي دكتور متاح",
+    );
     const pass2 =
       res2.conversationStatus === "AI_ACTIVE" &&
       res2.assistantAction === "AI_REPLY";
@@ -612,7 +637,8 @@ async function run(): Promise<void> {
   {
     const h = createHarness({ providersCount: 1 });
     const res = await h.sendMessage("عايز أحجز كشف أسنان بكره");
-    const lastOut = h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOut =
+      h.deliveredOutbound[h.deliveredOutbound.length - 1]?.content ?? "";
     // Working hours are 09:00 - 17:00, slot duration 30m. Slot 09:00 is valid.
     const pass =
       res.ok &&
@@ -658,14 +684,18 @@ async function run(): Promise<void> {
   {
     // 12a: Explicit human request
     const hHuman = createHarness();
-    const resHuman = await hHuman.sendMessage("حولني لموظف خدمة العملاء لو سمحت");
+    const resHuman = await hHuman.sendMessage(
+      "حولني لموظف خدمة العملاء لو سمحت",
+    );
     const passHuman =
       resHuman.conversationStatus === "NEED_HUMAN" &&
       resHuman.handoffCause === "CUSTOMER_REQUESTED_HUMAN";
 
     // 12b: Safety / emergency
     const hSafety = createHarness();
-    const resSafety = await hSafety.sendMessage("عندي نزيف حاد وألم غير محتمل في اللثة");
+    const resSafety = await hSafety.sendMessage(
+      "عندي نزيف حاد وألم غير محتمل في اللثة",
+    );
     const passSafety =
       resSafety.conversationStatus === "NEED_HUMAN" &&
       resSafety.handoffCause === "SENSITIVE_OR_RESTRICTED";
@@ -698,8 +728,10 @@ async function run(): Promise<void> {
 
     await hA.sendMessage("ايه الخدمات اللي موجوده عندكم؟");
     await hB.sendMessage("ايه الخدمات اللي موجوده عندكم؟");
-    const outA = hA.deliveredOutbound[hA.deliveredOutbound.length - 1]?.content ?? "";
-    const outB = hB.deliveredOutbound[hB.deliveredOutbound.length - 1]?.content ?? "";
+    const outA =
+      hA.deliveredOutbound[hA.deliveredOutbound.length - 1]?.content ?? "";
+    const outB =
+      hB.deliveredOutbound[hB.deliveredOutbound.length - 1]?.content ?? "";
 
     const catalogIsolated =
       outA.includes("كشف أسنان") &&
@@ -708,9 +740,10 @@ async function run(): Promise<void> {
       !outB.includes("كشف أسنان");
 
     const resA = await hA.sendMessage("عايز أحجز كشف أسنان بكره");
-    const outBookA = hA.deliveredOutbound[hA.deliveredOutbound.length - 1]?.content ?? "";
+    const outBookA =
+      hA.deliveredOutbound[hA.deliveredOutbound.length - 1]?.content ?? "";
     const bookIsolated =
-      outBookA.includes("تتوفر المواعيد التالية لخدمة \"كشف أسنان\"") &&
+      outBookA.includes('تتوفر المواعيد التالية لخدمة "كشف أسنان"') &&
       hA.conversation.businessId === BIZ_ID_A &&
       hB.conversation.businessId === BIZ_ID_B &&
       resA.conversationStatus === "AI_ACTIVE";
@@ -728,21 +761,30 @@ async function run(): Promise<void> {
   // ── 14. WhatsApp and Telegram text and button paths ───────────────────────
   {
     // WhatsApp: text reply "1" to clarify service
-    const hWa = createHarness({ channel: "WHATSAPP", defaultBookingServiceId: null });
+    const hWa = createHarness({
+      channel: "WHATSAPP",
+      defaultBookingServiceId: null,
+    });
     await hWa.sendMessage("عايز أحجز بكره");
     const resWa = await hWa.sendMessage("1");
-    const lastOutWa = hWa.deliveredOutbound[hWa.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOutWa =
+      hWa.deliveredOutbound[hWa.deliveredOutbound.length - 1]?.content ?? "";
     const passWa =
       resWa.conversationStatus === "AI_ACTIVE" &&
       !lastOutWa.includes("يرجى تحديد الخدمة");
 
     // Telegram: inline button with callback_data `service_1`
-    const hTg = createHarness({ channel: "TELEGRAM", defaultBookingServiceId: null });
+    const hTg = createHarness({
+      channel: "TELEGRAM",
+      defaultBookingServiceId: null,
+    });
     await hTg.sendMessage("عايز أحجز بكره");
-    const clarifyOutTg = hTg.deliveredOutbound[hTg.deliveredOutbound.length - 1];
+    const clarifyOutTg =
+      hTg.deliveredOutbound[hTg.deliveredOutbound.length - 1];
     const hasInlineKb = !!clarifyOutTg?.replyMarkup?.inline_keyboard;
     const resTg = await hTg.sendMessage("service_1");
-    const lastOutTg = hTg.deliveredOutbound[hTg.deliveredOutbound.length - 1]?.content ?? "";
+    const lastOutTg =
+      hTg.deliveredOutbound[hTg.deliveredOutbound.length - 1]?.content ?? "";
     const passTg =
       hasInlineKb &&
       resTg.conversationStatus === "AI_ACTIVE" &&
@@ -782,12 +824,12 @@ async function run(): Promise<void> {
     // Verify relative date resolution Egyptian colloquial
     const isoTomorrow = resolveEgyptianRelativeDate("بكره", TODAY_REF);
     const isoNextDay = resolveEgyptianRelativeDate("بعد بكره", TODAY_REF);
-    const datePass = isoTomorrow === "2026-10-21" && isoNextDay === "2026-10-22";
+    const datePass =
+      isoTomorrow === "2026-10-21" && isoNextDay === "2026-10-22";
 
     // Verify booking selection helper works with ordinals and buttons
-    const { parseBookingSelection } = await import(
-      "../src/features/conversations/server/booking-selection"
-    );
+    const { parseBookingSelection } =
+      await import("../src/features/conversations/server/booking-selection");
     const sel1 = parseBookingSelection("1");
     const selOpt1 = parseBookingSelection("opt_1");
     const selFirst = parseBookingSelection("الاول");
@@ -821,7 +863,9 @@ async function run(): Promise<void> {
     if (!c.pass) failed++;
   }
   console.log("========================================================");
-  console.log(`Total: ${checks.length} | Passed: ${checks.length - failed} | Failed: ${failed}`);
+  console.log(
+    `Total: ${checks.length} | Passed: ${checks.length - failed} | Failed: ${failed}`,
+  );
 
   if (failed > 0) {
     process.exit(1);

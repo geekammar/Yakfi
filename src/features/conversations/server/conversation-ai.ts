@@ -1270,7 +1270,11 @@ export function isPureServiceCatalogQuestion(message: string): boolean {
 
 export function formatServiceCatalogContent(
   businessName: string,
-  services: ReadonlyArray<{ name: string; durationMinutes?: number; price?: string | null }>,
+  services: ReadonlyArray<{
+    name: string;
+    durationMinutes?: number;
+    price?: string | null;
+  }>,
 ): string {
   const lines = services.map((s, idx) => {
     const duration = s.durationMinutes ? ` (${s.durationMinutes} دقيقة)` : "";

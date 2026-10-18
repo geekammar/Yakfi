@@ -829,10 +829,7 @@ function resolveFinishedTurn(
 
       // Preserve prior date and time-of-day preferences from recent customer messages
       const todayIso = todayIsoInTimeZone(now, timezone);
-      if (
-        !factUpdates.some((u) => u.key === "date") &&
-        !base.knownFacts.date
-      ) {
+      if (!factUpdates.some((u) => u.key === "date") && !base.knownFacts.date) {
         for (let i = recentChronological.length - 1; i >= 0; i--) {
           const m = recentChronological[i]!;
           if (m.senderType === "CUSTOMER") {

@@ -307,9 +307,7 @@ export function mapAiResponseToBookingInput(
       };
     } else if (services.length > 1) {
       // 3. Multiple services without default: show concise real service catalog (Rule A, B)
-      const list = services
-        .map((s, idx) => `${idx + 1}. ${s.name}`)
-        .join("\n");
+      const list = services.map((s, idx) => `${idx + 1}. ${s.name}`).join("\n");
       return {
         kind: "needs_clarification",
         message: `يرجى تحديد الخدمة المطلوبة — الخدمات المتاحة لدينا:\n${list}\nأخبرنا باسم أو رقم الخدمة التي ترغب بحجزها.`,
