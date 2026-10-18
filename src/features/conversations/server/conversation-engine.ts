@@ -826,6 +826,44 @@ function resolveFinishedTurn(
         }
         factUpdates.push({ key: missing, value });
       }
+
+      // Preserve prior date and time-of-day preferences from recent customer messages
+      const todayIso = todayIsoInTimeZone(now, timezone);
+      if (
+        !factUpdates.some((u) => u.key === "date") &&
+        !base.knownFacts.date
+      ) {
+        for (let i = recentChronological.length - 1; i >= 0; i--) {
+          const m = recentChronological[i]!;
+          if (m.senderType === "CUSTOMER") {
+            const rel = resolveEgyptianRelativeDate(m.content, todayIso);
+            if (rel) {
+              factUpdates.push({ key: "date", value: rel });
+              break;
+            }
+            const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
+            if (iso) {
+              factUpdates.push({ key: "date", value: iso[0] });
+              break;
+            }
+          }
+        }
+      }
+      if (
+        !factUpdates.some((u) => u.key === "timePreference") &&
+        !base.knownFacts.timePreference
+      ) {
+        for (let i = recentChronological.length - 1; i >= 0; i--) {
+          const m = recentChronological[i]!;
+          if (m.senderType === "CUSTOMER") {
+            const pref = extractTimeOfDayPreference(m.content);
+            if (pref) {
+              factUpdates.push({ key: "timePreference", value: pref });
+              break;
+            }
+          }
+        }
+      }
     }
 
     const { state } = mergeConversationState(seeded, {
@@ -2340,13 +2378,50 @@ async function runInboundTurn(
           new Date(),
           business.timezone ?? "UTC",
         );
-        const relDate = resolveEgyptianRelativeDate(inbound.text, todayIso);
+        let relDate = resolveEgyptianRelativeDate(inbound.text, todayIso);
+        if (!relDate && recentChronological) {
+          for (let i = recentChronological.length - 1; i >= 0; i--) {
+            const m = recentChronological[i]!;
+            if (m.senderType === "CUSTOMER") {
+              const prev = resolveEgyptianRelativeDate(m.content, todayIso);
+              if (prev) {
+                relDate = prev;
+                break;
+              }
+            }
+          }
+        }
         if (relDate) {
           bookingAiResponse = {
             ...bookingAiResponse,
             extraction: {
               ...bookingAiResponse.extraction,
               date: relDate,
+            },
+          };
+        }
+      }
+
+      if (!bookingAiResponse.extraction.timePreference) {
+        let timePref = extractTimeOfDayPreference(inbound.text);
+        if (!timePref && recentChronological) {
+          for (let i = recentChronological.length - 1; i >= 0; i--) {
+            const m = recentChronological[i]!;
+            if (m.senderType === "CUSTOMER") {
+              const prev = extractTimeOfDayPreference(m.content);
+              if (prev) {
+                timePref = prev;
+                break;
+              }
+            }
+          }
+        }
+        if (timePref) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              timePreference: timePref,
             },
           };
         }
@@ -2635,11 +2710,23 @@ async function runInboundTurn(
         }
       }
 
+      const defaultServiceId =
+        (business as unknown as { defaultBookingServiceId?: string | null })
+          .defaultBookingServiceId ??
+        (business as unknown as { defaultServiceId?: string | null })
+          .defaultServiceId ??
+        (
+          (business as unknown as { assistantStyle?: Record<string, unknown> })
+            .assistantStyle as { defaultServiceId?: string } | undefined
+        )?.defaultServiceId ??
+        null;
+
       const mapped = mapAiResponseToBookingInput({
         businessId: business.id,
         branchId,
         services: services.map((s) => ({ id: s.id, name: s.name })),
         aiResponse: bookingAiResponse,
+        defaultServiceId,
       });
       if (mapped.kind === "needs_clarification") {
         // First-class CLARIFY (PROMPT-AI-ARCH-06 — Slice 4): the booking
@@ -2669,6 +2756,23 @@ async function runInboundTurn(
           mapped.message,
           "AI_ACTIVE",
         );
+        const isTelegram = customer.phone.startsWith("tg:");
+        let replyMarkup: Record<string, unknown> | undefined;
+        if (
+          isTelegram &&
+          (mapped.reason === "MISSING_SERVICE" ||
+            mapped.reason === "AMBIGUOUS_SERVICE") &&
+          services.length > 0
+        ) {
+          replyMarkup = {
+            inline_keyboard: services.slice(0, 5).map((s, idx) => [
+              {
+                text: `${idx + 1}️⃣ ${s.name}`,
+                callback_data: `service_${idx + 1}`,
+              },
+            ]),
+          };
+        }
         const delivery = await deliverAssistantReply(
           deps,
           customer.phone,
@@ -2678,6 +2782,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
+          replyMarkup,
         );
         return {
           ok: true,

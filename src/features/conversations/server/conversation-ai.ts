@@ -212,6 +212,16 @@ const HUMAN_PHRASES = [
   // human request even when the object is the bare «حد» ("anyone"), which
   // is not a HUMAN_WORDS entry on its own (F1, TARGET_ARCHITECTURE Slice 1).
   "وصلني بحد",
+  "حولني لموظف",
+  "حولني لشخص",
+  "خدمة العملاء",
+  "خدمه العملاء",
+  "تحدث إلى موظف",
+  "تحدث الى موظف",
+  "التحدث إلى موظف",
+  "التحدث الى موظف",
+  "تكلم مع موظف",
+  "التكلم مع موظف",
 ];
 
 const SENSITIVE_WORDS = [
@@ -289,6 +299,9 @@ const BOOKING_WORDS = [
   "زيارة",
   "ازور",
   "أزور",
+  "كشف",
+  "أكشف",
+  "اكشف",
 ];
 
 const BOOKING_PHRASES = [
@@ -309,6 +322,14 @@ const BOOKING_PHRASES = [
   "موعد متابعه",
   "ميعاد متابعة",
   "ميعاد متابعه",
+  "عايز كشف",
+  "عايزة كشف",
+  "عايزه كشف",
+  "حجز كشف",
+  "كشف اسنان",
+  "كشف أسنان",
+  "كشف دكتور",
+  "كشف طبي",
 ];
 
 const AVAILABILITY_WORDS = [
@@ -939,7 +960,10 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
     candidates: ReadonlyArray<string> = tokens,
   ): boolean =>
     candidates.some((token) =>
-      words.some((word) => token === word || token.startsWith(word)),
+      words.some((word) => {
+        if (word === "اي" || word === "أي") return token === word;
+        return token === word || token.startsWith(word);
+      }),
     );
   return {
     bookingOrAvailability: matches(BOOKING_OR_AVAILABILITY_WORDS),
@@ -1227,6 +1251,39 @@ function isPureBusinessIdentityQuestion(message: string): boolean {
   );
 }
 
+/**
+ * PURE SERVICE-CATALOG ASKS ("ايه الخدمات اللي عندكم؟" / "الخدمات المتاحة").
+ * Matches when the turn asks about services without carrying another task intent.
+ */
+export function isPureServiceCatalogQuestion(message: string): boolean {
+  const relevance = deriveTaskRelevance(message);
+  if (!relevance.serviceCatalog) return false;
+  return !(
+    relevance.bookingOrAvailability ||
+    relevance.cancellationOrReschedule ||
+    relevance.providerChoice ||
+    relevance.contactOrIdentity ||
+    relevance.priceOrFee ||
+    relevance.businessIdentity
+  );
+}
+
+export function formatServiceCatalogContent(
+  businessName: string,
+  services: ReadonlyArray<{ name: string; durationMinutes?: number; price?: string | null }>,
+): string {
+  const lines = services.map((s, idx) => {
+    const duration = s.durationMinutes ? ` (${s.durationMinutes} دقيقة)` : "";
+    const price = s.price ? ` — ${s.price}` : "";
+    return `${idx + 1}. ${s.name}${duration}${price}`;
+  });
+  const header =
+    businessName && businessName.trim().length > 0
+      ? `الخدمات المتاحة لدينا في ${businessName.trim()}:`
+      : `الخدمات المتاحة لدينا:`;
+  return `${header}\n${lines.join("\n")}\n\nلحجز أي خدمة، أخبرنا باسم الخدمة أو رقمها وسنساعدك في اختيار الموعد المناسب.`;
+}
+
 /** Distinctive-token overlap score between a message and an FAQ question. */
 function faqMatchScore(
   messageTokens: string[],
@@ -1281,7 +1338,12 @@ function extractServiceFacts(
   const normalized = normalizeArabicText(message);
   for (const service of services) {
     const name = normalizeArabicText(service.name);
-    if (name.length > 0 && normalized.includes(name)) return service.name;
+    if (
+      name.length > 0 &&
+      (normalized.includes(name) || name.includes(normalized))
+    ) {
+      return service.name;
+    }
   }
   return null;
 }
@@ -1544,6 +1606,26 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
   if (isPureGreeting(request.message, normalized, tokens)) {
     return greetingResponse(request.message);
   }
+  // PURE SERVICE-CATALOG QUESTION (UX001-C2-HOTFIX): a direct ask about available
+  // services ("إيه الخدمات اللي عندكم؟") is answered deterministically from the
+  // authoritative `request.services` list — before any provider is consulted,
+  // so the turn spends ZERO provider calls and never leaves the customer without
+  // options.
+  if (isPureServiceCatalogQuestion(request.message)) {
+    if (request.services && request.services.length > 0) {
+      return {
+        action: "reply",
+        intent: "FAQ",
+        content: formatServiceCatalogContent(
+          request.businessName,
+          request.services,
+        ),
+        extraction: emptyAiExtraction,
+        handoffReason: null,
+        summary: null,
+      };
+    }
+  }
   // PURE BUSINESS-IDENTITY QUESTION (PROMPT-AI-UX-04B): a direct ask about the
   // business's own identity is answered here with a FIXED, confident reply
   // built from the authoritative `businessName` — before any provider is
@@ -1579,6 +1661,23 @@ export const deterministicConversationAi: ConversationAi = {
       services: rawRequest.services ?? [],
       faqs: rawRequest.faqs ?? [],
     };
+    if (
+      isPureServiceCatalogQuestion(request.message) &&
+      request.services &&
+      request.services.length > 0
+    ) {
+      return {
+        action: "reply",
+        intent: "FAQ",
+        content: formatServiceCatalogContent(
+          request.businessName,
+          request.services,
+        ),
+        extraction: emptyAiExtraction,
+        handoffReason: null,
+        summary: null,
+      };
+    }
     const result = classifyCustomerMessage(request.message, request.faqs);
     const service = extractServiceFacts(request.message, request.services);
     if (service === null) return result;
