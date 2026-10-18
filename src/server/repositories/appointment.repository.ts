@@ -333,11 +333,31 @@ export class AppointmentRepository {
       assignedUserId,
       providerId,
       notes,
+      followUpRequestId,
       ...rest
     } = input;
     return withSerializableRetry(() =>
-      db.$transaction(
+      (this.client ?? db).$transaction(
         async (tx) => {
+          if (followUpRequestId) {
+            const followUp = await tx.followUpRequest.findFirst({
+              where: {
+                id: followUpRequestId,
+                businessId: input.businessId,
+                ...notDeleted,
+              },
+            });
+            if (!followUp || followUp.status !== "PENDING") {
+              throw new Error("FOLLOW_UP_NOT_PENDING");
+            }
+            if (followUp.startDate && toDate(date) < followUp.startDate) {
+              throw new Error("FOLLOW_UP_DATE_OUT_OF_RANGE");
+            }
+            if (followUp.endDate && toDate(date) > followUp.endDate) {
+              throw new Error("FOLLOW_UP_DATE_OUT_OF_RANGE");
+            }
+          }
+
           const conflict = await tx.appointment.count({
             where: {
               businessId: input.businessId,
@@ -374,6 +394,17 @@ export class AppointmentRepository {
             where: { id: input.customerId },
             data: { lastAppointmentAt: new Date() },
           });
+
+          if (followUpRequestId) {
+            await tx.followUpRequest.update({
+              where: { id: followUpRequestId },
+              data: {
+                status: "SCHEDULED",
+                scheduledAppointmentId: appointment.id,
+              },
+            });
+          }
+
           return appointment;
         },
         { isolationLevel: "Serializable" },
@@ -415,7 +446,7 @@ export class AppointmentRepository {
     input: { date: string; startTime: string; endTime: string },
   ): Promise<Appointment | null> {
     return withSerializableRetry(() =>
-      db.$transaction(
+      (this.client ?? db).$transaction(
         async (tx) => {
           const appointment = await tx.appointment.findFirst({
             where: { id, ...notDeleted },

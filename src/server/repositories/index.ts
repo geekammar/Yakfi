@@ -16,6 +16,7 @@ import { BusinessRepository } from "./business.repository";
 import { ConversationRepository } from "./conversation.repository";
 import { CopyOverrideRepository } from "./copy-override.repository";
 import { CustomerRepository } from "./customer.repository";
+import { FollowUpRequestRepository } from "./follow-up-request.repository";
 import { InboundDedupeRepository } from "./inbound-dedupe.repository";
 import { InvitationRepository } from "./invitation.repository";
 import { KnowledgeGapRepository } from "./knowledge-gap.repository";
@@ -54,6 +55,7 @@ export const platformInvitationRepository = new PlatformInvitationRepository();
 export const aiPolicyRepository = new AiPolicyRepository();
 export const runtimeCredentialRepository = new RuntimeCredentialRepository();
 export const copyOverrideRepository = new CopyOverrideRepository();
+export const followUpRequestRepository = new FollowUpRequestRepository();
 
 export {
   AppointmentRepository,
@@ -63,6 +65,7 @@ export {
   ConversationRepository,
   CopyOverrideRepository,
   CustomerRepository,
+  FollowUpRequestRepository,
   InboundDedupeRepository,
   InvitationRepository,
   KnowledgeGapRepository,

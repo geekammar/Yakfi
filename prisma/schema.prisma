@@ -41,6 +41,12 @@ enum AppointmentStatus {
   COMPLETED
 }
 
+enum FollowUpRequestStatus {
+  PENDING
+  SCHEDULED
+  CANCELLED
+}
+
 // ─── Core domain ─────────────────────────────────────────────
 
 model Business {
@@ -125,6 +131,7 @@ model Business {
   usageRecords                     UsageRecord[]
   operatorAttentions               OperatorAttention[]
   knowledgeGaps                    KnowledgeGap[]
+  followUpRequests                 FollowUpRequest[]
 
   @@index([isActive])
   @@map("businesses")
@@ -198,6 +205,7 @@ model Service {
   appointments       Appointment[]
   providerServices   ProviderService[]
   providerExclusions ProviderServiceExclusion[]
+  followUpRequests   FollowUpRequest[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -218,8 +226,9 @@ model Customer {
   deletedAt          DateTime? @map("deleted_at")
 
   business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  conversations Conversation[]
-  appointments  Appointment[]
+  conversations    Conversation[]
+  appointments     Appointment[]
+  followUpRequests FollowUpRequest[]
 
   @@unique([businessId, phone])
   @@index([businessId])
@@ -394,6 +403,9 @@ model Appointment {
   assignedTo User?            @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   provider   ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
+  sourceFollowUpRequests   FollowUpRequest[] @relation("SourceFollowUpRequests")
+  scheduledFollowUpRequest FollowUpRequest?  @relation("ScheduledAppointmentFollowUp")
+
   @@index([businessId])
   @@index([businessId, date])
   @@index([branchId, date])
@@ -403,6 +415,46 @@ model Appointment {
   @@index([customerId])
   @@index([serviceId])
   @@map("appointments")
+}
+
+// ─── Follow-up requests (UX001-R5) ──────────────────────────
+// Flexible and undated follow-up recommendation foundation.
+// A FollowUpRequest is a lightweight, non-booking demand intent:
+// it NEVER reserves a slot or alters daily appointment capacity until
+// explicitly converted into a confirmed Appointment through the
+// authoritative Booking Core.
+// `scheduledAppointmentId` has a 1-to-1 unique constraint to guarantee
+// at the database level that a request cannot be double-scheduled.
+model FollowUpRequest {
+  id                     String                @id @default(uuid())
+  businessId             String                @map("business_id")
+  customerId             String                @map("customer_id")
+  sourceAppointmentId    String?               @map("source_appointment_id")
+  serviceId              String?               @map("service_id")
+  preferredProviderId    String?               @map("preferred_provider_id")
+  createdById            String?               @map("created_by_id")
+  startDate              DateTime?             @map("start_date") @db.Date
+  endDate                DateTime?             @map("end_date") @db.Date
+  status                 FollowUpRequestStatus @default(PENDING)
+  notes                  String?
+  scheduledAppointmentId String?               @unique @map("scheduled_appointment_id")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @default(now()) @updatedAt @map("updated_at")
+  deletedAt              DateTime?             @map("deleted_at")
+
+  business             Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer             Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sourceAppointment    Appointment?     @relation("SourceFollowUpRequests", fields: [sourceAppointmentId], references: [id], onDelete: SetNull)
+  service              Service?         @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  preferredProvider    ProviderProfile? @relation(fields: [preferredProviderId], references: [id], onDelete: SetNull)
+  createdBy            User?            @relation("FollowUpCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  scheduledAppointment Appointment?     @relation("ScheduledAppointmentFollowUp", fields: [scheduledAppointmentId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([customerId])
+  @@index([sourceAppointmentId])
+  @@map("follow_up_requests")
 }
 
 // ─── WhatsApp connections (DECISIONS #31, PROMPT-ARCH-02) ────
@@ -737,8 +789,9 @@ model ProviderProfile {
   business     Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   services     ProviderService[]
   exclusions   ProviderServiceExclusion[]
-  branches     ProviderBranch[]
-  appointments Appointment[]
+  branches         ProviderBranch[]
+  appointments     Appointment[]
+  followUpRequests FollowUpRequest[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -1070,6 +1123,7 @@ model User {
   copyOverrideHistory        PlatformCopyOverrideHistory[] @relation("PlatformCopyOverrideHistoryActor")
   resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
   reviewedKnowledgeGaps      KnowledgeGap[]       @relation("KnowledgeGapReviewer")
+  followUpRequestsCreated    FollowUpRequest[]    @relation("FollowUpCreator")
 
   @@index([businessId])
   @@index([accountType])

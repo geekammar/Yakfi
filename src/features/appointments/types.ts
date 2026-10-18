@@ -106,6 +106,10 @@ export type CreateAppointmentErrorCode =
   | "PROVIDER_NOT_ELIGIBLE"
   | "NO_ELIGIBLE_PROVIDERS"
   | "PAST_TIME"
+  | "DATE_OUT_OF_RANGE"
+  | "FOLLOW_UP_NOT_PENDING"
+  | "BUSINESS_CLOSED"
+  | "OUTSIDE_WORKING_HOURS"
   | "CREATE_FAILED";
 
 /**
@@ -188,6 +192,11 @@ export type BookingContextPrefill = {
   customer: BookingCustomerOption | null;
   serviceId: string | null;
   providerId?: string | null;
+  followUpContext?: {
+    id: string;
+    startDate: string | null;
+    endDate: string | null;
+  } | null;
 };
 
 export type ServiceReadinessStatus = "READY_TO_BOOK" | "SETUP_REQUIRED";

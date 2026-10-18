@@ -2,11 +2,14 @@
 
 import { updateAppointmentStatus } from "@/features/appointments/actions/appointment-actions";
 import { AppointmentStatusBadge } from "@/features/appointments/components/appointment-status";
+import { FollowUpList } from "@/features/appointments/components/follow-up-list";
+import { FollowUpModal } from "@/features/appointments/components/follow-up-modal";
 import { ReschedulePanel } from "@/features/appointments/components/reschedule-panel";
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import { formatSlotTime } from "@/features/appointments/components/smart-create/slot-helpers";
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
+import type { FollowUpRequestWithRelations } from "@/types/domain";
 
 import {
   ArrowRightIcon,
@@ -22,6 +25,7 @@ import {
   UserXIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 /** Stored epoch-anchored time → the ONE shared business-local formatter
@@ -38,6 +42,10 @@ export function AppointmentDetail({
   workingHours,
   slotDurationMinutes,
   initialRescheduling,
+  initialFollowUps = [],
+  services = [],
+  providers = [],
+  initialFollowUpOpen = false,
 }: {
   initialData: AppointmentDetailData;
   /** Business-local "YYYY-MM-DD" today (server-derived). */
@@ -48,11 +56,19 @@ export function AppointmentDetail({
   workingHours?: unknown;
   slotDurationMinutes?: number | null;
   initialRescheduling?: boolean;
+  initialFollowUps?: FollowUpRequestWithRelations[];
+  services?: Array<{ id: string; name: string; durationMinutes: number }>;
+  providers?: Array<{ id: string; name: string; displayName?: string | null }>;
+  initialFollowUpOpen?: boolean;
 }) {
+  const router = useRouter();
   const [data, setData] = useState(initialData);
   const [rescheduling, setRescheduling] = useState(
     initialRescheduling ?? false,
   );
+  const [followUpOpen, setFollowUpOpen] = useState(initialFollowUpOpen);
+  const [followUps] =
+    useState<FollowUpRequestWithRelations[]>(initialFollowUps);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -118,53 +134,60 @@ export function AppointmentDetail({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-xl border bg-card p-5 shadow-xs">
-          <h2 className="mb-5 font-semibold">تفاصيل الموعد</h2>
-          <dl className="grid gap-5 sm:grid-cols-2">
-            <Detail
-              icon={UserRoundIcon}
-              label="العميل"
-              value={data.customer.name}
-              hint={data.customer.phone}
-            />
-            <Detail
-              icon={CalendarClockIcon}
-              label="الخدمة"
-              value={data.service.name}
-              hint={`${data.service.durationMinutes} دقيقة`}
-            />
-            <Detail
-              icon={CalendarClockIcon}
-              label="التاريخ"
-              value={formatArabicDate(data.date)}
-            />
-            <Detail
-              icon={Clock3Icon}
-              label="الوقت"
-              value={`${formatTime(data.startTime)} - ${formatTime(data.endTime)}`}
-            />
-          </dl>
-          <div className="mt-6 border-t pt-5">
-            <p className="text-xs text-muted-foreground">الملاحظات</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-7">
-              {data.notes ?? "لا توجد ملاحظات لهذا الموعد."}
-            </p>
-          </div>
-          <div className="mt-6 border-t pt-5">
-            {data.conversationId ? (
-              <Button asChild variant="outline">
-                <Link href={`/conversations/${data.conversationId}`}>
-                  <MessageCircleIcon />
-                  فتح محادثة العميل
-                </Link>
-              </Button>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                لا توجد محادثة مرتبطة بهذا العميل.
+        <div className="space-y-6">
+          <section className="rounded-xl border bg-card p-5 shadow-xs">
+            <h2 className="mb-5 font-semibold">تفاصيل الموعد</h2>
+            <dl className="grid gap-5 sm:grid-cols-2">
+              <Detail
+                icon={UserRoundIcon}
+                label="العميل"
+                value={data.customer.name}
+                hint={data.customer.phone}
+              />
+              <Detail
+                icon={CalendarClockIcon}
+                label="الخدمة"
+                value={data.service.name}
+                hint={`${data.service.durationMinutes} دقيقة`}
+              />
+              <Detail
+                icon={CalendarClockIcon}
+                label="التاريخ"
+                value={formatArabicDate(data.date)}
+              />
+              <Detail
+                icon={Clock3Icon}
+                label="الوقت"
+                value={`${formatTime(data.startTime)} - ${formatTime(data.endTime)}`}
+              />
+            </dl>
+            <div className="mt-6 border-t pt-5">
+              <p className="text-xs text-muted-foreground">الملاحظات</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7">
+                {data.notes ?? "لا توجد ملاحظات لهذا الموعد."}
               </p>
-            )}
-          </div>
-        </section>
+            </div>
+            <div className="mt-6 border-t pt-5">
+              {data.conversationId ? (
+                <Button asChild variant="outline">
+                  <Link href={`/conversations/${data.conversationId}`}>
+                    <MessageCircleIcon />
+                    فتح محادثة العميل
+                  </Link>
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  لا توجد محادثة مرتبطة بهذا العميل.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <FollowUpList
+            followUps={followUps}
+            onRefresh={() => router.refresh()}
+          />
+        </div>
 
         <aside className="space-y-4">
           {!rescheduling ? (
@@ -190,13 +213,13 @@ export function AppointmentDetail({
                     إعادة الجدولة
                   </Button>
                 ) : null}
-                <Button asChild variant="outline">
-                  <Link
-                    href={`/appointments/new?customerId=${data.customer.id}&serviceId=${data.service.id}${data.provider?.id ? `&providerId=${data.provider.id}` : ""}`}
-                  >
-                    <CalendarPlusIcon />
-                    إضافة متابعة
-                  </Link>
+                <Button
+                  variant="outline"
+                  onClick={() => setFollowUpOpen(true)}
+                  disabled={isPending}
+                >
+                  <CalendarPlusIcon />
+                  إضافة متابعة
                 </Button>
                 {data.status === "CONFIRMED" ? (
                   <>
@@ -257,6 +280,19 @@ export function AppointmentDetail({
           )}
         </aside>
       </div>
+
+      <FollowUpModal
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        appointment={data}
+        today={today}
+        services={services}
+        providers={providers}
+        workingHours={workingHours}
+        onSuccess={() => {
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

@@ -4,7 +4,12 @@ import {
   todayInTimezone,
 } from "@/features/appointments/server/appointment-queries";
 import { requireUser } from "@/server/auth/guards";
-import { businessRepository } from "@/server/repositories";
+import {
+  businessRepository,
+  followUpRequestRepository,
+  providerRepository,
+  serviceRepository,
+} from "@/server/repositories";
 
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -18,7 +23,7 @@ export default async function AppointmentDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ reschedule?: string }>;
+  searchParams?: Promise<{ reschedule?: string; followUp?: string }>;
 }) {
   const session = await requireUser();
   if (!session.user.businessId) redirect("/onboarding");
@@ -30,7 +35,15 @@ export default async function AppointmentDetailPage({
   // `today` is business-local so the reschedule date step never counts
   // days from the device timezone; the timezone travels as a
   // server-derived display property (B-08 reuse of the B-07 pattern).
-  const business = await businessRepository.findById(session.user.businessId);
+  const [business, followUps, services, eligibleProviders] = await Promise.all([
+    businessRepository.findById(session.user.businessId),
+    followUpRequestRepository.listBySourceAppointment(
+      session.user.businessId,
+      id,
+    ),
+    serviceRepository.listByBusiness(session.user.businessId),
+    providerRepository.listProfilesByBusiness(session.user.businessId),
+  ]);
   if (!business) redirect("/onboarding");
 
   return (
@@ -41,6 +54,22 @@ export default async function AppointmentDetailPage({
       workingHours={business.workingHours}
       slotDurationMinutes={business.slotDurationMinutes}
       initialRescheduling={resolvedSearchParams?.reschedule === "true"}
+      initialFollowUpOpen={resolvedSearchParams?.followUp === "true"}
+      initialFollowUps={followUps}
+      services={services
+        .filter((s: { isActive: boolean }) => s.isActive)
+        .map((s: { id: string; name: string; durationMinutes: number }) => ({
+          id: s.id,
+          name: s.name,
+          durationMinutes: s.durationMinutes,
+        }))}
+      providers={eligibleProviders
+        .filter((p: { isActive: boolean }) => p.isActive)
+        .map((p: { id: string; name: string; displayName: string | null }) => ({
+          id: p.id,
+          name: p.name,
+          displayName: p.displayName,
+        }))}
     />
   );
 }

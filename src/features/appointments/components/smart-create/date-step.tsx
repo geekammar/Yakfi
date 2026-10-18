@@ -58,6 +58,7 @@ export function DateStep({
   serviceId: _serviceId,
   excludeAppointmentId: _excludeAppointmentId,
   workingHours,
+  allowedRange,
 }: {
   selectedDate: string;
   /** Business-local "YYYY-MM-DD" today (from server). */
@@ -66,6 +67,10 @@ export function DateStep({
   serviceId?: string;
   excludeAppointmentId?: string;
   workingHours?: unknown;
+  allowedRange?: {
+    startDate?: string | null;
+    endDate?: string | null;
+  } | null;
 }) {
   const parsed = appointmentDateSchema.safeParse(selectedDate);
   const dateError = parsed.success ? null : "التاريخ غير صالح";
@@ -234,6 +239,20 @@ export function DateStep({
           </span>
         </div>
 
+        {allowedRange ? (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs sm:text-sm text-foreground">
+            <CalendarDaysIcon className="size-4 text-primary shrink-0" />
+            <span>
+              حجز موعد متابعة: الفترة المحددة{" "}
+              {allowedRange.startDate && allowedRange.endDate
+                ? `من ${formatArabicDate(allowedRange.startDate)} إلى ${formatArabicDate(allowedRange.endDate)}`
+                : allowedRange.startDate
+                  ? `ابتداءً من ${formatArabicDate(allowedRange.startDate)}`
+                  : `حتى ${formatArabicDate(allowedRange.endDate!)}`}
+            </span>
+          </div>
+        ) : null}
+
         <div
           className="grid grid-cols-2 gap-2 sm:grid-cols-7"
           role="radiogroup"
@@ -244,7 +263,11 @@ export function DateStep({
             const isPast = dateStr < today;
             const workingDay = resolveWorkingHours(workingHours, dateStr);
             const isClosed = workingHours ? !workingDay : false;
-            const unselectable = isPast || isClosed;
+            const isOutOfRange =
+              !!allowedRange &&
+              ((!!allowedRange.startDate && dateStr < allowedRange.startDate) ||
+                (!!allowedRange.endDate && dateStr > allowedRange.endDate));
+            const unselectable = isPast || isClosed || isOutOfRange;
             const weekdayName = formatArabicWeekday(dateStr);
             const dayNum = Number(dateStr.slice(8, 10));
             const monthName = formatArabicMonth(dateStr);
@@ -285,7 +308,11 @@ export function DateStep({
                 </div>
 
                 <div className="mt-1">
-                  {isClosed ? (
+                  {isOutOfRange ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      خارج الفترة
+                    </span>
+                  ) : isClosed ? (
                     <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                       <CalendarOffIcon className="size-2.5" />
                       مغلق

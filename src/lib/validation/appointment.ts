@@ -42,6 +42,7 @@ const createAppointmentSchema = z
     startTime: timeSchema,
     endTime: timeSchema,
     notes: z.string().trim().max(2000).optional(),
+    followUpRequestId: uuidSchema.optional(),
     /**
      * Initial status (PROMPT-09): derived server-side from the Business's
      * confirmation mode — PENDING (default/manual) or CONFIRMED

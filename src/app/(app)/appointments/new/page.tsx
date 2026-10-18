@@ -47,6 +47,7 @@ export default async function NewAppointmentPage({
     customerId?: string;
     serviceId?: string;
     providerId?: string;
+    followUpId?: string;
   }>;
 }) {
   const session = await requireUser();
@@ -56,9 +57,7 @@ export default async function NewAppointmentPage({
 
   const params = await searchParams;
   const parsedDate = appointmentDateSchema.safeParse(params.date);
-  const defaultDate = parsedDate.success
-    ? parsedDate.data
-    : todayInTimezone(business.timezone);
+  const today = todayInTimezone(business.timezone);
 
   // Session role normalization: anything non-ADMIN behaves as STAFF
   // (least privilege — same fallback as the availability action).
@@ -83,8 +82,19 @@ export default async function NewAppointmentPage({
       providerId: uuidSchema.safeParse(params.providerId).success
         ? params.providerId
         : undefined,
+      followUpId: uuidSchema.safeParse(params.followUpId).success
+        ? params.followUpId
+        : undefined,
     }),
   ]);
+
+  let defaultDate = parsedDate.success ? parsedDate.data : today;
+  if (!parsedDate.success && prefill.followUpContext?.startDate) {
+    defaultDate =
+      prefill.followUpContext.startDate >= today
+        ? prefill.followUpContext.startDate
+        : today;
+  }
 
   return (
     <div className="animate-fade-in-up space-y-6">
@@ -112,6 +122,7 @@ export default async function NewAppointmentPage({
           CustomerCreateDialog={CustomerFormDialog}
           workingHours={business.workingHours}
           slotDurationMinutes={business.slotDurationMinutes}
+          followUpContext={prefill.followUpContext}
         />
       </div>
     </div>
