@@ -87,6 +87,36 @@ const DAY_AFTER_TOMORROW_PHRASES: ReadonlyArray<string> = [
   "بعد بكرة",
   "بعد بكره",
   "بعد غد",
+  "بعد يومين",
+].map(normalizeArabicText);
+
+const TWO_WEEKS_PHRASES: ReadonlyArray<string> = [
+  "بعد اسبوعين",
+  "بعد أسبوعين",
+  "الاسبوع بعد القادم",
+  "الأسبوع بعد القادم",
+  "الاسبوع اللي بعد الجاي",
+  "الأسبوع اللي بعد الجاي",
+].map(normalizeArabicText);
+
+const NEXT_WEEK_PHRASES: ReadonlyArray<string> = [
+  "الاسبوع القادم",
+  "الأسبوع القادم",
+  "الاسبوع الجاي",
+  "الأسبوع الجاي",
+  "الاسبوع المقبل",
+  "الأسبوع المقبل",
+  "بعد اسبوع",
+  "بعد أسبوع",
+].map(normalizeArabicText);
+
+const THIS_WEEK_PHRASES: ReadonlyArray<string> = [
+  "هذا الاسبوع",
+  "هذا الأسبوع",
+  "الاسبوع ده",
+  "الأسبوع ده",
+  "الاسبوع الحالي",
+  "الأسبوع الحالي",
 ].map(normalizeArabicText);
 
 /** Add `days` to an ISO `YYYY-MM-DD`, returning the ISO date (UTC-anchored). */
@@ -134,7 +164,7 @@ export function todayIsoInTimeZone(now: Date, timeZone: string): string {
  * then keeps its existing behavior and never fabricates a date.
  *
  * Recognition order: an explicit ISO date verbatim → day-after-tomorrow phrase
- * → a weekday name → a single relative word. The first recognized form wins.
+ * → a weekday name → week phrases → a single relative word. The first recognized form wins.
  */
 export function resolveEgyptianRelativeDate(
   message: string,
@@ -162,7 +192,31 @@ export function resolveEgyptianRelativeDate(
   // A weekday name anywhere in the message ("طيب نرجع للحجز الخميس").
   for (const token of tokens) {
     const day = WEEKDAY_BY_WORD.get(token);
-    if (day) return nextWeekday(today, day);
+    if (day) {
+      const base = nextWeekday(today, day);
+      if (TWO_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
+        return addDays(base, 7);
+      }
+      return base;
+    }
+  }
+
+  for (const phrase of TWO_WEEKS_PHRASES) {
+    if (phrase.length > 0 && normalized.includes(phrase)) {
+      return addDays(today, 14);
+    }
+  }
+
+  for (const phrase of NEXT_WEEK_PHRASES) {
+    if (phrase.length > 0 && normalized.includes(phrase)) {
+      return addDays(today, 7);
+    }
+  }
+
+  for (const phrase of THIS_WEEK_PHRASES) {
+    if (phrase.length > 0 && normalized.includes(phrase)) {
+      return addDays(today, 0);
+    }
   }
 
   // A single relative word (today / tomorrow).

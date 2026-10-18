@@ -36,6 +36,7 @@ export type BookingSelectionContext = {
   date: string;
   /** Options parsed from the canonical offer message (may be empty). */
   options: OfferedBookingOption[];
+  followUpRequestId?: string | null;
 };
 
 /** Arabic and Eastern Arabic indic digits → ascii. */
@@ -46,9 +47,10 @@ function normalizeDigits(text: string): string {
 }
 
 const OFFER_HEADER =
-  /تتوفر المواعيد التالية لخدمة\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
+  /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
 const OFFER_LINE =
   /^(\d+)[.)]\s*(.+?)\s*—\s*(\d{1,2}:\d{2})\s*إلى\s*(\d{1,2}:\d{2})\s*$/;
+const FOLLOW_UP_TAG = /\[متابعة:\s*([^\]]+)\]/;
 
 /**
  * Extract the last canonical booking-options offer from recent history.
@@ -63,6 +65,8 @@ export function extractLastBookingOffer(
     if (!msg || msg.senderType !== "AI") continue;
     const header = msg.content.match(OFFER_HEADER);
     if (!header || !header[1] || !header[2]) continue;
+    const followUpMatch = msg.content.match(FOLLOW_UP_TAG);
+    const followUpRequestId = followUpMatch ? followUpMatch[1]?.trim() : null;
     const options: OfferedBookingOption[] = [];
     for (const line of msg.content.split("\n")) {
       const parsed = line.trim().match(OFFER_LINE);
@@ -76,7 +80,12 @@ export function extractLastBookingOffer(
         endTime: parsed[4].padStart(5, "0"),
       });
     }
-    return { serviceName: header[1], date: header[2], options };
+    return {
+      serviceName: header[1],
+      date: header[2],
+      options,
+      ...(followUpRequestId ? { followUpRequestId } : {}),
+    };
   }
   return null;
 }

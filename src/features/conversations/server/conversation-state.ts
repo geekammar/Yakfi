@@ -86,6 +86,7 @@ export const conversationFactKeys = [
   "timePreference",
   "provider",
   "customerName",
+  "followUpRequestId",
 ] as const;
 
 export type ConversationFactKey = (typeof conversationFactKeys)[number];
@@ -118,6 +119,7 @@ export type ConversationKnownFacts = {
   readonly timePreference?: string;
   readonly provider?: string;
   readonly customerName?: string;
+  readonly followUpRequestId?: string;
 };
 
 /**
@@ -154,6 +156,7 @@ export type ConversationPendingOffer = {
   readonly serviceName: string;
   readonly date: string;
   readonly options: readonly OfferedBookingOption[];
+  readonly followUpRequestId?: string | null;
 };
 
 /** One goal the conversation is pursuing (multi-intent FOUNDATION only). */
@@ -605,12 +608,19 @@ export function deriveConversationStateFromHistory(
     serviceName: offer.serviceName,
     date: offer.date,
     options: offer.options,
+    followUpRequestId: offer.followUpRequestId ?? null,
   };
   return {
     ...base,
     currentGoal: "BOOKING",
     activeTask: { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" },
-    knownFacts: { service: offer.serviceName, date: offer.date },
+    knownFacts: {
+      service: offer.serviceName,
+      date: offer.date,
+      ...(offer.followUpRequestId
+        ? { followUpRequestId: offer.followUpRequestId }
+        : {}),
+    },
     bookingStage: "AVAILABILITY_RESOLVED",
     selectedService: offer.serviceName,
     selectedDate: offer.date,
