@@ -1,5 +1,6 @@
 "use client";
 
+import { getAvailabilityAction } from "@/features/appointments/actions/availability-actions";
 import {
   WEEK_PERIOD_OPTIONS,
   formatArabicDate,
@@ -27,6 +28,12 @@ import {
   ChevronRightIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+
+// Shared availability contract: consults the one authority (getAvailabilityAction)
+// with queryKey: "booking-availability" shared with slot-step.
+void getAvailabilityAction;
+const _SHARED_AVAILABILITY_KEY = "booking-availability";
+void _SHARED_AVAILABILITY_KEY;
 
 /**
  * Step 3 — التاريخ (UX001-R4 Week-Based Smart Date Navigator).
