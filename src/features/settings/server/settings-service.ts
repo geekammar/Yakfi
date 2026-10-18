@@ -9,6 +9,7 @@
  * without a live database (services/invitations-feature pattern).
  */
 
+import { areAppointmentRemindersOperational } from "@/features/appointments/server/reminder-config";
 import { businessSettingsSchema } from "@/features/settings/schemas/settings-schema";
 import type {
   BusinessSettingsView,
@@ -134,6 +135,7 @@ function toView(
     reminderEnabled: business.reminderEnabled ?? false,
     reminderLeadHours: business.reminderLeadHours ?? 24,
     reminderTemplateId: business.reminderTemplateId ?? "standard",
+    remindersOperational: areAppointmentRemindersOperational(),
     channelReadiness,
   };
 }
@@ -176,8 +178,13 @@ export async function updateBusinessSettings(
   const business = await deps.businessRepository.findById(scope.businessId);
   if (!business) return { success: false, message: NOT_FOUND_MESSAGE };
 
-  // If enabling reminders, verify that at least one messaging channel is connected & ready
-  if (parsed.data.reminderEnabled) {
+  const remindersOperational = areAppointmentRemindersOperational();
+  const effectiveReminderEnabled = remindersOperational
+    ? parsed.data.reminderEnabled
+    : false;
+
+  // If operational and enabling reminders, verify that at least one messaging channel is connected & ready
+  if (effectiveReminderEnabled) {
     const readiness = await resolveChannelReadiness(deps, scope.businessId);
     if (!readiness.hasActiveChannel) {
       return {
@@ -206,7 +213,7 @@ export async function updateBusinessSettings(
       address: blankToEmpty(parsed.data.address),
       confirmationMode: parsed.data.confirmationMode,
       cancellationPolicy: parsed.data.cancellationPolicy,
-      reminderEnabled: parsed.data.reminderEnabled,
+      reminderEnabled: effectiveReminderEnabled,
       reminderLeadHours: parsed.data.reminderLeadHours,
       reminderTemplateId: parsed.data.reminderTemplateId,
       ...(parsed.data.slotDurationMinutes !== undefined

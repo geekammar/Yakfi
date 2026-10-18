@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 import {
+  areAppointmentRemindersOperational,
   defaultAppointmentReminderServiceDeps,
   processDueReminders,
 } from "@/features/appointments/server/appointment-reminder.service";
@@ -40,6 +41,20 @@ function verifyCronSecret(request: NextRequest): boolean {
 async function handleCron(request: NextRequest) {
   if (!verifyCronSecret(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!areAppointmentRemindersOperational()) {
+    return NextResponse.json({
+      success: true,
+      enabled: false,
+      status: "DISABLED",
+      message: "Appointment reminders are globally disabled in discovery mode",
+      claimed: 0,
+      sent: 0,
+      failed: 0,
+      suppressed: 0,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   try {

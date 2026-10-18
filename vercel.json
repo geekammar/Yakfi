@@ -2,12 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm db:generate && pnpm build",
   "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
-  "crons": [
-    {
-      "path": "/api/cron/appointment-reminders",
-      "schedule": "0 * * * *"
-    }
-  ],
   "headers": [
     {
       "source": "/sw.js",

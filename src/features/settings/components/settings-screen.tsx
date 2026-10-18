@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   BOOKING_INTERVAL_OPTIONS,
   CONFIRMATION_MODES,
@@ -468,11 +469,38 @@ export function SettingsScreen({
           aria-labelledby="settings-reminders-section"
           className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
         >
-          <SectionHeader
-            title="التذكير بالمواعيد"
-            description="ذكّر عملاءك تلقائيًا قبل موعدهم."
-          />
-          <div className="space-y-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <SectionHeader
+              title="التذكير بالمواعيد"
+              description="ذكّر عملاءك تلقائيًا قبل موعدهم."
+            />
+            {!initialSettings.remindersOperational ? (
+              <Badge
+                variant="outline"
+                className="w-fit text-xs border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              >
+                مرحلة الإعداد (غير مفعّل)
+              </Badge>
+            ) : null}
+          </div>
+          <div className="space-y-6 pt-2">
+            {/* Informative Status when feature is globally disabled */}
+            {!initialSettings.remindersOperational ? (
+              <div
+                role="status"
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+              >
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <span className="size-2 rounded-full bg-amber-500" />
+                  <span>التذكير التلقائي غير مفعّل حاليًا</span>
+                </div>
+                <p className="text-muted-foreground dark:text-amber-200/80">
+                  يمكنك استعراض إعدادات التذكير وتجهيزها، لكن لن يتم إرسال رسائل
+                  تلقائية خلال المرحلة الحالية.
+                </p>
+              </div>
+            ) : null}
+
             {/* Setting A: Enable reminder */}
             <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
               <Controller
@@ -481,9 +509,16 @@ export function SettingsScreen({
                 render={({ field }) => (
                   <Checkbox
                     id="settings-reminder-enabled"
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
+                    checked={
+                      initialSettings.remindersOperational ? field.value : false
+                    }
+                    onCheckedChange={
+                      initialSettings.remindersOperational
+                        ? field.onChange
+                        : undefined
+                    }
                     disabled={
+                      !initialSettings.remindersOperational ||
                       !initialSettings.channelReadiness.hasActiveChannel
                     }
                     aria-describedby="reminder-enabled-desc"
@@ -493,7 +528,12 @@ export function SettingsScreen({
               <div className="space-y-1 leading-none">
                 <Label
                   htmlFor="settings-reminder-enabled"
-                  className="text-base font-semibold cursor-pointer"
+                  className={cn(
+                    "text-base font-semibold",
+                    initialSettings.remindersOperational
+                      ? "cursor-pointer"
+                      : "cursor-not-allowed opacity-75",
+                  )}
                 >
                   تفعيل التذكير التلقائي
                 </Label>
@@ -501,8 +541,9 @@ export function SettingsScreen({
                   id="reminder-enabled-desc"
                   className="text-xs text-muted-foreground leading-5"
                 >
-                  إرسال رسالة تذكير تلقائية للعميل قبل موعده لتقليل نسبة عدم
-                  الحضور.
+                  {initialSettings.remindersOperational
+                    ? "إرسال رسالة تذكير تلقائية للعميل قبل موعده لتقليل نسبة عدم الحضور."
+                    : "التذكير التلقائي معطل حالياً في هذه المرحلة التجريبية. يمكنك تجهيز خيارات التوقيت والنموذج بالأسفل وحفظها للمستقبل."}
                 </p>
               </div>
             </div>
@@ -645,9 +686,9 @@ export function SettingsScreen({
                   : `مرحباً بك! نود تذكيرك بموعدك لدى ${form.watch("name") || "عيادة الأمل"} يوم غداً (الأحد، 25 أكتوبر) الساعة 10:00 ص (خدمة: كشف واستشارة). يسعدنا حضورك في الموعد المحدد.`}
               </div>
               <p className="text-[11px] leading-4 text-muted-foreground">
-                * في واتساب: يتم الإرسال عبر القالب المعتمد رسمياً
-                (appointment_reminder) لضمان الوصول للعميل. لا تتضمن الرسائل أي
-                معلومات طبية خاصة أو بيانات سرية.
+                * معاينة تجريبية لشكل النص فقط — لن يتم إرسال أي رسائل للعملاء
+                خلال هذه المرحلة. في المستقبل، سيتم الإرسال عبر القالب المعتمد
+                رسمياً دون أي بيانات خاصة.
               </p>
             </div>
           </div>
@@ -670,7 +711,9 @@ export function SettingsScreen({
 
         <div className="flex flex-col-reverse gap-2 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ.
+            {initialSettings.remindersOperational
+              ? "تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ."
+              : "تعمل التعديلات على المواعيد الجديدة فوراً بعد الحفظ (إعدادات التذكير تبقى مُجهّزة لحين تفعيل الخدمة مستقبلاً)."}
           </p>
           <Button type="submit" size="lg" disabled={isSubmitting}>
             {isSubmitting ? (

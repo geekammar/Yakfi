@@ -47,6 +47,12 @@ import type {
   Customer,
 } from "@/types/domain";
 
+import {
+  areAppointmentRemindersOperational,
+  getAppointmentRemindersDiagnostics,
+  type ReminderOperationalDiagnostics,
+} from "./reminder-config";
+
 export type AppointmentReminderServiceDeps = {
   appointmentReminderRepository: Pick<
     AppointmentReminderRepository,
@@ -80,6 +86,12 @@ export const defaultAppointmentReminderServiceDeps: AppointmentReminderServiceDe
     whatsAppTransportFactory: () => createDefaultMetaWhatsAppTransport(),
     telegramTransportFactory: () => createTelegramMessageTransport(),
   };
+
+export {
+  areAppointmentRemindersOperational,
+  getAppointmentRemindersDiagnostics,
+  type ReminderOperationalDiagnostics,
+};
 
 export type ProcessDueRemindersResult = {
   claimed: number;
@@ -179,6 +191,15 @@ export async function processDueReminders(
   deps: AppointmentReminderServiceDeps = defaultAppointmentReminderServiceDeps,
   options: { batchSize?: number; leaseTimeoutMinutes?: number } = {},
 ): Promise<ProcessDueRemindersResult> {
+  if (!areAppointmentRemindersOperational()) {
+    return {
+      claimed: 0,
+      sent: 0,
+      failed: 0,
+      suppressed: 0,
+    };
+  }
+
   const now = deps.now ? deps.now() : new Date();
   const reminders = await deps.appointmentReminderRepository.claimDueReminders({
     batchSize: options.batchSize,
@@ -367,6 +388,7 @@ export async function scheduleReminderOnAppointmentCreated(
   appointment: Appointment,
   business: Business,
 ): Promise<AppointmentReminder | null> {
+  if (!areAppointmentRemindersOperational()) return null;
   if (!business.reminderEnabled) return null;
 
   const leadHours = business.reminderLeadHours ?? 24;
@@ -420,6 +442,9 @@ export async function handleAppointmentRescheduled(
     params.appointmentId,
     "RESCHEDULED",
   );
+
+  // If globally disabled, do not schedule any new reminder
+  if (!areAppointmentRemindersOperational()) return null;
 
   // 2. Load appointment and business
   const appointment = await deps.appointmentRepository.findById(

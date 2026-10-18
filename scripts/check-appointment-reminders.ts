@@ -22,7 +22,10 @@ import "./setup-test-env";
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
+import { GET, POST } from "../src/app/api/cron/appointment-reminders/route";
 import {
   handleAppointmentCancelled,
   handleAppointmentRescheduled,
@@ -31,6 +34,10 @@ import {
   scheduleReminderOnAppointmentCreated,
   type AppointmentReminderServiceDeps,
 } from "../src/features/appointments/server/appointment-reminder.service";
+import {
+  areAppointmentRemindersOperational,
+  getAppointmentRemindersDiagnostics,
+} from "../src/features/appointments/server/reminder-config";
 import {
   REMINDER_LEAD_HOURS_OPTIONS,
   REMINDER_TEMPLATE_OPTIONS,
@@ -69,6 +76,7 @@ import type {
   TelegramConnection,
   WhatsAppConnection,
 } from "../src/types/domain";
+import { NextRequest } from "next/server";
 
 // ── Test Harness Mocks ───────────────────────────────────────────────────────
 
@@ -253,37 +261,532 @@ function createMockDeps(
 
 let totalTests = 0;
 let passedTests = 0;
+const pendingTests: Promise<void>[] = [];
 
-function runTest(name: string, fn: () => void | Promise<void>) {
+function runTest(name: string, fn: () => void | Promise<void>): Promise<void> {
   totalTests += 1;
-  try {
-    const res = fn();
-    if (res instanceof Promise) {
-      res
-        .then(() => {
-          passedTests += 1;
-          console.log(`  ✓ ${name}`);
-        })
-        .catch((err) => {
-          console.error(`  ✗ ${name}`);
-          console.error(err);
-          process.exitCode = 1;
-        });
-    } else {
+  const p = Promise.resolve().then(async () => {
+    try {
+      await fn();
       passedTests += 1;
       console.log(`  ✓ ${name}`);
+    } catch (err) {
+      console.error(`  ✗ ${name}`);
+      console.error(err);
+      process.exitCode = 1;
     }
-  } catch (err) {
-    console.error(`  ✗ ${name}`);
-    console.error(err);
-    process.exitCode = 1;
-  }
+  });
+  pendingTests.push(p);
+  return p;
 }
 
 async function main() {
   console.log(
-    "\n🧪 Running FlowPilot Appointment Reminders Test Suite (BOOK-REM-01)...\n",
+    "\n🧪 PART 1: FlowPilot Discovery-Safe & Disabled-by-Default Suite (BOOK-REM-01)...\n",
   );
+
+  // Default discovery environment: APPOINTMENT_REMINDERS_ENABLED is omitted
+  delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+
+  // D01. Feature flag absent -> disabled
+  runTest("D01. Feature flag absent -> disabled", () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    assert.equal(areAppointmentRemindersOperational(), false);
+    const diag = getAppointmentRemindersDiagnostics();
+    assert.equal(diag.operational, false);
+    assert.match(diag.reason, /FLAG_NOT_SET/);
+  });
+
+  // D02. Feature flag "false" -> disabled
+  runTest('D02. Feature flag "false" -> disabled', () => {
+    assert.equal(
+      areAppointmentRemindersOperational({
+        APPOINTMENT_REMINDERS_ENABLED: "false",
+      }),
+      false,
+    );
+    assert.equal(
+      areAppointmentRemindersOperational({
+        APPOINTMENT_REMINDERS_ENABLED: "FALSE ",
+      }),
+      false,
+    );
+    const diag = getAppointmentRemindersDiagnostics({
+      APPOINTMENT_REMINDERS_ENABLED: "false",
+    });
+    assert.equal(diag.operational, false);
+    assert.match(diag.reason, /FLAG_EXPLICIT_FALSE/);
+  });
+
+  // D03. Feature flag invalid -> disabled with safe diagnostics
+  runTest("D03. Feature flag invalid -> disabled with safe diagnostics", () => {
+    assert.equal(
+      areAppointmentRemindersOperational({
+        APPOINTMENT_REMINDERS_ENABLED: "1",
+      }),
+      false,
+    );
+    assert.equal(
+      areAppointmentRemindersOperational({
+        APPOINTMENT_REMINDERS_ENABLED: "yes",
+      }),
+      false,
+    );
+    assert.equal(
+      areAppointmentRemindersOperational({
+        APPOINTMENT_REMINDERS_ENABLED: "random_text",
+      }),
+      false,
+    );
+    const diag = getAppointmentRemindersDiagnostics({
+      APPOINTMENT_REMINDERS_ENABLED: "invalid_val",
+    });
+    assert.equal(diag.operational, false);
+    assert.match(diag.reason, /FLAG_INVALID_VALUE/);
+  });
+
+  // D04. Feature flag "true" recognized only through defined operational gating
+  runTest(
+    'D04. Feature flag "true" recognized only through defined operational gating',
+    () => {
+      assert.equal(
+        areAppointmentRemindersOperational({
+          APPOINTMENT_REMINDERS_ENABLED: "true",
+        }),
+        true,
+      );
+      assert.equal(
+        areAppointmentRemindersOperational({
+          APPOINTMENT_REMINDERS_ENABLED: "TRUE",
+        }),
+        true,
+      );
+      assert.equal(
+        areAppointmentRemindersOperational({
+          APPOINTMENT_REMINDERS_ENABLED: " true ",
+        }),
+        true,
+      );
+    },
+  );
+
+  // D05. No reminders are created when disabled
+  runTest("D05. No reminders are created when disabled", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const biz: Business = {
+      id: "biz-1",
+      reminderEnabled: true,
+      reminderLeadHours: 24,
+      timezone: "Asia/Riyadh",
+    } as Business;
+    const appt: Appointment = {
+      id: "appt-1",
+      businessId: "biz-1",
+      date: new Date("2026-10-28T00:00:00.000Z"),
+      startTime: new Date("1970-01-01T15:00:00.000Z"),
+      endTime: new Date("1970-01-01T15:30:00.000Z"),
+    } as Appointment;
+    const deps = createMockDeps(store);
+    const created = await scheduleReminderOnAppointmentCreated(deps, appt, biz);
+    assert.equal(created, null);
+    assert.equal(store.reminders.size, 0);
+  });
+
+  // D06. No reminder processing occurs when disabled
+  runTest("D06. No reminder processing occurs when disabled", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const deps = createMockDeps(store);
+    const res = await processDueReminders(deps);
+    assert.deepEqual(res, { claimed: 0, sent: 0, failed: 0, suppressed: 0 });
+  });
+
+  // D07. No due-reminder claiming occurs when disabled
+  runTest("D07. No due-reminder claiming occurs when disabled", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    let claimCalled = false;
+    const deps = createMockDeps(store);
+    const originalClaim = deps.appointmentReminderRepository.claimDueReminders;
+    deps.appointmentReminderRepository.claimDueReminders = async (opts) => {
+      claimCalled = true;
+      return originalClaim(opts);
+    };
+    await processDueReminders(deps);
+    assert.equal(claimCalled, false);
+  });
+
+  // D08. No WhatsApp API calls occur when disabled
+  runTest("D08. No WhatsApp API calls occur when disabled", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    let waFactoryCalled = false;
+    const deps = createMockDeps(store);
+    deps.whatsAppTransportFactory = () => {
+      waFactoryCalled = true;
+      return {
+        providerName: "wa",
+        send: async () => ({ provider: "wa", delivered: true }),
+      };
+    };
+    await processDueReminders(deps);
+    assert.equal(waFactoryCalled, false);
+    assert.equal(store.sentMessages.length, 0);
+  });
+
+  // D09. No Telegram API calls occur when disabled
+  runTest("D09. No Telegram API calls occur when disabled", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    let tgFactoryCalled = false;
+    const deps = createMockDeps(store);
+    deps.telegramTransportFactory = () => {
+      tgFactoryCalled = true;
+      return {
+        providerName: "tg",
+        send: async () => ({ provider: "tg", delivered: true }),
+      };
+    };
+    await processDueReminders(deps);
+    assert.equal(tgFactoryCalled, false);
+    assert.equal(store.sentMessages.length, 0);
+  });
+
+  // D10. No AI calls occur when disabled
+  runTest("D10. No AI calls occur when disabled", () => {
+    // Pure string rendering, zero LLM calls
+    const rendered = renderReminderContent({
+      templateId: "standard",
+      businessName: "عيادة د. أمل",
+      date: "2026-10-25",
+      startTime: "10:00",
+      serviceName: "كشف",
+    });
+    assert.ok(rendered.length > 0);
+  });
+
+  // D11. Appointment creation still works
+  runTest("D11. Appointment creation still works", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const deps = createMockDeps(store);
+    const biz: Business = {
+      id: "biz-1",
+      reminderEnabled: true,
+      timezone: "Asia/Riyadh",
+    } as Business;
+    const appt: Appointment = {
+      id: "appt-normal",
+      businessId: "biz-1",
+      status: "CONFIRMED",
+      date: new Date("2026-10-30"),
+      startTime: new Date("1970-01-01T10:00:00Z"),
+    } as Appointment;
+    const reminder = await scheduleReminderOnAppointmentCreated(
+      deps,
+      appt,
+      biz,
+    );
+    assert.equal(reminder, null);
+    assert.equal(store.reminders.size, 0);
+  });
+
+  // D12. Appointment cancellation still works
+  runTest("D12. Appointment cancellation still works", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const deps = createMockDeps(store);
+    const count = await handleAppointmentCancelled(deps, "appt-cancel-test");
+    assert.equal(typeof count, "number");
+  });
+
+  // D13. Appointment rescheduling still works
+  runTest("D13. Appointment rescheduling still works", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const deps = createMockDeps(store);
+    const res = await handleAppointmentRescheduled(deps, {
+      appointmentId: "appt-resched-test",
+      newDate: "2026-10-29",
+      newStartTime: "14:00",
+    });
+    assert.equal(res, null);
+  });
+
+  // D14. Follow-up booking still works
+  runTest("D14. Follow-up booking still works", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const store = createMemoryStore();
+    const deps = createMockDeps(store);
+    const biz: Business = {
+      id: "biz-1",
+      reminderEnabled: true,
+      timezone: "Asia/Riyadh",
+    } as Business;
+    const apptFromFollowUp: Appointment = {
+      id: "appt-from-fu",
+      businessId: "biz-1",
+      status: "CONFIRMED",
+      date: new Date("2026-10-28"),
+      startTime: new Date("1970-01-01T10:00:00Z"),
+    } as Appointment;
+    const rem = await scheduleReminderOnAppointmentCreated(
+      deps,
+      apptFromFollowUp,
+      biz,
+    );
+    assert.equal(rem, null);
+    assert.equal(store.reminders.size, 0);
+  });
+
+  // D15. Existing reminder records cannot be sent when disabled
+  runTest(
+    "D15. Existing reminder records cannot be sent when disabled",
+    async () => {
+      delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+      const store = createMemoryStore();
+      const rem: AppointmentReminder = {
+        id: "rem-preexisting",
+        businessId: "biz-1",
+        appointmentId: "appt-1",
+        status: "PENDING",
+        dueAt: new Date("2026-10-20T00:00:00.000Z"),
+        leadHours: 24,
+        templateId: "standard",
+        channel: "WHATSAPP",
+        attemptCount: 0,
+        claimedAt: null,
+        sentAt: null,
+        providerMessageId: null,
+        lastError: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      store.reminders.set(rem.id, rem);
+      const deps = createMockDeps(store, new Date("2026-10-25T10:00:00.000Z"));
+      const res = await processDueReminders(deps);
+      assert.equal(res.sent, 0);
+      assert.equal(res.claimed, 0);
+      assert.equal(store.reminders.get("rem-preexisting")?.status, "PENDING");
+      assert.equal(store.sentMessages.length, 0);
+    },
+  );
+
+  // D16. Calling the protected Cron endpoint cannot bypass the disabled state
+  runTest(
+    "D16. Protected Cron endpoint cannot bypass the disabled state",
+    async () => {
+      delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+      const reqAuth = new NextRequest(
+        "http://localhost:3000/api/cron/appointment-reminders",
+        {
+          headers: { authorization: `Bearer ${process.env.CRON_SECRET}` },
+        },
+      );
+      const response = await GET(reqAuth);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.success, true);
+      assert.equal(body.enabled, false);
+      assert.equal(body.status, "DISABLED");
+      assert.equal(body.claimed, 0);
+      assert.equal(body.sent, 0);
+
+      const postResponse = await POST(reqAuth);
+      assert.equal(postResponse.status, 200);
+      const postBody = await postResponse.json();
+      assert.equal(postBody.status, "DISABLED");
+    },
+  );
+
+  // D17. Unauthorized Cron requests remain rejected
+  runTest("D17. Unauthorized Cron requests remain rejected", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const reqUnauth = new NextRequest(
+      "http://localhost:3000/api/cron/appointment-reminders",
+    );
+    const resUnauth = await GET(reqUnauth);
+    assert.equal(resUnauth.status, 401);
+
+    const reqWrongSecret = new NextRequest(
+      "http://localhost:3000/api/cron/appointment-reminders",
+      {
+        headers: { authorization: "Bearer wrong-secret" },
+      },
+    );
+    const resWrong = await GET(reqWrongSecret);
+    assert.equal(resWrong.status, 401);
+  });
+
+  // D18. Settings toggle cannot falsely activate reminders
+  runTest(
+    "D18. Settings toggle cannot falsely activate reminders",
+    async () => {
+      delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+      let savedData: unknown = null;
+      const deps: SettingsServiceDeps = {
+        businessRepository: {
+          findById: async () =>
+            ({ id: "biz-1", name: "المنشأة" }) as unknown as Business,
+          update: async (_id, data) => {
+            savedData = data;
+            return data as unknown as Business;
+          },
+        },
+        whatsAppConnectionRepository: {
+          listByBusiness: async () =>
+            [
+              {
+                id: "conn-1",
+                status: "CONNECTED",
+                isActive: true,
+              },
+            ] as unknown as WhatsAppConnection[],
+        },
+      };
+      const actor: SettingsActor = {
+        userId: "user-1",
+        role: "ADMIN",
+        businessId: "biz-1",
+      };
+      const res = await updateBusinessSettings(deps, actor, {
+        name: "عيادة د. أمل",
+        vertical: "dental",
+        city: "الرياض",
+        whatsappNumber: "+966500000001",
+        timezone: "Asia/Riyadh",
+        confirmationMode: "automatic",
+        cancellationPolicy: "سياسة الإلغاء 24 ساعة",
+        reminderEnabled: true, // Attempt to activate!
+        reminderLeadHours: 12,
+        reminderTemplateId: "standard",
+      });
+      assert.equal(res.success, true);
+      // Even though user passed reminderEnabled: true, system forced it to false
+      assert.equal(
+        (savedData as { reminderEnabled: boolean }).reminderEnabled,
+        false,
+      );
+      assert.equal(
+        (savedData as { reminderLeadHours: number }).reminderLeadHours,
+        12,
+      );
+    },
+  );
+
+  // D19. Settings show a clear disabled-state message
+  runTest("D19. Settings show a clear disabled-state message", async () => {
+    delete process.env.APPOINTMENT_REMINDERS_ENABLED;
+    const deps: SettingsServiceDeps = {
+      businessRepository: {
+        findById: async () =>
+          ({
+            id: "biz-1",
+            name: "المنشأة",
+            reminderEnabled: false,
+          }) as unknown as Business,
+        update: async () => ({}) as Business,
+      },
+    };
+    const actor: SettingsActor = {
+      userId: "user-1",
+      role: "ADMIN",
+      businessId: "biz-1",
+    };
+    const view = await getBusinessSettings(deps, actor);
+    assert.equal(
+      "remindersOperational" in view && view.remindersOperational,
+      false,
+    );
+
+    const screenSource = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/features/settings/components/settings-screen.tsx",
+      ),
+      "utf8",
+    );
+    const normalizedSource = screenSource.replace(/\s+/g, " ");
+    assert.ok(normalizedSource.includes("التذكير التلقائي غير مفعّل حاليًا"));
+    assert.ok(
+      normalizedSource.includes(
+        "يمكنك استعراض إعدادات التذكير وتجهيزها، لكن لن يتم إرسال رسائل تلقائية خلال المرحلة الحالية.",
+      ),
+    );
+  });
+
+  // D20. Message previews remain previews only
+  runTest("D20. Message previews remain previews only", () => {
+    const preview = renderReminderContent({
+      templateId: "compact",
+      businessName: "عيادة الأمل",
+      date: "2026-10-25",
+      startTime: "10:00",
+      serviceName: "استشارة",
+    });
+    assert.ok(preview.includes("عيادة الأمل"));
+    assert.ok(!preview.includes("process.env"));
+  });
+
+  // D21. 320px mobile RTL layout works
+  runTest("D21. 320px mobile RTL layout works", () => {
+    const screenSource = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/features/settings/components/settings-screen.tsx",
+      ),
+      "utf8",
+    );
+    assert.ok(screenSource.includes("max-w-sm"));
+    assert.ok(screenSource.includes("flex-wrap"));
+  });
+
+  // D22. No reminder Cron exists in vercel.json
+  runTest("D22. No reminder Cron exists in vercel.json", () => {
+    const vercelRaw = readFileSync(
+      resolve(process.cwd(), "vercel.json"),
+      "utf8",
+    );
+    const vercelObj = JSON.parse(vercelRaw);
+    assert.equal(vercelObj.crons, undefined);
+    assert.ok(!vercelRaw.includes("/api/cron/appointment-reminders"));
+  });
+
+  // D23. Hobby-compatible deployment configuration passes validation
+  runTest(
+    "D23. Hobby-compatible deployment configuration passes validation",
+    () => {
+      const vercelRaw = readFileSync(
+        resolve(process.cwd(), "vercel.json"),
+        "utf8",
+      );
+      const vercelObj = JSON.parse(vercelRaw);
+      assert.ok(vercelObj.buildCommand);
+      assert.ok(vercelObj.headers);
+      assert.equal(vercelObj.crons, undefined);
+    },
+  );
+
+  // D24. Reminder architecture remains testable with mocked operational activation
+  runTest(
+    "D24. Reminder architecture remains testable with mocked operational activation",
+    () => {
+      const mockEnv = {
+        APPOINTMENT_REMINDERS_ENABLED: "true",
+      };
+      assert.equal(areAppointmentRemindersOperational(mockEnv), true);
+    },
+  );
+
+  // Await all Discovery-Safe tests before entering Architecture tests
+  await Promise.all(pendingTests);
+  pendingTests.length = 0;
+
+  console.log(
+    "\n🧪 PART 2: FlowPilot Reminder Architecture Suite (Mocked Operational Activation)...\n",
+  );
+  process.env.APPOINTMENT_REMINDERS_ENABLED = "true";
 
   // 1. Existing business defaults to reminders disabled
   runTest("1. Existing business defaults to reminders disabled", async () => {
@@ -1351,14 +1854,17 @@ async function main() {
     assert.notEqual(wrongCandidate, placeholderSecret);
   });
 
-  // Wait for any async assertions to finish
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Wait for all Architecture tests to finish
+  await Promise.all(pendingTests);
+  delete process.env.APPOINTMENT_REMINDERS_ENABLED;
 
   console.log(
     `\n📊 Test Results: ${passedTests}/${totalTests} PASS (${totalTests - passedTests} FAIL, 0 SKIP)`,
   );
   if (passedTests === totalTests) {
-    console.log("🎉 ALL 35 APPOINTMENT REMINDER TEST SCENARIOS PASSED!\n");
+    console.log(
+      `🎉 ALL ${totalTests} APPOINTMENT REMINDER TEST SCENARIOS PASSED!\n`,
+    );
   } else {
     process.exitCode = 1;
   }

@@ -29,6 +29,8 @@ export type BusinessSettingsView = {
   reminderLeadHours: number;
   /** Selected message template/style id (BOOK-REM-01). */
   reminderTemplateId: string;
+  /** Global server-side feature operational status (Discovery mode: false). */
+  remindersOperational: boolean;
   /** Messaging channel readiness status for automated reminders. */
   channelReadiness: {
     whatsapp: boolean;

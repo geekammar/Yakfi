@@ -1,3 +1,4 @@
+import { areAppointmentRemindersOperational } from "@/features/appointments/server/reminder-config";
 import {
   calculateReminderDueTime,
   isLateBooking,
@@ -410,36 +411,38 @@ export class AppointmentRepository {
           }
 
           // Automated reminder scheduling (BOOK-REM-01)
-          const business = await tx.business.findUnique({
-            where: { id: input.businessId },
-            select: {
-              reminderEnabled: true,
-              reminderLeadHours: true,
-              reminderTemplateId: true,
-              timezone: true,
-            },
-          });
-          if (business?.reminderEnabled) {
-            const leadHours = business.reminderLeadHours ?? 24;
-            const timezone = business.timezone || "Asia/Riyadh";
-            if (!isLateBooking({ date, startTime, leadHours, timezone })) {
-              const dueAt = calculateReminderDueTime({
-                date,
-                startTime,
-                leadHours,
-                timezone,
-              });
-              await tx.appointmentReminder.create({
-                data: {
-                  businessId: input.businessId,
-                  appointmentId: appointment.id,
-                  channel: "WHATSAPP",
-                  status: "PENDING",
-                  dueAt,
+          if (areAppointmentRemindersOperational()) {
+            const business = await tx.business.findUnique({
+              where: { id: input.businessId },
+              select: {
+                reminderEnabled: true,
+                reminderLeadHours: true,
+                reminderTemplateId: true,
+                timezone: true,
+              },
+            });
+            if (business?.reminderEnabled) {
+              const leadHours = business.reminderLeadHours ?? 24;
+              const timezone = business.timezone || "Asia/Riyadh";
+              if (!isLateBooking({ date, startTime, leadHours, timezone })) {
+                const dueAt = calculateReminderDueTime({
+                  date,
+                  startTime,
                   leadHours,
-                  templateId: business.reminderTemplateId ?? "standard",
-                },
-              });
+                  timezone,
+                });
+                await tx.appointmentReminder.create({
+                  data: {
+                    businessId: input.businessId,
+                    appointmentId: appointment.id,
+                    channel: "WHATSAPP",
+                    status: "PENDING",
+                    dueAt,
+                    leadHours,
+                    templateId: business.reminderTemplateId ?? "standard",
+                  },
+                });
+              }
             }
           }
 
@@ -525,43 +528,45 @@ export class AppointmentRepository {
             data: { status: "CANCELLED", lastError: "RESCHEDULED" },
           });
 
-          const business = await tx.business.findUnique({
-            where: { id: appointment.businessId },
-            select: {
-              reminderEnabled: true,
-              reminderLeadHours: true,
-              reminderTemplateId: true,
-              timezone: true,
-            },
-          });
-          if (business?.reminderEnabled) {
-            const leadHours = business.reminderLeadHours ?? 24;
-            const timezone = business.timezone || "Asia/Riyadh";
-            if (
-              !isLateBooking({
-                date: input.date,
-                startTime: input.startTime,
-                leadHours,
-                timezone,
-              })
-            ) {
-              const dueAt = calculateReminderDueTime({
-                date: input.date,
-                startTime: input.startTime,
-                leadHours,
-                timezone,
-              });
-              await tx.appointmentReminder.create({
-                data: {
-                  businessId: appointment.businessId,
-                  appointmentId: id,
-                  channel: "WHATSAPP",
-                  status: "PENDING",
-                  dueAt,
+          if (areAppointmentRemindersOperational()) {
+            const business = await tx.business.findUnique({
+              where: { id: appointment.businessId },
+              select: {
+                reminderEnabled: true,
+                reminderLeadHours: true,
+                reminderTemplateId: true,
+                timezone: true,
+              },
+            });
+            if (business?.reminderEnabled) {
+              const leadHours = business.reminderLeadHours ?? 24;
+              const timezone = business.timezone || "Asia/Riyadh";
+              if (
+                !isLateBooking({
+                  date: input.date,
+                  startTime: input.startTime,
                   leadHours,
-                  templateId: business.reminderTemplateId ?? "standard",
-                },
-              });
+                  timezone,
+                })
+              ) {
+                const dueAt = calculateReminderDueTime({
+                  date: input.date,
+                  startTime: input.startTime,
+                  leadHours,
+                  timezone,
+                });
+                await tx.appointmentReminder.create({
+                  data: {
+                    businessId: appointment.businessId,
+                    appointmentId: id,
+                    channel: "WHATSAPP",
+                    status: "PENDING",
+                    dueAt,
+                    leadHours,
+                    templateId: business.reminderTemplateId ?? "standard",
+                  },
+                });
+              }
             }
           }
 
