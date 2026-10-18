@@ -29,7 +29,9 @@ export type OfferedBookingOption = {
 export type BookingSelection =
   | { kind: "index"; index: number }
   | { kind: "time"; time: string }
-  | { kind: "provider"; providerText: string };
+  | { kind: "provider"; providerText: string }
+  | { kind: "more_times" }
+  | { kind: "change_date" };
 
 export type BookingSelectionContext = {
   serviceName: string;
@@ -46,6 +48,7 @@ function normalizeDigits(text: string): string {
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
 }
 
+export const OFFER_HEADER_PHRASE = "تتوفر المواعيد التالية لخدمة";
 const OFFER_HEADER =
   /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
 const OFFER_LINE =
@@ -97,11 +100,108 @@ export function extractLastBookingOffer(
  *
  * Order: index → time → provider-name candidate.
  */
+
+const MORE_TIMES_PATTERNS = [
+  "اوقات اخرى",
+  "اوقات تانية",
+  "اوقات تانيه",
+  "مواعيد اخرى",
+  "مواعيد تانية",
+  "مواعيد تانيه",
+  "خيارات اخرى",
+  "خيارات تانية",
+  "خيارات تانيه",
+  "وقت تاني",
+  "وقت اخر",
+  "في اوقات تانية",
+  "فيه اوقات تانية",
+  "في مواعيد تانية",
+  "فيه مواعيد تانية",
+  "المزيد",
+  "more",
+  "more_times",
+  "more times",
+].map(normalizeArabicText);
+
+const CHANGE_DATE_PATTERNS = [
+  "يوم اخر",
+  "يوم تاني",
+  "يوم تانيه",
+  "تاريخ اخر",
+  "تاريخ تاني",
+  "تاريخ تانيه",
+  "غير اليوم",
+  "تغيير اليوم",
+  "تغيير التاريخ",
+  "يوم مختلف",
+  "عاوز يوم تاني",
+  "عايز يوم تاني",
+  "محتاج يوم تاني",
+  "another day",
+  "other day",
+  "change_date",
+  "change date",
+].map(normalizeArabicText);
+
+const ARABIC_ORDINALS: Record<string, number> = {
+  الاول: 1,
+  الاولاني: 1,
+  التاني: 2,
+  الثاني: 2,
+  التالت: 3,
+  الثالث: 3,
+  الرابع: 4,
+  الخامس: 5,
+  السادس: 6,
+};
+
 export function parseBookingSelection(
   rawText: string,
 ): BookingSelection | null {
   const trimmed = rawText.trim();
   if (trimmed.length === 0 || trimmed.length > 120) return null;
+
+  const normForNav = normalizeArabicText(trimmed);
+
+  // Direct callback tokens
+  if (trimmed === "more_times" || trimmed === "more times")
+    return { kind: "more_times" };
+  if (trimmed === "change_date" || trimmed === "change date")
+    return { kind: "change_date" };
+
+  // Navigation: more times / another day
+  for (const p of MORE_TIMES_PATTERNS) {
+    if (
+      normForNav === p ||
+      (normForNav.includes(p) && normForNav.length <= 25)
+    ) {
+      return { kind: "more_times" };
+    }
+  }
+  for (const p of CHANGE_DATE_PATTERNS) {
+    if (
+      normForNav === p ||
+      (normForNav.includes(p) && normForNav.length <= 25)
+    ) {
+      return { kind: "change_date" };
+    }
+  }
+
+  // Ordinal word match ("الأول", "الثاني", "الخيار الأول", etc.)
+  const bareOrdinal = normForNav.startsWith("الخيار ")
+    ? normForNav.replace("الخيار ", "").trim()
+    : normForNav.startsWith("رقم ")
+      ? normForNav.replace("رقم ", "").trim()
+      : normForNav;
+  if (ARABIC_ORDINALS[bareOrdinal] !== undefined) {
+    return { kind: "index", index: ARABIC_ORDINALS[bareOrdinal]! };
+  }
+
+  // Structured callback/button prefix e.g. "opt_1", "slot_2", "choice:3"
+  const prefixMatch = trimmed.match(/^(?:opt|slot|choice)[_:\s-]*([1-9]\d?)$/i);
+  if (prefixMatch && prefixMatch[1]) {
+    return { kind: "index", index: Number(prefixMatch[1]) };
+  }
 
   const digitsNormalized = normalizeDigits(trimmed);
 

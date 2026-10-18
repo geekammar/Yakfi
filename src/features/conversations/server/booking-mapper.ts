@@ -35,6 +35,19 @@ const ANY_PROVIDER_RAW = [
   "لا يهم",
   "اي طبيب",
   "أي طبيب",
+  "أي مقدم خدمة متاح",
+  "اي مقدم خدمة متاح",
+  "أي مقدم خدمة",
+  "اي مقدم خدمة",
+  "أي دكتور متاح",
+  "اي دكتور متاح",
+  "أي طبيب متاح",
+  "اي طبيب متاح",
+  "المتاح",
+  "اول متاح",
+  "أول متاح",
+  "مش فارق",
+  "مش فارقة",
   "any provider",
   "any doctor",
   "anyone",
@@ -209,7 +222,18 @@ export function mapAiResponseToBookingInput(
   const { services, aiResponse, branchId } = input;
   const extraction = aiResponse.extraction;
 
-  const serviceMatch = matchServiceByName(extraction.service, services);
+  let serviceMatch = matchServiceByName(extraction.service, services);
+  if (
+    serviceMatch.status === "missing" &&
+    services.length === 1 &&
+    services[0]
+  ) {
+    serviceMatch = {
+      status: "ok",
+      serviceId: services[0].id,
+      serviceName: services[0].name,
+    };
+  }
   if (serviceMatch.status === "missing") {
     return {
       kind: "needs_clarification",

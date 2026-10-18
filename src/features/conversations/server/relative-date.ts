@@ -90,6 +90,29 @@ const DAY_AFTER_TOMORROW_PHRASES: ReadonlyArray<string> = [
   "بعد يومين",
 ].map(normalizeArabicText);
 
+const THREE_WEEKS_PHRASES: ReadonlyArray<string> = [
+  "بعد 3 اسابيع",
+  "بعد 3 أسابيع",
+  "بعد ٣ اسابيع",
+  "بعد ٣ أسابيع",
+  "بعد تلات اسابيع",
+  "بعد تلات أسابيع",
+  "بعد ثلاثة اسابيع",
+  "بعد ثلاثة أسابيع",
+  "كمان 3 اسابيع",
+  "كمان 3 أسابيع",
+  "كمان ٣ اسابيع",
+  "كمان ٣ أسابيع",
+  "كمان تلات اسابيع",
+  "كمان تلات أسابيع",
+  "كمان ثلاثة اسابيع",
+  "كمان ثلاثة أسابيع",
+  "تلات اسابيع",
+  "تلات أسابيع",
+  "ثلاثة اسابيع",
+  "ثلاثة أسابيع",
+].map(normalizeArabicText);
+
 const TWO_WEEKS_PHRASES: ReadonlyArray<string> = [
   "بعد اسبوعين",
   "بعد أسبوعين",
@@ -187,17 +210,35 @@ export function resolveEgyptianRelativeDate(
     }
   }
 
-  const tokens = normalized.split(" ").filter(Boolean);
+  // If today is explicitly mentioned ("النهاردة" / "اليوم") alongside a weekday,
+  // honor today if the weekday matches today's weekday.
+  const isTodayMentioned = ["النهاردة", "النهارده", "اليوم"].some((w) =>
+    normalized.includes(normalizeArabicText(w)),
+  );
+
+  const tokens = normalized.split(/\s+/);
 
   // A weekday name anywhere in the message ("طيب نرجع للحجز الخميس").
   for (const token of tokens) {
     const day = WEEKDAY_BY_WORD.get(token);
     if (day) {
+      if (isTodayMentioned && weekdayOfDate(today) === day) {
+        return addDays(today, 0);
+      }
       const base = nextWeekday(today, day);
+      if (THREE_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
+        return addDays(base, 14);
+      }
       if (TWO_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
         return addDays(base, 7);
       }
       return base;
+    }
+  }
+
+  for (const phrase of THREE_WEEKS_PHRASES) {
+    if (phrase.length > 0 && normalized.includes(phrase)) {
+      return addDays(today, 21);
     }
   }
 
@@ -225,5 +266,40 @@ export function resolveEgyptianRelativeDate(
     if (offset !== undefined) return addDays(today, offset);
   }
 
+  return null;
+}
+
+/**
+ * Extract time of day preference from customer message text (e.g. "الصبح", "بعد العصر", "بالمساء").
+ */
+export function extractTimeOfDayPreference(
+  message: string,
+): "morning" | "afternoon" | "evening" | null {
+  const norm = normalizeArabicText(message);
+  if (
+    norm.includes("صبح") ||
+    norm.includes("صباح") ||
+    norm.includes("بدري") ||
+    norm.includes("اول النهار") ||
+    norm.includes("اول اليوم")
+  ) {
+    return "morning";
+  }
+  if (
+    norm.includes("عصر") ||
+    norm.includes("بعد الظهر") ||
+    norm.includes("الظهر") ||
+    norm.includes("بعد العصر")
+  ) {
+    return "afternoon";
+  }
+  if (
+    norm.includes("مساء") ||
+    norm.includes("ليل") ||
+    norm.includes("متاخر") ||
+    norm.includes("بالمساء")
+  ) {
+    return "evening";
+  }
   return null;
 }

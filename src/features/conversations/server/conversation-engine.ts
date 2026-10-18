@@ -130,6 +130,7 @@ import {
 } from "@/features/conversations/server/handoff-cause";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
+  extractTimeOfDayPreference,
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
@@ -335,7 +336,12 @@ export type ConversationEngineDeps = {
     AppointmentRepository,
     "listBlockingByAssignees"
   > &
-    Partial<Pick<AppointmentRepository, "createWithConflictCheck">>;
+    Partial<
+      Pick<
+        AppointmentRepository,
+        "createWithConflictCheck" | "listRecentByCustomer"
+      >
+    >;
   followUpRequestRepository?: Pick<
     FollowUpRequestRepository,
     "getEligibleForChannel" | "findById" | "updateStatus"
@@ -538,19 +544,29 @@ export function formatBookingOptionsMessage(
     endAt?: string;
     start?: string;
     end?: string;
+    startTime?: string;
+    endTime?: string;
+    providerId?: string;
+    index?: number;
   }>,
   followUpRequestId?: string | null,
 ): string {
   const lines = options.map((opt, idx) => {
-    const start = opt.startAt ? opt.startAt.slice(11, 16) : (opt.start ?? "");
-    const end = opt.endAt ? opt.endAt.slice(11, 16) : (opt.end ?? "");
+    const start = opt.startAt
+      ? opt.startAt.slice(11, 16)
+      : (opt.start ?? opt.startTime ?? "");
+    const end = opt.endAt
+      ? opt.endAt.slice(11, 16)
+      : (opt.end ?? opt.endTime ?? "");
     return `${idx + 1}. ${opt.displayName} — ${start} إلى ${end}`;
   });
   const followUpTag = followUpRequestId
     ? `\n[متابعة: ${followUpRequestId}]`
     : "";
-  const prefix = followUpRequestId ? "لمتابعة" : "لخدمة";
-  return `تتوفر المواعيد التالية ${prefix} "${serviceName}" يوم ${date}:\n${lines.join("\n")}${followUpTag}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
+  const header = followUpRequestId
+    ? `تتوفر المواعيد التالية لمتابعة "${serviceName}" يوم ${date}:`
+    : `تتوفر المواعيد التالية لخدمة "${serviceName}" يوم ${date}:`;
+  return `${header}\n${lines.join("\n")}${followUpTag}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
 }
 
 /** Canonical phone form for the number-mapping lookup (digits + leading +). */
@@ -908,6 +924,7 @@ async function deliverAssistantReply(
   assistantMessageId: string,
   businessId: string,
   connectionId: string | null,
+  replyMarkup?: Record<string, unknown>,
 ): Promise<InboundSuccess["delivery"]> {
   let delivery: InboundSuccess["delivery"] = null;
   try {
@@ -918,6 +935,7 @@ async function deliverAssistantReply(
       conversationId,
       content,
       connectionId: connectionId ?? undefined,
+      ...(replyMarkup ? { replyMarkup } : {}),
     });
     delivery = {
       provider: sent.provider,
@@ -1156,6 +1174,7 @@ async function selectionReply(
   content: string,
   status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
   cause: HandoffCause | null = null,
+  replyMarkup?: Record<string, unknown>,
 ): Promise<InboundSuccess> {
   const assistantMessage = await persistAssistantReply(
     deps,
@@ -1172,6 +1191,7 @@ async function selectionReply(
     assistantMessage.id,
     scope.business.id,
     scope.connectionId,
+    replyMarkup,
   );
   return {
     ok: true,
@@ -1225,11 +1245,13 @@ async function completeBookingSelection(
   context: BookingSelectionContext,
   selection: BookingSelection,
 ): Promise<InboundSuccess | null> {
+  const isTelegram = scope.customer.phone.startsWith("tg:");
   const reply = (
     content: string,
     status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
     cause: HandoffCause | null = null,
-  ) => selectionReply(deps, scope, content, status, cause);
+    replyMarkup?: Record<string, unknown>,
+  ) => selectionReply(deps, scope, content, status, cause, replyMarkup);
 
   // 1. Service — matched ONLY against the persisted Business services
   //    (the offer's service name is the selector, never an id source).
@@ -1321,6 +1343,49 @@ async function completeBookingSelection(
       bookingEmptyReasonMessage(bookingResult.reason ?? "FULLY_BOOKED", date),
       "NEED_HUMAN",
       "DOMAIN_REQUIRES_HUMAN",
+    );
+  }
+
+  // 4b. Deterministic navigation: more times / change date
+  if (selection.kind === "more_times") {
+    const maxPresentedIndex = context.options.reduce(
+      (max, opt) => Math.max(max, opt.index),
+      0,
+    );
+    const unpresented = freshOptions.slice(maxPresentedIndex);
+    if (unpresented.length > 0) {
+      const nextBatch = unpresented.slice(0, 5);
+      const replyMarkup = isTelegram
+        ? {
+            inline_keyboard: [
+              nextBatch.map((_, i) => ({
+                text: `${maxPresentedIndex + i + 1}️⃣ اختيار ${maxPresentedIndex + i + 1}`,
+                callback_data: `opt_${maxPresentedIndex + i + 1}`,
+              })),
+              [
+                { text: "🔄 أوقات أخرى", callback_data: "more_times" },
+                { text: "📅 يوم آخر", callback_data: "change_date" },
+              ],
+            ],
+          }
+        : undefined;
+      return reply(
+        `إليك أوقاتاً أخرى متاحة لخدمة "${serviceName}" يوم ${date}:\n${formatBookingOptionsMessage(serviceName, date, nextBatch, context.followUpRequestId)}`,
+        "AI_ACTIVE",
+        null,
+        replyMarkup,
+      );
+    }
+    return reply(
+      `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${date}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`,
+      "AI_ACTIVE",
+    );
+  }
+
+  if (selection.kind === "change_date") {
+    return reply(
+      `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}" (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):`,
+      "AI_ACTIVE",
     );
   }
 
@@ -1462,13 +1527,14 @@ async function completeBookingSelection(
   // 7. BOOKED transition + authoritative confirmation. The confirmation
   //    uses ONLY the created appointment's resolved values, and is
   //    persisted/delivered only AFTER creation succeeded.
+  const businessName = scope.business.name;
   const confirmation = followUpRequestId
     ? initialStatus === "CONFIRMED"
-      ? `تم تأكيد حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}.`
-      : `تم استلام طلب حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}. سيتواصل معك الفريق لتأكيد الموعد.`
+      ? `تم تأكيد حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}.`
+      : `تم استلام طلب حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`
     : initialStatus === "CONFIRMED"
-      ? `تم تأكيد حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}.`
-      : `تم استلام طلب حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName}. سيتواصل معك الفريق لتأكيد الموعد.`;
+      ? `تم تأكيد حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}.`
+      : `تم استلام طلب حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`;
   return reply(confirmation, "BOOKED");
 }
 
@@ -2286,6 +2352,50 @@ async function runInboundTurn(
         }
       }
 
+      const sameDoctorRequested =
+        /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
+          inbound.text,
+        );
+      if (sameDoctorRequested && !bookingAiResponse.extraction.provider) {
+        if (resolvedState?.knownFacts?.provider) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              provider: resolvedState.knownFacts.provider,
+            },
+          };
+        } else if (
+          deps.appointmentRepository &&
+          typeof deps.appointmentRepository.listRecentByCustomer === "function"
+        ) {
+          const recent = await deps.appointmentRepository.listRecentByCustomer(
+            business.id,
+            customer.id,
+            1,
+          );
+          const firstRecent = recent?.[0];
+          if (firstRecent && firstRecent.providerId) {
+            const pId = firstRecent.providerId;
+            const provRepo = deps.providerRepository ?? providerRepository;
+            const providers = await provRepo.listEligibleForService(
+              business.id,
+              firstRecent.serviceId,
+            );
+            const matchedP = providers.find((p) => p.id === pId);
+            if (matchedP) {
+              bookingAiResponse = {
+                ...bookingAiResponse,
+                extraction: {
+                  ...bookingAiResponse.extraction,
+                  provider: matchedP.name ?? null,
+                },
+              };
+            }
+          }
+        }
+      }
+
       let activeFollowUpId: string | null =
         resolvedState?.knownFacts?.followUpRequestId ?? null;
 
@@ -2784,11 +2894,52 @@ async function runInboundTurn(
           delivery,
         };
       }
+      const timeOfDayPref =
+        bookingAiResponse.extraction.timePreference ??
+        extractTimeOfDayPreference(inbound.text);
+
+      let bookableOptions = bookingResult.data.options;
+      if (timeOfDayPref) {
+        const matchesPref = (startTime: string) => {
+          const hour = parseInt(startTime.slice(0, 2), 10);
+          if (Number.isNaN(hour)) return true;
+          if (timeOfDayPref === "morning") return hour < 12;
+          if (timeOfDayPref === "afternoon") return hour >= 12 && hour < 17;
+          if (timeOfDayPref === "evening") return hour >= 17;
+          return true;
+        };
+        const preferred = bookableOptions.filter((o) =>
+          matchesPref(o.startAt.slice(11, 16)),
+        );
+        const others = bookableOptions.filter(
+          (o) => !matchesPref(o.startAt.slice(11, 16)),
+        );
+        if (preferred.length > 0) {
+          bookableOptions = [...preferred, ...others];
+        }
+      }
+
+      const isTelegram = customer.phone.startsWith("tg:");
+      const replyMarkup = isTelegram
+        ? {
+            inline_keyboard: [
+              bookableOptions.slice(0, 3).map((_, i) => ({
+                text: `${i + 1}️⃣ اختيار ${i + 1}`,
+                callback_data: `opt_${i + 1}`,
+              })),
+              [
+                { text: "🔄 أوقات أخرى", callback_data: "more_times" },
+                { text: "📅 يوم آخر", callback_data: "change_date" },
+              ],
+            ],
+          }
+        : undefined;
+
       // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
       const optionsMsg = formatBookingOptionsMessage(
         mapped.serviceName,
         mapped.date!,
-        bookingResult.data.options,
+        bookableOptions,
         activeFollowUpId,
       );
       const assistantMessage = await persistAssistantReply(
@@ -2806,6 +2957,7 @@ async function runInboundTurn(
         assistantMessage.id,
         business.id,
         outboundConnectionId,
+        replyMarkup,
       );
       return {
         ok: true,

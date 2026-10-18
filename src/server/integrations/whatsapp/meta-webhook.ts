@@ -206,13 +206,23 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
           normalizedInput.recipientProviderId = recipientProviderId;
         }
         if (kind === "TEXT") {
-          const body =
-            meta.type === "interactive"
-              ? meta.interactive?.button_reply?.title ||
-                meta.interactive?.button_reply?.id ||
-                meta.interactive?.list_reply?.title ||
-                meta.interactive?.list_reply?.id
-              : meta.text?.body;
+          let body: string | undefined;
+          if (meta.type === "interactive") {
+            const rawId =
+              meta.interactive?.button_reply?.id ??
+              meta.interactive?.list_reply?.id;
+            const rawTitle =
+              meta.interactive?.button_reply?.title ??
+              meta.interactive?.list_reply?.title;
+            // Prioritize normalized option index from id if present (e.g. "1", "opt_1", "opt:1")
+            if (rawId && /^(?:opt[:_]?)?[1-9]\d?$/i.test(rawId.trim())) {
+              body = rawId.trim().replace(/^opt[:_]?/i, "");
+            } else {
+              body = rawTitle || rawId;
+            }
+          } else {
+            body = meta.text?.body;
+          }
           if (!body || typeof body !== "string" || !body.trim()) {
             throw new TransportError(
               "MALFORMED_PROVIDER_PAYLOAD",

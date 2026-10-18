@@ -153,6 +153,7 @@ export function createTelegramMessageTransport(
         {
           chatId: message.to,
           text: message.content,
+          ...(message.replyMarkup ? { replyMarkup: message.replyMarkup } : {}),
         },
       );
       if (!result.ok) {

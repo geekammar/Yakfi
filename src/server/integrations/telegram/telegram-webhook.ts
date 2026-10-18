@@ -215,9 +215,61 @@ export function parseTelegramUpdate(
     return { status: "managed_bot", updateId, event };
   }
 
+  // ── customer interactive callback_query (UX001-C2).
+  //    Handles inline keyboard callbacks from private chats.
+  if (update.callback_query) {
+    const cb = update.callback_query as {
+      id?: string;
+      from?: TelegramUser;
+      message?: TelegramMessage;
+      data?: string;
+    };
+    const chatId = cb.message?.chat?.id ?? cb.from?.id;
+    if (typeof chatId !== "number" || !Number.isFinite(chatId)) {
+      return {
+        status: "ignored",
+        updateId,
+        reason: "UNSUPPORTED_UPDATE_TYPE",
+      };
+    }
+    if (cb.message?.chat?.type && cb.message.chat.type !== "private") {
+      return { status: "ignored", updateId, reason: "NON_PRIVATE_CHAT" };
+    }
+    const data = typeof cb.data === "string" ? cb.data.trim() : "";
+    if (!data) {
+      return {
+        status: "ignored",
+        updateId,
+        reason: "UNSUPPORTED_MESSAGE_TYPE",
+      };
+    }
+
+    const epochSec = cb.message?.date ?? Math.floor(Date.now() / 1000);
+    const timestamp = toIsoTimestamp(epochSec);
+    if (!timestamp) {
+      return { status: "malformed", error: malformed("زمن الرسالة غير صالح") };
+    }
+
+    const result = normalizeInboundTransportMessage({
+      externalMessageId: `tg:${options.botExternalId}:${updateId}`,
+      senderExternalId: String(chatId),
+      recipientExternalId: options.botExternalId,
+      recipientProviderId: options.botExternalId,
+      timestamp,
+      kind: "TEXT",
+      text: data,
+    });
+    if (!result.ok) {
+      return { status: "malformed", error: result.error };
+    }
+    return {
+      status: "message",
+      updateId,
+      message: result.message,
+    };
+  }
+
   // ── customer message (MVP: the `message` field, private chats only).
-  //    Edited messages, channel posts, and callback queries are out of
-  //    scope for the text-first MVP.
   const message = update.message;
   if (!message) {
     return {
