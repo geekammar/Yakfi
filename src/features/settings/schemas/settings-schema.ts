@@ -62,6 +62,53 @@ export const businessSettingsSchema = z.object({
     .trim()
     .min(5, "اكتب سياسة إلغاء مختصرة")
     .max(2000, "سياسة الإلغاء طويلة جداً"),
+  // Appointment reminders (BOOK-REM-01)
+  reminderEnabled: z.boolean().optional(),
+  reminderLeadHours: z
+    .union(
+      [
+        z.literal(1),
+        z.literal(2),
+        z.literal(4),
+        z.literal(12),
+        z.literal(24),
+        z.literal(48),
+      ],
+      { error: "اختر مدة صالحة لإرسال التذكير" },
+    )
+    .optional(),
+  reminderTemplateId: z
+    .enum(["standard", "compact"], {
+      error: "اختر قالباً صالحاً لرسالة التذكير",
+    })
+    .optional(),
 });
+
+export const REMINDER_LEAD_HOURS_OPTIONS = [
+  { value: 1, label: "قبل الموعد بساعة واحدة" },
+  { value: 2, label: "قبل الموعد بساعتين" },
+  { value: 4, label: "قبل الموعد بـ 4 ساعات" },
+  { value: 12, label: "قبل الموعد بـ 12 ساعة" },
+  { value: 24, label: "قبل الموعد بـ 24 ساعة (يوم واحد)" },
+  { value: 48, label: "قبل الموعد بـ 48 ساعة (يومان)" },
+] as const;
+
+export const REMINDER_TEMPLATE_OPTIONS = [
+  {
+    id: "standard",
+    name: "النموذج المعتمد (الأساسي)",
+    description:
+      "تذكير ودود ومكتمل يحتوي اسم المنشأة، التاريخ، الوقت، واسم الخدمة.",
+    preview:
+      "مرحباً بك! نود تذكيرك بموعدك لدى {businessName} يوم {date} الساعة {startTime} (خدمة: {serviceName}). يسعدنا حضورك في الموعد المحدد.",
+  },
+  {
+    id: "compact",
+    name: "النموذج المعتمد (المختصر)",
+    description: "صيغة مختصرة ومباشرة للمواعيد السريعة.",
+    preview:
+      "تذكير بموعدك: لدى {businessName} يوم {date} الساعة {startTime} لخدمة {serviceName}. نرجو الحضور قبل الموعد بـ 10 دقائق.",
+  },
+] as const;
 
 export type BusinessSettingsInput = z.infer<typeof businessSettingsSchema>;

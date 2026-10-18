@@ -10,6 +10,7 @@
  */
 
 import { AiPolicyRepository } from "./ai-policy.repository";
+import { AppointmentReminderRepository } from "./appointment-reminder.repository";
 import { AppointmentRepository } from "./appointment.repository";
 import { BranchRepository } from "./branch.repository";
 import { BusinessRepository } from "./business.repository";
@@ -38,6 +39,8 @@ export const serviceRepository = new ServiceRepository();
 export const customerRepository = new CustomerRepository();
 export const conversationRepository = new ConversationRepository();
 export const appointmentRepository = new AppointmentRepository();
+export const appointmentReminderRepository =
+  new AppointmentReminderRepository();
 export const invitationRepository = new InvitationRepository();
 export const branchRepository = new BranchRepository();
 export const whatsAppConnectionRepository = new WhatsAppConnectionRepository();
@@ -59,6 +62,7 @@ export const followUpRequestRepository = new FollowUpRequestRepository();
 
 export {
   AppointmentRepository,
+  AppointmentReminderRepository,
   AiPolicyRepository,
   BranchRepository,
   BusinessRepository,

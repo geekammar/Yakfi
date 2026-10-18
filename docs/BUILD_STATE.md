@@ -9,14 +9,8 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.40.2** — released and committed (`b8b8d40`, tag `v0.40.2`;
-HEAD == `origin/main`; tags through `v0.40.2`). Release v0.40.2 ships the
-PROMPT-AI-OPS-23 Superadmin provider display repair (DECISIONS #89) over
-v0.40.1, which itself shipped the PROMPT-AI-OPS-22 turn-evidence observability
-seam (DECISIONS #88) over v0.40.0. **Production IS DEPLOYED AT v0.40.2**
-(live-verified `GET /api/health` → `version:"0.40.2"`, `status:"ok"`,
-`deploymentReady:true`, `database:"connected"`, `missingEnvVars:[]`,
-2026-10-03T23:14Z). Releases
+**Product version: v0.51.0 (feature branch; PR ready)** — `BOOK-REM-01: Reliable Appointment Reminders, Configurable Hours & Safe Message Customization` (DECISIONS #94). Production baseline: v0.50.0 (commit `022ba1cfe56c68ab4d39839e86283a47376ad7b3`). Adds automated appointment reminders configurable from Settings, Meta WhatsApp approved template (`appointment_reminder`), Telegram bot text messaging, serverless hourly cron endpoint (`/api/cron/appointment-reminders`), atomic row claiming (`SKIP LOCKED`), and additive migration `20261018180000_appointment_reminders`. Verified by 35/35 offline automated test scenarios (`pnpm check:reminders`) and clean `pnpm verify:local`. Production migration is manual operator-gated via GitHub Actions.
+
 v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
 fixes, the official-creation deep-link + Android launcher fixes, the customer
 `/start` command, and Context Architecture V1). v0.31.1/v0.31.2 carry the

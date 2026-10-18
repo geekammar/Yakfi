@@ -133,6 +133,10 @@ const createBusinessSchema = z.object({
   // of the feature's closed shape.
   assistantName: z.string().trim().max(60).nullable().optional(),
   assistantStyle: z.record(z.string(), z.string()).optional(),
+  // Appointment reminders (BOOK-REM-01)
+  reminderEnabled: z.boolean().optional(),
+  reminderLeadHours: z.number().int().min(1).max(168).optional(),
+  reminderTemplateId: z.string().trim().max(64).optional(),
 });
 
 const updateBusinessSchema = createBusinessSchema.partial();

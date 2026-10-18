@@ -6,6 +6,7 @@
 
 import type {
   Appointment,
+  AppointmentReminder,
   AppointmentStatus,
   Branch,
   Business,
@@ -24,6 +25,8 @@ import type {
   ProviderProfile,
   ProviderService,
   ProviderServiceExclusion,
+  ReminderChannel,
+  ReminderStatus,
   RuntimeCredential,
   Service,
   TelegramConnection,
@@ -36,6 +39,7 @@ import type {
 
 export type {
   Appointment,
+  AppointmentReminder,
   AppointmentStatus,
   Branch,
   Business,
@@ -54,6 +58,8 @@ export type {
   ProviderProfile,
   ProviderService,
   ProviderServiceExclusion,
+  ReminderChannel,
+  ReminderStatus,
   RuntimeCredential,
   Service,
   TelegramConnection,
