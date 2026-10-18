@@ -46,6 +46,7 @@ export default async function NewAppointmentPage({
     date?: string;
     customerId?: string;
     serviceId?: string;
+    providerId?: string;
   }>;
 }) {
   const session = await requireUser();
@@ -79,6 +80,9 @@ export default async function NewAppointmentPage({
       serviceId: uuidSchema.safeParse(params.serviceId).success
         ? params.serviceId
         : undefined,
+      providerId: uuidSchema.safeParse(params.providerId).success
+        ? params.providerId
+        : undefined,
     }),
   ]);
 
@@ -103,6 +107,7 @@ export default async function NewAppointmentPage({
           }
           initialCustomer={prefill.customer}
           initialServiceId={prefill.serviceId}
+          initialProviderId={prefill.providerId}
           initialScreen={deriveInitialBookingScreen(prefill)}
           CustomerCreateDialog={CustomerFormDialog}
           workingHours={business.workingHours}

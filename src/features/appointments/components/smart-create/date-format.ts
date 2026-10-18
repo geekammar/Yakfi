@@ -15,7 +15,28 @@ export type RelativeDateOption =
   | "next-week"
   | "after-1-week"
   | "after-2-weeks"
+  | "after-3-weeks"
   | "after-1-month";
+
+export type WeekPeriodOption =
+  | "today"
+  | "tomorrow"
+  | "this-week"
+  | "next-week"
+  | "after-2-weeks"
+  | "after-3-weeks";
+
+export const WEEK_PERIOD_OPTIONS: ReadonlyArray<{
+  option: WeekPeriodOption;
+  label: string;
+}> = [
+  { option: "today", label: "اليوم" },
+  { option: "tomorrow", label: "غدًا" },
+  { option: "this-week", label: "هذا الأسبوع" },
+  { option: "next-week", label: "الأسبوع القادم" },
+  { option: "after-2-weeks", label: "بعد أسبوعين" },
+  { option: "after-3-weeks", label: "بعد 3 أسابيع" },
+];
 
 /** Quick relative choices offered on the date step (B-07 §C). */
 export const RELATIVE_DATE_OPTIONS: ReadonlyArray<{
@@ -28,6 +49,7 @@ export const RELATIVE_DATE_OPTIONS: ReadonlyArray<{
   { option: "next-week", label: "الأسبوع القادم" },
   { option: "after-1-week", label: "بعد أسبوع" },
   { option: "after-2-weeks", label: "بعد أسبوعين" },
+  { option: "after-3-weeks", label: "بعد 3 أسابيع" },
   { option: "after-1-month", label: "بعد شهر" },
 ];
 
@@ -130,8 +152,71 @@ export function resolveRelativeDate(
       return moveDate(anchor, 7);
     case "after-2-weeks":
       return moveDate(anchor, 14);
+    case "after-3-weeks":
+      return moveDate(anchor, 21);
     case "after-1-month":
       return addMonths(anchor, 1);
+  }
+}
+
+/**
+ * Returns the 7 days of the week starting on weekStartSaturday ("YYYY-MM-DD").
+ */
+export function getWeekDays(weekStartSaturday: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => moveDate(weekStartSaturday, i));
+}
+
+/**
+ * Returns formatted Arabic label for a week range, e.g. "١٧ أكتوبر – ٢٣ أكتوبر ٢٠٢٦"
+ */
+export function formatWeekRange(weekStartSaturday: string): string {
+  const weekEndFriday = moveDate(weekStartSaturday, 6);
+  const startDay = new Intl.DateTimeFormat("ar-EG", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(`${weekStartSaturday}T00:00:00.000Z`));
+  const endDay = new Intl.DateTimeFormat("ar-EG", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${weekEndFriday}T00:00:00.000Z`));
+  return `${startDay} – ${endDay}`;
+}
+
+/**
+ * Returns compact date range for quick period cards, e.g. "١٧ أكتوبر – ٢٣ أكتوبر"
+ */
+export function getPeriodDateRange(
+  today: string,
+  option: WeekPeriodOption,
+): string {
+  const thisWeekStart = startOfBusinessWeek(today);
+  switch (option) {
+    case "today":
+      return formatArabicDayMonth(today);
+    case "tomorrow":
+      return formatArabicDayMonth(moveDate(today, 1));
+    case "this-week": {
+      const end = moveDate(thisWeekStart, 6);
+      return `${formatArabicDayMonth(thisWeekStart)} – ${formatArabicDayMonth(end)}`;
+    }
+    case "next-week": {
+      const start = moveDate(thisWeekStart, 7);
+      const end = moveDate(start, 6);
+      return `${formatArabicDayMonth(start)} – ${formatArabicDayMonth(end)}`;
+    }
+    case "after-2-weeks": {
+      const start = moveDate(thisWeekStart, 14);
+      const end = moveDate(start, 6);
+      return `${formatArabicDayMonth(start)} – ${formatArabicDayMonth(end)}`;
+    }
+    case "after-3-weeks": {
+      const start = moveDate(thisWeekStart, 21);
+      const end = moveDate(start, 6);
+      return `${formatArabicDayMonth(start)} – ${formatArabicDayMonth(end)}`;
+    }
   }
 }
 

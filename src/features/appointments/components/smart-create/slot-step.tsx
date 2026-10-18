@@ -50,7 +50,7 @@ const NO_SLOTS_CONTENT = {
   },
   FULLY_BOOKED: {
     icon: CalendarXIcon,
-    title: "لا توجد أوقات متاحة",
+    title: "لا توجد مواعيد مناسبة في هذا اليوم",
     description: "لا يمكن حجز أي وقت في هذا التاريخ حالياً. جرّب تاريخاً آخر.",
     showServiceAction: false,
   },
@@ -591,7 +591,7 @@ export function SlotStep({
 
           {availableCount === 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3">
-              <p className="text-sm">لا توجد أوقات متاحة في هذا اليوم.</p>
+              <p className="text-sm">لا توجد مواعيد مناسبة في هذا اليوم.</p>
               <Button
                 type="button"
                 variant="outline"
@@ -599,7 +599,7 @@ export function SlotStep({
                 className="shrink-0"
                 onClick={onGoToDate}
               >
-                تغيير التاريخ
+                اختيار يوم آخر
               </Button>
             </div>
           ) : null}
@@ -763,7 +763,7 @@ export function SlotStep({
           action={
             <div className="flex flex-wrap justify-center gap-2">
               <Button type="button" size="sm" onClick={onGoToDate}>
-                تغيير التاريخ
+                اختيار يوم آخر
               </Button>
               {NO_SLOTS_CONTENT[emptyReason].showServiceAction ? (
                 <Button
