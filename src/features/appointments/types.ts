@@ -187,6 +187,7 @@ export type BookingCustomerOption = {
 export type BookingContextPrefill = {
   customer: BookingCustomerOption | null;
   serviceId: string | null;
+  providerId?: string | null;
 };
 
 export type ServiceReadinessStatus = "READY_TO_BOOK" | "SETUP_REQUIRED";

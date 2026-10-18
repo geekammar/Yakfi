@@ -87,8 +87,16 @@ function appointmentRange(input: ListAppointmentsDto) {
 }
 
 export class AppointmentRepository {
+  private readonly client: typeof db;
+
+  constructor(client: typeof db = db) {
+    this.client = client;
+  }
+
   async findById(id: string): Promise<Appointment | null> {
-    return db.appointment.findFirst({ where: { id, ...notDeleted } });
+    return (this.client ?? db).appointment.findFirst({
+      where: { id, ...notDeleted },
+    });
   }
 
   /** Agenda view — customer + service projections preloaded. */
@@ -168,6 +176,53 @@ export class AppointmentRepository {
       },
       orderBy: { startTime: "asc" },
       take: 100,
+    });
+  }
+
+  async searchAppointments(
+    businessId: string,
+    query: string,
+    limit = 20,
+  ): Promise<AppointmentWithRelations[]> {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return db.appointment.findMany({
+        where: { businessId, ...notDeleted },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          service: {
+            select: { id: true, name: true, durationMinutes: true },
+          },
+          provider: {
+            select: { id: true, name: true, displayName: true },
+          },
+        },
+        orderBy: [{ date: "desc" }, { startTime: "desc" }],
+        take: limit,
+      });
+    }
+
+    return (this.client ?? db).appointment.findMany({
+      where: {
+        businessId,
+        ...notDeleted,
+        OR: [
+          { customer: { name: { contains: trimmed, mode: "insensitive" } } },
+          { customer: { phone: { contains: trimmed } } },
+          { notes: { contains: trimmed, mode: "insensitive" } },
+        ],
+      },
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        service: {
+          select: { id: true, name: true, durationMinutes: true },
+        },
+        provider: {
+          select: { id: true, name: true, displayName: true },
+        },
+      },
+      orderBy: [{ date: "desc" }, { startTime: "desc" }],
+      take: limit,
     });
   }
 

@@ -51,7 +51,12 @@ export type BookingFlowServiceDeps = {
   customerRepository: Pick<CustomerRepository, "findById" | "listByBusiness">;
   serviceRepository: Pick<ServiceRepository, "findById" | "listByBusiness">;
   providerRepository?: Pick<ProviderRepository, "listEligibleForService"> &
-    Partial<Pick<ProviderRepository, "countEligiblePerService">>;
+    Partial<
+      Pick<
+        ProviderRepository,
+        "countEligiblePerService" | "findProfileWithinBusiness"
+      >
+    >;
 };
 
 /** Production dependencies (app singletons). */
@@ -202,14 +207,20 @@ export async function resolveBookingContext(
 ): Promise<BookingContextPrefill> {
   const parsed = bookingContextSchema.safeParse(input);
   if (!parsed.success || !actor.businessId) {
-    return { customer: null, serviceId: null };
+    return { customer: null, serviceId: null, providerId: null };
   }
-  const [customer, service] = await Promise.all([
+  const [customer, service, provider] = await Promise.all([
     parsed.data.customerId
       ? deps.customerRepository.findById(parsed.data.customerId)
       : Promise.resolve(null),
     parsed.data.serviceId
       ? deps.serviceRepository.findById(parsed.data.serviceId)
+      : Promise.resolve(null),
+    parsed.data.providerId && deps.providerRepository?.findProfileWithinBusiness
+      ? deps.providerRepository.findProfileWithinBusiness(
+          parsed.data.providerId,
+          actor.businessId,
+        )
       : Promise.resolve(null),
   ]);
   return {
@@ -220,6 +231,10 @@ export async function resolveBookingContext(
     serviceId:
       service && service.businessId === actor.businessId && service.isActive
         ? service.id
+        : null,
+    providerId:
+      provider && provider.businessId === actor.businessId && provider.isActive
+        ? provider.id
         : null,
   };
 }

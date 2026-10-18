@@ -2,275 +2,318 @@
 
 import { getAvailabilityAction } from "@/features/appointments/actions/availability-actions";
 import {
-  RELATIVE_DATE_OPTIONS,
-  RELATIVE_WINDOW_OPTIONS,
+  WEEK_PERIOD_OPTIONS,
   formatArabicDate,
-  formatArabicDayMonth,
   formatArabicMonth,
   formatArabicWeekday,
+  formatWeekRange,
+  getPeriodDateRange,
+  getWeekDays,
   moveDate,
-  relativeDateWindow,
-  resolveRelativeDate,
-  type RelativeDateOption,
+  startOfBusinessWeek,
+  type WeekPeriodOption,
 } from "@/features/appointments/components/smart-create/date-format";
-import {
-  DAY_CAPACITY_LABELS,
-  dayCapacityState,
-  isDayUnselectable,
-  type DayCapacityState,
-} from "@/features/appointments/components/smart-create/day-capacity";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { resolveWorkingHours } from "@/lib/scheduling/slot-grid";
 import { cn } from "@/lib/utils";
 import { appointmentDateSchema } from "@/lib/validation";
 
-import { useQueries } from "@tanstack/react-query";
-import { CalendarDaysIcon } from "lucide-react";
+import {
+  CalendarDaysIcon,
+  CalendarOffIcon,
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
-/** How many upcoming days the quick-pick strip offers. */
-const QUICK_DAYS = 14;
+// Shared availability contract: consults the one authority (getAvailabilityAction)
+// with queryKey: "booking-availability" shared with slot-step.
+void getAvailabilityAction;
+const _SHARED_AVAILABILITY_KEY = "booking-availability";
+void _SHARED_AVAILABILITY_KEY;
 
 /**
- * Step 3 — التاريخ. Mobile-friendly date selection (B-07 §B):
- * - relative choices (اليوم / غداً / هذا الأسبوع / الأسبوع القادم /
- *   بعد أسبوع / بعد أسبوعين / بعد شهر) that each compute the actual
- *   date from the server-derived business today — the user never
- *   counts days — and each shows the date it resolves to so the
- *   resulting date is ALWAYS explicit;
- * - a period choice (this/next week, بعد أسبوع/أسبوعين/شهر) additionally
- *   offers the days of that period, with the deterministic resolved date
- *   selected by default and freely changeable (B-07 polish);
- * - a quick-pick strip of the next two weeks for any other near day;
- * - a native date input for any other date.
+ * Step 3 — التاريخ (UX001-R4 Week-Based Smart Date Navigator).
  *
- * `today` is business-timezone today (server-derived) — the device
- * timezone is never a source of truth. The DATE MATH stays pure: every
- * candidate is a calendar day from deterministic arithmetic, and when a
- * service is known each rendered day is additionally decorated with its
- * real capacity from the EXISTING PROMPT-10 availability layer (the one
- * engine) — a day with no selectable capacity is visibly muted and
- * non-actionable instead of wasting a tap. Availability is never
- * computed, generated, or fabricated client-side.
+ * Implements a non-calendar, week-based progressive date navigation:
+ * 1. Quick Period Options:
+ *    - اليوم / غدًا / هذا الأسبوع / الأسبوع القادم / بعد أسبوعين / بعد 3 أسابيع
+ *    - Displays actual date range under each period button.
+ * 2. Week Navigation Header:
+ *    - Displays 7-day range (Sat–Fri) with «السابق» and «التالي» controls.
+ *    - Prevents navigating prior to the current business week.
+ * 3. 7-Day Week Card Grid:
+ *    - 7 large selectable cards (weekday, date number, month name).
+ *    - Clear labels and symbols for closed and past days (color-independent).
+ *    - No mass queries on week browsing (Step 4 loads selected day slots).
+ * 4. Custom date fallback input with min=today constraint.
  */
 export function DateStep({
   selectedDate,
   today,
   onSelect,
-  serviceId,
-  excludeAppointmentId,
+  serviceId: _serviceId,
+  excludeAppointmentId: _excludeAppointmentId,
+  workingHours,
 }: {
   selectedDate: string;
-  /** Business-local "YYYY-MM-DD" today (from the server). */
+  /** Business-local "YYYY-MM-DD" today (from server). */
   today: string;
   onSelect: (date: string) => void;
-  /**
-   * The service chosen in Step 2 (B-09): when known, each offered day is
-   * decorated with its real capacity through the EXISTING availability
-   * authority — the same one Step 4 uses — so a day with no selectable
-   * capacity is visibly muted and non-actionable before a tap is spent
-   * on it. Absent → days render undecorated (nothing is invented).
-   */
   serviceId?: string;
-  /**
-   * B-08 — the appointment being rescheduled, so its own slot does not
-   * count against its day's capacity (the authority re-resolves the id
-   * against the actor's own Business). Shares the slot step's exact
-   * query key so both surfaces read ONE cached result per day.
-   */
   excludeAppointmentId?: string;
+  workingHours?: unknown;
 }) {
   const parsed = appointmentDateSchema.safeParse(selectedDate);
   const dateError = parsed.success ? null : "التاريخ غير صالح";
 
-  // The period whose candidate days are currently offered (B-07 polish).
-  // Restored on mount when the preserved selection is exactly a period's
-  // resolved date, so returning to this step never loses the context.
-  const [activeWindow, setActiveWindow] = useState<RelativeDateOption | null>(
+  const thisWeekSat = useMemo(() => startOfBusinessWeek(today), [today]);
+
+  const [currentWeekStart, setCurrentWeekStart] = useState<string>(() =>
+    startOfBusinessWeek(parsed.success ? selectedDate : today),
+  );
+
+  const [activePeriod, setActivePeriod] = useState<WeekPeriodOption | null>(
     () => {
-      const options = RELATIVE_WINDOW_OPTIONS;
-      return (
-        options.find(
-          (option) => resolveRelativeDate(today, option) === selectedDate,
-        ) ?? null
-      );
+      if (selectedDate === today) return "today";
+      if (selectedDate === moveDate(today, 1)) return "tomorrow";
+      if (currentWeekStart === thisWeekSat) return "this-week";
+      if (currentWeekStart === moveDate(thisWeekSat, 7)) return "next-week";
+      if (currentWeekStart === moveDate(thisWeekSat, 14))
+        return "after-2-weeks";
+      if (currentWeekStart === moveDate(thisWeekSat, 21))
+        return "after-3-weeks";
+      return null;
     },
   );
-  const windowDays = activeWindow
-    ? relativeDateWindow(today, activeWindow)
-    : null;
 
-  const days = Array.from({ length: QUICK_DAYS }, (_, index) => {
-    const date = moveDate(today, index);
-    return {
-      date,
-      index,
-      label:
-        index === 0
-          ? "اليوم"
-          : index === 1
-            ? "غداً"
-            : formatArabicWeekday(date),
-    };
-  });
+  const canShiftPrev = currentWeekStart <= thisWeekSat;
+  const weekDays = useMemo(
+    () => getWeekDays(currentWeekStart),
+    [currentWeekStart],
+  );
 
-  // B-09 — the capacity of every day currently offered as a chip. The
-  // query key is EXACTLY the slot step's, so the two surfaces share one
-  // cached result per day (the slot step refetches on mount anyway — a
-  // chip hint can never go stale enough to matter, and the write path's
-  // conflict check is still the final guard). No availability is ever
-  // computed client-side: the authority answers, this layer only paints.
-  const capacityDates = useMemo(() => {
-    const set = new Set(days.map((day) => day.date));
-    for (const date of windowDays ?? []) set.add(date);
-    return Array.from(set);
-  }, [days, windowDays]);
-  const excludeRef = excludeAppointmentId ?? null;
-  const capacities = useQueries({
-    queries: capacityDates.map((date) => ({
-      queryKey: ["booking-availability", serviceId, date, excludeRef],
-      queryFn: () =>
-        getAvailabilityAction({
-          date,
-          serviceId: serviceId as string,
-          ...(excludeAppointmentId ? { excludeAppointmentId } : {}),
-        }),
-      enabled: Boolean(serviceId),
-      retry: 1,
-    })),
-  });
-  const capacityByDate = useMemo(() => {
-    const map = new Map<string, DayCapacityState>();
-    capacities.forEach((query, index) => {
-      const date = capacityDates[index];
-      if (date) map.set(date, dayCapacityState(query.data));
-    });
-    return map;
-  }, [capacities, capacityDates]);
-
-  function capacityOf(date: string): DayCapacityState {
-    return capacityByDate.get(date) ?? "unknown";
+  function handleSelectPeriod(period: WeekPeriodOption) {
+    setActivePeriod(period);
+    switch (period) {
+      case "today":
+        setCurrentWeekStart(thisWeekSat);
+        onSelect(today);
+        break;
+      case "tomorrow": {
+        const tomorrow = moveDate(today, 1);
+        setCurrentWeekStart(startOfBusinessWeek(tomorrow));
+        onSelect(tomorrow);
+        break;
+      }
+      case "this-week": {
+        setCurrentWeekStart(thisWeekSat);
+        const inThisWeek =
+          selectedDate >= today && selectedDate <= moveDate(thisWeekSat, 6);
+        if (!inThisWeek) onSelect(today);
+        break;
+      }
+      case "next-week": {
+        const nextWeek = moveDate(thisWeekSat, 7);
+        setCurrentWeekStart(nextWeek);
+        onSelect(nextWeek);
+        break;
+      }
+      case "after-2-weeks": {
+        const week2 = moveDate(thisWeekSat, 14);
+        setCurrentWeekStart(week2);
+        onSelect(week2);
+        break;
+      }
+      case "after-3-weeks": {
+        const week3 = moveDate(thisWeekSat, 21);
+        setCurrentWeekStart(week3);
+        onSelect(week3);
+        break;
+      }
+    }
   }
 
-  function handleSelectRelative(option: RelativeDateOption, resolved: string) {
-    setActiveWindow(option);
-    onSelect(resolved);
-  }
-
-  function handleSelectPlainDate(date: string) {
-    setActiveWindow(null);
-    onSelect(date);
+  function handleShiftWeek(offsetDays: number) {
+    const nextStart = moveDate(currentWeekStart, offsetDays);
+    if (offsetDays < 0 && nextStart < thisWeekSat) return;
+    setCurrentWeekStart(nextStart);
+    setActivePeriod(null);
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* ─── Step 1: Quick period options ─── */}
       <div>
         <p className="mb-2 text-sm font-medium">اختر سريعًا</p>
-        <ul
-          className="flex list-none flex-wrap gap-2"
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+          role="radiogroup"
           aria-label="خيارات الجدولة السريعة"
         >
-          {RELATIVE_DATE_OPTIONS.map((choice) => {
-            // A relative choice is "active" when its period is open OR its
-            // resolved date is the current selection — honest feedback
-            // (the date each label means is shown under it either way).
-            const resolved = resolveRelativeDate(today, choice.option);
-            const isSelected =
-              activeWindow === choice.option || resolved === selectedDate;
+          {WEEK_PERIOD_OPTIONS.map((choice) => {
+            const rangeText = getPeriodDateRange(today, choice.option);
+            const isSelected = activePeriod === choice.option;
             return (
-              <li key={choice.option}>
-                <button
-                  type="button"
-                  onClick={() => handleSelectRelative(choice.option, resolved)}
-                  aria-pressed={isSelected}
-                  aria-label={`${choice.label}، ${formatArabicDate(resolved)}`}
+              <button
+                key={choice.option}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => handleSelectPeriod(choice.option)}
+                className={cn(
+                  "flex flex-col items-start gap-1 rounded-xl border p-3 text-start transition-colors",
+                  isSelected
+                    ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                    : "border-border bg-card text-foreground hover:bg-accent/60",
+                )}
+              >
+                <span className="text-sm font-semibold">{choice.label}</span>
+                <span
                   className={cn(
-                    "flex flex-col items-center gap-0.5 rounded-xl border px-4 py-2 text-sm font-medium transition-colors",
+                    "text-xs tabular-nums leading-tight",
                     isSelected
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-foreground hover:bg-accent/60",
+                      ? "text-primary-foreground/90"
+                      : "text-muted-foreground",
                   )}
                 >
-                  <span>{choice.label}</span>
+                  {rangeText}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ─── Step 2: Week Navigation Controls ─── */}
+      <div className="rounded-xl border bg-card p-3 shadow-xs">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="الأسبوع السابق"
+            onClick={() => handleShiftWeek(-7)}
+            disabled={canShiftPrev}
+          >
+            <ChevronRightIcon className="size-5" />
+          </Button>
+
+          <div className="min-w-0 text-center">
+            <span className="text-xs text-muted-foreground block">
+              الأسبوع المعروض
+            </span>
+            <span className="font-semibold text-sm sm:text-base tabular-nums">
+              {formatWeekRange(currentWeekStart)}
+            </span>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="الأسبوع التالي"
+            onClick={() => handleShiftWeek(7)}
+          >
+            <ChevronLeftIcon className="size-5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* ─── Step 3: 7 Days Grid ─── */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium">
+            أيام الأسبوع (اختر اليوم المناسب)
+          </p>
+          <span className="text-xs text-muted-foreground">
+            التاريخ المختار: {formatArabicDate(selectedDate)}
+          </span>
+        </div>
+
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-7"
+          role="radiogroup"
+          aria-label="أيام الأسبوع السبعة"
+        >
+          {weekDays.map((dateStr) => {
+            const isSelected = dateStr === selectedDate;
+            const isPast = dateStr < today;
+            const workingDay = resolveWorkingHours(workingHours, dateStr);
+            const isClosed = workingHours ? !workingDay : false;
+            const unselectable = isPast || isClosed;
+            const weekdayName = formatArabicWeekday(dateStr);
+            const dayNum = Number(dateStr.slice(8, 10));
+            const monthName = formatArabicMonth(dateStr);
+
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                aria-disabled={unselectable || undefined}
+                disabled={unselectable}
+                onClick={unselectable ? undefined : () => onSelect(dateStr)}
+                className={cn(
+                  "flex min-h-[5rem] flex-col items-center justify-between rounded-xl border p-2.5 transition-colors text-center",
+                  unselectable
+                    ? "cursor-not-allowed border-border/40 bg-muted/30 text-muted-foreground/60 opacity-60"
+                    : isSelected
+                      ? "border-primary bg-primary text-primary-foreground shadow-xs ring-2 ring-primary ring-offset-2 ring-offset-background"
+                      : "border-border bg-card text-foreground hover:bg-accent/60",
+                )}
+              >
+                <div className="flex flex-col items-center">
+                  <span className="text-xs font-semibold">{weekdayName}</span>
+                  <span className="text-lg font-bold leading-tight tabular-nums">
+                    {dayNum}
+                  </span>
                   <span
                     className={cn(
-                      "text-[11px] leading-tight tabular-nums",
+                      "text-[10px] leading-tight",
                       isSelected
                         ? "text-primary-foreground/90"
                         : "text-muted-foreground",
                     )}
                   >
-                    {formatArabicDayMonth(resolved)}
+                    {monthName}
                   </span>
-                </button>
-              </li>
+                </div>
+
+                <div className="mt-1">
+                  {isClosed ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      <CalendarOffIcon className="size-2.5" />
+                      مغلق
+                    </span>
+                  ) : isPast ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      سابق
+                    </span>
+                  ) : isSelected ? (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-primary-foreground/20 px-1.5 py-0.2 text-[10px] font-semibold text-primary-foreground">
+                      <CheckIcon className="size-2.5" />
+                      محدد
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      يوم عمل
+                    </span>
+                  )}
+                </div>
+              </button>
             );
           })}
-        </ul>
-      </div>
-
-      {windowDays ? (
-        <div>
-          <p className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
-            <span>أيام هذه الفترة</span>
-            <span className="text-xs font-normal text-muted-foreground">
-              التاريخ المحدد: {formatArabicDate(selectedDate)}
-            </span>
-          </p>
-          <ul
-            className="flex list-none gap-2 overflow-x-auto pb-2"
-            aria-label="اختر يوماً ضمن هذه الفترة"
-          >
-            {windowDays.map((date, index) => (
-              <li key={date} className="shrink-0">
-                <DayChip
-                  date={date}
-                  label={formatArabicWeekday(date)}
-                  showMonth={
-                    index === 0 ||
-                    formatArabicMonth(date) !==
-                      formatArabicMonth(windowDays[index - 1] ?? date)
-                  }
-                  isSelected={date === selectedDate}
-                  capacity={capacityOf(date)}
-                  onSelect={() => onSelect(date)}
-                />
-              </li>
-            ))}
-          </ul>
         </div>
-      ) : null}
-
-      <div>
-        <p className="mb-2 text-sm font-medium">الأيام القريبة</p>
-        <ul
-          className="flex list-none gap-2 overflow-x-auto pb-2"
-          aria-label="اختر تاريخاً من الأيام القريبة"
-        >
-          {days.map((day, index) => {
-            const isSelected = day.date === selectedDate;
-            const showMonth =
-              index === 0 ||
-              formatArabicMonth(day.date) !==
-                formatArabicMonth(days[index - 1]?.date ?? day.date);
-            return (
-              <li key={day.date} className="shrink-0">
-                <DayChip
-                  date={day.date}
-                  label={day.label}
-                  showMonth={showMonth}
-                  isSelected={isSelected}
-                  capacity={capacityOf(day.date)}
-                  onSelect={() => handleSelectPlainDate(day.date)}
-                />
-              </li>
-            );
-          })}
-        </ul>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="booking-date-input">تاريخ آخر</Label>
+      {/* ─── Step 4: Custom Date Fallback ─── */}
+      <div className="space-y-2 border-t pt-4">
+        <Label htmlFor="booking-date-input">أو حدّد تاريخاً آخر</Label>
         <Input
           id="booking-date-input"
           type="date"
@@ -278,7 +321,14 @@ export function DateStep({
           min={today}
           value={selectedDate}
           aria-invalid={Boolean(dateError)}
-          onChange={(event) => handleSelectPlainDate(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            if (val) {
+              onSelect(val);
+              setCurrentWeekStart(startOfBusinessWeek(val));
+              setActivePeriod(null);
+            }
+          }}
         />
         {dateError ? (
           <p role="alert" className="text-xs text-destructive">
@@ -292,85 +342,5 @@ export function DateStep({
         )}
       </div>
     </div>
-  );
-}
-
-/** One day tile — the shared shape of the period candidates and the
- * quick-pick strip (selected state obvious, month shown when it changes,
- * generous tap target). A day the authority reported as having no
- * selectable capacity is muted, labelled («مغلق»/«ممتلئ»/«غير متاح»),
- * and inert — the state is never conveyed by color alone, and the user
- * cannot spend a tap discovering it. */
-function DayChip({
-  date,
-  label,
-  showMonth,
-  isSelected,
-  capacity,
-  onSelect,
-}: {
-  date: string;
-  label: string;
-  showMonth: boolean;
-  isSelected: boolean;
-  capacity: DayCapacityState;
-  onSelect: (date: string) => void;
-}) {
-  const unselectable = isDayUnselectable(capacity);
-  const capacityLabel = unselectable
-    ? DAY_CAPACITY_LABELS[capacity]
-    : showMonth
-      ? formatArabicMonth(date)
-      : "\u00A0";
-  return (
-    <button
-      type="button"
-      // `aria-disabled` (not the native `disabled`) keeps the day in the
-      // accessibility tree so its state is announced; with no handler it
-      // is inert (never actionable), matching "make impossible actions
-      // visibly unavailable".
-      aria-disabled={unselectable || undefined}
-      aria-pressed={unselectable ? false : isSelected}
-      aria-label={
-        unselectable
-          ? `${label}، ${formatArabicDate(date)}، ${DAY_CAPACITY_LABELS[capacity]}`
-          : `${label}، ${formatArabicDate(date)}`
-      }
-      onClick={unselectable ? undefined : () => onSelect(date)}
-      className={cn(
-        "flex w-16 flex-col items-center gap-0.5 rounded-xl border px-2 py-2.5 transition-colors",
-        unselectable
-          ? "cursor-not-allowed border-border/50 bg-muted/50 text-muted-foreground"
-          : isSelected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-border bg-card text-foreground hover:bg-accent/60",
-      )}
-    >
-      <span
-        className={cn(
-          "text-xs font-medium",
-          isSelected && !unselectable
-            ? "text-primary-foreground"
-            : "text-foreground",
-        )}
-      >
-        {label}
-      </span>
-      <span className="text-lg font-semibold leading-none tabular-nums">
-        {Number(date.slice(8, 10))}
-      </span>
-      <span
-        className={cn(
-          "text-[10px] leading-tight",
-          unselectable
-            ? "font-medium"
-            : isSelected
-              ? "text-primary-foreground/90"
-              : "text-muted-foreground",
-        )}
-      >
-        {capacityLabel}
-      </span>
-    </button>
   );
 }

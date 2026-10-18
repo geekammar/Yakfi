@@ -1,6 +1,9 @@
 "use client";
 
-import { updateAppointmentStatus } from "@/features/appointments/actions/appointment-actions";
+import {
+  searchAppointmentsAction,
+  updateAppointmentStatus,
+} from "@/features/appointments/actions/appointment-actions";
 import {
   APPOINTMENT_STATUS_LABELS,
   AppointmentStatusBadge,
@@ -13,6 +16,7 @@ import { formatSlotTime } from "@/features/appointments/components/smart-create/
 import { VisualStaffCalendar } from "@/features/appointments/components/visual-calendar/visual-staff-calendar";
 import type { AppointmentAgendaItem } from "@/features/appointments/types";
 import { EmptyState } from "@/components/shared/empty-state";
+import { SearchInput } from "@/components/shared/search-input";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -27,15 +31,18 @@ import type { AppointmentStatus } from "@/types/domain";
 
 import {
   CalendarDaysIcon,
+  CalendarPlusIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   Clock3Icon,
+  LoaderCircleIcon,
   PlusIcon,
+  RotateCwIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 const FILTERS: Array<{ value: "ALL" | AppointmentStatus; label: string }> = [
   { value: "ALL", label: "كل الحالات" },
@@ -74,13 +81,44 @@ export function AppointmentAgenda({
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initialItems);
-  const [viewMode, setViewMode] = useState<"calendar" | "list">("calendar");
+  const [viewMode, setViewMode] = useState<"calendar" | "list">("list");
   const [filter, setFilter] = useState<"ALL" | AppointmentStatus>("ALL");
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    null,
+  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    AppointmentAgendaItem[] | null
+  >(null);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      const res = await searchAppointmentsAction(trimmed);
+      if (res.success) {
+        setSearchResults(res.appointments);
+      }
+      setIsSearching(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const visible = useMemo(
-    () => items.filter((item) => filter === "ALL" || item.status === filter),
-    [filter, items],
+    () =>
+      items.filter((item) => {
+        if (filter !== "ALL" && item.status !== filter) return false;
+        if (selectedProviderId && item.provider?.id !== selectedProviderId)
+          return false;
+        return true;
+      }),
+    [filter, selectedProviderId, items],
   );
 
   function navigate(nextDate: string) {
@@ -109,22 +147,22 @@ export function AppointmentAgenda({
 
   return (
     <div className="space-y-5">
-      {/* ─── View Switcher: Visual Staff Calendar vs Agenda List ─── */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1">
-          <button
-            type="button"
-            onClick={() => setViewMode("calendar")}
-            className={cn(
-              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-colors",
-              viewMode === "calendar"
-                ? "bg-background text-foreground shadow-xs font-semibold"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Clock3Icon className="size-3.5" />
-            <span>الجدول المرئي</span>
-          </button>
+      {/* ─── Search & View Switcher ─── */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SearchInput
+          value={searchQuery}
+          onValueChange={(val) => {
+            setSearchQuery(val);
+            if (!val.trim()) {
+              setSearchResults(null);
+              setIsSearching(false);
+            }
+          }}
+          placeholder="بحث بالاسم أو الهاتف أو الملاحظات…"
+          className="w-full sm:w-80"
+        />
+
+        <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 self-start sm:self-auto">
           <button
             type="button"
             onClick={() => setViewMode("list")}
@@ -138,6 +176,19 @@ export function AppointmentAgenda({
             <CalendarDaysIcon className="size-3.5" />
             <span>قائمة المواعيد</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("calendar")}
+            className={cn(
+              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-colors",
+              viewMode === "calendar"
+                ? "bg-background text-foreground shadow-xs font-semibold"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Clock3Icon className="size-3.5" />
+            <span>الجدول الزمني</span>
+          </button>
         </div>
       </div>
 
@@ -147,7 +198,121 @@ export function AppointmentAgenda({
         </p>
       ) : null}
 
-      {viewMode === "calendar" ? (
+      {searchQuery.trim().length > 0 ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">
+              نتائج البحث عن «{searchQuery}»
+            </h3>
+            {searchResults ? (
+              <span className="text-xs text-muted-foreground">
+                {arabicCount(searchResults.length, APPOINTMENT_NOUNS)}
+              </span>
+            ) : null}
+          </div>
+
+          {isSearching ? (
+            <div className="flex items-center justify-center p-8 text-sm text-muted-foreground gap-2">
+              <LoaderCircleIcon className="size-4 animate-spin text-primary" />
+              <span>جارٍ البحث في المواعيد…</span>
+            </div>
+          ) : searchResults && searchResults.length > 0 ? (
+            <ul className="space-y-3">
+              {searchResults.map((appointment) => {
+                const isActive =
+                  appointment.status === "PENDING" ||
+                  appointment.status === "CONFIRMED";
+                return (
+                  <li
+                    key={appointment.id}
+                    className="rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-semibold text-foreground">
+                            {appointment.customer.name}
+                          </h4>
+                          <span
+                            dir="ltr"
+                            className="text-xs font-mono text-muted-foreground tabular-nums"
+                          >
+                            {appointment.customer.phone}
+                          </span>
+                          <AppointmentStatusBadge status={appointment.status} />
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {appointment.service.name} ·{" "}
+                          {appointment.service.durationMinutes} دقيقة
+                          {appointment.provider ? (
+                            <span>
+                              {" "}
+                              · الموظف:{" "}
+                              {appointment.provider.displayName ||
+                                appointment.provider.name}
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-xs font-medium text-foreground tabular-nums">
+                          {formatArabicDate(appointment.date)} ·{" "}
+                          {formatTime(appointment.startTime)}
+                        </p>
+                        {appointment.notes ? (
+                          <p className="line-clamp-1 text-xs text-muted-foreground">
+                            {appointment.notes}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap shrink-0 items-center gap-2">
+                        {isActive ? (
+                          <Button asChild variant="outline" size="sm">
+                            <Link
+                              href={`/appointments/${appointment.id}?reschedule=true`}
+                            >
+                              <RotateCwIcon className="size-3.5" />
+                              إعادة الجدولة
+                            </Link>
+                          </Button>
+                        ) : null}
+                        <Button asChild variant="outline" size="sm">
+                          <Link
+                            href={`/appointments/new?customerId=${appointment.customer.id}&serviceId=${appointment.service.id}${appointment.provider?.id ? `&providerId=${appointment.provider.id}` : ""}`}
+                          >
+                            <CalendarPlusIcon className="size-3.5" />
+                            إضافة متابعة
+                          </Link>
+                        </Button>
+                        <Button asChild size="sm">
+                          <Link href={`/appointments/${appointment.id}`}>
+                            التفاصيل
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <EmptyState
+              className="bg-card min-h-60"
+              icon={CalendarDaysIcon}
+              title="لم يتم العثور على مواعيد"
+              description="لم نجد أي موعد يطابق نص البحث المحدد. تحقق من صحة الاسم أو رقم الهاتف."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSearchQuery("")}
+                >
+                  مسح البحث
+                </Button>
+              }
+            />
+          )}
+        </div>
+      ) : viewMode === "calendar" ? (
         <VisualStaffCalendar
           items={items}
           date={date}
@@ -211,21 +376,48 @@ export function AppointmentAgenda({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Select
-              value={filter}
-              onValueChange={(value) => setFilter(value as typeof filter)}
-            >
-              <SelectTrigger className="w-44" aria-label="تصفية حسب الحالة">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FILTERS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={filter}
+                onValueChange={(value) => setFilter(value as typeof filter)}
+              >
+                <SelectTrigger className="w-40" aria-label="تصفية حسب الحالة">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILTERS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {providers && providers.length > 1 ? (
+                <Select
+                  value={selectedProviderId ?? "ALL"}
+                  onValueChange={(val) =>
+                    setSelectedProviderId(val === "ALL" ? null : val)
+                  }
+                >
+                  <SelectTrigger
+                    className="w-44"
+                    aria-label="تصفية حسب مقدم الخدمة"
+                  >
+                    <SelectValue placeholder="كل مقدمي الخدمة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">جميع مقدمي الخدمة</SelectItem>
+                    {providers.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.displayName || p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+            </div>
+
             <span className="text-xs text-muted-foreground" aria-live="polite">
               {arabicCount(visible.length, APPOINTMENT_NOUNS)}
             </span>
@@ -256,14 +448,17 @@ export function AppointmentAgenda({
                   <Button asChild size="sm">
                     <Link href={`/appointments/new?date=${date}`}>
                       <PlusIcon aria-hidden className="size-4" />
-                      إنشاء موعد
+                      موعد جديد
                     </Link>
                   </Button>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setFilter("ALL")}
+                    onClick={() => {
+                      setFilter("ALL");
+                      setSelectedProviderId(null);
+                    }}
                   >
                     عرض كل الحالات
                   </Button>
@@ -272,66 +467,91 @@ export function AppointmentAgenda({
             />
           ) : (
             <ol className="relative space-y-3 before:absolute before:inset-y-4 before:start-[1.7rem] before:w-px before:bg-border sm:before:start-[4.25rem]">
-              {visible.map((appointment) => (
-                <li
-                  key={appointment.id}
-                  className="relative grid grid-cols-[3.4rem_minmax(0,1fr)] gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)]"
-                >
-                  <div className="relative z-10 flex items-start gap-2 bg-background pt-4 text-sm font-semibold tabular-nums sm:justify-end sm:pe-4">
-                    <Clock3Icon className="mt-0.5 size-3.5 text-muted-foreground sm:hidden" />
-                    <time dateTime={appointment.startTime}>
-                      {formatTime(appointment.startTime)}
-                    </time>
-                  </div>
-                  <article className="rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="truncate font-semibold">
-                            {appointment.customer.name}
-                          </h3>
-                          <AppointmentStatusBadge status={appointment.status} />
-                        </div>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {appointment.service.name} ·{" "}
-                          {appointment.service.durationMinutes} دقيقة
-                          {appointment.provider ? (
-                            <span>
-                              {" "}
-                              · الموظف:{" "}
-                              {appointment.provider.displayName ||
-                                appointment.provider.name}
-                            </span>
-                          ) : null}
-                        </p>
-                        {appointment.notes ? (
-                          <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
-                            {appointment.notes}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {appointment.status === "PENDING" ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => confirmAppointment(appointment.id)}
-                            disabled={isPending}
-                          >
-                            <CheckIcon />
-                            تأكيد
-                          </Button>
-                        ) : null}
-                        <Button asChild variant="outline" size="sm">
-                          <Link href={`/appointments/${appointment.id}`}>
-                            التفاصيل
-                          </Link>
-                        </Button>
-                      </div>
+              {visible.map((appointment) => {
+                const isActive =
+                  appointment.status === "PENDING" ||
+                  appointment.status === "CONFIRMED";
+                return (
+                  <li
+                    key={appointment.id}
+                    className="relative grid grid-cols-[3.4rem_minmax(0,1fr)] gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)]"
+                  >
+                    <div className="relative z-10 flex items-start gap-2 bg-background pt-4 text-sm font-semibold tabular-nums sm:justify-end sm:pe-4">
+                      <Clock3Icon className="mt-0.5 size-3.5 text-muted-foreground sm:hidden" />
+                      <time dateTime={appointment.startTime}>
+                        {formatTime(appointment.startTime)}
+                      </time>
                     </div>
-                  </article>
-                </li>
-              ))}
+                    <article className="rounded-xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate font-semibold">
+                              {appointment.customer.name}
+                            </h3>
+                            <AppointmentStatusBadge
+                              status={appointment.status}
+                            />
+                          </div>
+                          <p className="mt-1 truncate text-sm text-muted-foreground">
+                            {appointment.service.name} ·{" "}
+                            {appointment.service.durationMinutes} دقيقة
+                            {appointment.provider ? (
+                              <span>
+                                {" "}
+                                · الموظف:{" "}
+                                {appointment.provider.displayName ||
+                                  appointment.provider.name}
+                              </span>
+                            ) : null}
+                          </p>
+                          {appointment.notes ? (
+                            <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
+                              {appointment.notes}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap shrink-0 items-center gap-2">
+                          {appointment.status === "PENDING" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => confirmAppointment(appointment.id)}
+                              disabled={isPending}
+                            >
+                              <CheckIcon />
+                              تأكيد
+                            </Button>
+                          ) : null}
+                          {isActive ? (
+                            <Button asChild variant="outline" size="sm">
+                              <Link
+                                href={`/appointments/${appointment.id}?reschedule=true`}
+                              >
+                                <RotateCwIcon className="size-3.5" />
+                                إعادة الجدولة
+                              </Link>
+                            </Button>
+                          ) : null}
+                          <Button asChild variant="outline" size="sm">
+                            <Link
+                              href={`/appointments/new?customerId=${appointment.customer.id}&serviceId=${appointment.service.id}${appointment.provider?.id ? `&providerId=${appointment.provider.id}` : ""}`}
+                            >
+                              <CalendarPlusIcon className="size-3.5" />
+                              إضافة متابعة
+                            </Link>
+                          </Button>
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/appointments/${appointment.id}`}>
+                              التفاصيل
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  </li>
+                );
+              })}
             </ol>
           )}
         </div>

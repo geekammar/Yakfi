@@ -124,6 +124,7 @@ export function SmartCreateAppointment({
   confirmationMode,
   initialCustomer,
   initialServiceId,
+  initialProviderId,
   initialScreen,
   CustomerCreateDialog,
   workingHours,
@@ -149,6 +150,7 @@ export function SmartCreateAppointment({
    */
   initialCustomer?: BookingCustomerOption | null;
   initialServiceId?: string | null;
+  initialProviderId?: string | null;
   /** Where the flow opens after prefill (derived by the route through
    * the booking-flow service). */
   initialScreen?: BookingFlowScreen;
@@ -179,7 +181,7 @@ export function SmartCreateAppointment({
   const [date, setDate] = useState(defaultDate);
   const [selectedSlot, setSelectedSlot] = useState<SelectedSlot | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
-    null,
+    initialProviderId ?? null,
   );
   const [reviewCheck, setReviewCheck] = useState<ReviewCheckState>({
     status: "idle",
@@ -719,6 +721,7 @@ export function SmartCreateAppointment({
             today={today}
             onSelect={handleSelectDate}
             serviceId={serviceId ?? undefined}
+            workingHours={workingHours}
           />
         ) : screen === "slot" && service ? (
           <SlotStep

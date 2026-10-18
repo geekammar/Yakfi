@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowRightIcon,
   CalendarClockIcon,
+  CalendarPlusIcon,
   CheckIcon,
   CircleXIcon,
   Clock3Icon,
@@ -36,6 +37,7 @@ export function AppointmentDetail({
   timezone,
   workingHours,
   slotDurationMinutes,
+  initialRescheduling,
 }: {
   initialData: AppointmentDetailData;
   /** Business-local "YYYY-MM-DD" today (server-derived). */
@@ -45,9 +47,12 @@ export function AppointmentDetail({
   /** The candidate-grid inputs for the reschedule slot step (DECISIONS #56). */
   workingHours?: unknown;
   slotDurationMinutes?: number | null;
+  initialRescheduling?: boolean;
 }) {
   const [data, setData] = useState(initialData);
-  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduling, setRescheduling] = useState(
+    initialRescheduling ?? false,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -185,6 +190,14 @@ export function AppointmentDetail({
                     إعادة الجدولة
                   </Button>
                 ) : null}
+                <Button asChild variant="outline">
+                  <Link
+                    href={`/appointments/new?customerId=${data.customer.id}&serviceId=${data.service.id}${data.provider?.id ? `&providerId=${data.provider.id}` : ""}`}
+                  >
+                    <CalendarPlusIcon />
+                    إضافة متابعة
+                  </Link>
+                </Button>
                 {data.status === "CONFIRMED" ? (
                   <>
                     <Button

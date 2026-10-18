@@ -27,6 +27,7 @@ export const bookingCustomerSearchSchema = z.object({
 export const bookingContextSchema = z.object({
   customerId: uuidSchema.optional(),
   serviceId: uuidSchema.optional(),
+  providerId: uuidSchema.optional(),
 });
 
 export type BookingCustomerSearchInput = z.infer<
