@@ -1,7 +1,12 @@
 import { PageHeader } from "@/components/shared/page-header";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { ChevronLeftIcon, UsersRoundIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  UsersRoundIcon,
+} from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -19,6 +24,14 @@ export default function AdminPage() {
       <PageHeader
         title="لوحة الإدارة"
         description="إدارة الفريق والإعدادات العامة."
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/appointments">
+              <ChevronRightIcon className="size-4" />
+              العودة إلى المواعيد
+            </Link>
+          </Button>
+        }
       />
       <Link
         href="/admin/team"

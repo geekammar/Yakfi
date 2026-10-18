@@ -42,6 +42,19 @@ export async function getAppointmentAgenda(businessId: string, date: string) {
   return appointments.map(serializeAppointment);
 }
 
+export async function searchBusinessAppointments(
+  businessId: string,
+  query: string,
+  limit = 20,
+) {
+  const appointments = await appointmentRepository.searchAppointments(
+    businessId,
+    query,
+    limit,
+  );
+  return appointments.map(serializeAppointment);
+}
+
 export async function getAppointmentDetail(
   businessId: string,
   appointmentId: string,

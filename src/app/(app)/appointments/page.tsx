@@ -9,7 +9,6 @@ import { appointmentDateSchema } from "@/lib/validation";
 import { requireUser } from "@/server/auth/guards";
 import { businessRepository, providerRepository } from "@/server/repositories";
 
-import { PlusIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -45,14 +44,11 @@ export default async function AppointmentsPage({
   return (
     <div className="animate-fade-in-up space-y-6">
       <PageHeader
-        title="جدول المواعيد"
-        description="راجع يومك بسرعة وتعامل مع كل موعد من قائمة واضحة."
+        title="المواعيد"
+        description="راجع مواعيد اليوم وتنقّل بين الأسابيع وتعامل مع الحجوزات بسرعة."
         actions={
           <Button asChild>
-            <Link href={`/appointments/new?date=${date}`}>
-              <PlusIcon />
-              إنشاء موعد
-            </Link>
+            <Link href={`/appointments/new?date=${date}`}>+ موعد جديد</Link>
           </Button>
         }
       />

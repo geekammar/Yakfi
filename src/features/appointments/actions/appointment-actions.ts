@@ -12,6 +12,7 @@ import {
 } from "@/features/appointments/server/appointment-create-service";
 import type {
   AppointmentActionResult,
+  AppointmentAgendaItem,
   CreateAppointmentActionResult,
   RescheduleAppointmentActionResult,
 } from "@/features/appointments/types";
@@ -180,6 +181,36 @@ export async function rescheduleAppointment(
       success: false,
       code: "RESCHEDULE_FAILED",
       message: "تعذر إعادة جدولة الموعد",
+    };
+  }
+}
+
+export async function searchAppointmentsAction(query: string): Promise<{
+  success: boolean;
+  appointments: AppointmentAgendaItem[];
+  message?: string;
+}> {
+  try {
+    const user = await currentUser();
+    if (!user?.businessId) {
+      return {
+        success: false,
+        appointments: [],
+        message: "لا يمكن الوصول للمواعيد",
+      };
+    }
+    const { searchBusinessAppointments } =
+      await import("@/features/appointments/server/appointment-queries");
+    const appointments = await searchBusinessAppointments(
+      user.businessId,
+      query,
+    );
+    return { success: true, appointments };
+  } catch {
+    return {
+      success: false,
+      appointments: [],
+      message: "تعذر البحث عن المواعيد",
     };
   }
 }

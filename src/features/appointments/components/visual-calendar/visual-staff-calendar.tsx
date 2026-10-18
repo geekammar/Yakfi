@@ -268,8 +268,8 @@ export function VisualStaffCalendar({
         ) : null}
       </div>
 
-      {/* ─── Provider Filter Chips (when providers exist) ─── */}
-      {providers.length > 0 ? (
+      {/* ─── Provider Filter Chips (only when multiple providers exist) ─── */}
+      {providers.length > 1 ? (
         <section aria-label="تصفية حسب مقدم الخدمة" className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">
