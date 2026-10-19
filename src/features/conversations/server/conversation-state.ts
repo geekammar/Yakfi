@@ -37,8 +37,15 @@ import type {
   AiFactUpdate,
   AiGoal,
 } from "@/features/conversations/server/ai-contract";
+import type { BookingOffer } from "@/features/conversations/server/booking-offer";
+import {
+  bookingOfferSchema,
+  isOfferLive,
+} from "@/features/conversations/server/booking-offer";
 import type { OfferedBookingOption } from "@/features/conversations/server/booking-selection";
 import { extractLastBookingOffer } from "@/features/conversations/server/booking-selection";
+
+import { z } from "zod";
 
 // ─── Vocabulary ──────────────────────────────────────────────────────────────
 
@@ -213,6 +220,34 @@ export type ConversationState = {
     readonly type: string;
     readonly turnId?: string;
   } | null;
+  /**
+   * CONV-CORE-01 — the RESOLVED service identity (server-matched against the
+   * Business catalogue, never model output) and where it came from. A text
+   * re-phrasing that resolves to the SAME id is not a service change.
+   */
+  readonly serviceId: string | null;
+  readonly serviceSource: ConversationServiceSource | null;
+  /**
+   * CONV-CORE-01 — the current typed, validated offer (service list or slot
+   * list) the customer is choosing from. `pendingOffer` above is the legacy
+   * presentation mirror derived from it (or from history for legacy threads).
+   */
+  readonly offer: BookingOffer | null;
+  /** CONV-CORE-01 — the last completed booking task (post-booking continuity). */
+  readonly completedTask: ConversationCompletedTask | null;
+};
+
+/** Where the resolved service came from. */
+export type ConversationServiceSource = "CUSTOMER" | "DEFAULT";
+
+/** The minimal, non-authoritative record of the last completed booking. */
+export type ConversationCompletedTask = {
+  readonly kind: "BOOKING";
+  readonly appointmentId: string;
+  readonly serviceId: string;
+  readonly providerId: string | null;
+  readonly date: string;
+  readonly completedAt: string;
 };
 
 /** A single observed state transition (projected into Slice-0 observability). */
@@ -245,6 +280,10 @@ export function emptyConversationState(): ConversationState {
     goals: [],
     pendingGoals: [],
     lastClarification: null,
+    serviceId: null,
+    serviceSource: null,
+    offer: null,
+    completedTask: null,
   };
 }
 
@@ -342,6 +381,16 @@ export type MergeConversationStateInput = {
     readonly type: string;
     readonly missingFacts?: readonly ConversationFactKey[];
   } | null;
+  /**
+   * CONV-CORE-01 — the service identity the ENGINE resolved this turn against
+   * the Business catalogue (never model output). Drives dependency-aware
+   * invalidation: a different id drops the provider + slot offer; the same id
+   * (a re-phrasing) keeps them.
+   */
+  readonly resolvedService?: {
+    readonly serviceId: string;
+    readonly source: ConversationServiceSource;
+  } | null;
 };
 
 export type MergeConversationStateResult = {
@@ -397,6 +446,62 @@ export function mergeConversationState(
 
   if (revisions.length > MAX_REVISIONS) {
     revisions.splice(0, revisions.length - MAX_REVISIONS);
+  }
+
+  // ── Dependency-aware invalidation (CONV-CORE-01) ─────────────────────────
+  // A change to ONE dimension invalidates ONLY what depends on it:
+  //   service identity → provider preference + slot offer (eligibility and
+  //                      slots are per service)
+  //   date / provider / time preference → slot offer only (service kept)
+  // A service RE-PHRASING that resolves to the same id invalidates nothing.
+  const changed = (key: ConversationFactKey) =>
+    state.knownFacts[key] != null &&
+    knownFacts[key] != null &&
+    state.knownFacts[key] !== knownFacts[key];
+  let serviceId = state.serviceId;
+  let serviceSource = state.serviceSource;
+  let serviceIdentityChanged = false;
+  if (input.resolvedService) {
+    if (input.resolvedService.serviceId !== state.serviceId) {
+      serviceIdentityChanged = state.serviceId != null;
+      serviceId = input.resolvedService.serviceId;
+      serviceSource = input.resolvedService.source;
+    } else if (input.resolvedService.source === "CUSTOMER") {
+      serviceSource = "CUSTOMER";
+    }
+  } else if (changed("service")) {
+    // Text changed and the engine could not resolve an id this turn —
+    // conservatively treat it as a new service.
+    serviceIdentityChanged = true;
+    serviceId = null;
+    serviceSource = null;
+  }
+  const providerSuppliedThisTurn = (input.factUpdates ?? []).some(
+    (u) => u.key === "provider",
+  );
+  if (
+    serviceIdentityChanged &&
+    !providerSuppliedThisTurn &&
+    knownFacts.provider
+  ) {
+    const { provider: _dropped, ...rest } = knownFacts;
+    void _dropped;
+    knownFacts = rest;
+  }
+  const slotDependencyChanged =
+    serviceIdentityChanged ||
+    changed("date") ||
+    changed("provider") ||
+    changed("timePreference");
+  let offer: BookingOffer | null = state.offer;
+  if (offer && offer.status === "ACTIVE") {
+    const invalidate =
+      offer.kind === "SLOT"
+        ? slotDependencyChanged ||
+          (serviceId != null && offer.serviceId !== serviceId)
+        : // A service list is answered once a service is resolved.
+          input.resolvedService != null;
+    if (invalidate) offer = { ...offer, status: "INVALIDATED" };
   }
 
   // ── Goals (multi-intent foundation) ──────────────────────────────────────
@@ -487,8 +592,9 @@ export function mergeConversationState(
   }
 
   // ── Pending offer (cached presentation; domain re-verifies at execution) ─
-  const pendingOffer =
+  let pendingOffer =
     input.pendingOffer !== undefined ? input.pendingOffer : state.pendingOffer;
+  if (state.offer && offer && offer.status !== "ACTIVE") pendingOffer = null;
 
   // ── Booking-stage derivation ─────────────────────────────────────────────
   const hasTaskGoal =
@@ -552,6 +658,10 @@ export function mergeConversationState(
     goals,
     pendingGoals,
     lastClarification,
+    serviceId,
+    serviceSource,
+    offer,
+    completedTask: state.completedTask,
   };
 
   // ── Transitions (projected into Slice-0 observability) ───────────────────
@@ -626,5 +736,256 @@ export function deriveConversationStateFromHistory(
     selectedDate: offer.date,
     topics: [{ goal: "BOOKING", suspendState: "ACTIVE" }],
     pendingOffer,
+  };
+}
+
+// ─── Offer + task transitions (CONV-CORE-01) ─────────────────────────────────
+//
+// Every offer lifecycle change goes through these PURE functions so the
+// conversation state has exactly ONE owner of its shape. The engine decides
+// WHEN; these decide WHAT the next state is.
+
+/** The legacy presentation mirror of a typed slot offer. */
+function pendingOfferMirror(
+  offer: BookingOffer,
+): ConversationPendingOffer | null {
+  if (offer.kind !== "SLOT") return null;
+  return {
+    serviceName: offer.serviceName,
+    date: offer.date,
+    options: offer.options.map((o) => ({
+      index: o.index,
+      displayName: o.displayName,
+      startTime: o.startAt.slice(11, 16),
+      endTime: o.endAt.slice(11, 16),
+    })),
+    followUpRequestId: offer.followUpRequestId,
+  };
+}
+
+/**
+ * Present a NEW offer: it REPLACES any previous offer (single current offer;
+ * a stale callback carrying the old token no longer matches). A slot offer
+ * also records the facts it was resolved from, so the state and the offer
+ * can never disagree about service/date.
+ */
+export function withPresentedOffer(
+  state: ConversationState,
+  offer: BookingOffer,
+): ConversationState {
+  const facts: ConversationKnownFacts =
+    offer.kind === "SLOT"
+      ? {
+          ...state.knownFacts,
+          service: offer.serviceName,
+          date: offer.date,
+          ...(offer.followUpRequestId
+            ? { followUpRequestId: offer.followUpRequestId }
+            : {}),
+        }
+      : state.knownFacts;
+  const pendingOffer = pendingOfferMirror(offer);
+  return {
+    ...state,
+    knownFacts: facts,
+    selectedService: facts.service ?? null,
+    selectedDate: facts.date ?? null,
+    offer,
+    pendingOffer,
+    ...(offer.kind === "SLOT"
+      ? {
+          serviceId: offer.serviceId,
+          serviceSource: offer.serviceSource,
+          bookingStage: "AVAILABILITY_RESOLVED" as const,
+        }
+      : {}),
+    activeTask: {
+      kind: state.activeTask?.kind ?? "BOOKING",
+      stage: offer.kind === "SLOT" ? "AVAILABILITY_RESOLVED" : "GOAL_STATED",
+    },
+  };
+}
+
+/** Move the current offer to a terminal/claimed status (no-op if none). */
+export function withOfferStatus(
+  state: ConversationState,
+  status: BookingOffer["status"],
+): ConversationState {
+  if (!state.offer) return state;
+  return {
+    ...state,
+    offer: { ...state.offer, status },
+    pendingOffer: status === "ACTIVE" ? state.pendingOffer : null,
+  };
+}
+
+/**
+ * Completed-task transition: the booking was written by the DOMAIN. The offer
+ * is CONSUMED, the booking facts are cleared (a new request starts clean), and
+ * a minimal completed-task record keeps post-booking continuity.
+ */
+export function completeBookingTask(
+  state: ConversationState,
+  completed: Omit<ConversationCompletedTask, "kind">,
+): ConversationState {
+  const base = withOfferStatus(state, "CONSUMED");
+  return {
+    ...base,
+    knownFacts: base.knownFacts.customerName
+      ? { customerName: base.knownFacts.customerName }
+      : {},
+    selectedService: null,
+    selectedDate: null,
+    selectedTimePref: null,
+    providerPreference: null,
+    serviceId: null,
+    serviceSource: null,
+    missingFacts: [],
+    lastClarification: null,
+    pendingGoals: [],
+    activeTask: null,
+    currentGoal: null,
+    bookingStage: "COMPLETED",
+    pendingOffer: null,
+    completedTask: { kind: "BOOKING", ...completed },
+  };
+}
+
+/** The offer the customer may still select right now (null when none/expired). */
+export function liveOffer(
+  state: ConversationState,
+  now: Date,
+): BookingOffer | null {
+  return isOfferLive(state.offer, now) ? state.offer : null;
+}
+
+// ─── Durable envelope (CONV-CORE-01) ─────────────────────────────────────────
+//
+// The persisted JSON shape. Bounded, Zod-validated on EVERY load: a row that
+// fails validation (corruption, an incompatible future version, a tampered
+// value) is treated as ABSENT and the engine falls back to the legacy,
+// history-derived path — never trusted partially.
+
+export const CONVERSATION_STATE_VERSION = 1;
+
+const factsSchema = z
+  .object({
+    service: z.string().max(200).optional(),
+    date: z.string().max(40).optional(),
+    timePreference: z.string().max(80).optional(),
+    provider: z.string().max(200).optional(),
+    customerName: z.string().max(200).optional(),
+    followUpRequestId: z.string().max(200).optional(),
+  })
+  .strict();
+
+const stageSchema = z.enum(conversationBookingStageValues);
+
+const persistedStateSchema = z.object({
+  version: z.literal(CONVERSATION_STATE_VERSION),
+  currentGoal: z.string().max(40).nullable(),
+  activeTask: z
+    .object({ kind: z.string().max(40), stage: stageSchema })
+    .nullable(),
+  knownFacts: factsSchema,
+  missingFacts: z.array(z.enum(conversationFactKeys)).max(8),
+  bookingStage: stageSchema,
+  pendingGoals: z
+    .array(
+      z.object({
+        kind: z.string().max(40),
+        intent: z.string().max(40).optional(),
+        priority: z.number().int().optional(),
+        active: z.boolean(),
+      }),
+    )
+    .max(MAX_PENDING_GOALS),
+  lastClarification: z.object({ type: z.string().max(60) }).nullable(),
+  serviceId: z.string().max(200).nullable(),
+  serviceSource: z.enum(["CUSTOMER", "DEFAULT"]).nullable(),
+  offer: bookingOfferSchema.nullable(),
+  completedTask: z
+    .object({
+      kind: z.literal("BOOKING"),
+      appointmentId: z.string().max(200),
+      serviceId: z.string().max(200),
+      providerId: z.string().max(200).nullable(),
+      date: z.string().max(40),
+      completedAt: z.iso.datetime(),
+    })
+    .nullable(),
+});
+
+export type PersistedConversationState = z.infer<typeof persistedStateSchema>;
+
+/** State → bounded persisted JSON (drops derived mirrors + revision log). */
+export function dehydrateConversationState(
+  state: ConversationState,
+): PersistedConversationState {
+  return {
+    version: CONVERSATION_STATE_VERSION,
+    currentGoal: state.currentGoal,
+    activeTask: state.activeTask,
+    knownFacts: { ...state.knownFacts },
+    missingFacts: [...state.missingFacts],
+    bookingStage: state.bookingStage,
+    pendingGoals: state.pendingGoals.map((g) => ({ ...g })),
+    lastClarification: state.lastClarification
+      ? { type: state.lastClarification.type }
+      : null,
+    serviceId: state.serviceId,
+    serviceSource: state.serviceSource,
+    offer: state.offer,
+    completedTask: state.completedTask,
+  };
+}
+
+/**
+ * Persisted JSON → state, VALIDATED and TENANT-CHECKED. Returns null (treat as
+ * absent) on any schema violation or when the stored offer is scoped to a
+ * different business/conversation than the one being served.
+ */
+export function hydrateConversationState(
+  raw: unknown,
+  scope: { readonly businessId: string; readonly conversationId: string },
+): ConversationState | null {
+  const parsed = persistedStateSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const p = parsed.data;
+  if (
+    p.offer &&
+    (p.offer.businessId !== scope.businessId ||
+      p.offer.conversationId !== scope.conversationId)
+  ) {
+    return null;
+  }
+  const facts: ConversationKnownFacts = p.knownFacts;
+  const base: ConversationState = {
+    ...emptyConversationState(),
+    currentGoal: p.currentGoal,
+    activeTask: p.activeTask,
+    knownFacts: facts,
+    missingFacts: p.missingFacts,
+    bookingStage: p.bookingStage,
+    selectedService: facts.service ?? null,
+    selectedDate: facts.date ?? null,
+    selectedTimePref: facts.timePreference ?? null,
+    providerPreference: facts.provider ?? null,
+    topics: p.activeTask
+      ? [{ goal: p.activeTask.kind, suspendState: "ACTIVE" }]
+      : [],
+    pendingGoals: p.pendingGoals,
+    lastClarification: p.lastClarification,
+    serviceId: p.serviceId,
+    serviceSource: p.serviceSource,
+    offer: p.offer,
+    completedTask: p.completedTask,
+  };
+  return {
+    ...base,
+    pendingOffer:
+      p.offer && p.offer.status === "ACTIVE"
+        ? pendingOfferMirror(p.offer)
+        : null,
   };
 }

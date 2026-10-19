@@ -14,6 +14,7 @@ import { AppointmentReminderRepository } from "./appointment-reminder.repository
 import { AppointmentRepository } from "./appointment.repository";
 import { BranchRepository } from "./branch.repository";
 import { BusinessRepository } from "./business.repository";
+import { ConversationStateRepository } from "./conversation-state.repository";
 import { ConversationRepository } from "./conversation.repository";
 import { CopyOverrideRepository } from "./copy-override.repository";
 import { CustomerRepository } from "./customer.repository";
@@ -38,6 +39,7 @@ export const userRepository = new UserRepository();
 export const serviceRepository = new ServiceRepository();
 export const customerRepository = new CustomerRepository();
 export const conversationRepository = new ConversationRepository();
+export const conversationStateRepository = new ConversationStateRepository();
 export const appointmentRepository = new AppointmentRepository();
 export const appointmentReminderRepository =
   new AppointmentReminderRepository();
@@ -67,6 +69,7 @@ export {
   BranchRepository,
   BusinessRepository,
   ConversationRepository,
+  ConversationStateRepository,
   CopyOverrideRepository,
   CustomerRepository,
   FollowUpRequestRepository,

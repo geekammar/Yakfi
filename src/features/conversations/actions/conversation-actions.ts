@@ -6,10 +6,12 @@ import {
   summarySchema,
   transitionConversationSchema,
 } from "@/features/conversations/schemas/conversation-schema";
+import { invalidateConversationOffer } from "@/features/conversations/server/conversation-state-store";
 import type { ConversationActionResult } from "@/features/conversations/types";
 import { requireUser } from "@/server/auth/guards";
 import {
   conversationRepository,
+  conversationStateRepository,
   operatorAttentionRepository,
   userRepository,
 } from "@/server/repositories";
@@ -31,6 +33,17 @@ async function actionContext(conversationId: string) {
 
 function failure(message: string): ConversationActionResult {
   return { success: false, message };
+}
+
+/**
+ * CONV-CORE-01 — a human now owns the thread: the assistant's current booking
+ * offer stops being selectable (best-effort; never fails the staff action).
+ */
+async function invalidateAssistantOffer(businessId: string, id: string) {
+  await invalidateConversationOffer(conversationStateRepository, {
+    businessId,
+    conversationId: id,
+  });
 }
 
 function refreshConversation(id: string) {
@@ -63,6 +76,9 @@ export async function assignConversation(
       assignedUserId: parsed.data.assignedUserId,
       ...(parsed.data.assignedUserId ? { status: "NEED_HUMAN" } : {}),
     });
+    if (parsed.data.assignedUserId) {
+      await invalidateAssistantOffer(context.businessId, parsed.data.id);
+    }
     refreshConversation(parsed.data.id);
     return { success: true };
   } catch {
@@ -96,6 +112,9 @@ export async function transitionConversation(
       parsed.data.id,
       transitions[parsed.data.transition],
     );
+    if (parsed.data.transition !== "RETURN_TO_AI") {
+      await invalidateAssistantOffer(context.businessId, parsed.data.id);
+    }
 
     // PROMPT-B04 — keep the operator-attention marker consistent with the
     // (server-authorized) lifecycle transition. The handoff itself is the
@@ -152,6 +171,7 @@ export async function sendStaffReply(
         status: "NEED_HUMAN",
       },
     );
+    await invalidateAssistantOffer(context.businessId, parsed.data.id);
     refreshConversation(parsed.data.id);
     return { success: true };
   } catch {

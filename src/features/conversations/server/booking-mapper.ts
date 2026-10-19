@@ -267,6 +267,12 @@ export type BookingMapperOutput =
       kind: "ready";
       serviceId: string;
       serviceName: string;
+      /**
+       * CONV-CORE-01 — CUSTOMER when the customer's own words resolved the
+       * service; DEFAULT when the configured default / single-service rule
+       * supplied it.
+       */
+      serviceSource: "CUSTOMER" | "DEFAULT";
       providerText: string | null;
       date: string | null;
       branchId: string | null;
@@ -287,6 +293,8 @@ export function mapAiResponseToBookingInput(
   const extraction = aiResponse.extraction;
 
   let serviceMatch = matchServiceByName(extraction.service, services);
+  const serviceSource: "CUSTOMER" | "DEFAULT" =
+    serviceMatch.status === "missing" ? "DEFAULT" : "CUSTOMER";
   if (serviceMatch.status === "missing") {
     // 1. Configured default booking service if valid and active (Rule A)
     const defaultService = defaultServiceId
@@ -348,6 +356,7 @@ export function mapAiResponseToBookingInput(
     kind: "ready",
     serviceId: serviceMatch.serviceId,
     serviceName: serviceMatch.serviceName,
+    serviceSource,
     providerText: extraction.provider,
     date,
     branchId,
