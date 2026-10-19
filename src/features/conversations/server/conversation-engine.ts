@@ -1841,8 +1841,16 @@ async function runInboundTurn(
     //    claim's message ids in the SAME transaction. A concurrent
     //    duplicate loses the conditional update, rolls back, and
     //    surfaces as an idempotent duplicate result.
+    const wasBooked = conversation.status === "BOOKED";
     const aiEligible =
-      conversation.status === "AI_ACTIVE" && !conversation.assignedUserId;
+      (conversation.status === "AI_ACTIVE" || wasBooked) &&
+      !conversation.assignedUserId;
+    if (wasBooked && aiEligible) {
+      conversation = {
+        ...conversation,
+        status: "AI_ACTIVE",
+      };
+    }
     let customerMessage;
     try {
       customerMessage = await deps.conversationRepository.addMessage(
@@ -1854,7 +1862,12 @@ async function runInboundTurn(
         },
         // A thread that is not AI-eligible needs staff attention; the
         // assignment is preserved, only the status routes to the queue.
-        aiEligible ? {} : { status: "NEED_HUMAN" },
+        // A thread that was BOOKED transitions back to AI_ACTIVE for the new turn.
+        aiEligible
+          ? wasBooked
+            ? { status: "AI_ACTIVE" }
+            : {}
+          : { status: "NEED_HUMAN" },
         { claimId: claim.claimId },
       );
     } catch (error) {
@@ -1937,10 +1950,11 @@ async function runInboundTurn(
     // Service server-side, re-run CORE-01+CORE-02 fresh, then canonical
     // createWithConflictCheck → BOOKED + confirmation (zero write on
     // stale/invalid/ambiguous).
-    const selectionAttempt = tryParseBookingSelection(
-      inbound.text,
-      recentChronological,
-    );
+    // CONV-LIFE-01: If thread was BOOKED, previous offer is fulfilled; skip
+    // selection attempt to avoid duplicate booking.
+    const selectionAttempt = wasBooked
+      ? null
+      : tryParseBookingSelection(inbound.text, recentChronological);
     if (selectionAttempt) {
       const selectionResult = await completeBookingSelection(
         deps,

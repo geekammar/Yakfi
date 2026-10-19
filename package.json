@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",

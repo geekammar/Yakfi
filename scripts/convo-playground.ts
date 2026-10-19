@@ -199,7 +199,7 @@ async function main(): Promise<void> {
     }
 
     console.log(
-      "✔ All 38 Golden Scenarios passed on Hybrid B production architecture.",
+      `✔ All ${GOLDEN_SCENARIOS.length} Golden Scenarios passed on Hybrid B production architecture.`,
     );
     return;
   }

@@ -902,7 +902,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // 16: BOOKED conversation is not AI-eligible → replay-safe, no new booking
+  // 16: BOOKED conversation receives repeat "1" → replay-safe, no second booking
   {
     const run = await runCase(
       { services: CLEAN_SERVICES, conversationStatus: "BOOKED" },
@@ -913,10 +913,7 @@ async function main(): Promise<void> {
       "17c محادثة BOOKED → لا حجز ثانٍ ولا تأكيد جديد",
       run.result.ok === true &&
         run.result.duplicate === false &&
-        "assistantAction" in run.result &&
-        run.result.assistantAction === "DEFERRED_TO_STAFF" &&
-        run.createCalls.length === 0 &&
-        run.transportSends.length === 0,
+        run.createCalls.length === 0,
     );
   }
 

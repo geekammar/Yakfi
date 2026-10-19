@@ -33,6 +33,8 @@ export type PlaygroundHarnessOptions = {
   priorAppointment?: boolean;
   channel?: "WHATSAPP" | "TELEGRAM";
   todayRef?: string;
+  conversationStatus?: any;
+  assignedUserId?: string | null;
 };
 
 export type DeliveredOutbound = {
@@ -97,6 +99,18 @@ export function createPlaygroundHarness(
     isActive: true,
     defaultServiceBookingEnabled: false,
     defaultBookingServiceId: null,
+    faqs: [
+      {
+        question: "مواعيد العمل",
+        answer:
+          "مواعيد العمل لدينا من السبت إلى الجمعة من الساعة 9:00 صباحاً حتى 5:00 مساءً.",
+      },
+      {
+        question: "عنوان ومكان العيادة",
+        answer:
+          "عنوان العيادة: الفرع الرئيسي - القاهرة. شرفنا بزيارتك في أي وقت.",
+      },
+    ],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...options.businessConfig,
@@ -119,8 +133,8 @@ export function createPlaygroundHarness(
     businessId: business.id,
     customerId: customer.id,
     channel,
-    status: "AI_ACTIVE" as ConversationStatus,
-    assignedUserId: null,
+    status: (options.conversationStatus ?? "AI_ACTIVE") as ConversationStatus,
+    assignedUserId: options.assignedUserId ?? null,
     branchId: business.defaultBranchId,
     unreadCount: 0,
     lastMessageAt: virtualNow,

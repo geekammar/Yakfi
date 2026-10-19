@@ -66,6 +66,14 @@ export function extractLastBookingOffer(
   for (let i = recentChronological.length - 1; i >= 0; i -= 1) {
     const msg = recentChronological[i];
     if (!msg || msg.senderType !== "AI") continue;
+    // If the assistant already confirmed a booking in a later turn,
+    // any older booking slot offer is fulfilled and expired.
+    if (
+      msg.content.includes("تم تأكيد") ||
+      msg.content.includes("تم استلام طلب")
+    ) {
+      return null;
+    }
     const header = msg.content.match(OFFER_HEADER);
     if (!header || !header[1] || !header[2]) continue;
     const followUpMatch = msg.content.match(FOLLOW_UP_TAG);

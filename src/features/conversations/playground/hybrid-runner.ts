@@ -30,6 +30,8 @@ export async function runHybridScenario(
       initialAppointments: scenario.setup?.initialAppointments,
       priorAppointment: scenario.setup?.priorAppointment,
       todayRef: scenario.setup?.todayRef,
+      conversationStatus: scenario.setup?.conversationStatus,
+      assignedUserId: scenario.setup?.assignedUserId,
     });
 
   const turns: TurnTrace[] = [];

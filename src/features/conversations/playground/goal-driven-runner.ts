@@ -32,6 +32,8 @@ export async function runGoalDrivenScenario(
       initialAppointments: scenario.setup?.initialAppointments,
       priorAppointment: scenario.setup?.priorAppointment,
       todayRef: scenario.setup?.todayRef,
+      conversationStatus: scenario.setup?.conversationStatus,
+      assignedUserId: scenario.setup?.assignedUserId,
     });
 
   const turns: TurnTrace[] = [];
@@ -68,13 +70,19 @@ export async function runGoalDrivenScenario(
     const startTurnTime = Date.now();
 
     // 2. Add customer message to conversation history
+    const wasBooked = harness.conversation.status === "BOOKED";
+    const nextStatus =
+      wasBooked && !harness.conversation.assignedUserId
+        ? "AI_ACTIVE"
+        : harness.conversation.status;
+
     await harness.deps.conversationRepository.addMessage(
       {
         conversationId: harness.conversation.id,
         senderType: "CUSTOMER",
         content: turnExp.input,
       },
-      { status: harness.conversation.status },
+      { status: nextStatus },
     );
 
     // 3. Process turn via Goal-Driven Engine Prototype
