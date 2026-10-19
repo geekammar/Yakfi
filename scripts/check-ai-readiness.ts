@@ -75,6 +75,8 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     reminderEnabled: false,
     reminderLeadHours: 24,
     reminderTemplateId: "standard",
+    defaultServiceBookingEnabled: false,
+    defaultBookingServiceId: null,
     ...overrides,
   };
 }

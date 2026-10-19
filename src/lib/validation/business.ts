@@ -137,6 +137,9 @@ const createBusinessSchema = z.object({
   reminderEnabled: z.boolean().optional(),
   reminderLeadHours: z.number().int().min(1).max(168).optional(),
   reminderTemplateId: z.string().trim().max(64).optional(),
+  // Default service booking mode (CONV-PLAY-01)
+  defaultServiceBookingEnabled: z.boolean().optional(),
+  defaultBookingServiceId: z.string().trim().nullable().optional(),
 });
 
 const updateBusinessSchema = createBusinessSchema.partial();

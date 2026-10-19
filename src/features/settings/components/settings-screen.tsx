@@ -58,8 +58,10 @@ import { Controller, useForm } from "react-hook-form";
  */
 export function SettingsScreen({
   initialSettings,
+  services = [],
 }: {
   initialSettings: BusinessSettingsView;
+  services?: Array<{ id: string; name: string; isActive?: boolean }>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -85,9 +87,21 @@ export function SettingsScreen({
         24) as BusinessSettingsInput["reminderLeadHours"],
       reminderTemplateId: (initialSettings.reminderTemplateId ??
         "standard") as BusinessSettingsInput["reminderTemplateId"],
+      defaultServiceBookingEnabled:
+        initialSettings.defaultServiceBookingEnabled ?? false,
+      defaultBookingServiceId: initialSettings.defaultBookingServiceId ?? null,
     },
     mode: "onChange",
   });
+
+  const defaultServiceBookingEnabled = form.watch(
+    "defaultServiceBookingEnabled",
+  );
+  const selectedServiceId = form.watch("defaultBookingServiceId");
+  const activeServices = services.filter((s) => s.isActive !== false);
+  const selectedDefaultService = activeServices.find(
+    (s) => s.id === selectedServiceId,
+  );
 
   const submit = form.handleSubmit(async (data) => {
     setError(null);
@@ -460,6 +474,144 @@ export function SettingsScreen({
                 {...form.register("cancellationPolicy")}
               />
               {fieldError(form.formState.errors.cancellationPolicy?.message)}
+            </div>
+
+            {/* ─── الحجز السريع بالخدمة الافتراضية (CONV-PLAY-01) ─── */}
+            <div className="border-t pt-5 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold">
+                  الحجز السريع بالخدمة الافتراضية
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5 leading-5">
+                  إذا طلب العميل حجز موعد دون تحديد الخدمة، سيختار المساعد
+                  الخدمة الافتراضية لتسريع الحجز. يمكنك تغييرها لاحقًا، ويمكن
+                  للعميل اختيار خدمة أخرى في أي وقت.
+                </p>
+              </div>
+
+              {/* Toggle */}
+              <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
+                <Controller
+                  control={form.control}
+                  name="defaultServiceBookingEnabled"
+                  render={({ field }) => (
+                    <Checkbox
+                      id="settings-default-service-enabled"
+                      checked={field.value ?? false}
+                      onCheckedChange={field.onChange}
+                      aria-describedby="default-service-enabled-desc"
+                    />
+                  )}
+                />
+                <div className="space-y-1 leading-none">
+                  <Label
+                    htmlFor="settings-default-service-enabled"
+                    className="text-sm font-semibold cursor-pointer"
+                  >
+                    استخدام الخدمة الافتراضية عند طلب حجز دون تحديد خدمة
+                  </Label>
+                  <p
+                    id="default-service-enabled-desc"
+                    className="text-xs text-muted-foreground leading-5"
+                  >
+                    تحديد خدمة أساسية للاقتراح الفوري عند عدم تحديد العميل لنوع
+                    الخدمة.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status indicator when disabled */}
+              {!defaultServiceBookingEnabled ? (
+                <div
+                  role="status"
+                  className="rounded-lg border border-border/60 bg-muted/40 p-3 text-xs leading-5 text-muted-foreground"
+                >
+                  <p>
+                    <span className="font-semibold text-foreground">
+                      الحالة الحالية:
+                    </span>{" "}
+                    الوضع معطّل — عند طلب حجز بدون تحديد خدمة، سيعرض المساعد
+                    قائمة الخدمات المتاحة ليختار العميل منها.
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Dropdown: الخدمة الافتراضية */}
+              <div className="max-w-sm space-y-2">
+                <Label htmlFor="settings-default-service">
+                  الخدمة الافتراضية
+                  {defaultServiceBookingEnabled ? (
+                    <span className="text-destructive ms-1">*</span>
+                  ) : (
+                    <span className="font-normal text-muted-foreground ms-1">
+                      (تجهيز مسبق)
+                    </span>
+                  )}
+                </Label>
+                <Controller
+                  control={form.control}
+                  name="defaultBookingServiceId"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value ?? ""}
+                      onValueChange={(val) => field.onChange(val || null)}
+                    >
+                      <SelectTrigger
+                        id="settings-default-service"
+                        className="w-full"
+                        aria-invalid={Boolean(
+                          form.formState.errors.defaultBookingServiceId,
+                        )}
+                      >
+                        <SelectValue placeholder="اختر الخدمة الافتراضية" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeServices.length > 0 ? (
+                          activeServices.map((service) => (
+                            <SelectItem key={service.id} value={service.id}>
+                              {service.name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="p-2 text-xs text-muted-foreground text-center">
+                            لا توجد خدمات نشطة متاحة
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {fieldError(
+                  form.formState.errors.defaultBookingServiceId?.message,
+                )}
+                <p className="text-xs leading-5 text-muted-foreground">
+                  تُعرض الخدمات النشطة والمتاحة للمنشأة فقط.
+                </p>
+              </div>
+
+              {/* Booking Preview when enabled */}
+              {defaultServiceBookingEnabled && selectedDefaultService ? (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-xs leading-6 space-y-1.5">
+                  <div className="font-semibold text-primary flex items-center gap-1.5">
+                    <SparklesIcon className="size-3.5" />
+                    <span>معاينة سلوك الحجز مع العميل:</span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    العميل:{" "}
+                    <span className="font-medium text-foreground">
+                      &quot;عايز أحجز بكرة&quot;
+                    </span>
+                  </p>
+                  <p className="text-muted-foreground">
+                    المساعد:{" "}
+                    <span className="font-medium text-foreground">
+                      &quot;تمام، هحجز لك على خدمة {selectedDefaultService.name}
+                      . تقدر تغيّر الخدمة لو حابب. دي المواعيد المتاحة
+                      بكرة...&quot;
+                    </span>
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>

@@ -81,6 +81,30 @@ export function parseAppointmentStartUtc(params: {
 }
 
 /**
+ * Parse appointment end wall-clock datetime in the business timezone to UTC Date.
+ */
+export function parseAppointmentEndUtc(params: {
+  date: string;
+  endTime: string;
+  timezone: string;
+}): Date {
+  const [year, month, day] = params.date.split("-").map(Number);
+  const timeStr =
+    params.endTime.length > 5 && params.endTime.includes("T")
+      ? params.endTime.slice(11, 16)
+      : params.endTime.slice(0, 5);
+  const [hour, minute] = timeStr.split(":").map(Number);
+  return zonedTimestampUtc(
+    year ?? 2026,
+    month ?? 1,
+    day ?? 1,
+    hour ?? 0,
+    minute ?? 0,
+    params.timezone || "Asia/Riyadh",
+  );
+}
+
+/**
  * Calculates the exact UTC timestamp when a reminder should be dispatched.
  *
  * reminderDueTime = appointmentStartTime (in timezone) - (leadHours * 3600s)

@@ -1,5 +1,16 @@
 import type { AppointmentStatus } from "@/types/domain";
 
+export type ServiceCorrectionHistoryEntry = {
+  previousServiceId: string | null;
+  previousServiceName?: string | null;
+  newServiceId: string;
+  newServiceName?: string | null;
+  correctedAt: string;
+  correctedById?: string | null;
+  correctedByName?: string | null;
+  notes?: string | null;
+};
+
 export type AppointmentAgendaItem = {
   id: string;
   date: string;
@@ -9,7 +20,16 @@ export type AppointmentAgendaItem = {
   notes: string | null;
   customer: { id: string; name: string; phone: string };
   service: { id: string; name: string; durationMinutes: number };
+  performedService?: {
+    id: string;
+    name: string;
+    durationMinutes: number;
+  } | null;
+  serviceCorrectedAt?: string | null;
+  serviceCorrectedBy?: { id: string; name: string } | null;
+  serviceCorrectionHistory?: ServiceCorrectionHistoryEntry[] | null;
   provider?: { id: string; name: string; displayName?: string | null } | null;
+  updatedAt?: string;
 };
 
 export type AppointmentDetailData = AppointmentAgendaItem & {
@@ -19,6 +39,31 @@ export type AppointmentDetailData = AppointmentAgendaItem & {
 export type AppointmentActionResult =
   | { success: true; appointmentId?: string }
   | { success: false; message: string };
+
+export type CorrectPerformedServiceErrorCode =
+  | "VALIDATION"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "NOT_COMPLETED"
+  | "NOT_PASSED_YET"
+  | "INVALID_SERVICE"
+  | "CONCURRENCY_CONFLICT"
+  | "UPDATE_FAILED";
+
+export type CorrectPerformedServiceActionResult =
+  | {
+      success: true;
+      appointmentId: string;
+      performedServiceId: string;
+      performedServiceName: string;
+      serviceCorrectedAt: string;
+      updatedAt: string;
+    }
+  | {
+      success: false;
+      code: CorrectPerformedServiceErrorCode;
+      message: string;
+    };
 
 /**
  * `rescheduleAppointment` result contract (B-08): typed failure codes so

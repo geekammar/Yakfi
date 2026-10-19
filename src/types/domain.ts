@@ -32,6 +32,7 @@ import type {
   TelegramConnection,
   TelegramProvisioningLedger,
   UsageRecord,
+  User,
   UserRole,
   WhatsAppConnection,
   WhatsAppOnboardingAuthorization,
@@ -65,6 +66,7 @@ export type {
   TelegramConnection,
   TelegramProvisioningLedger,
   UsageRecord,
+  User,
   UserRole,
   WhatsAppConnection,
   WhatsAppOnboardingAuthorization,
@@ -84,6 +86,8 @@ export type ConversationWithCustomer = Conversation & {
 export type AppointmentWithRelations = Appointment & {
   customer: Pick<Customer, "id" | "name" | "phone">;
   service: Pick<Service, "id" | "name" | "durationMinutes">;
+  performedService?: Pick<Service, "id" | "name" | "durationMinutes"> | null;
+  serviceCorrectedBy?: Pick<User, "id" | "name"> | null;
   provider?: Pick<ProviderProfile, "id" | "name" | "displayName"> | null;
 };
 

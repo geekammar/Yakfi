@@ -2,6 +2,7 @@
 
 import {
   appointmentStatusActionSchema,
+  correctPerformedServiceSchema,
   rescheduleAppointmentSchema,
 } from "@/features/appointments/schemas/appointment-schema";
 import {
@@ -13,11 +14,18 @@ import {
 import type {
   AppointmentActionResult,
   AppointmentAgendaItem,
+  CorrectPerformedServiceActionResult,
   CreateAppointmentActionResult,
   RescheduleAppointmentActionResult,
 } from "@/features/appointments/types";
+import { parseAppointmentEndUtc } from "@/lib/scheduling/reminder-time";
 import { requireUser } from "@/server/auth/guards";
-import { appointmentRepository, userRepository } from "@/server/repositories";
+import {
+  appointmentRepository,
+  businessRepository,
+  serviceRepository,
+  userRepository,
+} from "@/server/repositories";
 
 import { revalidatePath } from "next/cache";
 
@@ -211,6 +219,175 @@ export async function searchAppointmentsAction(query: string): Promise<{
       success: false,
       appointments: [],
       message: "تعذر البحث عن المواعيد",
+    };
+  }
+}
+
+/**
+ * Retrospective post-visit performed service correction (CONV-PLAY-01).
+ *
+ * Rules:
+ * 1. Admin/Staff authorized within tenant boundary.
+ * 2. Original scheduled end time must have passed (`now >= endTime`).
+ * 3. Appointment status must be COMPLETED.
+ * 4. Original booked service (`serviceId`), date, startTime, endTime, and status are preserved.
+ * 5. No availability search, no conflict calculation, no slot alterations.
+ * 6. Audit history recorded on the appointment.
+ * 7. Optimistic concurrency check protects against concurrent overwrites.
+ */
+export async function correctPerformedServiceAction(
+  input: unknown,
+): Promise<CorrectPerformedServiceActionResult> {
+  const parsed = correctPerformedServiceSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      code: "VALIDATION",
+      message:
+        parsed.error.issues[0]?.message ?? "بيانات تصحيح الخدمة غير صالحة",
+    };
+  }
+
+  const user = await currentUser();
+  if (!user?.businessId) {
+    return {
+      success: false,
+      code: "UNAUTHORIZED",
+      message: "غير مصرح لك بإجراء هذا التعديل",
+    };
+  }
+
+  const [appointment, business] = await Promise.all([
+    appointmentRepository.findWithRelationsByBusiness(
+      parsed.data.appointmentId,
+      user.businessId,
+    ),
+    businessRepository.findById(user.businessId),
+  ]);
+
+  if (!appointment) {
+    return {
+      success: false,
+      code: "NOT_FOUND",
+      message: "الموعد غير موجود",
+    };
+  }
+
+  // 1. Validate visit completion
+  if (appointment.status !== "COMPLETED") {
+    return {
+      success: false,
+      code: "NOT_COMPLETED",
+      message: "تصحيح الخدمة المنفذة متاح فقط للمواعيد المكتملة",
+    };
+  }
+
+  // 2. Validate scheduled end time is in the past
+  const dateIso =
+    appointment.date instanceof Date
+      ? appointment.date.toISOString().slice(0, 10)
+      : String(appointment.date).slice(0, 10);
+  const endTimeStr =
+    appointment.endTime instanceof Date
+      ? appointment.endTime.toISOString().slice(11, 16)
+      : String(appointment.endTime).includes("T")
+        ? String(appointment.endTime).slice(11, 16)
+        : String(appointment.endTime).slice(0, 5);
+
+  const endUtc = parseAppointmentEndUtc({
+    date: dateIso,
+    endTime: endTimeStr,
+    timezone: business?.timezone ?? "Asia/Riyadh",
+  });
+
+  if (Date.now() < endUtc.getTime()) {
+    return {
+      success: false,
+      code: "NOT_PASSED_YET",
+      message:
+        "لا يمكن تسجيل أو تصحيح الخدمة المنفذة إلا بعد انتهاء وقت الموعد المجدول",
+    };
+  }
+
+  // 3. Concurrency check
+  if (
+    parsed.data.expectedVersion &&
+    appointment.updatedAt &&
+    appointment.updatedAt.toISOString() !== parsed.data.expectedVersion
+  ) {
+    return {
+      success: false,
+      code: "CONCURRENCY_CONFLICT",
+      message:
+        "تم تعديل الموعد بواسطة مستخدم آخر. يرجى تحديث الصفحة والمحاولة مجدداً.",
+    };
+  }
+
+  // 4. Validate performed service
+  const targetService = await serviceRepository.findByIdWithinBusiness(
+    parsed.data.performedServiceId,
+    user.businessId,
+  );
+  if (!targetService || !targetService.isActive || targetService.deletedAt) {
+    return {
+      success: false,
+      code: "INVALID_SERVICE",
+      message: "الخدمة المحددة غير صالحة أو غير مفعّلة في المنشأة",
+    };
+  }
+
+  // 5. Build audit entry
+  const previousServiceId =
+    appointment.performedServiceId ?? appointment.serviceId;
+  const previousServiceName =
+    appointment.performedService?.name ?? appointment.service?.name ?? null;
+
+  const historyEntry = {
+    previousServiceId,
+    previousServiceName,
+    newServiceId: targetService.id,
+    newServiceName: targetService.name,
+    correctedAt: new Date().toISOString(),
+    correctedById: user.id,
+    correctedByName: user.name || "عضو الفريق",
+    notes: parsed.data.notes || null,
+  };
+
+  try {
+    const updated = await appointmentRepository.correctPerformedService(
+      appointment.id,
+      user.businessId,
+      {
+        performedServiceId: targetService.id,
+        correctedById: user.id,
+        historyEntry,
+      },
+    );
+
+    if (!updated) {
+      return {
+        success: false,
+        code: "UPDATE_FAILED",
+        message: "تعذر تحديث الخدمة المنفذة",
+      };
+    }
+
+    refreshAppointments(appointment.id);
+
+    return {
+      success: true,
+      appointmentId: updated.id,
+      performedServiceId: targetService.id,
+      performedServiceName: targetService.name,
+      serviceCorrectedAt:
+        updated.serviceCorrectedAt?.toISOString() ?? new Date().toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+  } catch {
+    return {
+      success: false,
+      code: "UPDATE_FAILED",
+      message: "تعذر تحديث الخدمة المنفذة",
     };
   }
 }
