@@ -283,9 +283,10 @@ async function main(): Promise<void> {
     req("عايز أحجز موعد بكرة", { traceId: TRACES.admitted });
 
   {
-    // DISABLED: neither flag set ⇒ ZERO JEV/decisions traffic.
+    // DISABLED via Emergency Kill Switch (CONV-JEV-01): FLOWPILOT_JEV_SEMANTIC_ENABLED=false ⇒ ZERO JEV/decisions traffic.
     const log: Array<string> = [];
     const disabledEnv: Record<string, string | undefined> = {
+      FLOWPILOT_JEV_SEMANTIC_ENABLED: "false",
       OPENROUTER_API_KEY: "stub-key-not-a-secret",
     };
     const ai = await createPolicyBackedAi({
@@ -298,16 +299,17 @@ async function main(): Promise<void> {
       url.includes("/decisions"),
     ).length;
     check(
-      "S4a DISABLED (no flags) ⇒ the factory sends ZERO decisions calls",
+      "S4a DISABLED (emergency kill switch false) ⇒ the factory sends ZERO decisions calls",
       decisionsCalls === 0,
     );
   }
   {
-    // S45 — ROLLBACK: with BOTH flags absent the factory reproduces the
+    // S45 — ROLLBACK via Emergency Kill Switch: with FLOWPILOT_JEV_SEMANTIC_ENABLED=false the factory reproduces the
     // pre-03D serving path: exactly one generative call, no decisions call,
-    // and NO shadow telemetry slot. Disabling the shadow is a full rollback.
+    // and NO shadow telemetry slot. Disabling JEV is a full rollback.
     const log: Array<string> = [];
     const offEnv: Record<string, string | undefined> = {
+      FLOWPILOT_JEV_SEMANTIC_ENABLED: "false",
       OPENROUTER_API_KEY: "stub-key-not-a-secret",
     };
     const ai = await createPolicyBackedAi({
@@ -323,7 +325,7 @@ async function main(): Promise<void> {
       url.includes("chat/completions"),
     ).length;
     check(
-      "S45 SHADOW OFF (flags absent) reproduces the pre-03D serving path",
+      "S45 SHADOW OFF (kill switch false) reproduces the deterministic/generative serving path",
       chatCalls === 1 &&
         log.filter((url) => url.includes("/decisions")).length === 0 &&
         (telemetry?.shadow === undefined || telemetry?.shadow === null) &&
@@ -331,10 +333,34 @@ async function main(): Promise<void> {
     );
   }
   {
-    // SHADOW: shadow flag only ⇒ the conservative route stays authoritative
+    // CONV-JEV-01: With flags absent, TypeSafe JEV is preferred by default!
+    const log: Array<string> = [];
+    const defaultEnv: Record<string, string | undefined> = {
+      OPENROUTER_API_KEY: "stub-key-not-a-secret",
+    };
+    const ai = await createPolicyBackedAi({
+      getEnvVar: (name) => defaultEnv[name],
+      fetchImpl: routingFetch(log),
+      getAiPolicyImpl: policyStub() as never,
+    });
+    await ai.respond(factoryRequest());
+    const decisionsCalls = log.filter((url) =>
+      url.includes("/decisions"),
+    ).length;
+    const chatCalls = log.filter((url) =>
+      url.includes("chat/completions"),
+    ).length;
+    check(
+      "S4_CONV_JEV_01 flags absent ⇒ TypeSafe JEV is preferred (1 decisions, 0 chat)",
+      decisionsCalls === 1 && chatCalls === 0,
+    );
+  }
+  {
+    // SHADOW: shadow flag with semantic disabled ⇒ the conservative route stays authoritative
     // (one chat call) AND the shadow evaluation runs (one decisions call).
     const log: Array<string> = [];
     const env: Record<string, string | undefined> = {
+      FLOWPILOT_JEV_SEMANTIC_ENABLED: "false",
       FLOWPILOT_JEV_SHADOW_ENABLED: "1",
       OPENROUTER_API_KEY: "stub-key-not-a-secret",
       SHADOW_SAMPLE_RATE: "1",
@@ -355,7 +381,7 @@ async function main(): Promise<void> {
       ai as { getLastTelemetry?: () => unknown }
     ).getLastTelemetry?.() as { shadow?: JevSemanticEvidence } | null;
     check(
-      "S4b SHADOW (shadow only) ⇒ serving chat=1 AND shadow decisions=1",
+      "S4b SHADOW (shadow on, semantic disabled) ⇒ serving chat=1 AND shadow decisions=1",
       chatCalls === 1 &&
         decisionsCalls === 1 &&
         telemetry?.shadow?.evidenceRole === "SHADOW",

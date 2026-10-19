@@ -8,7 +8,12 @@ import type { ConversationState } from "@/features/conversations/server/conversa
 import type { Business, ConversationStatus } from "@/types/domain";
 
 export type PlaygroundArchitecture =
-  "HYBRID_B" | "GOAL_DRIVEN_HYBRID" | "AGENT_C";
+  | "HYBRID_B"
+  | "GOAL_DRIVEN_HYBRID"
+  | "TYPESAFE_JEV_GOAL_DRIVEN"
+  | "AGENT_C"
+  | "DETERMINISTIC_BASELINE"
+  | "FULL_AGENT";
 
 export type InboundChannel = "WHATSAPP" | "TELEGRAM";
 
@@ -27,6 +32,38 @@ export type ToolCallRecord = {
   durationMs: number;
 };
 
+export type TypeSafeJevTurnDiagnostic = {
+  intent: string;
+  confidence: number;
+  source: "TYPESAFE_JEV" | "DETERMINISTIC_BASELINE" | "FALLBACK";
+  reason: string;
+  isAbstention?: boolean;
+  fallbackReason?: string | null;
+  rawProbabilities?: Record<string, number>;
+  conversationGoal?: string | null;
+  latencyMs?: number;
+  tokens?: { input: number; output: number };
+  costUsd?: number;
+  isCostEstimate?: boolean;
+};
+
+export type BaselineTurnDiagnostic = {
+  intent: string;
+  action: string;
+  reason?: string;
+};
+
+export type BookingCoreActionDiagnostic = {
+  action:
+    "NONE" | "SLOTS_RESOLVED" | "APPOINTMENT_CREATED" | "CONFLICT_PREVENTED";
+  serviceId?: string | null;
+  providerId?: string | null;
+  slotStartTime?: string | null;
+  slotDate?: string | null;
+  appointmentId?: string | null;
+  preventedConflict?: boolean;
+};
+
 export type TurnProcessing = {
   architecture: PlaygroundArchitecture;
   jevDecision: {
@@ -36,11 +73,32 @@ export type TurnProcessing = {
     strategy?: string;
     reason?: string;
   } | null;
+  /** CONV-JEV-01 Step F.3: TypeSafe JEV decision, if actually called */
+  typeSafeJevDecision?: TypeSafeJevTurnDiagnostic | null;
+  /** CONV-JEV-01 Step F.4: Deterministic Baseline decision */
+  baselineDecision?: BaselineTurnDiagnostic | null;
+  /** CONV-JEV-01 Step F.5: Difference between the two decisions */
+  decisionDifference?: string | null;
+  /** CONV-JEV-01 Step F.2: Goal and context before processing */
+  goalStateBefore?: Record<string, any> | null;
+  /** CONV-JEV-01 Step F.6: Goal and context after processing */
+  goalStateAfter?: Record<string, any> | null;
+  /** CONV-JEV-01 Step F.7: Booking Core action, if any */
+  bookingCoreAction?: BookingCoreActionDiagnostic | null;
+  /** CONV-JEV-01 Step F.9: Reason for fallback or handoff */
+  reasonForFallbackOrHandoff?: string | null;
+  /** CONV-JEV-01 Step F.10: Latency and cost */
+  latencyAndCost?: {
+    latencyMs: number;
+    costUsd: number;
+    isEstimate: boolean;
+  };
   semanticIntent: string | null;
   extractedEntities: Record<string, any>;
   toolCalls: ToolCallRecord[];
   executionTimeMs: number;
   llmCalls: number;
+  jevCalls?: number;
   tokenUsageEstimate: {
     promptTokens: number;
     completionTokens: number;
@@ -59,6 +117,8 @@ export type TurnDiagnostics = {
   warnings: string[];
   isClarificationLoop: boolean;
   isUnnecessaryHandoff: boolean;
+  isContextLoss?: boolean;
+  isDuplicateBookingAttempt?: boolean;
   appointmentCreated: boolean;
   appointmentId?: string | null;
 };
@@ -126,6 +186,11 @@ export type ScenarioMetrics = {
   totalTurns: number;
   totalDurationMs: number;
   totalLlmCalls: number;
+  totalJevCalls?: number;
+  totalCostUsd?: number;
+  isCostEstimate?: boolean;
+  p50LatencyMs?: number;
+  p95LatencyMs?: number;
   totalTokens: {
     promptTokens: number;
     completionTokens: number;
@@ -134,6 +199,8 @@ export type ScenarioMetrics = {
   appointmentBooked: boolean;
   clarificationLoopDetected: boolean;
   unnecessaryHandoffDetected: boolean;
+  contextLossDetected?: boolean;
+  duplicateBookingPrevented?: boolean;
 };
 
 export type ScenarioTrace = {
@@ -153,32 +220,48 @@ export type ScenarioComparison = {
   scenarioId: string;
   title: string;
   category: string;
+  /** Architecture A: Deterministic Baseline */
   hybridVerdict: "PASS" | "FAIL";
+  /** Architecture B: Goal-Driven Hybrid */
   goalDrivenVerdict?: "PASS" | "FAIL";
+  /** Architecture C: Real TypeSafe JEV + Goal-Driven State */
+  typeSafeJevVerdict?: "PASS" | "FAIL";
+  /** Architecture D (Optional): Full Agent C */
   agentCVerdict: "PASS" | "FAIL";
   hybridDurationMs: number;
   goalDrivenDurationMs?: number;
+  typeSafeJevDurationMs?: number;
   agentCDurationMs: number;
   hybridLlmCalls: number;
   goalDrivenLlmCalls?: number;
+  typeSafeJevLlmCalls?: number;
+  typeSafeJevCalls?: number;
+  typeSafeJevCostUsd?: number;
   agentCLlmCalls: number;
   notes?: string;
 };
 
 export type BenchmarkComparisonReport = {
   timestamp: string;
+  evaluationMode: "LIVE_TYPESAFE_JEV" | "OFFLINE_SIMULATION" | "HYBRID_ONLY";
   totalScenarios: number;
   hybridPassed: number;
   goalDrivenPassed?: number;
+  typeSafeJevPassed?: number;
   agentCPassed: number;
   hybridAvgDurationMs: number;
   goalDrivenAvgDurationMs?: number;
+  typeSafeJevAvgDurationMs?: number;
   agentCAvgDurationMs: number;
   hybridTotalLlmCalls: number;
   goalDrivenTotalLlmCalls?: number;
+  typeSafeJevTotalLlmCalls?: number;
+  typeSafeJevTotalCalls?: number;
+  typeSafeJevTotalCostUsd?: number;
   agentCTotalLlmCalls: number;
   hybridTotalTokens: number;
   goalDrivenTotalTokens?: number;
+  typeSafeJevTotalTokens?: number;
   agentCTotalTokens: number;
   comparisons: ScenarioComparison[];
 };

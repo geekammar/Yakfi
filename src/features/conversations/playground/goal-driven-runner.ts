@@ -7,19 +7,27 @@
  */
 
 import { deriveConversationStateFromHistory } from "@/features/conversations/server/conversation-state";
+import type { JevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
 
 import { processGoalDrivenTurn } from "./goal-driven-engine";
 import { createPlaygroundHarness, type PlaygroundHarness } from "./harness";
 import type {
+  PlaygroundArchitecture,
   ScenarioDefinition,
   ScenarioMetrics,
   ScenarioTrace,
   TurnTrace,
 } from "./types";
 
+export type GoalDrivenRunOptions = {
+  jevProvider?: JevDecisionsProvider | null;
+  architecture?: PlaygroundArchitecture;
+};
+
 export async function runGoalDrivenScenario(
   scenario: ScenarioDefinition,
   existingHarness?: PlaygroundHarness,
+  options?: GoalDrivenRunOptions,
 ): Promise<ScenarioTrace> {
   const startedAt = new Date().toISOString();
   const harness =
@@ -117,6 +125,8 @@ export async function runGoalDrivenScenario(
             conversationId: harness.conversation.id,
             services,
             virtualNow: harness.getVirtualNow(),
+            jevProvider: options?.jevProvider,
+            architecture: options?.architecture,
           },
         );
       } catch (err: any) {
@@ -194,12 +204,30 @@ export async function runGoalDrivenScenario(
       unnecessaryHandoffDetected = true;
     }
 
+    const isContextLoss = Boolean(
+      stateBefore?.selectedService &&
+      !stateAfter?.selectedService &&
+      !turnExp.input.includes("خدمة") &&
+      !turnExp.input.includes("اغير"),
+    );
+    const isDuplicateBookingAttempt = Boolean(
+      wasBooked &&
+      !appointmentCreated &&
+      (turnExp.input.trim() === "1" || /^[1-9]$/.test(turnExp.input.trim())),
+    );
+
     const warnings: string[] = [];
     if (isClarificationLoop) {
       warnings.push("CLARIFICATION_LOOP_DETECTED");
     }
     if (isUnnecessaryHandoff) {
       warnings.push("UNNECESSARY_HANDOFF_DETECTED");
+    }
+    if (isContextLoss) {
+      warnings.push("CONTEXT_LOSS_DETECTED");
+    }
+    if (isDuplicateBookingAttempt) {
+      warnings.push("DUPLICATE_BOOKING_PREVENTED");
     }
 
     const turnTrace: TurnTrace = {
@@ -215,12 +243,30 @@ export async function runGoalDrivenScenario(
       },
       stateBefore,
       processing: {
-        architecture: "GOAL_DRIVEN_HYBRID",
-        jevDecision: {
-          status: "GOAL_DRIVEN_RESOLVED",
-          route: "SEMANTIC_GOAL_PROJECTION",
-          confidence: 1.0,
-        },
+        architecture: options?.architecture ?? "GOAL_DRIVEN_HYBRID",
+        jevDecision: result.typeSafeJevDecision
+          ? {
+              status:
+                result.typeSafeJevDecision.source === "TYPESAFE_JEV"
+                  ? "JEV_EVALUATED"
+                  : "FALLBACK",
+              route: result.typeSafeJevDecision.reason,
+              confidence: result.typeSafeJevDecision.confidence,
+              strategy: result.typeSafeJevDecision.source,
+            }
+          : {
+              status: "GOAL_DRIVEN_RESOLVED",
+              route: "SEMANTIC_GOAL_PROJECTION",
+              confidence: 1.0,
+            },
+        typeSafeJevDecision: result.typeSafeJevDecision ?? null,
+        baselineDecision: result.baselineDecision ?? null,
+        decisionDifference: result.decisionDifference ?? null,
+        goalStateBefore: result.goalStateBefore ?? null,
+        goalStateAfter: result.goalStateAfter ?? null,
+        bookingCoreAction: result.bookingCoreAction ?? null,
+        reasonForFallbackOrHandoff: result.reasonForFallbackOrHandoff ?? null,
+        latencyAndCost: result.latencyAndCost,
         semanticIntent: result.intent ?? "BOOKING",
         extractedEntities: {
           service: stateAfter.selectedService,
@@ -230,6 +276,7 @@ export async function runGoalDrivenScenario(
         toolCalls: [],
         executionTimeMs: durationMs,
         llmCalls: turnLlmCalls,
+        jevCalls: result.jevCalls ?? 0,
         tokenUsageEstimate: {
           promptTokens: turnPromptTokens,
           completionTokens: turnCompletionTokens,
@@ -250,6 +297,8 @@ export async function runGoalDrivenScenario(
         warnings,
         isClarificationLoop,
         isUnnecessaryHandoff,
+        isContextLoss,
+        isDuplicateBookingAttempt,
         appointmentCreated,
         appointmentId,
       },
@@ -359,7 +408,7 @@ export async function runGoalDrivenScenario(
     scenarioId: scenario.id,
     title: scenario.title,
     category: scenario.category,
-    architecture: "GOAL_DRIVEN_HYBRID",
+    architecture: options?.architecture ?? "GOAL_DRIVEN_HYBRID",
     startedAt,
     completedAt,
     turns,

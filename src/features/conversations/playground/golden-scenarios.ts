@@ -1053,4 +1053,79 @@ export const GOLDEN_SCENARIOS: ScenarioDefinition[] = [
       shouldBook: true,
     },
   },
+  {
+    id: "GS-49",
+    title: "تحديد تفضيل الفترة المسائية ('عايز أحجز بكرة بالليل')",
+    category: "STANDARD_BOOKING",
+    description:
+      "التقاط تفضيل الموعد المسائي والاحتفاظ به في سياق المحادثة وعرض المواعيد المسائية.",
+    turns: [
+      {
+        input: "عايز أحجز بكرة بالليل",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["كشف أسنان"],
+        forbiddenOutboundContains: ["اختار الخدمة"],
+      },
+    ],
+    expectations: {
+      maxLlmCalls: 1,
+    },
+  },
+  {
+    id: "GS-50",
+    title: "استفسار عن خدمة محددة غير مدرجة ('عندكم تقويم شفاف؟')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "الاستفسار عن خدمة تخصصية غير متاحة في الدليل — الإجابة بعدم التوفر وعرض الخدمات المتاحة دون بدء حجز خاطئ.",
+    turns: [
+      {
+        input: "عندكم تقويم شفاف؟",
+        forbiddenOutboundContains: ["تم تأكيد حجزك"],
+      },
+    ],
+    expectations: {},
+  },
+  {
+    id: "GS-51",
+    title: "تغيير الطبيب مع الاحتفاظ بالخدمة المحددة مسبقاً",
+    category: "SLOT_NAVIGATION",
+    description:
+      "تغيير العميل للطبيب المفضل في خطوة لاحقة دون إعادة سؤاله عن نوع الخدمة المحفوظة في الهدف.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة مع دكتورة سارة",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["د. سارة عادل"],
+      },
+      {
+        input: "ينفع مع دكتور أحمد؟",
+        forbiddenOutboundContains: ["اختار الخدمة"],
+      },
+    ],
+    expectations: {
+      maxLlmCalls: 2,
+    },
+  },
+  {
+    id: "GS-52",
+    title: "فشل استدعاء JEV الشبكي أثناء الحجز والرجوع الآمن دون فقدان السياق",
+    category: "STANDARD_BOOKING",
+    description:
+      "الرجوع الآمن إلى الأساس الحتمي (Deterministic Baseline) في حال تعذر الاتصال بـ TypeSafe JEV مع إتمام الحجز بنجاح.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["تم تأكيد حجزك"],
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+      maxLlmCalls: 1,
+    },
+  },
 ];

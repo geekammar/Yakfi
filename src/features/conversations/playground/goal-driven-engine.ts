@@ -23,7 +23,20 @@ import {
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
+import type { JevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
+import { SEMANTIC_QUESTIONS } from "@/server/integrations/ai/jev-semantic-strategy";
+import {
+  createSafeFallbackDecision,
+  mapJevAnswersToStructuredDecision,
+} from "@/server/integrations/ai/typesafe-jev-contract";
 import type { Business, Customer, Service } from "@/types/domain";
+
+import type {
+  BaselineTurnDiagnostic,
+  BookingCoreActionDiagnostic,
+  PlaygroundArchitecture,
+  TypeSafeJevTurnDiagnostic,
+} from "./types";
 
 // ─── Goal-Driven State Contracts ──────────────────────────────────────────
 
@@ -339,7 +352,7 @@ export function reconstructStateFromHistory(
 // ─── Goal-Driven Engine Turn Handler ───────────────────────────────────────
 
 export type GoalDrivenTurnResult = {
-  assistantAction: "AI_REPLY" | "AI_HANDOFF";
+  assistantAction: "AI_REPLY" | "AI_HANDOFF" | "DEFERRED_TO_STAFF";
   conversationStatus: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED";
   intent: string | null;
   handoffCause: string | null;
@@ -349,6 +362,19 @@ export type GoalDrivenTurnResult = {
   appointmentCreated?: boolean;
   appointmentId?: string | null;
   llmCalls: number;
+  jevCalls?: number;
+  typeSafeJevDecision?: TypeSafeJevTurnDiagnostic | null;
+  baselineDecision?: BaselineTurnDiagnostic | null;
+  decisionDifference?: string | null;
+  goalStateBefore?: Record<string, any> | null;
+  goalStateAfter?: Record<string, any> | null;
+  bookingCoreAction?: BookingCoreActionDiagnostic | null;
+  reasonForFallbackOrHandoff?: string | null;
+  latencyAndCost?: {
+    latencyMs: number;
+    costUsd: number;
+    isEstimate: boolean;
+  };
 };
 
 export async function processGoalDrivenTurn(
@@ -360,6 +386,8 @@ export async function processGoalDrivenTurn(
     conversationId: string;
     services: Service[];
     virtualNow?: Date;
+    jevProvider?: JevDecisionsProvider | null;
+    architecture?: PlaygroundArchitecture;
   },
 ): Promise<GoalDrivenTurnResult> {
   const { business, customer, services } = context;
@@ -372,61 +400,7 @@ export async function processGoalDrivenTurn(
       : inbound.text;
   const normText = normalizeArabic(rawText);
 
-  // 1. SAFETY & EMERGENCY GATING (Top Priority Rule E)
-  const isEmergency =
-    /(?:نزيف\s+شديد|طارئ|طوارئ|حادث|الم\s+شديد\s+جدا|الم\s+لا\s+يطاق|تسمم|اغماء|كسر\s+حاد)/.test(
-      normText,
-    );
-  if (isEmergency) {
-    const emergencyMsg =
-      "سلامتك ألف سلامة! هذه حالة طارئة تتطلب تدخلاً طبياً عاجلاً. يرجى التوجه فوراً إلى أقرب مستشفى أو قسم طوارئ، أو الاتصال بالإسعاف (123 في مصر). تم إخطار فريق العيادة أيضاً للتواصل معك.";
-    return {
-      assistantAction: "AI_HANDOFF",
-      conversationStatus: "NEED_HUMAN",
-      intent: "SENSITIVE",
-      handoffCause: "SENSITIVE_OR_RESTRICTED",
-      replyText: emergencyMsg,
-      llmCalls: 0,
-    };
-  }
-
-  // 2. EXPLICIT HUMAN REQUEST GATING
-  const isHumanReq =
-    /(?:حولني\s+ل?موظف|عايز\s+(?:اكلم\s+)?(?:موظف|انسان|شخص|بني\s+ادم|خدمة\s+العملاء)|تحدث\s+مع\s+موظف|مسؤول|خدمه\s+العملاء)/.test(
-      normText,
-    );
-  if (isHumanReq) {
-    const handoffMsg =
-      "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق لمساعدتك فوراً.";
-    return {
-      assistantAction: "AI_HANDOFF",
-      conversationStatus: "NEED_HUMAN",
-      intent: "HUMAN_REQUEST",
-      handoffCause: "CUSTOMER_REQUESTED_HUMAN",
-      replyText: handoffMsg,
-      llmCalls: 0,
-    };
-  }
-
-  // 2b. CANCELLATION & RESCHEDULE GATING
-  const isCancelOrReschedule =
-    /(?:الغي|الغاء|كنسل|مش\s+هاحضر|مش\s+هقدر\s+احضر|اغير\s+المعاد|تغيير\s+الميعاد|تاجيل)/.test(
-      normText,
-    );
-  if (isCancelOrReschedule) {
-    const cancelMsg =
-      "تمام — سيتواصل معك أحد أعضاء الفريق لإتمام تعديل أو إلغاء الموعد.";
-    return {
-      assistantAction: "AI_HANDOFF",
-      conversationStatus: "NEED_HUMAN",
-      intent: "CANCELLATION",
-      handoffCause: "CUSTOMER_REQUESTED_HUMAN",
-      replyText: cancelMsg,
-      llmCalls: 0,
-    };
-  }
-
-  // 3. LOAD RECENT CONVERSATION & RECONSTRUCT GOAL-DRIVEN STATE
+  // 1. RECONSTRUCT GOAL-DRIVEN STATE BEFORE PROCESSING
   const rawRecent = await deps.conversationRepository.getMessages(
     context.conversationId,
     20,
@@ -434,34 +408,268 @@ export async function processGoalDrivenTurn(
   // getMessages returns reverse chronological (newest first); reverse to chronological (oldest first)
   const recentMessages = [...rawRecent].reverse();
   const state = reconstructStateFromHistory(recentMessages, services, todayIso);
+  const goalStateBefore = JSON.parse(JSON.stringify(state));
 
-  // 4. DETECT UNANSWERED / UNSUPPORTED SPECIFIC SERVICE QUESTIONS
-  // If the user asks about an explicit treatment like "التقويم الشفاف" and it does NOT match active services
+  // 2. DERIVE DETERMINISTIC BASELINE DECISION
+  const isEmergency =
+    /(?:نزيف\s+شديد|طارئ|طوارئ|حادث|الم\s+شديد\s+جدا|الم\s+لا\s+يطاق|تسمم|اغماء|كسر\s+حاد)/.test(
+      normText,
+    );
+  const isHumanReq =
+    /(?:حولني\s+ل?موظف|عايز\s+(?:اكلم\s+)?(?:موظف|انسان|شخص|بني\s+ادم|خدمة\s+العملاء)|تحدث\s+مع\s+موظف|مسؤول|خدمه\s+العملاء)/.test(
+      normText,
+    );
+  const isCancelOrReschedule =
+    /(?:الغي|الغاء|كنسل|مش\s+هاحضر|مش\s+هقدر\s+احضر|اغير\s+المعاد|تغيير\s+الميعاد|تاجيل)/.test(
+      normText,
+    );
   const asksSpecificUnsupported =
     normText.includes("تقويم") &&
     !services.some((s) => normalizeArabic(s.name).includes("تقويم"));
-  if (asksSpecificUnsupported) {
-    const servList = services
-      .map((s, idx) => `${idx + 1}. ${s.name}`)
-      .join("\n");
-    const reply = `عفواً، خدمة التقويم غير متوفرة لدينا حالياً بالعيادة.\nالخدمات المتاحة لدينا:\n${servList}\nهل تود حجز موعد لأي من هذه الخدمات المتاحة؟`;
-    return {
-      assistantAction: "AI_REPLY",
-      conversationStatus: "AI_ACTIVE",
-      intent: "FAQ",
-      handoffCause: null,
-      replyText: reply,
-      llmCalls: 0,
-    };
-  }
-
-  // 5. PURE CATALOG QUESTION ("ايه الخدمات اللي عندكم؟")
   const isPureCatalog =
     /(?:ايه\s+الخدمات|ما\s+هي\s+الخدمات|الخدمات\s+المتاح[هة]|قائم[هة]\s+الخدمات|عندكم\s+خدمات\s+ايه|اسعار\s+الخدمات)/.test(
       normText,
     ) &&
     !normText.includes("احجز") &&
     !normText.includes("حجز");
+
+  const baselineDecision: BaselineTurnDiagnostic = isEmergency
+    ? { intent: "SENSITIVE", action: "AI_HANDOFF", reason: "EMERGENCY_KEYWORD" }
+    : isHumanReq
+      ? {
+          intent: "HUMAN_REQUEST",
+          action: "AI_HANDOFF",
+          reason: "EXPLICIT_HUMAN_KEYWORD",
+        }
+      : isCancelOrReschedule
+        ? {
+            intent: "CANCELLATION",
+            action: "AI_HANDOFF",
+            reason: "CANCEL_RESCHEDULE_KEYWORD",
+          }
+        : asksSpecificUnsupported
+          ? {
+              intent: "FAQ",
+              action: "AI_REPLY",
+              reason: "UNSUPPORTED_SERVICE_FAQ",
+            }
+          : isPureCatalog
+            ? {
+                intent: "CATALOG",
+                action: "AI_REPLY",
+                reason: "CATALOG_INQUIRY",
+              }
+            : {
+                intent: "BOOKING",
+                action: "AI_REPLY",
+                reason: "DEFAULT_BOOKING_FLOW",
+              };
+
+  // 3. TYPESAFE JEV EVALUATION (If provider configured)
+  let typeSafeJevDecision: TypeSafeJevTurnDiagnostic | null = null;
+  let decisionDifference: string | null = null;
+  let reasonForFallbackOrHandoff: string | null = null;
+  let jevCalls = 0;
+  let latencyMs = 0;
+  let costUsd = 0;
+  let bookingCoreAction: BookingCoreActionDiagnostic | null = null;
+
+  const ordinalIdx = parseOrdinalIndex(rawText);
+  const isMechanicalInput =
+    Boolean(inbound.buttonPayload && inbound.buttonPayload.length > 0) ||
+    Boolean(state.lastOfferedOptions && ordinalIdx !== null) ||
+    normText === "more_times" ||
+    normText === "change_date";
+
+  if (context.jevProvider) {
+    if (isMechanicalInput) {
+      // Step 5 Optimization: purely mechanical selection spends 0 JEV/LLM calls
+      typeSafeJevDecision = {
+        intent: "OPTION_SELECTION",
+        confidence: 1.0,
+        source: "DETERMINISTIC_BASELINE",
+        reason: "MECHANICAL_SELECTION_BYPASS",
+        costUsd: 0,
+        latencyMs: 0,
+        isCostEstimate: false,
+      };
+      decisionDifference =
+        "Mechanical option selection: JEV model call bypassed per performance rule #5";
+    } else {
+      const t0 = Date.now();
+      try {
+        const evalRes = await context.jevProvider.evaluate({
+          state: {
+            customerMessage: rawText,
+            businessName: business.name,
+            services: services.map((s) => s.name),
+            faqs: Array.isArray(business.faqs)
+              ? (business.faqs as any[]).map((f) => f.question)
+              : [],
+            languageHint: "ar",
+          },
+          questions: SEMANTIC_QUESTIONS,
+        });
+        latencyMs = Date.now() - t0;
+        if (evalRes.ok && Object.keys(evalRes.answers).length > 0) {
+          jevCalls = 1;
+          const inputTokens = evalRes.inputTokens ?? 332;
+          const outputTokens = evalRes.outputTokens ?? 24;
+          const tokens = { input: inputTokens, output: outputTokens };
+          costUsd = (inputTokens + outputTokens) * 0.00000004;
+          const structured = mapJevAnswersToStructuredDecision(
+            evalRes.answers,
+            rawText,
+            {
+              latencyMs,
+              tokens,
+              costUsd,
+              isCostEstimate: evalRes.inputTokens === null,
+            },
+          );
+          typeSafeJevDecision = {
+            intent: structured.intent,
+            confidence: structured.confidence,
+            source: structured.source,
+            reason: structured.reason,
+            isAbstention: structured.isAbstention,
+            fallbackReason: structured.fallbackReason,
+            rawProbabilities: structured.rawProbabilities,
+            conversationGoal: structured.conversationGoal,
+            latencyMs,
+            tokens,
+            costUsd,
+            isCostEstimate: structured.isCostEstimate,
+          };
+          decisionDifference =
+            structured.intent === baselineDecision.intent
+              ? `Full Agreement: Both engines resolved "${structured.intent}"`
+              : `Difference: TypeSafe JEV resolved "${structured.intent}" (confidence ${(structured.confidence * 100).toFixed(0)}%) vs Baseline "${baselineDecision.intent}"`;
+        } else {
+          typeSafeJevDecision = createSafeFallbackDecision(
+            evalRes.errorMessage ?? "JEV_EVAL_FAILED",
+            baselineDecision.intent as any,
+            { latencyMs },
+          );
+          reasonForFallbackOrHandoff = `REMOTE_JEV_FALLBACK: ${evalRes.errorMessage ?? "Provider failure"}`;
+          decisionDifference =
+            "Safe Fallback: Deterministic Baseline executed (JEV unavailable)";
+        }
+      } catch (err: any) {
+        latencyMs = Date.now() - t0;
+        typeSafeJevDecision = createSafeFallbackDecision(
+          err?.message ?? String(err),
+          baselineDecision.intent as any,
+          { latencyMs },
+        );
+        reasonForFallbackOrHandoff = `REMOTE_JEV_EXCEPTION: ${err?.message ?? String(err)}`;
+        decisionDifference =
+          "Safe Fallback: Deterministic Baseline executed due to exception";
+      }
+    }
+  }
+
+  // Diagnostic helper to build standardized turn result
+  const makeResult = (res: {
+    assistantAction: "AI_REPLY" | "AI_HANDOFF" | "DEFERRED_TO_STAFF";
+    conversationStatus: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED";
+    intent: string | null;
+    handoffCause: string | null;
+    replyText: string;
+    buttons?: Array<{ label: string; payload: string }>;
+    replyMarkup?: any;
+    appointmentCreated?: boolean;
+    appointmentId?: string | null;
+    llmCalls?: number;
+  }): GoalDrivenTurnResult => {
+    return {
+      ...res,
+      llmCalls: res.llmCalls ?? 0,
+      jevCalls,
+      typeSafeJevDecision,
+      baselineDecision,
+      decisionDifference,
+      goalStateBefore,
+      goalStateAfter: JSON.parse(JSON.stringify(state)),
+      bookingCoreAction,
+      reasonForFallbackOrHandoff:
+        reasonForFallbackOrHandoff ?? res.handoffCause,
+      latencyAndCost: {
+        latencyMs,
+        costUsd,
+        isEstimate: typeSafeJevDecision?.isCostEstimate ?? true,
+      },
+    };
+  };
+
+  // 4. SAFETY & EMERGENCY GATING (Rule E & JEV SENSITIVE_EMERGENCY)
+  const isJevEmergency =
+    typeSafeJevDecision?.source === "TYPESAFE_JEV" &&
+    typeSafeJevDecision.intent === "SENSITIVE_EMERGENCY";
+  if (isEmergency || isJevEmergency) {
+    const emergencyMsg =
+      "سلامتك ألف سلامة! هذه حالة طارئة تتطلب تدخلاً طبياً عاجلاً. يرجى التوجه فوراً إلى أقرب مستشفى أو قسم طوارئ، أو الاتصال بالإسعاف (123 في مصر). تم إخطار فريق العيادة أيضاً للتواصل معك.";
+    return makeResult({
+      assistantAction: "AI_HANDOFF",
+      conversationStatus: "NEED_HUMAN",
+      intent: "SENSITIVE",
+      handoffCause: "SENSITIVE_OR_RESTRICTED",
+      replyText: emergencyMsg,
+    });
+  }
+
+  // 5. EXPLICIT HUMAN REQUEST GATING (Rule F & JEV EXPLICIT_HUMAN)
+  const isJevHuman =
+    typeSafeJevDecision?.source === "TYPESAFE_JEV" &&
+    typeSafeJevDecision.intent === "EXPLICIT_HUMAN";
+  if (isHumanReq || isJevHuman) {
+    const handoffMsg =
+      "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق لمساعدتك فوراً.";
+    return makeResult({
+      assistantAction: "AI_HANDOFF",
+      conversationStatus: "NEED_HUMAN",
+      intent: "HUMAN_REQUEST",
+      handoffCause: "CUSTOMER_REQUESTED_HUMAN",
+      replyText: handoffMsg,
+    });
+  }
+
+  // 6. CANCELLATION & RESCHEDULE GATING
+  const isJevCancel =
+    typeSafeJevDecision?.source === "TYPESAFE_JEV" &&
+    typeSafeJevDecision.intent === "CANCELLATION";
+  const isJevReschedule =
+    typeSafeJevDecision?.source === "TYPESAFE_JEV" &&
+    typeSafeJevDecision.intent === "RESCHEDULE";
+  if (isCancelOrReschedule || isJevCancel || isJevReschedule) {
+    const cancelMsg =
+      "تمام — سيتواصل معك أحد أعضاء الفريق لإتمام تعديل أو إلغاء الموعد.";
+    return makeResult({
+      assistantAction: "AI_HANDOFF",
+      conversationStatus: "NEED_HUMAN",
+      intent: isJevReschedule ? "RESCHEDULE" : "CANCELLATION",
+      handoffCause: "CUSTOMER_REQUESTED_HUMAN",
+      replyText: cancelMsg,
+    });
+  }
+
+  // 4. DETECT UNANSWERED / UNSUPPORTED SPECIFIC SERVICE QUESTIONS
+  // If the user asks about an explicit treatment like "التقويم الشفاف" and it does NOT match active services
+  if (asksSpecificUnsupported) {
+    const servList = services
+      .map((s, idx) => `${idx + 1}. ${s.name}`)
+      .join("\n");
+    const reply = `عفواً، خدمة التقويم غير متوفرة لدينا حالياً بالعيادة.\nالخدمات المتاحة لدينا:\n${servList}\nهل تود حجز موعد لأي من هذه الخدمات المتاحة؟`;
+    return makeResult({
+      assistantAction: "AI_REPLY",
+      conversationStatus: "AI_ACTIVE",
+      intent: "FAQ",
+      handoffCause: null,
+      replyText: reply,
+    });
+  }
+
+  // 5. PURE CATALOG QUESTION ("ايه الخدمات اللي عندكم؟")
   if (isPureCatalog) {
     const list = services
       .map((s, idx) => {
@@ -472,14 +680,13 @@ export async function processGoalDrivenTurn(
       })
       .join("\n");
     const reply = `الخدمات المتاحة لدينا في ${business.name}:\n${list}\n\nلحجز أي خدمة، أخبرنا برقم أو اسم الخدمة وسنساعدك في اختيار الموعد المناسب.`;
-    return {
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "FAQ",
       handoffCause: null,
       replyText: reply,
-      llmCalls: 0,
-    };
+    });
   }
 
   // 6. GENERAL FAQ QUESTION (Hours, location, etc.)
@@ -522,23 +729,21 @@ export async function processGoalDrivenTurn(
       // Answer and continue active booking task
       const sDesc = state.service.name ? ` لخدمة "${state.service.name}"` : "";
       const reply = `${matchedFaq.answer}\n\nوبخصوص طلب الحجز${sDesc}، هل تحب نستكمل اختيار الموعد المناسب لك؟`;
-      return {
+      return makeResult({
         assistantAction: "AI_REPLY",
         conversationStatus: "AI_ACTIVE",
         intent: "FAQ",
         handoffCause: null,
         replyText: reply,
-        llmCalls: 0,
-      };
+      });
     } else {
-      return {
+      return makeResult({
         assistantAction: "AI_REPLY",
         conversationStatus: "AI_ACTIVE",
         intent: "FAQ",
         handoffCause: null,
         replyText: matchedFaq.answer,
-        llmCalls: 0,
-      };
+      });
     }
   }
 
@@ -557,14 +762,17 @@ export async function processGoalDrivenTurn(
     !state.lastOfferedOptions &&
     hasPriorBookingConfirmation
   ) {
-    return {
+    bookingCoreAction = {
+      action: "CONFLICT_PREVENTED",
+      preventedConflict: true,
+    };
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "GENERAL_INQUIRY",
       handoffCause: null,
       replyText: `تم تأكيد حجزك السابق بالفعل! هل تود الاستفسار عن موعدك، موقع العيادة، أو حجز موعد جديد؟`,
-      llmCalls: 0,
-    };
+    });
   }
 
   // A. Check Navigation: "أوقات تانية" (more times) or "يوم تاني" (change date)
@@ -583,14 +791,13 @@ export async function processGoalDrivenTurn(
     state.timing.date = null;
     state.lastOfferedOptions = null;
     const prompt = `تمام، اخترنا خدمة "${state.service.name ?? "المطلوبة"}". ما هو اليوم البديل المناسب لك؟ (مثلاً: غداً، أو بعد غد، أو يوم الأحد القادم)`;
-    return {
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "BOOKING",
       handoffCause: null,
       replyText: prompt,
-      llmCalls: 0,
-    };
+    });
   }
 
   // B. Check Ordinal against lastOfferedOptions (UNIFIED OPTION RESOLUTION)
@@ -657,7 +864,16 @@ export async function processGoalDrivenTurn(
         const pDesc = providerName ? ` مع ${providerName}` : "";
         const confirmMsg = `تم تأكيد حجزك بنجاح لدى ${business.name}!\nالخدمة: ${state.service.name ?? "كشف أسنان"}${pDesc}\nالموعد: يوم ${date} الساعة ${startTime} إلى ${endTime}.\nفي انتظارك ونتمنى لك دوام الصحة والعافية!`;
 
-        return {
+        bookingCoreAction = {
+          action: "APPOINTMENT_CREATED",
+          appointmentId: appt ? (appt as any).id : null,
+          serviceId: servId,
+          providerId: provId,
+          slotDate: date,
+          slotStartTime: startTime,
+        };
+
+        return makeResult({
           assistantAction: "AI_REPLY",
           conversationStatus: "BOOKED",
           intent: "BOOKING",
@@ -665,8 +881,7 @@ export async function processGoalDrivenTurn(
           replyText: confirmMsg,
           appointmentCreated: true,
           appointmentId: appt ? (appt as any).id : null,
-          llmCalls: 0,
-        };
+        });
       }
     }
   }
@@ -811,7 +1026,7 @@ export async function processGoalDrivenTurn(
         }
       : undefined;
 
-    return {
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "BOOKING",
@@ -819,21 +1034,19 @@ export async function processGoalDrivenTurn(
       replyText: reply,
       buttons,
       replyMarkup,
-      llmCalls: 0,
-    };
+    });
   }
 
   // Step 9.2: If service is known, but date is missing -> prompt for date naturally
   if (!state.timing.date) {
     const prompt = `تمام، تم اختيار خدمة "${state.service.name}". ما هو اليوم المناسب لك لحجز الموعد؟ (مثلاً: اليوم، غداً، أو يوم محدد)`;
-    return {
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "BOOKING",
       handoffCause: null,
       replyText: prompt,
-      llmCalls: 0,
-    };
+    });
   }
 
   // Step 9.3: Service and date are both known -> Query CORE-01 and CORE-02 for slots
@@ -854,14 +1067,13 @@ export async function processGoalDrivenTurn(
   if (!eligibility.success || eligibility.data.providers.length === 0) {
     const msg =
       "عفواً، لا يوجد مقدمو خدمة متاحون لهذه الخدمة حالياً لدى المنشأة.";
-    return {
+    return makeResult({
       assistantAction: "AI_HANDOFF",
       conversationStatus: "NEED_HUMAN",
       intent: "BOOKING",
       handoffCause: "DOMAIN_REQUIRES_HUMAN",
       replyText: msg,
-      llmCalls: 0,
-    };
+    });
   }
 
   const bookingDeps = {
@@ -889,14 +1101,13 @@ export async function processGoalDrivenTurn(
     bookingOptionsResult.data.options.length === 0
   ) {
     const noSlotsMsg = `عفواً، لا تتوفر مواعيد شاغرة لخدمة "${state.service.name}" يوم ${targetDate}. هل تود تجربة يوم آخر؟ (مثل: غداً، أو بعد غد)`;
-    return {
+    return makeResult({
       assistantAction: "AI_REPLY",
       conversationStatus: "AI_ACTIVE",
       intent: "BOOKING",
       handoffCause: null,
       replyText: noSlotsMsg,
-      llmCalls: 0,
-    };
+    });
   }
 
   // 10. FILTER & PRIORITIZE SLOTS BASED ON PRESERVED TIME PREFERENCE
@@ -959,7 +1170,14 @@ export async function processGoalDrivenTurn(
       }
     : undefined;
 
-  return {
+  bookingCoreAction = {
+    action: "SLOTS_RESOLVED",
+    serviceId: targetServId,
+    providerId: state.provider.id,
+    slotDate: targetDate,
+  };
+
+  return makeResult({
     assistantAction: "AI_REPLY",
     conversationStatus: "AI_ACTIVE",
     intent: "BOOKING",
@@ -967,6 +1185,5 @@ export async function processGoalDrivenTurn(
     replyText: offerMsg,
     buttons,
     replyMarkup,
-    llmCalls: 0,
-  };
+  });
 }

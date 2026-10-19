@@ -1,12 +1,19 @@
 /**
  * FlowPilot Conversation Playground — Automated Comparative Evaluator
- * Evaluates Hybrid B vs Goal-Driven Hybrid vs Full Agent C across the Golden Scenario corpus.
+ * CONV-JEV-01: Multi-Engine Benchmark & Diagnostic Evaluator
+ *
+ * Compares:
+ *   A. Deterministic Baseline (Hybrid B local rules)
+ *   B. Goal-Driven Hybrid (Local state projection)
+ *   C. TypeSafe JEV + Goal-Driven State (Pinned model typesafe/jev-1.13)
+ *   D. Full Agent C (Optional generative reference)
  */
 
 import { runAgentCScenario } from "./agent-c-runner";
 import { runGoalDrivenScenario } from "./goal-driven-runner";
 import { GOLDEN_SCENARIOS } from "./golden-scenarios";
 import { runHybridScenario } from "./hybrid-runner";
+import { runTypeSafeJevScenario } from "./jev-runner";
 import type {
   BenchmarkComparisonReport,
   ScenarioComparison,
@@ -18,8 +25,25 @@ export type EvaluateOptions = {
   scenarios?: ScenarioDefinition[];
   saveTraces?: boolean;
   tracesDir?: string;
-  architectures?: Array<"hybrid" | "goal_driven" | "agent_c">;
+  architectures?: Array<"hybrid" | "goal_driven" | "typesafe_jev" | "agent_c">;
+  live?: boolean;
 };
+
+export function calculatePercentiles(values: number[]): {
+  median: number;
+  p95: number;
+} {
+  if (values.length === 0) return { median: 0, p95: 0 };
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 !== 0
+      ? sorted[mid]!
+      : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
+  const p95Idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+  const p95 = sorted[p95Idx]!;
+  return { median, p95 };
+}
 
 export async function evaluateBenchmark(
   options: EvaluateOptions = {},
@@ -27,26 +51,49 @@ export async function evaluateBenchmark(
   report: BenchmarkComparisonReport;
   hybridTraces: ScenarioTrace[];
   goalDrivenTraces: ScenarioTrace[];
+  typeSafeJevTraces: ScenarioTrace[];
   agentCTraces: ScenarioTrace[];
 }> {
   const scenarios = options.scenarios ?? GOLDEN_SCENARIOS;
+  const includeAgentC = options.architectures?.includes("agent_c") ?? false;
+  const isLive = Boolean(options.live);
+
   const hybridTraces: ScenarioTrace[] = [];
   const goalDrivenTraces: ScenarioTrace[] = [];
+  const typeSafeJevTraces: ScenarioTrace[] = [];
   const agentCTraces: ScenarioTrace[] = [];
   const comparisons: ScenarioComparison[] = [];
 
   for (const scenario of scenarios) {
-    // 1. Run Hybrid B
+    // 1. Run Architecture A: Deterministic Baseline
     const hybridTrace = await runHybridScenario(scenario);
     hybridTraces.push(hybridTrace);
 
-    // 2. Run Goal-Driven Hybrid
+    // 2. Run Architecture B: Goal-Driven Hybrid
     const goalDrivenTrace = await runGoalDrivenScenario(scenario);
     goalDrivenTraces.push(goalDrivenTrace);
 
-    // 3. Run Agent C
-    const agentCTrace = await runAgentCScenario(scenario);
-    agentCTraces.push(agentCTrace);
+    // 3. Run Architecture C: TypeSafe JEV + Goal-Driven State
+    const typeSafeJevTrace = await runTypeSafeJevScenario(scenario, {
+      live: isLive,
+    });
+    typeSafeJevTraces.push(typeSafeJevTrace);
+
+    // 4. Run Architecture D: Full Agent C (optional)
+    let agentCTrace: ScenarioTrace | null = null;
+    if (includeAgentC) {
+      agentCTrace = await runAgentCScenario(scenario);
+      agentCTraces.push(agentCTrace);
+    }
+
+    const jevCalls = typeSafeJevTrace.turns.reduce(
+      (sum, t) => sum + (t.processing.jevCalls ?? 0),
+      0,
+    );
+    const jevCostUsd = typeSafeJevTrace.turns.reduce(
+      (sum, t) => sum + (t.processing.latencyAndCost?.costUsd ?? 0),
+      0,
+    );
 
     comparisons.push({
       scenarioId: scenario.id,
@@ -54,20 +101,25 @@ export async function evaluateBenchmark(
       category: scenario.category,
       hybridVerdict: hybridTrace.verdict,
       goalDrivenVerdict: goalDrivenTrace.verdict,
-      agentCVerdict: agentCTrace.verdict,
+      typeSafeJevVerdict: typeSafeJevTrace.verdict,
+      agentCVerdict: agentCTrace ? agentCTrace.verdict : "PASS",
       hybridDurationMs: hybridTrace.metrics.totalDurationMs,
       goalDrivenDurationMs: goalDrivenTrace.metrics.totalDurationMs,
-      agentCDurationMs: agentCTrace.metrics.totalDurationMs,
+      typeSafeJevDurationMs: typeSafeJevTrace.metrics.totalDurationMs,
+      agentCDurationMs: agentCTrace ? agentCTrace.metrics.totalDurationMs : 0,
       hybridLlmCalls: hybridTrace.metrics.totalLlmCalls,
       goalDrivenLlmCalls: goalDrivenTrace.metrics.totalLlmCalls,
-      agentCLlmCalls: agentCTrace.metrics.totalLlmCalls,
+      typeSafeJevLlmCalls: typeSafeJevTrace.metrics.totalLlmCalls,
+      typeSafeJevCalls: jevCalls,
+      typeSafeJevCostUsd: jevCostUsd,
+      agentCLlmCalls: agentCTrace ? agentCTrace.metrics.totalLlmCalls : 0,
       notes:
-        goalDrivenTrace.verdict === "FAIL"
-          ? `Goal-Driven failed: ${goalDrivenTrace.failureReason}`
-          : hybridTrace.verdict === "FAIL"
-            ? `Hybrid B failed: ${hybridTrace.failureReason}`
-            : agentCTrace.verdict === "FAIL"
-              ? `Agent C failed: ${agentCTrace.failureReason}`
+        typeSafeJevTrace.verdict === "FAIL"
+          ? `TypeSafe JEV: ${typeSafeJevTrace.failureReason}`
+          : goalDrivenTrace.verdict === "FAIL"
+            ? `Goal-Driven: ${goalDrivenTrace.failureReason}`
+            : hybridTrace.verdict === "FAIL"
+              ? `Deterministic Baseline: ${hybridTrace.failureReason}`
               : undefined,
     });
   }
@@ -77,20 +129,30 @@ export async function evaluateBenchmark(
   const goalDrivenPassed = goalDrivenTraces.filter(
     (t) => t.verdict === "PASS",
   ).length;
+  const typeSafeJevPassed = typeSafeJevTraces.filter(
+    (t) => t.verdict === "PASS",
+  ).length;
   const agentCPassed = agentCTraces.filter((t) => t.verdict === "PASS").length;
 
-  const hybridTotalDuration = hybridTraces.reduce(
-    (acc, t) => acc + t.metrics.totalDurationMs,
+  const hybridDurations = hybridTraces.map((t) => t.metrics.totalDurationMs);
+  const goalDrivenDurations = goalDrivenTraces.map(
+    (t) => t.metrics.totalDurationMs,
+  );
+  const typeSafeJevDurations = typeSafeJevTraces.map(
+    (t) => t.metrics.totalDurationMs,
+  );
+  const agentCDurations = agentCTraces.map((t) => t.metrics.totalDurationMs);
+
+  const hybridTotalDuration = hybridDurations.reduce((a, b) => a + b, 0);
+  const goalDrivenTotalDuration = goalDrivenDurations.reduce(
+    (a, b) => a + b,
     0,
   );
-  const goalDrivenTotalDuration = goalDrivenTraces.reduce(
-    (acc, t) => acc + t.metrics.totalDurationMs,
+  const typeSafeJevTotalDuration = typeSafeJevDurations.reduce(
+    (a, b) => a + b,
     0,
   );
-  const agentCTotalDuration = agentCTraces.reduce(
-    (acc, t) => acc + t.metrics.totalDurationMs,
-    0,
-  );
+  const agentCTotalDuration = agentCDurations.reduce((a, b) => a + b, 0);
 
   const hybridTotalLlmCalls = hybridTraces.reduce(
     (acc, t) => acc + t.metrics.totalLlmCalls,
@@ -98,6 +160,25 @@ export async function evaluateBenchmark(
   );
   const goalDrivenTotalLlmCalls = goalDrivenTraces.reduce(
     (acc, t) => acc + t.metrics.totalLlmCalls,
+    0,
+  );
+  const typeSafeJevTotalLlmCalls = typeSafeJevTraces.reduce(
+    (acc, t) => acc + t.metrics.totalLlmCalls,
+    0,
+  );
+  const typeSafeJevTotalCalls = typeSafeJevTraces.reduce(
+    (acc, t) =>
+      acc +
+      t.turns.reduce((ts, turn) => ts + (turn.processing.jevCalls ?? 0), 0),
+    0,
+  );
+  const typeSafeJevTotalCostUsd = typeSafeJevTraces.reduce(
+    (acc, t) =>
+      acc +
+      t.turns.reduce(
+        (ts, turn) => ts + (turn.processing.latencyAndCost?.costUsd ?? 0),
+        0,
+      ),
     0,
   );
   const agentCTotalLlmCalls = agentCTraces.reduce(
@@ -113,6 +194,10 @@ export async function evaluateBenchmark(
     (acc, t) => acc + t.metrics.totalTokens.totalTokens,
     0,
   );
+  const typeSafeJevTotalTokens = typeSafeJevTraces.reduce(
+    (acc, t) => acc + t.metrics.totalTokens.totalTokens,
+    0,
+  );
   const agentCTotalTokens = agentCTraces.reduce(
     (acc, t) => acc + t.metrics.totalTokens.totalTokens,
     0,
@@ -120,9 +205,11 @@ export async function evaluateBenchmark(
 
   const report: BenchmarkComparisonReport = {
     timestamp: new Date().toISOString(),
+    evaluationMode: isLive ? "LIVE_TYPESAFE_JEV" : "OFFLINE_SIMULATION",
     totalScenarios,
     hybridPassed,
     goalDrivenPassed,
+    typeSafeJevPassed,
     agentCPassed,
     hybridAvgDurationMs:
       totalScenarios > 0 ? Math.round(hybridTotalDuration / totalScenarios) : 0,
@@ -130,18 +217,34 @@ export async function evaluateBenchmark(
       totalScenarios > 0
         ? Math.round(goalDrivenTotalDuration / totalScenarios)
         : 0,
+    typeSafeJevAvgDurationMs:
+      totalScenarios > 0
+        ? Math.round(typeSafeJevTotalDuration / totalScenarios)
+        : 0,
     agentCAvgDurationMs:
-      totalScenarios > 0 ? Math.round(agentCTotalDuration / totalScenarios) : 0,
+      agentCTraces.length > 0
+        ? Math.round(agentCTotalDuration / agentCTraces.length)
+        : 0,
     hybridTotalLlmCalls,
     goalDrivenTotalLlmCalls,
+    typeSafeJevTotalLlmCalls,
+    typeSafeJevTotalCalls,
+    typeSafeJevTotalCostUsd,
     agentCTotalLlmCalls,
     hybridTotalTokens,
     goalDrivenTotalTokens,
+    typeSafeJevTotalTokens,
     agentCTotalTokens,
     comparisons,
   };
 
-  return { report, hybridTraces, goalDrivenTraces, agentCTraces };
+  return {
+    report,
+    hybridTraces,
+    goalDrivenTraces,
+    typeSafeJevTraces,
+    agentCTraces,
+  };
 }
 
 export function formatComparisonMarkdown(
@@ -153,31 +256,39 @@ export function formatComparisonMarkdown(
   const goalDrivenPassPct = Math.round(
     ((report.goalDrivenPassed ?? 0) / report.totalScenarios) * 100,
   );
-  const agentCPassPct = Math.round(
-    (report.agentCPassed / report.totalScenarios) * 100,
+  const jevPassPct = Math.round(
+    ((report.typeSafeJevPassed ?? 0) / report.totalScenarios) * 100,
   );
 
-  let md = `# تقرير المقارنة المعيارية الثلاثية: Hybrid B مقابل Goal-Driven Hybrid مقابل Full Agent C\n\n`;
+  const modeBadge =
+    report.evaluationMode === "LIVE_TYPESAFE_JEV"
+      ? "🔴 **LIVE NETWORK BENCHMARK (Real OpenRouter Decisions API `typesafe/jev-1.13`)**"
+      : "🟡 **OFFLINE SIMULATION (Deterministic Mock / Zero Remote Spend)**";
+
+  let md = `# تقرير المقارنة المعيارية الشاملة — FlowPilot CONV-JEV-01\n\n`;
+  md += `**حالة بيئة التقييم**: ${modeBadge}\n`;
   md += `**تاريخ التقرير**: ${report.timestamp}\n`;
-  md += `**إجمالي السيناريوهات**: ${report.totalScenarios}\n\n`;
+  md += `**إجمالي السيناريوهات الذهبية المختبرة**: ${report.totalScenarios}\n\n`;
 
-  md += `## ملخص المؤشرات القياسية المقارنة\n\n`;
-  md += `| المؤشر | Hybrid B (الأساس الحالي) | Goal-Driven Hybrid (المرشح التجريبي) | Full Agent C (معيار المرجع التجريبي) |\n`;
+  md += `## جدول المقارنة المعيارية بين المحركات\n\n`;
+  md += `| المعيار القياسي | A. Deterministic Baseline | B. Goal-Driven State | C. TypeSafe JEV + Goal-Driven |\n`;
   md += `| :--- | :---: | :---: | :---: |\n`;
-  md += `| نسبة النجاح | **${hybridPassPct}%** (${report.hybridPassed}/${report.totalScenarios}) | **${goalDrivenPassPct}%** (${report.goalDrivenPassed ?? 0}/${report.totalScenarios}) | **${agentCPassPct}%** (${report.agentCPassed}/${report.totalScenarios}) |\n`;
-  md += `| متوسط زمن الاستجابة | **${report.hybridAvgDurationMs} ms** | **${report.goalDrivenAvgDurationMs ?? 0} ms** | **${report.agentCAvgDurationMs} ms** |\n`;
-  md += `| إجمالي مكالمات LLM | **${report.hybridTotalLlmCalls}** | **${report.goalDrivenTotalLlmCalls ?? 0}** | **${report.agentCTotalLlmCalls}** |\n`;
-  md += `| إجمالي التوكنز المقدرة | **${report.hybridTotalTokens}** | **${report.goalDrivenTotalTokens ?? 0}** | **${report.agentCTotalTokens}** |\n\n`;
+  md += `| **نسبة النجاح الإجمالية** | **${hybridPassPct}%** (${report.hybridPassed}/${report.totalScenarios}) | **${goalDrivenPassPct}%** (${report.goalDrivenPassed ?? 0}/${report.totalScenarios}) | **${jevPassPct}%** (${report.typeSafeJevPassed ?? 0}/${report.totalScenarios}) |\n`;
+  md += `| **متوسط زمن الاستجابة** | **${report.hybridAvgDurationMs} ms** | **${report.goalDrivenAvgDurationMs ?? 0} ms** | **${report.typeSafeJevAvgDurationMs ?? 0} ms** |\n`;
+  md += `| **إجمالي استدعاءات LLM التوليدي** | **${report.hybridTotalLlmCalls}** | **${report.goalDrivenTotalLlmCalls ?? 0}** | **${report.typeSafeJevTotalLlmCalls ?? 0}** |\n`;
+  md += `| **استدعاءات قرارات TypeSafe JEV** | 0 | 0 | **${report.typeSafeJevTotalCalls ?? 0}** |\n`;
+  md += `| **إجمالي التكلفة التقديرية (USD)** | $0.00 | $0.00 | **$${(report.typeSafeJevTotalCostUsd ?? 0).toFixed(6)}** |\n`;
+  md += `| **إجمالي التوكنز المستهلكة** | **${report.hybridTotalTokens}** | **${report.goalDrivenTotalTokens ?? 0}** | **${report.typeSafeJevTotalTokens ?? 0}** |\n\n`;
 
-  md += `## تفاصيل السيناريوهات\n\n`;
-  md += `| المعرف | الفئة | اسم السيناريو | Hybrid B | Goal-Driven | Agent C | زمن G-D (ms) | مكالمات G-D |\n`;
+  md += `## تفاصيل السيناريوهات الذهبية (Sample Summary)\n\n`;
+  md += `| المعرف | الفئة | اسم السيناريو | Baseline | Goal-Driven | TypeSafe JEV | زمن JEV (ms) | نداءات JEV |\n`;
   md += `| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
 
   for (const c of report.comparisons) {
     const hIcon = c.hybridVerdict === "PASS" ? "✔" : "❌";
     const gdIcon = c.goalDrivenVerdict === "PASS" ? "✔" : "❌";
-    const cIcon = c.agentCVerdict === "PASS" ? "✔" : "❌";
-    md += `| ${c.scenarioId} | ${c.category} | ${c.title} | ${hIcon} | ${gdIcon} | ${cIcon} | ${c.goalDrivenDurationMs ?? 0} | ${c.goalDrivenLlmCalls ?? 0} |\n`;
+    const jevIcon = c.typeSafeJevVerdict === "PASS" ? "✔" : "❌";
+    md += `| ${c.scenarioId} | ${c.category} | ${c.title} | ${hIcon} | ${gdIcon} | ${jevIcon} | ${c.typeSafeJevDurationMs ?? 0} | ${c.typeSafeJevCalls ?? 0} |\n`;
   }
 
   return md;
