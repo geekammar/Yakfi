@@ -153,6 +153,7 @@ import {
 } from "@/features/conversations/server/handoff-cause";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
+  extractProviderPreference,
   extractTimeOfDayPreference,
   resolveEgyptianRelativeDate,
   todayIsoInTimeZone,
@@ -782,17 +783,12 @@ function resolveFinishedTurn(
         ? turnTelemetry?.jevDecision?.semantic?.signals
         : undefined;
     // CONV-CORE-02: Single Decision Ownership & Safety Precedence.
-    // When JEV owns the turn, its semantic reading must not be overwritten
-    // by competing lexical classifiers, while explicit human requests and
-    // sensitive/safety restrictions retain authoritative precedence.
-    const signals = semanticSignals
-      ? {
-          sensitive: semanticSignals.sensitive || lexicalControl.sensitive,
-          explicitHuman:
-            semanticSignals.explicitHuman || lexicalControl.explicitHuman,
-          nonCommittal: semanticSignals.nonCommittal,
-        }
-      : lexicalControl;
+    // When JEV owns the turn, its validated semantic signals are authoritative
+    // and must not be overwritten by competing broad lexical classifiers.
+    // Genuine explicit human requests and sensitive/safety restrictions are evaluated
+    // within the validated semantic reading when JEV runs. For non-JEV turns or on
+    // fallback, the lexical detector remains authoritative.
+    const signals = semanticSignals ?? lexicalControl;
 
     const base =
       priorState ?? deriveConversationStateFromHistory(recentChronological);
@@ -830,40 +826,54 @@ function resolveFinishedTurn(
 
     const todayIso = todayIsoInTimeZone(now, timezone);
 
-    // CONV-CORE-02: Explicit date in current turn (colloquial Egyptian date or ISO)
-    const currentTurnDate = resolveEgyptianRelativeDate(
-      currentMessage,
-      todayIso,
-    );
-    if (
-      currentTurnDate &&
-      !factUpdates.some((u) => u.key === "date" && u.value === currentTurnDate)
-    ) {
-      factUpdates.push({
-        key: "date",
-        value: currentTurnDate,
-        isRevision: Boolean(
-          base.knownFacts.date && base.knownFacts.date !== currentTurnDate,
-        ),
-      });
+    // CONV-CORE-02: Explicit unambiguous date in current turn (colloquial Egyptian date or ISO).
+    // Validated model/extraction facts are authoritative — never overwrite an existing date update.
+    if (!factUpdates.some((u) => u.key === "date")) {
+      const currentTurnDate = resolveEgyptianRelativeDate(
+        currentMessage,
+        todayIso,
+      );
+      if (currentTurnDate) {
+        factUpdates.push({
+          key: "date",
+          value: currentTurnDate,
+          isRevision: Boolean(
+            base.knownFacts.date && base.knownFacts.date !== currentTurnDate,
+          ),
+        });
+      }
     }
 
-    // Explicit time of day preference in current turn
-    const currentTurnTimePref = extractTimeOfDayPreference(currentMessage);
-    if (
-      currentTurnTimePref &&
-      !factUpdates.some(
-        (u) => u.key === "timePreference" && u.value === currentTurnTimePref,
-      )
-    ) {
-      factUpdates.push({
-        key: "timePreference",
-        value: currentTurnTimePref,
-        isRevision: Boolean(
-          base.knownFacts.timePreference &&
-          base.knownFacts.timePreference !== currentTurnTimePref,
-        ),
-      });
+    // Explicit unambiguous time of day preference in current turn.
+    // Validated model/extraction facts are authoritative — never overwrite an existing preference update.
+    if (!factUpdates.some((u) => u.key === "timePreference")) {
+      const currentTurnTimePref = extractTimeOfDayPreference(currentMessage);
+      if (currentTurnTimePref) {
+        factUpdates.push({
+          key: "timePreference",
+          value: currentTurnTimePref,
+          isRevision: Boolean(
+            base.knownFacts.timePreference &&
+            base.knownFacts.timePreference !== currentTurnTimePref,
+          ),
+        });
+      }
+    }
+
+    // Explicit provider preference in current turn.
+    // Validated model/extraction facts are authoritative — never overwrite an existing provider update.
+    if (!factUpdates.some((u) => u.key === "provider")) {
+      const currentTurnProvider = extractProviderPreference(currentMessage);
+      if (currentTurnProvider) {
+        factUpdates.push({
+          key: "provider",
+          value: currentTurnProvider,
+          isRevision: Boolean(
+            base.knownFacts.provider &&
+            base.knownFacts.provider !== currentTurnProvider,
+          ),
+        });
+      }
     }
 
     // SUPPLIED-FACT RESUME binding (PROMPT-AI-EVAL-07). When a clarification is
@@ -877,12 +887,17 @@ function resolveFinishedTurn(
     const modelEscalatesHuman =
       decision.intent === "HUMAN_REQUEST" ||
       decision.handoffReason === "HUMAN_REQUEST";
+    const isInterruption =
+      decision.intent === "FAQ" ||
+      decision.intent === "GREETING" ||
+      decision.intent === "AMBIGUOUS";
     if (
       pending &&
       pending.missingFacts.length === 1 &&
       !signals.sensitive &&
       !signals.explicitHuman &&
-      !modelEscalatesHuman
+      !modelEscalatesHuman &&
+      !isInterruption
     ) {
       const missing = pending.missingFacts[0]!;
       const alreadySupplied =
@@ -890,12 +905,14 @@ function resolveFinishedTurn(
         base.knownFacts[missing] != null;
       const trimmed = currentMessage.trim();
       if (!alreadySupplied && trimmed.length > 0) {
-        let value = trimmed;
         if (missing === "date") {
           const iso = resolveEgyptianRelativeDate(currentMessage, todayIso);
-          if (iso) value = iso;
+          if (iso) {
+            factUpdates.push({ key: missing, value: iso });
+          }
+        } else {
+          factUpdates.push({ key: missing, value: trimmed });
         }
-        factUpdates.push({ key: missing, value });
       }
     }
 
@@ -933,10 +950,14 @@ function resolveFinishedTurn(
       }
     }
 
+    const deferredGoals = decision.goals
+      ?.slice(1)
+      .filter((g) => g.kind === "DOMAIN_ACTION");
     const { state } = mergeConversationState(seeded, {
       factUpdates,
       turnGoal: decision.intent,
       ...(decision.goals ? { goals: decision.goals } : {}),
+      ...(deferredGoals && deferredGoals.length > 0 ? { deferredGoals } : {}),
     });
     const plan = resolveTurnPlan({
       decision,
@@ -2516,11 +2537,16 @@ async function runInboundTurn(
         business,
         services,
         conversation: {
+          id: conversation.id,
           status: conversation.status,
           recentMessages: recentMessagesBeforeCurrent,
         },
         message: inbound.text,
         conversationState: turnSession.state,
+        conversationStateEnvelope: {
+          businessId: business.id,
+          conversationId: conversation.id,
+        },
         now,
       },
     });
@@ -3014,6 +3040,17 @@ async function runInboundTurn(
             }
           }
         }
+      } else if (!bookingAiResponse.extraction.provider) {
+        const turnProvider = extractProviderPreference(inbound.text);
+        if (turnProvider) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              provider: turnProvider,
+            },
+          };
+        }
       }
 
       let activeFollowUpId: string | null =
@@ -3335,6 +3372,11 @@ async function runInboundTurn(
               serviceOffer = null;
             }
           }
+        }
+        if (turnSession.enabled && !serviceOffer) {
+          turnSession.state =
+            turnSession.state ?? resolvedState ?? emptyConversationState();
+          await turnSession.commit();
         }
         let replyMarkup: Record<string, unknown> | undefined;
         if (

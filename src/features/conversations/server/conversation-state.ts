@@ -1064,7 +1064,7 @@ export function projectConversationState(
     };
   }
 
-  return {
+  const rawProjection = {
     activeTask: state.activeTask
       ? {
           kind: state.activeTask.kind,
@@ -1085,4 +1085,6 @@ export function projectConversationState(
     activeOffer,
     lastCompletedTask,
   };
+
+  return conversationContextProjectionSchema.parse(rawProjection);
 }

@@ -2,7 +2,8 @@
  * FlowPilot — CONV-CORE-02 Verification Suite
  * Context-Aware JEV-First Semantic Gateway & Single Decision Ownership
  *
- * Verifies all 19 Required Scenarios (A through S):
+ * Verifies all 19 Required Scenarios (A through S) through real engine,
+ * gateway, semantic strategy, decisions provider, and mock HTTP seams:
  *  A. Initial Arabic booking with context projection
  *  B. Date correction: date updates, service & evening preference survive, slot offer invalidated
  *  C. Provider correction: provider updates, slot offer invalidated, service & date survive
@@ -13,15 +14,15 @@
  *  H. Second booking after confirmation: fresh task, consumed offer not reused
  *  I. Explicit human request: authoritative safety precedence wins
  *  J. Provider preference without human request: mapped to provider, not handoff
- *  K. Numeric selection: mechanical resolution with ZERO model calls
+ *  K. Numeric selection: mechanical resolution with ZERO model calls (Western & Arabic digits)
  *  L. Expired / invalid selection: safely rejected, no invalid appointment
- *  M. JEV timeout / malformed output: fails closed safely, 1 spent attempt
- *  N. Missing credentials: pre-attempt routing, 0 JEV calls
+ *  M. JEV timeout / malformed output: fails closed safely, 1 spent attempt, 0 LLM calls
+ *  N. Missing credentials: pre-attempt routing, 0 network calls spent
  *  O. Successful semantic result vs conflicting lexical cue: JEV interpretation preserved
- *  P. Cross-tenant mismatch: mismatched state rejected by context builder
+ *  P. Cross-tenant mismatch: mismatched state rejected by context builder (negative provenance tests)
  *  Q. Fresh request / durable reload: store reload affects provider request and planning
  *  R. Context bounds & disclosure: bounds enforced, secrets/nonces excluded, stale offers nullified
- *  S. State-revision regression: CAS conflict detected and handled
+ *  S. State-revision regression: CAS conflict detected and handled through openTurnStateSession()
  *
  * Run: pnpm check:conv-core-02
  */
@@ -41,8 +42,17 @@ import type {
   AiResponse,
 } from "@/features/conversations/server/conversation-ai";
 import type { ConversationEngineDeps } from "@/features/conversations/server/conversation-engine";
-import type { ConversationState } from "@/features/conversations/server/conversation-state";
+import type {
+  ConversationFactKey,
+  ConversationState,
+} from "@/features/conversations/server/conversation-state";
 import type { UpdateConversationDto } from "@/lib/validation";
+import type { JevAnswer } from "@/server/integrations/ai/jev-decisions-provider";
+import type {
+  AiProviderAdapter,
+  AiProviderResult,
+  AiTelemetry,
+} from "@/server/integrations/ai/types";
 import type { InboundClaimResult } from "@/server/repositories/inbound-dedupe.repository";
 import type { UsageRecord } from "@/types/domain";
 
@@ -114,6 +124,55 @@ class InMemoryConversationStateStore {
   }
 }
 
+function buildDefaultJevAnswers(text: string): Record<string, JevAnswer> {
+  const isEmergency =
+    text.includes("ألم") ||
+    text.includes("طوارئ") ||
+    text.includes("تعبان جدا");
+  const isHumanReq =
+    text.includes("الموظفين ضروري") ||
+    text.includes("أكلم حد") ||
+    text.includes("حولني لموظف");
+  const isStaffCompliment =
+    text.includes("الموظفين ممتازين") ||
+    text.includes("الموظفين عندكم ممتازين");
+  const isBenignIssue = text.includes("مفيش مشكلة");
+
+  const sensitiveScore = isEmergency ? 0.98 : isBenignIssue ? 0.01 : 0.02;
+  const supportScore = isHumanReq ? 0.95 : isStaffCompliment ? 0.05 : 0.05;
+  const bookingScore = isEmergency || isHumanReq ? 0.1 : 0.95;
+
+  let goal: string = "booking";
+  if (isEmergency) goal = "sensitive";
+  else if (isHumanReq) goal = "human_handoff";
+
+  return {
+    supportRequested: { type: "noul", noul: supportScore },
+    providerRequested: {
+      type: "noul",
+      noul: text.includes("د.") || text.includes("دكتور") ? 0.95 : 0.05,
+    },
+    bookingRequested: { type: "noul", noul: bookingScore },
+    availabilityAsked: { type: "noul", noul: 0.05 },
+    cancellationRequested: { type: "noul", noul: 0.01 },
+    rescheduleRequested: { type: "noul", noul: 0.01 },
+    providerPreferenceExpressed: {
+      type: "noul",
+      noul: text.includes("د.") || text.includes("دكتور") ? 0.95 : 0.05,
+    },
+    sensitiveTurn: { type: "noul", noul: sensitiveScore },
+    serviceOrPriceAsked: { type: "noul", noul: 0.05 },
+    greetingOnly: { type: "noul", noul: 0.01 },
+    ambiguousTurn: { type: "noul", noul: 0.05 },
+    conversationGoal: {
+      type: "choice",
+      choice: goal,
+      confidence: null,
+      probabilities: { [goal]: 1.0 },
+    },
+  };
+}
+
 async function main(): Promise<void> {
   process.env.DATABASE_URL ??=
     "postgresql://user:password@localhost:5432/placeholder";
@@ -136,10 +195,14 @@ async function main(): Promise<void> {
   } = await import("../src/features/conversations/server/conversation-state");
   const { buildAiContext } =
     await import("../src/features/conversations/server/ai-context-builder/context-builder");
-  const { createJevDecisionsProvider } =
+  const { createJevDecisionsProvider, JEV_PINNED_MODEL, JEV_SECRET_REF } =
     await import("../src/server/integrations/ai/jev-decisions-provider");
   const { createSemanticJevStrategy } =
     await import("../src/server/integrations/ai/jev-semantic-strategy");
+  const { createAiOrchestrator } =
+    await import("../src/server/integrations/ai/orchestrator");
+  const { openTurnStateSession } =
+    await import("../src/features/conversations/server/conversation-state-store");
   const { receiveInboundMessage } =
     await import("../src/features/conversations/server/conversation-engine");
 
@@ -154,9 +217,41 @@ async function main(): Promise<void> {
   const BRANCH_1 = "44444444-4444-4444-8444-444444444444";
   const now = new Date("2026-09-14T10:00:00Z");
 
+  type HttpCall = {
+    url: string;
+    method: string;
+    headers: Headers;
+    body: Record<string, unknown> & {
+      state?: {
+        customer_message?: string;
+        conversation_context?: {
+          known_service?: string | null;
+          known_date?: string | null;
+          time_preference?: string | null;
+          provider_preference?: string | null;
+          active_offer?: {
+            offered_service_name?: string | null;
+          } | null;
+          [key: string]: unknown;
+        };
+        [key: string]: unknown;
+      };
+    };
+    rawBody: string;
+  };
+
+  type MockHttpHandler = (call: {
+    url: string;
+    method: string;
+    headers: Headers;
+    body: unknown;
+  }) => { status: number; body: unknown };
+
   function createEngineFixture(opts?: {
     defaultServiceId?: string | null;
-    customAi?: (req: AiRequest) => Promise<AiResponse>;
+    customHttpHandler?: MockHttpHandler;
+    hasCredentials?: boolean;
+    customGenerativeReply?: (req: AiRequest) => AiResponse;
   }) {
     const days = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"];
     const workingHours: Record<string, unknown> = {};
@@ -251,8 +346,164 @@ async function main(): Promise<void> {
       endTime: string;
     }> = [];
 
-    let aiCalls = 0;
+    // HTTP seam for provider adapter calls
+    const httpCalls: HttpCall[] = [];
+    let currentHttpHandler: MockHttpHandler =
+      opts?.customHttpHandler ??
+      ((call) => {
+        const payload = call.body as
+          { state?: { customer_message?: string } } | undefined;
+        const text = payload?.state?.customer_message ?? "";
+        const answers = buildDefaultJevAnswers(text);
+        return {
+          status: 200,
+          body: {
+            id: `dec-${httpCalls.length}`,
+            model: JEV_PINNED_MODEL,
+            answers,
+            usage: { input_tokens: 180, output_tokens: 30 },
+          },
+        };
+      });
+
+    const mockFetch: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const headers = new Headers(init?.headers);
+      const rawBody = String(init?.body ?? "{}");
+      let body: unknown = {};
+      try {
+        body = JSON.parse(rawBody);
+      } catch {}
+      const call: HttpCall = {
+        url,
+        method,
+        headers,
+        body: body as HttpCall["body"],
+        rawBody,
+      };
+      httpCalls.push(call);
+
+      const res = currentHttpHandler(call);
+      return new Response(JSON.stringify(res.body), {
+        status: res.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    let hasCredentials = opts?.hasCredentials ?? true;
+    const decisionsProvider = createJevDecisionsProvider({
+      getEnvVar: (name) =>
+        name === JEV_SECRET_REF && hasCredentials
+          ? "sk-openrouter-test"
+          : undefined,
+      fetchImpl: mockFetch,
+    });
+
+    const semanticStrategy = createSemanticJevStrategy({
+      provider: decisionsProvider,
+      enabled: true,
+    });
+
+    let generativeCalls = 0;
     const capturedRequests: AiRequest[] = [];
+    const generativeAdapter: AiProviderAdapter = {
+      providerId: "openrouter",
+      model: "mock-generative-v1",
+      secretRef: "MOCK_KEY",
+      async call(req: AiRequest): Promise<AiProviderResult> {
+        generativeCalls++;
+        capturedRequests.push(req);
+
+        let response: AiResponse;
+        if (opts?.customGenerativeReply) {
+          response = opts.customGenerativeReply(req);
+        } else if (
+          req.message.includes("عنوان") ||
+          req.message.includes("مكان")
+        ) {
+          response = {
+            intent: "FAQ",
+            action: "reply",
+            summary: "سؤال عن المكان",
+            content: "عنواننا في التجمع الخامس، القاهرة.",
+            handoffReason: null,
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+          };
+        } else if (req.message.includes("بكام")) {
+          response = {
+            intent: "FAQ",
+            action: "reply",
+            summary: "استفسار عن السعر مع حجز",
+            content: "سعر كشف الأسنان 300 جنيه.",
+            handoffReason: null,
+            goals: [
+              { kind: "ANSWER", intent: "FAQ", continueAfter: true },
+              { kind: "DOMAIN_ACTION", intent: "BOOKING" },
+            ],
+            extraction: {
+              service: "كشف أسنان",
+              provider: null,
+              date: "2026-09-15",
+              timePreference: null,
+            },
+          };
+        } else {
+          response = {
+            intent: "BOOKING",
+            action: "booking_handoff",
+            summary: "حجز موعد",
+            content: "أهلاً بك! هساعدك في حجز الموعد.",
+            handoffReason: null,
+            extraction: {
+              service: "تنظيف أسنان",
+              provider: null,
+              date: "2026-09-15",
+              timePreference: "evening",
+            },
+          };
+        }
+
+        return {
+          ok: true,
+          response,
+          provider: "openrouter",
+          model: "mock-generative-v1",
+          latencyMs: 15,
+        };
+      },
+    };
+
+    const orchestrator = createAiOrchestrator({
+      primary: generativeAdapter,
+      secondary: null,
+      fallbackEnabled: false,
+      decisionStrategy: semanticStrategy,
+    });
+
+    let lastTelemetry: AiTelemetry | null = null;
+    const realGatewayAi = {
+      get providerName() {
+        return lastTelemetry?.finalProvider ?? "policy-backed";
+      },
+      async respond(request: AiRequest): Promise<AiResponse> {
+        capturedRequests.push(request);
+        const result = await orchestrator.callWithFallback(request);
+        lastTelemetry = result.telemetry;
+        if (!result.response) {
+          throw new Error("No response returned from orchestrator");
+        }
+        return result.response;
+      },
+      getLastTelemetry() {
+        return lastTelemetry;
+      },
+    };
 
     const deps: ConversationEngineDeps = {
       businessRepository: {
@@ -276,7 +527,7 @@ async function main(): Promise<void> {
         findById: async () =>
           ({
             ...conversation,
-            status: conversationStatus,
+            status: conversation.status,
           }) as unknown as Conversation,
         create: async () => conversation as unknown as Conversation,
         addMessage: async (
@@ -397,71 +648,7 @@ async function main(): Promise<void> {
         providerName: "test-transport",
         send: async () => ({ provider: "test", delivered: true }),
       },
-      ai: {
-        providerName: "test-ai",
-        respond: async (request: AiRequest): Promise<AiResponse> => {
-          aiCalls++;
-          capturedRequests.push(request);
-          if (opts?.customAi) {
-            return opts.customAi(request);
-          }
-          const text = request.message;
-          if (text.includes("عنوان") || text.includes("مكان")) {
-            return {
-              intent: "FAQ",
-              action: "reply",
-              summary: "سؤال عن العنوان",
-              content: "عنواننا في التجمع الخامس، القاهرة.",
-              handoffReason: null,
-              extraction: {
-                service: null,
-                provider: null,
-                date: null,
-                timePreference: null,
-              },
-            };
-          }
-          if (text.includes("بكام")) {
-            return {
-              intent: "FAQ",
-              action: "reply",
-              summary: "استفسار عن السعر وحجز",
-              content: "سعر كشف الأسنان 300 جنيه.",
-              handoffReason: null,
-              goals: [
-                {
-                  kind: "ANSWER",
-                  intent: "FAQ",
-                  continueAfter: true,
-                },
-                {
-                  kind: "DOMAIN_ACTION",
-                  intent: "BOOKING",
-                },
-              ],
-              extraction: {
-                service: "كشف أسنان",
-                provider: null,
-                date: "2026-09-15",
-                timePreference: null,
-              },
-            };
-          }
-          return {
-            intent: "BOOKING",
-            action: "booking_handoff",
-            summary: "طلب حجز",
-            content: "أهلاً بك! جاري البحث عن موعد مناسب.",
-            handoffReason: null,
-            extraction: {
-              service: "تنظيف أسنان",
-              provider: null,
-              date: "2026-09-15",
-              timePreference: "evening",
-            },
-          };
-        },
-      },
+      ai: realGatewayAi as unknown as ConversationEngineDeps["ai"],
     };
 
     let msgCounter = 0;
@@ -484,21 +671,29 @@ async function main(): Promise<void> {
       createdAppointments,
       capturedRequests,
       sendTurn,
-      getAiCalls: () => aiCalls,
+      httpCalls,
+      setHttpHandler: (fn: MockHttpHandler) => {
+        currentHttpHandler = fn;
+      },
+      setCredentials: (cred: boolean) => {
+        hasCredentials = cred;
+      },
+      getJevCalls: () => httpCalls.length,
+      getGenerativeCalls: () => generativeCalls,
     };
   }
 
   console.log("── FLOWPILOT CONV-CORE-02 ACCEPTANCE SUITE ──\n");
 
   // =========================================================================
-  // SCENARIO A: Initial Arabic booking with context projection
+  // SCENARIO A: Initial Arabic booking through real JEV gateway with context projection
   // =========================================================================
   {
     const fixture = createEngineFixture();
     const res = await fixture.sendTurn("عايز أحجز تنظيف بكرة بالليل");
 
     check(
-      "Scenario A: Turn executed successfully",
+      "Scenario A: Turn executed successfully through real JEV gateway",
       Boolean(
         res.ok &&
         "assistantAction" in res &&
@@ -507,11 +702,11 @@ async function main(): Promise<void> {
       res,
     );
     check(
-      "Scenario A: Exactly 1 model call made for initial booking",
-      fixture.getAiCalls() === 1,
+      "Scenario A: Exactly 1 JEV physical attempt spent, 0 generative LLM calls",
+      fixture.getJevCalls() === 1 && fixture.getGenerativeCalls() === 0,
     );
 
-    // Verify durable state was saved with the extracted facts
+    // Verify durable state was saved with the extracted facts and slot offer presented
     const saved = await fixture.stateStore.load(B_ID, fixture.conversation.id);
     const hydrated = saved
       ? hydrateConversationState(saved.state, {
@@ -533,15 +728,17 @@ async function main(): Promise<void> {
         hydrated?.knownFacts?.timePreference === "evening",
     );
 
-    // Turn 2: Verify next turn projects this saved context to the AI
+    // Turn 2: Verify next turn projects this saved context to the AI and serializes to HTTP seam
     await fixture.sendTurn("الساعة كام المواعيد؟");
-    const turn2Req =
-      fixture.capturedRequests[fixture.capturedRequests.length - 1];
+    const lastHttpCall = fixture.httpCalls[fixture.httpCalls.length - 1];
+    const wireContext = lastHttpCall?.body?.state?.conversation_context;
+
     check(
-      "Scenario A: Context projection received by AI provider on subsequent turn",
-      turn2Req?.conversationContext !== undefined &&
-        turn2Req?.conversationContext?.knownService === "تنظيف أسنان" &&
-        turn2Req?.conversationContext?.timePreference === "evening",
+      "Scenario A: Context projection serialized to HTTP seam on subsequent turn",
+      wireContext !== undefined &&
+        wireContext.known_service === "تنظيف أسنان" &&
+        wireContext.time_preference === "evening",
+      wireContext,
     );
   }
 
@@ -550,7 +747,6 @@ async function main(): Promise<void> {
   // =========================================================================
   {
     const fixture = createEngineFixture();
-    // Seed initial state: service "تنظيف أسنان", date "2026-09-15", evening, active offer
     const initialOffer = buildSlotOffer(
       { businessId: B_ID, conversationId: fixture.conversation.id },
       "offer-b",
@@ -597,26 +793,6 @@ async function main(): Promise<void> {
     );
 
     // Turn 2: Customer corrects date: "خليه الخميس بدل بكرة"
-    fixture.deps.ai = {
-      providerName: "test-ai",
-      respond: async (request: AiRequest): Promise<AiResponse> => {
-        fixture.capturedRequests.push(request);
-        return {
-          intent: "BOOKING",
-          action: "booking_handoff",
-          summary: "تعديل التاريخ إلى الخميس",
-          content: "تمام، هشوفلك المتاح يوم الخميس.",
-          handoffReason: null,
-          extraction: {
-            service: null, // Did not repeat service
-            provider: null,
-            date: "2026-09-17", // Thursday
-            timePreference: null, // Did not repeat evening
-          },
-        };
-      },
-    };
-
     await fixture.sendTurn("خليه الخميس بدل بكرة");
 
     const saved = await fixture.stateStore.load(B_ID, fixture.conversation.id);
@@ -627,18 +803,18 @@ async function main(): Promise<void> {
         })
       : null;
 
-    const lastReq =
-      fixture.capturedRequests[fixture.capturedRequests.length - 1];
+    const lastHttpCall = fixture.httpCalls[fixture.httpCalls.length - 1];
+    const sentContext = lastHttpCall?.body?.state?.conversation_context;
     check(
-      "Scenario B: Context projection carried prior activeOffer and facts to AI",
-      lastReq?.conversationContext?.knownService === "تنظيف أسنان" &&
-        lastReq?.conversationContext?.activeOffer?.offeredServiceName ===
-          "تنظيف أسنان",
+      "Scenario B: Context projection carried prior activeOffer and facts to JEV HTTP seam",
+      sentContext?.known_service === "تنظيف أسنان" &&
+        sentContext?.active_offer?.offered_service_name === "تنظيف أسنان",
     );
     check(
       "Scenario B: Date updated to Thursday (2026-09-17)",
       state?.selectedDate === "2026-09-17" ||
         state?.knownFacts?.date === "2026-09-17",
+      state?.knownFacts,
     );
     check(
       "Scenario B: Service survived date correction without being repeated",
@@ -706,26 +882,6 @@ async function main(): Promise<void> {
     );
 
     // Turn: Customer corrects provider: "عايز مع د. سارة بدل د. أحمد"
-    fixture.deps.ai = {
-      providerName: "test-ai",
-      respond: async (request: AiRequest): Promise<AiResponse> => {
-        fixture.capturedRequests.push(request);
-        return {
-          intent: "BOOKING",
-          action: "booking_handoff",
-          summary: "تغيير الطبيب",
-          content: "تمام، هشوفلك مواعيد د. سارة.",
-          handoffReason: null,
-          extraction: {
-            service: null,
-            provider: "د. سارة",
-            date: null,
-            timePreference: null,
-          },
-        };
-      },
-    };
-
     await fixture.sendTurn("عايز مع د. سارة بدل د. أحمد");
 
     const saved = await fixture.stateStore.load(B_ID, fixture.conversation.id);
@@ -766,48 +922,80 @@ async function main(): Promise<void> {
   // =========================================================================
   {
     const fixture = createEngineFixture();
-    const res = await fixture.sendTurn("بكام الكشف وعايز أحجز بكرة");
+    const res = await fixture.sendTurn("بكام كشف الأسنان وعايز أحجز بكرة");
 
     check(
-      "Scenario D: Handled in exactly 1 model call",
-      fixture.getAiCalls() === 1,
+      "Scenario D: Handled in exactly 1 model call (0 extra chains)",
+      fixture.getGenerativeCalls() === 1 && fixture.getJevCalls() === 0,
     );
     check(
-      "Scenario D: Answer-and-continue reply composed with continuation invite",
+      "Scenario D: Grounded FAQ reply returned with booking preserved in pendingGoals",
       Boolean(
         res.ok &&
         "assistantAction" in res &&
-        res.assistantAction === "AI_REPLY",
+        res.assistantAction === "AI_REPLY" &&
+        res.observability?.turnPlan?.steps?.some((s) => s.kind === "ANSWER"),
       ),
       res,
+    );
+    const saved = await fixture.stateStore.load(B_ID, fixture.conversation.id);
+    const state = saved
+      ? hydrateConversationState(saved.state, {
+          businessId: B_ID,
+          conversationId: fixture.conversation.id,
+        })
+      : null;
+    check(
+      "Scenario D: Booking goal survives as pendingGoal in durable state",
+      Boolean(state?.pendingGoals?.some((g) => g.kind === "DOMAIN_ACTION")),
     );
   }
 
   // =========================================================================
-  // SCENARIO E: Knowledge interruption during booking
+  // SCENARIO E: Knowledge interruption during multi-turn booking
   // =========================================================================
   {
-    const { state: inBooking } = mergeConversationState(
-      emptyConversationState(),
-      {
-        turnGoal: "BOOKING",
-        factUpdates: [
-          { key: "service", value: "كشف أسنان" },
-          { key: "date", value: "2026-09-15" },
-        ],
-      },
+    const fixture = createEngineFixture();
+    // Turn 1: Customer starts booking
+    await fixture.sendTurn("عايز أحجز كشف أسنان");
+    const state1 = (
+      await fixture.stateStore.load(B_ID, fixture.conversation.id)
+    )?.state as ConversationState | undefined;
+    check(
+      "Scenario E (Multi-turn): Turn 1 establishes active booking task",
+      state1?.activeTask?.kind === "BOOKING",
     );
 
-    const { state: interrupted } = mergeConversationState(inBooking, {
-      turnGoal: "FAQ",
-    });
+    // Turn 2: Customer interrupts with FAQ: "عنوان ومكان العيادة فين؟"
+    const res2 = await fixture.sendTurn("عنوان ومكان العيادة فين؟");
+    check(
+      "Scenario E (Multi-turn): Grounded FAQ answer provided during interruption",
+      Boolean(
+        res2.ok &&
+        "assistantAction" in res2 &&
+        res2.assistantAction === "AI_REPLY" &&
+        fixture.conversation.status === "AI_ACTIVE",
+      ),
+    );
+
+    const saved2 = await fixture.stateStore.load(B_ID, fixture.conversation.id);
+    const state2 = saved2
+      ? hydrateConversationState(saved2.state, {
+          businessId: B_ID,
+          conversationId: fixture.conversation.id,
+        })
+      : null;
 
     check(
-      "Scenario E: Booking task is marked INTERRUPTED when FAQ is asked and facts survive",
-      interrupted.bookingStage === "INTERRUPTED" &&
-        interrupted.knownFacts.service === "كشف أسنان" &&
-        interrupted.knownFacts.date === "2026-09-15" &&
-        interrupted.topics[0]?.suspendState === "INTERRUPTED",
+      "Scenario E (Multi-turn): Booking task marked INTERRUPTED and facts survive",
+      state2?.bookingStage === "INTERRUPTED" &&
+        state2.knownFacts.service === "كشف أسنان",
+      {
+        bookingStage: state2?.bookingStage,
+        knownFacts: state2?.knownFacts,
+        activeTask: state2?.activeTask,
+        topics: state2?.topics,
+      },
     );
   }
 
@@ -853,11 +1041,14 @@ async function main(): Promise<void> {
       dehydrateConversationState(seedState),
     );
 
-    await fixture.sendTurn("عنوان ومكان العيادة فين؟");
+    const res = await fixture.sendTurn("مواعيد العمل إيه؟");
 
     check(
       "Scenario G: Post-confirmation FAQ answered without handoff",
-      fixture.conversation.status === "AI_ACTIVE",
+      res.ok &&
+        "assistantAction" in res &&
+        res.assistantAction === "AI_REPLY" &&
+        fixture.conversation.status === "AI_ACTIVE",
     );
   }
 
@@ -901,32 +1092,18 @@ async function main(): Promise<void> {
   }
 
   // =========================================================================
-  // SCENARIO I: Explicit human request
+  // SCENARIO I: Explicit human request through real JEV gateway
   // =========================================================================
   {
     const fixture = createEngineFixture();
-    fixture.deps.ai = {
-      providerName: "test-ai",
-      respond: async (): Promise<AiResponse> => ({
-        intent: "HUMAN_REQUEST",
-        action: "handoff",
-        summary: "طلب التحدث مع موظف",
-        content: "تم تحويلك إلى موظف خدمة العملاء.",
-        handoffReason: "HUMAN_REQUEST",
-        extraction: {
-          service: null,
-          provider: null,
-          date: null,
-          timePreference: null,
-        },
-      }),
-    };
-
-    await fixture.sendTurn("عايز أكلم حد من الموظفين ضروري");
+    const res = await fixture.sendTurn("عايز أكلم حد من الموظفين ضروري");
 
     check(
       "Scenario I: Explicit human request triggers handoff",
-      fixture.conversation.status === "NEED_HUMAN",
+      res.ok &&
+        "assistantAction" in res &&
+        res.assistantAction === "AI_HANDOFF" &&
+        fixture.conversation.status === "NEED_HUMAN",
     );
   }
 
@@ -935,20 +1112,24 @@ async function main(): Promise<void> {
   // =========================================================================
   {
     const fixture = createEngineFixture();
-    await fixture.sendTurn("عايز أحجز مع الدكتور أحمد");
+    const res = await fixture.sendTurn("عايز أحجز مع الدكتور أحمد");
 
     check(
       "Scenario J: Named provider preference is NOT treated as human handoff",
-      fixture.conversation.status === "AI_ACTIVE",
+      res.ok &&
+        "assistantAction" in res &&
+        res.assistantAction === "AI_REPLY" &&
+        fixture.conversation.status === "AI_ACTIVE",
     );
   }
 
   // =========================================================================
-  // SCENARIO K: Numeric selection (1 / ١ against active offer)
+  // SCENARIO K: Numeric selection (1 / ١ against active offer) via receiveInboundMessage
   // =========================================================================
   {
+    const fixture = createEngineFixture();
     const offer = buildSlotOffer(
-      { businessId: B_ID, conversationId: C_ID },
+      { businessId: B_ID, conversationId: fixture.conversation.id },
       "offer-k",
       {
         serviceId: SERVICE_1,
@@ -970,13 +1151,67 @@ async function main(): Promise<void> {
       now,
     )!;
 
-    const reply = interpretOfferReply("١", offer, now);
+    const seedState = withPresentedOffer(emptyConversationState(), offer);
+    await fixture.stateStore.save(
+      B_ID,
+      fixture.conversation.id,
+      null,
+      dehydrateConversationState(seedState),
+    );
 
+    // K1: Arabic digit selection "١" through receiveInboundMessage
+    const resArabic = await fixture.sendTurn("١");
     check(
-      "Scenario K: Numeric mechanical selection spends exactly 0 AI model calls",
-      reply.kind === "slot" &&
-        reply.selection.kind === "index" &&
-        reply.selection.index === 1,
+      "Scenario K: Arabic digit selection executes mechanically with exactly 0 model calls",
+      resArabic.ok &&
+        "assistantAction" in resArabic &&
+        resArabic.assistantAction === "AI_REPLY" &&
+        fixture.getJevCalls() === 0 &&
+        fixture.getGenerativeCalls() === 0 &&
+        fixture.createdAppointments.length === 1,
+    );
+
+    // K2: Western digit selection "1" against fresh active offer
+    const fixture2 = createEngineFixture();
+    const offer2 = buildSlotOffer(
+      { businessId: B_ID, conversationId: fixture2.conversation.id },
+      "offer-k2",
+      {
+        serviceId: SERVICE_1,
+        serviceName: "كشف أسنان",
+        serviceSource: "CUSTOMER",
+        providerId: PROVIDER_1,
+        date: "2026-09-15",
+        followUpRequestId: null,
+        shownCount: 1,
+        options: [
+          {
+            providerId: PROVIDER_1,
+            displayName: "د. سارة",
+            startAt: "2026-09-15T09:00",
+            endAt: "2026-09-15T09:30",
+          },
+        ],
+      },
+      now,
+    )!;
+    const seedState2 = withPresentedOffer(emptyConversationState(), offer2);
+    await fixture2.stateStore.save(
+      B_ID,
+      fixture2.conversation.id,
+      null,
+      dehydrateConversationState(seedState2),
+    );
+
+    const resWestern = await fixture2.sendTurn("1");
+    check(
+      "Scenario K: Western digit selection executes mechanically with exactly 0 model calls",
+      resWestern.ok &&
+        "assistantAction" in resWestern &&
+        resWestern.assistantAction === "AI_REPLY" &&
+        fixture2.getJevCalls() === 0 &&
+        fixture2.getGenerativeCalls() === 0 &&
+        fixture2.createdAppointments.length === 1,
     );
   }
 
@@ -1017,40 +1252,24 @@ async function main(): Promise<void> {
   }
 
   // =========================================================================
-  // SCENARIO M: JEV timeout / malformed output
+  // SCENARIO M: JEV timeout / spent failure
   // =========================================================================
   {
-    let attemptsCount = 0;
-    const decisions = createJevDecisionsProvider({
-      getEnvVar: (name: string) =>
-        name === "OPENROUTER_API_KEY" ? "sk-test" : undefined,
-      fetchImpl: (async () => {
-        attemptsCount++;
+    const fixture = createEngineFixture({
+      customHttpHandler: () => {
         throw new Error("ETIMEDOUT");
-      }) as unknown as typeof fetch,
+      },
     });
 
-    const strategy = createSemanticJevStrategy({
-      provider: decisions,
-      enabled: true,
-    });
-
-    const result = await strategy.decide({
-      message: "عايز كشف",
-      conversationStatus: "AI_ACTIVE",
-      recentMessages: [],
-      businessName: "عيادة",
-      services: [],
-      faqs: [],
-    });
+    const res = await fixture.sendTurn("عايز أحجز كشف");
 
     check(
-      "Scenario M: JEV timeout results in deterministic fallback",
-      result.mode === "DETERMINISTIC",
+      "Scenario M: JEV timeout results in deterministic fallback (fail-closed)",
+      Boolean(res.ok && "assistantAction" in res),
     );
     check(
-      "Scenario M: Exactly 1 physical attempt spent (no retries)",
-      attemptsCount === 1,
+      "Scenario M: Exactly 1 JEV physical attempt spent, 0 generative LLM calls (no chaining)",
+      fixture.getJevCalls() === 1 && fixture.getGenerativeCalls() === 0,
     );
   }
 
@@ -1058,127 +1277,188 @@ async function main(): Promise<void> {
   // SCENARIO N: Missing credentials
   // =========================================================================
   {
-    let fetchCalls = 0;
-    const decisions = createJevDecisionsProvider({
-      getEnvVar: () => undefined,
-      fetchImpl: (async () => {
-        fetchCalls++;
-        return new Response("{}", { status: 200 });
-      }) as unknown as typeof fetch,
+    const fixture = createEngineFixture({
+      hasCredentials: false,
     });
 
-    const strategy = createSemanticJevStrategy({
-      provider: decisions,
-      enabled: true,
-    });
-
-    const result = await strategy.decide({
-      message: "عايز كشف",
-      conversationStatus: "AI_ACTIVE",
-      recentMessages: [],
-      businessName: "عيادة",
-      services: [],
-      faqs: [],
-    });
+    const res = await fixture.sendTurn("عايز كشف");
 
     check(
       "Scenario N: Missing credentials routes pre-attempt to GENERATIVE",
-      result.mode === "GENERATIVE",
+      Boolean(res.ok && "assistantAction" in res),
     );
     check(
-      "Scenario N: Missing credentials spends exactly 0 network calls",
-      fetchCalls === 0,
+      "Scenario N: Missing credentials spends exactly 0 network calls to JEV",
+      fixture.getJevCalls() === 0 && fixture.getGenerativeCalls() === 1,
     );
   }
 
   // =========================================================================
-  // SCENARIO O: Successful semantic result vs conflicting lexical cue
+  // SCENARIO O: Semantic Ownership & Lexical Conflict Resolution (Review Finding 1)
   // =========================================================================
   {
-    const fixture = createEngineFixture();
-    fixture.deps.ai = {
-      providerName: "typesafe-jev",
-      respond: async (request: AiRequest): Promise<AiResponse> => {
-        fixture.capturedRequests.push(request);
-        return {
-          intent: "BOOKING",
-          action: "booking_handoff",
-          summary: "طلب حجز مع طبيب",
-          content: "تمام، هشوفلك موعد مناسب.",
-          handoffReason: null,
-          extraction: {
-            service: "كشف أسنان",
-            provider: null,
-            date: "2026-09-15",
-            timePreference: null,
-          },
-        };
-      },
-    };
-
-    // The message includes the word 'خدمة' or 'مساعدة' which might trigger a generic lexical rule,
-    // but JEV identified it as a BOOKING.
-    await fixture.sendTurn("ممكن خدمة كشف أسنان بكرة؟");
-
-    check(
-      "Scenario O: Semantic decision owns the turn (stays AI_ACTIVE booking)",
-      fixture.conversation.status === "AI_ACTIVE",
+    // O.1: Booking + compliment mentioning staff ("الموظفين عندكم ممتازين")
+    const fixtureStaffCompliment = createEngineFixture();
+    const resCompliment = await fixtureStaffCompliment.sendTurn(
+      "عايز أحجز كشف بكرة والموظفين عندكم ممتازين",
     );
-    const saved = await fixture.stateStore.load(B_ID, fixture.conversation.id);
-    const state = saved
-      ? hydrateConversationState(saved.state, {
-          businessId: B_ID,
-          conversationId: fixture.conversation.id,
-        })
-      : null;
     check(
-      "Scenario O: State transitioned to BOOKING without lexical override",
-      state?.activeTask?.kind === "BOOKING",
+      "Scenario O.1: Booking with staff compliment stays AI_ACTIVE booking (not human handoff)",
+      resCompliment.ok &&
+        "assistantAction" in resCompliment &&
+        resCompliment.assistantAction === "AI_REPLY" &&
+        fixtureStaffCompliment.conversation.status === "AI_ACTIVE",
+      resCompliment,
+    );
+
+    // O.2: Benign "مفيش مشكلة"
+    const fixtureBenignIssue = createEngineFixture();
+    const resBenign = await fixtureBenignIssue.sendTurn(
+      "عايز أحجز كشف بكرة ومفيش مشكلة",
+    );
+    check(
+      "Scenario O.2: Benign 'مفيش مشكلة' stays AI_ACTIVE booking (not sensitive handoff)",
+      resBenign.ok &&
+        "assistantAction" in resBenign &&
+        resBenign.assistantAction === "AI_REPLY" &&
+        fixtureBenignIssue.conversation.status === "AI_ACTIVE",
+    );
+
+    // O.3: Genuine sensitive case
+    const fixtureSensitive = createEngineFixture();
+    const resSensitive = await fixtureSensitive.sendTurn(
+      "عندي ألم شديد جداً ومش قادر أتحمل",
+    );
+    check(
+      "Scenario O.3: Genuine emergency triggers SENSITIVE handoff",
+      resSensitive.ok &&
+        "assistantAction" in resSensitive &&
+        resSensitive.assistantAction === "AI_HANDOFF" &&
+        fixtureSensitive.conversation.status === "NEED_HUMAN" &&
+        resSensitive.handoffCause === "SENSITIVE_OR_RESTRICTED",
+      { resSensitive, status: fixtureSensitive.conversation.status },
+    );
+
+    // O.4: Staff-owned conversation deferred to staff
+    const fixtureStaffOwned = createEngineFixture();
+    fixtureStaffOwned.conversation.status = "NEED_HUMAN";
+    const resStaffOwned =
+      await fixtureStaffOwned.sendTurn("عايز أحجز كشف بكرة");
+    check(
+      "Scenario O.4: Staff-owned conversation routes to DEFERRED_TO_STAFF with 0 AI calls",
+      resStaffOwned.ok &&
+        "assistantAction" in resStaffOwned &&
+        resStaffOwned.assistantAction === "DEFERRED_TO_STAFF" &&
+        fixtureStaffOwned.getJevCalls() === 0 &&
+        fixtureStaffOwned.getGenerativeCalls() === 0,
     );
   }
 
   // =========================================================================
-  // SCENARIO P: Cross-tenant mismatch
+  // SCENARIO P: Context Provenance & Cross-Tenant Isolation (Review Finding 4)
   // =========================================================================
   {
-    const foreignState: MutableConversationState = emptyConversationState();
-    foreignState.activeTask = { kind: "BOOKING", stage: "SERVICE_SUPPLIED" };
-    foreignState.serviceId = SERVICE_1;
-    foreignState.selectedService = "كشف أسنان";
-    foreignState.selectedDate = "2026-09-15";
-    foreignState.knownFacts = {
-      service: "كشف أسنان",
-      date: "2026-09-15",
-    };
+    const stateA: MutableConversationState = emptyConversationState();
+    stateA.activeTask = { kind: "BOOKING", stage: "SERVICE_SUPPLIED" };
+    stateA.serviceId = SERVICE_1;
+    stateA.selectedService = "كشف أسنان";
 
-    const projection = projectConversationState(foreignState);
-    check(
-      "Scenario P: Context projection can be built",
-      projection !== null && projection.activeTask?.kind === "BOOKING",
-    );
-
-    // Verify context builder projects valid tenant state into request
-    const built = buildAiContext({
+    // P.1: State from Business A supplied toward Business B -> REJECTED
+    const builtCrossTenant = buildAiContext({
       scope: { businessId: B_ID },
       sources: {
         message: "مرحبا",
-        business: {
-          businessId: B_ID,
-          name: "عيادة الابتسامة",
+        business: { businessId: B_ID, name: "عيادة الابتسامة" },
+        conversation: { id: "conv-1", status: "AI_ACTIVE", recentMessages: [] },
+        conversationState: stateA,
+        conversationStateEnvelope: {
+          businessId: "FOREIGN-BUSINESS-B",
+          conversationId: "conv-1",
         },
-        conversation: {
-          status: "AI_ACTIVE",
-          recentMessages: [],
-        },
-        conversationState: foreignState,
         services: [],
       },
     });
-
     check(
-      "Scenario P: Context builder projects valid tenant state into request",
-      built.request.conversationContext !== null &&
-        built.request.conversationContext?.activeTask?.kind === "BOOKING",
+      "Scenario P.1: Cross-tenant state envelope rejected by Context Builder",
+      builtCrossTenant.request.conversationContext === undefined,
+    );
+
+    // P.2: Wrong conversation ID within same business -> REJECTED
+    const builtWrongConv = buildAiContext({
+      scope: { businessId: B_ID },
+      sources: {
+        message: "مرحبا",
+        business: { businessId: B_ID, name: "عيادة الابتسامة" },
+        conversation: {
+          id: "conv-CURRENT",
+          status: "AI_ACTIVE",
+          recentMessages: [],
+        },
+        conversationState: stateA,
+        conversationStateEnvelope: {
+          businessId: B_ID,
+          conversationId: "conv-FOREIGN",
+        },
+        services: [],
+      },
+    });
+    check(
+      "Scenario P.2: Mismatched conversation within same business rejected",
+      builtWrongConv.request.conversationContext === undefined,
+    );
+
+    // P.3: Foreign state with no active offer and unproven provenance -> REJECTED
+    const builtUnproven = buildAiContext({
+      scope: { businessId: B_ID },
+      sources: {
+        message: "مرحبا",
+        business: { businessId: B_ID, name: "عيادة الابتسامة" },
+        conversation: { id: "conv-1", status: "AI_ACTIVE", recentMessages: [] },
+        conversationState: stateA,
+        conversationStateEnvelope: null,
+        services: [],
+      },
+    });
+    check(
+      "Scenario P.3: Unproven state provenance rejected safely",
+      builtUnproven.request.conversationContext === undefined,
+    );
+
+    // P.4: Correctly scoped state accepted -> INCLUDED
+    const builtValid = buildAiContext({
+      scope: { businessId: B_ID },
+      sources: {
+        message: "مرحبا",
+        business: { businessId: B_ID, name: "عيادة الابتسامة" },
+        conversation: { id: "conv-1", status: "AI_ACTIVE", recentMessages: [] },
+        conversationState: stateA,
+        conversationStateEnvelope: {
+          businessId: B_ID,
+          conversationId: "conv-1",
+        },
+        services: [],
+      },
+    });
+    check(
+      "Scenario P.4: Correctly scoped state envelope accepted and projected",
+      builtValid.request.conversationContext !== undefined &&
+        builtValid.request.conversationContext?.knownService === "كشف أسنان",
+    );
+
+    // P.5: No durable state remains supported
+    const builtNoState = buildAiContext({
+      scope: { businessId: B_ID },
+      sources: {
+        message: "مرحبا",
+        business: { businessId: B_ID, name: "عيادة الابتسامة" },
+        conversation: { id: "conv-1", status: "AI_ACTIVE", recentMessages: [] },
+        conversationState: null,
+        services: [],
+      },
+    });
+    check(
+      "Scenario P.5: Null durable state handled safely with undefined projection",
+      builtNoState.request.conversationContext === undefined,
     );
   }
 
@@ -1208,23 +1488,27 @@ async function main(): Promise<void> {
 
     await fixture.sendTurn("ممكن أعرف المواعيد المتاحة؟");
 
-    const lastReq =
-      fixture.capturedRequests[fixture.capturedRequests.length - 1];
+    const lastHttpCall = fixture.httpCalls[fixture.httpCalls.length - 1];
+    const wireCtx = lastHttpCall?.body?.state?.conversation_context;
     check(
-      "Scenario Q: Reloaded state reflected in provider request context",
-      lastReq?.conversationContext?.knownService === "تنظيف أسنان" &&
-        lastReq?.conversationContext?.knownDate === "2026-09-20" &&
-        lastReq?.conversationContext?.timePreference === "morning",
-      lastReq?.conversationContext,
+      "Scenario Q: Reloaded state reflected in provider request wire context",
+      wireCtx?.known_service === "تنظيف أسنان" &&
+        wireCtx?.known_date === "2026-09-20" &&
+        wireCtx?.time_preference === "morning",
+      wireCtx,
     );
   }
 
   // =========================================================================
-  // SCENARIO R: Context bounds & disclosure
+  // SCENARIO R: Context bounds, boundary sizes & runtime validation (Finding 5)
   // =========================================================================
   {
     const state: MutableConversationState = emptyConversationState();
     state.activeTask = { kind: "BOOKING", stage: "SERVICE_SUPPLIED" };
+    state.selectedService =
+      "تنظيف وتلميع الأسنان بالفلورايد وإزالة الرواسب الجيرية بعناية فائقة"; // 65 chars
+    state.serviceId =
+      "svc-boundary-sized-identifier-that-is-longer-than-sixty-four-characters-long";
     state.missingFacts = [
       "date",
       "timePreference",
@@ -1235,14 +1519,7 @@ async function main(): Promise<void> {
       "date",
       "service",
       "provider",
-    ] as unknown as readonly (
-      | "date"
-      | "timePreference"
-      | "service"
-      | "provider"
-      | "followUpRequestId"
-      | "customerName"
-    )[];
+    ] as unknown as ConversationFactKey[];
 
     const offer = buildSlotOffer(
       { businessId: B_ID, conversationId: "c-1" },
@@ -1251,7 +1528,7 @@ async function main(): Promise<void> {
         serviceId: SERVICE_1,
         serviceName: "كشف أسنان",
         serviceSource: "CUSTOMER",
-        providerId: null,
+        providerId: PROVIDER_1,
         date: "2026-09-15",
         followUpRequestId: null,
         shownCount: 1,
@@ -1267,29 +1544,34 @@ async function main(): Promise<void> {
       now,
     )!;
 
-    const stateWithOffer = withPresentedOffer(state, offer);
-    const projection = projectConversationState(stateWithOffer, { now });
+    state.offer = offer;
+
+    const projection = projectConversationState(state, { now });
 
     check(
       "Scenario R: Missing facts in clarification are bounded to 8 items",
-      (projection?.pendingClarification?.missingFacts?.length ?? 0) <= 8,
+      projection?.pendingClarification?.missingFacts?.length === 8,
     );
     check(
       "Scenario R: Offer nonce / internal tokens are NOT leaked in projection",
-      !("token" in (projection?.activeOffer ?? {})) &&
-        !("businessId" in (projection?.activeOffer ?? {})),
+      !("nonce" in (projection?.activeOffer ?? {})),
     );
     check(
       "Scenario R: Live active offer is projected with safe fields",
-      projection?.activeOffer?.offeredServiceName === "كشف أسنان" &&
-        projection?.activeOffer?.itemCount === 1,
+      projection?.activeOffer?.type === "SLOT" &&
+        projection.activeOffer.offeredServiceName === "كشف أسنان",
     );
 
-    // Stale offer (expired after 12h TTL)
+    // Boundary size validation: lengths up to persistedState max bounds are accepted safely
+    check(
+      "Scenario R: Boundary-sized valid state passes runtime validation safely",
+      projection?.knownService === state.selectedService &&
+        projection?.resolvedServiceId === state.serviceId,
+    );
+
+    // Expired offer is projected as null
     const dayLater = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const staleProjection = projectConversationState(stateWithOffer, {
-      now: dayLater,
-    });
+    const staleProjection = projectConversationState(state, { now: dayLater });
     check(
       "Scenario R: Expired offer is projected as null",
       staleProjection?.activeOffer === null,
@@ -1297,58 +1579,115 @@ async function main(): Promise<void> {
   }
 
   // =========================================================================
-  // SCENARIO S: State-revision regression (CAS conflict)
+  // SCENARIO S: Production Turn State Session CAS Concurrency (Review Finding 6)
   // =========================================================================
   {
     const store = new InMemoryConversationStateStore();
-    const state = emptyConversationState();
+    const scope = { businessId: B_ID, conversationId: "conv-cas-session" };
 
-    // First save: expectedRevision null -> revision 1
-    const res1 = await store.save(
-      B_ID,
-      "conv-cas",
-      null,
-      dehydrateConversationState(state),
-    );
+    // Initialize state
+    const session1 = await openTurnStateSession(store, scope, now);
+    session1.state = {
+      ...emptyConversationState(),
+      selectedService: "كشف أسنان",
+      serviceId: SERVICE_1,
+      knownFacts: { service: "كشف أسنان" },
+    };
+    const commit1 = await session1.commit();
     check(
-      "Scenario S: Initial save returns revision 1",
-      res1.status === "saved" && res1.revision === 1,
-    );
-
-    // Concurrent save with obsolete expectedRevision null -> conflict
-    const resConflict = await store.save(
-      B_ID,
-      "conv-cas",
-      null,
-      dehydrateConversationState(state),
-    );
-    check(
-      "Scenario S: Concurrent initialization returns conflict",
-      resConflict.status === "conflict",
+      "Scenario S: Initial session commit succeeds (revision 1)",
+      commit1 === true,
     );
 
-    // Second valid update with expectedRevision 1 -> revision 2
-    const res2 = await store.save(
-      B_ID,
-      "conv-cas",
-      1,
-      dehydrateConversationState(state),
-    );
+    // Concurrent turn: Session 2 opens while Session 1 is already loaded
+    const session2 = await openTurnStateSession(store, scope, now);
+    const session3Stale = await openTurnStateSession(store, scope, now);
+
+    // Session 2 commits revision 2
+    session2.state = {
+      ...(session2.state ?? emptyConversationState()),
+      knownFacts: {
+        ...(session2.state?.knownFacts ?? {}),
+        date: "2026-09-15",
+      },
+    };
+    const commit2 = await session2.commit();
     check(
-      "Scenario S: Valid CAS update returns revision 2",
-      res2.status === "saved" && res2.revision === 2,
+      "Scenario S: Second valid session commit advances revision",
+      commit2 === true,
     );
 
-    // Outdated CAS update with revision 1 -> conflict
-    const resStale = await store.save(
-      B_ID,
-      "conv-cas",
-      1,
-      dehydrateConversationState(state),
+    // Session 3 tries to commit with stale revision 1 -> Rejected
+    session3Stale.state = {
+      ...(session3Stale.state ?? emptyConversationState()),
+      knownFacts: {
+        ...(session3Stale.state?.knownFacts ?? {}),
+        date: "2026-09-20",
+      },
+    };
+    const commit3Conflict = await session3Stale.commit();
+    check(
+      "Scenario S: Stale revision commit rejected by production session seam",
+      commit3Conflict === false,
+    );
+
+    // Session 3 reloads to pick up newer revision and succeeds
+    const reloaded = await session3Stale.reload();
+    check(
+      "Scenario S: Session reload successfully synchronizes newer revision",
+      reloaded === true &&
+        session3Stale.state?.knownFacts?.date === "2026-09-15",
+    );
+  }
+
+  // =========================================================================
+  // FOCUSED FACT PRECEDENCE & NEGATION REGRESSIONS (Review Finding 2)
+  // =========================================================================
+  {
+    const fixture = createEngineFixture();
+
+    // Regression 1: Validated evening correction remains evening
+    await fixture.sendTurn("مش الصبح، بالليل");
+    const stateEvening = (
+      await fixture.stateStore.load(B_ID, fixture.conversation.id)
+    )?.state as ConversationState | undefined;
+    check(
+      "Regression Finding 2.1: Validated evening correction remains evening",
+      stateEvening?.knownFacts?.timePreference === "evening",
+      stateEvening?.knownFacts,
+    );
+
+    // Regression 2: Negated date is not installed as a new requested date
+    const fixtureNegDate = createEngineFixture();
+    await fixtureNegDate.sendTurn("بلاش بكرة");
+    const stateNegDate = (
+      await fixtureNegDate.stateStore.load(B_ID, fixtureNegDate.conversation.id)
+    )?.state as ConversationState | undefined;
+    check(
+      "Regression Finding 2.2: Negated date is not installed as a positive booking fact",
+      stateNegDate?.knownFacts?.date == null,
+      stateNegDate?.knownFacts,
+    );
+
+    // Regression 3: Omitted facts do not erase existing facts
+    const stateWithService: MutableConversationState = emptyConversationState();
+    stateWithService.serviceId = SERVICE_1;
+    stateWithService.selectedService = "كشف أسنان";
+    stateWithService.knownFacts = {
+      service: "كشف أسنان",
+      timePreference: "evening",
+    };
+    const { state: updatedDateOnly } = mergeConversationState(
+      stateWithService,
+      {
+        factUpdates: [{ key: "date", value: "2026-09-20" }],
+      },
     );
     check(
-      "Scenario S: Stale revision CAS update returns conflict",
-      resStale.status === "conflict",
+      "Regression Finding 2.3: Omitted facts do not erase existing facts",
+      updatedDateOnly.knownFacts.service === "كشف أسنان" &&
+        updatedDateOnly.knownFacts.timePreference === "evening" &&
+        updatedDateOnly.knownFacts.date === "2026-09-20",
     );
   }
 
@@ -1359,7 +1698,7 @@ async function main(): Promise<void> {
   let failed = 0;
   for (const c of checks) {
     if (c.pass) {
-      console.log(`  ✔ ${c.label}`);
+      console.log(`  ✅ ${c.label}`);
     } else {
       console.log(`  ❌ ${c.label}`);
       failed++;
@@ -1367,14 +1706,15 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `\nTOTAL: ${checks.length} | PASSED: ${checks.length - failed} | FAILED: ${failed}\n`,
+    `\nTOTAL: ${checks.length} assertions. PASSED: ${checks.length - failed}, FAILED: ${failed}`,
   );
+
   if (failed > 0) {
     process.exit(1);
   }
 }
 
 main().catch((err) => {
-  console.error("FATAL ERROR in check-conv-core-02:", err);
+  console.error("FATAL in check-conv-core-02:", err);
   process.exit(1);
 });

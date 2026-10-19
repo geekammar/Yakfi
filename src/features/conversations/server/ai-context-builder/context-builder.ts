@@ -190,6 +190,7 @@ export type ContextSources = {
   readonly business: ContextBusinessSources;
   readonly services: ReadonlyArray<ContextServiceFact>;
   readonly conversation: {
+    readonly id?: string;
     readonly status: ConversationStatus;
     readonly recentMessages: ReadonlyArray<{
       readonly senderType: string;
@@ -204,6 +205,11 @@ export type ContextSources = {
   readonly providerPreference?: string | null;
   /** CONV-CORE-02: Durable conversation state for minimal bounded AI projection. */
   readonly conversationState?: ConversationState | null;
+  /** Trusted source scope envelope from loaded session/repository (prevents scope spoofing). */
+  readonly conversationStateEnvelope?: {
+    readonly businessId: string;
+    readonly conversationId?: string;
+  } | null;
   /** Current turn time for freshness and expiration evaluation. */
   readonly now?: Date;
 };
@@ -865,15 +871,38 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
   let conversationContextIncluded = false;
   let projectedContext: ConversationContextProjection | null = null;
   if (sources.conversationState) {
+    const envelope = sources.conversationStateEnvelope;
+    // Source tenant scope must be proven from explicit envelope or state property;
+    // NEVER fall back to destination scopeId.
     const stateBusinessId =
+      envelope?.businessId ??
       (sources.conversationState as { businessId?: string }).businessId ??
       sources.conversationState.offer?.businessId ??
-      scopeId;
+      null;
+
+    const stateConversationId =
+      envelope?.conversationId ??
+      (sources.conversationState as { conversationId?: string })
+        .conversationId ??
+      sources.conversationState.offer?.conversationId ??
+      null;
+
+    const conversationIdMismatch = Boolean(
+      sources.conversation.id &&
+      stateConversationId &&
+      sources.conversation.id !== stateConversationId,
+    );
+
+    // If conversation ID within the same business is mismatched, reject projection
+    const effectiveBusinessId = conversationIdMismatch
+      ? "__CONVERSATION_SCOPE_MISMATCH__"
+      : stateBusinessId;
+
     const contextVerdict = evaluateCandidate({
       ledger,
       scope,
       source: "CONVERSATION_STATE",
-      businessId: stateBusinessId,
+      businessId: effectiveBusinessId,
       visibility: classifyConversationField("conversationContext"),
       key: "conversation.context",
       inBudget: true,

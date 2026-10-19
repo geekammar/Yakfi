@@ -176,11 +176,11 @@ export const conversationContextProjectionSchema = z.object({
     .optional(),
   bookingStage: z.string().max(64).optional(),
   currentGoal: z.string().max(64).nullable().optional(),
-  knownService: z.string().max(120).nullable().optional(),
-  resolvedServiceId: z.string().max(64).nullable().optional(),
-  knownDate: z.string().max(32).nullable().optional(),
-  timePreference: z.string().max(64).nullable().optional(),
-  providerPreference: z.string().max(120).nullable().optional(),
+  knownService: z.string().max(200).nullable().optional(),
+  resolvedServiceId: z.string().max(200).nullable().optional(),
+  knownDate: z.string().max(40).nullable().optional(),
+  timePreference: z.string().max(80).nullable().optional(),
+  providerPreference: z.string().max(200).nullable().optional(),
   pendingClarification: z
     .object({
       type: z.string().max(64),
@@ -201,16 +201,16 @@ export const conversationContextProjectionSchema = z.object({
     .object({
       type: z.enum(["SERVICE", "SLOT"]),
       itemCount: z.number().int().min(0).max(10),
-      offeredDate: z.string().max(32).nullable().optional(),
-      offeredServiceName: z.string().max(120).nullable().optional(),
+      offeredDate: z.string().max(40).nullable().optional(),
+      offeredServiceName: z.string().max(200).nullable().optional(),
     })
     .nullable()
     .optional(),
   lastCompletedTask: z
     .object({
       kind: z.literal("BOOKING"),
-      serviceId: z.string().max(64),
-      date: z.string().max(32),
+      serviceId: z.string().max(200),
+      date: z.string().max(40),
       completedAt: z.string().max(64),
     })
     .nullable()

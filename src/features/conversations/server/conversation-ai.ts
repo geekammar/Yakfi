@@ -453,8 +453,6 @@ const STOPWORDS = new Set(
     "و",
     "او",
     "هل",
-    "كم",
-    "بكام",
     "اي",
     "اديه",
     "بس",
@@ -1322,9 +1320,9 @@ function matchFaq(
     if (questionTokens.length === 0) continue;
     const score = faqMatchScore(messageTokens, questionTokens);
     const threshold =
-      questionTokens.length <= 3
-        ? Math.max(1, Math.ceil(questionTokens.length / 2))
-        : 2;
+      questionTokens.length <= 2
+        ? questionTokens.length
+        : Math.max(2, Math.ceil(questionTokens.length / 2));
     if (score >= threshold && score > bestScore) {
       best = entry;
       bestScore = score;
@@ -1341,19 +1339,37 @@ function matchFaq(
  * (normalized). Dates, times, and provider preferences are never
  * guessed — they stay null for the domain to resolve.
  */
-function extractServiceFacts(
+export function extractServiceFacts(
   message: string,
   services: ReadonlyArray<{ name: string }>,
 ): string | null {
   const normalized = normalizeArabicText(message);
+  if (!normalized) return null;
+  const messageTokens = new Set(normalized.split(" ").filter(Boolean));
+
   for (const service of services) {
     const name = normalizeArabicText(service.name);
-    if (
-      name.length > 0 &&
-      (normalized.includes(name) || name.includes(normalized))
-    ) {
+    if (name.length > 0 && normalized.includes(name)) {
       return service.name;
     }
+  }
+
+  const matches: Array<{ name: string }> = [];
+  for (const service of services) {
+    const hay = normalizeArabicText(service.name);
+    if (hay.length === 0) continue;
+    const tokens = hay
+      .split(" ")
+      .filter(
+        (t) => t.length >= 3 && t !== "اسنان" && t !== "طبي" && t !== "عياده",
+      );
+    if (tokens.some((t) => messageTokens.has(t))) {
+      matches.push(service);
+    }
+  }
+
+  if (matches.length === 1) {
+    return matches[0]!.name;
   }
   return null;
 }
@@ -1551,7 +1567,24 @@ export function strongFaqMatch(
   message: string,
   faqs: ReadonlyArray<{ question: string; answer: string }>,
 ): boolean {
-  return matchFaq(tokenize(message), faqs) !== null;
+  const classification = classifyCustomerMessage(message, faqs);
+  if (classification.intent === "FAQ") return true;
+
+  const norm = normalizeArabicText(message);
+  const asksQuestion =
+    norm.includes("بكام") ||
+    norm.includes("سعر") ||
+    norm.includes("تكلفة") ||
+    norm.includes("تكلفه") ||
+    norm.includes("عنوان") ||
+    norm.includes("مكان") ||
+    norm.includes("فين") ||
+    norm.includes("مواعيد العمل");
+
+  if (asksQuestion && matchFaq(tokenize(message), faqs) !== null) {
+    return true;
+  }
+  return false;
 }
 
 /**
