@@ -182,6 +182,7 @@ const CONVERSATION_FIELD_VISIBILITY: Record<string, VisibilityLevel> = {
   availability: "CONDITIONAL", // domain-computed (CORE-02); booking/availability asks only
   services: "PUBLIC", // the service-name facts the customer chooses from
   faqs: FAQ_STORE_VISIBILITY, // the canonical knowledge store
+  conversationContext: "INTERNAL", // bounded projection of durable state for AI interpretation
 };
 
 /**

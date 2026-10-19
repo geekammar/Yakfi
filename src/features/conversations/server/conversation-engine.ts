@@ -776,11 +776,23 @@ function resolveFinishedTurn(
     // once and still decides the actual action (JEV never calls it). For every
     // other turn the lexical detector stays authoritative (the exact
     // pre-AI-JEV-03 behaviour).
+    const lexicalControl = detectTurnControlSignals(currentMessage);
     const semanticSignals =
       routing === "JEV"
         ? turnTelemetry?.jevDecision?.semantic?.signals
         : undefined;
-    const signals = semanticSignals ?? detectTurnControlSignals(currentMessage);
+    // CONV-CORE-02: Single Decision Ownership & Safety Precedence.
+    // When JEV owns the turn, its semantic reading must not be overwritten
+    // by competing lexical classifiers, while explicit human requests and
+    // sensitive/safety restrictions retain authoritative precedence.
+    const signals = semanticSignals
+      ? {
+          sensitive: semanticSignals.sensitive || lexicalControl.sensitive,
+          explicitHuman:
+            semanticSignals.explicitHuman || lexicalControl.explicitHuman,
+          nonCommittal: semanticSignals.nonCommittal,
+        }
+      : lexicalControl;
 
     const base =
       priorState ?? deriveConversationStateFromHistory(recentChronological);
@@ -816,6 +828,44 @@ function resolveFinishedTurn(
       ...(decision.factUpdates ?? []),
     ];
 
+    const todayIso = todayIsoInTimeZone(now, timezone);
+
+    // CONV-CORE-02: Explicit date in current turn (colloquial Egyptian date or ISO)
+    const currentTurnDate = resolveEgyptianRelativeDate(
+      currentMessage,
+      todayIso,
+    );
+    if (
+      currentTurnDate &&
+      !factUpdates.some((u) => u.key === "date" && u.value === currentTurnDate)
+    ) {
+      factUpdates.push({
+        key: "date",
+        value: currentTurnDate,
+        isRevision: Boolean(
+          base.knownFacts.date && base.knownFacts.date !== currentTurnDate,
+        ),
+      });
+    }
+
+    // Explicit time of day preference in current turn
+    const currentTurnTimePref = extractTimeOfDayPreference(currentMessage);
+    if (
+      currentTurnTimePref &&
+      !factUpdates.some(
+        (u) => u.key === "timePreference" && u.value === currentTurnTimePref,
+      )
+    ) {
+      factUpdates.push({
+        key: "timePreference",
+        value: currentTurnTimePref,
+        isRevision: Boolean(
+          base.knownFacts.timePreference &&
+          base.knownFacts.timePreference !== currentTurnTimePref,
+        ),
+      });
+    }
+
     // SUPPLIED-FACT RESUME binding (PROMPT-AI-EVAL-07). When a clarification is
     // pending for exactly ONE conversation fact and the model's extraction did
     // NOT already supply it, bind the current customer turn as that fact so the
@@ -840,58 +890,44 @@ function resolveFinishedTurn(
         base.knownFacts[missing] != null;
       const trimmed = currentMessage.trim();
       if (!alreadySupplied && trimmed.length > 0) {
-        // SUPPLIED COLLOQUIAL DATE (PROMPT-AI-ARCH-08). When the pending fact is
-        // the booking DATE and the customer supplied it in a supported
-        // colloquial Egyptian relative form («الخميس», «بكرة», «بعد بكرة»…),
-        // normalize it to the ISO `YYYY-MM-DD` the booking DOMAIN requires so
-        // the supplied fact BINDS deterministically (never re-clarified) and
-        // the booking advances. The AI contract can only carry ISO, so this
-        // normalization is the engine's (Conversation orchestration's) job —
-        // the DOMAIN still re-validates and executes. A non-colloquial answer
-        // (a verbatim ISO date, or a free-form service) keeps the existing
-        // raw-bind behavior.
         let value = trimmed;
         if (missing === "date") {
-          const iso = resolveEgyptianRelativeDate(
-            currentMessage,
-            todayIsoInTimeZone(now, timezone),
-          );
+          const iso = resolveEgyptianRelativeDate(currentMessage, todayIso);
           if (iso) value = iso;
         }
         factUpdates.push({ key: missing, value });
       }
+    }
 
-      // Preserve prior date and time-of-day preferences from recent customer messages
-      const todayIso = todayIsoInTimeZone(now, timezone);
-      if (!factUpdates.some((u) => u.key === "date") && !base.knownFacts.date) {
-        for (let i = recentChronological.length - 1; i >= 0; i--) {
-          const m = recentChronological[i]!;
-          if (m.senderType === "CUSTOMER") {
-            const rel = resolveEgyptianRelativeDate(m.content, todayIso);
-            if (rel) {
-              factUpdates.push({ key: "date", value: rel });
-              break;
-            }
-            const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
-            if (iso) {
-              factUpdates.push({ key: "date", value: iso[0] });
-              break;
-            }
+    // Preserve prior date and time-of-day preferences from recent customer messages
+    if (!factUpdates.some((u) => u.key === "date") && !base.knownFacts.date) {
+      for (let i = recentChronological.length - 1; i >= 0; i--) {
+        const m = recentChronological[i]!;
+        if (m.senderType === "CUSTOMER") {
+          const rel = resolveEgyptianRelativeDate(m.content, todayIso);
+          if (rel) {
+            factUpdates.push({ key: "date", value: rel });
+            break;
+          }
+          const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
+          if (iso) {
+            factUpdates.push({ key: "date", value: iso[0] });
+            break;
           }
         }
       }
-      if (
-        !factUpdates.some((u) => u.key === "timePreference") &&
-        !base.knownFacts.timePreference
-      ) {
-        for (let i = recentChronological.length - 1; i >= 0; i--) {
-          const m = recentChronological[i]!;
-          if (m.senderType === "CUSTOMER") {
-            const pref = extractTimeOfDayPreference(m.content);
-            if (pref) {
-              factUpdates.push({ key: "timePreference", value: pref });
-              break;
-            }
+    }
+    if (
+      !factUpdates.some((u) => u.key === "timePreference") &&
+      !base.knownFacts.timePreference
+    ) {
+      for (let i = recentChronological.length - 1; i >= 0; i--) {
+        const m = recentChronological[i]!;
+        if (m.senderType === "CUSTOMER") {
+          const pref = extractTimeOfDayPreference(m.content);
+          if (pref) {
+            factUpdates.push({ key: "timePreference", value: pref });
+            break;
           }
         }
       }
@@ -938,23 +974,13 @@ function resumeBookingExtraction(
     state.knownFacts.service &&
     e.service !== state.knownFacts.service,
   );
-  const dateChanged = Boolean(
-    e.date && state.knownFacts.date && e.date !== state.knownFacts.date,
-  );
-  const providerChanged = Boolean(
-    e.provider &&
-    state.knownFacts.provider &&
-    e.provider !== state.knownFacts.provider,
-  );
 
   const service = e.service ?? state.knownFacts.service ?? null;
   const provider = serviceChanged
     ? (e.provider ?? null)
     : (e.provider ?? state.knownFacts.provider ?? null);
   const timePreference =
-    serviceChanged || dateChanged || providerChanged
-      ? (e.timePreference ?? null)
-      : (e.timePreference ?? state.knownFacts.timePreference ?? null);
+    e.timePreference ?? state.knownFacts.timePreference ?? null;
 
   const stateDate = serviceChanged ? null : (state.knownFacts.date ?? null);
   const date =
@@ -2494,6 +2520,8 @@ async function runInboundTurn(
           recentMessages: recentMessagesBeforeCurrent,
         },
         message: inbound.text,
+        conversationState: turnSession.state,
+        now,
       },
     });
     // PROMPT-AI-JEV-03D — stamp the turn's OPAQUE correlation id onto the
@@ -2606,7 +2634,7 @@ async function runInboundTurn(
       validated,
       turnRouting,
       inbound.text,
-      new Date(),
+      now,
       business.timezone,
       turnTelemetry,
       turnSession.state,
@@ -2894,10 +2922,7 @@ async function runInboundTurn(
         : validated;
 
       if (!bookingAiResponse.extraction.date) {
-        const todayIso = todayIsoInTimeZone(
-          new Date(),
-          business.timezone ?? "UTC",
-        );
+        const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
         let relDate = resolveEgyptianRelativeDate(inbound.text, todayIso);
         if (!relDate && recentChronological) {
           for (let i = recentChronological.length - 1; i >= 0; i--) {

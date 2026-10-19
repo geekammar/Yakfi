@@ -1001,6 +1001,9 @@ export function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
       services: request.services.map((service) => service.name),
       faqs: request.faqs.map((faq) => faq.question),
       languageHint: languageHint(request.message),
+      ...(request.conversationContext
+        ? { conversationContext: request.conversationContext }
+        : {}),
     },
     questions: { ...SEMANTIC_QUESTIONS },
   };

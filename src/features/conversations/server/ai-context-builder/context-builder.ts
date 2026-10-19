@@ -56,7 +56,10 @@
  * excluded with a typed reason — never guessed, never silently reinterpreted
  * as public, and never replaced by raw source content.
  */
-import type { AiRequest } from "@/features/conversations/server/ai-contract";
+import type {
+  AiRequest,
+  ConversationContextProjection,
+} from "@/features/conversations/server/ai-contract";
 import {
   AI_KNOWLEDGE_ENTRY_LIMIT,
   AI_RECENT_MESSAGE_LIMIT,
@@ -70,6 +73,10 @@ import {
   normalizeArabicText,
   type TaskRelevance,
 } from "@/features/conversations/server/conversation-ai";
+import {
+  projectConversationState,
+  type ConversationState,
+} from "@/features/conversations/server/conversation-state";
 import {
   FACT_EXCLUSION_REASONS,
   classifyBusinessField,
@@ -195,6 +202,10 @@ export type ContextSources = {
   readonly availability?: ReadonlyArray<ContextAvailabilityFact> | null;
   /** Previously captured provider preference, when one exists. */
   readonly providerPreference?: string | null;
+  /** CONV-CORE-02: Durable conversation state for minimal bounded AI projection. */
+  readonly conversationState?: ConversationState | null;
+  /** Current turn time for freshness and expiration evaluation. */
+  readonly now?: Date;
 };
 
 /**
@@ -850,6 +861,32 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     providerPreferenceIncluded = preferenceVerdict.included;
   }
 
+  // ── 9. Conversation context projection (CONV-CORE-02) ───────────────────
+  let conversationContextIncluded = false;
+  let projectedContext: ConversationContextProjection | null = null;
+  if (sources.conversationState) {
+    const stateBusinessId =
+      (sources.conversationState as { businessId?: string }).businessId ??
+      sources.conversationState.offer?.businessId ??
+      scopeId;
+    const contextVerdict = evaluateCandidate({
+      ledger,
+      scope,
+      source: "CONVERSATION_STATE",
+      businessId: stateBusinessId,
+      visibility: classifyConversationField("conversationContext"),
+      key: "conversation.context",
+      inBudget: true,
+      taskRequired: true,
+    });
+    conversationContextIncluded = contextVerdict.included;
+    if (conversationContextIncluded) {
+      projectedContext = projectConversationState(sources.conversationState, {
+        now: sources.now,
+      });
+    }
+  }
+
   // ── Compose the request (provenance dropped, only eligible facts) ────────
   const request: AiRequest = {
     message: messageVerdict.included ? sources.message : "",
@@ -895,6 +932,9 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
             slots: [...result.slots],
           })),
         }
+      : {}),
+    ...(conversationContextIncluded && projectedContext
+      ? { conversationContext: projectedContext }
       : {}),
   };
 
