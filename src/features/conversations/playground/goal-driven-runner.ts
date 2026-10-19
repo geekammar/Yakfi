@@ -91,7 +91,9 @@ export async function runGoalDrivenScenario(
         llmCalls: 0,
       };
     } else {
-      const services = await harness.deps.serviceRepository.listByBusiness(harness.business.id);
+      const services = await harness.deps.serviceRepository.listByBusiness(
+        harness.business.id,
+      );
 
       try {
         result = await processGoalDrivenTurn(
@@ -149,8 +151,8 @@ export async function runGoalDrivenScenario(
 
     // 6. Diagnostics
     const newAppts = harness.appointments.slice(prevApptsLen);
-    const appointmentCreated = result.appointmentCreated ?? (newAppts.length > 0);
-    const appointmentId = result.appointmentId ?? (newAppts[0]?.id ?? null);
+    const appointmentCreated = result.appointmentCreated ?? newAppts.length > 0;
+    const appointmentId = result.appointmentId ?? newAppts[0]?.id ?? null;
 
     const turnLlmCalls = result.llmCalls ?? 0;
     const turnPromptTokens = turnLlmCalls > 0 ? 180 : 0;
@@ -234,7 +236,8 @@ export async function runGoalDrivenScenario(
         sentCount: 1,
       },
       assistantAction: result.assistantAction ?? "AI_REPLY",
-      conversationStatus: result.conversationStatus ?? harness.conversation.status,
+      conversationStatus:
+        result.conversationStatus ?? harness.conversation.status,
       diagnostics: {
         warnings,
         isClarificationLoop,

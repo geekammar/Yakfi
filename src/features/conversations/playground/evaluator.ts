@@ -74,7 +74,9 @@ export async function evaluateBenchmark(
 
   const totalScenarios = scenarios.length;
   const hybridPassed = hybridTraces.filter((t) => t.verdict === "PASS").length;
-  const goalDrivenPassed = goalDrivenTraces.filter((t) => t.verdict === "PASS").length;
+  const goalDrivenPassed = goalDrivenTraces.filter(
+    (t) => t.verdict === "PASS",
+  ).length;
   const agentCPassed = agentCTraces.filter((t) => t.verdict === "PASS").length;
 
   const hybridTotalDuration = hybridTraces.reduce(
@@ -125,7 +127,9 @@ export async function evaluateBenchmark(
     hybridAvgDurationMs:
       totalScenarios > 0 ? Math.round(hybridTotalDuration / totalScenarios) : 0,
     goalDrivenAvgDurationMs:
-      totalScenarios > 0 ? Math.round(goalDrivenTotalDuration / totalScenarios) : 0,
+      totalScenarios > 0
+        ? Math.round(goalDrivenTotalDuration / totalScenarios)
+        : 0,
     agentCAvgDurationMs:
       totalScenarios > 0 ? Math.round(agentCTotalDuration / totalScenarios) : 0,
     hybridTotalLlmCalls,

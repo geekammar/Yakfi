@@ -7,7 +7,8 @@
 import type { ConversationState } from "@/features/conversations/server/conversation-state";
 import type { Business, ConversationStatus } from "@/types/domain";
 
-export type PlaygroundArchitecture = "HYBRID_B" | "GOAL_DRIVEN_HYBRID" | "AGENT_C";
+export type PlaygroundArchitecture =
+  "HYBRID_B" | "GOAL_DRIVEN_HYBRID" | "AGENT_C";
 
 export type InboundChannel = "WHATSAPP" | "TELEGRAM";
 

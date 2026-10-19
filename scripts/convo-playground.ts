@@ -131,10 +131,13 @@ async function main(): Promise<void> {
 
   // 2. COMPARE BENCHMARK MODE
   if (isCompare) {
-    console.log("Running Comparative Benchmark: Hybrid B vs Goal-Driven vs Agent C...");
+    console.log(
+      "Running Comparative Benchmark: Hybrid B vs Goal-Driven vs Agent C...",
+    );
     console.log(`Corpus: ${GOLDEN_SCENARIOS.length} Golden Scenarios\n`);
 
-    const { report, hybridTraces, goalDrivenTraces, agentCTraces } = await evaluateBenchmark();
+    const { report, hybridTraces, goalDrivenTraces, agentCTraces } =
+      await evaluateBenchmark();
 
     for (const t of hybridTraces) saveTrace(t, tracesDir);
     for (const t of goalDrivenTraces) saveTrace(t, tracesDir);

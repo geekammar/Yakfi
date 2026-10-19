@@ -126,7 +126,9 @@ export function parseOrdinalIndex(raw: string): number | null {
   }
 
   // Prefix match e.g. "opt_1", "service_2", "slot_3", "choice:1"
-  const prefixMatch = raw.trim().match(/^(?:opt|service|serv|slot|choice)[_: -]*([1-9]\d?)$/i);
+  const prefixMatch = raw
+    .trim()
+    .match(/^(?:opt|service|serv|slot|choice)[_: -]*([1-9]\d?)$/i);
   if (prefixMatch && prefixMatch[1]) {
     return parseInt(prefixMatch[1], 10);
   }
@@ -155,7 +157,8 @@ export function parseOrdinalIndex(raw: string): number | null {
 
 // ─── History Parser & State Reconstructor ─────────────────────────────────
 
-const SLOT_OFFER_HEADER = /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
+const SLOT_OFFER_HEADER =
+  /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
 const SERVICE_OFFER_HEADER = /الخدمات المتاحة لدينا:/;
 const FOLLOWUP_OFFER_HEADER = /أكثر من طلب متابعة معلّق:/;
 
@@ -168,7 +171,12 @@ export function reconstructStateFromHistory(
     currentGoal: "CREATE_APPOINTMENT",
     service: { id: null, name: null, source: null },
     provider: { id: null, name: null, preference: null },
-    timing: { date: null, timePreference: null, explicitTime: null, slotPageOffset: 0 },
+    timing: {
+      date: null,
+      timePreference: null,
+      explicitTime: null,
+      slotPageOffset: 0,
+    },
     lastOfferedOptions: null,
     followUpRequestId: null,
   };
@@ -196,8 +204,18 @@ export function reconstructStateFromHistory(
 
         const options: OfferedOption[] = [];
         for (const line of msg.content.split("\n")) {
-          const parsedLine = line.trim().match(/^(\d+)[.)]\s*(.+?)\s*—\s*(\d{1,2}:\d{2})\s*إلى\s*(\d{1,2}:\d{2})/);
-          if (parsedLine && parsedLine[1] && parsedLine[2] && parsedLine[3] && parsedLine[4]) {
+          const parsedLine = line
+            .trim()
+            .match(
+              /^(\d+)[.)]\s*(.+?)\s*—\s*(\d{1,2}:\d{2})\s*إلى\s*(\d{1,2}:\d{2})/,
+            );
+          if (
+            parsedLine &&
+            parsedLine[1] &&
+            parsedLine[2] &&
+            parsedLine[3] &&
+            parsedLine[4]
+          ) {
             options.push({
               id: `slot_${parsedLine[1]}`,
               stableIndex: parseInt(parsedLine[1], 10),
@@ -228,7 +246,9 @@ export function reconstructStateFromHistory(
           if (parsed && parsed[1] && parsed[2]) {
             const sName = parsed[2].split("—")[0]!.trim();
             const matched = services.find(
-              (s) => normalizeArabic(s.name) === normalizeArabic(sName) || sName.includes(s.name),
+              (s) =>
+                normalizeArabic(s.name) === normalizeArabic(sName) ||
+                sName.includes(s.name),
             );
             options.push({
               id: matched?.id ?? `service_${parsed[1]}`,
@@ -275,9 +295,17 @@ export function reconstructStateFromHistory(
       }
 
       // Stated provider preference
-      if (/(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(text)) {
+      if (
+        /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
+          text,
+        )
+      ) {
         state.provider.preference = "SAME_AS_LAST";
-      } else if (/(?:أي\s+دكتور|اي\s+دكتور|أي\s+مقدم|اي\s+مقدم|مش\s+فارق|مش\s+فارقة)/.test(text)) {
+      } else if (
+        /(?:أي\s+دكتور|اي\s+دكتور|أي\s+مقدم|اي\s+مقدم|مش\s+فارق|مش\s+فارقة)/.test(
+          text,
+        )
+      ) {
         state.provider.preference = "ANY";
       }
 
@@ -285,7 +313,10 @@ export function reconstructStateFromHistory(
       for (const s of services) {
         const normS = normalizeArabic(s.name);
         const normT = normalizeArabic(text);
-        if (normT.includes(normS) || (normT.length >= 3 && normS.includes(normT))) {
+        if (
+          normT.includes(normS) ||
+          (normT.length >= 3 && normS.includes(normT))
+        ) {
           state.service = { id: s.id, name: s.name, source: "USER_SELECTED" };
         }
       }
@@ -325,9 +356,10 @@ export async function processGoalDrivenTurn(
   const now = context.virtualNow ?? new Date();
   const todayIso = todayIsoInTimeZone(now, business.timezone ?? "Africa/Cairo");
 
-  const rawText = (inbound.buttonPayload && inbound.buttonPayload.length > 0)
-    ? inbound.buttonPayload
-    : inbound.text;
+  const rawText =
+    inbound.buttonPayload && inbound.buttonPayload.length > 0
+      ? inbound.buttonPayload
+      : inbound.text;
   const normText = normalizeArabic(rawText);
 
   // 1. SAFETY & EMERGENCY GATING (Top Priority Rule E)
@@ -354,7 +386,8 @@ export async function processGoalDrivenTurn(
       normText,
     );
   if (isHumanReq) {
-    const handoffMsg = "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق لمساعدتك فوراً.";
+    const handoffMsg =
+      "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق لمساعدتك فوراً.";
     return {
       assistantAction: "AI_HANDOFF",
       conversationStatus: "NEED_HUMAN",
@@ -366,15 +399,21 @@ export async function processGoalDrivenTurn(
   }
 
   // 3. LOAD RECENT CONVERSATION & RECONSTRUCT GOAL-DRIVEN STATE
-  const recentMessages = await deps.conversationRepository.getMessages(context.conversationId, 20);
+  const recentMessages = await deps.conversationRepository.getMessages(
+    context.conversationId,
+    20,
+  );
   const state = reconstructStateFromHistory(recentMessages, services, todayIso);
 
   // 4. DETECT UNANSWERED / UNSUPPORTED SPECIFIC SERVICE QUESTIONS
   // If the user asks about an explicit treatment like "التقويم الشفاف" and it does NOT match active services
   const asksSpecificUnsupported =
-    normText.includes("تقويم") && !services.some((s) => normalizeArabic(s.name).includes("تقويم"));
+    normText.includes("تقويم") &&
+    !services.some((s) => normalizeArabic(s.name).includes("تقويم"));
   if (asksSpecificUnsupported) {
-    const servList = services.map((s, idx) => `${idx + 1}. ${s.name}`).join("\n");
+    const servList = services
+      .map((s, idx) => `${idx + 1}. ${s.name}`)
+      .join("\n");
     const reply = `عفواً، خدمة التقويم غير متوفرة لدينا حالياً بالعيادة.\nالخدمات المتاحة لدينا:\n${servList}\nهل تود حجز موعد لأي من هذه الخدمات المتاحة؟`;
     return {
       assistantAction: "AI_REPLY",
@@ -390,11 +429,15 @@ export async function processGoalDrivenTurn(
   const isPureCatalog =
     /(?:ايه\s+الخدمات|ما\s+هي\s+الخدمات|الخدمات\s+المتاحة|قائمه\s+الخدمات|عندكم\s+خدمات\s+ايه|اسعار\s+الخدمات)/.test(
       normText,
-    ) && !normText.includes("احجز") && !normText.includes("حجز");
+    ) &&
+    !normText.includes("احجز") &&
+    !normText.includes("حجز");
   if (isPureCatalog) {
     const list = services
       .map((s, idx) => {
-        const priceStr = (s as any).price ? ` — ${(s as any).price} ${(s as any).priceCurrency ?? (s as any).currency ?? "EGP"}` : "";
+        const priceStr = (s as any).price
+          ? ` — ${(s as any).price} ${(s as any).priceCurrency ?? (s as any).currency ?? "EGP"}`
+          : "";
         return `${idx + 1}. ${s.name}${priceStr}`;
       })
       .join("\n");
@@ -419,10 +462,16 @@ export async function processGoalDrivenTurn(
       break;
     }
   }
-  if (!matchedFaq && /(?:مواعيد\s+العمل|ساعات\s+العمل|شغالين\s+امتى|بتفتحوا\s+امتى)/.test(normText)) {
+  if (
+    !matchedFaq &&
+    /(?:مواعيد\s+العمل|ساعات\s+العمل|شغالين\s+امتى|بتفتحوا\s+امتى)/.test(
+      normText,
+    )
+  ) {
     matchedFaq = {
       question: "مواعيد العمل",
-      answer: "مواعيد العمل لدينا من السبت إلى الجمعة من الساعة 9:00 صباحاً حتى 5:00 مساءً.",
+      answer:
+        "مواعيد العمل لدينا من السبت إلى الجمعة من الساعة 9:00 صباحاً حتى 5:00 مساءً.",
     };
   }
 
@@ -455,10 +504,18 @@ export async function processGoalDrivenTurn(
   const ordinalIndex = parseOrdinalIndex(rawText);
 
   // A. Check Navigation: "أوقات تانية" (more times) or "يوم تاني" (change date)
-  if (/(?:اوقات\s+تانية|اوقات\s+تانيه|مواعيد\s+تانية|مزيد\s+من\s+المواعيد|more_times)/.test(normText)) {
+  if (
+    /(?:اوقات\s+تانية|اوقات\s+تانيه|مواعيد\s+تانية|مزيد\s+من\s+المواعيد|more_times)/.test(
+      normText,
+    )
+  ) {
     state.timing.slotPageOffset = (state.timing.slotPageOffset ?? 0) + 3;
   }
-  if (/(?:يوم\s+تاني|يوم\s+اخر|غير\s+اليوم|تغيير\s+اليوم|change_date)/.test(normText)) {
+  if (
+    /(?:يوم\s+تاني|يوم\s+اخر|غير\s+اليوم|تغيير\s+اليوم|change_date)/.test(
+      normText,
+    )
+  ) {
     state.timing.date = null;
     state.lastOfferedOptions = null;
     const prompt = `تمام، اخترنا خدمة "${state.service.name ?? "المطلوبة"}". ما هو اليوم البديل المناسب لك؟ (مثلاً: غداً، أو بعد غد، أو يوم الأحد القادم)`;
@@ -491,16 +548,22 @@ export async function processGoalDrivenTurn(
     } else if (type === "SLOT") {
       if (matchedItem) {
         // BOOK THE SELECTED APPOINTMENT TRANSACTIONALLY
-        const { providerName, startTime, endTime, date } = matchedItem.metadata!;
+        const { providerName, startTime, endTime, date } =
+          matchedItem.metadata!;
         const servId = state.service.id ?? services[0]!.id;
 
         // Find provider ID
         let provId: string | null = null;
         let assignedUid: string = "assigned-user";
         if (deps.providerRepository) {
-          const allP = await deps.providerRepository.listEligibleForService(business.id, servId);
+          const allP = await deps.providerRepository.listEligibleForService(
+            business.id,
+            servId,
+          );
           const foundP = allP.find((p: any) =>
-            normalizeArabic(p.displayName ?? p.name).includes(normalizeArabic(providerName)),
+            normalizeArabic(p.displayName ?? p.name).includes(
+              normalizeArabic(providerName),
+            ),
           );
           if (foundP) {
             provId = foundP.id;
@@ -509,7 +572,9 @@ export async function processGoalDrivenTurn(
         }
 
         if (!deps.appointmentRepository?.createWithConflictCheck) {
-          throw new Error("appointmentRepository.createWithConflictCheck not implemented");
+          throw new Error(
+            "appointmentRepository.createWithConflictCheck not implemented",
+          );
         }
 
         const appt = await deps.appointmentRepository.createWithConflictCheck({
@@ -553,10 +618,18 @@ export async function processGoalDrivenTurn(
   }
 
   // D. Provider Extraction
-  if (/(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(normText)) {
+  if (
+    /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
+      normText,
+    )
+  ) {
     state.provider.preference = "SAME_AS_LAST";
     if (deps.appointmentRepository?.listRecentByCustomer) {
-      const recent = await deps.appointmentRepository.listRecentByCustomer(business.id, customer.id, 1);
+      const recent = await deps.appointmentRepository.listRecentByCustomer(
+        business.id,
+        customer.id,
+        1,
+      );
       const prior = recent?.[0];
       if (prior && prior.providerId && deps.providerRepository) {
         const eligible = await deps.providerRepository.listEligibleForService(
@@ -570,18 +643,34 @@ export async function processGoalDrivenTurn(
         }
       }
     }
-  } else if (/(?:أي\s+دكتور|اي\s+دكتور|أي\s+مقدم|اي\s+مقدم|مش\s+فارق|مش\s+فارقة)/.test(normText)) {
+  } else if (
+    /(?:أي\s+دكتور|اي\s+دكتور|أي\s+مقدم|اي\s+مقدم|مش\s+فارق|مش\s+فارقة)/.test(
+      normText,
+    )
+  ) {
     state.provider.preference = "ANY";
   } else {
     // Check specific doctor by name
     if (deps.providerRepository) {
       const servId = state.service.id ?? services[0]?.id;
       const allP = servId
-        ? await deps.providerRepository.listEligibleForService(business.id, servId)
+        ? await deps.providerRepository.listEligibleForService(
+            business.id,
+            servId,
+          )
         : [];
       for (const p of allP) {
         const pNorm = normalizeArabic(p.displayName ?? p.name ?? "");
-        if (normText.includes(pNorm) || (pNorm.length >= 4 && normText.includes(pNorm.replace("د ", "").replace("دكتورة ", "").replace("دكتور ", "")))) {
+        if (
+          normText.includes(pNorm) ||
+          (pNorm.length >= 4 &&
+            normText.includes(
+              pNorm
+                .replace("د ", "")
+                .replace("دكتورة ", "")
+                .replace("دكتور ", ""),
+            ))
+        ) {
           state.provider.id = p.id;
           state.provider.name = p.displayName ?? p.name ?? null;
           state.provider.preference = "SPECIFIC";
@@ -595,7 +684,10 @@ export async function processGoalDrivenTurn(
   for (const s of services) {
     const sNorm = normalizeArabic(s.name);
     // Bidirectional substring or keyword match (e.g. "كشف" matches "كشف أسنان")
-    if (normText.includes(sNorm) || (normText.length >= 3 && sNorm.includes(normText))) {
+    if (
+      normText.includes(sNorm) ||
+      (normText.length >= 3 && sNorm.includes(normText))
+    ) {
       state.service = { id: s.id, name: s.name, source: "USER_SELECTED" };
       break;
     }
@@ -604,19 +696,31 @@ export async function processGoalDrivenTurn(
   // 8. RESOLVE DEFAULT SERVICE RULES (CASES A, B, C, D)
   if (!state.service.id) {
     const defEnabled = Boolean((business as any).defaultServiceBookingEnabled);
-    const defId = (business as any).defaultBookingServiceId ?? (business as any).defaultServiceId;
+    const defId =
+      (business as any).defaultBookingServiceId ??
+      (business as any).defaultServiceId;
 
     if (defEnabled && defId) {
       // Case A: Default service quick booking enabled
-      const matchedDef = services.find((s) => s.id === defId && s.isActive !== false);
+      const matchedDef = services.find(
+        (s) => s.id === defId && s.isActive !== false,
+      );
       if (matchedDef) {
-        state.service = { id: matchedDef.id, name: matchedDef.name, source: "BUSINESS_DEFAULT" };
+        state.service = {
+          id: matchedDef.id,
+          name: matchedDef.name,
+          source: "BUSINESS_DEFAULT",
+        };
       }
     }
 
     if (!state.service.id && services.length === 1 && services[0]) {
       // Case B: Only one valid bookable service
-      state.service = { id: services[0].id, name: services[0].name, source: "AUTO_SINGLE" };
+      state.service = {
+        id: services[0].id,
+        name: services[0].name,
+        source: "AUTO_SINGLE",
+      };
     }
   }
 
@@ -635,7 +739,10 @@ export async function processGoalDrivenTurn(
     const replyMarkup = isTelegram
       ? {
           inline_keyboard: services.map((s, idx) => [
-            { text: `${idx + 1}️⃣ ${s.name}`, callback_data: `service_${idx + 1}` },
+            {
+              text: `${idx + 1}️⃣ ${s.name}`,
+              callback_data: `service_${idx + 1}`,
+            },
           ]),
         }
       : undefined;
@@ -681,7 +788,8 @@ export async function processGoalDrivenTurn(
   );
 
   if (!eligibility.success || eligibility.data.providers.length === 0) {
-    const msg = "عفواً، لا يوجد مقدمو خدمة متاحون لهذه الخدمة حالياً لدى المنشأة.";
+    const msg =
+      "عفواً، لا يوجد مقدمو خدمة متاحون لهذه الخدمة حالياً لدى المنشأة.";
     return {
       assistantAction: "AI_HANDOFF",
       conversationStatus: "NEED_HUMAN",
@@ -712,7 +820,10 @@ export async function processGoalDrivenTurn(
     },
   );
 
-  if (!bookingOptionsResult.success || bookingOptionsResult.data.options.length === 0) {
+  if (
+    !bookingOptionsResult.success ||
+    bookingOptionsResult.data.options.length === 0
+  ) {
     const noSlotsMsg = `عفواً، لا تتوفر مواعيد شاغرة لخدمة "${state.service.name}" يوم ${targetDate}. هل تود تجربة يوم آخر؟ (مثل: غداً، أو بعد غد)`;
     return {
       assistantAction: "AI_REPLY",
@@ -738,8 +849,12 @@ export async function processGoalDrivenTurn(
       return true;
     };
 
-    const preferred = allSlots.filter((o) => matchesPref(o.startAt.slice(11, 16)));
-    const others = allSlots.filter((o) => !matchesPref(o.startAt.slice(11, 16)));
+    const preferred = allSlots.filter((o) =>
+      matchesPref(o.startAt.slice(11, 16)),
+    );
+    const others = allSlots.filter(
+      (o) => !matchesPref(o.startAt.slice(11, 16)),
+    );
     if (preferred.length > 0) {
       allSlots = [...preferred, ...others];
     }
