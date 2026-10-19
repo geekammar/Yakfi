@@ -29,7 +29,7 @@ import {
   createShadowSampler,
   parseShadowTimeoutMs,
 } from "./jev-shadow-strategy";
-import { createConservativeJevStrategy } from "./jev-strategy";
+import { createDeterministicBaselineStrategy } from "./jev-strategy";
 import { createOpenRouterAdapter } from "./openrouter";
 import type { AiProviderAdapter } from "./types";
 
@@ -173,8 +173,15 @@ export async function createPolicyBackedAi(
   // semantic strategy's `enabled: false` branch never consults the provider —
   // so not supplying it is a complete rollback with no schema, migration or DB
   // coordination. The switch is NOT activated in any environment here.
-  const semanticEnabled = isSemanticJevEnabled(deps.getEnvVar);
-  const decisionStrategy = semanticEnabled
+  // CONV-JEV-01: TypeSafe JEV is the PREFERRED semantic engine by default.
+  // Gated by:
+  // 1. Emergency kill switch: FLOWPILOT_JEV_SEMANTIC_ENABLED=false (or 0/no/off) immediately disables JEV.
+  // 2. Production budget safety: in production environments (VERCEL_ENV=production or NODE_ENV=production),
+  //    live paid spending remains blocked unless FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET is configured by the operator.
+  // 3. Fallback: if credentials are missing, unreachable, timeout, or invalid response, the engine falls back
+  //    safely to the Deterministic Baseline without lost context or unvalidated bookings.
+  const semanticPreferred = isTypeSafeJevPreferred(deps.getEnvVar);
+  const decisionStrategy = semanticPreferred
     ? createSemanticJevStrategy({
         provider: createJevDecisionsProvider({
           getEnvVar: deps.getEnvVar,
@@ -186,7 +193,7 @@ export async function createPolicyBackedAi(
         }),
         enabled: true,
       })
-    : createConservativeJevStrategy();
+    : createDeterministicBaselineStrategy();
   // PROMPT-AI-JEV-03D — OPTION E: the NON-AUTHORITATIVE shadow JEV evaluation.
   // The shadow switch is a SEPARATE kill switch, intentionally distinct from
   // the AUTHORITY switch above: the {DISABLED, SHADOW, ACTIVE} lifecycle needs
@@ -202,7 +209,7 @@ export async function createPolicyBackedAi(
   // strategy.
   const shadowTimeoutMs = parseShadowTimeoutMs(deps.getEnvVar);
   const shadowStrategy =
-    !semanticEnabled && isShadowJevEnabled(deps.getEnvVar)
+    !semanticPreferred && isShadowJevEnabled(deps.getEnvVar)
       ? createShadowJevStrategy({
           // The shadow's JEV provider is the SAME pinned, zero-retry Decisions
           // seam the ACTIVE path would use, with the SHADOW deadline as its
@@ -233,35 +240,73 @@ export async function createPolicyBackedAi(
 
 /**
  * The ONE explicit environment-controlled kill switch for the semantic JEV
- * strategy (PROMPT-AI-JEV-03B §11). DISABLED BY DEFAULT:
- *  · ABSENT            ⇒ OFF
- *  · any non-value     ⇒ OFF
- *  · "0"/"false"/"no"  ⇒ OFF
- *  · "1"/"true"/"yes"  ⇒ ON (the ONLY enablement)
+ * strategy (CONV-JEV-01).
  *
- * No schema, no DB policy row, no tenant-level widening. A disabled switch
- * yields the exact pre-AI-JEV-03 production behavior.
+ * Emergency kill switch:
+ *  · "0"/"false"/"no"/"off" ⇒ OFF (emergency override; JEV is NEVER called)
+ *
+ * When not explicitly disabled:
+ *  · In non-production (dev/eval/preview/playground) ⇒ ON (preferred by default)
+ *  · In production (VERCEL_ENV=production or NODE_ENV=production) ⇒ ON only if
+ *    FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET is configured, otherwise safely blocked.
  */
 export const SEMANTIC_JEV_FLAG = "FLOWPILOT_JEV_SEMANTIC_ENABLED";
 
+/** Operator approved monthly budget flag for production spending safety (CONV-JEV-01). */
+export const JEV_BUDGET_APPROVAL_FLAG = "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET";
+
+/** Per-request budget ceiling (USD) for JEV decisions. */
+export const JEV_PER_REQUEST_CEILING_USD = 0.005;
+
 /**
  * The SEPARATE, NON-AUTHORITATIVE shadow switch (PROMPT-AI-JEV-03D §15.2).
- * Reuses the IDENTICAL positive-enablement set as the semantic flag so the two
- * switches can never drift in what they accept:
- *  · ABSENT            ⇒ OFF
- *  · any non-value     ⇒ OFF
- *  · "0"/"false"/"no"  ⇒ OFF
- *  · "1"/"true"/"yes"  ⇒ ON (the ONLY enablement)
- *
- * ON can NEVER activate authoritative Semantic JEV: the shadow is installed
- * only in the `else` arm of the semantic branch above, and its output reaches
- * only the disjoint telemetry evidence slot. OFF (the default in every
- * environment) yields the exact v0.45.0 customer-serving behavior.
  */
 export const SHADOW_JEV_FLAG = "FLOWPILOT_JEV_SHADOW_ENABLED";
 
 export const SEMANTIC_JEV_ENABLEMENTS = new Set(["1", "true", "yes"]);
+export const SEMANTIC_JEV_DISABLEMENTS = new Set(["0", "false", "no", "off"]);
 
+/**
+ * Checks whether the emergency kill switch is actively engaged to disable JEV.
+ * Returns true if FLOWPILOT_JEV_SEMANTIC_ENABLED is explicitly 0, false, no, or off.
+ */
+export function isSemanticJevEmergencyDisabled(
+  getEnvVar: (name: string) => string | undefined,
+): boolean {
+  const raw = getEnvVar(SEMANTIC_JEV_FLAG);
+  if (!raw) return false;
+  return SEMANTIC_JEV_DISABLEMENTS.has(raw.trim().toLowerCase());
+}
+
+/**
+ * Checks whether TypeSafe JEV is the preferred semantic decision engine (CONV-JEV-01 Step C).
+ * Preferred by default unless:
+ * 1. Explicit emergency kill switch is engaged (FLOWPILOT_JEV_SEMANTIC_ENABLED=false)
+ * 2. In production without an approved operator budget.
+ */
+export function isTypeSafeJevPreferred(
+  getEnvVar: (name: string) => string | undefined,
+): boolean {
+  if (isSemanticJevEmergencyDisabled(getEnvVar)) return false;
+
+  // Production budget safety rule (CONV-JEV-01 Step C):
+  // Unbudgeted live production spending is blocked until an approved budget is supplied.
+  const isProd =
+    getEnvVar("NODE_ENV") === "production" ||
+    getEnvVar("VERCEL_ENV") === "production";
+  if (isProd) {
+    const approvedBudget = getEnvVar(JEV_BUDGET_APPROVAL_FLAG);
+    if (!approvedBudget || approvedBudget.trim().length === 0) {
+      return false; // Leave live production spending safely blocked
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Explicit positive enablement checker (legacy compatibility).
+ */
 export function isSemanticJevEnabled(
   getEnvVar: (name: string) => string | undefined,
 ): boolean {

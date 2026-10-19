@@ -159,6 +159,11 @@ export type JevStrategy = {
   decide(request: AiRequest): Promise<JevDecision>;
 };
 
+// ─── Deterministic Baseline Strategy (CONV-JEV-01 Terminology Authority) ──
+// NOTE: Under CONV-JEV-01, the word JEV means exclusively the real TypeSafe AI
+// remote model. The deterministic rule-based checks and fallbacks are named
+// Deterministic Baseline.
+
 /**
  * The telemetry `finalProvider` label the gateway emits when the JEV strategy
  * terminated the turn deterministically (the sibling of the engine-side
@@ -166,18 +171,29 @@ export type JevStrategy = {
  */
 export const JEV_DETERMINISTIC_PROVIDER = "jev-deterministic";
 
+/** Authoritative name under CONV-JEV-01. */
+export const DETERMINISTIC_BASELINE_PROVIDER = "deterministic-baseline";
+
 export function isJevDeterministicProvider(
   provider: string | null | undefined,
 ) {
-  return provider === JEV_DETERMINISTIC_PROVIDER;
+  return (
+    provider === JEV_DETERMINISTIC_PROVIDER ||
+    provider === DETERMINISTIC_BASELINE_PROVIDER
+  );
 }
+
+/** Authoritative alias under CONV-JEV-01. */
+export const isDeterministicBaselineProvider = isJevDeterministicProvider;
 
 /**
  * Fit a proven deterministic `AiResponse` (from `bypassDeterministicAi`) into
  * the bounded decision contract, deriving the machine-readable reason from the
  * response's own declared intent. Exposed for the strategy + its guards.
  */
-export function jevDecisionFromProvenResponse(proven: AiResponse): JevDecision {
+export function deterministicDecisionFromProvenResponse(
+  proven: AiResponse,
+): JevDecision {
   const reason: JevDecisionReason =
     proven.intent === "GREETING"
       ? "DETERMINISTIC_ACKNOWLEDGEMENT"
@@ -185,9 +201,16 @@ export function jevDecisionFromProvenResponse(proven: AiResponse): JevDecision {
   return { mode: "DETERMINISTIC", reason, response: proven };
 }
 
-// ─── The conservative default strategy ──────────────────────────────────────
+/** Legacy alias for backward compatibility. */
+export const jevDecisionFromProvenResponse =
+  deterministicDecisionFromProvenResponse;
+
+// ─── The Deterministic Baseline Strategy ────────────────────────────────────
 
 export const CONSERVATIVE_JEV_STRATEGY_ID = "jev-conservative@v1";
+
+/** Authoritative alias under CONV-JEV-01. */
+export const DETERMINISTIC_BASELINE_STRATEGY_ID = "deterministic-baseline@v1";
 
 /**
  * The default JEV strategy (PROMPT-AI-ARCH-17). Conservative by construction:
@@ -197,22 +220,11 @@ export const CONSERVATIVE_JEV_STRATEGY_ID = "jev-conservative@v1";
  * (`bypassDeterministicAi`). Everything else continues to the single existing
  * generative call.
  *
- * This slice deliberately introduces NO new deterministic behaviour: no
- * natural-language interpretation is converted into deterministic logic, and a
- * turn with insufficient deterministic evidence stays generative. Widening the
- * deterministic set is a later evidence-gated decision, not this one.
+ * Authoritative name under CONV-JEV-01: Deterministic Baseline Strategy.
  */
 export function createConservativeJevStrategy(): JevStrategy {
   return {
     strategyId: CONSERVATIVE_JEV_STRATEGY_ID,
-    /**
-     * PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may make
-     * its one async JEV call. The CONSERVATIVE strategy keeps its exact
-     * synchronous, pure, zero-I/O, zero-model-call behaviour: this body awaits
-     * nothing, performs no I/O, and resolves on the same turn — so a
-     * conservative strategy is still the pure no-op decision it always was,
-     * and a semantic turn can never hide behind it.
-     */
     async decide(request: AiRequest): Promise<JevDecision> {
       const proven = bypassDeterministicAi(request);
       if (!proven) {
@@ -222,7 +234,11 @@ export function createConservativeJevStrategy(): JevStrategy {
           response: null,
         };
       }
-      return jevDecisionFromProvenResponse(proven);
+      return deterministicDecisionFromProvenResponse(proven);
     },
   };
 }
+
+/** Authoritative name under CONV-JEV-01: Deterministic Baseline Strategy. */
+export const createDeterministicBaselineStrategy =
+  createConservativeJevStrategy;
