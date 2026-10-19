@@ -7,7 +7,8 @@
 import type { ConversationState } from "@/features/conversations/server/conversation-state";
 import type { Business, ConversationStatus } from "@/types/domain";
 
-export type PlaygroundArchitecture = "HYBRID_B" | "AGENT_C";
+export type PlaygroundArchitecture =
+  "HYBRID_B" | "GOAL_DRIVEN_HYBRID" | "AGENT_C";
 
 export type InboundChannel = "WHATSAPP" | "TELEGRAM";
 
@@ -150,10 +151,13 @@ export type ScenarioComparison = {
   title: string;
   category: string;
   hybridVerdict: "PASS" | "FAIL";
+  goalDrivenVerdict?: "PASS" | "FAIL";
   agentCVerdict: "PASS" | "FAIL";
   hybridDurationMs: number;
+  goalDrivenDurationMs?: number;
   agentCDurationMs: number;
   hybridLlmCalls: number;
+  goalDrivenLlmCalls?: number;
   agentCLlmCalls: number;
   notes?: string;
 };
@@ -162,12 +166,16 @@ export type BenchmarkComparisonReport = {
   timestamp: string;
   totalScenarios: number;
   hybridPassed: number;
+  goalDrivenPassed?: number;
   agentCPassed: number;
   hybridAvgDurationMs: number;
+  goalDrivenAvgDurationMs?: number;
   agentCAvgDurationMs: number;
   hybridTotalLlmCalls: number;
+  goalDrivenTotalLlmCalls?: number;
   agentCTotalLlmCalls: number;
   hybridTotalTokens: number;
+  goalDrivenTotalTokens?: number;
   agentCTotalTokens: number;
   comparisons: ScenarioComparison[];
 };

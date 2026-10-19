@@ -81,6 +81,8 @@ async function main(): Promise<void> {
     await import("../src/features/conversations/playground/golden-scenarios");
   const { runHybridScenario } =
     await import("../src/features/conversations/playground/hybrid-runner");
+  const { runGoalDrivenScenario } =
+    await import("../src/features/conversations/playground/goal-driven-runner");
   const { runAgentCScenario } =
     await import("../src/features/conversations/playground/agent-c-runner");
   const { evaluateBenchmark, formatComparisonMarkdown } =
@@ -101,8 +103,8 @@ async function main(): Promise<void> {
     modeIdx !== -1 && args[modeIdx + 1] ? args[modeIdx + 1]! : "hybrid";
 
   console.log("========================================================");
-  console.log("  FLOWPILOT CONVERSATION PLAYGROUND (CONV-PLAY-01)");
-  console.log("  Agent-First Interactive Tracing & Benchmark Engine");
+  console.log("  FLOWPILOT CONVERSATION PLAYGROUND (CONV-PLAY-02A)");
+  console.log("  Goal-Driven Hybrid & Comparative Benchmark Engine");
   console.log("========================================================");
 
   // 1. REPLAY MODE
@@ -129,12 +131,16 @@ async function main(): Promise<void> {
 
   // 2. COMPARE BENCHMARK MODE
   if (isCompare) {
-    console.log("Running Comparative Benchmark: Hybrid B vs Full Agent C...");
+    console.log(
+      "Running Comparative Benchmark: Hybrid B vs Goal-Driven vs Agent C...",
+    );
     console.log(`Corpus: ${GOLDEN_SCENARIOS.length} Golden Scenarios\n`);
 
-    const { report, hybridTraces, agentCTraces } = await evaluateBenchmark();
+    const { report, hybridTraces, goalDrivenTraces, agentCTraces } =
+      await evaluateBenchmark();
 
     for (const t of hybridTraces) saveTrace(t, tracesDir);
+    for (const t of goalDrivenTraces) saveTrace(t, tracesDir);
     for (const t of agentCTraces) saveTrace(t, tracesDir);
 
     const mdReport = formatComparisonMarkdown(report);
@@ -218,6 +224,11 @@ async function main(): Promise<void> {
   let trace: ScenarioTrace;
   if (mode.toLowerCase() === "agent_c") {
     trace = await runAgentCScenario(scenario);
+  } else if (
+    mode.toLowerCase() === "goal_driven" ||
+    mode.toLowerCase() === "goal-driven"
+  ) {
+    trace = await runGoalDrivenScenario(scenario);
   } else {
     trace = await runHybridScenario(scenario);
   }
