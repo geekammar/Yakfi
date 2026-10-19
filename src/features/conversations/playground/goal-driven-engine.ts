@@ -187,6 +187,16 @@ export function reconstructStateFromHistory(
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!;
     if (msg.senderType === "AI") {
+      // CONV-LIFE-01: If assistant previously confirmed a booking, prior offers are fulfilled!
+      if (
+        msg.content.includes("تم تأكيد") ||
+        msg.content.includes("تم استلام طلب")
+      ) {
+        state.lastOfferedOptions = null;
+        state.currentGoal = "GENERAL_INQUIRY";
+        break;
+      }
+
       // Check slot offer
       const slotMatch = msg.content.match(SLOT_OFFER_HEADER);
       if (slotMatch && slotMatch[1] && slotMatch[2]) {
@@ -398,11 +408,31 @@ export async function processGoalDrivenTurn(
     };
   }
 
+  // 2b. CANCELLATION & RESCHEDULE GATING
+  const isCancelOrReschedule =
+    /(?:الغي|الغاء|كنسل|مش\s+هاحضر|مش\s+هقدر\s+احضر|اغير\s+المعاد|تغيير\s+الميعاد|تاجيل)/.test(
+      normText,
+    );
+  if (isCancelOrReschedule) {
+    const cancelMsg =
+      "تمام — سيتواصل معك أحد أعضاء الفريق لإتمام تعديل أو إلغاء الموعد.";
+    return {
+      assistantAction: "AI_HANDOFF",
+      conversationStatus: "NEED_HUMAN",
+      intent: "CANCELLATION",
+      handoffCause: "CUSTOMER_REQUESTED_HUMAN",
+      replyText: cancelMsg,
+      llmCalls: 0,
+    };
+  }
+
   // 3. LOAD RECENT CONVERSATION & RECONSTRUCT GOAL-DRIVEN STATE
-  const recentMessages = await deps.conversationRepository.getMessages(
+  const rawRecent = await deps.conversationRepository.getMessages(
     context.conversationId,
     20,
   );
+  // getMessages returns reverse chronological (newest first); reverse to chronological (oldest first)
+  const recentMessages = [...rawRecent].reverse();
   const state = reconstructStateFromHistory(recentMessages, services, todayIso);
 
   // 4. DETECT UNANSWERED / UNSUPPORTED SPECIFIC SERVICE QUESTIONS
@@ -427,7 +457,7 @@ export async function processGoalDrivenTurn(
 
   // 5. PURE CATALOG QUESTION ("ايه الخدمات اللي عندكم؟")
   const isPureCatalog =
-    /(?:ايه\s+الخدمات|ما\s+هي\s+الخدمات|الخدمات\s+المتاحة|قائمه\s+الخدمات|عندكم\s+خدمات\s+ايه|اسعار\s+الخدمات)/.test(
+    /(?:ايه\s+الخدمات|ما\s+هي\s+الخدمات|الخدمات\s+المتاح[هة]|قائم[هة]\s+الخدمات|عندكم\s+خدمات\s+ايه|اسعار\s+الخدمات)/.test(
       normText,
     ) &&
     !normText.includes("احجز") &&
@@ -474,6 +504,18 @@ export async function processGoalDrivenTurn(
         "مواعيد العمل لدينا من السبت إلى الجمعة من الساعة 9:00 صباحاً حتى 5:00 مساءً.",
     };
   }
+  if (
+    !matchedFaq &&
+    /(?:فين\s+مكانكم|عنوان\s+العيادة|عنوانكم\s+فين|مكان\s+العيادة|فين\s+العيادة|العنوان)/.test(
+      normText,
+    )
+  ) {
+    const address = (business as any).address ?? "الفرع الرئيسي";
+    matchedFaq = {
+      question: "عنوان العيادة",
+      answer: `عنوان العيادة: ${address}. شرفنا بزيارتك في أي وقت.`,
+    };
+  }
 
   if (matchedFaq) {
     if (state.service.name || state.timing.date) {
@@ -502,6 +544,28 @@ export async function processGoalDrivenTurn(
 
   // 7. SEMANTIC ENTITY & SELECTION EXTRACTION
   const ordinalIndex = parseOrdinalIndex(rawText);
+
+  // CONV-LIFE-01: Check if there is an existing confirmed appointment in history
+  const hasPriorBookingConfirmation = recentMessages.some(
+    (m) =>
+      m.senderType === "AI" &&
+      (m.content.includes("تم تأكيد") || m.content.includes("تم استلام طلب")),
+  );
+
+  if (
+    ordinalIndex !== null &&
+    !state.lastOfferedOptions &&
+    hasPriorBookingConfirmation
+  ) {
+    return {
+      assistantAction: "AI_REPLY",
+      conversationStatus: "AI_ACTIVE",
+      intent: "GENERAL_INQUIRY",
+      handoffCause: null,
+      replyText: `تم تأكيد حجزك السابق بالفعل! هل تود الاستفسار عن موعدك، موقع العيادة، أو حجز موعد جديد؟`,
+      llmCalls: 0,
+    };
+  }
 
   // A. Check Navigation: "أوقات تانية" (more times) or "يوم تاني" (change date)
   if (

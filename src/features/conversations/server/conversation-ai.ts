@@ -1258,13 +1258,19 @@ function isPureBusinessIdentityQuestion(message: string): boolean {
 export function isPureServiceCatalogQuestion(message: string): boolean {
   const relevance = deriveTaskRelevance(message);
   if (!relevance.serviceCatalog) return false;
-  return !(
+  if (
     relevance.bookingOrAvailability ||
     relevance.cancellationOrReschedule ||
     relevance.providerChoice ||
     relevance.contactOrIdentity ||
     relevance.priceOrFee ||
     relevance.businessIdentity
+  ) {
+    return false;
+  }
+  const norm = normalizeArabicText(message);
+  return /(?:ايه|إيه|ما\s+هي|ماهي|عرض|قائمة|قائمه|كل|جميع|عايز\s+اعرف|ممكن\s+اعرف)\s+(?:ال)?خدمات|خدماتكم|الخدمات\s+(?:المتاحة|المتاحه|الموجودة|الموجوده|المتوفرة|المتوفره|المقدمة|المقدمه)|عندكم\s+خدمات|خدمات\s+ايه|اسعار\s+الخدمات|service\s+catalog|what\s+services|available\s+services/i.test(
+    norm,
   );
 }
 

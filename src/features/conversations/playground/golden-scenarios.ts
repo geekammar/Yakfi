@@ -773,7 +773,7 @@ export const GOLDEN_SCENARIOS: ScenarioDefinition[] = [
       },
       {
         input: "1",
-        expectedAction: "DEFERRED_TO_STAFF",
+        expectedAction: "AI_REPLY",
         assertFn: (turn) => {
           if (turn.diagnostics.appointmentCreated) {
             throw new Error(
@@ -781,6 +781,272 @@ export const GOLDEN_SCENARIOS: ScenarioDefinition[] = [
             );
           }
         },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+
+  // =========================================================================
+  // Category 9: POST_BOOKING_CONTINUITY (CONV-LIFE-01: 10 Scenarios GS-39 to GS-48)
+  // =========================================================================
+  {
+    id: "GS-39",
+    title:
+      "استفسار بعد تأكيد الحجز: موقع وعنوان العيادة ('عنوان ومكان العيادة')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "بعد تأكيد الحجز، يسأل العميل عن عنوان ومكان العيادة، فيجيب المساعد دون حظر العميل ودون إنشاء حجز مكرر.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "عنوان ومكان العيادة فين؟",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["الفرع الرئيسي"],
+        assertFn: (turn) => {
+          if (turn.diagnostics.appointmentCreated) {
+            throw new Error(
+              "Should not create an appointment for a location FAQ",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-40",
+    title: "استفسار بعد تأكيد الحجز: قائمة الخدمات المتاحة ('الخدمات المتاحة')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "بعد تأكيد الحجز، يسأل العميل عن الخدمات المتاحة، فيعرض المساعد القائمة دون إقفال المحادثة.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "الخدمات المتاحة",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["الخدمات المتاحة"],
+        assertFn: (turn) => {
+          if (turn.diagnostics.appointmentCreated) {
+            throw new Error(
+              "Should not create an appointment for catalog query",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-41",
+    title:
+      "حجز موعد ثانٍ بعد تأكيد الحجز الأول ('عايز أحجز تنظيف أسنان الأسبوع الجاي')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "استمرار المحادثة بعد تأكيد الحجز الأول لطلب حجز خدمة جديدة بشكل منفصل وسلس.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "عايز أحجز تنظيف أسنان الأسبوع الجاي",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["تنظيف أسنان"],
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-42",
+    title: "إرسال رقم الخيار '1' بعد تأكيد الحجز دون عروض معلقة",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "إرسال '1' بعد تأكيد الحجز لا يُنشئ موعداً ثانياً ولا يُعيد عرضاً قديماً مستوفى.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+        assertFn: (turn) => {
+          if (turn.diagnostics.appointmentCreated) {
+            throw new Error(
+              "Duplicate booking created on redundant selection click",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-43",
+    title: "طلب التحويل لموظف بعد تأكيد الحجز ('حولني لموظف لو سمحت')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "طلب بشري صريح بعد تأكيد الحجز يُحول المحادثة فوراً إلى NEED_HUMAN.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "حولني لموظف لو سمحت",
+        expectedAction: "AI_HANDOFF",
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-44",
+    title: "المحادثة المسندة لموظف بشري (DEFERRED_TO_STAFF)",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "إذا كانت المحادثة مسندة لموظف بشري (assignedUserId)، فإن رسائل العميل تُحال للموظف دون معالجة ذكاء اصطناعي.",
+    setup: {
+      assignedUserId: "staff-1",
+      conversationStatus: "NEED_HUMAN",
+    },
+    turns: [
+      {
+        input: "مساء الخير، كنت بستفسر عن حاجة",
+        expectedAction: "DEFERRED_TO_STAFF",
+      },
+    ],
+    expectations: {},
+  },
+  {
+    id: "GS-45",
+    title: "استفسار عن ساعات العمل ('مواعيد العمل عندكم إيه؟')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "سؤال العميل عن ساعات العمل يُجاب عليه بنجاح عبر الإجابات المحفوظة.",
+    turns: [
+      {
+        input: "مواعيد العمل عندكم إيه؟",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["مواعيد العمل"],
+      },
+    ],
+    expectations: {},
+  },
+  {
+    id: "GS-46",
+    title: "استفسار عن الإلغاء بعد الحجز ('عايز ألغي الموعد')",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "طلب إلغاء الموعد بعد الحجز لا يُنشئ حجزاً جديداً ويُحول بشكل آمن للموظف (AI_HANDOFF).",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "عايز ألغي الموعد",
+        expectedAction: "AI_HANDOFF",
+        assertFn: (turn) => {
+          if (turn.diagnostics.appointmentCreated) {
+            throw new Error(
+              "Should not create appointment on cancellation turn",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-47",
+    title: "استفسار عام عن ساعات العمل بعد تأكيد الحجز",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "الإجابة عن ساعات العمل بعد إتمام الحجز دون إغلاق المحادثة أو إنشاء حجز ثانٍ.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "مواعيد العمل عندكم إيه؟",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["مواعيد العمل"],
+        assertFn: (turn) => {
+          if (turn.diagnostics.appointmentCreated) {
+            throw new Error("Should not create appointment on FAQ turn");
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+  {
+    id: "GS-48",
+    title: "عزل البيانات وتعدد المنشآت (Tenant Isolation)",
+    category: "POST_BOOKING_CONTINUITY",
+    description:
+      "التأكد من أن عروض المواعيد والخدمات تخص المنشأة المحددة ولا تتسرب بين المنشآت.",
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["كشف أسنان"],
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+        expectedOutboundContains: ["لدى عيادة النور لطب الأسنان"],
       },
     ],
     expectations: {

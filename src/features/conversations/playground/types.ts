@@ -99,7 +99,8 @@ export type ScenarioDefinition = {
     | "SLOT_NAVIGATION"
     | "CATALOG_INQUIRY"
     | "CHANNEL_FORMATTING"
-    | "SAFETY_HANDOFF";
+    | "SAFETY_HANDOFF"
+    | "POST_BOOKING_CONTINUITY";
   description: string;
   channel?: InboundChannel;
   setup?: {
@@ -109,6 +110,8 @@ export type ScenarioDefinition = {
     initialAppointments?: any[];
     priorAppointment?: boolean;
     todayRef?: string;
+    conversationStatus?: ConversationStatus;
+    assignedUserId?: string | null;
   };
   turns: ScenarioTurnExpectation[];
   expectations: {

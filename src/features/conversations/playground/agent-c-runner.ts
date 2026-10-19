@@ -335,6 +335,8 @@ export async function runAgentCScenario(
       initialAppointments: scenario.setup?.initialAppointments,
       priorAppointment: scenario.setup?.priorAppointment,
       todayRef: scenario.setup?.todayRef,
+      conversationStatus: scenario.setup?.conversationStatus,
+      assignedUserId: scenario.setup?.assignedUserId,
     });
 
   const sandbox = createAgentCSandbox(harness);
