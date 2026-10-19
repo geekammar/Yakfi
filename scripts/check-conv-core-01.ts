@@ -37,6 +37,25 @@
  * Run: pnpm check:conv-core-01
  */
 
+import type {
+  Appointment,
+  Branch,
+  Business,
+  Conversation,
+  Customer,
+  Message,
+  Service,
+} from "@/generated/prisma/client";
+
+import type {
+  AiRequest,
+  AiResponse,
+} from "@/features/conversations/server/conversation-ai";
+import type { ConversationEngineDeps } from "@/features/conversations/server/conversation-engine";
+import type { UpdateConversationDto } from "@/lib/validation";
+import type { InboundClaimResult } from "@/server/repositories/inbound-dedupe.repository";
+import type { UsageRecord } from "@/types/domain";
+
 type Check = { label: string; pass: boolean };
 
 class InMemoryConversationStateStore {
@@ -99,28 +118,23 @@ async function main(): Promise<void> {
   process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 
-  const {
-    buildSlotOffer,
-    isOfferLive,
-    offerCallbackData,
-  } = await import("../src/features/conversations/server/booking-offer");
-  const {
-    interpretOfferReply,
-  } = await import("../src/features/conversations/server/booking-selection");
+  const { buildSlotOffer, isOfferLive, offerCallbackData } =
+    await import("../src/features/conversations/server/booking-offer");
+  const { interpretOfferReply } =
+    await import("../src/features/conversations/server/booking-selection");
   const {
     completeBookingTask,
     dehydrateConversationState,
     emptyConversationState,
     hydrateConversationState,
     mergeConversationState,
+    withOfferStatus,
     withPresentedOffer,
   } = await import("../src/features/conversations/server/conversation-state");
-  const {
-    openTurnStateSession,
-  } = await import("../src/features/conversations/server/conversation-state-store");
-  const {
-    receiveInboundMessage,
-  } = await import("../src/features/conversations/server/conversation-engine");
+  const { openTurnStateSession } =
+    await import("../src/features/conversations/server/conversation-state-store");
+  const { receiveInboundMessage } =
+    await import("../src/features/conversations/server/conversation-engine");
 
   const checks: Check[] = [];
   function check(label: string, pass: boolean, detail?: unknown): void {
@@ -209,7 +223,15 @@ async function main(): Promise<void> {
     };
 
     let conversationStatus = "AI_ACTIVE";
-    let conversation = {
+    const conversation: {
+      id: string;
+      businessId: string;
+      customerId: string;
+      branchId: string;
+      status: string;
+      assignedUserId: string | null;
+      aiSummary: string | null;
+    } = {
       id: "conv-1",
       businessId: B_ID,
       customerId: customer.id,
@@ -220,19 +242,20 @@ async function main(): Promise<void> {
     };
 
     const dedupeLedger = new Set<string>();
-    const messages: Array<{ senderType: string; content: string; id: string }> = [
-      {
-        id: "msg-1",
-        senderType: "CUSTOMER",
-        content: "عايز كشف أسنان بكرة",
-      },
-      {
-        id: "msg-2",
-        senderType: "AI",
-        content:
-          'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم 2026-09-15:\n1. د. سارة — 09:00 إلى 09:30',
-      },
-    ];
+    const messages: Array<{ senderType: string; content: string; id: string }> =
+      [
+        {
+          id: "msg-1",
+          senderType: "CUSTOMER",
+          content: "عايز كشف أسنان بكرة",
+        },
+        {
+          id: "msg-2",
+          senderType: "AI",
+          content:
+            'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم 2026-09-15:\n1. د. سارة — 09:00 إلى 09:30',
+        },
+      ];
 
     const stateStore = new InMemoryConversationStateStore();
     // Pre-seed active slot offer
@@ -286,25 +309,39 @@ async function main(): Promise<void> {
 
     let aiCalls = 0;
 
-    const deps = {
+    const deps: ConversationEngineDeps = {
       businessRepository: {
-        findByWhatsappNumber: async () => business as any,
-        findById: async (id: string) => (id === B_ID ? (business as any) : null),
+        findByWhatsappNumber: async () => business as unknown as Business,
+        findById: async (id: string) =>
+          id === B_ID ? (business as unknown as Business) : null,
       },
       branchRepository: {
-        findDefaultByBusiness: async () => branch as any,
+        findDefaultByBusiness: async () => branch as unknown as Branch,
         findByIdWithinBusiness: async (id: string, bId?: string) =>
-          id === BRANCH_1 && (!bId || bId === B_ID) ? (branch as any) : null,
+          id === BRANCH_1 && (!bId || bId === B_ID)
+            ? (branch as unknown as Branch)
+            : null,
       },
       customerRepository: {
-        upsertByPhone: async () => customer as any,
-        touchConversation: async () => customer as any,
+        upsertByPhone: async () => customer as unknown as Customer,
+        touchConversation: async () => customer as unknown as Customer,
       },
       conversationRepository: {
         findLatestByCustomer: async () => ({ id: conversation.id }),
-        findById: async () => ({ ...conversation, status: conversationStatus } as any),
-        create: async () => conversation as any,
-        addMessage: async (input: any, options?: { status?: string }) => {
+        findById: async () =>
+          ({
+            ...conversation,
+            status: conversationStatus,
+          }) as unknown as Conversation,
+        create: async () => conversation as unknown as Conversation,
+        addMessage: async (
+          input: {
+            conversationId: string;
+            senderType: string;
+            content: string;
+          },
+          options?: { status?: string },
+        ) => {
           if (options?.status) {
             conversationStatus = options.status;
           }
@@ -315,60 +352,123 @@ async function main(): Promise<void> {
             content: input.content,
           };
           messages.push(msg);
-          return msg as any;
+          return msg as unknown as Message;
         },
-        getMessages: async () => [...messages] as any,
-        update: async (_id: string, patch: any) => {
-          if (patch?.status) conversationStatus = patch.status;
-          return { ...conversation, status: conversationStatus } as any;
+        getMessages: async (_conversationId: string) =>
+          [...messages] as unknown as Message[],
+        update: async (_id: string, data: UpdateConversationDto) => {
+          if (data.aiSummary !== undefined) {
+            conversation.aiSummary = data.aiSummary;
+          }
+          return {
+            ...conversation,
+            status: conversationStatus,
+          } as unknown as Conversation;
+        },
+        updateWorkflow: async (
+          _id: string,
+          data: { status?: Conversation["status"] },
+        ) => {
+          if (data.status) conversationStatus = data.status;
+          return {
+            ...conversation,
+            status: conversationStatus,
+          } as unknown as Conversation;
         },
       },
       conversationStateRepository: stateStore,
       serviceRepository: {
-        listByBusiness: async () => services as any,
-        findById: async (id: string) => services.find((s) => s.id === id) as any,
+        listByBusiness: async () => services as unknown as Service[],
+        findById: async (id: string) =>
+          (services.find((s) => s.id === id) ??
+            null) as unknown as Service | null,
       },
       inboundDedupeRepository: {
-        claim: async (_bId: string, key: string) => {
-          if (dedupeLedger.has(key)) return { status: "duplicate" as const };
+        claim: async (
+          _bId: string,
+          key: string,
+        ): Promise<InboundClaimResult> => {
+          if (dedupeLedger.has(key)) {
+            return {
+              status: "duplicate",
+              claimId: `claim-${dedupeLedger.size}`,
+              conversationId: conversation.id,
+              customerMessageId: "msg-1",
+            };
+          }
           dedupeLedger.add(key);
-          return { status: "claimed" as const, claimId: `claim-${dedupeLedger.size}` };
+          return {
+            status: "claimed",
+            claimId: `claim-${dedupeLedger.size}`,
+          };
         },
       },
+      usageRepository: {
+        record: async () => ({ id: "usage-1" }) as unknown as UsageRecord,
+      },
       providerRepository: {
-        listEligibleForService: async () => providers as any,
+        listEligibleForService: async () =>
+          providers as unknown as Array<{
+            id: string;
+            displayName: string;
+            user: { name: string };
+          }>,
         listAssignmentSeams: async () => [
           { providerId: PROVIDER_1, userId: USER_1, assignedUserId: USER_1 },
           { providerId: PROVIDER_2, userId: USER_2, assignedUserId: USER_2 },
         ],
       },
       appointmentRepository: {
-        createWithConflictCheck: async (dto: any) => {
-          createdAppointments.push(dto);
-          return { id: `apt-${createdAppointments.length}` };
+        createWithConflictCheck: async (dto: {
+          businessId: string;
+          customerId: string;
+          serviceId: string;
+          date: string;
+          startTime: string;
+          endTime: string;
+          branchId?: string | null;
+          providerId?: string | null;
+          assignedUserId?: string | null;
+          status?: string;
+          followUpRequestId?: string | null;
+        }) => {
+          createdAppointments.push({
+            serviceId: dto.serviceId,
+            providerId: dto.providerId ?? undefined,
+            date: dto.date,
+            startTime: dto.startTime,
+            endTime: dto.endTime,
+          });
+          return {
+            id: `apt-${createdAppointments.length}`,
+          } as unknown as Appointment;
         },
-        listBlockingIntervalsForDateRange: async () => [],
         listBlockingByAssignees: async () => [],
-      } as any,
+      },
       ai: {
         providerName: "deterministic",
-        respond: async (input: any) => {
+        respond: async (request: AiRequest): Promise<AiResponse> => {
           aiCalls++;
           if (opts?.simulateAiFailure) throw new Error("AI provider failure");
-          const msgText = input?.currentMessage?.content ?? "";
+          const msgText = request.message ?? "";
           if (msgText.includes("عنوان") || msgText.includes("مكان")) {
             return {
               intent: "FAQ" as const,
-              confidence: 0.95,
               action: "reply" as const,
               summary: "سؤال عن العنوان",
               content: "عنواننا في التجمع الخامس، القاهرة.",
+              extraction: {
+                service: null,
+                date: null,
+                timePreference: null,
+                provider: null,
+              },
+              handoffReason: null,
             };
           }
           if (msgText.includes("تنظيف أسنان")) {
             return {
               intent: "BOOKING" as const,
-              confidence: 0.95,
               action: "reply" as const,
               summary: "طلب حجز تنظيف أسنان",
               content: "تفضل المواعيد المتاحة لتنظيف الأسنان.",
@@ -378,12 +478,12 @@ async function main(): Promise<void> {
                 timePreference: null,
                 provider: null,
               },
+              handoffReason: null,
             };
           }
           if (msgText.includes("عايز أحجز موعد بكرة")) {
             return {
               intent: "BOOKING" as const,
-              confidence: 0.95,
               action: "reply" as const,
               summary: "طلب حجز بدون تحديد خدمة",
               content: "تفضل المواعيد المتاحة لكشف الأسنان.",
@@ -393,11 +493,11 @@ async function main(): Promise<void> {
                 timePreference: null,
                 provider: null,
               },
+              handoffReason: null,
             };
           }
           return {
             intent: "BOOKING" as const,
-            confidence: 0.95,
             action: "reply" as const,
             summary: "طلب حجز",
             content: "أهلاً بك، كيف أساعدك؟",
@@ -407,6 +507,7 @@ async function main(): Promise<void> {
               timePreference: null,
               provider: null,
             },
+            handoffReason: null,
           };
         },
       },
@@ -819,8 +920,8 @@ async function main(): Promise<void> {
       externalId: "ext-dup-msg-11",
     };
 
-    const first = await receiveInboundMessage(fixture.deps as any, inbound);
-    const second = await receiveInboundMessage(fixture.deps as any, inbound);
+    const first = await receiveInboundMessage(fixture.deps, inbound);
+    const second = await receiveInboundMessage(fixture.deps, inbound);
 
     check(
       "11. Duplicate inbound delivery is recognized idempotently",
@@ -1085,7 +1186,7 @@ async function main(): Promise<void> {
     const fixture = createEngineFixture({
       defaultServiceId: SERVICE_1,
     });
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عايز أحجز موعد بكرة",
@@ -1108,7 +1209,7 @@ async function main(): Promise<void> {
     const fixture = createEngineFixture({
       defaultServiceId: SERVICE_1,
     });
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عايز أحجز تنظيف أسنان بكرة",
@@ -1130,7 +1231,7 @@ async function main(): Promise<void> {
   {
     const fixture = createEngineFixture();
     fixture.setConversationStatus("BOOKED");
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عنوان ومكان العيادة فين؟",
@@ -1155,7 +1256,7 @@ async function main(): Promise<void> {
   {
     const fixture = createEngineFixture();
     fixture.setConversationStatus("BOOKED");
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "ايه الخدمات المتاحة عندكم؟",
@@ -1180,7 +1281,7 @@ async function main(): Promise<void> {
   {
     const fixture = createEngineFixture();
     fixture.setConversationStatus("BOOKED");
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عايز أحجز موعد تاني لكشف أسنان الأسبوع القادم",
@@ -1201,7 +1302,7 @@ async function main(): Promise<void> {
   // ──────────────────────────────────────────────────────────────────────────
   {
     const fixture = createEngineFixture();
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "حولني لموظف لو سمحت",
@@ -1224,7 +1325,7 @@ async function main(): Promise<void> {
   // ──────────────────────────────────────────────────────────────────────────
   {
     const fixture = createEngineFixture();
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عندي نزيف شديد بعد الخلع ومش بيقف",
@@ -1246,10 +1347,13 @@ async function main(): Promise<void> {
   // 25. A customer interrupts a booking to ask a FAQ
   // ──────────────────────────────────────────────────────────────────────────
   {
-    const { state: inBooking } = mergeConversationState(emptyConversationState(), {
-      turnGoal: "BOOKING",
-      factUpdates: [{ key: "service", value: "كشف أسنان" }],
-    });
+    const { state: inBooking } = mergeConversationState(
+      emptyConversationState(),
+      {
+        turnGoal: "BOOKING",
+        factUpdates: [{ key: "service", value: "كشف أسنان" }],
+      },
+    );
 
     const { state: interrupted } = mergeConversationState(inBooking, {
       turnGoal: "FAQ",
@@ -1266,10 +1370,13 @@ async function main(): Promise<void> {
   // 26. The interrupted goal resumes correctly
   // ──────────────────────────────────────────────────────────────────────────
   {
-    const { state: inBooking } = mergeConversationState(emptyConversationState(), {
-      turnGoal: "BOOKING",
-      factUpdates: [{ key: "service", value: "كشف أسنان" }],
-    });
+    const { state: inBooking } = mergeConversationState(
+      emptyConversationState(),
+      {
+        turnGoal: "BOOKING",
+        factUpdates: [{ key: "service", value: "كشف أسنان" }],
+      },
+    );
 
     const { state: interrupted } = mergeConversationState(inBooking, {
       turnGoal: "FAQ",
@@ -1294,7 +1401,7 @@ async function main(): Promise<void> {
     const fixture = createEngineFixture({
       simulateAiFailure: true,
     });
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "عايز كشف أسنان",
@@ -1314,7 +1421,7 @@ async function main(): Promise<void> {
   // ──────────────────────────────────────────────────────────────────────────
   {
     const fixture = createEngineFixture();
-    const res = await receiveInboundMessage(fixture.deps as any, {
+    const res = await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "1",
@@ -1324,7 +1431,8 @@ async function main(): Promise<void> {
     });
 
     const created = fixture.createdAppointments;
-    const msgs = await fixture.deps.conversationRepository.getMessages();
+    const msgs =
+      await fixture.deps.conversationRepository.getMessages("conv-1");
     check(
       "28. Created appointment uses exclusively real catalogue IDs",
       created.length === 1 &&
@@ -1341,7 +1449,7 @@ async function main(): Promise<void> {
   {
     const fixture = createEngineFixture();
     const callsBefore = fixture.aiCallCount;
-    await receiveInboundMessage(fixture.deps as any, {
+    await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "1",
@@ -1363,7 +1471,7 @@ async function main(): Promise<void> {
   {
     const fixture = createEngineFixture();
     const initialBookingsCount = fixture.existingHistoricalBookings.length;
-    await receiveInboundMessage(fixture.deps as any, {
+    await receiveInboundMessage(fixture.deps, {
       from: "+201234567890",
       to: "+201001111111",
       text: "1",
@@ -1376,6 +1484,86 @@ async function main(): Promise<void> {
       "30. Historical bookings remain untouched after turn execution",
       fixture.existingHistoricalBookings.length === initialBookingsCount &&
         fixture.existingHistoricalBookings[0]?.id === "hist-apt-1",
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 31. Stranded claim recovery after timeout
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    const store = new InMemoryConversationStateStore();
+    const offer = buildSlotOffer(
+      { businessId: B_ID, conversationId: C_ID },
+      "off-31",
+      {
+        serviceId: SERVICE_1,
+        serviceName: "كشف أسنان",
+        serviceSource: "CUSTOMER",
+        providerId: null,
+        date: "2026-09-15",
+        followUpRequestId: null,
+        shownCount: 1,
+        options: [
+          {
+            providerId: PROVIDER_1,
+            displayName: "د. سارة",
+            startAt: "2026-09-15T09:00",
+            endAt: "2026-09-15T09:30",
+          },
+        ],
+      },
+      now,
+    )!;
+    // Persist as CLAIMED 5 minutes ago (abandoned / crashed turn)
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+    const claimedState = withOfferStatus(
+      withPresentedOffer(emptyConversationState(), offer),
+      "CLAIMED",
+    );
+    store.rows.set(C_ID, {
+      businessId: B_ID,
+      revision: 1,
+      state: dehydrateConversationState(claimedState),
+      updatedAt: fiveMinutesAgo,
+    });
+
+    const session = await openTurnStateSession(
+      store,
+      { businessId: B_ID, conversationId: C_ID },
+      now,
+    );
+    check(
+      "31. Stranded claim (>2m) is automatically released back to ACTIVE on session open",
+      session.state?.offer?.status === "ACTIVE",
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 32. Invalid selection index releases claim back to ACTIVE
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    const fixture = createEngineFixture();
+    await receiveInboundMessage(fixture.deps, {
+      from: "+201234567890",
+      to: "+201001111111",
+      text: "9",
+      receivedAt: now.toISOString(),
+      channel: "WHATSAPP",
+      externalId: "ext-32-a",
+    });
+
+    const row = await fixture.deps.conversationStateRepository!.load(
+      B_ID,
+      "conv-1",
+    );
+    const hydrated = hydrateConversationState(row?.state, {
+      businessId: B_ID,
+      conversationId: "conv-1",
+    });
+
+    check(
+      "32. Out-of-bounds selection index releases offer back to ACTIVE",
+      hydrated?.offer?.status === "ACTIVE",
     );
   }
 
@@ -1393,7 +1581,9 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`\nTOTAL: ${checks.length} | PASSED: ${passedCount} | FAILED: ${checks.length - passedCount}`);
+  console.log(
+    `\nTOTAL: ${checks.length} | PASSED: ${passedCount} | FAILED: ${checks.length - passedCount}`,
+  );
   if (passedCount !== checks.length) {
     process.exit(1);
   }

@@ -227,7 +227,10 @@ export function slotOfferKeyboard(offer: SlotOffer): Record<string, unknown> {
         callback_data: offerCallbackData(offer, option.index),
       })),
       [
-        { text: "🔄 أوقات أخرى", callback_data: offerCallbackData(offer, "more") },
+        {
+          text: "🔄 أوقات أخرى",
+          callback_data: offerCallbackData(offer, "more"),
+        },
         { text: "📅 يوم آخر", callback_data: offerCallbackData(offer, "date") },
       ],
     ],

@@ -30,6 +30,8 @@ export type ConversationStateStore = Pick<
  * and the offer (which has its own TTL) are kept.
  */
 export const CONVERSATION_FACT_FRESHNESS_MS = 12 * 60 * 60 * 1000;
+/** Stranded claims older than this are safely released or invalidated on load. */
+export const OFFER_CLAIM_TIMEOUT_MS = 2 * 60 * 1000;
 
 export type TurnStateSession = {
   /** False when no durable store is reachable — every call is a no-op. */
@@ -44,32 +46,50 @@ export type TurnStateSession = {
    * its write landed.
    */
   commit(): Promise<boolean>;
+  /**
+   * Reload latest state and revision from durable store. Returns true if loaded,
+   * false if row does not exist or store unreachable.
+   */
+  reload(): Promise<boolean>;
   /** Atomically CLAIM the current ACTIVE offer before a booking write. */
   claimOffer(): Promise<"claimed" | "conflict" | "no_offer">;
+  /** Release a CLAIMED offer back to ACTIVE (e.g. invalid index / ambiguous time). */
+  releaseClaim(): Promise<boolean>;
+  /** Invalidate the current offer (e.g. booking failure / date change). */
+  invalidateOffer(): Promise<boolean>;
 };
 
 function freshen(state: ConversationState, updatedAt: Date, now: Date) {
-  if (now.getTime() - updatedAt.getTime() <= CONVERSATION_FACT_FRESHNESS_MS) {
-    return state;
+  let result = state;
+  if (now.getTime() - updatedAt.getTime() > CONVERSATION_FACT_FRESHNESS_MS) {
+    result = {
+      ...result,
+      knownFacts: result.knownFacts.customerName
+        ? { customerName: result.knownFacts.customerName }
+        : {},
+      selectedService: null,
+      selectedDate: null,
+      selectedTimePref: null,
+      providerPreference: null,
+      serviceId: null,
+      serviceSource: null,
+      missingFacts: [],
+      lastClarification: null,
+      activeTask: null,
+      currentGoal: null,
+      bookingStage: "NOT_APPLICABLE" as const,
+      topics: [],
+    };
   }
-  return {
-    ...state,
-    knownFacts: state.knownFacts.customerName
-      ? { customerName: state.knownFacts.customerName }
-      : {},
-    selectedService: null,
-    selectedDate: null,
-    selectedTimePref: null,
-    providerPreference: null,
-    serviceId: null,
-    serviceSource: null,
-    missingFacts: [],
-    lastClarification: null,
-    activeTask: null,
-    currentGoal: null,
-    bookingStage: "NOT_APPLICABLE" as const,
-    topics: [],
-  };
+  if (
+    result.offer &&
+    result.offer.status === "CLAIMED" &&
+    now.getTime() - updatedAt.getTime() > OFFER_CLAIM_TIMEOUT_MS
+  ) {
+    const expired = Date.parse(result.offer.expiresAt) <= now.getTime();
+    result = withOfferStatus(result, expired ? "INVALIDATED" : "ACTIVE");
+  }
+  return result;
 }
 
 export async function openTurnStateSession(
@@ -82,7 +102,10 @@ export async function openTurnStateSession(
     loaded: false,
     state: null,
     commit: async () => true,
+    reload: async () => false,
     claimOffer: async () => "no_offer",
+    releaseClaim: async () => true,
+    invalidateOffer: async () => true,
   };
   if (!store) return disabled;
 
@@ -124,6 +147,23 @@ export async function openTurnStateSession(
         return false;
       }
     },
+    async reload() {
+      if (!enabled) return false;
+      try {
+        const row = await store.load(scope.businessId, scope.conversationId);
+        if (row) {
+          revision = row.revision;
+          const hydrated = hydrateConversationState(row.state, scope);
+          session.state = hydrated
+            ? freshen(hydrated, row.updatedAt, now)
+            : null;
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    },
     async claimOffer() {
       const offer: BookingOffer | null = session.state?.offer ?? null;
       if (!enabled || !session.state || !offer || offer.status !== "ACTIVE") {
@@ -137,6 +177,24 @@ export async function openTurnStateSession(
         return "conflict";
       }
       return "claimed";
+    },
+    async releaseClaim() {
+      if (
+        !enabled ||
+        !session.state ||
+        session.state.offer?.status !== "CLAIMED"
+      ) {
+        return true;
+      }
+      session.state = withOfferStatus(session.state, "ACTIVE");
+      return await session.commit();
+    },
+    async invalidateOffer() {
+      if (!enabled || !session.state || !session.state.offer) {
+        return true;
+      }
+      session.state = withOfferStatus(session.state, "INVALIDATED");
+      return await session.commit();
     },
   };
   return session;

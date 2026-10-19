@@ -89,6 +89,12 @@ import type {
   TurnStateTransitionObservation,
 } from "@/features/conversations/server/ai-observability";
 import { buildTurnObservability } from "@/features/conversations/server/ai-observability";
+import {
+  isProviderNameCandidate,
+  mapAiResponseToBookingInput,
+  matchProviderByName,
+  matchServiceByName,
+} from "@/features/conversations/server/booking-mapper";
 import type {
   ServiceOffer,
   SlotOffer,
@@ -99,17 +105,11 @@ import {
   serviceOfferKeyboard,
   slotOfferKeyboard,
 } from "@/features/conversations/server/booking-offer";
-import {
-  isProviderNameCandidate,
-  mapAiResponseToBookingInput,
-  matchProviderByName,
-  matchServiceByName,
-} from "@/features/conversations/server/booking-mapper";
 import type {
   BookingSelection,
   BookingSelectionContext,
+  OfferReply,
 } from "@/features/conversations/server/booking-selection";
-import type { OfferReply } from "@/features/conversations/server/booking-selection";
 import {
   interpretOfferReply,
   tryParseBookingSelection,
@@ -137,10 +137,12 @@ import {
   withOfferStatus,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
-import type { ConversationStateStore } from "@/features/conversations/server/conversation-state-store";
-import { openTurnStateSession } from "@/features/conversations/server/conversation-state-store";
-import type { TurnStateSession } from "@/features/conversations/server/conversation-state-store";
 import type { ConversationState } from "@/features/conversations/server/conversation-state";
+import type {
+  ConversationStateStore,
+  TurnStateSession,
+} from "@/features/conversations/server/conversation-state-store";
+import { openTurnStateSession } from "@/features/conversations/server/conversation-state-store";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
 import {
@@ -1331,6 +1333,9 @@ async function completeBookingSelection(
     })),
   );
   if (serviceMatch.status !== "ok") {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       serviceMatch.status === "ambiguous"
         ? `هناك أكثر من خدمة تطابق "${context.serviceName}" — يرجى تحديد الخدمة بدقة.`
@@ -1353,6 +1358,9 @@ async function completeBookingSelection(
     { serviceId, ...(branchId ? { branchId } : {}) },
   );
   if (!eligibility.success) {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       bookingEligibilityErrorMessage(eligibility.error.code),
       "NEED_HUMAN",
@@ -1375,6 +1383,9 @@ async function completeBookingSelection(
       eligibility.data.providers,
     );
     if (providerMatch.status === "missing") {
+      if (turnSession?.enabled) {
+        await turnSession.releaseClaim();
+      }
       return reply(
         providerMatch.reason === "ambiguous"
           ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
@@ -1399,6 +1410,9 @@ async function completeBookingSelection(
     },
   );
   if (!bookingResult.success) {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       bookingOptionsErrorMessage(bookingResult.error.code),
       "NEED_HUMAN",
@@ -1407,6 +1421,9 @@ async function completeBookingSelection(
   }
   const freshOptions = bookingResult.data.options;
   if (freshOptions.length === 0) {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       bookingEmptyReasonMessage(bookingResult.reason ?? "FULLY_BOOKED", date),
       "NEED_HUMAN",
@@ -1426,7 +1443,10 @@ async function completeBookingSelection(
       let nextOffer: SlotOffer | null = null;
       if (turnSession?.enabled) {
         nextOffer = buildSlotOffer(
-          { businessId: scope.business.id, conversationId: scope.conversation.id },
+          {
+            businessId: scope.business.id,
+            conversationId: scope.conversation.id,
+          },
           crypto.randomUUID(),
           {
             serviceId,
@@ -1450,7 +1470,10 @@ async function completeBookingSelection(
             turnSession.state ?? emptyConversationState(),
             nextOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            nextOffer = null;
+          }
         }
       }
       const replyMarkup = isTelegram
@@ -1476,6 +1499,9 @@ async function completeBookingSelection(
         replyMarkup,
       );
     }
+    if (turnSession?.enabled) {
+      await turnSession.releaseClaim();
+    }
     return reply(
       `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${date}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`,
       "AI_ACTIVE",
@@ -1483,6 +1509,9 @@ async function completeBookingSelection(
   }
 
   if (selection.kind === "change_date") {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}" (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):`,
       "AI_ACTIVE",
@@ -1497,10 +1526,16 @@ async function completeBookingSelection(
     );
     if (!offered) {
       if (context.options.length === 0) {
+        if (turnSession?.enabled) {
+          await turnSession.invalidateOffer();
+        }
         return reply(
           `لم يعد بإمكاني التأكد من الخيارات المعروضة — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, freshOptions)}`,
           "AI_ACTIVE",
         );
+      }
+      if (turnSession?.enabled) {
+        await turnSession.releaseClaim();
       }
       return reply(
         `${BOOKING_INVALID_INDEX_MESSAGE} — يرجى اختيار رقم من 1 إلى ${context.options.length}.`,
@@ -1516,6 +1551,9 @@ async function completeBookingSelection(
       ) ?? null;
     if (!chosen) {
       // Stale presentation: the exact offered option is gone.
+      if (turnSession?.enabled) {
+        await turnSession.invalidateOffer();
+      }
       return reply(
         `الخيار المحدد لم يعد متاحاً — إليك المواعيد المحدثة:\n${formatBookingOptionsMessage(serviceName, date, freshOptions)}`,
         "AI_ACTIVE",
@@ -1526,9 +1564,15 @@ async function completeBookingSelection(
       (option) => option.startAt.slice(11, 16) === selection.time,
     );
     if (matches.length === 0) {
+      if (turnSession?.enabled) {
+        await turnSession.releaseClaim();
+      }
       return reply(BOOKING_UNKNOWN_TIME_MESSAGE, "AI_ACTIVE");
     }
     if (matches.length > 1) {
+      if (turnSession?.enabled) {
+        await turnSession.releaseClaim();
+      }
       return reply(BOOKING_AMBIGUOUS_TIME_MESSAGE, "AI_ACTIVE");
     }
     chosen = matches[0] ?? null;
@@ -1538,6 +1582,9 @@ async function completeBookingSelection(
     chosen = freshOptions[0] ?? null;
   }
   if (!chosen) {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "DOMAIN_REQUIRES_HUMAN");
   }
 
@@ -1556,6 +1603,9 @@ async function completeBookingSelection(
   if (!resolvedBranchId || !assigneeId) {
     // The booking cannot be routed — the business's branch/assignee setup
     // cannot accept it. An operator can fix this configuration gap.
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "TENANT_CONFIGURATION");
   }
 
@@ -1566,12 +1616,18 @@ async function completeBookingSelection(
       scope.business.id,
     );
     if (!followUp || followUp.status !== "PENDING") {
+      if (turnSession?.enabled) {
+        await turnSession.invalidateOffer();
+      }
       return reply(
         "عذراً، طلب المتابعة لم يعد متاحاً للجدولة (تم إلغاؤه أو جدولته مسبقاً أو خارج الفترة المحددة). يمكنك حجز موعد جديد مباشرة باختيار الخدمة المطلوبة.",
         "AI_ACTIVE",
       );
     }
     if (followUp.customerId !== scope.customer.id) {
+      if (turnSession?.enabled) {
+        await turnSession.invalidateOffer();
+      }
       return reply(
         BOOKING_RETRY_MESSAGE,
         "NEED_HUMAN",
@@ -1596,9 +1652,15 @@ async function completeBookingSelection(
 
   if (created.status === "failed") {
     // Unexpected booking failure — NEVER a success confirmation.
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(BOOKING_RETRY_MESSAGE, "NEED_HUMAN", "DOMAIN_REQUIRES_HUMAN");
   }
   if (created.status === "invalid_follow_up") {
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
+    }
     return reply(
       "عذراً، طلب المتابعة لم يعد متاحاً للجدولة (تم إلغاؤه أو جدولته مسبقاً أو خارج الفترة المحددة). يمكنك حجز موعد جديد مباشرة باختيار الخدمة المطلوبة.",
       "AI_ACTIVE",
@@ -1615,7 +1677,10 @@ async function completeBookingSelection(
       let retryOffer: SlotOffer | null = null;
       if (turnSession?.enabled) {
         retryOffer = buildSlotOffer(
-          { businessId: scope.business.id, conversationId: scope.conversation.id },
+          {
+            businessId: scope.business.id,
+            conversationId: scope.conversation.id,
+          },
           crypto.randomUUID(),
           {
             serviceId,
@@ -1639,7 +1704,10 @@ async function completeBookingSelection(
             turnSession.state ?? emptyConversationState(),
             retryOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            retryOffer = null;
+          }
         }
       }
       const replyMarkup =
@@ -1650,6 +1718,9 @@ async function completeBookingSelection(
         null,
         replyMarkup,
       );
+    }
+    if (turnSession?.enabled) {
+      await turnSession.invalidateOffer();
     }
     return reply(
       BOOKING_CONFLICT_MESSAGE,
@@ -1672,7 +1743,22 @@ async function completeBookingSelection(
         completedAt: new Date().toISOString(),
       },
     );
-    await turnSession.commit();
+    const ok = await turnSession.commit();
+    if (!ok) {
+      // Safe retry: reload latest state row and re-apply completeBookingTask so CONSUMED status lands
+      await turnSession.reload();
+      turnSession.state = completeBookingTask(
+        turnSession.state ?? emptyConversationState(),
+        {
+          appointmentId: created.appointmentId,
+          serviceId,
+          providerId: chosen.providerId ?? providerId ?? null,
+          date,
+          completedAt: new Date().toISOString(),
+        },
+      );
+      await turnSession.commit();
+    }
   }
 
   const businessName = scope.business.name;
@@ -2090,14 +2176,30 @@ async function runInboundTurn(
           "AI_ACTIVE",
         );
       }
-      const selectionResult = await completeBookingSelection(
-        deps,
-        selectionScope,
-        offerReply.context,
-        offerReply.selection,
-        turnSession,
-      );
-      if (selectionResult) return selectionResult;
+      try {
+        const selectionResult = await completeBookingSelection(
+          deps,
+          selectionScope,
+          offerReply.context,
+          offerReply.selection,
+          turnSession,
+        );
+        if (selectionResult) return selectionResult;
+      } catch (err) {
+        if (
+          turnSession.enabled &&
+          turnSession.state?.offer?.status === "CLAIMED"
+        ) {
+          await turnSession.invalidateOffer();
+        }
+        throw err;
+      }
+      if (
+        turnSession.enabled &&
+        turnSession.state?.offer?.status === "CLAIMED"
+      ) {
+        await turnSession.releaseClaim();
+      }
     } else if (offerReply.kind === "service") {
       if (turnSession.state) {
         turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
@@ -2151,7 +2253,7 @@ async function runInboundTurn(
               if (preferred.length > 0)
                 bookableOptions = [...preferred, ...others];
             }
-            const slotOffer = buildSlotOffer(
+            let slotOffer: SlotOffer | null = buildSlotOffer(
               { businessId: business.id, conversationId: conversation.id },
               crypto.randomUUID(),
               {
@@ -2176,7 +2278,10 @@ async function runInboundTurn(
                 turnSession.state ?? emptyConversationState(),
                 slotOffer,
               );
-              await turnSession.commit();
+              const ok = await turnSession.commit();
+              if (!ok) {
+                slotOffer = null;
+              }
             }
             const isTelegram = customer.phone.startsWith("tg:");
             const replyMarkup =
@@ -2238,7 +2343,25 @@ async function runInboundTurn(
           offer: null,
           pendingOffer: null,
         };
-        await turnSession.commit();
+        const ok = await turnSession.commit();
+        if (!ok) {
+          await turnSession.reload();
+          turnSession.state = {
+            ...(turnSession.state ?? emptyConversationState()),
+            serviceId: offerReply.serviceId,
+            selectedService: offerReply.serviceName,
+            serviceSource: "CUSTOMER",
+            knownFacts: {
+              ...(turnSession.state?.knownFacts ?? {}),
+              service: offerReply.serviceName,
+            },
+            missingFacts: ["date"],
+            lastClarification: { type: "date" },
+            offer: null,
+            pendingOffer: null,
+          };
+          await turnSession.commit();
+        }
       }
       const assistantMessage = await persistAssistantReply(
         deps,
@@ -3182,7 +3305,10 @@ async function runInboundTurn(
               turnSession.state ?? resolvedState ?? emptyConversationState(),
               serviceOffer,
             );
-            await turnSession.commit();
+            const ok = await turnSession.commit();
+            if (!ok) {
+              serviceOffer = null;
+            }
           }
         }
         let replyMarkup: Record<string, unknown> | undefined;
@@ -3481,7 +3607,10 @@ async function runInboundTurn(
             turnSession.state ?? resolvedState ?? emptyConversationState(),
             slotOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            slotOffer = null;
+          }
         }
       }
 

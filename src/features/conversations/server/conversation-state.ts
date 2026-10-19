@@ -44,6 +44,7 @@ import {
 } from "@/features/conversations/server/booking-offer";
 import type { OfferedBookingOption } from "@/features/conversations/server/booking-selection";
 import { extractLastBookingOffer } from "@/features/conversations/server/booking-selection";
+
 import { z } from "zod";
 
 // ─── Vocabulary ──────────────────────────────────────────────────────────────
@@ -745,7 +746,9 @@ export function deriveConversationStateFromHistory(
 // WHEN; these decide WHAT the next state is.
 
 /** The legacy presentation mirror of a typed slot offer. */
-function pendingOfferMirror(offer: BookingOffer): ConversationPendingOffer | null {
+function pendingOfferMirror(
+  offer: BookingOffer,
+): ConversationPendingOffer | null {
   if (offer.kind !== "SLOT") return null;
   return {
     serviceName: offer.serviceName,
@@ -981,6 +984,8 @@ export function hydrateConversationState(
   return {
     ...base,
     pendingOffer:
-      p.offer && p.offer.status === "ACTIVE" ? pendingOfferMirror(p.offer) : null,
+      p.offer && p.offer.status === "ACTIVE"
+        ? pendingOfferMirror(p.offer)
+        : null,
   };
 }
