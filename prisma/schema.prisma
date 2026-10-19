@@ -137,16 +137,16 @@ model Business {
   // Disabled by default for existing and new businesses until explicitly
   // enabled. `reminderLeadHours` specifies how many hours before appointment
   // start time to dispatch the reminder (1, 2, 4, 12, 24, 48).
-  reminderEnabled       Boolean   @default(false) @map("reminder_enabled")
-  reminderLeadHours     Int       @default(24) @map("reminder_lead_hours")
-  reminderTemplateId    String    @default("standard") @map("reminder_template_id")
+  reminderEnabled    Boolean @default(false) @map("reminder_enabled")
+  reminderLeadHours  Int     @default(24) @map("reminder_lead_hours")
+  reminderTemplateId String  @default("standard") @map("reminder_template_id")
 
   // ── Default service booking mode (CONV-PLAY-01) ──────────────
   // "الحجز السريع بالخدمة الافتراضية" — optional, disabled by default.
   // When enabled and customer requests booking without specifying a service,
   // the assistant automatically selects this configured default service.
-  defaultServiceBookingEnabled Boolean   @default(false) @map("default_service_booking_enabled")
-  defaultBookingServiceId      String?   @map("default_booking_service_id")
+  defaultServiceBookingEnabled Boolean @default(false) @map("default_service_booking_enabled")
+  defaultBookingServiceId      String? @map("default_booking_service_id")
 
   users                            User[]
   branches                         Branch[]
@@ -167,6 +167,7 @@ model Business {
   usageRecords                     UsageRecord[]
   operatorAttentions               OperatorAttention[]
   knowledgeGaps                    KnowledgeGap[]
+  conversationStates               ConversationStateRecord[]
   followUpRequests                 FollowUpRequest[]
   appointmentReminders             AppointmentReminder[]
 
@@ -239,13 +240,13 @@ model Service {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  business           Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointments       Appointment[]              @relation("AppointmentBookedService")
-  performedAppointments Appointment[]           @relation("AppointmentPerformedService")
-  defaultForBusinesses  Business[]               @relation("BusinessDefaultBookingService")
-  providerServices   ProviderService[]
-  providerExclusions ProviderServiceExclusion[]
-  followUpRequests   FollowUpRequest[]
+  business              Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments          Appointment[]              @relation("AppointmentBookedService")
+  performedAppointments Appointment[]              @relation("AppointmentPerformedService")
+  defaultForBusinesses  Business[]                 @relation("BusinessDefaultBookingService")
+  providerServices      ProviderService[]
+  providerExclusions    ProviderServiceExclusion[]
+  followUpRequests      FollowUpRequest[]
 
   @@index([businessId])
   @@index([businessId, isActive])
@@ -265,7 +266,7 @@ model Customer {
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt          DateTime? @map("deleted_at")
 
-  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   conversations    Conversation[]
   appointments     Appointment[]
   followUpRequests FollowUpRequest[]
@@ -294,13 +295,14 @@ model Conversation {
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?          @map("deleted_at")
 
-  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  branch        Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo    User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  business      Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer      Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch        Branch                   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo    User?                    @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
   messages      Message[]
   attention     OperatorAttention?
   knowledgeGaps KnowledgeGap[]
+  stateRecord   ConversationStateRecord?
 
   @@index([businessId])
   @@index([businessId, status])
@@ -415,23 +417,47 @@ model KnowledgeGap {
   @@map("knowledge_gaps")
 }
 
+// ─── Durable conversation state (CONV-CORE-01) ──────────────
+// ONE row per conversation: the engine-owned, Zod-validated
+// ConversationState snapshot (customer facts + the current typed
+// booking offer + the completed-task marker). Orchestration state
+// only — NEVER booking truth: every write still re-runs CORE-01 +
+// CORE-02 + createWithConflictCheck. `revision` is the optimistic-
+// concurrency counter (compare-and-swap on every save), which also
+// makes offer CLAIM atomic across concurrent webhook deliveries.
+// Tenant isolation: every read/write is scoped by businessId.
+model ConversationStateRecord {
+  conversationId String   @id @map("conversation_id")
+  businessId     String   @map("business_id")
+  revision       Int      @default(0)
+  state          Json
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("conversation_state_records")
+}
+
 // ─── Appointments ────────────────────────────────────────────
 
 model Appointment {
-  id             String            @id @default(uuid())
-  businessId     String            @map("business_id")
-  customerId     String            @map("customer_id")
-  serviceId      String            @map("service_id")
+  id                       String            @id @default(uuid())
+  businessId               String            @map("business_id")
+  customerId               String            @map("customer_id")
+  serviceId                String            @map("service_id")
   // Branch-aware (DECISIONS #30): always the Business's Default Branch
   // today; resolved SERVER-side, never client input.
-  branchId       String            @map("branch_id")
-  assignedUserId String?           @map("assigned_user_id")
-  providerId     String?           @map("provider_id")
-  date           DateTime          @db.Date
-  startTime      DateTime          @map("start_time") @db.Time
-  endTime        DateTime          @map("end_time") @db.Time
-  status         AppointmentStatus @default(PENDING)
-  notes          String?
+  branchId                 String            @map("branch_id")
+  assignedUserId           String?           @map("assigned_user_id")
+  providerId               String?           @map("provider_id")
+  date                     DateTime          @db.Date
+  startTime                DateTime          @map("start_time") @db.Time
+  endTime                  DateTime          @map("end_time") @db.Time
+  status                   AppointmentStatus @default(PENDING)
+  notes                    String?
   // ── Retrospective post-visit service correction (CONV-PLAY-01) ──
   // Performed service actually provided during a completed visit.
   // Booked service (`serviceId`) remains historical truth and is never altered.
@@ -439,9 +465,9 @@ model Appointment {
   serviceCorrectedAt       DateTime?         @map("service_corrected_at")
   serviceCorrectedById     String?           @map("service_corrected_by_id")
   serviceCorrectionHistory Json?             @map("service_correction_history")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
-  deletedAt      DateTime?         @map("deleted_at")
+  createdAt                DateTime          @default(now()) @map("created_at")
+  updatedAt                DateTime          @default(now()) @updatedAt @map("updated_at")
+  deletedAt                DateTime?         @map("deleted_at")
 
   business           Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customer           Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -867,10 +893,10 @@ model ProviderProfile {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
 
-  user         User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
-  business     Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  services     ProviderService[]
-  exclusions   ProviderServiceExclusion[]
+  user             User?                      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business         Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services         ProviderService[]
+  exclusions       ProviderServiceExclusion[]
   branches         ProviderBranch[]
   appointments     Appointment[]
   followUpRequests FollowUpRequest[]
@@ -1081,24 +1107,24 @@ model PlatformInvitation {
 // integration.
 
 model PlatformAiPolicy {
-  id                 String   @id @default("singleton")
-  primaryProvider    String   @map("primary_provider")
-  primaryModel       String   @map("primary_model")
-  secondaryProvider  String?  @map("secondary_provider")
-  secondaryModel     String?  @map("secondary_model")
-  fallbackEnabled    Boolean  @default(true) @map("fallback_enabled")
-  primarySecretRef   String   @map("primary_secret_ref")
-  secondarySecretRef String?  @map("secondary_secret_ref")
+  id                     String   @id @default("singleton")
+  primaryProvider        String   @map("primary_provider")
+  primaryModel           String   @map("primary_model")
+  secondaryProvider      String?  @map("secondary_provider")
+  secondaryModel         String?  @map("secondary_model")
+  fallbackEnabled        Boolean  @default(true) @map("fallback_enabled")
+  primarySecretRef       String   @map("primary_secret_ref")
+  secondarySecretRef     String?  @map("secondary_secret_ref")
   // PROMPT-AI-OPS-28 — OPTIONAL OpenRouter-only provider endpoint pin
   // (e.g. `decart/fp4`). Additive + nullable: absent ⇒ OpenRouter keeps its
   // default routing. Meaningful ONLY when the effective provider is
   // OpenRouter; every other provider ignores it. Not a secret, not a key —
   // a routing slug the platform operator owns.
-  openRouterProviderOnly String? @map("open_router_provider_only")
+  openRouterProviderOnly String?  @map("open_router_provider_only")
   // Audit reference — the Platform Operator who last changed the policy.
-  updatedById        String?  @map("updated_by_id")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById            String?  @map("updated_by_id")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at")
 
   updatedBy User? @relation("PlatformAiPolicyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
@@ -1192,21 +1218,21 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
 
-  business                   Business?            @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  business                   Business?                     @relation(fields: [businessId], references: [id], onDelete: SetNull)
   sessions                   Session[]
   accounts                   Account[]
   providerProfile            ProviderProfile?
-  assignedConversations      Conversation[]       @relation("ConversationAssignee")
-  assignedAppointments       Appointment[]        @relation("AppointmentAssignee")
-  invitationsCreated         Invitation[]         @relation("InvitationCreator")
-  platformInvitationsCreated PlatformInvitation[] @relation("PlatformInvitationCreator")
-  aiPolicyUpdates            PlatformAiPolicy[]   @relation("PlatformAiPolicyUpdater")
-  copyOverridesUpdated       PlatformCopyOverride[]      @relation("PlatformCopyOverrideUpdater")
+  assignedConversations      Conversation[]                @relation("ConversationAssignee")
+  assignedAppointments       Appointment[]                 @relation("AppointmentAssignee")
+  invitationsCreated         Invitation[]                  @relation("InvitationCreator")
+  platformInvitationsCreated PlatformInvitation[]          @relation("PlatformInvitationCreator")
+  aiPolicyUpdates            PlatformAiPolicy[]            @relation("PlatformAiPolicyUpdater")
+  copyOverridesUpdated       PlatformCopyOverride[]        @relation("PlatformCopyOverrideUpdater")
   copyOverrideHistory        PlatformCopyOverrideHistory[] @relation("PlatformCopyOverrideHistoryActor")
-  resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
-  reviewedKnowledgeGaps      KnowledgeGap[]       @relation("KnowledgeGapReviewer")
-  followUpRequestsCreated    FollowUpRequest[]    @relation("FollowUpCreator")
-  correctedAppointments      Appointment[]        @relation("AppointmentServiceCorrector")
+  resolvedAttentions         OperatorAttention[]           @relation("AttentionResolver")
+  reviewedKnowledgeGaps      KnowledgeGap[]                @relation("KnowledgeGapReviewer")
+  followUpRequestsCreated    FollowUpRequest[]             @relation("FollowUpCreator")
+  correctedAppointments      Appointment[]                 @relation("AppointmentServiceCorrector")
 
   @@index([businessId])
   @@index([accountType])

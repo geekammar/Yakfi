@@ -16,6 +16,14 @@
  * candidate; the engine re-resolves Business/Branch/Service/Provider
  * server-side and re-validates against fresh CORE-01 + CORE-02 results.
  */
+import type {
+  BookingOffer,
+  SlotOffer,
+} from "@/features/conversations/server/booking-offer";
+import {
+  isOfferLive,
+  parseOfferCallback,
+} from "@/features/conversations/server/booking-offer";
 import { normalizeArabicText } from "@/features/conversations/server/conversation-ai";
 
 /** One option exactly as presented in the canonical offer message. */
@@ -24,6 +32,8 @@ export type OfferedBookingOption = {
   displayName: string;
   startTime: string;
   endTime: string;
+  /** CONV-CORE-01 — the real provider id (typed offers only). */
+  providerId?: string;
 };
 
 export type BookingSelection =
@@ -39,6 +49,14 @@ export type BookingSelectionContext = {
   /** Options parsed from the canonical offer message (may be empty). */
   options: OfferedBookingOption[];
   followUpRequestId?: string | null;
+  /**
+   * CONV-CORE-01 — present ONLY for a typed offer: the exact service/provider
+   * ids the offer was resolved for, and how many fresh options were already
+   * shown (for "more times"). Absent ⇒ legacy text-recovered offer.
+   */
+  serviceId?: string;
+  providerId?: string | null;
+  shownCount?: number;
 };
 
 /** Arabic and Eastern Arabic indic digits → ascii. */
@@ -302,4 +320,150 @@ export function tryParseBookingSelection(
   const selection = parseBookingSelection(customerText);
   if (!selection) return null;
   return { context, selection };
+}
+
+// ─── Typed offer replies (CONV-CORE-01) ─────────────────────────────────────
+
+/** The selection context a typed slot offer implies (ids, not names). */
+export function selectionContextFromSlotOffer(
+  offer: SlotOffer,
+): BookingSelectionContext {
+  return {
+    serviceName: offer.serviceName,
+    date: offer.date,
+    options: offer.options.map((option) => ({
+      index: option.index,
+      displayName: option.displayName,
+      startTime: option.startAt.slice(11, 16),
+      endTime: option.endAt.slice(11, 16),
+      providerId: option.providerId,
+    })),
+    followUpRequestId: offer.followUpRequestId,
+    serviceId: offer.serviceId,
+    providerId: offer.providerId,
+    shownCount: offer.shownCount,
+  };
+}
+
+/**
+ * How the customer's raw turn relates to the CURRENT typed offer. This is a
+ * MECHANICAL interpretation (index / time / callback token) — never intent
+ * classification — and it reads ONLY the typed snapshot, never message copy.
+ */
+export type OfferReply =
+  /** Not a reply to an offer — the normal AI turn owns it. */
+  | { kind: "none" }
+  /** A selection-shaped reply to an offer that is no longer selectable. */
+  | { kind: "stale"; reason: "EXPIRED" | "CLOSED" | "UNKNOWN_TOKEN" }
+  /** A slot-offer selection (re-verified against fresh CORE-02 by the engine). */
+  | {
+      kind: "slot";
+      context: BookingSelectionContext;
+      selection: BookingSelection;
+    }
+  /** A service-list selection resolved to the offered service id. */
+  | { kind: "service"; serviceId: string; serviceName: string }
+  /** An index outside the offered service list. */
+  | { kind: "service_invalid_index"; max: number };
+
+function serviceIndexFromText(text: string): number | null {
+  const trimmed = text.trim();
+  const prefixed = trimmed.match(/^(?:service|serv)[_:]([1-9]\d?)$/i);
+  if (prefixed?.[1]) return Number(prefixed[1]);
+  const selection = parseBookingSelection(trimmed);
+  return selection?.kind === "index" ? selection.index : null;
+}
+
+/** Legacy positional callbacks (`opt_N`, `service_N`, `more_times`, …). */
+function isLegacyCallback(text: string): boolean {
+  return /^(?:opt|slot|choice|service|serv)[_:][1-9]\d?$|^(?:more_times|change_date)$/i.test(
+    text.trim(),
+  );
+}
+
+/**
+ * Interpret the customer's turn against the current typed offer.
+ *
+ * - `fp:<token>:<action>` callbacks bind to ONE offer: a token that is not the
+ *   live offer's token is STALE (never re-applied to a newer list).
+ * - Legacy positional callbacks / bare indices apply only to a LIVE offer.
+ * - Free text that is not selection-shaped returns `none` (the AI decides).
+ */
+export function interpretOfferReply(
+  rawText: string,
+  offer: BookingOffer | null,
+  now: Date,
+): OfferReply {
+  const live = isOfferLive(offer, now);
+  const callback = parseOfferCallback(rawText);
+  if (callback) {
+    if (!offer || callback.token !== offer.token) {
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+    }
+    if (!live) {
+      return {
+        kind: "stale",
+        reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+      };
+    }
+    if (offer.kind === "SERVICE") {
+      if (callback.action.kind !== "index") return { kind: "none" };
+      return serviceChoice(offer, callback.action.index);
+    }
+    const selection: BookingSelection =
+      callback.action.kind === "index"
+        ? { kind: "index", index: callback.action.index }
+        : callback.action.kind === "more"
+          ? { kind: "more_times" }
+          : { kind: "change_date" };
+    return {
+      kind: "slot",
+      context: selectionContextFromSlotOffer(offer),
+      selection,
+    };
+  }
+
+  if (!offer) return { kind: "none" };
+
+  if (!live) {
+    // Only a clearly selection-shaped turn is answered as stale; anything
+    // else is a fresh request the AI should handle normally.
+    const selectionShaped =
+      isLegacyCallback(rawText) ||
+      parseBookingSelection(rawText)?.kind === "index";
+    if (!selectionShaped) return { kind: "none" };
+    return {
+      kind: "stale",
+      reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+    };
+  }
+
+  if (offer.kind === "SERVICE") {
+    const index = serviceIndexFromText(rawText);
+    if (index === null) return { kind: "none" };
+    return serviceChoice(offer, index);
+  }
+
+  const selection = parseBookingSelection(rawText);
+  if (!selection) return { kind: "none" };
+  return {
+    kind: "slot",
+    context: selectionContextFromSlotOffer(offer),
+    selection,
+  };
+}
+
+function serviceChoice(
+  offer: Extract<BookingOffer, { kind: "SERVICE" }>,
+  index: number,
+): OfferReply {
+  const option = offer.options.find((o) => o.index === index);
+  if (!option) {
+    return { kind: "service_invalid_index", max: offer.options.length };
+  }
+  return {
+    kind: "service",
+    serviceId: option.serviceId,
+    serviceName: option.name,
+  };
 }

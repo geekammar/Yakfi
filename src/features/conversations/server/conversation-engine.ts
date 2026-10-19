@@ -89,6 +89,16 @@ import type {
   TurnStateTransitionObservation,
 } from "@/features/conversations/server/ai-observability";
 import { buildTurnObservability } from "@/features/conversations/server/ai-observability";
+import type {
+  ServiceOffer,
+  SlotOffer,
+} from "@/features/conversations/server/booking-offer";
+import {
+  buildServiceOffer,
+  buildSlotOffer,
+  serviceOfferKeyboard,
+  slotOfferKeyboard,
+} from "@/features/conversations/server/booking-offer";
 import {
   isProviderNameCandidate,
   mapAiResponseToBookingInput,
@@ -99,7 +109,11 @@ import type {
   BookingSelection,
   BookingSelectionContext,
 } from "@/features/conversations/server/booking-selection";
-import { tryParseBookingSelection } from "@/features/conversations/server/booking-selection";
+import type { OfferReply } from "@/features/conversations/server/booking-selection";
+import {
+  interpretOfferReply,
+  tryParseBookingSelection,
+} from "@/features/conversations/server/booking-selection";
 import {
   CONTINUE_DOMAIN_INVITE,
   clarificationForBookingReason,
@@ -115,10 +129,17 @@ import {
   normalizeArabicText,
 } from "@/features/conversations/server/conversation-ai";
 import {
+  completeBookingTask,
   deriveConversationStateFromHistory,
+  emptyConversationState,
   factUpdatesFromExtraction,
   mergeConversationState,
+  withOfferStatus,
+  withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
+import type { ConversationStateStore } from "@/features/conversations/server/conversation-state-store";
+import { openTurnStateSession } from "@/features/conversations/server/conversation-state-store";
+import type { TurnStateSession } from "@/features/conversations/server/conversation-state-store";
 import type { ConversationState } from "@/features/conversations/server/conversation-state";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
@@ -174,6 +195,7 @@ import {
   branchRepository,
   businessRepository,
   conversationRepository,
+  conversationStateRepository,
   customerRepository,
   followUpRequestRepository,
   inboundDedupeRepository,
@@ -328,6 +350,13 @@ export type ConversationEngineDeps = {
    * harnesses may omit it to keep their output silent.
    */
   turnTelemetry?: TurnTelemetrySink;
+  /**
+   * OPTIONAL (CONV-CORE-01): the durable ConversationState store (typed
+   * offers + customer facts). When absent — offline harnesses, or a database
+   * the migration has not reached yet — the engine keeps the legacy,
+   * history-derived behaviour byte-for-byte.
+   */
+  conversationStateRepository?: ConversationStateStore;
   providerRepository?: Pick<
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
@@ -362,6 +391,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   attentionRepository: operatorAttentionRepository,
   knowledgeGapRepository,
   turnTelemetry: turnTelemetrySink,
+  conversationStateRepository,
   providerRepository,
   appointmentRepository,
   followUpRequestRepository,
@@ -729,6 +759,7 @@ function resolveFinishedTurn(
    * turn it is unused and the lexical detector stays authoritative.
    */
   turnTelemetry?: AiTelemetry | null,
+  priorState?: ConversationState | null,
 ): { plan: ResolvedTurn; state: ConversationState } | null {
   if (!decision) return null;
   try {
@@ -749,7 +780,8 @@ function resolveFinishedTurn(
         : undefined;
     const signals = semanticSignals ?? detectTurnControlSignals(currentMessage);
 
-    const base = deriveConversationStateFromHistory(recentChronological);
+    const base =
+      priorState ?? deriveConversationStateFromHistory(recentChronological);
     // Reconstruct a pending clarification from history (migration-safe §9) so
     // the resumed state reflects what the engine actually asked last turn.
     const pending = derivePendingClarification(recentChronological);
@@ -1279,6 +1311,7 @@ async function completeBookingSelection(
   scope: BookingSelectionScope,
   context: BookingSelectionContext,
   selection: BookingSelection,
+  turnSession?: TurnStateSession,
 ): Promise<InboundSuccess | null> {
   const isTelegram = scope.customer.phone.startsWith("tg:");
   const reply = (
@@ -1390,19 +1423,51 @@ async function completeBookingSelection(
     const unpresented = freshOptions.slice(maxPresentedIndex);
     if (unpresented.length > 0) {
       const nextBatch = unpresented.slice(0, 5);
+      let nextOffer: SlotOffer | null = null;
+      if (turnSession?.enabled) {
+        nextOffer = buildSlotOffer(
+          { businessId: scope.business.id, conversationId: scope.conversation.id },
+          crypto.randomUUID(),
+          {
+            serviceId,
+            serviceName,
+            serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
+            providerId: providerId ?? null,
+            date,
+            followUpRequestId: context.followUpRequestId ?? null,
+            shownCount: maxPresentedIndex + nextBatch.length,
+            options: nextBatch.map((o) => ({
+              providerId: o.providerId,
+              displayName: o.displayName,
+              startAt: o.startAt,
+              endAt: o.endAt,
+            })),
+          },
+          new Date(),
+        );
+        if (nextOffer) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            nextOffer,
+          );
+          await turnSession.commit();
+        }
+      }
       const replyMarkup = isTelegram
-        ? {
-            inline_keyboard: [
-              nextBatch.map((_, i) => ({
-                text: `${maxPresentedIndex + i + 1}️⃣ اختيار ${maxPresentedIndex + i + 1}`,
-                callback_data: `opt_${maxPresentedIndex + i + 1}`,
-              })),
-              [
-                { text: "🔄 أوقات أخرى", callback_data: "more_times" },
-                { text: "📅 يوم آخر", callback_data: "change_date" },
+        ? nextOffer
+          ? slotOfferKeyboard(nextOffer)
+          : {
+              inline_keyboard: [
+                nextBatch.map((_, i) => ({
+                  text: `${maxPresentedIndex + i + 1}️⃣ اختيار ${maxPresentedIndex + i + 1}`,
+                  callback_data: `opt_${maxPresentedIndex + i + 1}`,
+                })),
+                [
+                  { text: "🔄 أوقات أخرى", callback_data: "more_times" },
+                  { text: "📅 يوم آخر", callback_data: "change_date" },
+                ],
               ],
-            ],
-          }
+            }
         : undefined;
       return reply(
         `إليك أوقاتاً أخرى متاحة لخدمة "${serviceName}" يوم ${date}:\n${formatBookingOptionsMessage(serviceName, date, nextBatch, context.followUpRequestId)}`,
@@ -1547,9 +1612,43 @@ async function completeBookingSelection(
       { serviceId, ...(branchId ? { branchId } : {}), date },
     );
     if (retry.success && retry.data.options.length > 0) {
+      let retryOffer: SlotOffer | null = null;
+      if (turnSession?.enabled) {
+        retryOffer = buildSlotOffer(
+          { businessId: scope.business.id, conversationId: scope.conversation.id },
+          crypto.randomUUID(),
+          {
+            serviceId,
+            serviceName,
+            serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
+            providerId: providerId ?? null,
+            date,
+            followUpRequestId,
+            shownCount: retry.data.options.length,
+            options: retry.data.options.map((o) => ({
+              providerId: o.providerId,
+              displayName: o.displayName,
+              startAt: o.startAt,
+              endAt: o.endAt,
+            })),
+          },
+          new Date(),
+        );
+        if (retryOffer) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            retryOffer,
+          );
+          await turnSession.commit();
+        }
+      }
+      const replyMarkup =
+        isTelegram && retryOffer ? slotOfferKeyboard(retryOffer) : undefined;
       return reply(
         `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options, followUpRequestId)}`,
         "AI_ACTIVE",
+        null,
+        replyMarkup,
       );
     }
     return reply(
@@ -1562,6 +1661,20 @@ async function completeBookingSelection(
   // 7. BOOKED transition + authoritative confirmation. The confirmation
   //    uses ONLY the created appointment's resolved values, and is
   //    persisted/delivered only AFTER creation succeeded.
+  if (turnSession?.enabled) {
+    turnSession.state = completeBookingTask(
+      turnSession.state ?? emptyConversationState(),
+      {
+        appointmentId: created.appointmentId,
+        serviceId,
+        providerId: chosen.providerId ?? providerId ?? null,
+        date,
+        completedAt: new Date().toISOString(),
+      },
+    );
+    await turnSession.commit();
+  }
+
   const businessName = scope.business.name;
   const confirmation = followUpRequestId
     ? initialStatus === "CONFIRMED"
@@ -1944,32 +2057,301 @@ async function runInboundTurn(
         senderType: message.senderType,
         content: message.content,
       }));
-    // 7b. Deterministic booking selection close-the-loop (PROMPT-AI-03B):
-    // Never calls LLM, never fabricates ids — customer chose 1/2/3 or
-    // HH:mm or provider-name after an offer. Re-derive Business/Branch/
-    // Service server-side, re-run CORE-01+CORE-02 fresh, then canonical
-    // createWithConflictCheck → BOOKED + confirmation (zero write on
-    // stale/invalid/ambiguous).
-    // CONV-LIFE-01: If thread was BOOKED, previous offer is fulfilled; skip
-    // selection attempt to avoid duplicate booking.
-    const selectionAttempt = wasBooked
-      ? null
-      : tryParseBookingSelection(inbound.text, recentChronological);
-    if (selectionAttempt) {
+    const now = new Date(inbound.receivedAt);
+    const turnSession = await openTurnStateSession(
+      deps.conversationStateRepository,
+      { businessId: business.id, conversationId: conversation.id },
+      now,
+    );
+
+    const selectionScope: BookingSelectionScope = {
+      business,
+      conversation,
+      customer,
+      customerMessageId: customerMessage.id,
+      connectionId: outboundConnectionId,
+      services,
+    };
+
+    // 7b. Mechanical selection resolver (CONV-CORE-01):
+    // First, evaluate against any durable typed offer in state.
+    // Falls back to legacy text-parsed selection when no typed offer is in state.
+    const offerReply: OfferReply = turnSession.enabled
+      ? interpretOfferReply(inbound.text, turnSession.state?.offer ?? null, now)
+      : { kind: "none" };
+
+    if (offerReply.kind === "slot") {
+      const claim = await turnSession.claimOffer();
+      if (claim === "conflict") {
+        return selectionReply(
+          deps,
+          selectionScope,
+          "جاري معالجة طلبك حالياً، يرجى الانتظار لحظات.",
+          "AI_ACTIVE",
+        );
+      }
       const selectionResult = await completeBookingSelection(
         deps,
-        {
-          business,
-          conversation,
-          customer,
-          customerMessageId: customerMessage.id,
-          connectionId: outboundConnectionId,
-          services,
-        },
-        selectionAttempt.context,
-        selectionAttempt.selection,
+        selectionScope,
+        offerReply.context,
+        offerReply.selection,
+        turnSession,
       );
       if (selectionResult) return selectionResult;
+    } else if (offerReply.kind === "service") {
+      if (turnSession.state) {
+        turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
+      }
+      const knownDate = turnSession.state?.knownFacts.date;
+      if (knownDate) {
+        const branchId = (conversation.branchId as string | null) ?? null;
+        const eligibilityDeps = buildEligibilityDeps(deps);
+        const eligibility = await resolveEligibleProviders(
+          eligibilityDeps as unknown as Parameters<
+            typeof resolveEligibleProviders
+          >[0],
+          { businessId: business.id },
+          {
+            serviceId: offerReply.serviceId,
+            ...(branchId ? { branchId } : {}),
+          },
+        );
+        if (eligibility.success) {
+          const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+          const bookingResult = await resolveBookingOptions(
+            bookingDeps as unknown as Parameters<
+              typeof resolveBookingOptions
+            >[0],
+            { userId: customer.id, businessId: business.id },
+            {
+              serviceId: offerReply.serviceId,
+              ...(branchId ? { branchId } : {}),
+              date: knownDate,
+            },
+          );
+          if (bookingResult.success && bookingResult.data.options.length > 0) {
+            let bookableOptions = bookingResult.data.options;
+            const timeOfDayPref = turnSession.state?.knownFacts.timePreference;
+            if (timeOfDayPref) {
+              const matchesPref = (startTime: string) => {
+                const hour = parseInt(startTime.slice(0, 2), 10);
+                if (Number.isNaN(hour)) return true;
+                if (timeOfDayPref === "morning") return hour < 12;
+                if (timeOfDayPref === "afternoon")
+                  return hour >= 12 && hour < 17;
+                if (timeOfDayPref === "evening") return hour >= 17;
+                return true;
+              };
+              const preferred = bookableOptions.filter((o) =>
+                matchesPref(o.startAt.slice(11, 16)),
+              );
+              const others = bookableOptions.filter(
+                (o) => !matchesPref(o.startAt.slice(11, 16)),
+              );
+              if (preferred.length > 0)
+                bookableOptions = [...preferred, ...others];
+            }
+            const slotOffer = buildSlotOffer(
+              { businessId: business.id, conversationId: conversation.id },
+              crypto.randomUUID(),
+              {
+                serviceId: offerReply.serviceId,
+                serviceName: offerReply.serviceName,
+                serviceSource: "CUSTOMER",
+                providerId: null,
+                date: knownDate,
+                followUpRequestId: null,
+                shownCount: bookableOptions.length,
+                options: bookableOptions.map((o) => ({
+                  providerId: o.providerId,
+                  displayName: o.displayName,
+                  startAt: o.startAt,
+                  endAt: o.endAt,
+                })),
+              },
+              now,
+            );
+            if (slotOffer && turnSession.enabled) {
+              turnSession.state = withPresentedOffer(
+                turnSession.state ?? emptyConversationState(),
+                slotOffer,
+              );
+              await turnSession.commit();
+            }
+            const isTelegram = customer.phone.startsWith("tg:");
+            const replyMarkup =
+              isTelegram && slotOffer
+                ? slotOfferKeyboard(slotOffer)
+                : undefined;
+            const optionsMsg = formatBookingOptionsMessage(
+              offerReply.serviceName,
+              knownDate,
+              bookableOptions,
+            );
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              optionsMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              optionsMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+              replyMarkup,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: "AVAILABILITY",
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+        }
+      }
+      const dateMsg = `تم اختيار خدمة "${offerReply.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):`;
+      if (turnSession.enabled) {
+        turnSession.state = {
+          ...(turnSession.state ?? emptyConversationState()),
+          serviceId: offerReply.serviceId,
+          selectedService: offerReply.serviceName,
+          serviceSource: "CUSTOMER",
+          knownFacts: {
+            ...(turnSession.state?.knownFacts ?? {}),
+            service: offerReply.serviceName,
+          },
+          missingFacts: ["date"],
+          lastClarification: { type: "date" },
+          offer: null,
+          pendingOffer: null,
+        };
+        await turnSession.commit();
+      }
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        dateMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        dateMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "BOOKING",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else if (offerReply.kind === "service_invalid_index") {
+      const invalidMsg = `يرجى اختيار رقم من 1 إلى ${offerReply.max}.`;
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        invalidMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        invalidMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "BOOKING",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else if (offerReply.kind === "stale") {
+      const staleMsg =
+        offerReply.reason === "CLOSED"
+          ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يمكنك طلب موعد جديد بتحديد الخدمة واليوم المناسب."
+          : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد اليوم والخدمة لعرض المواعيد المتاحة حالياً.";
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        staleMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        staleMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "BOOKING",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else {
+      // Legacy text-parsing fallback:
+      const selectionAttempt = wasBooked
+        ? null
+        : tryParseBookingSelection(inbound.text, recentChronological);
+      if (selectionAttempt) {
+        const selectionResult = await completeBookingSelection(
+          deps,
+          selectionScope,
+          selectionAttempt.context,
+          selectionAttempt.selection,
+          turnSession,
+        );
+        if (selectionResult) return selectionResult;
+      }
     }
     // 7c. B-02 — the Context Builder is the explicit AI boundary
     //     (PROMPT-B02): it takes the structured source facts already loaded
@@ -2104,9 +2486,13 @@ async function runInboundTurn(
       new Date(),
       business.timezone,
       turnTelemetry,
+      turnSession.state,
     );
     const resolvedTurn = resolution?.plan ?? null;
     const resolvedState = resolution?.state ?? null;
+    if (resolvedState && turnSession.enabled) {
+      turnSession.state = resolvedState;
+    }
     // PROMPT-AI-OPS-22 — provider execution facts for the evidence record.
     // `NOT_CALLED` marks a turn that spent no physical provider call (the
     // deterministic bypass / a JEV deterministic termination). When an adapter
@@ -2777,6 +3163,28 @@ async function runInboundTurn(
           "AI_ACTIVE",
         );
         const isTelegram = customer.phone.startsWith("tg:");
+        let serviceOffer: ServiceOffer | null = null;
+        if (
+          turnSession.enabled &&
+          (mapped.reason === "MISSING_SERVICE" ||
+            mapped.reason === "AMBIGUOUS_SERVICE") &&
+          services.length > 0
+        ) {
+          const activeServices = services.filter((s) => s.isActive);
+          serviceOffer = buildServiceOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            activeServices.map((s) => ({ id: s.id, name: s.name })),
+            now,
+          );
+          if (serviceOffer) {
+            turnSession.state = withPresentedOffer(
+              turnSession.state ?? resolvedState ?? emptyConversationState(),
+              serviceOffer,
+            );
+            await turnSession.commit();
+          }
+        }
         let replyMarkup: Record<string, unknown> | undefined;
         if (
           isTelegram &&
@@ -2784,14 +3192,16 @@ async function runInboundTurn(
             mapped.reason === "AMBIGUOUS_SERVICE") &&
           services.length > 0
         ) {
-          replyMarkup = {
-            inline_keyboard: services.slice(0, 5).map((s, idx) => [
-              {
-                text: `${idx + 1}️⃣ ${s.name}`,
-                callback_data: `service_${idx + 1}`,
-              },
-            ]),
-          };
+          replyMarkup = serviceOffer
+            ? serviceOfferKeyboard(serviceOffer)
+            : {
+                inline_keyboard: services.slice(0, 5).map((s, idx) => [
+                  {
+                    text: `${idx + 1}️⃣ ${s.name}`,
+                    callback_data: `service_${idx + 1}`,
+                  },
+                ]),
+              };
         }
         const delivery = await deliverAssistantReply(
           deps,
@@ -3044,20 +3454,53 @@ async function runInboundTurn(
         }
       }
 
+      let slotOffer: SlotOffer | null = null;
+      if (turnSession.enabled) {
+        slotOffer = buildSlotOffer(
+          { businessId: business.id, conversationId: conversation.id },
+          crypto.randomUUID(),
+          {
+            serviceId: mapped.serviceId,
+            serviceName: mapped.serviceName,
+            serviceSource: mapped.serviceSource,
+            providerId: mapped.providerText ?? null,
+            date: mapped.date!,
+            followUpRequestId: activeFollowUpId,
+            shownCount: bookableOptions.length,
+            options: bookableOptions.map((o) => ({
+              providerId: o.providerId,
+              displayName: o.displayName,
+              startAt: o.startAt,
+              endAt: o.endAt,
+            })),
+          },
+          now,
+        );
+        if (slotOffer) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? resolvedState ?? emptyConversationState(),
+            slotOffer,
+          );
+          await turnSession.commit();
+        }
+      }
+
       const isTelegram = customer.phone.startsWith("tg:");
       const replyMarkup = isTelegram
-        ? {
-            inline_keyboard: [
-              bookableOptions.slice(0, 3).map((_, i) => ({
-                text: `${i + 1}️⃣ اختيار ${i + 1}`,
-                callback_data: `opt_${i + 1}`,
-              })),
-              [
-                { text: "🔄 أوقات أخرى", callback_data: "more_times" },
-                { text: "📅 يوم آخر", callback_data: "change_date" },
+        ? slotOffer
+          ? slotOfferKeyboard(slotOffer)
+          : {
+              inline_keyboard: [
+                bookableOptions.slice(0, 3).map((_, i) => ({
+                  text: `${i + 1}️⃣ اختيار ${i + 1}`,
+                  callback_data: `opt_${i + 1}`,
+                })),
+                [
+                  { text: "🔄 أوقات أخرى", callback_data: "more_times" },
+                  { text: "📅 يوم آخر", callback_data: "change_date" },
+                ],
               ],
-            ],
-          }
+            }
         : undefined;
 
       // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
@@ -3233,6 +3676,13 @@ async function runInboundTurn(
         business.id,
         outboundConnectionId,
       );
+      if (turnSession.enabled) {
+        turnSession.state = withOfferStatus(
+          turnSession.state ?? resolvedState ?? emptyConversationState(),
+          "INVALIDATED",
+        );
+        await turnSession.commit();
+      }
       return {
         ok: true,
         duplicate: false,
@@ -3330,6 +3780,19 @@ async function runInboundTurn(
       status: delivery.delivered ? "SUCCESS" : "FAILURE",
       occurredAt: new Date(),
     });
+
+    if (turnSession.enabled && resolvedState) {
+      let finalState = resolvedState;
+      if (
+        validated.action !== "reply" ||
+        validated.intent === "HUMAN_REQUEST" ||
+        validated.handoffReason
+      ) {
+        finalState = withOfferStatus(finalState, "INVALIDATED");
+      }
+      turnSession.state = finalState;
+      await turnSession.commit();
+    }
 
     return {
       ok: true,
