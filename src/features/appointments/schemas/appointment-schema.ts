@@ -30,9 +30,19 @@ export const appointmentStatusActionSchema = z.object({
   status: z.enum(["CONFIRMED", "CANCELLED", "COMPLETED", "NO_SHOW"]),
 });
 
+export const correctPerformedServiceSchema = z.object({
+  appointmentId: uuidSchema,
+  performedServiceId: uuidSchema,
+  notes: z.string().trim().max(500, "الملاحظة طويلة جداً").optional(),
+  expectedVersion: z.string().optional(),
+});
+
 export type CreateAppointmentFormInput = z.infer<
   typeof createAppointmentFormSchema
 >;
 export type RescheduleAppointmentInput = z.infer<
   typeof rescheduleAppointmentSchema
+>;
+export type CorrectPerformedServiceInput = z.infer<
+  typeof correctPerformedServiceSchema
 >;

@@ -12,8 +12,9 @@
 
 # testing
 /coverage
-/playwright-report/
+/playwright-report
 /test-results/
+.flowpilot/
 
 # next.js
 /.next/

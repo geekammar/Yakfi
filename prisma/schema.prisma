@@ -132,13 +132,26 @@ model Business {
   // Disabled by default for existing and new businesses until explicitly
   // enabled. `reminderLeadHours` specifies how many hours before appointment
   // start time to dispatch the reminder (1, 2, 4, 12, 24, 48).
+  // ── Appointment reminders (BOOK-REM-01) ──────────────────────
+  // Configurable automated appointment reminder policy (ADMIN-only).
+  // Disabled by default for existing and new businesses until explicitly
+  // enabled. `reminderLeadHours` specifies how many hours before appointment
+  // start time to dispatch the reminder (1, 2, 4, 12, 24, 48).
   reminderEnabled       Boolean   @default(false) @map("reminder_enabled")
   reminderLeadHours     Int       @default(24) @map("reminder_lead_hours")
   reminderTemplateId    String    @default("standard") @map("reminder_template_id")
 
+  // ── Default service booking mode (CONV-PLAY-01) ──────────────
+  // "الحجز السريع بالخدمة الافتراضية" — optional, disabled by default.
+  // When enabled and customer requests booking without specifying a service,
+  // the assistant automatically selects this configured default service.
+  defaultServiceBookingEnabled Boolean   @default(false) @map("default_service_booking_enabled")
+  defaultBookingServiceId      String?   @map("default_booking_service_id")
+
   users                            User[]
   branches                         Branch[]
   defaultBranch                    Branch?                           @relation("DefaultBranch", fields: [defaultBranchId], references: [id], onDelete: Restrict)
+  defaultBookingService            Service?                          @relation("BusinessDefaultBookingService", fields: [defaultBookingServiceId], references: [id], onDelete: SetNull)
   services                         Service[]
   customers                        Customer[]
   conversations                    Conversation[]
@@ -158,6 +171,7 @@ model Business {
   appointmentReminders             AppointmentReminder[]
 
   @@index([isActive])
+  @@index([defaultBookingServiceId])
   @@map("businesses")
 }
 
@@ -226,7 +240,9 @@ model Service {
   deletedAt       DateTime? @map("deleted_at")
 
   business           Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  appointments       Appointment[]
+  appointments       Appointment[]              @relation("AppointmentBookedService")
+  performedAppointments Appointment[]           @relation("AppointmentPerformedService")
+  defaultForBusinesses  Business[]               @relation("BusinessDefaultBookingService")
   providerServices   ProviderService[]
   providerExclusions ProviderServiceExclusion[]
   followUpRequests   FollowUpRequest[]
@@ -416,16 +432,25 @@ model Appointment {
   endTime        DateTime          @map("end_time") @db.Time
   status         AppointmentStatus @default(PENDING)
   notes          String?
+  // ── Retrospective post-visit service correction (CONV-PLAY-01) ──
+  // Performed service actually provided during a completed visit.
+  // Booked service (`serviceId`) remains historical truth and is never altered.
+  performedServiceId       String?           @map("performed_service_id")
+  serviceCorrectedAt       DateTime?         @map("service_corrected_at")
+  serviceCorrectedById     String?           @map("service_corrected_by_id")
+  serviceCorrectionHistory Json?             @map("service_correction_history")
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?         @map("deleted_at")
 
-  business   Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  service    Service          @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  branch     Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo User?            @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  provider   ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  business           Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer           Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service            Service          @relation("AppointmentBookedService", fields: [serviceId], references: [id], onDelete: Restrict)
+  performedService   Service?         @relation("AppointmentPerformedService", fields: [performedServiceId], references: [id], onDelete: SetNull)
+  serviceCorrectedBy User?            @relation("AppointmentServiceCorrector", fields: [serviceCorrectedById], references: [id], onDelete: SetNull)
+  branch             Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo         User?            @relation("AppointmentAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  provider           ProviderProfile? @relation(fields: [providerId], references: [id], onDelete: SetNull)
 
   sourceFollowUpRequests   FollowUpRequest[]     @relation("SourceFollowUpRequests")
   scheduledFollowUpRequest FollowUpRequest?      @relation("ScheduledAppointmentFollowUp")
@@ -439,6 +464,7 @@ model Appointment {
   @@index([status])
   @@index([customerId])
   @@index([serviceId])
+  @@index([performedServiceId])
   @@map("appointments")
 }
 
@@ -1180,6 +1206,7 @@ model User {
   resolvedAttentions         OperatorAttention[]  @relation("AttentionResolver")
   reviewedKnowledgeGaps      KnowledgeGap[]       @relation("KnowledgeGapReviewer")
   followUpRequestsCreated    FollowUpRequest[]    @relation("FollowUpCreator")
+  correctedAppointments      Appointment[]        @relation("AppointmentServiceCorrector")
 
   @@index([businessId])
   @@index([accountType])

@@ -17,11 +17,13 @@ import type {
 } from "@/features/settings/types";
 import type {
   BusinessRepository,
+  ServiceRepository,
   TelegramConnectionRepository,
   WhatsAppConnectionRepository,
 } from "@/server/repositories";
 import {
   businessRepository,
+  serviceRepository,
   telegramConnectionRepository,
   whatsAppConnectionRepository,
 } from "@/server/repositories";
@@ -36,6 +38,7 @@ export type SettingsActor = {
 
 export type SettingsServiceDeps = {
   businessRepository: Pick<BusinessRepository, "findById" | "update">;
+  serviceRepository?: Pick<ServiceRepository, "findByIdWithinBusiness">;
   whatsAppConnectionRepository?: Pick<
     WhatsAppConnectionRepository,
     "listByBusiness"
@@ -49,6 +52,7 @@ export type SettingsServiceDeps = {
 /** Production dependencies (app singletons). */
 export const defaultSettingsServiceDeps: SettingsServiceDeps = {
   businessRepository,
+  serviceRepository,
   whatsAppConnectionRepository,
   telegramConnectionRepository,
 };
@@ -114,6 +118,8 @@ function toView(
     reminderEnabled?: boolean;
     reminderLeadHours?: number;
     reminderTemplateId?: string;
+    defaultServiceBookingEnabled?: boolean;
+    defaultBookingServiceId?: string | null;
   },
   channelReadiness: {
     whatsapp: boolean;
@@ -136,6 +142,9 @@ function toView(
     reminderLeadHours: business.reminderLeadHours ?? 24,
     reminderTemplateId: business.reminderTemplateId ?? "standard",
     remindersOperational: areAppointmentRemindersOperational(),
+    defaultServiceBookingEnabled:
+      business.defaultServiceBookingEnabled ?? false,
+    defaultBookingServiceId: business.defaultBookingServiceId ?? null,
     channelReadiness,
   };
 }
@@ -178,6 +187,22 @@ export async function updateBusinessSettings(
   const business = await deps.businessRepository.findById(scope.businessId);
   if (!business) return { success: false, message: NOT_FOUND_MESSAGE };
 
+  // Validate configured default service if provided
+  if (parsed.data.defaultBookingServiceId) {
+    if (deps.serviceRepository) {
+      const service = await deps.serviceRepository.findByIdWithinBusiness(
+        parsed.data.defaultBookingServiceId,
+        scope.businessId,
+      );
+      if (!service || !service.isActive || service.deletedAt) {
+        return {
+          success: false,
+          message: "الخدمة الافتراضية المحددة غير صالحة أو غير مفعّلة",
+        };
+      }
+    }
+  }
+
   const remindersOperational = areAppointmentRemindersOperational();
   const effectiveReminderEnabled = remindersOperational
     ? parsed.data.reminderEnabled
@@ -216,6 +241,9 @@ export async function updateBusinessSettings(
       reminderEnabled: effectiveReminderEnabled,
       reminderLeadHours: parsed.data.reminderLeadHours,
       reminderTemplateId: parsed.data.reminderTemplateId,
+      defaultServiceBookingEnabled:
+        parsed.data.defaultServiceBookingEnabled ?? false,
+      defaultBookingServiceId: parsed.data.defaultBookingServiceId ?? null,
       ...(parsed.data.slotDurationMinutes !== undefined
         ? { slotDurationMinutes: parsed.data.slotDurationMinutes }
         : {}),

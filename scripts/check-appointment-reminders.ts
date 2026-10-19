@@ -816,6 +816,8 @@ async function main() {
       reminderEnabled: false,
       reminderLeadHours: 24,
       reminderTemplateId: "standard",
+      defaultServiceBookingEnabled: false,
+      defaultBookingServiceId: null,
     };
     store.businesses.set(biz.id, biz);
 
@@ -991,6 +993,8 @@ async function main() {
       reminderEnabled: true,
       reminderLeadHours: 4,
       reminderTemplateId: "compact",
+      defaultServiceBookingEnabled: false,
+      defaultBookingServiceId: null,
     };
     store.businesses.set(biz.id, biz);
 

@@ -16,7 +16,12 @@ function serializeAppointment(appointment: {
   notes: string | null;
   customer: AppointmentAgendaItem["customer"];
   service: AppointmentAgendaItem["service"];
+  performedService?: AppointmentAgendaItem["performedService"] | null;
+  serviceCorrectedAt?: Date | null;
+  serviceCorrectedBy?: AppointmentAgendaItem["serviceCorrectedBy"] | null;
+  serviceCorrectionHistory?: unknown | null;
   provider?: { id: string; name: string; displayName?: string | null } | null;
+  updatedAt?: Date;
 }): AppointmentAgendaItem {
   return {
     id: appointment.id,
@@ -27,6 +32,16 @@ function serializeAppointment(appointment: {
     notes: appointment.notes,
     customer: appointment.customer,
     service: appointment.service,
+    performedService: appointment.performedService ?? null,
+    serviceCorrectedAt: appointment.serviceCorrectedAt
+      ? appointment.serviceCorrectedAt.toISOString()
+      : null,
+    serviceCorrectedBy: appointment.serviceCorrectedBy ?? null,
+    serviceCorrectionHistory: Array.isArray(
+      appointment.serviceCorrectionHistory,
+    )
+      ? (appointment.serviceCorrectionHistory as AppointmentAgendaItem["serviceCorrectionHistory"])
+      : null,
     provider: appointment.provider
       ? {
           id: appointment.provider.id,
@@ -34,6 +49,9 @@ function serializeAppointment(appointment: {
           displayName: appointment.provider.displayName ?? null,
         }
       : null,
+    updatedAt: appointment.updatedAt
+      ? appointment.updatedAt.toISOString()
+      : undefined,
   };
 }
 

@@ -31,6 +31,10 @@ export type BusinessSettingsView = {
   reminderTemplateId: string;
   /** Global server-side feature operational status (Discovery mode: false). */
   remindersOperational: boolean;
+  /** Default service booking mode enabled state (CONV-PLAY-01). */
+  defaultServiceBookingEnabled: boolean;
+  /** Configured default service id for fast booking (CONV-PLAY-01). */
+  defaultBookingServiceId: string | null;
   /** Messaging channel readiness status for automated reminders. */
   channelReadiness: {
     whatsapp: boolean;

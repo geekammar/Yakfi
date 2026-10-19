@@ -5,10 +5,12 @@ import { AppointmentStatusBadge } from "@/features/appointments/components/appoi
 import { FollowUpList } from "@/features/appointments/components/follow-up-list";
 import { FollowUpModal } from "@/features/appointments/components/follow-up-modal";
 import { ReschedulePanel } from "@/features/appointments/components/reschedule-panel";
+import { ServiceCorrectionModal } from "@/features/appointments/components/service-correction-modal";
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import { formatSlotTime } from "@/features/appointments/components/smart-create/slot-helpers";
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
+import { parseAppointmentEndUtc } from "@/lib/scheduling/reminder-time";
 import type { FollowUpRequestWithRelations } from "@/types/domain";
 
 import {
@@ -21,12 +23,13 @@ import {
   LoaderCircleIcon,
   MessageCircleIcon,
   RotateCwIcon,
+  SparklesIcon,
   UserRoundIcon,
   UserXIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 
 /** Stored epoch-anchored time → the ONE shared business-local formatter
  * (the value's "HH:mm" IS the business-local wall clock, so slicing and
@@ -34,6 +37,8 @@ import { useState, useTransition } from "react";
 function formatTime(time: string) {
   return formatSlotTime(time.slice(11, 16));
 }
+
+const emptySubscribe = () => () => {};
 
 export function AppointmentDetail({
   initialData,
@@ -67,10 +72,29 @@ export function AppointmentDetail({
     initialRescheduling ?? false,
   );
   const [followUpOpen, setFollowUpOpen] = useState(initialFollowUpOpen);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
   const [followUps] =
     useState<FollowUpRequestWithRelations[]>(initialFollowUps);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const dateIso = data.date.slice(0, 10);
+  const endTimeStr = data.endTime.includes("T")
+    ? data.endTime.slice(11, 16)
+    : data.endTime.slice(0, 5);
+  const endUtc = parseAppointmentEndUtc({
+    date: dateIso,
+    endTime: endTimeStr,
+    timezone,
+  });
+  const endUtcMs = endUtc.getTime();
+  const hasEnded = useSyncExternalStore(
+    emptySubscribe,
+    () => Date.now() >= endUtcMs,
+    () => false,
+  );
+  const isCompleted = data.status === "COMPLETED";
+  const canCorrectService = isCompleted && hasEnded;
 
   function changeStatus(
     status: "CONFIRMED" | "CANCELLED" | "COMPLETED" | "NO_SHOW",
@@ -146,9 +170,25 @@ export function AppointmentDetail({
               />
               <Detail
                 icon={CalendarClockIcon}
-                label="الخدمة"
+                label="الخدمة المحجوزة"
                 value={data.service.name}
-                hint={`${data.service.durationMinutes} دقيقة`}
+                hint={`${data.service.durationMinutes} دقيقة (الأصلية)`}
+              />
+              <Detail
+                icon={SparklesIcon}
+                label="الخدمة المنفذة"
+                value={
+                  data.performedService
+                    ? data.performedService.name
+                    : data.status === "COMPLETED"
+                      ? `${data.service.name} (مطابقة للمحجوزة)`
+                      : "لم تُسجل بعد"
+                }
+                hint={
+                  data.serviceCorrectedAt
+                    ? `تم التوثيق: ${new Date(data.serviceCorrectedAt).toLocaleDateString("ar-EG")}`
+                    : undefined
+                }
               />
               <Detail
                 icon={CalendarClockIcon}
@@ -167,6 +207,44 @@ export function AppointmentDetail({
                 {data.notes ?? "لا توجد ملاحظات لهذا الموعد."}
               </p>
             </div>
+            {data.serviceCorrectionHistory &&
+            data.serviceCorrectionHistory.length > 0 ? (
+              <div className="mt-6 border-t pt-5 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  سجل تصحيح الخدمة المنفذة
+                </p>
+                <div className="space-y-2">
+                  {data.serviceCorrectionHistory.map((entry, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-lg border bg-muted/20 p-2.5 text-xs space-y-1"
+                    >
+                      <div className="flex justify-between items-center text-muted-foreground">
+                        <span>
+                          بواسطة: {entry.correctedByName || "عضو الفريق"}
+                        </span>
+                        <span>
+                          {new Date(entry.correctedAt).toLocaleDateString(
+                            "ar-EG",
+                          )}
+                        </span>
+                      </div>
+                      <p className="font-medium text-foreground">
+                        تعديل من &quot;
+                        {entry.previousServiceName || entry.previousServiceId}
+                        &quot; إلى &quot;
+                        {entry.newServiceName || entry.newServiceId}&quot;
+                      </p>
+                      {entry.notes ? (
+                        <p className="text-muted-foreground italic">
+                          ملاحظة: {entry.notes}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-6 border-t pt-5">
               {data.conversationId ? (
                 <Button asChild variant="outline">
@@ -194,6 +272,21 @@ export function AppointmentDetail({
             <section className="rounded-xl border bg-card p-4 shadow-xs">
               <h2 className="mb-3 font-semibold">إجراءات الموعد</h2>
               <div className="grid gap-2">
+                {canCorrectService ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => setCorrectionOpen(true)}
+                    disabled={isPending}
+                  >
+                    <SparklesIcon />
+                    تسجيل / تصحيح الخدمة المنفذة
+                  </Button>
+                ) : isCompleted && !hasEnded ? (
+                  <p className="text-xs text-muted-foreground p-2 rounded-lg bg-muted/40 text-center">
+                    يصبح تسجيل الخدمة المنفذة متاحاً بعد انتهاء وقت الموعد
+                    المحدد.
+                  </p>
+                ) : null}
                 {data.status === "PENDING" ? (
                   <Button
                     onClick={() => changeStatus("CONFIRMED")}
@@ -290,6 +383,28 @@ export function AppointmentDetail({
         providers={providers}
         workingHours={workingHours}
         onSuccess={() => {
+          router.refresh();
+        }}
+      />
+
+      <ServiceCorrectionModal
+        open={correctionOpen}
+        onOpenChange={setCorrectionOpen}
+        appointment={data}
+        services={services}
+        onSuccess={(updated) => {
+          setData((current) => ({
+            ...current,
+            performedService: {
+              id: updated.performedServiceId,
+              name: updated.performedServiceName,
+              durationMinutes:
+                services.find((s) => s.id === updated.performedServiceId)
+                  ?.durationMinutes ?? current.service.durationMinutes,
+            },
+            serviceCorrectedAt: updated.serviceCorrectedAt,
+            updatedAt: updated.updatedAt,
+          }));
           router.refresh();
         }}
       />

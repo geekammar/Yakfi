@@ -1,3 +1,5 @@
+import type { Prisma } from "@/generated/prisma/client";
+
 import { areAppointmentRemindersOperational } from "@/features/appointments/server/reminder-config";
 import {
   calculateReminderDueTime,
@@ -133,11 +135,65 @@ export class AppointmentRepository {
         service: {
           select: { id: true, name: true, durationMinutes: true },
         },
+        performedService: {
+          select: { id: true, name: true, durationMinutes: true },
+        },
+        serviceCorrectedBy: {
+          select: { id: true, name: true },
+        },
         provider: {
           select: { id: true, name: true, displayName: true },
         },
       },
     });
+  }
+
+  async correctPerformedService(
+    id: string,
+    businessId: string,
+    data: {
+      performedServiceId: string;
+      correctedById: string;
+      historyEntry: unknown;
+    },
+  ): Promise<AppointmentWithRelations | null> {
+    const existing = await db.appointment.findFirst({
+      where: { id, businessId, ...notDeleted },
+    });
+    if (!existing) return null;
+
+    const currentHistory = Array.isArray(existing.serviceCorrectionHistory)
+      ? (existing.serviceCorrectionHistory as unknown[])
+      : [];
+    const updatedHistory = [...currentHistory, data.historyEntry];
+
+    const updated = await db.appointment.update({
+      where: { id },
+      data: {
+        performedServiceId: data.performedServiceId,
+        serviceCorrectedAt: new Date(),
+        serviceCorrectedById: data.correctedById,
+        serviceCorrectionHistory:
+          updatedHistory as unknown as Prisma.InputJsonValue,
+      },
+      include: {
+        customer: { select: { id: true, name: true, phone: true } },
+        service: {
+          select: { id: true, name: true, durationMinutes: true },
+        },
+        performedService: {
+          select: { id: true, name: true, durationMinutes: true },
+        },
+        serviceCorrectedBy: {
+          select: { id: true, name: true },
+        },
+        provider: {
+          select: { id: true, name: true, displayName: true },
+        },
+      },
+    });
+
+    return updated as unknown as AppointmentWithRelations;
   }
 
   async list(

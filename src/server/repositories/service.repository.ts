@@ -11,6 +11,13 @@ export class ServiceRepository {
     return db.service.findFirst({ where: { id, ...notDeleted } });
   }
 
+  async findByIdWithinBusiness(
+    id: string,
+    businessId: string,
+  ): Promise<Service | null> {
+    return db.service.findFirst({ where: { id, businessId, ...notDeleted } });
+  }
+
   async listByBusiness(
     businessId: string,
     options?: { includeInactive?: boolean; rawPagination?: unknown },

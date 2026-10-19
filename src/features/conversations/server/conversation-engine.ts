@@ -2707,16 +2707,25 @@ async function runInboundTurn(
         }
       }
 
-      const defaultServiceId =
-        (business as unknown as { defaultBookingServiceId?: string | null })
-          .defaultBookingServiceId ??
-        (business as unknown as { defaultServiceId?: string | null })
-          .defaultServiceId ??
-        (
-          (business as unknown as { assistantStyle?: Record<string, unknown> })
-            .assistantStyle as { defaultServiceId?: string } | undefined
-        )?.defaultServiceId ??
-        null;
+      const defaultServiceBookingEnabled = Boolean(
+        (business as unknown as { defaultServiceBookingEnabled?: boolean })
+          .defaultServiceBookingEnabled,
+      );
+
+      const defaultServiceId = defaultServiceBookingEnabled
+        ? ((business as unknown as { defaultBookingServiceId?: string | null })
+            .defaultBookingServiceId ??
+          (business as unknown as { defaultServiceId?: string | null })
+            .defaultServiceId ??
+          (
+            (
+              business as unknown as {
+                assistantStyle?: Record<string, unknown>;
+              }
+            ).assistantStyle as { defaultServiceId?: string } | undefined
+          )?.defaultServiceId ??
+          null)
+        : null;
 
       const mapped = mapAiResponseToBookingInput({
         businessId: business.id,
