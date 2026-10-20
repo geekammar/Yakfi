@@ -2303,6 +2303,163 @@ async function main(): Promise<void> {
       );
     }
 
+    // Test 2.4d-f: Provider supplied ONLY through factUpdates (extraction.provider = null).
+    // Customer message contains "دكتور أحمد" (heuristic parser would propose "أحمد").
+    // Validated factUpdates explicitly contains "د. أحمد علي".
+    {
+      const fixtureFactUpdateOnly = createEngineFixture({
+        hasCredentials: false,
+        providers: [
+          {
+            id: PROVIDER_AHMED_ALI,
+            displayName: "د. أحمد علي",
+            user: { name: "أحمد علي" },
+          },
+          {
+            id: PROVIDER_AHMED_HASSAN,
+            displayName: "د. أحمد حسن",
+            user: { name: "أحمد حسن" },
+          },
+          { id: PROVIDER_1, displayName: "د. سارة", user: { name: "سارة" } },
+        ],
+        customGenerativeReply: (_req) => ({
+          intent: "BOOKING",
+          action: "reply",
+          summary: "حجز كشف مع د. أحمد علي عبر factUpdates",
+          content: "تم اختيار د. أحمد علي لموعدك.",
+          handoffReason: null,
+          extraction: {
+            service: "كشف أسنان",
+            date: "2026-09-15",
+            timePreference: "morning",
+            provider: null,
+          },
+          factUpdates: [
+            { key: "provider", value: "د. أحمد علي", isRevision: true },
+          ],
+        }),
+      });
+
+      await fixtureFactUpdateOnly.sendTurn(
+        "عايز كشف أسنان مع دكتور أحمد الصبح",
+      );
+      const saved = await fixtureFactUpdateOnly.stateStore.load(
+        B_ID,
+        fixtureFactUpdateOnly.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixtureFactUpdateOnly.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.4d: Validated factUpdates provider 'د. أحمد علي' is preserved when extraction.provider is null",
+        state?.knownFacts?.provider === "د. أحمد علي" &&
+          state?.providerPreference === "د. أحمد علي",
+        {
+          provider: state?.knownFacts?.provider,
+          pref: state?.providerPreference,
+        },
+      );
+      check(
+        "Regression Finding 2.4e: Booking domain and offer resolution match 'د. أحمد علي' from factUpdates without catalog ambiguity",
+        state?.offer?.kind === "SLOT" &&
+          state?.offer?.options.length > 0 &&
+          state?.offer?.options.every(
+            (opt) => opt.providerId === PROVIDER_AHMED_ALI,
+          ),
+        {
+          kind: state?.offer?.kind,
+          options: state?.offer?.kind === "SLOT" ? state.offer.options : [],
+        },
+      );
+      check(
+        "Regression Finding 2.4f: Single model call spent through factUpdates seam without extra chains",
+        fixtureFactUpdateOnly.getGenerativeCalls() === 1 &&
+          fixtureFactUpdateOnly.getJevCalls() === 0,
+      );
+    }
+
+    // Test 2.4g-i: Both extraction and factUpdates supplied — factUpdates canonically wins over extraction.
+    // extraction.provider has "د. أحمد حسن"
+    // factUpdates has "د. أحمد علي"
+    // Customer message contains "دكتور أحمد"
+    {
+      const fixturePrecedence = createEngineFixture({
+        hasCredentials: false,
+        providers: [
+          {
+            id: PROVIDER_AHMED_ALI,
+            displayName: "د. أحمد علي",
+            user: { name: "أحمد علي" },
+          },
+          {
+            id: PROVIDER_AHMED_HASSAN,
+            displayName: "د. أحمد حسن",
+            user: { name: "أحمد حسن" },
+          },
+          { id: PROVIDER_1, displayName: "د. سارة", user: { name: "سارة" } },
+        ],
+        customGenerativeReply: (_req) => ({
+          intent: "BOOKING",
+          action: "reply",
+          summary: "حجز كشف مع أسبقية factUpdates على extraction",
+          content: "تم اختيار د. أحمد علي لموعدك.",
+          handoffReason: null,
+          extraction: {
+            service: "كشف أسنان",
+            date: "2026-09-15",
+            timePreference: "morning",
+            provider: "د. أحمد حسن",
+          },
+          factUpdates: [
+            { key: "provider", value: "د. أحمد علي", isRevision: true },
+          ],
+        }),
+      });
+
+      await fixturePrecedence.sendTurn("عايز كشف أسنان مع دكتور أحمد الصبح");
+      const saved = await fixturePrecedence.stateStore.load(
+        B_ID,
+        fixturePrecedence.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixturePrecedence.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.4g: Canonical fact-merge precedence ensures factUpdates ('د. أحمد علي') overrides extraction ('د. أحمد حسن')",
+        state?.knownFacts?.provider === "د. أحمد علي" &&
+          state?.providerPreference === "د. أحمد علي",
+        {
+          provider: state?.knownFacts?.provider,
+          pref: state?.providerPreference,
+        },
+      );
+      check(
+        "Regression Finding 2.4h: Booking domain and offer resolution match canonical winner 'د. أحمد علي'",
+        state?.offer?.kind === "SLOT" &&
+          state?.offer?.options.length > 0 &&
+          state?.offer?.options.every(
+            (opt) => opt.providerId === PROVIDER_AHMED_ALI,
+          ),
+        {
+          kind: state?.offer?.kind,
+          options: state?.offer?.kind === "SLOT" ? state.offer.options : [],
+        },
+      );
+      check(
+        "Regression Finding 2.4i: Single model call spent through canonical fact-merge seam without extra chains",
+        fixturePrecedence.getGenerativeCalls() === 1 &&
+          fixturePrecedence.getJevCalls() === 0,
+      );
+    }
+
     // ── Finding 2.5: Multi-Turn State Authority & History Fallback Protection (Date) ──
     // Turn A: Initial booking message establishes date.
     // Turn B: Date rejection without replacement clears date from durable state.

@@ -1068,9 +1068,19 @@ function resumeBookingExtraction(
   );
 
   const service = e.service ?? state.knownFacts.service ?? null;
+  const factUpdateProvider =
+    response.factUpdates
+      ?.filter(
+        (u) =>
+          u.key === "provider" &&
+          typeof u.value === "string" &&
+          u.value.trim().length > 0,
+      )
+      .slice(-1)[0]?.value ?? null;
+  const turnProvider = factUpdateProvider ?? e.provider ?? null;
   const provider = serviceChanged
-    ? (e.provider ?? null)
-    : (e.provider ?? state.knownFacts.provider ?? null);
+    ? turnProvider
+    : (turnProvider ?? state.knownFacts.provider ?? null);
   const timePreference =
     e.timePreference ?? state.knownFacts.timePreference ?? null;
 
@@ -3111,13 +3121,23 @@ async function runInboundTurn(
       }
 
       // Provider resolution: One reconciled authoritative fact set for saved state and booking input.
-      // Distinguish a current validated update from an older carried preference.
+      // Distinguish a current validated update (from factUpdates or extraction) from an older carried preference.
       // A simple text parser proposal must never overwrite or truncate a current validated provider.
-      const currentValidatedProvider = validated.extraction.provider ?? null;
+      const validatedFactUpdateProvider =
+        validated.factUpdates
+          ?.filter(
+            (u) =>
+              u.key === "provider" &&
+              typeof u.value === "string" &&
+              u.value.trim().length > 0,
+          )
+          .slice(-1)[0]?.value ?? null;
+      const currentValidatedProvider =
+        validatedFactUpdateProvider ?? validated.extraction.provider ?? null;
       const turnProvRes = extractProviderPreferenceDetailed(inbound.text);
 
       if (currentValidatedProvider) {
-        // Current validated update from the AI model / gateway is authoritative.
+        // Current validated update from the AI model / gateway (factUpdates or extraction) is authoritative.
         // Heuristic parser must NOT overwrite or truncate it.
         bookingAiResponse = {
           ...bookingAiResponse,
