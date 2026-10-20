@@ -46,6 +46,14 @@ import {
 } from "@/features/conversations/server/booking-offer";
 import type { OfferedBookingOption } from "@/features/conversations/server/booking-selection";
 import { extractLastBookingOffer } from "@/features/conversations/server/booking-selection";
+import {
+  conversationFactKeys,
+  isFactKey,
+  isRemovableFactKey,
+  removableFactKeys,
+  type ConversationFactKey,
+  type RemovableFactKey,
+} from "@/features/conversations/server/conversation-facts";
 
 import { z } from "zod";
 
@@ -85,26 +93,13 @@ export const conversationBookingStageValues = [
 export type ConversationBookingStage =
   (typeof conversationBookingStageValues)[number];
 
-/**
- * The closed set of conversation fact keys this state tracks. Unknown keys
- * on an incoming `factUpdate` are ignored (never a second fact model).
- */
-export const conversationFactKeys = [
-  "service",
-  "date",
-  "timePreference",
-  "provider",
-  "customerName",
-  "followUpRequestId",
-] as const;
-
-export type ConversationFactKey = (typeof conversationFactKeys)[number];
-
-const factKeySet: ReadonlySet<string> = new Set(conversationFactKeys);
-
-function isFactKey(key: string): key is ConversationFactKey {
-  return factKeySet.has(key);
-}
+export {
+  conversationFactKeys,
+  isFactKey,
+  isRemovableFactKey,
+  removableFactKeys,
+};
+export type { ConversationFactKey, RemovableFactKey };
 
 /** The intent families the DOMAIN executes (a booking-journey task). */
 const taskGoalValues: ReadonlySet<string> = new Set([
@@ -141,7 +136,7 @@ export type ConversationKnownFacts = {
 export type ConversationFactRevision = {
   readonly key: ConversationFactKey;
   readonly from: string | null;
-  readonly to: string;
+  readonly to: string | null;
   readonly isRevision: boolean;
   readonly turnId?: string;
 };
@@ -432,6 +427,24 @@ export function mergeConversationState(
   for (const update of input.factUpdates ?? []) {
     if (!isFactKey(update.key)) continue; // ignore unknown keys (no 2nd model)
     const key = update.key;
+
+    if (update.operation === "remove") {
+      const prevValue = knownFacts[key] ?? null;
+      if (prevValue !== null) {
+        revisions.push({
+          key,
+          from: prevValue,
+          to: null,
+          isRevision: true,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+        });
+        const { [key]: _dropped, ...rest } = knownFacts;
+        void _dropped;
+        knownFacts = rest;
+      }
+      continue;
+    }
+
     const nextValue = update.value;
     const prevValue = knownFacts[key] ?? null;
 
@@ -492,7 +505,7 @@ export function mergeConversationState(
     serviceSource = null;
   }
   const providerSuppliedThisTurn = (input.factUpdates ?? []).some(
-    (u) => u.key === "provider",
+    (u) => u.key === "provider" && u.operation !== "remove",
   );
   if (
     serviceIdentityChanged &&

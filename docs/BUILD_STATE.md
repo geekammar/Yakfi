@@ -51,12 +51,13 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (PR #17 focused repair on branch `feat/conv-core-02-jev-context-gateway`) — SAFE OFFER SELECTION & GENERATIVE STATE CONTEXT PROJECTION (CONV-CORE-02)**:
-Two targeted repairs implemented without engine redesign or migration:
+**IN-FLIGHT (PR ready on branch `feat/conv-core-03a-semantic-facts`) — EXPLICIT SEMANTIC FACT UPDATES & ONE RECONCILIATION PATH (CORE-03A)**:
+One bounded conversation-engine slice implementing explicit semantic fact updates and unified turn reconciliation:
 
-1. **Safe Offer Selection**: Removed natural-language phrase matching, ordinal dictionaries, and sentence heuristics from `parseBookingSelection` (`booking-selection.ts`). Genuine numeric selections (`2`, `٢`), protocol button actions (`opt_1`, `more_times`, `change_date`), and offer-bound callbacks (`fp:<token>:<action>`) execute deterministically with 0 LLM calls. Free-form negative/navigation sentences (e.g., `مش عايز يوم تاني`, `٢ بس غير اليوم`) return `null` and pass to the semantic provider intact. Pre-AI legacy selection fallback in `conversation-engine.ts` is guarded to avoid re-swallowing active offer turns.
-2. **Generative State Context**: Wire-connected `conversationContext` in `buildPromptMessages` (`src/server/integrations/ai/prompt.ts`) into `userContent` when present (safely omitted when absent). Added minimal instruction in `booking-assistant.prompt` establishing that `conversationContext` governs current booking facts over historical transcript data; customer/business values are treated strictly as data. Offer tokens/nonces remain absent from projection.
-   Verified by Section T in `scripts/check-conv-core-02.ts` (120/120 passing), `scripts/check-conversation-c2.ts` (39/39 passing), prompt generation (`check:ai-prompts` 143/143), and clean `pnpm verify:local`.
+1. **Extended AI Contract (`ai-contract.ts`)**: Reusable fact vocabulary (`conversation-facts.ts`) with `removableFactKeys` (`date`, `timePreference`, `provider`). `aiFactUpdateSchema` accepts legacy/explicit SET `{ key, operation?: "set", value }` and explicit REMOVE `{ key, operation: "remove" }` (rejects replacement values). Legacy calls and string keys remain compatible.
+2. **Unified Single-Pass Reconciliation (`semantic-facts.ts`)**: `reconcileTurnSemanticFacts` enforces canonical precedence: legacy extraction proposes SETs first; explicit `factUpdates` override extraction; last valid operation per key wins; explicit SET/REMOVE marks a key as touched and blocks lexical override; REMOVE overrides conflicting extraction; absent facts preserve existing state.
+3. **Consistent State & Downstream Booking Execution (`conversation-state.ts`, `conversation-engine.ts`)**: `mergeConversationState` clears removed facts (`date`, `timePreference`, `provider`), logs revisions (`to: null`), and invalidates dependent offers. Downstream booking execution respects touched removed keys and prevents refilling from lexical date/time/provider regex, relative-date helpers, or stale extraction.
+   Prompt contract updated (`prompts/system/booking-assistant.prompt`), checked via `check:ai-prompts` (145/145 PASS). Verified offline by `scripts/check-conv-core-03a.ts` (48/48 PASS) plus full targeted suites (`check:conv-core-01`, `check:conv-core-02`, `check:conversation-state`, `check:ai-architecture`, `check:booking-options`, `check:booking-modes`). Version bumped to 0.59.0.
 
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
 `PROMPT-OPS-REL-01-R`:
@@ -2621,12 +2622,13 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**AWAITING CI & OPERATOR REVIEW — PR #17 (feat/conv-core-02-jev-context-gateway) Focused Repair**:
-Branch `feat/conv-core-02-jev-context-gateway` updated with focused repairs for safe offer selection and generative state context projection.
+**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03a-semantic-facts) CORE-03A**:
+Branch `feat/conv-core-03a-semantic-facts` ready with explicit semantic fact updates and unified reconciliation path (v0.59.0).
 
-1. Push commit to remote `origin feat/conv-core-02-jev-context-gateway`.
-2. Monitor GitHub Actions CI on PR #17 final HEAD (`pr-validation.yml`).
-3. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, candidate 0.58.0 preserved).
+1. Push branch `feat/conv-core-03a-semantic-facts` to `origin`.
+2. Open PR against `main` for review.
+3. Monitor GitHub Actions CI on PR HEAD (`pr-validation.yml`).
+4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.59.0).
 
 **JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
 DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**
