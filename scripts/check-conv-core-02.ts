@@ -220,8 +220,8 @@ async function main(): Promise<void> {
   const SERVICE_2 = "33333333-3333-4333-8333-333333333332";
   const PROVIDER_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
   const PROVIDER_2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
-  const USER_1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
-  const USER_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+  const PROVIDER_AHMED_ALI = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
+  const PROVIDER_AHMED_HASSAN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4";
   const BRANCH_1 = "44444444-4444-4444-8444-444444444444";
   const now = new Date("2026-09-14T10:00:00Z");
 
@@ -260,6 +260,11 @@ async function main(): Promise<void> {
     customHttpHandler?: MockHttpHandler;
     hasCredentials?: boolean;
     customGenerativeReply?: (req: AiRequest) => AiResponse;
+    providers?: Array<{
+      id: string;
+      displayName: string;
+      user: { name: string };
+    }>;
   }) {
     const days = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"];
     const workingHours: Record<string, unknown> = {};
@@ -319,10 +324,12 @@ async function main(): Promise<void> {
       },
     ];
 
-    const providers = [
+    const defaultProviders = [
       { id: PROVIDER_1, displayName: "د. سارة", user: { name: "سارة" } },
       { id: PROVIDER_2, displayName: "د. أحمد", user: { name: "أحمد" } },
     ];
+
+    const providers = opts?.providers ?? defaultProviders;
 
     const customer = {
       id: "cust-1",
@@ -620,10 +627,12 @@ async function main(): Promise<void> {
             displayName: string;
             user: { name: string };
           }>,
-        listAssignmentSeams: async () => [
-          { providerId: PROVIDER_1, userId: USER_1, assignedUserId: USER_1 },
-          { providerId: PROVIDER_2, userId: USER_2, assignedUserId: USER_2 },
-        ],
+        listAssignmentSeams: async () =>
+          providers.map((p, idx) => ({
+            providerId: p.id,
+            userId: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${idx + 1}`,
+            assignedUserId: `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${idx + 1}`,
+          })),
       },
       appointmentRepository: {
         createWithConflictCheck: async (dto: {
@@ -2212,6 +2221,300 @@ async function main(): Promise<void> {
         state?.knownFacts?.timePreference == null &&
           state?.selectedTimePref == null,
         { timePref: state?.knownFacts?.timePreference },
+      );
+    }
+
+    // ── Finding 2.4: Authoritative Provider Precedence & Disambiguation (Section 5) ──
+    // Deliberate conflict through approved generative adapter seam with two providers sharing first name:
+    // "د. أحمد علي" and "د. أحمد حسن".
+    // Customer message says "عايز كشف مع دكتور أحمد", where heuristic regex parser extracts "أحمد".
+    // The validated model extraction resolves to the specific provider "د. أحمد علي".
+    {
+      const fixtureProvider = createEngineFixture({
+        hasCredentials: false,
+        providers: [
+          {
+            id: PROVIDER_AHMED_ALI,
+            displayName: "د. أحمد علي",
+            user: { name: "أحمد علي" },
+          },
+          {
+            id: PROVIDER_AHMED_HASSAN,
+            displayName: "د. أحمد حسن",
+            user: { name: "أحمد حسن" },
+          },
+          { id: PROVIDER_1, displayName: "د. سارة", user: { name: "سارة" } },
+        ],
+        customGenerativeReply: (_req) => ({
+          intent: "BOOKING",
+          action: "reply",
+          summary: "حجز كشف مع د. أحمد علي",
+          content: "تم اختيار د. أحمد علي لموعدك.",
+          handoffReason: null,
+          extraction: {
+            service: "كشف أسنان",
+            date: "2026-09-15",
+            timePreference: "morning",
+            provider: "د. أحمد علي",
+          },
+        }),
+      });
+
+      await fixtureProvider.sendTurn("عايز كشف أسنان مع دكتور أحمد الصبح");
+      const savedProvider = await fixtureProvider.stateStore.load(
+        B_ID,
+        fixtureProvider.conversation.id,
+      );
+      const stateProvider = savedProvider
+        ? hydrateConversationState(savedProvider.state, {
+            businessId: B_ID,
+            conversationId: fixtureProvider.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.4a: Authoritative validated provider update 'د. أحمد علي' is strictly preserved without heuristic first-name truncation",
+        stateProvider?.knownFacts?.provider === "د. أحمد علي" &&
+          stateProvider?.providerPreference === "د. أحمد علي",
+        {
+          provider: stateProvider?.knownFacts?.provider,
+          pref: stateProvider?.providerPreference,
+        },
+      );
+      check(
+        "Regression Finding 2.4b: Booking domain and offer resolution cleanly match 'د. أحمد علي' without ambiguous catalog failure",
+        stateProvider?.offer?.kind === "SLOT" &&
+          stateProvider?.offer?.options.length > 0 &&
+          stateProvider?.offer?.options.every(
+            (opt) => opt.providerId === PROVIDER_AHMED_ALI,
+          ),
+        {
+          kind: stateProvider?.offer?.kind,
+          options:
+            stateProvider?.offer?.kind === "SLOT"
+              ? stateProvider.offer.options
+              : [],
+        },
+      );
+      check(
+        "Regression Finding 2.4c: Single model call spent through approved generative adapter seam without duplicate chains",
+        fixtureProvider.getGenerativeCalls() === 1 &&
+          fixtureProvider.getJevCalls() === 0,
+      );
+    }
+
+    // ── Finding 2.5: Multi-Turn State Authority & History Fallback Protection (Date) ──
+    // Turn A: Initial booking message establishes date.
+    // Turn B: Date rejection without replacement clears date from durable state.
+    // Turn C: Fresh request loading saved state with continuation ("تمام كمل").
+    // Turn D: Explicit new date ("خليها الخميس") is accepted and completed.
+    {
+      const fixtureDateMulti = createEngineFixture();
+
+      // Turn 1: Initial booking establishing date 2026-09-15
+      await fixtureDateMulti.sendTurn("عايز أحجز كشف بكرة");
+      const savedT1 = await fixtureDateMulti.stateStore.load(
+        B_ID,
+        fixtureDateMulti.conversation.id,
+      );
+      const stateT1 = savedT1
+        ? hydrateConversationState(savedT1.state, {
+            businessId: B_ID,
+            conversationId: fixtureDateMulti.conversation.id,
+          })
+        : null;
+      const initialOfferId = stateT1?.offer?.id;
+
+      // Turn 2: Date rejection without replacement
+      await fixtureDateMulti.sendTurn("بلاش بكرة");
+      const savedT2 = await fixtureDateMulti.stateStore.load(
+        B_ID,
+        fixtureDateMulti.conversation.id,
+      );
+      const stateT2 = savedT2
+        ? hydrateConversationState(savedT2.state, {
+            businessId: B_ID,
+            conversationId: fixtureDateMulti.conversation.id,
+          })
+        : null;
+      check(
+        "Regression Finding 2.5a-pre: Turn 2 date negation drops date fact and invalidates initial offer",
+        stateT2?.knownFacts?.date == null &&
+          (stateT2?.offer == null ||
+            stateT2?.offer?.status === "INVALIDATED" ||
+            stateT2?.pendingOffer == null),
+        {
+          date: stateT2?.knownFacts?.date,
+          offerStatus: stateT2?.offer?.status,
+          pendingOffer: stateT2?.pendingOffer,
+        },
+      );
+
+      // Turn 3: Continuation without new date ("تمام كمل")
+      const resT3 = await fixtureDateMulti.sendTurn("تمام كمل");
+      const savedT3 = await fixtureDateMulti.stateStore.load(
+        B_ID,
+        fixtureDateMulti.conversation.id,
+      );
+      const stateT3 = savedT3
+        ? hydrateConversationState(savedT3.state, {
+            businessId: B_ID,
+            conversationId: fixtureDateMulti.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.5a: Rejected date remains absent across subsequent turns loading durable state",
+        stateT3?.knownFacts?.date == null && stateT3?.selectedDate == null,
+        { date: stateT3?.knownFacts?.date, selDate: stateT3?.selectedDate },
+      );
+      check(
+        "Regression Finding 2.5b: Old offer remains unusable and no unintended appointment is created",
+        fixtureDateMulti.createdAppointments.length === 0 &&
+          (stateT3?.offer == null ||
+            stateT3?.offer?.status === "INVALIDATED" ||
+            stateT3?.offer?.id !== initialOfferId),
+        {
+          appointments: fixtureDateMulti.createdAppointments.length,
+          offerStatus: stateT3?.offer?.status,
+        },
+      );
+      check(
+        "Regression Finding 2.5c: System asks for the missing date upon continuation",
+        Boolean(
+          (stateT3?.missingFacts && stateT3.missingFacts.includes("date")) ||
+          (resT3.ok &&
+            "assistantAction" in resT3 &&
+            resT3.assistantAction === "AI_REPLY"),
+        ),
+        { missingFacts: stateT3?.missingFacts },
+      );
+
+      // Turn 4: Later explicit new date (Thursday 2026-09-17) is accepted
+      await fixtureDateMulti.sendTurn("خليها الخميس");
+      const savedT4 = await fixtureDateMulti.stateStore.load(
+        B_ID,
+        fixtureDateMulti.conversation.id,
+      );
+      const stateT4 = savedT4
+        ? hydrateConversationState(savedT4.state, {
+            businessId: B_ID,
+            conversationId: fixtureDateMulti.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.5d: Later explicit new date (Thursday 2026-09-17) is accepted correctly into durable state and fresh slot offer",
+        stateT4?.knownFacts?.date === "2026-09-17" &&
+          stateT4?.selectedDate === "2026-09-17" &&
+          stateT4?.offer?.kind === "SLOT" &&
+          stateT4?.offer?.date === "2026-09-17",
+        {
+          date: stateT4?.knownFacts?.date,
+          offerDate:
+            stateT4?.offer?.kind === "SLOT" ? stateT4.offer.date : null,
+        },
+      );
+
+      // Turn 5: Selection consumes valid Thursday offer
+      await fixtureDateMulti.sendTurn("1");
+      check(
+        "Regression Finding 2.5e: Mechanical selection consumes valid Thursday offer and creates intended appointment",
+        fixtureDateMulti.createdAppointments.length === 1 &&
+          fixtureDateMulti.createdAppointments[0]?.date === "2026-09-17",
+        fixtureDateMulti.createdAppointments,
+      );
+    }
+
+    // ── Finding 2.6: Multi-Turn State Authority & History Fallback Protection (Time Preference) ──
+    {
+      const fixtureTimeMulti = createEngineFixture();
+
+      // Turn 1: Initial booking with afternoon preference
+      await fixtureTimeMulti.sendTurn("عايز أحجز كشف بكرة بعد الظهر");
+      const savedT1 = await fixtureTimeMulti.stateStore.load(
+        B_ID,
+        fixtureTimeMulti.conversation.id,
+      );
+      const stateT1 = savedT1
+        ? hydrateConversationState(savedT1.state, {
+            businessId: B_ID,
+            conversationId: fixtureTimeMulti.conversation.id,
+          })
+        : null;
+      check(
+        "Regression Finding 2.6a-pre: Turn 1 records afternoon preference",
+        stateT1?.knownFacts?.timePreference === "afternoon",
+        { timePref: stateT1?.knownFacts?.timePreference },
+      );
+
+      // Turn 2: Time rejection without replacement
+      await fixtureTimeMulti.sendTurn("بلاش بعد الظهر");
+      const savedT2 = await fixtureTimeMulti.stateStore.load(
+        B_ID,
+        fixtureTimeMulti.conversation.id,
+      );
+      const stateT2 = savedT2
+        ? hydrateConversationState(savedT2.state, {
+            businessId: B_ID,
+            conversationId: fixtureTimeMulti.conversation.id,
+          })
+        : null;
+      check(
+        "Regression Finding 2.6b-pre: Turn 2 time rejection drops time preference",
+        stateT2?.knownFacts?.timePreference == null,
+        { timePref: stateT2?.knownFacts?.timePreference },
+      );
+
+      // Turn 3: Continuation without time preference ("تمام كمل")
+      await fixtureTimeMulti.sendTurn("تمام كمل");
+      const savedT3 = await fixtureTimeMulti.stateStore.load(
+        B_ID,
+        fixtureTimeMulti.conversation.id,
+      );
+      const stateT3 = savedT3
+        ? hydrateConversationState(savedT3.state, {
+            businessId: B_ID,
+            conversationId: fixtureTimeMulti.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.6a: Rejected time preference remains absent on subsequent turns and is not resurrected from history",
+        stateT3?.knownFacts?.timePreference == null &&
+          stateT3?.selectedTimePref == null,
+        {
+          timePref: stateT3?.knownFacts?.timePreference,
+          selTime: stateT3?.selectedTimePref,
+        },
+      );
+      check(
+        "Regression Finding 2.6b: Old slot offer remains invalidated and no unintended appointment is created",
+        fixtureTimeMulti.createdAppointments.length === 0,
+        { appointments: fixtureTimeMulti.createdAppointments.length },
+      );
+
+      // Turn 4: Later explicit time preference (evening) is accepted
+      await fixtureTimeMulti.sendTurn("خليها بالليل");
+      const savedT4 = await fixtureTimeMulti.stateStore.load(
+        B_ID,
+        fixtureTimeMulti.conversation.id,
+      );
+      const stateT4 = savedT4
+        ? hydrateConversationState(savedT4.state, {
+            businessId: B_ID,
+            conversationId: fixtureTimeMulti.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.6c: Later explicit time preference (evening) is accepted into durable state",
+        stateT4?.knownFacts?.timePreference === "evening" &&
+          stateT4?.selectedTimePref === "evening",
+        {
+          timePref: stateT4?.knownFacts?.timePreference,
+          selTime: stateT4?.selectedTimePref,
+        },
       );
     }
   }

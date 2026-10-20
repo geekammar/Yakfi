@@ -952,45 +952,69 @@ function resolveFinishedTurn(
     }
 
     // Preserve prior date and time-of-day preferences from recent customer messages
-    // ONLY if the customer did not explicitly negate them in the current turn.
-    if (
-      !factUpdates.some((u) => u.key === "date") &&
-      !base.knownFacts.date &&
-      dateRes.negatedDates.length === 0
-    ) {
-      for (let i = recentChronological.length - 1; i >= 0; i--) {
-        const m = recentChronological[i]!;
-        if (m.senderType === "CUSTOMER") {
-          const rel = resolveEgyptianRelativeDate(m.content, todayIso);
-          if (rel && !dateRes.negatedDates.includes(rel)) {
-            factUpdates.push({ key: "date", value: rel });
-            break;
-          }
-          const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
-          if (iso && !dateRes.negatedDates.includes(iso[0])) {
-            factUpdates.push({ key: "date", value: iso[0] });
-            break;
+    // ONLY for legacy unmanaged initialization (when valid durable priorState is absent).
+    // When priorState is loaded, durable knownFacts is authoritative and deleted/cleared facts
+    // must not be repeatedly reconstructed from older conversation text.
+    if (!priorState) {
+      if (
+        !factUpdates.some((u) => u.key === "date") &&
+        !base.knownFacts.date &&
+        dateRes.negatedDates.length === 0
+      ) {
+        const historyNegatedDates: string[] = [...dateRes.negatedDates];
+        for (let i = recentChronological.length - 1; i >= 0; i--) {
+          const m = recentChronological[i]!;
+          if (m.senderType === "CUSTOMER") {
+            const detailed = resolveEgyptianRelativeDateDetailed(
+              m.content,
+              todayIso,
+            );
+            for (const nd of detailed.negatedDates) {
+              if (!historyNegatedDates.includes(nd)) {
+                historyNegatedDates.push(nd);
+              }
+            }
+            if (
+              detailed.positiveDate &&
+              !historyNegatedDates.includes(detailed.positiveDate)
+            ) {
+              factUpdates.push({ key: "date", value: detailed.positiveDate });
+              break;
+            }
+            const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
+            if (iso && !historyNegatedDates.includes(iso[0])) {
+              factUpdates.push({ key: "date", value: iso[0] });
+              break;
+            }
           }
         }
       }
-    }
-    if (
-      !factUpdates.some((u) => u.key === "timePreference") &&
-      !base.knownFacts.timePreference &&
-      timeRes.negatedTimes.length === 0
-    ) {
-      for (let i = recentChronological.length - 1; i >= 0; i--) {
-        const m = recentChronological[i]!;
-        if (m.senderType === "CUSTOMER") {
-          const pref = extractTimeOfDayPreference(m.content);
-          if (
-            pref &&
-            !timeRes.negatedTimes.includes(
-              pref as "morning" | "afternoon" | "evening",
-            )
-          ) {
-            factUpdates.push({ key: "timePreference", value: pref });
-            break;
+      if (
+        !factUpdates.some((u) => u.key === "timePreference") &&
+        !base.knownFacts.timePreference &&
+        timeRes.negatedTimes.length === 0
+      ) {
+        const historyNegatedTimes: Array<"morning" | "afternoon" | "evening"> =
+          [...timeRes.negatedTimes];
+        for (let i = recentChronological.length - 1; i >= 0; i--) {
+          const m = recentChronological[i]!;
+          if (m.senderType === "CUSTOMER") {
+            const detailed = extractTimeOfDayPreferenceDetailed(m.content);
+            for (const nt of detailed.negatedTimes) {
+              if (!historyNegatedTimes.includes(nt)) {
+                historyNegatedTimes.push(nt);
+              }
+            }
+            if (
+              detailed.positiveTime &&
+              !historyNegatedTimes.includes(detailed.positiveTime)
+            ) {
+              factUpdates.push({
+                key: "timePreference",
+                value: detailed.positiveTime,
+              });
+              break;
+            }
           }
         }
       }
@@ -2713,7 +2737,7 @@ async function runInboundTurn(
       turnSession.state,
     );
     const resolvedTurn = resolution?.plan ?? null;
-    const resolvedState = resolution?.state ?? null;
+    let resolvedState = resolution?.state ?? null;
     if (resolvedState && turnSession.enabled) {
       turnSession.state = resolvedState;
     }
@@ -3001,17 +3025,32 @@ async function runInboundTurn(
       );
       if (!bookingAiResponse.extraction.date) {
         let relDate = turnDateRes.positiveDate;
+        // Legacy fallback only: if durable state is not active, scan older customer messages
+        const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
         if (
           !relDate &&
+          isLegacyUnmanaged &&
           recentChronological &&
           turnDateRes.negatedDates.length === 0
         ) {
+          const historyNegatedDates: string[] = [...turnDateRes.negatedDates];
           for (let i = recentChronological.length - 1; i >= 0; i--) {
             const m = recentChronological[i]!;
             if (m.senderType === "CUSTOMER") {
-              const prev = resolveEgyptianRelativeDate(m.content, todayIso);
-              if (prev && !turnDateRes.negatedDates.includes(prev)) {
-                relDate = prev;
+              const detailed = resolveEgyptianRelativeDateDetailed(
+                m.content,
+                todayIso,
+              );
+              for (const nd of detailed.negatedDates) {
+                if (!historyNegatedDates.includes(nd)) {
+                  historyNegatedDates.push(nd);
+                }
+              }
+              if (
+                detailed.positiveDate &&
+                !historyNegatedDates.includes(detailed.positiveDate)
+              ) {
+                relDate = detailed.positiveDate;
                 break;
               }
             }
@@ -3031,22 +3070,30 @@ async function runInboundTurn(
       const turnTimeRes = extractTimeOfDayPreferenceDetailed(inbound.text);
       if (!bookingAiResponse.extraction.timePreference) {
         let timePref = turnTimeRes.positiveTime;
+        const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
         if (
           !timePref &&
+          isLegacyUnmanaged &&
           recentChronological &&
           turnTimeRes.negatedTimes.length === 0
         ) {
+          const historyNegatedTimes: Array<
+            "morning" | "afternoon" | "evening"
+          > = [...turnTimeRes.negatedTimes];
           for (let i = recentChronological.length - 1; i >= 0; i--) {
             const m = recentChronological[i]!;
             if (m.senderType === "CUSTOMER") {
-              const prev = extractTimeOfDayPreference(m.content);
+              const detailed = extractTimeOfDayPreferenceDetailed(m.content);
+              for (const nt of detailed.negatedTimes) {
+                if (!historyNegatedTimes.includes(nt)) {
+                  historyNegatedTimes.push(nt);
+                }
+              }
               if (
-                prev &&
-                !turnTimeRes.negatedTimes.includes(
-                  prev as "morning" | "afternoon" | "evening",
-                )
+                detailed.positiveTime &&
+                !historyNegatedTimes.includes(detailed.positiveTime)
               ) {
-                timePref = prev;
+                timePref = detailed.positiveTime;
                 break;
               }
             }
@@ -3063,78 +3110,115 @@ async function runInboundTurn(
         }
       }
 
+      // Provider resolution: One reconciled authoritative fact set for saved state and booking input.
+      // Distinguish a current validated update from an older carried preference.
+      // A simple text parser proposal must never overwrite or truncate a current validated provider.
+      const currentValidatedProvider = validated.extraction.provider ?? null;
       const turnProvRes = extractProviderPreferenceDetailed(inbound.text);
-      if (
-        bookingAiResponse.extraction.provider &&
-        turnProvRes.negatedProviders.some((np) => {
-          const normNp = normalizeArabicText(np);
-          const normP = normalizeArabicText(
-            bookingAiResponse.extraction.provider!,
-          );
-          return (
-            normNp === normP || normP.includes(normNp) || normNp.includes(normP)
-          );
-        })
-      ) {
+
+      if (currentValidatedProvider) {
+        // Current validated update from the AI model / gateway is authoritative.
+        // Heuristic parser must NOT overwrite or truncate it.
         bookingAiResponse = {
           ...bookingAiResponse,
           extraction: {
             ...bookingAiResponse.extraction,
-            provider: null,
+            provider: currentValidatedProvider,
           },
         };
-      }
-
-      const sameDoctorRequested =
-        /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
-          inbound.text,
-        );
-      if (sameDoctorRequested && !bookingAiResponse.extraction.provider) {
-        if (resolvedState?.knownFacts?.provider) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              provider: resolvedState.knownFacts.provider,
+        if (resolvedState) {
+          resolvedState = {
+            ...resolvedState,
+            knownFacts: {
+              ...resolvedState.knownFacts,
+              provider: currentValidatedProvider,
             },
+            providerPreference: currentValidatedProvider,
           };
-        } else if (
-          deps.appointmentRepository &&
-          typeof deps.appointmentRepository.listRecentByCustomer === "function"
-        ) {
-          const recent = await deps.appointmentRepository.listRecentByCustomer(
-            business.id,
-            customer.id,
-            1,
-          );
-          const firstRecent = recent?.[0];
-          if (firstRecent && firstRecent.providerId) {
-            const pId = firstRecent.providerId;
-            const provRepo = deps.providerRepository ?? providerRepository;
-            const providers = await provRepo.listEligibleForService(
-              business.id,
-              firstRecent.serviceId,
-            );
-            const matchedP = providers.find((p) => p.id === pId);
-            if (matchedP) {
-              bookingAiResponse = {
-                ...bookingAiResponse,
-                extraction: {
-                  ...bookingAiResponse.extraction,
-                  provider: matchedP.name ?? null,
-                },
-              };
-            }
+          if (turnSession.enabled) {
+            turnSession.state = resolvedState;
           }
         }
-      } else if (turnProvRes.positiveProvider) {
+      } else {
+        // No current validated provider update: manage carried preferences,
+        // removals of stale rejected preferences, and genuine corrections.
+        let provider = bookingAiResponse.extraction.provider ?? null;
+
+        if (
+          provider &&
+          turnProvRes.negatedProviders.some((np) => {
+            const normNp = normalizeArabicText(np);
+            const normP = normalizeArabicText(provider!);
+            return (
+              normNp === normP ||
+              normP.includes(normNp) ||
+              normNp.includes(normP)
+            );
+          })
+        ) {
+          provider = null;
+        }
+
+        const sameDoctorRequested =
+          /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
+            inbound.text,
+          );
+        if (sameDoctorRequested && !provider) {
+          if (resolvedState?.knownFacts?.provider) {
+            provider = resolvedState.knownFacts.provider;
+          } else if (
+            deps.appointmentRepository &&
+            typeof deps.appointmentRepository.listRecentByCustomer ===
+              "function"
+          ) {
+            const recent =
+              await deps.appointmentRepository.listRecentByCustomer(
+                business.id,
+                customer.id,
+                1,
+              );
+            const firstRecent = recent?.[0];
+            if (firstRecent && firstRecent.providerId) {
+              const pId = firstRecent.providerId;
+              const provRepo = deps.providerRepository ?? providerRepository;
+              const providers = await provRepo.listEligibleForService(
+                business.id,
+                firstRecent.serviceId,
+              );
+              const matchedP = providers.find((p) => p.id === pId);
+              if (matchedP) {
+                provider = matchedP.name ?? null;
+              }
+            }
+          }
+        } else if (turnProvRes.positiveProvider) {
+          provider = turnProvRes.positiveProvider;
+        }
+
         bookingAiResponse = {
           ...bookingAiResponse,
           extraction: {
             ...bookingAiResponse.extraction,
-            provider: turnProvRes.positiveProvider,
+            provider,
           },
         };
+
+        if (resolvedState) {
+          const nextFacts = { ...resolvedState.knownFacts };
+          if (provider) {
+            nextFacts.provider = provider;
+          } else {
+            delete nextFacts.provider;
+          }
+          resolvedState = {
+            ...resolvedState,
+            knownFacts: nextFacts,
+            providerPreference: provider,
+          };
+          if (turnSession.enabled) {
+            turnSession.state = resolvedState;
+          }
+        }
       }
 
       let activeFollowUpId: string | null =
@@ -3740,7 +3824,7 @@ async function runInboundTurn(
             serviceId: mapped.serviceId,
             serviceName: mapped.serviceName,
             serviceSource: mapped.serviceSource,
-            providerId: mapped.providerText ?? null,
+            providerId: providerId ?? mapped.providerText ?? null,
             date: mapped.date!,
             followUpRequestId: activeFollowUpId,
             shownCount: bookableOptions.length,
