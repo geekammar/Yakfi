@@ -2589,10 +2589,11 @@ async function runInboundTurn(
         delivery,
       };
     } else {
-      // Legacy text-parsing fallback:
-      const selectionAttempt = wasBooked
-        ? null
-        : tryParseBookingSelection(inbound.text, recentChronological);
+      // Legacy text-parsing fallback (only when no typed offer is in state):
+      const selectionAttempt =
+        wasBooked || (turnSession.enabled && turnSession.state?.offer)
+          ? null
+          : tryParseBookingSelection(inbound.text, recentChronological);
       if (selectionAttempt) {
         const selectionResult = await completeBookingSelection(
           deps,

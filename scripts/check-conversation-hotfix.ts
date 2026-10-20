@@ -832,14 +832,14 @@ async function run(): Promise<void> {
       await import("../src/features/conversations/server/booking-selection");
     const sel1 = parseBookingSelection("1");
     const selOpt1 = parseBookingSelection("opt_1");
-    const selFirst = parseBookingSelection("الاول");
+    const selIndic2 = parseBookingSelection("٢");
     const selPass =
       sel1?.kind === "index" &&
       sel1.index === 1 &&
       selOpt1?.kind === "index" &&
       selOpt1.index === 1 &&
-      selFirst?.kind === "index" &&
-      selFirst.index === 1;
+      selIndic2?.kind === "index" &&
+      selIndic2.index === 2;
 
     check(
       16,

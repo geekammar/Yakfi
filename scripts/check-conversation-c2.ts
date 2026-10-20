@@ -598,25 +598,21 @@ async function run(): Promise<void> {
   }
 
   // =========================================================================
-  // Group F: Selection Parsing (Arabic Ordinals, Prefixes, Navigation)
+  // Group F: Selection Parsing (Protocols, Numbers, Safe Boundaries)
   // =========================================================================
   {
-    const s1 = parseBookingSelection("الاول");
-    check("F", "الأول -> slot index 1", s1?.kind === "index" && s1.index === 1);
+    const s1 = parseBookingSelection("1");
+    check("F", "1 -> slot index 1", s1?.kind === "index" && s1.index === 1);
 
-    const s2 = parseBookingSelection("التاني");
+    const s2 = parseBookingSelection("٢");
     check(
       "F",
-      "التاني -> slot index 2",
+      "٢ (indic) -> slot index 2",
       s2?.kind === "index" && s2.index === 2,
     );
 
-    const s3 = parseBookingSelection("التالت");
-    check(
-      "F",
-      "التالت -> slot index 3",
-      s3?.kind === "index" && s3.index === 3,
-    );
+    const s3 = parseBookingSelection("3");
+    check("F", "3 -> slot index 3", s3?.kind === "index" && s3.index === 3);
 
     const sOpt = parseBookingSelection("opt_1");
     check(
@@ -632,8 +628,22 @@ async function run(): Promise<void> {
       sSlot?.kind === "index" && sSlot.index === 2,
     );
 
-    const sMore = parseBookingSelection("أوقات أخرى");
-    check("F", "أوقات أخرى -> more_times", sMore?.kind === "more_times");
+    const sFree = parseBookingSelection("مش عايز يوم تاني");
+    check(
+      "F",
+      "مش عايز يوم تاني -> null (free-form negative reaches semantic route)",
+      sFree === null,
+    );
+
+    const sMixed = parseBookingSelection("٢ بس غير اليوم");
+    check(
+      "F",
+      "٢ بس غير اليوم -> null (mixed numeric reaches semantic route)",
+      sMixed === null,
+    );
+
+    const sOrdinal = parseBookingSelection("الاول");
+    check("F", "الاول -> null (ordinal dictionary removed)", sOrdinal === null);
 
     const sMoreTg = parseBookingSelection("more_times");
     check(
@@ -641,9 +651,6 @@ async function run(): Promise<void> {
       "more_times (callback) -> more_times",
       sMoreTg?.kind === "more_times",
     );
-
-    const sChangeDate = parseBookingSelection("يوم آخر");
-    check("F", "يوم آخر -> change_date", sChangeDate?.kind === "change_date");
 
     const sChangeDateTg = parseBookingSelection("change_date");
     check(
@@ -689,11 +696,11 @@ async function run(): Promise<void> {
 
     const llmCallsBefore = h.getLlmCallCount();
 
-    // 1. Customer requests "أوقات أخرى"
-    const moreRes = await h.sendMessage("أوقات أخرى", "ext-nav-more");
+    // 1. Customer triggers button protocol "more_times"
+    const moreRes = await h.sendMessage("more_times", "ext-nav-more");
     check(
       "G",
-      "أوقات أخرى handled deterministically",
+      "more_times handled deterministically",
       moreRes.ok === true && moreRes.assistantAction === "AI_REPLY",
     );
     const lastReply =
@@ -705,15 +712,15 @@ async function run(): Promise<void> {
     );
     check(
       "G",
-      "Zero LLM calls on 'أوقات أخرى'",
+      "Zero LLM calls on 'more_times'",
       h.getLlmCallCount() === llmCallsBefore,
     );
 
-    // 2. Customer requests "يوم آخر"
-    const changeRes = await h.sendMessage("يوم آخر", "ext-nav-day");
+    // 2. Customer triggers button protocol "change_date"
+    const changeRes = await h.sendMessage("change_date", "ext-nav-day");
     check(
       "G",
-      "يوم آخر handled deterministically",
+      "change_date handled deterministically",
       changeRes.ok === true && changeRes.assistantAction === "AI_REPLY",
     );
     const changeReply =
@@ -725,7 +732,7 @@ async function run(): Promise<void> {
     );
     check(
       "G",
-      "Zero LLM calls on 'يوم آخر'",
+      "Zero LLM calls on 'change_date'",
       h.getLlmCallCount() === llmCallsBefore,
     );
   }

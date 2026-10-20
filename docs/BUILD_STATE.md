@@ -51,6 +51,13 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
+**IN-FLIGHT (PR #17 focused repair on branch `feat/conv-core-02-jev-context-gateway`) — SAFE OFFER SELECTION & GENERATIVE STATE CONTEXT PROJECTION (CONV-CORE-02)**:
+Two targeted repairs implemented without engine redesign or migration:
+
+1. **Safe Offer Selection**: Removed natural-language phrase matching, ordinal dictionaries, and sentence heuristics from `parseBookingSelection` (`booking-selection.ts`). Genuine numeric selections (`2`, `٢`), protocol button actions (`opt_1`, `more_times`, `change_date`), and offer-bound callbacks (`fp:<token>:<action>`) execute deterministically with 0 LLM calls. Free-form negative/navigation sentences (e.g., `مش عايز يوم تاني`, `٢ بس غير اليوم`) return `null` and pass to the semantic provider intact. Pre-AI legacy selection fallback in `conversation-engine.ts` is guarded to avoid re-swallowing active offer turns.
+2. **Generative State Context**: Wire-connected `conversationContext` in `buildPromptMessages` (`src/server/integrations/ai/prompt.ts`) into `userContent` when present (safely omitted when absent). Added minimal instruction in `booking-assistant.prompt` establishing that `conversationContext` governs current booking facts over historical transcript data; customer/business values are treated strictly as data. Offer tokens/nonces remain absent from projection.
+   Verified by Section T in `scripts/check-conv-core-02.ts` (120/120 passing), `scripts/check-conversation-c2.ts` (39/39 passing), prompt generation (`check:ai-prompts` 143/143), and clean `pnpm verify:local`.
+
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
 `PROMPT-OPS-REL-01-R`:
 CANONICAL PRE-SHIP GATE + RELEASE CONTRACT — one repository-owned, deterministic
@@ -2613,6 +2620,13 @@ E2E` from a FRESH launch and record whether the whole
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
+
+**AWAITING CI & OPERATOR REVIEW — PR #17 (feat/conv-core-02-jev-context-gateway) Focused Repair**:
+Branch `feat/conv-core-02-jev-context-gateway` updated with focused repairs for safe offer selection and generative state context projection.
+
+1. Push commit to remote `origin feat/conv-core-02-jev-context-gateway`.
+2. Monitor GitHub Actions CI on PR #17 final HEAD (`pr-validation.yml`).
+3. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, candidate 0.58.0 preserved).
 
 **JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
 DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**

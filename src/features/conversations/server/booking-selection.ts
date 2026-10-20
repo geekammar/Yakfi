@@ -24,7 +24,6 @@ import {
   isOfferLive,
   parseOfferCallback,
 } from "@/features/conversations/server/booking-offer";
-import { normalizeArabicText } from "@/features/conversations/server/conversation-ai";
 
 /** One option exactly as presented in the canonical offer message. */
 export type OfferedBookingOption = {
@@ -127,100 +126,18 @@ export function extractLastBookingOffer(
  * Order: index → time → provider-name candidate.
  */
 
-const MORE_TIMES_PATTERNS = [
-  "اوقات اخرى",
-  "اوقات تانية",
-  "اوقات تانيه",
-  "مواعيد اخرى",
-  "مواعيد تانية",
-  "مواعيد تانيه",
-  "خيارات اخرى",
-  "خيارات تانية",
-  "خيارات تانيه",
-  "وقت تاني",
-  "وقت اخر",
-  "في اوقات تانية",
-  "فيه اوقات تانية",
-  "في مواعيد تانية",
-  "فيه مواعيد تانية",
-  "المزيد",
-  "more",
-  "more_times",
-  "more times",
-].map(normalizeArabicText);
-
-const CHANGE_DATE_PATTERNS = [
-  "يوم اخر",
-  "يوم تاني",
-  "يوم تانيه",
-  "تاريخ اخر",
-  "تاريخ تاني",
-  "تاريخ تانيه",
-  "غير اليوم",
-  "تغيير اليوم",
-  "تغيير التاريخ",
-  "يوم مختلف",
-  "عاوز يوم تاني",
-  "عايز يوم تاني",
-  "محتاج يوم تاني",
-  "another day",
-  "other day",
-  "change_date",
-  "change date",
-].map(normalizeArabicText);
-
-const ARABIC_ORDINALS: Record<string, number> = {
-  الاول: 1,
-  الاولاني: 1,
-  التاني: 2,
-  الثاني: 2,
-  التالت: 3,
-  الثالث: 3,
-  الرابع: 4,
-  الخامس: 5,
-  السادس: 6,
-};
-
 export function parseBookingSelection(
   rawText: string,
 ): BookingSelection | null {
   const trimmed = rawText.trim();
   if (trimmed.length === 0 || trimmed.length > 120) return null;
 
-  const normForNav = normalizeArabicText(trimmed);
-
-  // Direct callback tokens
-  if (trimmed === "more_times" || trimmed === "more times")
+  // Direct protocol navigation callback tokens
+  if (trimmed === "more_times" || trimmed === "more times") {
     return { kind: "more_times" };
-  if (trimmed === "change_date" || trimmed === "change date")
+  }
+  if (trimmed === "change_date" || trimmed === "change date") {
     return { kind: "change_date" };
-
-  // Navigation: more times / another day
-  for (const p of MORE_TIMES_PATTERNS) {
-    if (
-      normForNav === p ||
-      (normForNav.includes(p) && normForNav.length <= 25)
-    ) {
-      return { kind: "more_times" };
-    }
-  }
-  for (const p of CHANGE_DATE_PATTERNS) {
-    if (
-      normForNav === p ||
-      (normForNav.includes(p) && normForNav.length <= 25)
-    ) {
-      return { kind: "change_date" };
-    }
-  }
-
-  // Ordinal word match ("الأول", "الثاني", "الخيار الأول", etc.)
-  const bareOrdinal = normForNav.startsWith("الخيار ")
-    ? normForNav.replace("الخيار ", "").trim()
-    : normForNav.startsWith("رقم ")
-      ? normForNav.replace("رقم ", "").trim()
-      : normForNav;
-  if (ARABIC_ORDINALS[bareOrdinal] !== undefined) {
-    return { kind: "index", index: ARABIC_ORDINALS[bareOrdinal]! };
   }
 
   // Structured callback/button prefix e.g. "opt_1", "slot_2", "choice:3"
@@ -231,76 +148,26 @@ export function parseBookingSelection(
 
   const digitsNormalized = normalizeDigits(trimmed);
 
-  // Index: only when the whole (punctuation-stripped) text is a single
-  // digit — the engine re-validates it against the OFFERED option list
-  // (out-of-range → clarification, never a fabricated selection).
-  const strippedForIndex = digitsNormalized
-    .replace(/[\s.\-—–_()\[\]{}،,.:!؟?]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-  if (/^[1-9]$/.test(strippedForIndex)) {
-    return { kind: "index", index: Number(strippedForIndex) };
-  }
-  // "الخيار 1" / "رقم 2" / "اختيار 3" — only on short index phrases.
-  if (strippedForIndex.length <= 12) {
-    const m = strippedForIndex.match(/(?:^|\s)([1-9])(?:\s|$)/);
-    if (m && m[1] && strippedForIndex.split(" ").length <= 3) {
-      const withoutDigit = strippedForIndex.replace(m[1], "").trim();
-      if (
-        withoutDigit.length === 0 ||
-        /^(الخيار|خيار|رقم|اختيار|اختار|الاختيار)$/.test(
-          normalizeArabicText(withoutDigit),
-        )
-      ) {
-        return { kind: "index", index: Number(m[1]) };
-      }
-    }
+  // Index: genuine full-message numeric selection ONLY.
+  // Strips optional wrapping punctuation / whitespace (e.g. "2", "٢", " 2 ", "٢.", "(1)", "[3]").
+  // Free-form sentences with surrounding words or mixed content return null to reach semantic routing.
+  const stripped = digitsNormalized
+    .replace(/^[\s.\-—–_()\[\]{}،,.:!؟?]+|[\s.\-—–_()\[\]{}،,.:!؟?]+$/g, "")
+    .trim();
+  if (/^[1-9]\d?$/.test(stripped)) {
+    return { kind: "index", index: Number(stripped) };
   }
 
-  // Time: HH:mm (colon may be Arabic or space, digits may be indic).
+  // Time: HH:mm where uniquely resolvable as the full message ("10:00", "١٠:٠٠")
   const timeNorm = digitsNormalized
     .replace(/[٫꞉:：]/g, ":")
     .replace(/\s+/g, " ")
     .trim();
-  const timeMatch = timeNorm.match(/([01]?\d|2[0-3])\s*:\s*([0-5]\d)/);
+  const timeMatch = timeNorm.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   if (timeMatch && timeMatch[1] && timeMatch[2]) {
     const hh = timeMatch[1].padStart(2, "0");
     const mm = timeMatch[2];
-    const time = `${hh}:${mm}`;
-    // Only treat as time selection when the message is essentially the
-    // time ("10:00", "الساعة 10:00") — not a long sentence.
-    const timeRemoved = timeNorm.replace(timeMatch[0], "").trim();
-    const timeRemovedNorm = normalizeArabicText(timeRemoved);
-    if (
-      timeRemoved.length <= 10 &&
-      (timeRemoved.length === 0 ||
-        timeRemovedNorm.length === 0 ||
-        /^(الساعه|ساعه|تمام|تماما)$/.test(timeRemovedNorm))
-    ) {
-      return { kind: "time", time };
-    }
-    if (strippedForIndex === time || timeNorm === time) {
-      return { kind: "time", time };
-    }
-  }
-  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(digitsNormalized.trim())) {
-    return { kind: "time", time: digitsNormalized.trim() };
-  }
-
-  // Provider-name candidate: any short name-like text. The engine
-  // verifies it against the fresh eligible set AND requires the tokens
-  // to be a subset of a real provider name before treating it as a
-  // selection — otherwise the message falls through to the AI turn.
-  const norm = normalizeArabicText(trimmed);
-  if (norm.length >= 2 && norm.length <= 60 && trimmed.length <= 60) {
-    const tokens = norm.split(" ").filter(Boolean);
-    if (
-      tokens.length <= 4 &&
-      !/[؟?]/.test(trimmed) &&
-      !trimmed.includes("حجز")
-    ) {
-      return { kind: "provider", providerText: trimmed };
-    }
+    return { kind: "time", time: `${hh}:${mm}` };
   }
 
   return null;

@@ -180,10 +180,17 @@ async function main(): Promise<void> {
   process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 
-  const { buildSlotOffer } =
+  const { buildSlotOffer, offerCallbackData } =
     await import("../src/features/conversations/server/booking-offer");
-  const { interpretOfferReply } =
-    await import("../src/features/conversations/server/booking-selection");
+  const {
+    interpretOfferReply,
+    parseBookingSelection,
+    tryParseBookingSelection,
+  } = await import("../src/features/conversations/server/booking-selection");
+  const { buildPromptMessages } =
+    await import("../src/server/integrations/ai/prompt");
+  const { createOpenRouterAdapter } =
+    await import("../src/server/integrations/ai/openrouter");
   const {
     completeBookingTask,
     dehydrateConversationState,
@@ -2671,6 +2678,680 @@ async function main(): Promise<void> {
         {
           timePref: stateT4?.knownFacts?.timePreference,
           selTime: stateT4?.selectedTimePref,
+        },
+      );
+    }
+  }
+
+  // =========================================================================
+  // SECTION T: PR #17 REPAIR REGRESSION SUITE (SAFE SELECTION, GENERATIVE CONTEXT, PRODUCT REGRESSIONS)
+  // =========================================================================
+  {
+    // ── T.1: Safe Selection Helper & Boundary Invariants ──
+    {
+      const selNegative = parseBookingSelection("مش عايز يوم تاني");
+      check(
+        "T.1a: parseBookingSelection('مش عايز يوم تاني') returns null (free-form meaning preserved)",
+        selNegative === null,
+        selNegative,
+      );
+
+      const selMixed = parseBookingSelection("٢ بس غير اليوم");
+      check(
+        "T.1b: parseBookingSelection('٢ بس غير اليوم') returns null (mixed numeric preserved)",
+        selMixed === null,
+        selMixed,
+      );
+
+      const selIndic2 = parseBookingSelection("٢");
+      check(
+        "T.1c: parseBookingSelection('٢') returns index 2",
+        selIndic2?.kind === "index" && selIndic2.index === 2,
+        selIndic2,
+      );
+
+      const selWestern2 = parseBookingSelection("2");
+      check(
+        "T.1d: parseBookingSelection('2') returns index 2",
+        selWestern2?.kind === "index" && selWestern2.index === 2,
+        selWestern2,
+      );
+
+      const selPadded = parseBookingSelection("  ٢.  ");
+      check(
+        "T.1e: parseBookingSelection('  ٢.  ') returns index 2 with wrapping punctuation stripped",
+        selPadded?.kind === "index" && selPadded.index === 2,
+        selPadded,
+      );
+
+      const selOrdinal = parseBookingSelection("الاول");
+      check(
+        "T.1f: parseBookingSelection('الاول') returns null (ordinal dictionary removed)",
+        selOrdinal === null,
+        selOrdinal,
+      );
+
+      const selOpt = parseBookingSelection("opt_1");
+      check(
+        "T.1g: parseBookingSelection('opt_1') returns index 1 (button protocol preserved)",
+        selOpt?.kind === "index" && selOpt.index === 1,
+        selOpt,
+      );
+
+      const selMore = parseBookingSelection("more_times");
+      check(
+        "T.1h: parseBookingSelection('more_times') returns more_times (protocol callback preserved)",
+        selMore?.kind === "more_times",
+        selMore,
+      );
+
+      const selChangeDate = parseBookingSelection("change_date");
+      check(
+        "T.1i: parseBookingSelection('change_date') returns change_date (protocol callback preserved)",
+        selChangeDate?.kind === "change_date",
+        selChangeDate,
+      );
+
+      const selExactTime = parseBookingSelection("10:00");
+      check(
+        "T.1j: parseBookingSelection('10:00') returns time 10:00",
+        selExactTime?.kind === "time" && selExactTime.time === "10:00",
+        selExactTime,
+      );
+
+      const selIndicTime = parseBookingSelection("١٠:٠٠");
+      check(
+        "T.1k: parseBookingSelection('١٠:٠٠') returns time 10:00",
+        selIndicTime?.kind === "time" && selIndicTime.time === "10:00",
+        selIndicTime,
+      );
+
+      const historyWithOffer = [
+        {
+          senderType: "AI",
+          content:
+            'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم 2026-09-15\n1. د. سارة — 10:00 إلى 10:30\n2. د. أحمد — 11:00 إلى 11:30',
+        },
+      ];
+      const tryNegative = tryParseBookingSelection(
+        "مش عايز يوم تاني",
+        historyWithOffer,
+      );
+      check(
+        "T.1l: tryParseBookingSelection('مش عايز يوم تاني') returns null against offer history",
+        tryNegative === null,
+        tryNegative,
+      );
+
+      const tryMixed = tryParseBookingSelection(
+        "٢ بس غير اليوم",
+        historyWithOffer,
+      );
+      check(
+        "T.1m: tryParseBookingSelection('٢ بس غير اليوم') returns null against offer history",
+        tryMixed === null,
+        tryMixed,
+      );
+    }
+
+    // ── T.2: Selection Engine Execution & Semantic Routing ──
+    {
+      const fixtureOffer = createEngineFixture();
+      const liveOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixtureOffer.conversation.id },
+        "off-t2-live",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: PROVIDER_1,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 2,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T09:00",
+              endAt: "2026-09-15T09:30",
+            },
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T09:30",
+              endAt: "2026-09-15T10:00",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seedState = withPresentedOffer(
+        emptyConversationState(),
+        liveOffer,
+      ) as MutableConversationState;
+      seedState.activeTask = {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      };
+      seedState.serviceId = SERVICE_1;
+      seedState.selectedService = "كشف أسنان";
+      seedState.providerPreference = PROVIDER_1;
+      seedState.selectedDate = "2026-09-15";
+      seedState.knownFacts = {
+        service: "كشف أسنان",
+        provider: "د. سارة",
+        date: "2026-09-15",
+      };
+
+      await fixtureOffer.stateStore.save(
+        B_ID,
+        fixtureOffer.conversation.id,
+        null,
+        dehydrateConversationState(seedState),
+      );
+
+      // (a) Valid live offer + full "٢": correct offered option, zero model attempts
+      const genBefore = fixtureOffer.getGenerativeCalls();
+      const jevBefore = fixtureOffer.getJevCalls();
+      await fixtureOffer.sendTurn("٢");
+      check(
+        "T.2a: Valid live offer + full '٢' books option 2 with 0 model network attempts",
+        fixtureOffer.createdAppointments.length === 1 &&
+          fixtureOffer.createdAppointments[0]?.providerId === PROVIDER_1 &&
+          fixtureOffer.createdAppointments[0]?.startTime === "09:30" &&
+          fixtureOffer.getGenerativeCalls() === genBefore &&
+          fixtureOffer.getJevCalls() === jevBefore,
+        {
+          appointments: fixtureOffer.createdAppointments,
+          genCalls: fixtureOffer.getGenerativeCalls() - genBefore,
+          jevCalls: fixtureOffer.getJevCalls() - jevBefore,
+        },
+      );
+    }
+
+    // (b) Valid token callback: existing action preserved
+    {
+      const fixtureCb = createEngineFixture();
+      const liveOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixtureCb.conversation.id },
+        "off-t2-cb",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: PROVIDER_1,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T09:00",
+              endAt: "2026-09-15T09:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seedState = withPresentedOffer(
+        emptyConversationState(),
+        liveOffer,
+      ) as MutableConversationState;
+      seedState.activeTask = {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      };
+      seedState.serviceId = SERVICE_1;
+      seedState.selectedDate = "2026-09-15";
+      seedState.providerPreference = PROVIDER_1;
+      seedState.knownFacts = {
+        service: "كشف أسنان",
+        provider: "د. سارة",
+        date: "2026-09-15",
+      };
+
+      await fixtureCb.stateStore.save(
+        B_ID,
+        fixtureCb.conversation.id,
+        null,
+        dehydrateConversationState(seedState),
+      );
+
+      const cbData = offerCallbackData(liveOffer, 1);
+      await fixtureCb.sendTurn(cbData);
+      check(
+        "T.2b: Valid token callback books option 1 with 0 model calls",
+        fixtureCb.createdAppointments.length === 1 &&
+          fixtureCb.createdAppointments[0]?.providerId === PROVIDER_1,
+        fixtureCb.createdAppointments,
+      );
+    }
+
+    // (c) Free-form negative/navigation and mixed numeric messages reach semantic route intact
+    {
+      const fixtureFree = createEngineFixture();
+      const liveOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixtureFree.conversation.id },
+        "off-t2-free",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seedState = withPresentedOffer(
+        emptyConversationState(),
+        liveOffer,
+      ) as MutableConversationState;
+      seedState.activeTask = {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      };
+      seedState.serviceId = SERVICE_1;
+      seedState.selectedDate = "2026-09-15";
+      seedState.knownFacts = { service: "كشف أسنان", date: "2026-09-15" };
+
+      await fixtureFree.stateStore.save(
+        B_ID,
+        fixtureFree.conversation.id,
+        null,
+        dehydrateConversationState(seedState),
+      );
+
+      // Customer sends "٢ بس غير اليوم"
+      await fixtureFree.sendTurn("٢ بس غير اليوم");
+      check(
+        "T.2c: '٢ بس غير اليوم' causes NO pre-semantic booking and reaches semantic provider intact",
+        fixtureFree.createdAppointments.length === 0 &&
+          fixtureFree.capturedRequests.some(
+            (r) => r.message === "٢ بس غير اليوم",
+          ),
+        {
+          appointments: fixtureFree.createdAppointments,
+          captured: fixtureFree.capturedRequests.map((r) => r.message),
+        },
+      );
+
+      // Customer sends "مش عايز يوم تاني" with controlled semantic response
+      await fixtureFree.sendTurn("مش عايز يوم تاني");
+      const savedFree = await fixtureFree.stateStore.load(
+        B_ID,
+        fixtureFree.conversation.id,
+      );
+      const stateFree = savedFree
+        ? hydrateConversationState(savedFree.state, {
+            businessId: B_ID,
+            conversationId: fixtureFree.conversation.id,
+          })
+        : null;
+
+      check(
+        "T.2d: 'مش عايز يوم تاني' reaches semantic provider intact and causes no pre-semantic date-navigation action (date unchanged)",
+        fixtureFree.capturedRequests.some(
+          (r) => r.message === "مش عايز يوم تاني",
+        ) && stateFree?.knownFacts.date === "2026-09-15",
+        {
+          captured: fixtureFree.capturedRequests.map((r) => r.message),
+          date: stateFree?.knownFacts.date,
+        },
+      );
+    }
+
+    // (d) Expired / replaced / consumed offer and unknown token
+    {
+      const dayLater = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const liveOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: "c-1" },
+        "off-t2-inv",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const expiredReply = interpretOfferReply("2", liveOffer, dayLater);
+      check(
+        "T.2e: Expired offer reply is rejected as stale (EXPIRED)",
+        expiredReply.kind === "stale" && expiredReply.reason === "EXPIRED",
+        expiredReply,
+      );
+
+      const consumedOffer = { ...liveOffer, status: "CONSUMED" as const };
+      const consumedReply = interpretOfferReply("2", consumedOffer, now);
+      check(
+        "T.2f: Consumed offer reply is rejected as stale (CLOSED)",
+        consumedReply.kind === "stale" && consumedReply.reason === "CLOSED",
+        consumedReply,
+      );
+
+      const unknownTokReply = interpretOfferReply(
+        "fp:unknown123:1",
+        liveOffer,
+        now,
+      );
+      check(
+        "T.2g: Unknown token callback is rejected as stale (UNKNOWN_TOKEN)",
+        unknownTokReply.kind === "stale" &&
+          unknownTokReply.reason === "UNKNOWN_TOKEN",
+        unknownTokReply,
+      );
+    }
+
+    // (e) No fallback path reintroduces phrase-based selection
+    {
+      const fixtureNoOffer = createEngineFixture();
+      // No offer in state
+      await fixtureNoOffer.sendTurn("مش عايز يوم تاني");
+      check(
+        "T.2h: No fallback path reintroduces phrase-based selection for 'مش عايز يوم تاني'",
+        fixtureNoOffer.createdAppointments.length === 0,
+        fixtureNoOffer.createdAppointments,
+      );
+    }
+
+    // ── T.3: Generative State Context & HTTP Wire Seam ──
+    {
+      // (a) Prompt builder renders conversationContext once when present, omits when absent
+      const baseReq: AiRequest = {
+        message: "عايز موعد",
+        conversationStatus: "AI_ACTIVE",
+        businessName: "عيادة الابتسامة",
+        services: [{ name: "كشف أسنان" }],
+        faqs: [],
+        recentMessages: [{ senderType: "CUSTOMER", content: "عايز موعد كشف" }],
+        conversationContext: {
+          activeTask: { kind: "BOOKING", stage: "TIME_SUPPLIED" },
+          knownService: "كشف أسنان",
+          resolvedServiceId: SERVICE_1,
+          knownDate: "2026-09-25",
+          timePreference: "evening",
+          providerPreference: "د. سارة",
+        },
+      };
+
+      const msgsWithCtx = buildPromptMessages(baseReq);
+      const userContentWithCtx =
+        msgsWithCtx.find((m) => m.role === "user")?.content ?? "";
+      check(
+        "T.3a: buildPromptMessages renders conversationContext once when present",
+        userContentWithCtx.includes("conversationContext: {") &&
+          userContentWithCtx.includes(
+            '"activeTask":{"kind":"BOOKING","stage":"TIME_SUPPLIED"}',
+          ) &&
+          userContentWithCtx.includes('"knownService":"كشف أسنان"') &&
+          userContentWithCtx.includes(
+            '"resolvedServiceId":"' + SERVICE_1 + '"',
+          ),
+        userContentWithCtx,
+      );
+
+      const reqNoCtx: AiRequest = {
+        ...baseReq,
+        conversationContext: undefined,
+      };
+      const msgsNoCtx = buildPromptMessages(reqNoCtx);
+      const userContentNoCtx =
+        msgsNoCtx.find((m) => m.role === "user")?.content ?? "";
+      check(
+        "T.3b: buildPromptMessages omits conversationContext when absent",
+        !userContentNoCtx.includes("conversationContext:"),
+        userContentNoCtx,
+      );
+
+      // (b) Actual generative HTTP request body through production adapter with mocked HTTP
+      const mockHttpCalls: Array<{
+        url: string;
+        method: string;
+        body: Record<string, unknown>;
+        rawBody: string;
+      }> = [];
+      const generativeMockFetch: typeof fetch = async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const rawBody = String(init?.body ?? "{}");
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(rawBody) as Record<string, unknown>;
+        } catch {}
+        mockHttpCalls.push({ url, method, body, rawBody });
+        return new Response(
+          JSON.stringify({
+            id: "gen-mock-1",
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    intent: "BOOKING",
+                    action: "reply",
+                    summary: "حجز موعد",
+                    content: "تم استلام طلبك",
+                    extraction: {
+                      service: "كشف أسنان",
+                      provider: null,
+                      date: "2026-09-25",
+                      timePreference: "evening",
+                    },
+                    handoffReason: null,
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const genAdapter = createOpenRouterAdapter({
+        model: "openrouter/mock-gen",
+        getEnvVar: () => "test-api-key",
+        fetchImpl: generativeMockFetch,
+      });
+
+      const adapterResult = await genAdapter.call(baseReq);
+      check(
+        "T.3c: Production generative adapter succeeds with mocked HTTP",
+        adapterResult.ok === true,
+      );
+
+      const capturedGenCall = mockHttpCalls[0];
+      const genMessages = Array.isArray(capturedGenCall?.body?.messages)
+        ? (capturedGenCall.body.messages as Array<{
+            role: string;
+            content: string;
+          }>)
+        : [];
+      const genUserMsg =
+        genMessages.find((m) => m.role === "user")?.content ?? "";
+
+      check(
+        "T.3d: Durable state reaches generative HTTP request body with representative facts and active task",
+        Boolean(
+          capturedGenCall &&
+          capturedGenCall.method === "POST" &&
+          genUserMsg.includes("conversationContext:") &&
+          genUserMsg.includes('"kind":"BOOKING"') &&
+          genUserMsg.includes('"stage":"TIME_SUPPLIED"') &&
+          genUserMsg.includes('"knownService":"كشف أسنان"') &&
+          genUserMsg.includes(SERVICE_1) &&
+          genUserMsg.includes('"knownDate":"2026-09-25"') &&
+          genUserMsg.includes('"timePreference":"evening"') &&
+          genUserMsg.includes('"providerPreference":"د. سارة"'),
+        ),
+        genUserMsg,
+      );
+
+      check(
+        "T.3e: Offer tokens / nonces / internal secrets are strictly absent from generative HTTP wire context",
+        !genUserMsg.includes("off-") &&
+          !genUserMsg.includes("nonce") &&
+          !genUserMsg.includes("token"),
+        genUserMsg,
+      );
+
+      // (c) Conflicting old history remains historical data while authoritative snapshot is present
+      const reqWithOldConflict: AiRequest = {
+        ...baseReq,
+        recentMessages: [
+          {
+            senderType: "CUSTOMER",
+            content: "عايز أحجز الأسبوع الجاي يوم 2026-09-10",
+          },
+          { senderType: "AI", content: "تاريخ 2026-09-10 غير متاح" },
+          {
+            senderType: "CUSTOMER",
+            content: "خلاص بلاش 2026-09-10 وخليها 2026-09-25 بالليل",
+          },
+        ],
+      };
+      const msgsOldConflict = buildPromptMessages(reqWithOldConflict);
+      const contentOldConflict =
+        msgsOldConflict.find((m) => m.role === "user")?.content ?? "";
+      check(
+        "T.3f: Conflicting old history is preserved as transcript data while authoritative snapshot contains 2026-09-25",
+        contentOldConflict.includes("2026-09-10 غير متاح") &&
+          contentOldConflict.includes('"knownDate":"2026-09-25"'),
+        contentOldConflict,
+      );
+    }
+
+    // ── T.4: Product Regressions ──
+    {
+      // (a) Enabled valid default service + generic booking does not ask for service selection
+      const fixtureDefaultSvc = createEngineFixture({
+        defaultServiceId: SERVICE_1,
+      });
+      const resDefault = await fixtureDefaultSvc.sendTurn(
+        "عايز أحجز موعد بكرة",
+      );
+      const savedDefault = await fixtureDefaultSvc.stateStore.load(
+        B_ID,
+        fixtureDefaultSvc.conversation.id,
+      );
+      const stateDefault = savedDefault
+        ? hydrateConversationState(savedDefault.state, {
+            businessId: B_ID,
+            conversationId: fixtureDefaultSvc.conversation.id,
+          })
+        : null;
+
+      check(
+        "T.4a: Enabled valid default service + generic booking resolves default service without service clarification",
+        resDefault.ok &&
+          !resDefault.duplicate &&
+          resDefault.assistantAction === "AI_REPLY" &&
+          stateDefault?.serviceId === SERVICE_1,
+        {
+          action:
+            "assistantAction" in resDefault ? resDefault.assistantAction : null,
+          serviceId: stateDefault?.serviceId,
+        },
+      );
+
+      // (b) Explicit valid service is retained over default
+      const fixtureExplicitSvc = createEngineFixture({
+        defaultServiceId: SERVICE_1,
+      });
+      const resExplicit = await fixtureExplicitSvc.sendTurn(
+        "عايز أحجز تنظيف أسنان بكرة",
+      );
+      const savedExplicit = await fixtureExplicitSvc.stateStore.load(
+        B_ID,
+        fixtureExplicitSvc.conversation.id,
+      );
+      const stateExplicit = savedExplicit
+        ? hydrateConversationState(savedExplicit.state, {
+            businessId: B_ID,
+            conversationId: fixtureExplicitSvc.conversation.id,
+          })
+        : null;
+
+      check(
+        "T.4b: Explicit valid service ('تنظيف أسنان') is retained over configured default service",
+        resExplicit.ok &&
+          !resExplicit.duplicate &&
+          resExplicit.assistantAction === "AI_REPLY" &&
+          stateExplicit?.serviceId === SERVICE_2,
+        {
+          action:
+            "assistantAction" in resExplicit
+              ? resExplicit.assistantAction
+              : null,
+          serviceId: stateExplicit?.serviceId,
+        },
+      );
+
+      // (c) Services inquiry returns catalog without changing existing booking service
+      const fixtureCatalogInq = createEngineFixture();
+      const seedStateInq: MutableConversationState = emptyConversationState();
+      seedStateInq.activeTask = { kind: "BOOKING", stage: "SERVICE_SUPPLIED" };
+      seedStateInq.serviceId = SERVICE_1;
+      seedStateInq.selectedService = "كشف أسنان";
+      seedStateInq.knownFacts = { service: "كشف أسنان" };
+
+      await fixtureCatalogInq.stateStore.save(
+        B_ID,
+        fixtureCatalogInq.conversation.id,
+        null,
+        dehydrateConversationState(seedStateInq),
+      );
+
+      const resInq = await fixtureCatalogInq.sendTurn(
+        "إيه الخدمات المتاحة عندكم وبكام؟",
+      );
+      const savedInq = await fixtureCatalogInq.stateStore.load(
+        B_ID,
+        fixtureCatalogInq.conversation.id,
+      );
+      const stateInq = savedInq
+        ? hydrateConversationState(savedInq.state, {
+            businessId: B_ID,
+            conversationId: fixtureCatalogInq.conversation.id,
+          })
+        : null;
+
+      check(
+        "T.4c: Services inquiry returns catalog without changing existing booking service in state",
+        resInq.ok &&
+          !resInq.duplicate &&
+          resInq.assistantAction === "AI_REPLY" &&
+          stateInq?.serviceId === SERVICE_1 &&
+          stateInq?.knownFacts.service === "كشف أسنان",
+        {
+          action: "assistantAction" in resInq ? resInq.assistantAction : null,
+          serviceId: stateInq?.serviceId,
+          knownService: stateInq?.knownFacts.service,
         },
       );
     }
