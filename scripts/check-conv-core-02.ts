@@ -205,6 +205,14 @@ async function main(): Promise<void> {
     await import("../src/features/conversations/server/conversation-state-store");
   const { receiveInboundMessage } =
     await import("../src/features/conversations/server/conversation-engine");
+  const {
+    extractProviderPreference,
+    extractProviderPreferenceDetailed,
+    extractTimeOfDayPreference,
+    extractTimeOfDayPreferenceDetailed,
+    resolveEgyptianRelativeDate,
+    resolveEgyptianRelativeDateDetailed,
+  } = await import("../src/features/conversations/server/relative-date");
 
   const B_ID = "11111111-1111-4111-8111-111111111111";
   const C_ID = "33333333-3333-4333-8333-333333333330";
@@ -1641,54 +1649,571 @@ async function main(): Promise<void> {
   }
 
   // =========================================================================
-  // FOCUSED FACT PRECEDENCE & NEGATION REGRESSIONS (Review Finding 2)
+  // FOCUSED FACT PRECEDENCE & NEGATION REGRESSIONS (Review Findings 2, 3 & 4)
   // =========================================================================
   {
-    const fixture = createEngineFixture();
+    const REF_DATE = "2026-09-14"; // Reference Monday
 
-    // Regression 1: Validated evening correction remains evening
-    await fixture.sendTurn("مش الصبح، بالليل");
-    const stateEvening = (
-      await fixture.stateStore.load(B_ID, fixture.conversation.id)
-    )?.state as ConversationState | undefined;
-    check(
-      "Regression Finding 2.1: Validated evening correction remains evening",
-      stateEvening?.knownFacts?.timePreference === "evening",
-      stateEvening?.knownFacts,
-    );
-
-    // Regression 2: Negated date is not installed as a new requested date
-    const fixtureNegDate = createEngineFixture();
-    await fixtureNegDate.sendTurn("بلاش بكرة");
-    const stateNegDate = (
-      await fixtureNegDate.stateStore.load(B_ID, fixtureNegDate.conversation.id)
-    )?.state as ConversationState | undefined;
-    check(
-      "Regression Finding 2.2: Negated date is not installed as a positive booking fact",
-      stateNegDate?.knownFacts?.date == null,
-      stateNegDate?.knownFacts,
-    );
-
-    // Regression 3: Omitted facts do not erase existing facts
-    const stateWithService: MutableConversationState = emptyConversationState();
-    stateWithService.serviceId = SERVICE_1;
-    stateWithService.selectedService = "كشف أسنان";
-    stateWithService.knownFacts = {
-      service: "كشف أسنان",
-      timePreference: "evening",
-    };
-    const { state: updatedDateOnly } = mergeConversationState(
-      stateWithService,
-      {
-        factUpdates: [{ key: "date", value: "2026-09-20" }],
-      },
+    // ── Finding 2.1: Helper Regressions on Exact Review Cases ─────────────
+    // Case 1: “بلاش بكرة خليها بعد بكرة”
+    const r1 = resolveEgyptianRelativeDate(
+      "بلاش بكرة خليها بعد بكرة",
+      REF_DATE,
     );
     check(
-      "Regression Finding 2.3: Omitted facts do not erase existing facts",
-      updatedDateOnly.knownFacts.service === "كشف أسنان" &&
-        updatedDateOnly.knownFacts.timePreference === "evening" &&
-        updatedDateOnly.knownFacts.date === "2026-09-20",
+      "Regression Finding 2.1a: 'بلاش بكرة خليها بعد بكرة' resolves to 2026-09-16",
+      r1 === "2026-09-16",
+      r1,
     );
+
+    // Case 2: “عايز بكرة مش بعد بكرة”
+    const r2 = resolveEgyptianRelativeDate("عايز بكرة مش بعد بكرة", REF_DATE);
+    check(
+      "Regression Finding 2.1b: 'عايز بكرة مش بعد بكرة' resolves to 2026-09-15",
+      r2 === "2026-09-15",
+      r2,
+    );
+
+    // Case 3: “بلاش بعد بكرة”
+    const r3Det = resolveEgyptianRelativeDateDetailed(
+      "بلاش بعد بكرة",
+      REF_DATE,
+    );
+    check(
+      "Regression Finding 2.1c: 'بلاش بعد بكرة' yields no positive date and captures negated date",
+      r3Det.positiveDate === null && r3Det.negatedDates.includes("2026-09-16"),
+      r3Det,
+    );
+
+    // Case 4: “بلاش الأسبوع الجاي”
+    const r4Det = resolveEgyptianRelativeDateDetailed(
+      "بلاش الأسبوع الجاي",
+      REF_DATE,
+    );
+    check(
+      "Regression Finding 2.1d: 'بلاش الأسبوع الجاي' yields no positive date and captures negated date",
+      r4Det.positiveDate === null && r4Det.negatedDates.includes("2026-09-21"),
+      r4Det,
+    );
+
+    // Case 5: “مش بعد الظهر بالليل”
+    const r5 = extractTimeOfDayPreference("مش بعد الظهر بالليل");
+    const r5Det = extractTimeOfDayPreferenceDetailed("مش بعد الظهر بالليل");
+    check(
+      "Regression Finding 2.1e: 'مش بعد الظهر بالليل' resolves to evening with negated afternoon",
+      r5 === "evening" &&
+        r5Det.positiveTime === "evening" &&
+        r5Det.negatedTimes.includes("afternoon"),
+      r5Det,
+    );
+
+    // Case 6: “مش د. أحمد، مع د. سارة”
+    const r6 = extractProviderPreference("مش د. أحمد، مع د. سارة");
+    const r6Det = extractProviderPreferenceDetailed("مش د. أحمد، مع د. سارة");
+    check(
+      "Regression Finding 2.1f: 'مش د. أحمد، مع د. سارة' resolves to د. سارة with negated د. أحمد",
+      r6 === "د. سارة" &&
+        r6Det.positiveProvider === "د. سارة" &&
+        r6Det.negatedProviders.includes("د. أحمد"),
+      r6Det,
+    );
+
+    // ── Finding 2.2: Proving Validated Fact Precedence (Section 5) ────────
+    // Deliberate conflict through approved generative adapter seam:
+    // Message says "الصبح بدري" (heuristic parser would propose morning),
+    // but the validated update explicitly provides evening.
+    const fixturePrecedence = createEngineFixture({
+      hasCredentials: false, // forces generative adapter seam
+      customGenerativeReply: (_req) => ({
+        intent: "BOOKING",
+        action: "reply",
+        summary: "Validated extraction says evening despite morning text",
+        content: "تم تأكيد موعدك المسائي.",
+        handoffReason: null,
+        extraction: {
+          service: "كشف أسنان",
+          date: "2026-09-15",
+          timePreference: "evening",
+          provider: null,
+        },
+      }),
+    });
+
+    await fixturePrecedence.sendTurn("عايز كشف أسنان الصبح بدري");
+    const savedPrecedence = await fixturePrecedence.stateStore.load(
+      B_ID,
+      fixturePrecedence.conversation.id,
+    );
+    const statePrecedence = savedPrecedence
+      ? hydrateConversationState(savedPrecedence.state, {
+          businessId: B_ID,
+          conversationId: fixturePrecedence.conversation.id,
+        })
+      : null;
+
+    check(
+      "Regression Finding 2.2a: Validated generative adapter update strictly overrides conflicting heuristic parser proposal",
+      statePrecedence?.knownFacts?.timePreference === "evening",
+      statePrecedence?.knownFacts,
+    );
+    check(
+      "Regression Finding 2.2b: Saved durable state records validated evening preference despite message text",
+      statePrecedence?.selectedTimePref === "evening",
+      statePrecedence?.selectedTimePref,
+    );
+    check(
+      "Regression Finding 2.2c: Single model call spent through approved generative adapter seam without duplicate chains",
+      fixturePrecedence.getGenerativeCalls() === 1 &&
+        fixturePrecedence.getJevCalls() === 0,
+    );
+
+    // ── Finding 2.3: Active Booking State & History Fallback (Section 4) ───
+
+    // Test 2.3a: Active booking date correction replaces old offer with new date offer
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-date-corr",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      await fixture.sendTurn("بلاش بكرة خليها بعد بكرة");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3a: Active booking date correction updates date to 2026-09-16 and supersedes old offer",
+        Boolean(
+          state?.knownFacts?.date === "2026-09-16" &&
+          state?.selectedDate === "2026-09-16" &&
+          state?.offer?.status === "ACTIVE" &&
+          state?.offer?.kind === "SLOT" &&
+          state?.offer?.date === "2026-09-16" &&
+          state?.offer?.id !== initialOffer.id,
+        ),
+        {
+          stateDate: state?.selectedDate,
+          offerDate: state?.offer?.kind === "SLOT" ? state.offer.date : null,
+        },
+      );
+    }
+
+    // Test 2.3b: Active booking date negation without replacement clears date and invalidates offer
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-date-neg",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      const res = await fixture.sendTurn("بلاش بكرة");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3b: Active booking date negation clears date, invalidates old offer, and requests date clarification",
+        state?.knownFacts?.date == null &&
+          state?.selectedDate == null &&
+          state?.pendingOffer == null &&
+          state?.offer?.status === "INVALIDATED",
+        {
+          date: state?.knownFacts?.date,
+          pendingOffer: state?.pendingOffer,
+          offerStatus: state?.offer?.status,
+        },
+      );
+      check(
+        "Regression Finding 2.3c: Negated date is never reintroduced through recent-message fallback or resumeBookingExtraction",
+        state?.knownFacts?.date !== "2026-09-15" &&
+          Boolean(
+            res.ok &&
+            "observability" in res &&
+            res.observability?.clarification?.type === "CLARIFY_DATE",
+          ),
+        res,
+      );
+    }
+
+    // Test 2.3d: Active booking provider correction updates provider and offer to requested provider
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-prov-corr",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: PROVIDER_2,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_2,
+              displayName: "د. أحمد",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.providerPreference = "د. أحمد";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+        provider: "د. أحمد",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      await fixture.sendTurn("مش د. أحمد، مع د. سارة");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3d: Active booking provider correction updates provider to د. سارة and updates offer",
+        Boolean(
+          state?.knownFacts?.provider === "د. سارة" &&
+          state?.providerPreference === "د. سارة" &&
+          state?.offer?.kind === "SLOT" &&
+          state?.offer?.options.every((opt) => opt.providerId === PROVIDER_1),
+        ),
+        {
+          provider: state?.knownFacts?.provider,
+          options: state?.offer?.kind === "SLOT" ? state.offer.options : [],
+        },
+      );
+    }
+
+    // Test 2.3e: Active booking provider negation without replacement clears provider and invalidates offer
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-prov-neg",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: PROVIDER_2,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_2,
+              displayName: "د. أحمد",
+              startAt: "2026-09-15T10:00",
+              endAt: "2026-09-15T10:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.providerPreference = "د. أحمد";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+        provider: "د. أحمد",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      await fixture.sendTurn("مش د. أحمد");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3e: Active booking provider negation clears provider and invalidates previous offer",
+        state?.knownFacts?.provider == null &&
+          state?.providerPreference == null &&
+          state?.offer?.id !== initialOffer.id,
+        {
+          provider: state?.knownFacts?.provider,
+          pref: state?.providerPreference,
+          offerId: state?.offer?.id,
+        },
+      );
+      check(
+        "Regression Finding 2.3f: Rejected provider is never retained as new selection",
+        state?.knownFacts?.provider !== "د. أحمد",
+      );
+    }
+
+    // Test 2.3g: Active booking time correction updates time preference and invalidates old slot offer
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-time-corr",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T14:00",
+              endAt: "2026-09-15T14:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.selectedTimePref = "afternoon";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+        timePreference: "afternoon",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      await fixture.sendTurn("مش بعد الظهر بالليل");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3g: Active booking time correction updates time preference to evening and invalidates old slot offer",
+        state?.knownFacts?.timePreference === "evening" &&
+          state?.selectedTimePref === "evening" &&
+          state?.offer?.id !== initialOffer.id,
+        { timePref: state?.selectedTimePref },
+      );
+    }
+
+    // Test 2.3h: Active booking time negation without replacement clears time preference and invalidates old offer
+    {
+      const fixture = createEngineFixture();
+      const initialOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: fixture.conversation.id },
+        "offer-time-neg",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-15",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-15T14:00",
+              endAt: "2026-09-15T14:30",
+            },
+          ],
+        },
+        now,
+      )!;
+
+      const seed: MutableConversationState = withPresentedOffer(
+        emptyConversationState(),
+        initialOffer,
+      );
+      seed.activeTask = { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" };
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = "2026-09-15";
+      seed.selectedTimePref = "afternoon";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date: "2026-09-15",
+        timePreference: "afternoon",
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      await fixture.sendTurn("بلاش بعد الظهر");
+
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Regression Finding 2.3h: Active booking time negation clears time preference and invalidates old offer",
+        state?.knownFacts?.timePreference == null &&
+          state?.selectedTimePref == null,
+        { timePref: state?.knownFacts?.timePreference },
+      );
+    }
   }
 
   // =========================================================================

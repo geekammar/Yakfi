@@ -393,6 +393,10 @@ export type MergeConversationStateInput = {
     readonly serviceId: string;
     readonly source: ConversationServiceSource;
   } | null;
+  /**
+   * Conversation facts to clear/drop (e.g. when explicitly negated in the turn without replacement).
+   */
+  readonly droppedFacts?: readonly ConversationFactKey[];
 };
 
 export type MergeConversationStateResult = {
@@ -446,6 +450,16 @@ export function mergeConversationState(
     knownFacts = { ...knownFacts, [key]: nextValue };
   }
 
+  if (input.droppedFacts && input.droppedFacts.length > 0) {
+    for (const key of input.droppedFacts) {
+      if (knownFacts[key] !== undefined) {
+        const { [key]: _dropped, ...rest } = knownFacts;
+        void _dropped;
+        knownFacts = rest;
+      }
+    }
+  }
+
   if (revisions.length > MAX_REVISIONS) {
     revisions.splice(0, revisions.length - MAX_REVISIONS);
   }
@@ -457,8 +471,7 @@ export function mergeConversationState(
   //   date / provider / time preference → slot offer only (service kept)
   // A service RE-PHRASING that resolves to the same id invalidates nothing.
   const changed = (key: ConversationFactKey) =>
-    state.knownFacts[key] != null &&
-    knownFacts[key] != null &&
+    (state.knownFacts[key] != null || knownFacts[key] != null) &&
     state.knownFacts[key] !== knownFacts[key];
   let serviceId = state.serviceId;
   let serviceSource = state.serviceSource;

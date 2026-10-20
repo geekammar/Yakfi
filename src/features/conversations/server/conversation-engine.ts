@@ -137,7 +137,10 @@ import {
   withOfferStatus,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
-import type { ConversationState } from "@/features/conversations/server/conversation-state";
+import type {
+  ConversationFactKey,
+  ConversationState,
+} from "@/features/conversations/server/conversation-state";
 import type {
   ConversationStateStore,
   TurnStateSession,
@@ -153,9 +156,11 @@ import {
 } from "@/features/conversations/server/handoff-cause";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
-  extractProviderPreference,
+  extractProviderPreferenceDetailed,
   extractTimeOfDayPreference,
+  extractTimeOfDayPreferenceDetailed,
   resolveEgyptianRelativeDate,
+  resolveEgyptianRelativeDateDetailed,
   todayIsoInTimeZone,
 } from "@/features/conversations/server/relative-date";
 import {
@@ -825,54 +830,84 @@ function resolveFinishedTurn(
     ];
 
     const todayIso = todayIsoInTimeZone(now, timezone);
+    const droppedFacts: ConversationFactKey[] = [];
 
     // CONV-CORE-02: Explicit unambiguous date in current turn (colloquial Egyptian date or ISO).
     // Validated model/extraction facts are authoritative — never overwrite an existing date update.
+    const dateRes = resolveEgyptianRelativeDateDetailed(
+      currentMessage,
+      todayIso,
+    );
     if (!factUpdates.some((u) => u.key === "date")) {
-      const currentTurnDate = resolveEgyptianRelativeDate(
-        currentMessage,
-        todayIso,
-      );
-      if (currentTurnDate) {
+      if (dateRes.positiveDate) {
         factUpdates.push({
           key: "date",
-          value: currentTurnDate,
+          value: dateRes.positiveDate,
           isRevision: Boolean(
-            base.knownFacts.date && base.knownFacts.date !== currentTurnDate,
+            base.knownFacts.date &&
+            base.knownFacts.date !== dateRes.positiveDate,
           ),
         });
+      } else if (
+        base.knownFacts.date &&
+        dateRes.negatedDates.includes(base.knownFacts.date)
+      ) {
+        // Customer explicitly negated the currently-held date without positive replacement
+        droppedFacts.push("date");
       }
     }
 
     // Explicit unambiguous time of day preference in current turn.
     // Validated model/extraction facts are authoritative — never overwrite an existing preference update.
+    const timeRes = extractTimeOfDayPreferenceDetailed(currentMessage);
     if (!factUpdates.some((u) => u.key === "timePreference")) {
-      const currentTurnTimePref = extractTimeOfDayPreference(currentMessage);
-      if (currentTurnTimePref) {
+      if (timeRes.positiveTime) {
         factUpdates.push({
           key: "timePreference",
-          value: currentTurnTimePref,
+          value: timeRes.positiveTime,
           isRevision: Boolean(
             base.knownFacts.timePreference &&
-            base.knownFacts.timePreference !== currentTurnTimePref,
+            base.knownFacts.timePreference !== timeRes.positiveTime,
           ),
         });
+      } else if (
+        base.knownFacts.timePreference &&
+        timeRes.negatedTimes.includes(
+          base.knownFacts.timePreference as "morning" | "afternoon" | "evening",
+        )
+      ) {
+        // Customer explicitly negated the currently-held time preference without positive replacement
+        droppedFacts.push("timePreference");
       }
     }
 
     // Explicit provider preference in current turn.
     // Validated model/extraction facts are authoritative — never overwrite an existing provider update.
+    const provRes = extractProviderPreferenceDetailed(currentMessage);
     if (!factUpdates.some((u) => u.key === "provider")) {
-      const currentTurnProvider = extractProviderPreference(currentMessage);
-      if (currentTurnProvider) {
+      if (provRes.positiveProvider) {
         factUpdates.push({
           key: "provider",
-          value: currentTurnProvider,
+          value: provRes.positiveProvider,
           isRevision: Boolean(
             base.knownFacts.provider &&
-            base.knownFacts.provider !== currentTurnProvider,
+            base.knownFacts.provider !== provRes.positiveProvider,
           ),
         });
+      } else if (
+        base.knownFacts.provider &&
+        provRes.negatedProviders.some((np) => {
+          const normNp = normalizeArabicText(np);
+          const normHeld = normalizeArabicText(base.knownFacts.provider!);
+          return (
+            normNp === normHeld ||
+            normHeld.includes(normNp) ||
+            normNp.includes(normHeld)
+          );
+        })
+      ) {
+        // Customer explicitly negated the currently-held provider without positive replacement
+        droppedFacts.push("provider");
       }
     }
 
@@ -917,17 +952,22 @@ function resolveFinishedTurn(
     }
 
     // Preserve prior date and time-of-day preferences from recent customer messages
-    if (!factUpdates.some((u) => u.key === "date") && !base.knownFacts.date) {
+    // ONLY if the customer did not explicitly negate them in the current turn.
+    if (
+      !factUpdates.some((u) => u.key === "date") &&
+      !base.knownFacts.date &&
+      dateRes.negatedDates.length === 0
+    ) {
       for (let i = recentChronological.length - 1; i >= 0; i--) {
         const m = recentChronological[i]!;
         if (m.senderType === "CUSTOMER") {
           const rel = resolveEgyptianRelativeDate(m.content, todayIso);
-          if (rel) {
+          if (rel && !dateRes.negatedDates.includes(rel)) {
             factUpdates.push({ key: "date", value: rel });
             break;
           }
           const iso = m.content.match(/\b\d{4}-\d{2}-\d{2}\b/);
-          if (iso) {
+          if (iso && !dateRes.negatedDates.includes(iso[0])) {
             factUpdates.push({ key: "date", value: iso[0] });
             break;
           }
@@ -936,13 +976,19 @@ function resolveFinishedTurn(
     }
     if (
       !factUpdates.some((u) => u.key === "timePreference") &&
-      !base.knownFacts.timePreference
+      !base.knownFacts.timePreference &&
+      timeRes.negatedTimes.length === 0
     ) {
       for (let i = recentChronological.length - 1; i >= 0; i--) {
         const m = recentChronological[i]!;
         if (m.senderType === "CUSTOMER") {
           const pref = extractTimeOfDayPreference(m.content);
-          if (pref) {
+          if (
+            pref &&
+            !timeRes.negatedTimes.includes(
+              pref as "morning" | "afternoon" | "evening",
+            )
+          ) {
             factUpdates.push({ key: "timePreference", value: pref });
             break;
           }
@@ -958,6 +1004,7 @@ function resolveFinishedTurn(
       turnGoal: decision.intent,
       ...(decision.goals ? { goals: decision.goals } : {}),
       ...(deferredGoals && deferredGoals.length > 0 ? { deferredGoals } : {}),
+      ...(droppedFacts.length > 0 ? { droppedFacts } : {}),
     });
     const plan = resolveTurnPlan({
       decision,
@@ -2947,15 +2994,23 @@ async function runInboundTurn(
         ? resumeBookingExtraction(validated, resolvedState)
         : validated;
 
+      const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
+      const turnDateRes = resolveEgyptianRelativeDateDetailed(
+        inbound.text,
+        todayIso,
+      );
       if (!bookingAiResponse.extraction.date) {
-        const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
-        let relDate = resolveEgyptianRelativeDate(inbound.text, todayIso);
-        if (!relDate && recentChronological) {
+        let relDate = turnDateRes.positiveDate;
+        if (
+          !relDate &&
+          recentChronological &&
+          turnDateRes.negatedDates.length === 0
+        ) {
           for (let i = recentChronological.length - 1; i >= 0; i--) {
             const m = recentChronological[i]!;
             if (m.senderType === "CUSTOMER") {
               const prev = resolveEgyptianRelativeDate(m.content, todayIso);
-              if (prev) {
+              if (prev && !turnDateRes.negatedDates.includes(prev)) {
                 relDate = prev;
                 break;
               }
@@ -2973,14 +3028,24 @@ async function runInboundTurn(
         }
       }
 
+      const turnTimeRes = extractTimeOfDayPreferenceDetailed(inbound.text);
       if (!bookingAiResponse.extraction.timePreference) {
-        let timePref = extractTimeOfDayPreference(inbound.text);
-        if (!timePref && recentChronological) {
+        let timePref = turnTimeRes.positiveTime;
+        if (
+          !timePref &&
+          recentChronological &&
+          turnTimeRes.negatedTimes.length === 0
+        ) {
           for (let i = recentChronological.length - 1; i >= 0; i--) {
             const m = recentChronological[i]!;
             if (m.senderType === "CUSTOMER") {
               const prev = extractTimeOfDayPreference(m.content);
-              if (prev) {
+              if (
+                prev &&
+                !turnTimeRes.negatedTimes.includes(
+                  prev as "morning" | "afternoon" | "evening",
+                )
+              ) {
                 timePref = prev;
                 break;
               }
@@ -2996,6 +3061,28 @@ async function runInboundTurn(
             },
           };
         }
+      }
+
+      const turnProvRes = extractProviderPreferenceDetailed(inbound.text);
+      if (
+        bookingAiResponse.extraction.provider &&
+        turnProvRes.negatedProviders.some((np) => {
+          const normNp = normalizeArabicText(np);
+          const normP = normalizeArabicText(
+            bookingAiResponse.extraction.provider!,
+          );
+          return (
+            normNp === normP || normP.includes(normNp) || normNp.includes(normP)
+          );
+        })
+      ) {
+        bookingAiResponse = {
+          ...bookingAiResponse,
+          extraction: {
+            ...bookingAiResponse.extraction,
+            provider: null,
+          },
+        };
       }
 
       const sameDoctorRequested =
@@ -3040,17 +3127,14 @@ async function runInboundTurn(
             }
           }
         }
-      } else if (!bookingAiResponse.extraction.provider) {
-        const turnProvider = extractProviderPreference(inbound.text);
-        if (turnProvider) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              provider: turnProvider,
-            },
-          };
-        }
+      } else if (turnProvRes.positiveProvider) {
+        bookingAiResponse = {
+          ...bookingAiResponse,
+          extraction: {
+            ...bookingAiResponse.extraction,
+            provider: turnProvRes.positiveProvider,
+          },
+        };
       }
 
       let activeFollowUpId: string | null =
