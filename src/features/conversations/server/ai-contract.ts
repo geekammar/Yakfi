@@ -163,6 +163,65 @@ const availabilityResultSchema = z.object({
 });
 
 /**
+ * CONV-CORE-02: Bounded context projection of durable conversation state.
+ * Encapsulates the minimal, validated state slice required for contextual AI interpretation.
+ */
+export const conversationContextProjectionSchema = z.object({
+  activeTask: z
+    .object({
+      kind: z.string().max(64),
+      stage: z.string().max(64),
+    })
+    .nullable()
+    .optional(),
+  bookingStage: z.string().max(64).optional(),
+  currentGoal: z.string().max(64).nullable().optional(),
+  knownService: z.string().max(200).nullable().optional(),
+  resolvedServiceId: z.string().max(200).nullable().optional(),
+  knownDate: z.string().max(40).nullable().optional(),
+  timePreference: z.string().max(80).nullable().optional(),
+  providerPreference: z.string().max(200).nullable().optional(),
+  pendingClarification: z
+    .object({
+      type: z.string().max(64),
+      missingFacts: z.array(z.string().max(64)).max(8).optional(),
+    })
+    .nullable()
+    .optional(),
+  pendingGoals: z
+    .array(
+      z.object({
+        kind: z.string().max(64),
+        intent: z.string().max(64).optional(),
+      }),
+    )
+    .max(4)
+    .optional(),
+  activeOffer: z
+    .object({
+      type: z.enum(["SERVICE", "SLOT"]),
+      itemCount: z.number().int().min(0).max(10),
+      offeredDate: z.string().max(40).nullable().optional(),
+      offeredServiceName: z.string().max(200).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  lastCompletedTask: z
+    .object({
+      kind: z.literal("BOOKING"),
+      serviceId: z.string().max(200),
+      date: z.string().max(40),
+      completedAt: z.string().max(64),
+    })
+    .nullable()
+    .optional(),
+});
+
+export type ConversationContextProjection = z.infer<
+  typeof conversationContextProjectionSchema
+>;
+
+/**
  * The AI request — everything the assistant may see for the CURRENT
  * turn. Optional blocks are present ONLY when relevant to the task;
  * the engine never sends the complete business context.
@@ -228,6 +287,11 @@ export const aiRequestSchema = z.object({
     .max(64)
     .regex(/^[0-9a-f]+$/)
     .optional(),
+  /**
+   * CONV-CORE-02: Bounded context projection of durable conversation state.
+   * Additive and optional; present when available and tenant-validated.
+   */
+  conversationContext: conversationContextProjectionSchema.optional(),
 });
 
 export type AiRequest = z.infer<typeof aiRequestSchema>;

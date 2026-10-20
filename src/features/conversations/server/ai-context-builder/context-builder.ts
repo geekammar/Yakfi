@@ -56,7 +56,10 @@
  * excluded with a typed reason — never guessed, never silently reinterpreted
  * as public, and never replaced by raw source content.
  */
-import type { AiRequest } from "@/features/conversations/server/ai-contract";
+import type {
+  AiRequest,
+  ConversationContextProjection,
+} from "@/features/conversations/server/ai-contract";
 import {
   AI_KNOWLEDGE_ENTRY_LIMIT,
   AI_RECENT_MESSAGE_LIMIT,
@@ -70,6 +73,10 @@ import {
   normalizeArabicText,
   type TaskRelevance,
 } from "@/features/conversations/server/conversation-ai";
+import {
+  projectConversationState,
+  type ConversationState,
+} from "@/features/conversations/server/conversation-state";
 import {
   FACT_EXCLUSION_REASONS,
   classifyBusinessField,
@@ -183,6 +190,7 @@ export type ContextSources = {
   readonly business: ContextBusinessSources;
   readonly services: ReadonlyArray<ContextServiceFact>;
   readonly conversation: {
+    readonly id?: string;
     readonly status: ConversationStatus;
     readonly recentMessages: ReadonlyArray<{
       readonly senderType: string;
@@ -195,6 +203,15 @@ export type ContextSources = {
   readonly availability?: ReadonlyArray<ContextAvailabilityFact> | null;
   /** Previously captured provider preference, when one exists. */
   readonly providerPreference?: string | null;
+  /** CONV-CORE-02: Durable conversation state for minimal bounded AI projection. */
+  readonly conversationState?: ConversationState | null;
+  /** Trusted source scope envelope from loaded session/repository (prevents scope spoofing). */
+  readonly conversationStateEnvelope?: {
+    readonly businessId: string;
+    readonly conversationId?: string;
+  } | null;
+  /** Current turn time for freshness and expiration evaluation. */
+  readonly now?: Date;
 };
 
 /**
@@ -850,6 +867,55 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     providerPreferenceIncluded = preferenceVerdict.included;
   }
 
+  // ── 9. Conversation context projection (CONV-CORE-02) ───────────────────
+  let conversationContextIncluded = false;
+  let projectedContext: ConversationContextProjection | null = null;
+  if (sources.conversationState) {
+    const envelope = sources.conversationStateEnvelope;
+    // Source tenant scope must be proven from explicit envelope or state property;
+    // NEVER fall back to destination scopeId.
+    const stateBusinessId =
+      envelope?.businessId ??
+      (sources.conversationState as { businessId?: string }).businessId ??
+      sources.conversationState.offer?.businessId ??
+      null;
+
+    const stateConversationId =
+      envelope?.conversationId ??
+      (sources.conversationState as { conversationId?: string })
+        .conversationId ??
+      sources.conversationState.offer?.conversationId ??
+      null;
+
+    const conversationIdMismatch = Boolean(
+      sources.conversation.id &&
+      stateConversationId &&
+      sources.conversation.id !== stateConversationId,
+    );
+
+    // If conversation ID within the same business is mismatched, reject projection
+    const effectiveBusinessId = conversationIdMismatch
+      ? "__CONVERSATION_SCOPE_MISMATCH__"
+      : stateBusinessId;
+
+    const contextVerdict = evaluateCandidate({
+      ledger,
+      scope,
+      source: "CONVERSATION_STATE",
+      businessId: effectiveBusinessId,
+      visibility: classifyConversationField("conversationContext"),
+      key: "conversation.context",
+      inBudget: true,
+      taskRequired: true,
+    });
+    conversationContextIncluded = contextVerdict.included;
+    if (conversationContextIncluded) {
+      projectedContext = projectConversationState(sources.conversationState, {
+        now: sources.now,
+      });
+    }
+  }
+
   // ── Compose the request (provenance dropped, only eligible facts) ────────
   const request: AiRequest = {
     message: messageVerdict.included ? sources.message : "",
@@ -895,6 +961,9 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
             slots: [...result.slots],
           })),
         }
+      : {}),
+    ...(conversationContextIncluded && projectedContext
+      ? { conversationContext: projectedContext }
       : {}),
   };
 

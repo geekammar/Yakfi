@@ -85,6 +85,8 @@ jobs:
           pnpm check:staff-provider-01
           pnpm check:eligibility
           pnpm check:appointments-day-view
+          pnpm check:conv-core-01
+          pnpm check:conv-core-02
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

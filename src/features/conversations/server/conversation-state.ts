@@ -36,7 +36,9 @@ import type {
   AiExtraction,
   AiFactUpdate,
   AiGoal,
+  ConversationContextProjection,
 } from "@/features/conversations/server/ai-contract";
+import { conversationContextProjectionSchema } from "@/features/conversations/server/ai-contract";
 import type { BookingOffer } from "@/features/conversations/server/booking-offer";
 import {
   bookingOfferSchema,
@@ -391,6 +393,10 @@ export type MergeConversationStateInput = {
     readonly serviceId: string;
     readonly source: ConversationServiceSource;
   } | null;
+  /**
+   * Conversation facts to clear/drop (e.g. when explicitly negated in the turn without replacement).
+   */
+  readonly droppedFacts?: readonly ConversationFactKey[];
 };
 
 export type MergeConversationStateResult = {
@@ -444,6 +450,16 @@ export function mergeConversationState(
     knownFacts = { ...knownFacts, [key]: nextValue };
   }
 
+  if (input.droppedFacts && input.droppedFacts.length > 0) {
+    for (const key of input.droppedFacts) {
+      if (knownFacts[key] !== undefined) {
+        const { [key]: _dropped, ...rest } = knownFacts;
+        void _dropped;
+        knownFacts = rest;
+      }
+    }
+  }
+
   if (revisions.length > MAX_REVISIONS) {
     revisions.splice(0, revisions.length - MAX_REVISIONS);
   }
@@ -455,8 +471,7 @@ export function mergeConversationState(
   //   date / provider / time preference → slot offer only (service kept)
   // A service RE-PHRASING that resolves to the same id invalidates nothing.
   const changed = (key: ConversationFactKey) =>
-    state.knownFacts[key] != null &&
-    knownFacts[key] != null &&
+    (state.knownFacts[key] != null || knownFacts[key] != null) &&
     state.knownFacts[key] !== knownFacts[key];
   let serviceId = state.serviceId;
   let serviceSource = state.serviceSource;
@@ -988,4 +1003,101 @@ export function hydrateConversationState(
         ? pendingOfferMirror(p.offer)
         : null,
   };
+}
+
+// ─── CONV-CORE-02: Bounded Context Projection for AI Interpretation ──────────
+
+export { conversationContextProjectionSchema };
+export type { ConversationContextProjection };
+
+/**
+ * Project a minimal, typed, bounded view of durable conversation state for AI interpretation
+ * (CONV-CORE-02 Step 3).
+ *
+ * Invariants:
+ * - Omits internal DB identifiers, tokens, credentials, staff notes, and offer claim nonces.
+ * - Stale, consumed, expired, or invalidated offers are NEVER projected as active.
+ * - Last completed task is strictly historical and never revives as active work.
+ * - Safe for callers with null/undefined state (returns null).
+ */
+export function projectConversationState(
+  state: ConversationState | null | undefined,
+  options?: { now?: Date },
+): ConversationContextProjection | null {
+  if (!state) return null;
+  const now = options?.now ?? new Date();
+
+  // Freshness & offer guards: only LIVE, ACTIVE offers are projected as selectable
+  let activeOffer: ConversationContextProjection["activeOffer"] = null;
+  if (
+    state.offer &&
+    state.offer.status === "ACTIVE" &&
+    isOfferLive(state.offer, now)
+  ) {
+    activeOffer = {
+      type: state.offer.kind,
+      itemCount: Math.min(state.offer.options.length, 10),
+      offeredDate:
+        state.offer.kind === "SLOT" ? (state.offer.date ?? null) : null,
+      offeredServiceName:
+        state.offer.kind === "SLOT" ? (state.offer.serviceName ?? null) : null,
+    };
+  }
+
+  // Pending clarification
+  let pendingClarification: ConversationContextProjection["pendingClarification"] =
+    null;
+  if (
+    state.lastClarification ||
+    (state.missingFacts && state.missingFacts.length > 0)
+  ) {
+    pendingClarification = {
+      type: state.lastClarification?.type ?? "MISSING_FACTS",
+      missingFacts: state.missingFacts.slice(0, 8),
+    };
+  }
+
+  // Bounded pending goals (max 4)
+  const pendingGoals = state.pendingGoals
+    ? state.pendingGoals.slice(0, 4).map((g) => ({
+        kind: g.kind,
+        intent: g.intent,
+      }))
+    : undefined;
+
+  // Last completed task (historical context only)
+  let lastCompletedTask: ConversationContextProjection["lastCompletedTask"] =
+    null;
+  if (state.completedTask) {
+    lastCompletedTask = {
+      kind: "BOOKING",
+      serviceId: state.completedTask.serviceId,
+      date: state.completedTask.date,
+      completedAt: state.completedTask.completedAt,
+    };
+  }
+
+  const rawProjection = {
+    activeTask: state.activeTask
+      ? {
+          kind: state.activeTask.kind,
+          stage: state.activeTask.stage,
+        }
+      : null,
+    bookingStage: state.bookingStage,
+    currentGoal: state.currentGoal,
+    knownService: state.knownFacts.service ?? state.selectedService ?? null,
+    resolvedServiceId: state.serviceId ?? null,
+    knownDate: state.knownFacts.date ?? state.selectedDate ?? null,
+    timePreference:
+      state.knownFacts.timePreference ?? state.selectedTimePref ?? null,
+    providerPreference:
+      state.knownFacts.provider ?? state.providerPreference ?? null,
+    pendingClarification,
+    pendingGoals,
+    activeOffer,
+    lastCompletedTask,
+  };
+
+  return conversationContextProjectionSchema.parse(rawProjection);
 }

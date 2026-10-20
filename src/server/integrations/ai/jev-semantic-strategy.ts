@@ -79,6 +79,7 @@ import {
   classifyCustomerMessage,
   deterministicReplyForIntent,
   explicitHumanFromFacts,
+  extractServiceFacts,
   strongFaqMatch,
 } from "@/features/conversations/server/conversation-ai";
 
@@ -651,12 +652,19 @@ function semanticResponse(
   target: SemanticTarget,
 ): AiResponse {
   const baseline = classifyCustomerMessage(request.message, request.faqs);
+  const matchedService = extractServiceFacts(
+    request.message,
+    request.services ?? [],
+  );
+  const extraction = matchedService
+    ? { ...baseline.extraction, service: matchedService }
+    : baseline.extraction;
   const template = deterministicReplyForIntent(target.intent, request.message);
   return {
     intent: target.intent,
     action: target.action,
     content: template.content,
-    extraction: baseline.extraction,
+    extraction,
     handoffReason: target.handoffReason,
     summary: template.summary,
     ...(target.clarification ? { clarification: target.clarification } : {}),
@@ -1001,6 +1009,9 @@ export function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
       services: request.services.map((service) => service.name),
       faqs: request.faqs.map((faq) => faq.question),
       languageHint: languageHint(request.message),
+      ...(request.conversationContext
+        ? { conversationContext: request.conversationContext }
+        : {}),
     },
     questions: { ...SEMANTIC_QUESTIONS },
   };

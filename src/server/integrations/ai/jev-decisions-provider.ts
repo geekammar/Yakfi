@@ -55,6 +55,8 @@
  * AI stack is created.
  */
 
+import type { ConversationContextProjection } from "@/features/conversations/server/conversation-state";
+
 export const JEV_DECISIONS_ENDPOINT =
   "https://openrouter.ai/api/alpha/decisions";
 
@@ -107,6 +109,8 @@ export type JevState = {
   readonly services: ReadonlyArray<string>;
   readonly faqs: ReadonlyArray<string>;
   readonly languageHint: string;
+  /** CONV-CORE-02: Bounded context projection of durable conversation state. */
+  readonly conversationContext?: ConversationContextProjection | null;
 };
 
 export type JevEvaluationRequest = {
@@ -246,6 +250,62 @@ function mapState(state: JevState): Record<string, unknown> {
     services: state.services,
     faqs: state.faqs,
     language_hint: state.languageHint,
+    ...(state.conversationContext
+      ? {
+          conversation_context: {
+            active_task: state.conversationContext.activeTask
+              ? {
+                  kind: state.conversationContext.activeTask.kind,
+                  stage: state.conversationContext.activeTask.stage,
+                }
+              : null,
+            booking_stage: state.conversationContext.bookingStage ?? null,
+            current_goal: state.conversationContext.currentGoal ?? null,
+            known_service: state.conversationContext.knownService ?? null,
+            resolved_service_id:
+              state.conversationContext.resolvedServiceId ?? null,
+            known_date: state.conversationContext.knownDate ?? null,
+            time_preference: state.conversationContext.timePreference ?? null,
+            provider_preference:
+              state.conversationContext.providerPreference ?? null,
+            pending_clarification: state.conversationContext
+              .pendingClarification
+              ? {
+                  type: state.conversationContext.pendingClarification.type,
+                  missing_facts:
+                    state.conversationContext.pendingClarification
+                      .missingFacts ?? [],
+                }
+              : null,
+            pending_goals:
+              state.conversationContext.pendingGoals?.map((g) => ({
+                kind: g.kind,
+                intent: g.intent,
+              })) ?? [],
+            active_offer: state.conversationContext.activeOffer
+              ? {
+                  type: state.conversationContext.activeOffer.type,
+                  item_count: state.conversationContext.activeOffer.itemCount,
+                  offered_date:
+                    state.conversationContext.activeOffer.offeredDate ?? null,
+                  offered_service_name:
+                    state.conversationContext.activeOffer.offeredServiceName ??
+                    null,
+                }
+              : null,
+            last_completed_task: state.conversationContext.lastCompletedTask
+              ? {
+                  kind: state.conversationContext.lastCompletedTask.kind,
+                  service_id:
+                    state.conversationContext.lastCompletedTask.serviceId,
+                  date: state.conversationContext.lastCompletedTask.date,
+                  completed_at:
+                    state.conversationContext.lastCompletedTask.completedAt,
+                }
+              : null,
+          },
+        }
+      : {}),
   };
 }
 

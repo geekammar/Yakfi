@@ -180,126 +180,370 @@ export function todayIsoInTimeZone(now: Date, timeZone: string): string {
   }
 }
 
+const NEGATION_WORDS = new Set(["بلاش", "مش", "لا", "لأ", "غير", "بدل", "ما"]);
+const PREPOSITIONS = new Set([
+  "في",
+  "ف",
+  "من",
+  "علي",
+  "على",
+  "ب",
+  "مع",
+  "عند",
+  "ل",
+]);
+const VOLITION_WORDS = new Set(["عايز", "عاوز", "حابب", "محتاج"]);
+
+function matchSequenceAt(
+  tokens: string[],
+  start: number,
+  phraseTokens: string[],
+): boolean {
+  if (start + phraseTokens.length > tokens.length) return false;
+  for (let j = 0; j < phraseTokens.length; j++) {
+    if (tokens[start + j] !== phraseTokens[j]) return false;
+  }
+  return true;
+}
+
+function isNegatedAt(tokens: string[], idx: number): boolean {
+  if (idx > 0 && NEGATION_WORDS.has(tokens[idx - 1]!)) {
+    return true;
+  }
+  if (
+    idx > 1 &&
+    NEGATION_WORDS.has(tokens[idx - 2]!) &&
+    (PREPOSITIONS.has(tokens[idx - 1]!) || VOLITION_WORDS.has(tokens[idx - 1]!))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export type RelativeDateResolution = {
+  positiveDate: string | null;
+  negatedDates: string[];
+};
+
+/**
+ * Resolve supported colloquial Egyptian relative-date forms inside a customer message,
+ * returning both the unambiguous positive date (if any) and all negated dates.
+ *
+ * Prevents double-counting component words of recognized multi-token phrases,
+ * respects localized negation spans, and rejects contradictory dates.
+ */
+export function resolveEgyptianRelativeDateDetailed(
+  message: string,
+  today: string,
+): RelativeDateResolution {
+  if (!ISO_DATE.test(today)) return { positiveDate: null, negatedDates: [] };
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return { positiveDate: null, negatedDates: [] };
+
+  // An explicit ISO date supplied verbatim is already the DOMAIN form.
+  if (ISO_DATE.test(trimmed)) {
+    return { positiveDate: trimmed, negatedDates: [] };
+  }
+
+  const normalized = normalizeArabicText(message);
+  if (normalized.length === 0) return { positiveDate: null, negatedDates: [] };
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const consumed = new Set<number>();
+  type Candidate = { date: string; negated: boolean };
+  const candidates: Candidate[] = [];
+
+  // 1. Day-after-tomorrow phrases (exact sequential token matches, checked before single words)
+  for (const phrase of DAY_AFTER_TOMORROW_PHRASES) {
+    const pTokens = phrase.split(/\s+/).filter(Boolean);
+    for (let i = 0; i <= tokens.length - pTokens.length; i++) {
+      if (consumed.has(i)) continue;
+      if (matchSequenceAt(tokens, i, pTokens)) {
+        const negated = isNegatedAt(tokens, i);
+        candidates.push({ date: addDays(today, 2), negated });
+        for (let k = 0; k < pTokens.length; k++) consumed.add(i + k);
+      }
+    }
+  }
+
+  // 2. Weekdays (with optional multi-week modifiers)
+  const isTodayMentioned = ["النهاردة", "النهارده", "اليوم"].some((w) =>
+    normalized.includes(normalizeArabicText(w)),
+  );
+
+  for (let i = 0; i < tokens.length; i++) {
+    if (consumed.has(i)) continue;
+    const token = tokens[i]!;
+    const day = WEEKDAY_BY_WORD.get(token);
+    if (day) {
+      const negated = isNegatedAt(tokens, i);
+      consumed.add(i);
+      if (isTodayMentioned && weekdayOfDate(today) === day) {
+        candidates.push({ date: addDays(today, 0), negated });
+      } else {
+        const base = nextWeekday(today, day);
+        if (THREE_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
+          candidates.push({ date: addDays(base, 14), negated });
+        } else if (TWO_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
+          candidates.push({ date: addDays(base, 7), negated });
+        } else {
+          candidates.push({ date: base, negated });
+        }
+      }
+    }
+  }
+
+  // 3. Multi-week phrases alone
+  const multiWeekPatterns: Array<{
+    phrases: ReadonlyArray<string>;
+    offsetDays: number;
+  }> = [
+    { phrases: THREE_WEEKS_PHRASES, offsetDays: 21 },
+    { phrases: TWO_WEEKS_PHRASES, offsetDays: 14 },
+    { phrases: NEXT_WEEK_PHRASES, offsetDays: 7 },
+    { phrases: THIS_WEEK_PHRASES, offsetDays: 0 },
+  ];
+
+  for (const { phrases, offsetDays } of multiWeekPatterns) {
+    for (const phrase of phrases) {
+      const pTokens = phrase.split(/\s+/).filter(Boolean);
+      for (let i = 0; i <= tokens.length - pTokens.length; i++) {
+        let anyConsumed = false;
+        for (let k = 0; k < pTokens.length; k++) {
+          if (consumed.has(i + k)) {
+            anyConsumed = true;
+            break;
+          }
+        }
+        if (anyConsumed) continue;
+        if (matchSequenceAt(tokens, i, pTokens)) {
+          const negated = isNegatedAt(tokens, i);
+          candidates.push({ date: addDays(today, offsetDays), negated });
+          for (let k = 0; k < pTokens.length; k++) consumed.add(i + k);
+        }
+      }
+    }
+  }
+
+  // 4. Single relative word (today / tomorrow)
+  for (let i = 0; i < tokens.length; i++) {
+    if (consumed.has(i)) continue;
+    const token = tokens[i]!;
+    const offset = OFFSET_BY_WORD.get(token);
+    if (offset !== undefined) {
+      const negated = isNegatedAt(tokens, i);
+      candidates.push({ date: addDays(today, offset), negated });
+      consumed.add(i);
+    }
+  }
+
+  const positive = candidates.filter((c) => !c.negated);
+  const negated = candidates.filter((c) => c.negated);
+  const uniquePositive = Array.from(new Set(positive.map((c) => c.date)));
+  const uniqueNegated = Array.from(new Set(negated.map((c) => c.date)));
+
+  // If there are contradictory positive dates, prefer safe clarification (return null)
+  const positiveDate = uniquePositive.length === 1 ? uniquePositive[0]! : null;
+
+  return {
+    positiveDate,
+    negatedDates: uniqueNegated,
+  };
+}
+
 /**
  * Resolve a supported colloquial Egyptian relative-date form inside a customer
  * message to a bounded ISO `YYYY-MM-DD`, relative to `today` (ISO). Returns
- * `null` when the message carries no recognized relative-date form — the caller
- * then keeps its existing behavior and never fabricates a date.
- *
- * Recognition order: an explicit ISO date verbatim → day-after-tomorrow phrase
- * → a weekday name → week phrases → a single relative word. The first recognized form wins.
+ * `null` when the message carries no recognized relative-date form or when the
+ * only mentioned dates are explicitly negated (e.g. "بلاش بكرة", "مش بكرة").
  */
 export function resolveEgyptianRelativeDate(
   message: string,
   today: string,
 ): string | null {
-  if (!ISO_DATE.test(today)) return null;
-  const trimmed = message.trim();
-  if (trimmed.length === 0) return null;
+  return resolveEgyptianRelativeDateDetailed(message, today).positiveDate;
+}
 
-  // An explicit ISO date supplied verbatim is already the DOMAIN form.
-  if (ISO_DATE.test(trimmed)) return trimmed;
+export type TimeOfDayResolution = {
+  positiveTime: "morning" | "afternoon" | "evening" | null;
+  negatedTimes: Array<"morning" | "afternoon" | "evening">;
+};
 
-  const normalized = normalizeArabicText(message);
-  if (normalized.length === 0) return null;
+const MULTI_WORD_TIME_PHRASES: ReadonlyArray<{
+  phrase: string;
+  pref: "morning" | "afternoon" | "evening";
+}> = [
+  // Afternoon
+  { phrase: "بعد الظهر", pref: "afternoon" },
+  { phrase: "بعد الضهر", pref: "afternoon" },
+  { phrase: "بعد العصر", pref: "afternoon" },
+  // Morning
+  { phrase: "اول النهار", pref: "morning" },
+  { phrase: "اول اليوم", pref: "morning" },
+  { phrase: "الصبح بدري", pref: "morning" },
+  // Evening
+  { phrase: "في الليل", pref: "evening" },
+  { phrase: "ف الليل", pref: "evening" },
+  { phrase: "في المساء", pref: "evening" },
+  { phrase: "ف المساء", pref: "evening" },
+].map((item) => ({
+  phrase: normalizeArabicText(item.phrase),
+  pref: item.pref as "morning" | "afternoon" | "evening",
+}));
 
-  // Day-after-tomorrow is a phrase ("بعد بكرة") — match before single words.
-  for (const phrase of DAY_AFTER_TOMORROW_PHRASES) {
-    if (phrase.length > 0 && normalized.includes(phrase)) {
-      return addDays(today, 2);
-    }
-  }
+/**
+ * Extract time of day preference with detailed resolution (positive & negated).
+ */
+export function extractTimeOfDayPreferenceDetailed(
+  message: string,
+): TimeOfDayResolution {
+  const norm = normalizeArabicText(message);
+  if (norm.length === 0) return { positiveTime: null, negatedTimes: [] };
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  const consumed = new Set<number>();
 
-  // If today is explicitly mentioned ("النهاردة" / "اليوم") alongside a weekday,
-  // honor today if the weekday matches today's weekday.
-  const isTodayMentioned = ["النهاردة", "النهارده", "اليوم"].some((w) =>
-    normalized.includes(normalizeArabicText(w)),
-  );
+  type Candidate = {
+    pref: "morning" | "afternoon" | "evening";
+    negated: boolean;
+  };
+  const candidates: Candidate[] = [];
 
-  const tokens = normalized.split(/\s+/);
-
-  // A weekday name anywhere in the message ("طيب نرجع للحجز الخميس").
-  for (const token of tokens) {
-    const day = WEEKDAY_BY_WORD.get(token);
-    if (day) {
-      if (isTodayMentioned && weekdayOfDate(today) === day) {
-        return addDays(today, 0);
+  // 1. Multi-word phrases
+  for (const { phrase, pref } of MULTI_WORD_TIME_PHRASES) {
+    const pTokens = phrase.split(/\s+/).filter(Boolean);
+    for (let i = 0; i <= tokens.length - pTokens.length; i++) {
+      let anyConsumed = false;
+      for (let k = 0; k < pTokens.length; k++) {
+        if (consumed.has(i + k)) {
+          anyConsumed = true;
+          break;
+        }
       }
-      const base = nextWeekday(today, day);
-      if (THREE_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
-        return addDays(base, 14);
+      if (anyConsumed) continue;
+      if (matchSequenceAt(tokens, i, pTokens)) {
+        const negated = isNegatedAt(tokens, i);
+        candidates.push({ pref, negated });
+        for (let k = 0; k < pTokens.length; k++) consumed.add(i + k);
       }
-      if (TWO_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
-        return addDays(base, 7);
-      }
-      return base;
     }
   }
 
-  for (const phrase of THREE_WEEKS_PHRASES) {
-    if (phrase.length > 0 && normalized.includes(phrase)) {
-      return addDays(today, 21);
+  // 2. Single token words
+  for (let i = 0; i < tokens.length; i++) {
+    if (consumed.has(i)) continue;
+    const t = tokens[i]!;
+    let pref: "morning" | "afternoon" | "evening" | null = null;
+    if (t.includes("صبح") || t.includes("صباح") || t.includes("بدري")) {
+      pref = "morning";
+    } else if (t.includes("عصر") || t.includes("ظهر") || t.includes("ضهر")) {
+      pref = "afternoon";
+    } else if (
+      t.includes("مساء") ||
+      t.includes("ليل") ||
+      t.includes("متاخر") ||
+      t.includes("سهرة")
+    ) {
+      pref = "evening";
+    }
+
+    if (pref) {
+      const negated = isNegatedAt(tokens, i);
+      candidates.push({ pref, negated });
+      consumed.add(i);
     }
   }
 
-  for (const phrase of TWO_WEEKS_PHRASES) {
-    if (phrase.length > 0 && normalized.includes(phrase)) {
-      return addDays(today, 14);
-    }
-  }
+  const positive = candidates.filter((c) => !c.negated);
+  const negated = candidates.filter((c) => c.negated);
+  const uniquePositive = Array.from(new Set(positive.map((c) => c.pref)));
+  const uniqueNegated = Array.from(new Set(negated.map((c) => c.pref)));
 
-  for (const phrase of NEXT_WEEK_PHRASES) {
-    if (phrase.length > 0 && normalized.includes(phrase)) {
-      return addDays(today, 7);
-    }
-  }
+  const positiveTime = uniquePositive.length === 1 ? uniquePositive[0]! : null;
 
-  for (const phrase of THIS_WEEK_PHRASES) {
-    if (phrase.length > 0 && normalized.includes(phrase)) {
-      return addDays(today, 0);
-    }
-  }
-
-  // A single relative word (today / tomorrow).
-  for (const token of tokens) {
-    const offset = OFFSET_BY_WORD.get(token);
-    if (offset !== undefined) return addDays(today, offset);
-  }
-
-  return null;
+  return {
+    positiveTime,
+    negatedTimes: uniqueNegated,
+  };
 }
 
 /**
  * Extract time of day preference from customer message text (e.g. "الصبح", "بعد العصر", "بالمساء").
+ * Correctly accounts for negation so that "مش الصبح، بالليل" resolves to "evening" rather than "morning",
+ * and an isolated negated preference ("بلاش الصبح") returns null.
  */
 export function extractTimeOfDayPreference(
   message: string,
 ): "morning" | "afternoon" | "evening" | null {
-  const norm = normalizeArabicText(message);
-  if (
-    norm.includes("صبح") ||
-    norm.includes("صباح") ||
-    norm.includes("بدري") ||
-    norm.includes("اول النهار") ||
-    norm.includes("اول اليوم")
-  ) {
-    return "morning";
+  return extractTimeOfDayPreferenceDetailed(message).positiveTime;
+}
+
+export type ProviderPreferenceResolution = {
+  positiveProvider: string | null;
+  negatedProviders: string[];
+};
+
+/**
+ * Extract provider preference with detailed resolution (positive & negated).
+ * Respects local clause negation without incorrectly negating positive replacements.
+ */
+export function extractProviderPreferenceDetailed(
+  text: string,
+): ProviderPreferenceResolution {
+  const norm = normalizeArabicText(text);
+  if (norm.length === 0)
+    return { positiveProvider: null, negatedProviders: [] };
+
+  const regex =
+    /(?:^|\s)(?:مع|عند)?\s*(د\.\s*|دكتور\s+|دكتورة\s+|الدكتور\s+|الدكتورة\s+)([^\s,،.]+)/g;
+
+  type Candidate = { name: string; negated: boolean };
+  const candidates: Candidate[] = [];
+
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const namePart = match[2]!;
+    const startIndex = match.index;
+
+    // Look at tokens strictly immediately preceding the title/preposition
+    const precedingSlice = text
+      .slice(Math.max(0, startIndex - 30), startIndex)
+      .trim();
+    const precedingNorm = normalizeArabicText(precedingSlice);
+    const precedingTokens = precedingNorm.split(/\s+/).filter(Boolean);
+
+    const lastToken = precedingTokens[precedingTokens.length - 1];
+    const secondLastToken = precedingTokens[precedingTokens.length - 2];
+
+    const isNegated =
+      (lastToken && NEGATION_WORDS.has(lastToken)) ||
+      (lastToken &&
+        (PREPOSITIONS.has(lastToken) || VOLITION_WORDS.has(lastToken)) &&
+        secondLastToken &&
+        NEGATION_WORDS.has(secondLastToken));
+
+    const cleanName = `د. ${namePart.trim()}`;
+    candidates.push({ name: cleanName, negated: Boolean(isNegated) });
   }
-  if (
-    norm.includes("عصر") ||
-    norm.includes("بعد الظهر") ||
-    norm.includes("الظهر") ||
-    norm.includes("بعد العصر")
-  ) {
-    return "afternoon";
-  }
-  if (
-    norm.includes("مساء") ||
-    norm.includes("ليل") ||
-    norm.includes("متاخر") ||
-    norm.includes("بالمساء")
-  ) {
-    return "evening";
-  }
-  return null;
+
+  const positive = candidates.filter((c) => !c.negated);
+  const negated = candidates.filter((c) => c.negated);
+  const uniquePositive = Array.from(new Set(positive.map((c) => c.name)));
+  const uniqueNegated = Array.from(new Set(negated.map((c) => c.name)));
+
+  // If contradictory positive providers, prefer safe clarification (return null)
+  const positiveProvider =
+    uniquePositive.length === 1 ? uniquePositive[0]! : null;
+
+  return {
+    positiveProvider,
+    negatedProviders: uniqueNegated,
+  };
+}
+
+/**
+ * Extract provider preference from customer message (e.g. "مع د. سارة", "دكتور أحمد").
+ * Properly respects negation (e.g. "مش د. أحمد، مع د. سارة" resolves to "د. سارة").
+ */
+export function extractProviderPreference(text: string): string | null {
+  return extractProviderPreferenceDetailed(text).positiveProvider;
 }
