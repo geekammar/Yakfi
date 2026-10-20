@@ -51,13 +51,21 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (PR ready on branch `feat/conv-core-03a-semantic-facts`) — EXPLICIT SEMANTIC FACT UPDATES & ONE RECONCILIATION PATH (CORE-03A)**:
-One bounded conversation-engine slice implementing explicit semantic fact updates and unified turn reconciliation:
+**IN-FLIGHT (PR ready on branch `feat/conv-core-03a-semantic-facts`) — EXPLICIT SEMANTIC FACT UPDATES & ONE RECONCILIATION PATH (CORE-03A Focused Acceptance Repair)**:
+One bounded conversation-engine slice implementing explicit semantic fact updates and unified turn reconciliation, strengthened across reviewer acceptance gaps:
 
 1. **Extended AI Contract (`ai-contract.ts`)**: Reusable fact vocabulary (`conversation-facts.ts`) with `removableFactKeys` (`date`, `timePreference`, `provider`). `aiFactUpdateSchema` accepts legacy/explicit SET `{ key, operation?: "set", value }` and explicit REMOVE `{ key, operation: "remove" }` (rejects replacement values). Legacy calls and string keys remain compatible.
 2. **Unified Single-Pass Reconciliation (`semantic-facts.ts`)**: `reconcileTurnSemanticFacts` enforces canonical precedence: legacy extraction proposes SETs first; explicit `factUpdates` override extraction; last valid operation per key wins; explicit SET/REMOVE marks a key as touched and blocks lexical override; REMOVE overrides conflicting extraction; absent facts preserve existing state.
 3. **Consistent State & Downstream Booking Execution (`conversation-state.ts`, `conversation-engine.ts`)**: `mergeConversationState` clears removed facts (`date`, `timePreference`, `provider`), logs revisions (`to: null`), and invalidates dependent offers. Downstream booking execution respects touched removed keys and prevents refilling from lexical date/time/provider regex, relative-date helpers, or stale extraction.
-   Prompt contract updated (`prompts/system/booking-assistant.prompt`), checked via `check:ai-prompts` (145/145 PASS). Verified offline by `scripts/check-conv-core-03a.ts` (48/48 PASS) plus full targeted suites (`check:conv-core-01`, `check:conv-core-02`, `check:conversation-state`, `check:ai-architecture`, `check:booking-options`, `check:booking-modes`). Version bumped to 0.59.0.
+4. **Production Booking Defect Fixed (`booking-mapper.ts`)**: Fixed silent fallback to `defaultServiceId` when an explicit unknown service was requested by the customer. `matchServiceByName` now distinguishes `{ status: "unknown"; raw: string }` and yields `needs_clarification` (`MISSING_SERVICE`) rather than silently defaulting.
+5. **Reviewer Acceptance Evidence Repair (`check-conv-core-03a.ts`)**:
+   - **Time preference removal (A)**: Removed synthetic `timeOfDay: undefined` harness artifact; established valid morning/evening candidate slots; proved evening narrows slot offer head and REMOVE restores full morning-first order with persisted state mirrors.
+   - **Default service resolution (B)**: Verified via `receiveInboundMessage` that default service applies when no service is mentioned (no catalog list), explicit valid service overrides default, and explicit unknown service triggers clarification instead of silent fallback.
+   - **Catalog inquiry during active booking (C)**: Verified catalog reply lists active services while preserving `serviceId`, `serviceSource`, `knownFacts`, and the active booking task across turns.
+   - **Wire contract on generative adapter (D)**: Passed requests through real `createOpenRouterAdapter` intercepted via `mockFetch`; validated outgoing JSON body carries SET/REMOVE instructions, serialized `conversationContext`, and strictly excludes token/nonce canaries; proved incoming REMOVE response parses cleanly.
+   - **Zero network attempts on selections (E)**: Verified Arabic digit (`"١"`) and structured callback (`"opt_2"`) consume exactly 0 physical model network calls across JEV and generative adapters, backed by positive control canary; confirmed mixed sentence (`"٢ بس غير اليوم ده"`) bypasses early booking and reaches semantic AI pipeline intact.
+   - **Continuation & anti-vacuous validation (F)**: Verified non-vacuous domain queries via deltas; proved date removal creates no appointment and triggers `MISSING_DATE` clarification; proved reloaded state continuity without reviving removed provider, date, or time filters; verified fresh SET after REMOVE.
+Verified offline by `scripts/check-conv-core-03a.ts` (65/65 PASS) plus full targeted suites (`check:conv-core-01`, `check:conv-core-02`, `check:conversation-state`, `check:services`), clean `pnpm verify:local` (security, ai-prompts, typecheck, lint, format), and `pnpm check:version` (0.59.0). PR opened against `main`.
 
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
 `PROMPT-OPS-REL-01-R`:

@@ -77,6 +77,7 @@ export function isAnyProviderPhrase(text: string | null): boolean {
 export type ServiceMatchResult =
   | { status: "ok"; serviceId: string; serviceName: string }
   | { status: "missing" }
+  | { status: "unknown"; raw: string }
   | { status: "ambiguous"; candidates: Array<{ id: string; name: string }> };
 
 const SERVICE_ORDINALS: Record<string, number> = {
@@ -165,7 +166,7 @@ export function matchServiceByName(
     // as well as exact verbatim matches.
     return hay.includes(needle) || needle.includes(hay);
   });
-  if (candidates.length === 0) return { status: "missing" };
+  if (candidates.length === 0) return { status: "unknown", raw: serviceText };
   if (candidates.length === 1) {
     const found = candidates[0]!;
     return { status: "ok", serviceId: found.id, serviceName: found.name };
@@ -329,6 +330,14 @@ export function mapAiResponseToBookingInput(
         reason: "MISSING_SERVICE",
       };
     }
+  }
+  if (serviceMatch.status === "unknown") {
+    const list = services.map((s, idx) => `${idx + 1}. ${s.name}`).join("\n");
+    return {
+      kind: "needs_clarification",
+      message: `الخدمة المطلوبة غير متوفرة لدينا — الخدمات المتاحة لدينا:\n${list}\nأخبرنا باسم أو رقم الخدمة التي ترغب بحجزها.`,
+      reason: "MISSING_SERVICE",
+    };
   }
   if (serviceMatch.status === "ambiguous") {
     const names = serviceMatch.candidates.map((c) => c.name).join("، ");

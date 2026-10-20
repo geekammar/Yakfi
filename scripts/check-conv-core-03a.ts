@@ -38,10 +38,6 @@ import type {
 import type { ConversationEngineDeps } from "@/features/conversations/server/conversation-engine";
 import type { ConversationState } from "@/features/conversations/server/conversation-state";
 import type { JevAnswer } from "@/server/integrations/ai/jev-decisions-provider";
-import type {
-  AiProviderAdapter,
-  AiProviderResult,
-} from "@/server/integrations/ai/types";
 
 type Check = { label: string; pass: boolean; detail?: unknown };
 const checks: Check[] = [];
@@ -175,8 +171,6 @@ async function main(): Promise<void> {
     await import("../src/features/conversations/server/ai-contract");
   const { buildSlotOffer } =
     await import("../src/features/conversations/server/booking-offer");
-  const { matchServiceByName } =
-    await import("../src/features/conversations/server/booking-mapper");
   const { parseBookingSelection, tryParseBookingSelection } =
     await import("../src/features/conversations/server/booking-selection");
   const { receiveInboundMessage } =
@@ -190,14 +184,14 @@ async function main(): Promise<void> {
   } = await import("../src/features/conversations/server/conversation-state");
   const { reconcileTurnSemanticFacts } =
     await import("../src/features/conversations/server/semantic-facts");
-  const { buildPromptMessages } =
-    await import("../src/server/integrations/ai/prompt");
   const { createAiOrchestrator } =
     await import("../src/server/integrations/ai/orchestrator");
   const { createSemanticJevStrategy } =
     await import("../src/server/integrations/ai/jev-semantic-strategy");
   const { createJevDecisionsProvider, JEV_PINNED_MODEL, JEV_SECRET_REF } =
     await import("../src/server/integrations/ai/jev-decisions-provider");
+  const { createOpenRouterAdapter, OPENROUTER_SECRET_REF } =
+    await import("../src/server/integrations/ai/openrouter");
 
   console.log("── FLOWPILOT CONV-CORE-03A VERIFICATION SUITE ──\n");
 
@@ -407,6 +401,11 @@ async function main(): Promise<void> {
     customGenerativeReply?: (req: AiRequest) => AiResponse;
     customHttpHandler?: MockHttpHandler;
     hasCredentials?: boolean;
+    blockingAppointments?: Array<{
+      assignedUserId: string;
+      startTime: string;
+      endTime: string;
+    }>;
   }) {
     const days = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"];
     const workingHours: Record<string, unknown> = {};
@@ -508,34 +507,32 @@ async function main(): Promise<void> {
       serviceId: string;
       providerId?: string;
       date: string;
-      timeOfDay?: string;
     }> = [];
 
     const httpCalls: HttpCall[] = [];
-    const currentHttpHandler: MockHttpHandler =
-      opts?.customHttpHandler ??
-      ((call) => {
-        const payload = call.body as
-          { state?: { customer_message?: string } } | undefined;
-        const text = payload?.state?.customer_message ?? "";
-        const answers = buildDefaultJevAnswers(text);
-        return {
-          status: 200,
-          body: {
-            id: `dec-${httpCalls.length}`,
-            model: JEV_PINNED_MODEL,
-            answers,
-            usage: { input_tokens: 180, output_tokens: 30 },
-          },
-        };
-      });
+    const capturedRequests: AiRequest[] = [];
+    const currentGenerativeReply: (req: AiRequest) => AiResponse =
+      opts?.customGenerativeReply ??
+      ((_req) => ({
+        intent: "BOOKING",
+        action: "booking_handoff",
+        summary: "حجز موعد",
+        content: "أهلاً بك! هساعدك في حجز الموعد.",
+        handoffReason: null,
+        extraction: {
+          service: "تنظيف أسنان",
+          provider: null,
+          date: "2026-09-15",
+          timePreference: null,
+        },
+      }));
 
     const mockFetch: typeof fetch = async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       const headers = new Headers(init?.headers);
       const rawBody = String(init?.body ?? "{}");
-      let body: unknown = {};
+      let body: any = {};
       try {
         body = JSON.parse(rawBody);
       } catch {}
@@ -543,16 +540,64 @@ async function main(): Promise<void> {
         url,
         method,
         headers,
-        body: body as HttpCall["body"],
+        body,
         rawBody,
       };
       httpCalls.push(call);
 
-      const res = currentHttpHandler(call);
-      return new Response(JSON.stringify(res.body), {
-        status: res.status,
-        headers: { "Content-Type": "application/json" },
-      });
+      if (opts?.customHttpHandler) {
+        const res = opts.customHttpHandler(call);
+        return new Response(JSON.stringify(res.body), {
+          status: res.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (body?.model === JEV_PINNED_MODEL) {
+        const payload = body?.state as
+          { customer_message?: string } | undefined;
+        const text = payload?.customer_message ?? "";
+        const answers = buildDefaultJevAnswers(text);
+        return new Response(
+          JSON.stringify({
+            id: `dec-${httpCalls.length}`,
+            model: JEV_PINNED_MODEL,
+            answers,
+            usage: { input_tokens: 180, output_tokens: 30 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      // Real generative adapter call through OpenRouter endpoint
+      const lastReq = capturedRequests[capturedRequests.length - 1];
+      const reply = currentGenerativeReply(
+        lastReq ?? {
+          message: "",
+          conversationStatus: "AI_ACTIVE",
+          recentMessages: [],
+          businessName: business.name,
+          services: [],
+          faqs: [],
+        },
+      );
+
+      return new Response(
+        JSON.stringify({
+          id: `gen-${httpCalls.length}`,
+          model: "mock-generative-v1",
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: JSON.stringify(reply),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 150, completion_tokens: 40 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
     };
 
     const hasCredentials =
@@ -570,44 +615,12 @@ async function main(): Promise<void> {
       enabled: true,
     });
 
-    let _generativeCalls = 0;
-    const capturedRequests: AiRequest[] = [];
-    const generativeAdapter: AiProviderAdapter = {
-      providerId: "openrouter",
+    const generativeAdapter = createOpenRouterAdapter({
       model: "mock-generative-v1",
-      secretRef: "MOCK_KEY",
-      async call(req: AiRequest): Promise<AiProviderResult> {
-        _generativeCalls++;
-        capturedRequests.push(req);
-
-        let response: AiResponse;
-        if (opts?.customGenerativeReply) {
-          response = opts.customGenerativeReply(req);
-        } else {
-          response = {
-            intent: "BOOKING",
-            action: "booking_handoff",
-            summary: "حجز موعد",
-            content: "أهلاً بك! هساعدك في حجز الموعد.",
-            handoffReason: null,
-            extraction: {
-              service: "تنظيف أسنان",
-              provider: null,
-              date: "2026-09-15",
-              timePreference: null,
-            },
-          };
-        }
-
-        return {
-          ok: true,
-          response,
-          provider: "openrouter",
-          model: "mock-generative-v1",
-          latencyMs: 15,
-        };
-      },
-    };
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "sk-openrouter-gen-test" : undefined,
+      fetchImpl: mockFetch,
+    });
 
     const orchestrator = createAiOrchestrator({
       primary: generativeAdapter,
@@ -672,7 +685,6 @@ async function main(): Promise<void> {
             serviceId: SERVICE_2,
             providerId: scopedIds.length === 1 ? scopedIds[0] : undefined,
             date: "2026-09-15",
-            timeOfDay: undefined,
           });
           return scopedIds.map((id) => ({
             providerId: id,
@@ -772,7 +784,7 @@ async function main(): Promise<void> {
             status: "CONFIRMED",
           } as any;
         },
-        listBlockingByAssignees: async () => [],
+        listBlockingByAssignees: async () => opts?.blockingAppointments ?? [],
       } as any,
       transport: {
         providerName: "test-transport",
@@ -864,21 +876,25 @@ async function main(): Promise<void> {
       s1.knownFacts.provider === "د. سارة",
     );
 
+    const domainCountBefore = h.capturedDomainInputs.length;
+
     // Turn 2: Customer removes provider preference ("أي حد متاح")
     await h.sendTurn("أي حد متاح مش فارقة");
 
     const loaded2 = await h.stateStore.load(B_ID, "conv-1");
     const s2 = loaded2?.state as any;
-    const lastDomainInput =
-      h.capturedDomainInputs[h.capturedDomainInputs.length - 1];
+    const currentDomainInput = h.capturedDomainInputs[domainCountBefore];
 
     check(
       "6a. State provider preference cleared after remove",
-      s2.knownFacts.provider === undefined,
+      s2.knownFacts.provider === undefined &&
+        (s2.providerPreference === null || s2.providerPreference === undefined),
     );
     check(
-      "6b. Captured Domain input has providerId undefined (any provider)",
-      lastDomainInput?.providerId === undefined,
+      "6b. A new domain query was executed without provider filter (any provider)",
+      h.capturedDomainInputs.length === domainCountBefore + 1 &&
+        currentDomainInput !== undefined &&
+        currentDomainInput.providerId === undefined,
     );
     check(
       "6c. Service and date survive provider removal",
@@ -890,6 +906,13 @@ async function main(): Promise<void> {
   // Check 7: Remove time preference: no old filter is applied; service/date/provider survive
   {
     const h = createTestHarness({
+      blockingAppointments: [
+        {
+          assignedUserId: "user-" + PROVIDER_SARA,
+          startTime: "09:30",
+          endTime: "17:00",
+        },
+      ],
       customGenerativeReply: (req) => {
         if (req.message.includes("مش فارق الوقت")) {
           return {
@@ -932,24 +955,43 @@ async function main(): Promise<void> {
     // Turn 1: Establish service, date, provider, evening time
     await h.sendTurn("عايز أنظف أسناني بالليل يوم 15-9 مع د. سارة");
 
+    const loaded1 = await h.stateStore.load(B_ID, "conv-1");
+    const s1 = loaded1?.state as any;
+    const turn1Options: Array<{ startAt: string }> = s1.offer?.options ?? [];
+    const leadsWithEvening =
+      turn1Options.length > 0 &&
+      parseInt(turn1Options[0]?.startAt.slice(11, 13) ?? "0", 10) >= 17;
+
+    check(
+      "7-pre. Active evening preference prioritizes evening slots at the head of the offer",
+      leadsWithEvening,
+      { turn1Options, offer: s1?.offer, knownFacts: s1?.knownFacts },
+    );
+
     // Turn 2: Remove time preference
     await h.sendTurn("مش فارق الوقت الصبح أو بالليل");
 
     const loaded2 = await h.stateStore.load(B_ID, "conv-1");
     const s2 = loaded2?.state as any;
-    const lastDomainInput =
-      h.capturedDomainInputs[h.capturedDomainInputs.length - 1];
+    const turn2Options: Array<{ startAt: string }> = s2.offer?.options ?? [];
+    const leadsWithMorning =
+      turn2Options.length > 0 &&
+      parseInt(turn2Options[0]?.startAt.slice(11, 13) ?? "0", 10) < 12;
 
     check(
       "7a. State timePreference cleared after remove",
       s2.knownFacts.timePreference === undefined,
     );
     check(
-      "7b. Captured Domain input receives undefined timeOfDay (unfiltered day search)",
-      lastDomainInput?.timeOfDay === undefined,
+      "7b. Mirrored selectedTimePref cleared after remove",
+      s2.selectedTimePref === null || s2.selectedTimePref === undefined,
     );
     check(
-      "7c. Service, date, and provider survive timePreference removal",
+      "7c. Resulting slot offer is no longer restricted to evening and leads with morning hour",
+      leadsWithMorning,
+    );
+    check(
+      "7d. Service, date, and provider survive timePreference removal",
       s2.knownFacts.service === "تنظيف أسنان" &&
         s2.knownFacts.date === "2026-09-15" &&
         s2.knownFacts.provider === "د. سارة",
@@ -1006,6 +1048,9 @@ async function main(): Promise<void> {
       s1.offer?.status === "ACTIVE",
     );
 
+    const domainCountBefore = h.capturedDomainInputs.length;
+    const apptCountBefore = h.createdAppointments.length;
+
     // Turn 2: Remove date
     const res2 = await h.sendTurn("بلاش اليوم ده، هحدد بعدين");
 
@@ -1017,12 +1062,23 @@ async function main(): Promise<void> {
       s2.knownFacts.date === undefined,
     );
     check(
-      "8b. Prior slot offer is INVALIDATED",
+      "8b. Mirrored selectedDate cleared after remove",
+      s2.selectedDate === null || s2.selectedDate === undefined,
+    );
+    check(
+      "8c. Prior slot offer is INVALIDATED",
       s2.offer?.status === "INVALIDATED",
     );
-    check("8c. No appointment was created", h.createdAppointments.length === 0);
     check(
-      "8d. Next step asks for date (CLARIFY / MISSING_DATE)",
+      "8d. No new appointment slot search was executed for this turn",
+      h.capturedDomainInputs.length === domainCountBefore,
+    );
+    check(
+      "8e. No appointment was created",
+      h.createdAppointments.length === apptCountBefore,
+    );
+    check(
+      "8f. Next step asks for date (CLARIFY / MISSING_DATE)",
       Boolean(
         res2.ok &&
         "assistantAction" in res2 &&
@@ -1032,7 +1088,7 @@ async function main(): Promise<void> {
       ),
     );
     check(
-      "8e. Service survives date removal",
+      "8g. Service survives date removal",
       s2.knownFacts.service === "تنظيف أسنان",
     );
   }
@@ -1079,7 +1135,8 @@ async function main(): Promise<void> {
 
   // Check 10: Reload the saved state and send a continuation without replacement: rejected facts do not revive from historical text
   {
-    const h = createTestHarness({
+    // 10a. Provider removal continuation
+    const hProv = createTestHarness({
       customGenerativeReply: (req) => {
         if (req.message.includes("أي حد متاح")) {
           return {
@@ -1133,20 +1190,167 @@ async function main(): Promise<void> {
       },
     });
 
-    // Turn 1: Establish booking with Dr. Sara
-    await h.sendTurn("حجز تنظيف أسنان مع د. سارة يوم 15-9");
+    await hProv.sendTurn("حجز تنظيف أسنان مع د. سارة يوم 15-9");
+    await hProv.sendTurn("أي حد متاح مش فارقة");
+    await hProv.sendTurn("تمام الساعة 10 مناسبة");
 
-    // Turn 2: Remove provider preference
-    await h.sendTurn("أي حد متاح مش فارقة");
-
-    // Turn 3: Continuation turn without provider mention
-    await h.sendTurn("تمام الساعة 10 مناسبة");
-
-    const loaded3 = await h.stateStore.load(B_ID, "conv-1");
-    const s3 = loaded3?.state as any;
+    const loadedProv = await hProv.stateStore.load(B_ID, "conv-1");
+    const sProv = loadedProv?.state as any;
     check(
-      "10. Rejected provider does NOT revive on continuation turn",
-      s3.knownFacts.provider === undefined,
+      "10a. Rejected provider does NOT revive on continuation turn",
+      sProv.knownFacts.provider === undefined &&
+        (sProv.providerPreference === null ||
+          sProv.providerPreference === undefined),
+    );
+
+    // 10b. Date removal continuation
+    const hDate = createTestHarness({
+      customGenerativeReply: (req) => {
+        if (req.message.includes("بلاش اليوم ده")) {
+          return {
+            intent: "BOOKING",
+            action: "booking_handoff",
+            summary: "إزالة التاريخ",
+            content: "تمام بدون تاريخ محدد.",
+            handoffReason: null,
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            factUpdates: [{ key: "date", operation: "remove" }],
+          };
+        }
+        if (req.message.includes("مين الدكاترة")) {
+          return {
+            intent: "BOOKING",
+            action: "booking_handoff",
+            summary: "استفسار عن الأطباء",
+            content: "الأطباء المتاحون: د. سارة، د. أحمد علي.",
+            handoffReason: null,
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+          };
+        }
+        return {
+          intent: "BOOKING",
+          action: "booking_handoff",
+          summary: "حجز موعد",
+          content: "المواعيد المتاحة",
+          handoffReason: null,
+          extraction: {
+            service: "تنظيف أسنان",
+            provider: null,
+            date: "2026-09-15",
+            timePreference: null,
+          },
+          factUpdates: [
+            { key: "service", operation: "set", value: "تنظيف أسنان" },
+            { key: "date", operation: "set", value: "2026-09-15" },
+          ],
+        };
+      },
+    });
+
+    await hDate.sendTurn("حجز تنظيف أسنان يوم 2026-09-15");
+    await hDate.sendTurn("بلاش اليوم ده، هحدد بعدين");
+    await hDate.sendTurn("مين الدكاترة المتاحين عندكم؟");
+
+    const loadedDate = await hDate.stateStore.load(B_ID, "conv-1");
+    const sDate = loadedDate?.state as any;
+    check(
+      "10b. Rejected date does NOT revive from history on continuation turn",
+      sDate.knownFacts.date === undefined &&
+        (sDate.selectedDate === null || sDate.selectedDate === undefined),
+    );
+
+    // 10c. Time preference removal continuation
+    const hTime = createTestHarness({
+      blockingAppointments: [
+        {
+          assignedUserId: "user-" + PROVIDER_SARA,
+          startTime: "09:30",
+          endTime: "17:00",
+        },
+      ],
+      customGenerativeReply: (req) => {
+        if (req.message.includes("مش فارق الوقت")) {
+          return {
+            intent: "BOOKING",
+            action: "booking_handoff",
+            summary: "إزالة الوقت",
+            content: "تمام بدون تفضيل وقت.",
+            handoffReason: null,
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            factUpdates: [{ key: "timePreference", operation: "remove" }],
+          };
+        }
+        if (req.message.includes("مع د. سارة")) {
+          return {
+            intent: "BOOKING",
+            action: "booking_handoff",
+            summary: "تأكيد الطبيب",
+            content: "المواعيد مع د. سارة.",
+            handoffReason: null,
+            extraction: {
+              service: null,
+              provider: "د. سارة",
+              date: null,
+              timePreference: null,
+            },
+            factUpdates: [
+              { key: "provider", operation: "set", value: "د. سارة" },
+            ],
+          };
+        }
+        return {
+          intent: "BOOKING",
+          action: "booking_handoff",
+          summary: "حجز موعد",
+          content: "المواعيد المتاحة",
+          handoffReason: null,
+          extraction: {
+            service: "تنظيف أسنان",
+            provider: null,
+            date: "2026-09-15",
+            timePreference: "evening",
+          },
+          factUpdates: [
+            { key: "service", operation: "set", value: "تنظيف أسنان" },
+            { key: "date", operation: "set", value: "2026-09-15" },
+            { key: "timePreference", operation: "set", value: "evening" },
+          ],
+        };
+      },
+    });
+
+    await hTime.sendTurn("حجز تنظيف أسنان بالليل يوم 2026-09-15");
+    await hTime.sendTurn("مش فارق الوقت الصبح أو بالليل");
+    await hTime.sendTurn("مع د. سارة");
+
+    const loadedTime = await hTime.stateStore.load(B_ID, "conv-1");
+    const sTime = loadedTime?.state as any;
+    const contOptions: Array<{ startAt: string }> = sTime.offer?.options ?? [];
+    const contHasMorning = contOptions.some(
+      (opt) => parseInt(opt.startAt.slice(11, 13), 10) < 12,
+    );
+
+    check(
+      "10c. Rejected time preference does NOT revive as filter on continuation turn",
+      sTime.knownFacts.timePreference === undefined &&
+        (sTime.selectedTimePref === null ||
+          sTime.selectedTimePref === undefined) &&
+        contHasMorning,
     );
   }
 
@@ -1237,7 +1441,105 @@ async function main(): Promise<void> {
   {
     const h = createTestHarness();
 
+    // Positive Control / Canary:
+    // Send a regular semantic turn, proving that httpCalls captures model network attempts
+    await h.sendTurn("عايز أحجز كشف أسنان");
+    check(
+      "12-canary. Positive control: Semantic turn captures physical network attempts in httpCalls",
+      h.httpCalls.length > 0,
+    );
+
     // Establish active offer in state
+    const baseState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: SERVICE_1,
+      serviceSource: "CUSTOMER",
+      knownFacts: { service: "كشف أسنان", date: "2026-09-15" },
+    };
+    const slotOffer = buildSlotOffer(
+      { businessId: B_ID, conversationId: "conv-1" },
+      "tok-123",
+      {
+        serviceId: SERVICE_1,
+        serviceName: "كشف أسنان",
+        serviceSource: "CUSTOMER",
+        providerId: null,
+        date: "2026-09-15",
+        followUpRequestId: null,
+        shownCount: 2,
+        options: [
+          {
+            displayName: "د. سارة",
+            startAt: "2026-09-15T09:00",
+            endAt: "2026-09-15T09:30",
+            providerId: PROVIDER_SARA,
+          },
+          {
+            displayName: "د. أحمد علي",
+            startAt: "2026-09-15T09:00",
+            endAt: "2026-09-15T09:30",
+            providerId: PROVIDER_AHMED_ALI,
+          },
+        ],
+      },
+      testNow,
+    );
+    const stateWithOffer = withPresentedOffer(baseState, slotOffer!);
+    const prev1 = await h.stateStore.load(B_ID, "conv-1");
+    await h.stateStore.save(
+      B_ID,
+      "conv-1",
+      prev1?.revision ?? null,
+      dehydrateConversationState(stateWithOffer),
+    );
+
+    // Reset counters for the selection turn
+    h.httpCalls.length = 0;
+    h.createdAppointments.length = 0;
+
+    // Send selection "١" (Arabic digit 1)
+    await h.sendTurn("١");
+
+    check(
+      "12a. Arabic digit selection books appointment directly",
+      h.createdAppointments.length === 1 &&
+        h.createdAppointments[0]?.startTime === "09:00",
+    );
+    check(
+      "12b. Exactly ZERO physical model HTTP attempts spent on digit selection",
+      h.httpCalls.length === 0,
+    );
+
+    // Test valid structured callback "opt_2"
+    const prev2 = await h.stateStore.load(B_ID, "conv-1");
+    await h.stateStore.save(
+      B_ID,
+      "conv-1",
+      prev2?.revision ?? null,
+      dehydrateConversationState(stateWithOffer),
+    );
+    h.httpCalls.length = 0;
+    h.createdAppointments.length = 0;
+
+    const resOpt = await h.sendTurn("opt_2");
+
+    check(
+      "12c. Valid callback 'opt_2' books appointment directly",
+      h.createdAppointments.length === 1 &&
+        h.createdAppointments[0]?.startTime === "09:00" &&
+        h.createdAppointments[0]?.providerId === PROVIDER_AHMED_ALI,
+      { resOpt, appts: h.createdAppointments, msgs: h.messages.slice(-2) },
+    );
+    check(
+      "12d. Exactly ZERO physical model HTTP attempts spent on callback selection",
+      h.httpCalls.length === 0,
+    );
+  }
+
+  // Check 13: Mixed numeric sentence reaches semantic processing intact
+  {
+    const h = createTestHarness();
+
     const baseState: ConversationState = {
       ...emptyConversationState(),
       serviceId: SERVICE_1,
@@ -1273,38 +1575,38 @@ async function main(): Promise<void> {
       testNow,
     );
     const stateWithOffer = withPresentedOffer(baseState, slotOffer!);
+    const prev3 = await h.stateStore.load(B_ID, "conv-1");
     await h.stateStore.save(
       B_ID,
       "conv-1",
-      null,
+      prev3?.revision ?? null,
       dehydrateConversationState(stateWithOffer),
     );
 
-    // Send selection "١" (Arabic digit 1)
-    await h.sendTurn("١");
+    h.httpCalls.length = 0;
+    h.createdAppointments.length = 0;
+
+    // Send mixed sentence "٢ بس غير اليوم ده" through the engine
+    await h.sendTurn("٢ بس غير اليوم ده");
 
     check(
-      "12a. Arabic digit selection books appointment directly",
-      h.createdAppointments.length === 1 &&
-        h.createdAppointments[0]?.startTime === "09:00",
+      "13a. Mixed sentence '٢ بس غير اليوم ده' does NOT book an appointment",
+      h.createdAppointments.length === 0,
     );
     check(
-      "12b. Exactly ZERO physical model HTTP attempts spent",
-      h.httpCalls.length === 0,
+      "13b. Mixed sentence reaches full semantic pipeline and spends network calls",
+      h.httpCalls.length > 0,
     );
-  }
 
-  // Check 13: Mixed numeric sentence still reaches semantic processing intact
-  {
     const selection = parseBookingSelection("٢ بس غير اليوم ده");
     check(
-      "13a. parseBookingSelection('٢ بس غير اليوم ده') returns null (preserved for AI)",
+      "13c. parseBookingSelection('٢ بس غير اليوم ده') returns null (preserved for AI)",
       selection === null,
     );
 
     const tryOfferSelection = tryParseBookingSelection("٢ بس غير اليوم ده", []);
     check(
-      "13b. tryParseBookingSelection('٢ بس غير اليوم ده') returns null",
+      "13d. tryParseBookingSelection('٢ بس غير اليوم ده') returns null",
       tryOfferSelection === null,
     );
   }
@@ -1314,24 +1616,109 @@ async function main(): Promise<void> {
   // =========================================================================
   console.log("3. Product & Prompt Wire Invariants...");
 
-  // Check 14: Default-service booking stays automatic; explicit service takes precedence
+  // Check 14: Default-service booking via receiveInboundMessage
   {
-    // Matcher against catalog with default
-    const catalog = [
-      { id: SERVICE_1, name: "كشف أسنان" },
-      { id: SERVICE_2, name: "تنظيف أسنان" },
-    ];
+    // Scenario 1: Default configured (SERVICE_1 "كشف أسنان") + no service mentioned in message/extraction
+    const h1 = createTestHarness({
+      defaultServiceId: SERVICE_1,
+      customGenerativeReply: () => ({
+        intent: "BOOKING",
+        action: "booking_handoff",
+        summary: "حجز موعد",
+        content: "المواعيد المتاحة",
+        handoffReason: null,
+        extraction: {
+          service: null,
+          provider: null,
+          date: "2026-09-15",
+          timePreference: null,
+        },
+        factUpdates: [{ key: "date", operation: "set", value: "2026-09-15" }],
+      }),
+    });
 
-    const matchMissing = matchServiceByName(null, catalog);
+    await h1.sendTurn("عايز أحجز موعد يوم 15-9");
+    const loaded1 = await h1.stateStore.load(B_ID, "conv-1");
+    const s1 = loaded1?.state as any;
+    const lastReply1 = h1.messages[h1.messages.length - 1]?.content ?? "";
+
     check(
-      "14a. Null service reports 'missing' for default handling",
-      matchMissing.status === "missing",
+      "14a. Default service used when no service mentioned",
+      s1.serviceId === SERVICE_1 &&
+        s1.serviceSource === "DEFAULT" &&
+        s1.knownFacts.service === "كشف أسنان",
+    );
+    check(
+      "14b. Default service booking does NOT show service catalog list",
+      !lastReply1.includes("الخدمات المتاحة لدينا:") &&
+        !lastReply1.includes("يرجى تحديد الخدمة"),
     );
 
-    const matchExplicit = matchServiceByName("تنظيف أسنان", catalog);
+    // Scenario 2: Explicit valid different service ("تنظيف أسنان" SERVICE_2) takes precedence over default
+    const h2 = createTestHarness({
+      defaultServiceId: SERVICE_1,
+      customGenerativeReply: () => ({
+        intent: "BOOKING",
+        action: "booking_handoff",
+        summary: "حجز تنظيف",
+        content: "المواعيد المتاحة لتنظيف الأسنان",
+        handoffReason: null,
+        extraction: {
+          service: "تنظيف أسنان",
+          provider: null,
+          date: "2026-09-15",
+          timePreference: null,
+        },
+        factUpdates: [
+          { key: "service", operation: "set", value: "تنظيف أسنان" },
+          { key: "date", operation: "set", value: "2026-09-15" },
+        ],
+      }),
+    });
+
+    await h2.sendTurn("عايز تنظيف أسنان يوم 15-9");
+    const loaded2 = await h2.stateStore.load(B_ID, "conv-1");
+    const s2 = loaded2?.state as any;
+
     check(
-      "14b. Explicit service resolves explicitly to SERVICE_2",
-      matchExplicit.status === "ok" && matchExplicit.serviceId === SERVICE_2,
+      "14c. Explicit valid service takes precedence over default",
+      s2.serviceId === SERVICE_2 &&
+        s2.serviceSource === "CUSTOMER" &&
+        s2.knownFacts.service === "تنظيف أسنان",
+    );
+
+    // Scenario 3: Explicit unknown service ("جراحة قلب") does NOT silently convert to default
+    const h3 = createTestHarness({
+      defaultServiceId: SERVICE_1,
+      customGenerativeReply: () => ({
+        intent: "BOOKING",
+        action: "booking_handoff",
+        summary: "طلب خدمة غير متوفرة",
+        content: "جاري الفحص",
+        handoffReason: null,
+        extraction: {
+          service: "جراحة قلب",
+          provider: null,
+          date: "2026-09-15",
+          timePreference: null,
+        },
+        factUpdates: [{ key: "date", operation: "set", value: "2026-09-15" }],
+      }),
+    });
+
+    const res3 = await h3.sendTurn("عايز جراحة قلب يوم 15-9");
+    const loaded3 = await h3.stateStore.load(B_ID, "conv-1");
+    const s3 = loaded3?.state as any;
+
+    check(
+      "14d. Explicit unknown service does NOT silently fall back to default",
+      s3?.serviceId !== SERVICE_1 &&
+        (Boolean(
+          (res3 as any)?.observability?.clarification?.missingFacts?.includes(
+            "service",
+          ),
+        ) ||
+          (res3 as any)?.assistantAction === "AI_REPLY"),
     );
   }
 
@@ -1366,85 +1753,74 @@ async function main(): Promise<void> {
             date: "2026-09-15",
             timePreference: null,
           },
+          factUpdates: [
+            { key: "service", operation: "set", value: "تنظيف أسنان" },
+            { key: "date", operation: "set", value: "2026-09-15" },
+          ],
         };
       },
     });
 
     // Turn 1: Establish booking state
     await h.sendTurn("حجز تنظيف أسنان يوم 15-9");
+    const loaded1 = await h.stateStore.load(B_ID, "conv-1");
+    const s1 = loaded1?.state as any;
 
     // Turn 2: Inquire about services
     const res2 = await h.sendTurn("إيه الخدمات المتاحة عندكم؟");
-
+    const loaded2 = await h.stateStore.load(B_ID, "conv-1");
+    const s2 = loaded2?.state as any;
     const lastMsg = h.messages[h.messages.length - 1]?.content ?? "";
+
     check(
       "15a. Reply contains real service names ('كشف أسنان' and 'تنظيف أسنان')",
-      lastMsg.includes("كشف أسنان") && lastMsg.includes("تنظيف أسنان"),
+      res2.ok &&
+        lastMsg.includes("كشف أسنان") &&
+        lastMsg.includes("تنظيف أسنان"),
     );
     check(
-      "15b. Booking state is preserved across catalog inquiry",
-      Boolean(
-        res2.ok &&
-        "assistantAction" in res2 &&
-        res2.assistantAction === "AI_REPLY" &&
-        res2.intent === "FAQ",
-      ),
+      "15b. Preserved serviceId across inquiry",
+      s2.serviceId === s1.serviceId && s2.serviceId === SERVICE_2,
+    );
+    check(
+      "15c. Preserved serviceSource across inquiry",
+      s2.serviceSource === s1.serviceSource && s2.serviceSource === "CUSTOMER",
+    );
+    check(
+      "15d. Preserved knownFacts (service and date) across inquiry",
+      s2.knownFacts.service === s1.knownFacts.service &&
+        s2.knownFacts.date === s1.knownFacts.date &&
+        s2.knownFacts.service === "تنظيف أسنان" &&
+        s2.knownFacts.date === "2026-09-15",
+    );
+    check(
+      "15e. Active booking task is preserved across inquiry",
+      s2.activeTask?.kind === "BOOKING",
     );
   }
 
-  // Check 16: Through production prompt builder/provider adapter + mocked HTTP, assert the emitted contract supports removal and current context is present
-  {
-    const sampleReq: AiRequest = {
-      message: "مش فارق الوقت",
-      conversationStatus: "AI_ACTIVE",
-      recentMessages: [{ senderType: "CUSTOMER", content: "مش فارق الوقت" }],
-      businessName: "عيادة الابتسامة",
-      services: [{ name: "تنظيف أسنان" }],
-      faqs: [],
-      conversationContext: {
-        activeTask: { kind: "BOOKING", stage: "DATE_SUPPLIED" },
-        knownService: "تنظيف أسنان",
-        knownDate: "2026-09-15",
-        timePreference: "evening",
-        providerPreference: null,
-        activeOffer: null,
-        pendingClarification: null,
-      },
-    };
-
-    const messages = buildPromptMessages(sampleReq);
-    const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
-    const userMsg = messages.find((m) => m.role === "user")?.content ?? "";
-
-    check(
-      "16a. System instructions describe factUpdates with set and remove operations",
-      systemMsg.includes("factUpdates") &&
-        systemMsg.includes("operation") &&
-        systemMsg.includes("remove"),
-    );
-    check(
-      "16b. User message includes serialized conversationContext",
-      userMsg.includes("conversationContext:") &&
-        userMsg.includes("2026-09-15") &&
-        userMsg.includes("evening"),
-    );
-  }
-
-  // Check 17: Real offer token/nonce canaries inserted into the upstream fixture must NOT appear in the projected model payload
+  // Check 16 & 17: Prompt contract & canary isolation on HTTP wire through real OpenRouter adapter
   {
     const TOKEN_CANARY = "canary_token_secret_xyz123";
     const NONCE_CANARY = "canary_claim_nonce_secret_abc456";
 
+    // 1. Build upstream state containing canaries
     const baseState: ConversationState = {
       ...emptyConversationState(),
-      serviceId: SERVICE_1,
-      knownFacts: { service: "تنظيف أسنان", date: "2026-09-15" },
+      serviceId: SERVICE_2,
+      serviceSource: "CUSTOMER",
+      knownFacts: {
+        service: "تنظيف أسنان",
+        date: "2026-09-15",
+        timePreference: "evening",
+      },
+      selectedTimePref: "evening",
     };
     const canaryOffer = buildSlotOffer(
       { businessId: B_ID, conversationId: "conv-1" },
       TOKEN_CANARY,
       {
-        serviceId: SERVICE_1,
+        serviceId: SERVICE_2,
         serviceName: "تنظيف أسنان",
         serviceSource: "CUSTOMER",
         providerId: null,
@@ -1453,21 +1829,19 @@ async function main(): Promise<void> {
         shownCount: 1,
         options: [
           {
-            displayName: "10:00 ص",
-            startAt: "2026-09-15T10:00",
-            endAt: "2026-09-15T10:30",
+            displayName: "د. سارة",
+            startAt: "2026-09-15T17:00",
+            endAt: "2026-09-15T17:30",
             providerId: PROVIDER_SARA,
           },
         ],
       },
       testNow,
     );
-    // Inject canary nonce
     const offerWithNonce = {
       ...canaryOffer!,
       claimNonce: NONCE_CANARY,
     };
-
     const stateWithCanary = withPresentedOffer(
       baseState,
       offerWithNonce as any,
@@ -1475,28 +1849,104 @@ async function main(): Promise<void> {
     const projection = projectConversationState(stateWithCanary, {
       now: testNow,
     });
-    const projectedJson = JSON.stringify(projection);
 
-    const promptMessages = buildPromptMessages({
-      message: "تمام",
+    const wireReq: AiRequest = {
+      message: "مش فارق الوقت",
       conversationStatus: "AI_ACTIVE",
-      recentMessages: [{ senderType: "CUSTOMER", content: "تمام" }],
+      recentMessages: [{ senderType: "CUSTOMER", content: "مش فارق الوقت" }],
       businessName: "عيادة الابتسامة",
-      services: [],
+      services: [{ name: "كشف أسنان" }, { name: "تنظيف أسنان" }],
       faqs: [],
       conversationContext: projection ?? undefined,
+    };
+
+    const interceptedCalls: HttpCall[] = [];
+    const wireAdapter = createOpenRouterAdapter({
+      model: "mock-generative-v1",
+      getEnvVar: (name) =>
+        name === OPENROUTER_SECRET_REF ? "sk-wire-test" : undefined,
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "POST";
+        const headers = new Headers(init?.headers);
+        const rawBody = String(init?.body ?? "{}");
+        let body: any = {};
+        try {
+          body = JSON.parse(rawBody);
+        } catch {}
+        interceptedCalls.push({ url, method, headers, body, rawBody });
+
+        return new Response(
+          JSON.stringify({
+            id: "wire-test-1",
+            model: "mock-generative-v1",
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    intent: "BOOKING",
+                    action: "booking_handoff",
+                    summary: "إزالة تفضيل الوقت",
+                    content: "تمام بدون تفضيل وقت.",
+                    extraction: {
+                      service: null,
+                      provider: null,
+                      date: null,
+                      timePreference: null,
+                    },
+                    factUpdates: [
+                      { key: "timePreference", operation: "remove" },
+                    ],
+                  }),
+                },
+              },
+            ],
+            usage: { prompt_tokens: 120, completion_tokens: 45 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
     });
-    const promptJson = JSON.stringify(promptMessages);
+
+    const adapterResult = await wireAdapter.call(wireReq);
+
+    const wireCall = interceptedCalls[0];
+    const wireMessages =
+      (wireCall?.body?.messages as Array<{
+        role: string;
+        content: string;
+      }>) ?? [];
+    const wireSystem =
+      wireMessages.find((m) => m.role === "system")?.content ?? "";
+    const wireUser = wireMessages.find((m) => m.role === "user")?.content ?? "";
 
     check(
-      "17a. Token canary is strictly absent from projected state and prompt",
-      !projectedJson.includes(TOKEN_CANARY) &&
-        !promptJson.includes(TOKEN_CANARY),
+      "16a. Wire request body carries system instructions describing SET and REMOVE operations",
+      wireSystem.includes("factUpdates") &&
+        wireSystem.includes("operation") &&
+        wireSystem.includes("remove"),
     );
     check(
-      "17b. Claim nonce canary is strictly absent from projected state and prompt",
-      !projectedJson.includes(NONCE_CANARY) &&
-        !promptJson.includes(NONCE_CANARY),
+      "16b. Wire request body carries serialized conversationContext",
+      wireUser.includes("conversationContext:") &&
+        wireUser.includes("2026-09-15") &&
+        wireUser.includes("evening"),
+    );
+    check(
+      "16c. Real adapter parses and validates JSON response carrying REMOVE operation",
+      adapterResult.ok === true &&
+        adapterResult.response?.factUpdates?.some(
+          (u) => u.key === "timePreference" && u.operation === "remove",
+        ) === true,
+    );
+    check(
+      "17a. Token canary is strictly absent from physical HTTP wire payload",
+      wireCall !== undefined && !wireCall.rawBody.includes(TOKEN_CANARY),
+    );
+    check(
+      "17b. Claim nonce canary is strictly absent from physical HTTP wire payload",
+      wireCall !== undefined && !wireCall.rawBody.includes(NONCE_CANARY),
     );
   }
 
