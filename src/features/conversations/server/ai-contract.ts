@@ -240,6 +240,15 @@ export type ConversationContextProjection = z.infer<
   typeof conversationContextProjectionSchema
 >;
 
+export const requiredSemanticCapabilityValues = ["structured_turn"] as const;
+
+export type RequiredSemanticCapability =
+  (typeof requiredSemanticCapabilityValues)[number];
+
+export const requiredSemanticCapabilitySchema = z.enum(
+  requiredSemanticCapabilityValues,
+);
+
 /**
  * The AI request — everything the assistant may see for the CURRENT
  * turn. Optional blocks are present ONLY when relevant to the task;
@@ -316,6 +325,12 @@ export const aiRequestSchema = z.object({
    * Additive and optional; present when canonical turn clock is available.
    */
   temporalContext: aiTemporalContextSchema.optional(),
+  /**
+   * CORE-03B2A: Server-derived provider-neutral semantic capability requirement.
+   * Additive and optional; present when a free-form customer turn reaches
+   * the semantic boundary after mechanical handling has yielded.
+   */
+  requiredSemanticCapability: requiredSemanticCapabilitySchema.optional(),
 });
 
 export type AiRequest = z.infer<typeof aiRequestSchema>;

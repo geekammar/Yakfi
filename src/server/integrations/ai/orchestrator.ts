@@ -133,61 +133,68 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
   async function callWithFallback(
     request: AiRequest,
   ): Promise<OrchestratorResult> {
-    // JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8; PROMPT-AI-JEV-03B):
-    // an OPTIONAL, provider-neutral decision behind this gateway. A
-    // DETERMINISTIC decision terminates the turn with a complete response and
-    // ZERO provider attempts; a GENERATIVE decision falls through to the
-    // gateway's single existing call. The strategy never calls the generative
-    // provider, so the one-call budget is held HERE (the gateway), never by the
-    // strategy.
-    //
-    // PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may spend
-    // its ONE JEV call inside `decide`. The truth table is then exact:
-    //   · a proven 0-call bypass (or a JEV success / fail-closed termination)
-    //     returns DETERMINISTIC → ZERO generative attempts;
-    //   · a pre-attempt unavailability or a JEV-ineligible turn returns
-    //     GENERATIVE → the gateway's ONE existing call;
-    //   · a JEV failure AFTER an attempt was spent also returns DETERMINISTIC
-    //     (the strategy terminates on the lexical baseline) → the LLM is NEVER
-    //     called after a spent JEV attempt. There is no two-call row.
-    const jev = decisionStrategy
-      ? await decisionStrategy.decide(request)
-      : null;
-    const jevDecision = jev
-      ? {
-          mode: jev.mode,
-          reason: jev.reason,
-          ...(jev.semantic ? { semantic: jev.semantic } : {}),
-        }
-      : undefined;
-    if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
-      return {
-        response: jev.response,
-        telemetry: {
-          attempts: [],
-          fallbackUsed: false,
-          finalProvider: JEV_DETERMINISTIC_PROVIDER,
-          finalModel: null,
-          finalStatus: "SUCCESS",
-          jevDecision,
-        },
-      };
-    }
-    // No strategy configured: the built-in deterministic bypass is the exact
-    // prior behaviour (disabling JEV changes nothing but the audit field).
-    const bypass = !decisionStrategy ? bypassDeterministicAi(request) : null;
-    if (bypass) {
-      return {
-        response: bypass,
-        telemetry: {
-          attempts: [],
-          fallbackUsed: false,
-          finalProvider: "deterministic-bypass",
-          finalModel: null,
-          finalStatus: "SUCCESS",
-          jevDecision,
-        },
-      };
+    const requiresStructuredTurn =
+      request.requiredSemanticCapability === "structured_turn";
+
+    let jevDecision: AiTelemetry["jevDecision"];
+
+    if (!requiresStructuredTurn) {
+      // JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8; PROMPT-AI-JEV-03B):
+      // an OPTIONAL, provider-neutral decision behind this gateway. A
+      // DETERMINISTIC decision terminates the turn with a complete response and
+      // ZERO provider attempts; a GENERATIVE decision falls through to the
+      // gateway's single existing call. The strategy never calls the generative
+      // provider, so the one-call budget is held HERE (the gateway), never by the
+      // strategy.
+      //
+      // PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may spend
+      // its ONE JEV call inside `decide`. The truth table is then exact:
+      //   · a proven 0-call bypass (or a JEV success / fail-closed termination)
+      //     returns DETERMINISTIC → ZERO generative attempts;
+      //   · a pre-attempt unavailability or a JEV-ineligible turn returns
+      //     GENERATIVE → the gateway's ONE existing call;
+      //   · a JEV failure AFTER an attempt was spent also returns DETERMINISTIC
+      //     (the strategy terminates on the lexical baseline) → the LLM is NEVER
+      //     called after a spent JEV attempt. There is no two-call row.
+      const jev = decisionStrategy
+        ? await decisionStrategy.decide(request)
+        : null;
+      jevDecision = jev
+        ? {
+            mode: jev.mode,
+            reason: jev.reason,
+            ...(jev.semantic ? { semantic: jev.semantic } : {}),
+          }
+        : undefined;
+      if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
+        return {
+          response: jev.response,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: JEV_DETERMINISTIC_PROVIDER,
+            finalModel: null,
+            finalStatus: "SUCCESS",
+            jevDecision,
+          },
+        };
+      }
+      // No strategy configured: the built-in deterministic bypass is the exact
+      // prior behaviour (disabling JEV changes nothing but the audit field).
+      const bypass = !decisionStrategy ? bypassDeterministicAi(request) : null;
+      if (bypass) {
+        return {
+          response: bypass,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: "deterministic-bypass",
+            finalModel: null,
+            finalStatus: "SUCCESS",
+            jevDecision,
+          },
+        };
+      }
     }
 
     // PROMPT-AI-JEV-03D — OPTION E: the NON-AUTHORITATIVE shadow seam. The
@@ -201,9 +208,10 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     // A deterministic bypass turn (both early returns above) and an ACTIVE
     // semantic turn (the factory installs no shadow in that state) NEVER
     // reach here, so neither can start a shadow model call.
-    const shadowAdmission = shadowStrategy
-      ? shadowStrategy.admit(request)
-      : null;
+    const shadowAdmission =
+      shadowStrategy && !requiresStructuredTurn
+        ? shadowStrategy.admit(request)
+        : null;
     const shadowWillRun =
       shadowAdmission !== null &&
       shadowAdmission.eligible &&

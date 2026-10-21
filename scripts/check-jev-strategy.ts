@@ -774,6 +774,7 @@ async function main(): Promise<void> {
         createWithConflictCheck: async () => ({ id: "appt-1" }),
       },
       ai,
+      requiredSemanticCapability: null,
       transport: {
         providerName: "scripted",
         async send(input: { content: string }) {

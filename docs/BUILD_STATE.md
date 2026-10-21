@@ -9,7 +9,7 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.60.0 (feature branch; PR ready)** — `CORE-03B1: Server-Derived Temporal Context and Semantic Capability Boundary`. Production baseline: v0.59.0 (commit `ddf75b67cd45841ba19a169c43b9ee21d328e35c`). Adds provider-neutral server-derived temporal context (`referenceInstant`, `timeZone`, `localDate`) to `AiRequest`, renders authoritative calendar reference instructions in prompt templates, records clear semantic capability boundaries for mechanical/JEV/generative paths, and maintains zero-model protocol selection and CORE-03A fact reconciliation. Verified by 42/42 offline automated test scenarios (`pnpm check:conv-core-03b1`), full regression suites, and clean `pnpm verify:local`.
+**Product version: v0.61.0 (feature branch; PR ready)** — `CORE-03B2A: Capability-Safe Routing for Free-Form Conversation Turns`. Production baseline: v0.60.0 (commit `9f5f20472efd94f89124cbe1fd16f8fb722fe3d9`). Ensures free-form customer turns reaching the semantic boundary request full structured conversation capability (`requiredSemanticCapability: "structured_turn"`) and route directly to generative AiResponse provider paths before bounded JEV decision strategies or free-text lexical bypasses, preserving zero-model mechanical selections. Verified by 47/47 offline automated test scenarios (`pnpm check:conv-core-03b2a`), full regression suites, and clean `pnpm verify:local`.
 
 v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
 fixes, the official-creation deep-link + Android launcher fixes, the customer
@@ -51,19 +51,25 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (PR ready on branch `feat/conv-core-03b1-temporal-context`) — SERVER-DERIVED TEMPORAL CONTEXT & SEMANTIC CAPABILITY BOUNDARY (CORE-03B1)**:
-One bounded slice giving the semantic AI boundary an authoritative temporal reference based on the business timezone and recording code-backed capability boundaries:
+**IN-FLIGHT (PR ready on branch `feat/conv-core-03b2a-capability-routing`) — CAPABILITY-SAFE ROUTING FOR FREE-FORM CONVERSATION TURNS (CORE-03B2A)**:
+One bounded slice ensuring free-form customer turns reaching the semantic boundary request full structured conversation capability and use an existing generative provider path capable of returning AiResponse (extraction, goals, factUpdates) without premature interception by bounded JEV decision strategies or free-text lexical bypasses:
 
-1. **Server-Derived Temporal Contract (`src/features/conversations/server/temporal-context.ts`, `ai-contract.ts`)**: Added optional `temporalContext: { referenceInstant, timeZone, localDate }` on `AiRequest`. Context is derived server-side from the existing canonical turn clock (`now`) and business timezone via `Intl.DateTimeFormat`; customer statements never overwrite it. Robust fallback policy: missing/invalid timezones safely fall back to `"UTC"`. Zod schema strictly validates UTC ISO instant and enforces date consistency.
-2. **Context Pipeline & Wire Projection (`context-builder.ts`, `prompt.ts`, `prompts/system/booking-assistant.prompt`)**: Context builder injects server-derived temporal context into `AiRequest`. `buildPromptMessages` renders compact `temporalContext` into user context block. Prompt instructions declare `temporalContext` as the authoritative calendar reference for relative dates (e.g. tomorrow/next week). Generated prompts verified with byte-identical check (`pnpm check:ai-prompts`).
-3. **Semantic & JEV Capability Boundaries (`docs/ai/ARCHITECTURE.md`, `jev-semantic-strategy.ts`)**: Code-backed distinction between mechanical zero-model selections (Arabic numerals/buttons), JEV's bounded routing outputs (atomic routing questions only; current adapter mapping omits temporalContext; semanticResponse delegates extraction to lexical helpers rather than producing factUpdates), and generative structured-output contract. Avoids vendor rejection claims based on local types. Explicitly marks legacy Arabic lexical helpers as debt for future slices.
-4. **Acceptance Verification (`scripts/check-conv-core-03b1.ts`)**:
-   - Contract validation & fallback invariants (A1–A8b).
-   - Timezone correctness & boundary assertions, including Cairo DST sensitivity distinguishing runtime IANA Cairo from fixed UTC+2/UTC+3 offset errors and pure-function determinism (B9a–B12).
-   - Engine-to-wire path capturing real generative adapter payload, verifying exact temporalContext block matching canonical turn instant, absence of wall-clock drift across independent turns, single appearance, customer spoof immunity, and state persistence of controlled relative date '2026-10-23' for tomorrow without claiming premature booking completion (C13–C17b, E23).
-   - Security & zero-model boundaries: non-vacuous canary isolation (positive upstream fixture control for offer token & claim nonce, wire exclusion of token/nonce/auth-credential), zero model calls on selection, 1-call limit on measured fixture, explicit REMOVE schema validation, and default-service fixture configuration (D18a–D22).
-   - Honest language evidence & JEV boundary: offline mock evidence clearly distinguished from live model testing (NOT EVALUATED in offline suite); JEV adapter mapping omits temporalContext and delegates rich extraction (E25a–E25b).
-     Verified offline by `pnpm check:conv-core-03b1` (42/42 PASS), existing suites (`check:conv-core-03a` 65/65, `check:conv-core-02` 120/120, `check:conv-core-01` 32/32, `check:ai-prompts` 146/146), `pnpm check:version` (0.60.0), and `pnpm verify:local`.
+1. **Server-Derived Semantic Capability Contract (`ai-contract.ts`, `ai-context-builder/context-builder.ts`)**: Added provider-neutral `requiredSemanticCapability: "structured_turn"` to `AiRequest`. Stamped server-side by the engine after mechanical selection yields; cannot be forged or requested by customer message text. Zod schema strictly validates and preserves the contract across boundaries without leaking internal metadata onto the generative model wire.
+2. **Capability-Safe Engine & Gateway Routing (`conversation-engine.ts`, `orchestrator.ts`, `jev-semantic-strategy.ts`)**:
+   - Engine skips `bypassDeterministicAi` when `requiredSemanticCapability: "structured_turn"`, preventing premature lexical bypass of free-text turns.
+   - Orchestrator routes requests requiring `"structured_turn"` directly to capable generative primary adapters before evaluating bounded JEV decision strategies or shadow runs.
+   - JEV strategy marks `"CAPABILITY_STRUCTURED_TURN"` as ineligible, returning immediately without executing external classification or legacy delegation chains.
+   - Preserves 100% backward compatibility for legacy callers without the capability contract.
+3. **Zero-Model & Downstream Contract Guarantees**:
+   - Deterministic numeric selections ("١", "1") and offer callbacks (`fp:<token>:<action>`) remain zero-model operations handled by booking core before AI invocation.
+   - State reconciliation preserves authoritative explicit `factUpdates` (`operation: "set" | "remove"`), unaffected by stale/conflicting extractions.
+   - Safe handoff to `NEED_HUMAN` on invalid provider output without guessing appointments.
+4. **Acceptance Verification (`scripts/check-conv-core-03b2a.ts`)**:
+   - Actual routing with JEV configured: 0 JEV HTTP attempts spent on free-form turns requiring structured_turn, exactly 1 generative HTTP request captured, customer text arrives intact with temporal/conversation context (A1–A5h).
+   - Mechanical paths & zero-model guarantees: Arabic/Western digit selections and offer callbacks execute with 0 model calls; positive controls verify HTTP attempt counters and valid evaluation for both provider paths (B6a–B10b).
+   - End-to-end state behavior: provider REMOVE clears preference, date correction reaches state, dispatches availability query for corrected date, updates active typed slot offer and rejects replaced old-date offer, explicit factUpdates override conflicting extraction, invalid output creates no appointments (C11a–C14b).
+   - Policy & wire invariants: real policy-backed AI factory exercises prohibited/invalid fallback and allowed generative route, staff assignment defers, legacy callers preserved with real bounded JEV inference on eligible turns and 0-call bypass for greetings, single model call spent without duplicate chains, metadata wire privacy preserved (D15a–E21).
+     Verified by `pnpm check:conv-core-03b2a` (47/47 PASS), all predecessor suites (`conv-core-01`, `02`, `03a`, `03b1`), and clean `pnpm verify:local`.
 
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
 `PROMPT-OPS-REL-01-R`:
@@ -2628,13 +2634,13 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03b1-temporal-context) CORE-03B1**:
-Branch `feat/conv-core-03b1-temporal-context` ready with server-derived temporal context and semantic capability boundaries (v0.60.0).
+**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03b2a-capability-routing) CORE-03B2A**:
+Branch `feat/conv-core-03b2a-capability-routing` ready with capability-safe routing for free-form conversation turns (v0.61.0).
 
-1. Push branch `feat/conv-core-03b1-temporal-context` to `origin`.
+1. Push branch `feat/conv-core-03b2a-capability-routing` to `origin`.
 2. Open PR against `main` for review.
 3. Monitor GitHub Actions CI on PR HEAD (`pr-validation.yml`).
-4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.60.0).
+4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.61.0).
 
 **JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
 DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**
