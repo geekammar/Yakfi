@@ -408,6 +408,7 @@ async function run(): Promise<void> {
           return { provider: "TEST_TRANSPORT", delivered: true };
         },
       } as any,
+      requiredSemanticCapability: null,
     };
 
     return {
