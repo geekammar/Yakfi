@@ -646,11 +646,12 @@ function semanticTarget(
  * prose, so no model text and no chain-of-thought can reach the customer
  * through this channel.
  *
- * CAPABILITY BOUNDARY (CORE-03B1): JEV evaluates atomic routing/goal questions
- * only; its output schema carries no fact extraction or factUpdates. The extraction
- * here is strictly delegated to the legacy lexical baseline (`classifyCustomerMessage`
- * and `extractServiceFacts`). JEV cannot interpret relative dates or emit arbitrary
- * date updates; temporal context forwarded to the turn does not grant JEV rich extraction.
+ * CAPABILITY BOUNDARY (CORE-03B1):
+ * a. The current JEV adapter and request mapping (`buildSemanticRequest`) omits temporal context.
+ * b. Configured JEV outputs in this system are bounded decisions (atomic routing questions and conversation goal).
+ * c. `semanticResponse` currently delegates rich extraction to legacy lexical helpers
+ *    (`classifyCustomerMessage` and `extractServiceFacts`) and does not produce the new
+ *    `factUpdates` (`operation: "set" | "remove"`) itself.
  */
 function semanticResponse(
   request: AiRequest,
@@ -1008,10 +1009,13 @@ export function languageHint(message: string): string {
 /**
  * Build the provider-neutral JEV evaluation request from an assembled AiRequest.
  *
- * NOTE (CORE-03B1): The underlying Decisions API state contract (`JevState`) only
- * admits `customerMessage`, `businessName`, `services`, `faqs`, `languageHint`,
- * and `conversationContext`. Unsupported temporal fields are not forwarded to avoid
- * schema violations with the vendor Decisions API.
+ * NOTE (CORE-03B1):
+ * a. The current adapter/request mapping (`buildSemanticRequest` / `JevState`) maps
+ *    `customerMessage`, `businessName`, `services`, `faqs`, `languageHint`, and
+ *    `conversationContext`, and currently omits `temporalContext`.
+ * b. Configured JEV outputs in this integration are bounded decisions.
+ * c. `semanticResponse` currently delegates rich extraction to legacy helpers rather
+ *    than producing `factUpdates` directly.
  */
 export function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
   return {

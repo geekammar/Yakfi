@@ -230,11 +230,12 @@ A precise, code-backed distinction between the current pipeline capabilities:
    - Evaluated by `interpretOfferReply` and executed by `completeBookingSelection` (`src/features/conversations/server/booking-selection.ts`).
    - Resolves structured callback tokens (e.g. `opt_2`) and exact numeric choices in Arabic or English digits (`"١"`, `"1"`) deterministically against active state offers. Spends exactly zero model network attempts.
 
-2. **JEV Bounded Semantic Output & Limitations**:
+2. **JEV Integration Boundaries**:
    - Implemented in `src/server/integrations/ai/jev-semantic-strategy.ts` (`buildSemanticRequest`, `evaluateSemanticReading`, `semanticResponse`).
-   - JEV evaluates a closed set of 11 atomic Noul routing questions plus 1 choice goal (`conversationGoal`).
-   - JEV's wire request schema (`JevState` in `src/server/integrations/ai/jev-decisions-provider.ts`) does not consume temporal context.
-   - Crucially, `semanticResponse` derives fact extraction solely by delegating to the lexical baseline (`classifyCustomerMessage` and `extractServiceFacts` in `src/features/conversations/server/conversation-ai.ts`). JEV itself does **not** extract dates, interpret relative dates, or produce rich `factUpdates` (`operation: "set" | "remove"`). Receiving temporal context or state does not give JEV arbitrary extraction capability.
+   - Configured JEV outputs in this system are bounded decisions (evaluates a closed set of 11 atomic Noul routing questions plus 1 choice goal, `conversationGoal`).
+   - Current adapter and request mapping (`buildSemanticRequest` and our local `JevState` type in `src/server/integrations/ai/jev-decisions-provider.ts`) omits temporal context.
+   - `semanticResponse` currently delegates rich extraction to legacy helpers (`classifyCustomerMessage` and `extractServiceFacts` in `src/features/conversations/server/conversation-ai.ts`) and does not produce the new `factUpdates` (`operation: "set" | "remove"`) itself.
+   - Local adapter types define what our current integration forwards; they are not evidence of vendor API rejection or intrinsic model capability limits.
 
 3. **Generative Structured-Output Contract**:
    - Implemented across `createOpenRouterAdapter` (`src/server/integrations/ai/openrouter.ts`), `buildPromptMessages` (`src/server/integrations/ai/prompt.ts`), and the system prompt (`prompts/system/booking-assistant.prompt`).
