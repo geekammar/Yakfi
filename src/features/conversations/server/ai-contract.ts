@@ -20,7 +20,20 @@
  *   the Domain decides and executes; the Engine orchestrates.
  */
 
+import {
+  conversationFactKeys,
+  removableFactKeys,
+  type ConversationFactKey,
+  type RemovableFactKey,
+} from "./conversation-facts";
 import { z } from "zod";
+
+export {
+  conversationFactKeys,
+  removableFactKeys,
+  type ConversationFactKey,
+  type RemovableFactKey,
+};
 
 // ─── Intent family (no invented intents) ─────────────────────────────────────
 
@@ -365,15 +378,46 @@ export const aiHandoffCauseSchema = z.string().trim().min(1).max(64);
 
 export type AiHandoffCause = z.infer<typeof aiHandoffCauseSchema>;
 
-/** A conversation fact the model PROPOSES; the engine validates (later slice). */
-export const aiFactUpdateSchema = z.object({
-  /** Closed fact key in the target model (service | date | timePreference | …). */
+/** Explicit or legacy SET operation (CORE-03A). */
+export const aiSetFactUpdateSchema = z.object({
+  /** Fact key in the target model. */
   key: z.string().trim().min(1).max(64),
-  /** Customer-stated value; the engine validates it against server ids. */
-  value: z.string().trim().min(1).max(200),
+  /** Explicit or default 'set' operation. */
+  operation: z.literal("set").optional(),
+  /** Customer-stated value; cannot be empty or sentinel 'null'. */
+  value: z
+    .string()
+    .trim()
+    .min(1, "قيمة الحقيقة مطلوبة")
+    .max(200)
+    .refine((v) => v.toLowerCase() !== "null", {
+      message: "نص 'null' ليس قيمة صالحة",
+    }),
   /** True when this supersedes a previously known value. */
   isRevision: z.boolean().optional(),
 });
+
+/** Explicit REMOVE operation (date, timePreference, provider only) (CORE-03A). */
+export const aiRemoveFactUpdateSchema = z.object({
+  /** Bounded subset of removable fact keys. */
+  key: z.enum(removableFactKeys),
+  /** Explicit 'remove' operation. */
+  operation: z.literal("remove"),
+  /** REMOVE carries no replacement value. */
+  value: z.undefined().optional(),
+  /** True when this supersedes a previously known value. */
+  isRevision: z.boolean().optional(),
+});
+
+/**
+ * A conversation fact the model PROPOSES; the engine validates.
+ * Supports legacy SET { key, value }, explicit SET { key, operation: "set", value },
+ * and explicit REMOVE { key, operation: "remove" }.
+ */
+export const aiFactUpdateSchema = z.union([
+  aiSetFactUpdateSchema,
+  aiRemoveFactUpdateSchema,
+]);
 
 export type AiFactUpdate = z.infer<typeof aiFactUpdateSchema>;
 
