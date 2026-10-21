@@ -16,7 +16,7 @@ export const DEEPSEEK_V3_OPENROUTER_COST_CONFIG: CostModelConfig = {
   provider: "openrouter",
   model: "deepseek/deepseek-chat",
   pricingSource:
-    "OpenRouter official deepseek/deepseek-chat pricing (verified 2026-10)",
+    "OpenRouter deepseek/deepseek-chat pricing (verified 2026-10-21; subject to provider rate change; real-time dollar webhooks unverified/unsupported)",
   inputPricePerMillionUsd: 0.14,
   outputPricePerMillionUsd: 0.28,
   conservativeInputTokenBoundPerRequest: 5000,
@@ -30,6 +30,7 @@ export function calculateConservativeCostCeiling(
   maxCostPerAttemptUsd: number;
   totalCostCeilingUsd: number;
   explanation: string;
+  isConditionalEstimate: boolean;
 } {
   const maxInputCostPerCall =
     (costConfig.conservativeInputTokenBoundPerRequest *
@@ -42,14 +43,16 @@ export function calculateConservativeCostCeiling(
   const totalCostCeilingUsd = maxAttempts * maxCostPerAttemptUsd;
 
   const explanation =
-    `${maxAttempts} max attempts * (${costConfig.conservativeInputTokenBoundPerRequest} in @ $${costConfig.inputPricePerMillionUsd}/M + ` +
+    `${maxAttempts} max attempts * (assumed ${costConfig.conservativeInputTokenBoundPerRequest} in @ $${costConfig.inputPricePerMillionUsd}/M + ` +
     `${costConfig.outputTokenLimit} out @ $${costConfig.outputPricePerMillionUsd}/M) = ` +
-    `$${maxCostPerAttemptUsd.toFixed(6)}/call -> $${totalCostCeilingUsd.toFixed(4)} USD conservative ceiling`;
+    `$${maxCostPerAttemptUsd.toFixed(6)}/call -> $${totalCostCeilingUsd.toFixed(4)} USD conditional cost estimate ` +
+    `(conditional estimate based on assumed 5k input bound, not an enforced prompt ceiling or guaranteed provider-side hard ceiling)`;
 
   return {
     maxCostPerAttemptUsd,
     totalCostCeilingUsd,
     explanation,
+    isConditionalEstimate: true,
   };
 }
 

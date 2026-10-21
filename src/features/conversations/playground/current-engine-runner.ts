@@ -409,6 +409,8 @@ export async function runCurrentEngineScenario(
     let pSum = 0;
     let cSum = 0;
     let tSum = 0;
+    let anyPromptMissing = false;
+    let anyCompletionMissing = false;
 
     for (const a of turnAttempts) {
       if (
@@ -417,8 +419,24 @@ export async function runCurrentEngineScenario(
         !Number.isNaN(a.tokenUsage.totalTokens)
       ) {
         turnKnownAttempts++;
-        pSum += a.tokenUsage.promptTokens ?? 0;
-        cSum += a.tokenUsage.completionTokens ?? 0;
+        if (
+          typeof a.tokenUsage.promptTokens === "number" &&
+          !Number.isNaN(a.tokenUsage.promptTokens)
+        ) {
+          pSum += a.tokenUsage.promptTokens;
+        } else {
+          anyPromptMissing = true;
+        }
+
+        if (
+          typeof a.tokenUsage.completionTokens === "number" &&
+          !Number.isNaN(a.tokenUsage.completionTokens)
+        ) {
+          cSum += a.tokenUsage.completionTokens;
+        } else {
+          anyCompletionMissing = true;
+        }
+
         tSum += a.tokenUsage.totalTokens;
       } else {
         turnUnknownAttempts++;
@@ -438,17 +456,30 @@ export async function runCurrentEngineScenario(
       turnCompletionTokens = null;
       turnTotalTokens = null;
     } else if (turnUnknownAttempts === 0) {
-      // All attempts have known usage
+      // All attempts have at least totalTokens known
       usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
-      turnCompleteness = "COMPLETE";
-      turnPromptTokens = pSum;
-      turnCompletionTokens = cSum;
-      turnTotalTokens = tSum;
-      totalPromptTokens += pSum;
-      totalCompletionTokens += cSum;
-      totalTokens += tSum;
-      totalKnownTokens += tSum;
-      hasAnyKnownTokens = true;
+      if (anyPromptMissing || anyCompletionMissing) {
+        // Partially populated usage object: missing components remain null!
+        turnCompleteness = "PARTIAL";
+        turnPromptTokens = anyPromptMissing ? null : pSum;
+        turnCompletionTokens = anyCompletionMissing ? null : cSum;
+        turnTotalTokens = tSum;
+        if (!anyPromptMissing) totalPromptTokens += pSum;
+        if (!anyCompletionMissing) totalCompletionTokens += cSum;
+        totalKnownTokens += tSum;
+        hasAnyKnownTokens = true;
+        hasAnyUnknownTokens = true;
+      } else {
+        turnCompleteness = "COMPLETE";
+        turnPromptTokens = pSum;
+        turnCompletionTokens = cSum;
+        turnTotalTokens = tSum;
+        totalPromptTokens += pSum;
+        totalCompletionTokens += cSum;
+        totalTokens += tSum;
+        totalKnownTokens += tSum;
+        hasAnyKnownTokens = true;
+      }
     } else if (turnKnownAttempts > 0 && turnUnknownAttempts > 0) {
       // Turn with a failed attempt (no usage) and retry (usage) -> PARTIAL
       usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
@@ -456,8 +487,8 @@ export async function runCurrentEngineScenario(
       turnPromptTokens = null;
       turnCompletionTokens = null;
       turnTotalTokens = null;
-      totalPromptTokens += pSum;
-      totalCompletionTokens += cSum;
+      if (!anyPromptMissing) totalPromptTokens += pSum;
+      if (!anyCompletionMissing) totalCompletionTokens += cSum;
       totalKnownTokens += tSum;
       hasAnyKnownTokens = true;
       hasAnyUnknownTokens = true;
@@ -541,13 +572,7 @@ export async function runCurrentEngineScenario(
     let finalProvider: string | null = null;
     let finalModel: string | null = null;
 
-    if (
-      !isPolicyProhibited &&
-      (turnAttempts.length > 0 ||
-        (telemetry &&
-          telemetry.finalProvider !== "deterministic" &&
-          telemetry.finalProvider !== "deterministic-bypass"))
-    ) {
+    if (!isPolicyProhibited && turnAttempts.length > 0) {
       observedProvider =
         telemetry?.finalProvider ?? result.observability?.provider ?? null;
       observedModel =
@@ -561,13 +586,22 @@ export async function runCurrentEngineScenario(
       finalModel = null;
     }
 
-    // Capture model outputs separately from durable state
+    // Capture model outputs separately from durable state.
+    // A mechanical selection or deterministic bypass has NO model extraction or model fact updates.
+    const isModelGenerated =
+      !isPolicyProhibited &&
+      routeType !== "MECHANICAL_SELECTION" &&
+      routeType !== "DETERMINISTIC_BYPASS" &&
+      routeType !== "POLICY_PROHIBITED" &&
+      routeType !== "STAFF_DEFERRED" &&
+      turnAttempts.length > 0;
+
     const capturedModelExtraction =
-      capturedAi && !isPolicyProhibited && capturedAi.extraction
+      capturedAi && isModelGenerated && capturedAi.extraction
         ? { ...capturedAi.extraction }
         : null;
     const capturedModelFactUpdates =
-      capturedAi && !isPolicyProhibited && capturedAi.factUpdates
+      capturedAi && isModelGenerated && capturedAi.factUpdates
         ? (capturedAi.factUpdates as any[])
         : null;
     const reconciledFacts = stateAfter?.knownFacts

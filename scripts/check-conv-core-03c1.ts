@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import { execSync } from "node:child_process";
+
 import {
   runCurrentEngineScenario,
   validateLiveOperatorLimits,
@@ -862,6 +864,22 @@ async function runAcceptanceSuite(): Promise<void> {
       telemetryProhibitedTrace.turns[0]?.processing.currentEngine?.routing
         .observedModel === null,
   );
+  check(
+    "18d. Mechanical selection has no model extraction or model fact updates",
+    trace11.turns[1]?.processing.currentEngine?.semantic.modelExtraction ===
+      null &&
+      trace11.turns[1]?.processing.currentEngine?.semantic.modelFactUpdates ===
+        null,
+  );
+  check(
+    "18e. Configured provider/model cannot masquerade as observed values when no call ran",
+    trace11.turns[1]?.processing.currentEngine?.routing.observedProvider ===
+      null &&
+      trace11.turns[1]?.processing.currentEngine?.routing.observedModel ===
+        null &&
+      trace11.turns[1]?.processing.currentEngine?.routing.configuredProvider ===
+        "openrouter",
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 19. Per-attempt usage completeness (failed attempt without usage + successful retry with usage)
@@ -933,6 +951,66 @@ async function runAcceptanceSuite(): Promise<void> {
       retryTrace.metrics.knownTokensSubtotal?.totalTokens === 180,
   );
 
+  // 19d: Partially populated usage object (missing prompt/completion tokens)
+  const partialFieldsFetch: typeof fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-partial-fields-test",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                intent: "BOOKING",
+                action: "booking_handoff",
+                content: "متاح",
+                summary: "حجز",
+                extraction: { service: "كشف أسنان", date: "2026-10-21" },
+                factUpdates: [
+                  { key: "service", operation: "set", value: "كشف أسنان" },
+                  { key: "date", operation: "set", value: "2026-10-21" },
+                ],
+              }),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        // Missing prompt_tokens and completion_tokens:
+        usage: { total_tokens: 120 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  const partialFieldsTrace = await runCurrentEngineScenario(scenario01, {
+    live: true,
+    upstreamFetch: partialFieldsFetch,
+    operatorLimits: {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test partial fields completeness",
+    },
+  });
+
+  check(
+    "19d. Usage object with missing prompt/completion fields reports completeness PARTIAL",
+    partialFieldsTrace.turns[0]?.processing.measuredUsage?.completeness ===
+      "PARTIAL",
+  );
+  check(
+    "19e. Missing prompt/completion components stay null without coercing ?? 0",
+    partialFieldsTrace.turns[0]?.processing.measuredUsage?.promptTokens ===
+      null &&
+      partialFieldsTrace.turns[0]?.processing.measuredUsage
+        ?.completionTokens === null &&
+      partialFieldsTrace.turns[0]?.processing.measuredUsage?.totalTokens ===
+        120,
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
   // 20. Evaluation Verdict Integrity
   // ─────────────────────────────────────────────────────────────────────────────
@@ -959,6 +1037,20 @@ async function runAcceptanceSuite(): Promise<void> {
       ),
   );
 
+  let cliExitCode = 0;
+  try {
+    execSync(
+      "pnpm tsx scripts/convo-playground.ts --mode current_engine --scenario UNKNOWN_SCENARIO_XYZ",
+      { stdio: "pipe" },
+    );
+  } catch (err: any) {
+    cliExitCode = err.status ?? 1;
+  }
+  check(
+    "20b. Deliberate failure in playground CLI results in non-zero exit code",
+    cliExitCode !== 0,
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
   // 21. Tracked known defect CE-13: False sensitive handoff on dialectal phrase 'مش مشكلة'
   // ─────────────────────────────────────────────────────────────────────────────
@@ -977,6 +1069,30 @@ async function runAcceptanceSuite(): Promise<void> {
     trace13.turns[1]?.assistantAction === "AI_HANDOFF" &&
       trace13.turns[1]?.processing.currentEngine?.domainResult.handoffCause ===
         "SENSITIVE_OR_RESTRICTED",
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 22. Complete offline Egyptian Arabic scenario corpus (CE-01 to CE-13)
+  // ─────────────────────────────────────────────────────────────────────────────
+  check(
+    "22a. Scenario corpus contains exactly 13 Egyptian Arabic scenarios",
+    EGYPTIAN_ARABIC_SCENARIOS.length === 13,
+  );
+
+  let corpusAllPassed = true;
+  const failingCorpusScenarios: string[] = [];
+  for (const s of EGYPTIAN_ARABIC_SCENARIOS) {
+    const t = await runCurrentEngineScenario(s);
+    if (t.verdict !== "PASS") {
+      corpusAllPassed = false;
+      failingCorpusScenarios.push(`${s.id}: ${t.failureReason}`);
+    }
+  }
+
+  check(
+    "22b. All 13 offline Egyptian scenarios pass current-engine execution",
+    corpusAllPassed,
+    failingCorpusScenarios,
   );
 
   // ─────────────────────────────────────────────────────────────────────────────

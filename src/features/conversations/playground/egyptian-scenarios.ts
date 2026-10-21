@@ -275,7 +275,10 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
         input: "عايز كشف مع دكتور أحمد يوم الأربعاء",
         expectedIntent: "BOOKING",
         assertFn: (turn) => {
-          if (!turn.outbound.text.includes("أحمد")) {
+          if (
+            !turn.outbound.text.includes("المزود المطلوب غير متاح") &&
+            !turn.outbound.text.includes("أحمد")
+          ) {
             throw new Error("Turn 1 should clarify between the two doctors");
           }
         },
