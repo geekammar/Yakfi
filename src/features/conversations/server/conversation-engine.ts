@@ -781,6 +781,7 @@ function resolveFinishedTurn(
    */
   turnTelemetry?: AiTelemetry | null,
   priorState?: ConversationState | null,
+  isStructuredSemanticTurn?: boolean,
 ): { plan: ResolvedTurn; state: ConversationState } | null {
   if (!decision) return null;
   try {
@@ -850,11 +851,11 @@ function resolveFinishedTurn(
 
     // CONV-CORE-02 / CORE-03A: Explicit unambiguous date in current turn (colloquial Egyptian date or ISO).
     // Reconciled semantic factUpdates/extraction are authoritative — only run lexical helper if date was NOT touched.
-    const dateRes = resolveEgyptianRelativeDateDetailed(
-      currentMessage,
-      todayIso,
-    );
-    if (!turnReconciled.isTouched("date")) {
+    // CORE-03B2B1: On structured semantic turns, prose must not supply or drop date.
+    const dateRes = isStructuredSemanticTurn
+      ? { positiveDate: null, negatedDates: [] as string[] }
+      : resolveEgyptianRelativeDateDetailed(currentMessage, todayIso);
+    if (!isStructuredSemanticTurn && !turnReconciled.isTouched("date")) {
       if (dateRes.positiveDate) {
         factUpdates.push({
           key: "date",
@@ -875,8 +876,17 @@ function resolveFinishedTurn(
 
     // Explicit unambiguous time of day preference in current turn.
     // Reconciled semantic factUpdates/extraction are authoritative — only run lexical helper if timePreference was NOT touched.
-    const timeRes = extractTimeOfDayPreferenceDetailed(currentMessage);
-    if (!turnReconciled.isTouched("timePreference")) {
+    // CORE-03B2B1: On structured semantic turns, prose must not supply or drop timePreference.
+    const timeRes = isStructuredSemanticTurn
+      ? {
+          positiveTime: null,
+          negatedTimes: [] as Array<"morning" | "afternoon" | "evening">,
+        }
+      : extractTimeOfDayPreferenceDetailed(currentMessage);
+    if (
+      !isStructuredSemanticTurn &&
+      !turnReconciled.isTouched("timePreference")
+    ) {
       if (timeRes.positiveTime) {
         factUpdates.push({
           key: "timePreference",
@@ -899,8 +909,11 @@ function resolveFinishedTurn(
 
     // Explicit provider preference in current turn.
     // Reconciled semantic factUpdates/extraction are authoritative — only run lexical helper if provider was NOT touched.
-    const provRes = extractProviderPreferenceDetailed(currentMessage);
-    if (!turnReconciled.isTouched("provider")) {
+    // CORE-03B2B1: On structured semantic turns, prose must not supply or drop provider.
+    const provRes = isStructuredSemanticTurn
+      ? { positiveProvider: null, negatedProviders: [] as string[] }
+      : extractProviderPreferenceDetailed(currentMessage);
+    if (!isStructuredSemanticTurn && !turnReconciled.isTouched("provider")) {
       if (provRes.positiveProvider) {
         factUpdates.push({
           key: "provider",
@@ -935,6 +948,8 @@ function resolveFinishedTurn(
     // turn keeps safety precedence, and an explicit escalation (the model asked
     // for a human) is a benign interruption to PRESERVE (rule 6), never a fact —
     // so neither is silently bound as a booking fact.
+    // CORE-03B2B1: Scoped booking facts (date, timePreference, provider) must not
+    // be bound from arbitrary customer prose after AI on structured semantic turns.
     const modelEscalatesHuman =
       decision.intent === "HUMAN_REQUEST" ||
       decision.handoffReason === "HUMAN_REQUEST";
@@ -956,14 +971,20 @@ function resolveFinishedTurn(
         turnReconciled.isRemoved(missing) ||
         base.knownFacts[missing] != null;
       const trimmed = currentMessage.trim();
-      if (!alreadySupplied && trimmed.length > 0) {
-        if (missing === "date") {
-          const iso = resolveEgyptianRelativeDate(currentMessage, todayIso);
-          if (iso) {
-            factUpdates.push({ key: missing, value: iso });
+      const isScopedFact =
+        missing === "date" ||
+        missing === "timePreference" ||
+        missing === "provider";
+      if (!isStructuredSemanticTurn || !isScopedFact) {
+        if (!alreadySupplied && trimmed.length > 0) {
+          if (missing === "date") {
+            const iso = resolveEgyptianRelativeDate(currentMessage, todayIso);
+            if (iso) {
+              factUpdates.push({ key: missing, value: iso });
+            }
+          } else {
+            factUpdates.push({ key: missing, value: trimmed });
           }
-        } else {
-          factUpdates.push({ key: missing, value: trimmed });
         }
       }
     }
@@ -972,7 +993,8 @@ function resolveFinishedTurn(
     // ONLY for legacy unmanaged initialization (when valid durable priorState is absent).
     // When priorState is loaded, durable knownFacts is authoritative and deleted/cleared facts
     // must not be repeatedly reconstructed from older conversation text.
-    if (!priorState) {
+    // CORE-03B2B1: On structured semantic turns, history scans must not reconstruct scoped facts.
+    if (!priorState && !isStructuredSemanticTurn) {
       if (
         !turnReconciled.isTouched("date") &&
         !factUpdates.some((u) => u.key === "date") &&
@@ -2787,6 +2809,17 @@ async function runInboundTurn(
         : deps.ai.providerName === "deterministic"
           ? "DETERMINISTIC"
           : "LLM";
+
+    // CORE-03B2B1: Identify the structured semantic path precisely.
+    // Reuses server-derived capability and verified generative response provenance.
+    const isStructuredSemanticTurn =
+      effectiveCapability === "structured_turn" &&
+      !deterministicBypass &&
+      turnRouting === "LLM" &&
+      turnTelemetry?.finalProvider !== "deterministic" &&
+      deps.ai.providerName !== "deterministic" &&
+      validated !== null;
+
     // PROMPT-AI-ARCH-05 (Slice 3): the ONE deterministic resolver's ordered
     // single-goal TurnPlan. PROMPT-AI-ARCH-06 (Slice 4): its `decisionClass`
     // is AUTHORITATIVE for the first-class CLARIFY branch below; every other
@@ -2800,6 +2833,7 @@ async function runInboundTurn(
       business.timezone,
       turnTelemetry,
       turnSession.state,
+      isStructuredSemanticTurn,
     );
     const resolvedTurn = resolution?.plan ?? null;
     let resolvedState = resolution?.state ?? null;
@@ -3092,318 +3126,475 @@ async function runInboundTurn(
           };
 
       const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
-      const turnDateRes = resolveEgyptianRelativeDateDetailed(
-        inbound.text,
-        todayIso,
-      );
-      if (turnReconciled.isTouched("date")) {
-        if (turnReconciled.isRemoved("date")) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              date: null,
-            },
-          };
-          if (resolvedState) {
-            const nextFacts = { ...resolvedState.knownFacts };
-            delete nextFacts.date;
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: nextFacts,
-              selectedDate: null,
+
+      if (isStructuredSemanticTurn) {
+        // CORE-03B2B1: On structured semantic turns, validated AI proposals and authoritative
+        // durable state are the sole sources of date, timePreference, and provider facts.
+        // Customer prose must not be reinterpreted to invent, replace, remove, or restore those facts.
+
+        // Date handling: authoritative state / explicit turn proposals only
+        if (turnReconciled.isTouched("date")) {
+          if (turnReconciled.isRemoved("date")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                date: null,
+              },
             };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
             }
-          }
-        } else {
-          const explicitDate =
-            turnReconciled.setFacts.get("date")?.value ??
-            bookingAiResponse.extraction.date ??
-            null;
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              date: explicitDate,
-            },
-          };
-          if (resolvedState && explicitDate) {
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: {
-                ...resolvedState.knownFacts,
+          } else {
+            const explicitDate =
+              turnReconciled.setFacts.get("date")?.value ??
+              bookingAiResponse.extraction.date ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
                 date: explicitDate,
               },
-              selectedDate: explicitDate,
             };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
-            }
-          }
-        }
-      } else if (!bookingAiResponse.extraction.date) {
-        let relDate = turnDateRes.positiveDate;
-        // Legacy fallback only: if durable state is not active, scan older customer messages
-        const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
-        if (
-          !relDate &&
-          isLegacyUnmanaged &&
-          recentChronological &&
-          turnDateRes.negatedDates.length === 0
-        ) {
-          const historyNegatedDates: string[] = [...turnDateRes.negatedDates];
-          for (let i = recentChronological.length - 1; i >= 0; i--) {
-            const m = recentChronological[i]!;
-            if (m.senderType === "CUSTOMER") {
-              const detailed = resolveEgyptianRelativeDateDetailed(
-                m.content,
-                todayIso,
-              );
-              for (const nd of detailed.negatedDates) {
-                if (!historyNegatedDates.includes(nd)) {
-                  historyNegatedDates.push(nd);
-                }
-              }
-              if (
-                detailed.positiveDate &&
-                !historyNegatedDates.includes(detailed.positiveDate)
-              ) {
-                relDate = detailed.positiveDate;
-                break;
+            if (resolvedState && explicitDate) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  date: explicitDate,
+                },
+                selectedDate: explicitDate,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
               }
             }
           }
         }
-        if (relDate) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              date: relDate,
-            },
-          };
-        }
-      }
 
-      const turnTimeRes = extractTimeOfDayPreferenceDetailed(inbound.text);
-      if (turnReconciled.isTouched("timePreference")) {
-        if (turnReconciled.isRemoved("timePreference")) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              timePreference: null,
-            },
-          };
-          if (resolvedState) {
-            const nextFacts = { ...resolvedState.knownFacts };
-            delete nextFacts.timePreference;
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: nextFacts,
-              selectedTimePref: null,
-            };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
-            }
-          }
-        } else {
-          const explicitTime =
-            turnReconciled.setFacts.get("timePreference")?.value ??
-            bookingAiResponse.extraction.timePreference ??
-            null;
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              timePreference: explicitTime ?? null,
-            },
-          };
-          if (resolvedState && explicitTime) {
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: {
-                ...resolvedState.knownFacts,
-                timePreference: explicitTime,
+        // Time preference handling: authoritative state / explicit turn proposals only
+        if (turnReconciled.isTouched("timePreference")) {
+          if (turnReconciled.isRemoved("timePreference")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                timePreference: null,
               },
-              selectedTimePref: explicitTime,
             };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.timePreference;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedTimePref: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          } else {
+            const explicitTime =
+              turnReconciled.setFacts.get("timePreference")?.value ??
+              bookingAiResponse.extraction.timePreference ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                timePreference: explicitTime ?? null,
+              },
+            };
+            if (resolvedState && explicitTime) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  timePreference: explicitTime,
+                },
+                selectedTimePref: explicitTime,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
             }
           }
         }
-      } else if (!bookingAiResponse.extraction.timePreference) {
-        let timePref = turnTimeRes.positiveTime;
-        const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
-        if (
-          !timePref &&
-          isLegacyUnmanaged &&
-          recentChronological &&
-          turnTimeRes.negatedTimes.length === 0
-        ) {
-          const historyNegatedTimes: Array<
-            "morning" | "afternoon" | "evening"
-          > = [...turnTimeRes.negatedTimes];
-          for (let i = recentChronological.length - 1; i >= 0; i--) {
-            const m = recentChronological[i]!;
-            if (m.senderType === "CUSTOMER") {
-              const detailed = extractTimeOfDayPreferenceDetailed(m.content);
-              for (const nt of detailed.negatedTimes) {
-                if (!historyNegatedTimes.includes(nt)) {
-                  historyNegatedTimes.push(nt);
-                }
-              }
-              if (
-                detailed.positiveTime &&
-                !historyNegatedTimes.includes(detailed.positiveTime)
-              ) {
-                timePref = detailed.positiveTime;
-                break;
-              }
-            }
-          }
-        }
-        if (timePref) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              timePreference: timePref,
-            },
-          };
-        }
-      }
 
-      // Provider resolution: One reconciled authoritative fact set for saved state and booking input (CORE-03A).
-      if (turnReconciled.isTouched("provider")) {
-        if (turnReconciled.isRemoved("provider")) {
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              provider: null,
-            },
-          };
-          if (resolvedState) {
-            const nextFacts = { ...resolvedState.knownFacts };
-            delete nextFacts.provider;
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: nextFacts,
-              providerPreference: null,
+        // Provider handling: authoritative state / explicit turn proposals only
+        if (turnReconciled.isTouched("provider")) {
+          if (turnReconciled.isRemoved("provider")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                provider: null,
+              },
             };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.provider;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                providerPreference: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
             }
-          }
-        } else {
-          const explicitProvider =
-            turnReconciled.setFacts.get("provider")?.value ??
-            bookingAiResponse.extraction.provider ??
-            null;
-          bookingAiResponse = {
-            ...bookingAiResponse,
-            extraction: {
-              ...bookingAiResponse.extraction,
-              provider: explicitProvider,
-            },
-          };
-          if (resolvedState && explicitProvider) {
-            resolvedState = {
-              ...resolvedState,
-              knownFacts: {
-                ...resolvedState.knownFacts,
+          } else {
+            const explicitProvider =
+              turnReconciled.setFacts.get("provider")?.value ??
+              bookingAiResponse.extraction.provider ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
                 provider: explicitProvider,
               },
-              providerPreference: explicitProvider,
             };
-            if (turnSession.enabled) {
-              turnSession.state = resolvedState;
+            if (resolvedState && explicitProvider) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  provider: explicitProvider,
+                },
+                providerPreference: explicitProvider,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
             }
           }
         }
       } else {
-        // No current validated provider update: manage carried preferences,
-        // removals of stale rejected preferences, and genuine corrections.
-        let provider = bookingAiResponse.extraction.provider ?? null;
-        const turnProvRes = extractProviderPreferenceDetailed(inbound.text);
-
-        if (
-          provider &&
-          turnProvRes.negatedProviders.some((np) => {
-            const normNp = normalizeArabicText(np);
-            const normP = normalizeArabicText(provider!);
-            return (
-              normNp === normP ||
-              normP.includes(normNp) ||
-              normNp.includes(normP)
-            );
-          })
-        ) {
-          provider = null;
-        }
-
-        const sameDoctorRequested =
-          /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
-            inbound.text,
-          );
-        if (sameDoctorRequested && !provider) {
-          if (resolvedState?.knownFacts?.provider) {
-            provider = resolvedState.knownFacts.provider;
-          } else if (
-            deps.appointmentRepository &&
-            typeof deps.appointmentRepository.listRecentByCustomer ===
-              "function"
-          ) {
-            const recent =
-              await deps.appointmentRepository.listRecentByCustomer(
-                business.id,
-                customer.id,
-                1,
-              );
-            const firstRecent = recent?.[0];
-            if (firstRecent && firstRecent.providerId) {
-              const pId = firstRecent.providerId;
-              const provRepo = deps.providerRepository ?? providerRepository;
-              const providers = await provRepo.listEligibleForService(
-                business.id,
-                firstRecent.serviceId,
-              );
-              const matchedP = providers.find((p) => p.id === pId);
-              if (matchedP) {
-                provider = matchedP.name ?? null;
+        const turnDateRes = resolveEgyptianRelativeDateDetailed(
+          inbound.text,
+          todayIso,
+        );
+        if (turnReconciled.isTouched("date")) {
+          if (turnReconciled.isRemoved("date")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                date: null,
+              },
+            };
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          } else {
+            const explicitDate =
+              turnReconciled.setFacts.get("date")?.value ??
+              bookingAiResponse.extraction.date ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                date: explicitDate,
+              },
+            };
+            if (resolvedState && explicitDate) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  date: explicitDate,
+                },
+                selectedDate: explicitDate,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
               }
             }
           }
-        } else if (turnProvRes.positiveProvider) {
-          provider = turnProvRes.positiveProvider;
+        } else if (!bookingAiResponse.extraction.date) {
+          let relDate = turnDateRes.positiveDate;
+          // Legacy fallback only: if durable state is not active, scan older customer messages
+          const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
+          if (
+            !relDate &&
+            isLegacyUnmanaged &&
+            recentChronological &&
+            turnDateRes.negatedDates.length === 0
+          ) {
+            const historyNegatedDates: string[] = [...turnDateRes.negatedDates];
+            for (let i = recentChronological.length - 1; i >= 0; i--) {
+              const m = recentChronological[i]!;
+              if (m.senderType === "CUSTOMER") {
+                const detailed = resolveEgyptianRelativeDateDetailed(
+                  m.content,
+                  todayIso,
+                );
+                for (const nd of detailed.negatedDates) {
+                  if (!historyNegatedDates.includes(nd)) {
+                    historyNegatedDates.push(nd);
+                  }
+                }
+                if (
+                  detailed.positiveDate &&
+                  !historyNegatedDates.includes(detailed.positiveDate)
+                ) {
+                  relDate = detailed.positiveDate;
+                  break;
+                }
+              }
+            }
+          }
+          if (relDate) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                date: relDate,
+              },
+            };
+          }
         }
 
-        bookingAiResponse = {
-          ...bookingAiResponse,
-          extraction: {
-            ...bookingAiResponse.extraction,
-            provider,
-          },
-        };
-
-        if (resolvedState) {
-          const nextFacts = { ...resolvedState.knownFacts };
-          if (provider) {
-            nextFacts.provider = provider;
+        const turnTimeRes = extractTimeOfDayPreferenceDetailed(inbound.text);
+        if (turnReconciled.isTouched("timePreference")) {
+          if (turnReconciled.isRemoved("timePreference")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                timePreference: null,
+              },
+            };
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.timePreference;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedTimePref: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
           } else {
-            delete nextFacts.provider;
+            const explicitTime =
+              turnReconciled.setFacts.get("timePreference")?.value ??
+              bookingAiResponse.extraction.timePreference ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                timePreference: explicitTime ?? null,
+              },
+            };
+            if (resolvedState && explicitTime) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  timePreference: explicitTime,
+                },
+                selectedTimePref: explicitTime,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
           }
-          resolvedState = {
-            ...resolvedState,
-            knownFacts: nextFacts,
-            providerPreference: provider,
+        } else if (!bookingAiResponse.extraction.timePreference) {
+          let timePref = turnTimeRes.positiveTime;
+          const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
+          if (
+            !timePref &&
+            isLegacyUnmanaged &&
+            recentChronological &&
+            turnTimeRes.negatedTimes.length === 0
+          ) {
+            const historyNegatedTimes: Array<
+              "morning" | "afternoon" | "evening"
+            > = [...turnTimeRes.negatedTimes];
+            for (let i = recentChronological.length - 1; i >= 0; i--) {
+              const m = recentChronological[i]!;
+              if (m.senderType === "CUSTOMER") {
+                const detailed = extractTimeOfDayPreferenceDetailed(m.content);
+                for (const nt of detailed.negatedTimes) {
+                  if (!historyNegatedTimes.includes(nt)) {
+                    historyNegatedTimes.push(nt);
+                  }
+                }
+                if (
+                  detailed.positiveTime &&
+                  !historyNegatedTimes.includes(detailed.positiveTime)
+                ) {
+                  timePref = detailed.positiveTime;
+                  break;
+                }
+              }
+            }
+          }
+          if (timePref) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                timePreference: timePref,
+              },
+            };
+          }
+        }
+
+        // Provider resolution: One reconciled authoritative fact set for saved state and booking input (CORE-03A).
+        if (turnReconciled.isTouched("provider")) {
+          if (turnReconciled.isRemoved("provider")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                provider: null,
+              },
+            };
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.provider;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                providerPreference: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          } else {
+            const explicitProvider =
+              turnReconciled.setFacts.get("provider")?.value ??
+              bookingAiResponse.extraction.provider ??
+              null;
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                provider: explicitProvider,
+              },
+            };
+            if (resolvedState && explicitProvider) {
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: {
+                  ...resolvedState.knownFacts,
+                  provider: explicitProvider,
+                },
+                providerPreference: explicitProvider,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          }
+        } else {
+          // No current validated provider update: manage carried preferences,
+          // removals of stale rejected preferences, and genuine corrections.
+          let provider = bookingAiResponse.extraction.provider ?? null;
+          const turnProvRes = extractProviderPreferenceDetailed(inbound.text);
+
+          if (
+            provider &&
+            turnProvRes.negatedProviders.some((np) => {
+              const normNp = normalizeArabicText(np);
+              const normP = normalizeArabicText(provider!);
+              return (
+                normNp === normP ||
+                normP.includes(normNp) ||
+                normNp.includes(normP)
+              );
+            })
+          ) {
+            provider = null;
+          }
+
+          const sameDoctorRequested =
+            /(?:نفس\s+(?:الدكتور|الطبيب|الدكتورة|الطبيبة|المقدم)|مع\s+نفس)/.test(
+              inbound.text,
+            );
+          if (sameDoctorRequested && !provider) {
+            if (resolvedState?.knownFacts?.provider) {
+              provider = resolvedState.knownFacts.provider;
+            } else if (
+              deps.appointmentRepository &&
+              typeof deps.appointmentRepository.listRecentByCustomer ===
+                "function"
+            ) {
+              const recent =
+                await deps.appointmentRepository.listRecentByCustomer(
+                  business.id,
+                  customer.id,
+                  1,
+                );
+              const firstRecent = recent?.[0];
+              if (firstRecent && firstRecent.providerId) {
+                const pId = firstRecent.providerId;
+                const provRepo = deps.providerRepository ?? providerRepository;
+                const providers = await provRepo.listEligibleForService(
+                  business.id,
+                  firstRecent.serviceId,
+                );
+                const matchedP = providers.find((p) => p.id === pId);
+                if (matchedP) {
+                  provider = matchedP.name ?? null;
+                }
+              }
+            }
+          } else if (turnProvRes.positiveProvider) {
+            provider = turnProvRes.positiveProvider;
+          }
+
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              provider,
+            },
           };
-          if (turnSession.enabled) {
-            turnSession.state = resolvedState;
+
+          if (resolvedState) {
+            const nextFacts = { ...resolvedState.knownFacts };
+            if (provider) {
+              nextFacts.provider = provider;
+            } else {
+              delete nextFacts.provider;
+            }
+            resolvedState = {
+              ...resolvedState,
+              knownFacts: nextFacts,
+              providerPreference: provider,
+            };
+            if (turnSession.enabled) {
+              turnSession.state = resolvedState;
+            }
           }
         }
       }
@@ -3977,10 +4168,14 @@ async function runInboundTurn(
           delivery,
         };
       }
-      const timeOfDayPref = turnReconciled.isTouched("timePreference")
+      // CORE-03B2B1: Final time-preference filtering on structured semantic turns respects
+      // validated extraction / durable state only — never reinterprets raw inbound prose.
+      const timeOfDayPref = isStructuredSemanticTurn
         ? (bookingAiResponse.extraction.timePreference ?? null)
-        : (bookingAiResponse.extraction.timePreference ??
-          extractTimeOfDayPreference(inbound.text));
+        : turnReconciled.isTouched("timePreference")
+          ? (bookingAiResponse.extraction.timePreference ?? null)
+          : (bookingAiResponse.extraction.timePreference ??
+            extractTimeOfDayPreference(inbound.text));
 
       let bookableOptions = bookingResult.data.options;
       if (timeOfDayPref) {
