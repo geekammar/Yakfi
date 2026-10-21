@@ -13,7 +13,8 @@ export type PlaygroundArchitecture =
   | "TYPESAFE_JEV_GOAL_DRIVEN"
   | "AGENT_C"
   | "DETERMINISTIC_BASELINE"
-  | "FULL_AGENT";
+  | "FULL_AGENT"
+  | "CURRENT_ENGINE";
 
 export type InboundChannel = "WHATSAPP" | "TELEGRAM";
 
@@ -104,6 +105,92 @@ export type TurnProcessing = {
     completionTokens: number;
     totalTokens: number;
   };
+  /** CORE-03C1: Explicit measurement classification */
+  measuredUsage?: MeasuredTokenUsage;
+  /** CORE-03C1: Current Engine detailed execution record */
+  currentEngine?: CurrentEngineTurnTraceDetails;
+};
+
+export type MeasuredTokenUsageSource =
+  "OFFLINE_FIXTURE" | "LIVE_PROVIDER" | "ESTIMATE" | "UNKNOWN";
+
+export type MeasuredTokenUsage = {
+  source: MeasuredTokenUsageSource;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  isEstimate: boolean;
+};
+
+export type CurrentEngineHttpAttemptTrace = {
+  index: number;
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+  timestamp: string;
+  sanitizedHeaders: Record<string, string>;
+  error?: string | null;
+};
+
+export type CurrentEngineTurnTraceDetails = {
+  routing: {
+    route:
+      | "STRUCTURED_SEMANTIC"
+      | "MECHANICAL_SELECTION"
+      | "DETERMINISTIC_BYPASS"
+      | "POLICY_PROHIBITED"
+      | "STAFF_DEFERRED";
+    effectiveCapability: string;
+    finalProvider: string | null;
+    finalModel: string | null;
+  };
+  semantic: {
+    intent: string | null;
+    extraction: Record<string, any> | null;
+    factUpdates: Array<{
+      field: string;
+      operation: string;
+      value?: any;
+    }> | null;
+  };
+  task: {
+    activeTask: string | null;
+    missingFacts: string[];
+    currentGoal: string | null;
+  };
+  offerTransition: {
+    offerBefore: any | null;
+    offerAfter: any | null;
+    transition: string;
+  };
+  availabilityQueries: Array<{
+    businessId: string;
+    date: string;
+    assigneeIds: string[];
+  }>;
+  domainResult: {
+    action: "AI_REPLY" | "AI_HANDOFF" | "DEFERRED_TO_STAFF";
+    conversationStatus: ConversationStatus;
+    clarificationCause?: string | null;
+    handoffCause?: string | null;
+    preventedConflict?: boolean;
+    createdAppointment?: any | null;
+  };
+  httpAttempts: {
+    count: number;
+    attempts: CurrentEngineHttpAttemptTrace[];
+  };
+  tokenUsage: MeasuredTokenUsage;
+};
+
+export type LiveOperatorLimits = {
+  scenarioSubset: string[];
+  maxPhysicalHttpAttempts: number;
+  outputTokenLimit: number;
+  timeoutMs: number;
+  approvedBudgetUsd: number;
+  budgetBasis: string;
 };
 
 export type TurnOutbound = {
@@ -127,6 +214,8 @@ export type TurnTrace = {
   turnIndex: number; // 1-based index
   turnId: string;
   timestamp: string; // ISO
+  referenceTime?: string;
+  timezone?: string;
   inbound: TurnInbound;
   stateBefore: Partial<ConversationState> | null;
   processing: TurnProcessing;

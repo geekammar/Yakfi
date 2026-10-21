@@ -5,3 +5,9 @@ process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 process.env.CRON_SECRET ??= "test-cron-secret";
+if (
+  !process.env.OPENROUTER_API_KEY ||
+  process.env.OPENROUTER_API_KEY.trim().length === 0
+) {
+  process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+}

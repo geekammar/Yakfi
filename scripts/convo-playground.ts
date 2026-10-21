@@ -15,7 +15,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import type { EgyptianScenarioDefinition } from "../src/features/conversations/playground/egyptian-scenarios";
 import type {
+  ScenarioDefinition,
   ScenarioTrace,
   TurnTrace,
 } from "../src/features/conversations/playground/types";
@@ -73,6 +75,51 @@ function printTurn(turn: TurnTrace, inspectMode = false): void {
   );
 
   if (inspectMode) {
+    if (turn.processing.currentEngine) {
+      const ce = turn.processing.currentEngine;
+      console.log(
+        `\n  --- CURRENT ENGINE EXECUTION INSPECTION (CORE-03C1) ---`,
+      );
+      console.log(`  1. Customer Message        : "${turn.inbound.text}"`);
+      console.log(
+        `  2. Canonical Time / TZ     : ${turn.referenceTime ?? "N/A"} (${turn.timezone ?? "Africa/Cairo"})`,
+      );
+      console.log(
+        `  3. Routing & Capability    : ${ce.routing.route} [${ce.routing.effectiveCapability}]`,
+      );
+      console.log(
+        `  4. Provider / Model        : ${ce.routing.finalProvider} / ${ce.routing.finalModel}`,
+      );
+      console.log(`  5. Physical HTTP Attempts  : ${ce.httpAttempts.count}`);
+      console.log(
+        `  6. Measured Token Usage    : ${ce.tokenUsage.source} -> in=${ce.tokenUsage.promptTokens ?? "unknown"} out=${ce.tokenUsage.completionTokens ?? "unknown"} total=${ce.tokenUsage.totalTokens ?? "unknown"}`,
+      );
+      console.log(
+        `  7. Durable State Before    : ${JSON.stringify(turn.stateBefore?.knownFacts ?? turn.stateBefore)}`,
+      );
+      console.log(
+        `  8. Durable State After     : ${JSON.stringify(turn.stateAfter?.knownFacts ?? turn.stateAfter)}`,
+      );
+      console.log(
+        `  9. Task & Missing Facts    : task=${ce.task.activeTask ?? "none"} | missing=[${ce.task.missingFacts.join(", ")}]`,
+      );
+      console.log(
+        `  10. Offer Transition       : ${ce.offerTransition.transition}`,
+      );
+      console.log(
+        `  11. Availability Queries   : ${JSON.stringify(ce.availabilityQueries)}`,
+      );
+      console.log(`  12. Customer-Visible Reply :`);
+      const lines = turn.outbound.text.split("\n");
+      for (const l of lines) {
+        console.log(`       ${l}`);
+      }
+      console.log(
+        `  13. Domain Result          : Action=${ce.domainResult.action} | Status=${ce.domainResult.conversationStatus}${ce.domainResult.clarificationCause ? ` | Clarify=${ce.domainResult.clarificationCause}` : ""}${ce.domainResult.handoffCause ? ` | Handoff=${ce.domainResult.handoffCause}` : ""}`,
+      );
+      console.log(`  -------------------------------------`);
+      return;
+    }
     console.log(`\n  --- STEP F DIAGNOSTICS INSPECTION ---`);
     console.log(`  1. Customer Message        : "${turn.inbound.text}"`);
     console.log(
@@ -174,6 +221,10 @@ function printTurn(turn: TurnTrace, inspectMode = false): void {
 async function main(): Promise<void> {
   const { GOLDEN_SCENARIOS } =
     await import("../src/features/conversations/playground/golden-scenarios");
+  const { EGYPTIAN_ARABIC_SCENARIOS } =
+    await import("../src/features/conversations/playground/egyptian-scenarios");
+  const { runCurrentEngineScenario, validateLiveOperatorLimits } =
+    await import("../src/features/conversations/playground/current-engine-runner");
   const { runHybridScenario } =
     await import("../src/features/conversations/playground/hybrid-runner");
   const { runGoalDrivenScenario } =
@@ -191,6 +242,8 @@ async function main(): Promise<void> {
   const isCompare = args.includes("--compare");
   const isLive = args.includes("--live");
   const isInspect = args.includes("--inspect");
+  const isPreflight =
+    args.includes("--preflight") || args.includes("--dry-run");
   const filterFailed = args.includes("--failed-only");
   const filterClarifications = args.includes("--clarifications-only");
   const filterHandoffs = args.includes("--handoffs-only");
@@ -200,24 +253,72 @@ async function main(): Promise<void> {
   const scenarioIdx = args.indexOf("--scenario");
   const modeIdx = args.indexOf("--mode");
   const outIdx = args.indexOf("--out");
+  const maxReqIdx = args.indexOf("--max-requests");
+  const maxTokensIdx = args.indexOf("--max-tokens");
+  const timeoutIdx = args.indexOf("--timeout");
+  const budgetIdx = args.indexOf("--budget");
+  const budgetBasisIdx = args.indexOf("--budget-basis");
+  const scenariosIdx = args.indexOf("--scenarios");
+
+  const maxRequests =
+    maxReqIdx !== -1 && args[maxReqIdx + 1]
+      ? parseInt(args[maxReqIdx + 1]!, 10)
+      : undefined;
+  const maxTokens =
+    maxTokensIdx !== -1 && args[maxTokensIdx + 1]
+      ? parseInt(args[maxTokensIdx + 1]!, 10)
+      : undefined;
+  const timeoutMs =
+    timeoutIdx !== -1 && args[timeoutIdx + 1]
+      ? parseInt(args[timeoutIdx + 1]!, 10)
+      : undefined;
+  const approvedBudgetUsd =
+    budgetIdx !== -1 && args[budgetIdx + 1]
+      ? parseFloat(args[budgetIdx + 1]!)
+      : undefined;
+  const budgetBasis =
+    budgetBasisIdx !== -1 && args[budgetBasisIdx + 1]
+      ? args[budgetBasisIdx + 1]!
+      : undefined;
+  const scenariosArg =
+    scenariosIdx !== -1 && args[scenariosIdx + 1]
+      ? args[scenariosIdx + 1]!.toLowerCase()
+      : undefined;
 
   const tracesDir =
     outIdx !== -1 && args[outIdx + 1] ? args[outIdx + 1]! : DEFAULT_TRACES_DIR;
-  const mode =
+  const rawMode =
     modeIdx !== -1 && args[modeIdx + 1]
       ? args[modeIdx + 1]!.toLowerCase()
-      : isLive
-        ? "typesafe_jev"
-        : "hybrid";
+      : null;
+  const mode =
+    rawMode === "current_engine" || rawMode === "current-engine"
+      ? "current_engine"
+      : rawMode
+        ? rawMode
+        : isLive
+          ? "typesafe_jev"
+          : "hybrid";
 
   console.log("========================================================");
-  console.log("  FLOWPILOT CONVERSATION PLAYGROUND (CONV-JEV-01)");
-  console.log("  Real TypeSafe JEV Default Engine & Benchmark Suite");
+  if (mode === "current_engine") {
+    console.log("  FLOWPILOT CONVERSATION PLAYGROUND (CORE-03C1)");
+    console.log("  Current Engine Mode (Merged Conversation Engine Path)");
+  } else {
+    console.log("  FLOWPILOT CONVERSATION PLAYGROUND (CONV-JEV-01)");
+    console.log("  Real TypeSafe JEV Default Engine & Benchmark Suite");
+  }
   console.log("========================================================");
   if (isLive) {
-    console.log(
-      "  MODE: LIVE TypeSafe JEV (typesafe/jev-1.13 via OpenRouter Decisions API)",
-    );
+    if (mode === "current_engine") {
+      console.log(
+        "  MODE: LIVE Current Engine (OpenRouter generative adapter via policy)",
+      );
+    } else {
+      console.log(
+        "  MODE: LIVE TypeSafe JEV (typesafe/jev-1.13 via OpenRouter Decisions API)",
+      );
+    }
   }
 
   // 1. REPLAY MODE
@@ -325,26 +426,140 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 4. SINGLE SCENARIO OR FILTERED RUN
-  let targetScenarios = GOLDEN_SCENARIOS;
+  // 4. PREFLIGHT / DRY-RUN MODE
+  const allScenarios: (ScenarioDefinition | EgyptianScenarioDefinition)[] =
+    mode === "current_engine"
+      ? scenariosArg === "golden"
+        ? GOLDEN_SCENARIOS
+        : EGYPTIAN_ARABIC_SCENARIOS
+      : GOLDEN_SCENARIOS;
+
+  let targetScenarios = allScenarios;
   const scenarioId =
     scenarioIdx !== -1 && args[scenarioIdx + 1] ? args[scenarioIdx + 1]! : null;
 
   if (scenarioId) {
-    const single = GOLDEN_SCENARIOS.find((s) => s.id === scenarioId);
+    const combined = [...EGYPTIAN_ARABIC_SCENARIOS, ...GOLDEN_SCENARIOS];
+    const single = combined.find((s) => s.id === scenarioId);
     if (!single) {
       console.error(
         `Error: Scenario '${scenarioId}' not found. Available IDs:`,
       );
-      console.log(GOLDEN_SCENARIOS.map((s) => s.id).join(", "));
+      console.log(combined.map((s) => s.id).join(", "));
       process.exit(1);
     }
     targetScenarios = [single];
   }
 
+  if (isPreflight) {
+    const opLimits = {
+      scenarioSubset: targetScenarios.map((s) => s.id),
+      maxPhysicalHttpAttempts: maxRequests ?? 25,
+      outputTokenLimit: maxTokens ?? 500,
+      timeoutMs: timeoutMs ?? 15000,
+      approvedBudgetUsd: approvedBudgetUsd ?? 0.05,
+      budgetBasis:
+        budgetBasis ??
+        "12 Egyptian scenarios * ~1.5 turns/scenario * ~1.2k tokens/turn = ~22k tokens on DeepSeek V3 @ $0.14/M in, $0.28/M out -> $0.005 base, capped with 10x safety margin at $0.05",
+    };
+
+    const limitCheck = validateLiveOperatorLimits(opLimits);
+    if (!limitCheck.valid) {
+      console.error(
+        `\n❌ [PREFLIGHT FAILED] Invalid operator limits configuration:`,
+      );
+      console.error(`   ${limitCheck.reason}\n`);
+      process.exit(1);
+    }
+
+    console.log("\n  --- DRY-RUN / PREFLIGHT AUDIT REPORT ---");
+    console.log(`  Preflight Status        : READY FOR OPERATOR APPROVAL`);
+    console.log(`  Evaluation Mode         : ${mode}`);
+    console.log(
+      `  Target Architecture     : Merged Production Conversation Engine`,
+    );
+    console.log(
+      `  Capability Requirement  : structured_turn (production default)`,
+    );
+    console.log(
+      `  Provider / Model        : openrouter / deepseek/deepseek-chat`,
+    );
+    console.log(
+      `  Target Scenarios        : ${targetScenarios.length} scenarios [${targetScenarios.map((s) => s.id).join(", ")}]`,
+    );
+    console.log(
+      `  Max Physical HTTP Calls : ${opLimits.maxPhysicalHttpAttempts}`,
+    );
+    console.log(`  Output Token Limit      : ${opLimits.outputTokenLimit}`);
+    console.log(`  Per-Attempt Timeout     : ${opLimits.timeoutMs}ms`);
+    console.log(
+      `  Approved Budget Cap     : $${opLimits.approvedBudgetUsd.toFixed(2)} USD`,
+    );
+    console.log(`  Cost Estimation Basis   : ${opLimits.budgetBasis}`);
+    console.log(`\n  --- MONETARY ENFORCEMENT METHOD & LIMITATIONS ---`);
+    console.log(
+      `  1. Physical Attempt Boundary: Adapter-level fetchImpl enforces an explicit ceiling on physical HTTP attempts.`,
+    );
+    console.log(
+      `  2. Output Token Setting     : Bounded via OpenAI-compatible max_tokens parameter to prevent runaways.`,
+    );
+    console.log(
+      `  3. Dollar Cap Limitations   : Generative APIs do not offer hard real-time balance webhooks before tokens generate; dollar cap is enforced via (requests * max_tokens) ceiling.`,
+    );
+    console.log(
+      `  4. JEV Spending Flag        : FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET applies strictly to JEV Decisions API and is NOT proof of generative LLM spending caps.`,
+    );
+    console.log(
+      `  5. Execution Safety Status  : PAID LIVE EVALUATION NOT RUN. Zero remote calls made.`,
+    );
+    console.log(`  -----------------------------------------\n`);
+    return;
+  }
+
+  // Live preflight validation before network activity
+  if (isLive && mode === "current_engine") {
+    const missing: string[] = [];
+    if (maxRequests == null) missing.push("--max-requests <positive-int>");
+    if (maxTokens == null) missing.push("--max-tokens <positive-int>");
+    if (timeoutMs == null) missing.push("--timeout <positive-int-ms>");
+    if (approvedBudgetUsd == null)
+      missing.push("--budget <positive-float-usd>");
+    if (!budgetBasis) missing.push("--budget-basis <explanation-string>");
+
+    if (missing.length > 0) {
+      console.error(
+        "\n❌ [LIVE PREFLIGHT BLOCKED] Missing required operator limits before network activity:\n",
+      );
+      for (const m of missing) {
+        console.error(`  - ${m}`);
+      }
+      console.error("\nExample:");
+      console.error(
+        '  pnpm convo:playground --mode current_engine --live --max-requests 25 --max-tokens 500 --timeout 15000 --budget 0.05 --budget-basis "22k tokens <= $0.05"\n',
+      );
+      process.exit(1);
+    }
+  }
+
+  // 5. SINGLE SCENARIO OR FILTERED RUN
   for (const scenario of targetScenarios) {
     let trace: ScenarioTrace;
-    if (mode === "agent_c") {
+    if (mode === "current_engine") {
+      trace = await runCurrentEngineScenario(scenario, {
+        live: isLive,
+        operatorLimits: isLive
+          ? {
+              scenarioSubset: targetScenarios.map((s) => s.id),
+              maxPhysicalHttpAttempts: maxRequests!,
+              outputTokenLimit: maxTokens!,
+              timeoutMs: timeoutMs!,
+              approvedBudgetUsd: approvedBudgetUsd!,
+              budgetBasis: budgetBasis!,
+            }
+          : undefined,
+        inspect: isInspect,
+      });
+    } else if (mode === "agent_c") {
       trace = await runAgentCScenario(scenario);
     } else if (mode === "typesafe_jev" || mode === "jev") {
       trace = await runTypeSafeJevScenario(scenario, { live: isLive });
