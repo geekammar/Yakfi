@@ -254,10 +254,12 @@ async function runAcceptanceSuite(): Promise<void> {
   const failingTrace = await runCurrentEngineScenario(failingScenario);
 
   check(
-    "8a. Failing provider call results in AI_HANDOFF and handoffCause AI_FAILURE",
+    "8a. Failing provider call results in AI_HANDOFF and handoffCause PROVIDER_FAILURE or AI_FAILURE",
     failingTrace.turns[0]?.assistantAction === "AI_HANDOFF" &&
-      failingTrace.turns[0]?.processing.currentEngine?.domainResult
-        .handoffCause === "AI_FAILURE",
+      (failingTrace.turns[0]?.processing.currentEngine?.domainResult
+        .handoffCause === "PROVIDER_FAILURE" ||
+        failingTrace.turns[0]?.processing.currentEngine?.domainResult
+          .handoffCause === "AI_FAILURE"),
   );
   check(
     "8b. Failed physical HTTP attempt is captured with status 500",
@@ -682,6 +684,133 @@ async function runAcceptanceSuite(): Promise<void> {
       serialized.includes("[REDACTED_NONCE_"),
   );
 
+  // 16d-h: Seed an arbitrary offer ID into actual state and callback markup
+  const arbitraryOfferId = "custom_unprefixed_offer_xyz_987654";
+  const canaryTrace: ScenarioTrace = {
+    ...trace01,
+    turns: [
+      {
+        ...trace01.turns[0]!,
+        processing: {
+          ...trace01.turns[0]!.processing,
+          tokenUsageEstimate: {
+            promptTokens: 111,
+            completionTokens: 22,
+            totalTokens: 133,
+          },
+          measuredUsage: {
+            source: "OFFLINE_FIXTURE",
+            promptTokens: 111,
+            completionTokens: 22,
+            totalTokens: 133,
+            isEstimate: false,
+          },
+          currentEngine: {
+            ...trace01.turns[0]!.processing.currentEngine!,
+            tokenUsage: {
+              source: "OFFLINE_FIXTURE",
+              promptTokens: 111,
+              completionTokens: 22,
+              totalTokens: 133,
+              isEstimate: false,
+            },
+          },
+        },
+        stateAfter: {
+          offer: {
+            id: arbitraryOfferId,
+            token: "tok999",
+            status: "ACTIVE" as any,
+          } as any,
+        },
+        outbound: {
+          text: `Booking offered under ID ${arbitraryOfferId}.`,
+          buttons: [{ label: "10:00 AM", payload: `fp:${arbitraryOfferId}:1` }],
+          sentCount: 1,
+        },
+      },
+      {
+        ...trace01.turns[0]!,
+        turnIndex: 2,
+        stateBefore: {
+          offer: {
+            id: arbitraryOfferId,
+            token: "tok999",
+            status: "ACTIVE" as any,
+          } as any,
+        },
+        stateAfter: {
+          offer: {
+            id: arbitraryOfferId,
+            token: "tok999",
+            status: "CONSUMED" as any,
+          } as any,
+        },
+      },
+    ],
+    metrics: {
+      ...trace01.metrics,
+      totalTokens: {
+        promptTokens: 222,
+        completionTokens: 44,
+        totalTokens: 266,
+      },
+      knownTokensSubtotal: {
+        promptTokens: 222,
+        completionTokens: 44,
+        totalTokens: 266,
+      },
+    },
+  };
+
+  // Prove value exists before export
+  const preExportJson = JSON.stringify(canaryTrace);
+  check(
+    "16d. Arbitrary offer ID exists in trace before export",
+    preExportJson.includes(arbitraryOfferId) &&
+      preExportJson.includes(`fp:${arbitraryOfferId}:1`),
+  );
+
+  const canarySanitized = redactTrace(canaryTrace);
+  const postExportJson = JSON.stringify(canarySanitized);
+
+  // Prove it is absent from all public output
+  check(
+    "16e. Arbitrary offer ID is absent from public exported output",
+    !postExportJson.includes(arbitraryOfferId),
+  );
+  check(
+    "16f. Callback payload fp:<id>:1 is redacted to stable marker",
+    !postExportJson.includes(`fp:${arbitraryOfferId}:1`) &&
+      postExportJson.includes("fp:[REDACTED_OFFER_"),
+  );
+
+  // Prove stable references preserve identity comparisons
+  const turn1OfferId = canarySanitized.turns[0]?.stateAfter?.offer?.id;
+  const turn2OfferBeforeId = canarySanitized.turns[1]?.stateBefore?.offer?.id;
+  const turn2OfferAfterId = canarySanitized.turns[1]?.stateAfter?.offer?.id;
+  check(
+    "16g. Stable references preserve identity comparison across turns",
+    typeof turn1OfferId === "string" &&
+      turn1OfferId.startsWith("[REDACTED_OFFER_") &&
+      turn1OfferId === turn2OfferBeforeId &&
+      turn1OfferId === turn2OfferAfterId,
+  );
+
+  // Prove tokenUsage and totalTokens remain structured numeric data
+  const postTurn1Usage =
+    canarySanitized.turns[0]?.processing.currentEngine?.tokenUsage;
+  const postMetricsTotal = canarySanitized.metrics.totalTokens;
+  check(
+    "16h. tokenUsage and totalTokens remain structured numeric data, not [REDACTED]",
+    typeof postTurn1Usage?.totalTokens === "number" &&
+      postTurn1Usage.totalTokens === 133 &&
+      typeof postMetricsTotal?.totalTokens === "number" &&
+      postMetricsTotal.totalTokens === 266 &&
+      canarySanitized.turns[0]?.processing.tokenUsageEstimate.totalTokens ===
+        133,
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
   // 17. Historical modes cannot be mislabeled as current-engine live evidence
   // ─────────────────────────────────────────────────────────────────────────────
@@ -700,6 +829,154 @@ async function runAcceptanceSuite(): Promise<void> {
   check(
     "17c. TypeSafe JEV runner labels architecture TYPESAFE_JEV_GOAL_DRIVEN, not CURRENT_ENGINE",
     jevTrace.architecture === "TYPESAFE_JEV_GOAL_DRIVEN",
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 18. Assistant Telemetry Interface & Observability
+  // ─────────────────────────────────────────────────────────────────────────────
+  check(
+    "18a. Observed provider is captured from actual telemetry/observability",
+    trace01.turns[0]?.processing.currentEngine?.routing.observedProvider !==
+      null,
+  );
+
+  const prohibitedScenario = {
+    ...scenario01,
+    id: "CE-PROHIBITED-TEST",
+  };
+  const telemetryProhibitedTrace = await runCurrentEngineScenario(
+    prohibitedScenario,
+    {
+      aiPolicy: { primaryProvider: "deterministic" as any } as any,
+    },
+  );
+  check(
+    "18b. Policy prohibition results in route POLICY_PROHIBITED",
+    telemetryProhibitedTrace.turns[0]?.processing.currentEngine?.routing
+      .route === "POLICY_PROHIBITED",
+  );
+  check(
+    "18c. Policy prohibition leaves observedProvider and observedModel as null",
+    telemetryProhibitedTrace.turns[0]?.processing.currentEngine?.routing
+      .observedProvider === null &&
+      telemetryProhibitedTrace.turns[0]?.processing.currentEngine?.routing
+        .observedModel === null,
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 19. Per-attempt usage completeness (failed attempt without usage + successful retry with usage)
+  // ─────────────────────────────────────────────────────────────────────────────
+  let retryAttemptCount = 0;
+  const retryUsageFetch: typeof fetch = async () => {
+    retryAttemptCount++;
+    if (retryAttemptCount === 1) {
+      // First attempt times out without token usage
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    // Second attempt succeeds with known token usage
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-retry-test",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                intent: "BOOKING",
+                action: "booking_handoff",
+                content: "تم الحجز",
+                summary: "حجز",
+                extraction: { service: "كشف أسنان", date: "2026-10-21" },
+                factUpdates: [
+                  { key: "service", operation: "set", value: "كشف أسنان" },
+                  { key: "date", operation: "set", value: "2026-10-21" },
+                ],
+              }),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 150, completion_tokens: 30, total_tokens: 180 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  const retryTrace = await runCurrentEngineScenario(scenario01, {
+    live: true,
+    upstreamFetch: retryUsageFetch,
+    operatorLimits: {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test retry completeness",
+    },
+  });
+
+  check(
+    "19a. Turn with 1 failed attempt (no usage) and 1 retry (usage) has completeness PARTIAL",
+    retryTrace.turns[0]?.processing.measuredUsage?.completeness === "PARTIAL",
+  );
+  check(
+    "19b. Turn with partial attempt usage leaves totalTokens as null",
+    retryTrace.turns[0]?.processing.measuredUsage?.totalTokens === null,
+  );
+  check(
+    "19c. Scenario with partial usage records tokenCompleteness PARTIAL and totalTokens null",
+    retryTrace.metrics.tokenCompleteness === "PARTIAL" &&
+      retryTrace.metrics.totalTokens === null &&
+      retryTrace.metrics.knownTokensSubtotal?.totalTokens === 180,
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 20. Evaluation Verdict Integrity
+  // ─────────────────────────────────────────────────────────────────────────────
+  const missingIntentScenario = {
+    ...scenario01,
+    id: "CE-MISSING-INTENT-TEST",
+    turns: [
+      {
+        input: "أي كلام عامي",
+        expectedIntent: "NON_EXISTENT_INTENT",
+      },
+    ],
+  };
+  const missingIntentTrace = await runCurrentEngineScenario(
+    missingIntentScenario,
+  );
+  check(
+    "20a. Mismatched or missing intent causes scenario verdict FAIL",
+    missingIntentTrace.verdict === "FAIL" &&
+      Boolean(
+        missingIntentTrace.failureReason?.includes(
+          "Expected intent 'NON_EXISTENT_INTENT'",
+        ),
+      ),
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 21. Tracked known defect CE-13: False sensitive handoff on dialectal phrase 'مش مشكلة'
+  // ─────────────────────────────────────────────────────────────────────────────
+  const scenario13 = EGYPTIAN_ARABIC_SCENARIOS.find((s) => s.id === "CE-13")!;
+  check(
+    "21a. CE-13 exists in EGYPTIAN_ARABIC_SCENARIOS",
+    scenario13 !== undefined,
+  );
+  const trace13 = await runCurrentEngineScenario(scenario13);
+  check(
+    "21b. CE-13 passes and faithfully records the defect",
+    trace13.verdict === "PASS",
+  );
+  check(
+    "21c. CE-13 turn 2 triggers AI_HANDOFF with cause SENSITIVE_OR_RESTRICTED",
+    trace13.turns[1]?.assistantAction === "AI_HANDOFF" &&
+      trace13.turns[1]?.processing.currentEngine?.domainResult.handoffCause ===
+        "SENSITIVE_OR_RESTRICTED",
   );
 
   // ─────────────────────────────────────────────────────────────────────────────

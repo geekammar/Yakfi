@@ -404,14 +404,20 @@ async function main(): Promise<void> {
     const traceData: ScenarioTrace = JSON.parse(
       fs.readFileSync(replayFile, "utf-8"),
     );
-    console.log(`Scenario: [${traceData.scenarioId}] ${traceData.title}`);
-    console.log(`Architecture: ${traceData.architecture}`);
-    for (const turn of traceData.turns) {
+    const sanitizedTrace = redactTrace(traceData);
+    console.log(
+      `Scenario: [${sanitizedTrace.scenarioId}] ${sanitizedTrace.title}`,
+    );
+    console.log(`Architecture: ${sanitizedTrace.architecture}`);
+    for (const turn of sanitizedTrace.turns) {
       printTurn(turn, isInspect);
     }
     console.log(
-      `\nVerdict: ${traceData.verdict} (${traceData.metrics.totalTurns} turns, ${traceData.metrics.totalDurationMs}ms, ${traceData.metrics.totalLlmCalls} LLM calls)`,
+      `\nVerdict: ${sanitizedTrace.verdict} (${sanitizedTrace.metrics.totalTurns} turns, ${sanitizedTrace.metrics.totalDurationMs}ms, ${sanitizedTrace.metrics.totalLlmCalls} LLM calls)`,
     );
+    if (sanitizedTrace.verdict === "FAIL") {
+      process.exit(1);
+    }
     return;
   }
 
@@ -633,6 +639,7 @@ async function main(): Promise<void> {
   }
 
   // 5. SINGLE SCENARIO OR FILTERED RUN
+  let hasAnyFailure = false;
   const sharedEngineSession =
     mode === "current_engine"
       ? new CurrentEngineExecutionSession({
@@ -693,33 +700,47 @@ async function main(): Promise<void> {
       continue;
     }
 
+    // Create the single sanitized public projection for both terminal display and disk export
+    const sanitizedTrace = redactTrace(trace);
+
     console.log(`\nRunning Scenario: [${scenario.id}] ${scenario.title}`);
-    console.log(`Category: ${scenario.category} | Mode: ${trace.architecture}`);
+    console.log(
+      `Category: ${scenario.category} | Mode: ${sanitizedTrace.architecture}`,
+    );
     console.log(`Description: ${scenario.description}`);
 
-    for (const turn of trace.turns) {
+    for (const turn of sanitizedTrace.turns) {
       printTurn(turn, isInspect);
     }
 
     console.log("\n========================================================");
-    console.log(`Verdict : ${trace.verdict}`);
-    if (trace.failureReason) {
-      console.log(`Failure : ${trace.failureReason}`);
+    console.log(`Verdict : ${sanitizedTrace.verdict}`);
+    if (sanitizedTrace.failureReason) {
+      console.log(`Failure : ${sanitizedTrace.failureReason}`);
     }
     const totalTokensStr =
-      trace.metrics.totalTokens?.totalTokens !== null &&
-      trace.metrics.totalTokens?.totalTokens !== undefined
-        ? `${trace.metrics.totalTokens.totalTokens} tokens`
-        : trace.metrics.knownTokensSubtotal
-          ? `${trace.metrics.knownTokensSubtotal} known tokens (partial)`
+      sanitizedTrace.metrics.totalTokens?.totalTokens !== null &&
+      sanitizedTrace.metrics.totalTokens?.totalTokens !== undefined
+        ? `${sanitizedTrace.metrics.totalTokens.totalTokens} tokens`
+        : sanitizedTrace.metrics.knownTokensSubtotal
+          ? `${sanitizedTrace.metrics.knownTokensSubtotal.totalTokens} known tokens (partial)`
           : "unknown tokens";
     console.log(
-      `Metrics : ${trace.metrics.totalTurns} turns | ${trace.metrics.totalDurationMs}ms execution | ${trace.metrics.totalLlmCalls} LLM calls | ${totalTokensStr}`,
+      `Metrics : ${sanitizedTrace.metrics.totalTurns} turns | ${sanitizedTrace.metrics.totalDurationMs}ms execution | ${sanitizedTrace.metrics.totalLlmCalls} LLM calls | ${totalTokensStr}`,
     );
     console.log("========================================================");
 
-    const savedPath = saveTrace(trace, tracesDir);
+    const savedPath = saveTrace(sanitizedTrace, tracesDir);
     console.log(`Trace saved to: ${savedPath}`);
+
+    if (sanitizedTrace.verdict === "FAIL") {
+      hasAnyFailure = true;
+    }
+  }
+
+  if (hasAnyFailure) {
+    console.error("\n❌ One or more scenarios failed.");
+    process.exit(1);
   }
 }
 

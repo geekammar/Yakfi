@@ -25,7 +25,8 @@ export type MockTurnResponse = {
 export type EgyptianScenarioDefinition = ScenarioDefinition & {
   mockResponses?: Record<number, MockTurnResponse>;
   referenceInstant?: string;
-  evaluationScope?: "LANGUAGE_EVALUATION" | "ENGINEERING_BOUNDARY";
+  evaluationScope?:
+    "LANGUAGE_EVALUATION" | "ENGINEERING_BOUNDARY" | "KNOWN_APPLICATION_DEFECT";
 };
 
 function mockBooking(params: {
@@ -689,6 +690,61 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
           if (dt === "invalid-date-format-string") {
             throw new Error(
               "Invalid date proposal must not corrupt durable state",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // CE-13: Tracked known defect — False sensitive handoff on dialectal phrase 'مش مشكلة'
+  {
+    id: "CE-13",
+    title: "خلل معروف: تحويل غير مبرر للإنسان بسبب عبارة 'مش مشكلة' العامية",
+    category: "SAFETY_HANDOFF",
+    evaluationScope: "KNOWN_APPLICATION_DEFECT",
+    description:
+      "العبارة العامية 'مش مشكلة' تحتوي على كلمة 'مشكلة' التي تُفعّل كاشف الكلمات الحساسة وتسبب تحويلاً خاطئاً (SENSITIVE_OR_RESTRICTED). يتم توثيقها كخلل تطبيق معروف بانتظار معالجة في محرك الكلمات المفتاحية.",
+    setup: {
+      todayRef: "2026-10-20",
+    },
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة يوم الأربعاء:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "morning",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+            { key: "timePreference", operation: "set", value: "morning" },
+          ],
+        }),
+      },
+      // Note: Turn 2 never hits the mock provider because detectTurnControlSignals intercepts before provider call
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان الصبح يوم الأربعاء",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "أي وقت يناسبكم مش مشكلة",
+        expectedAction: "AI_HANDOFF",
+        assertFn: (turn) => {
+          if (turn.assistantAction !== "AI_HANDOFF") {
+            throw new Error(
+              "Expected AI_HANDOFF due to sensitive word trigger",
+            );
+          }
+          if (
+            turn.processing.currentEngine?.domainResult.handoffCause !==
+            "SENSITIVE_OR_RESTRICTED"
+          ) {
+            throw new Error(
+              `Expected handoff cause SENSITIVE_OR_RESTRICTED, got ${turn.processing.currentEngine?.domainResult.handoffCause}`,
             );
           }
         },

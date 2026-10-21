@@ -282,15 +282,19 @@ export async function runCurrentEngineScenario(
     },
   });
 
-  // Instrumentation seam to capture actual parsed AiResponse without changing production engine
+  // Instrumentation seam to capture actual parsed AiResponse without changing production engine,
+  // while preserving and forwarding the assistant's getLastTelemetry() interface
   const turnAiCapture = { response: null as AiResponse | null };
   const getCapturedAi = (): AiResponse | null => turnAiCapture.response;
-  const instrumentedAi: ConversationAi = {
+  const instrumentedAi: ConversationAi & { getLastTelemetry(): any } = {
     providerName: policyAi.providerName,
     async respond(request: AiRequest): Promise<AiResponse> {
       const response = await policyAi.respond(request);
       turnAiCapture.response = response;
       return response;
+    },
+    getLastTelemetry() {
+      return (policyAi as any).getLastTelemetry?.() ?? null;
     },
   };
 
@@ -399,41 +403,72 @@ export async function runCurrentEngineScenario(
     // Track physical HTTP attempts
     totalLlmCalls += turnAttempts.length;
 
-    // Determine token usage honestly
+    // Determine token usage honestly per attempt
+    let turnKnownAttempts = 0;
+    let turnUnknownAttempts = 0;
+    let pSum = 0;
+    let cSum = 0;
+    let tSum = 0;
+
+    for (const a of turnAttempts) {
+      if (
+        a.tokenUsage &&
+        typeof a.tokenUsage.totalTokens === "number" &&
+        !Number.isNaN(a.tokenUsage.totalTokens)
+      ) {
+        turnKnownAttempts++;
+        pSum += a.tokenUsage.promptTokens ?? 0;
+        cSum += a.tokenUsage.completionTokens ?? 0;
+        tSum += a.tokenUsage.totalTokens;
+      } else {
+        turnUnknownAttempts++;
+      }
+    }
+
     let turnPromptTokens: number | null = null;
     let turnCompletionTokens: number | null = null;
     let turnTotalTokens: number | null = null;
     let usageSource: MeasuredTokenUsage["source"] = "UNKNOWN";
+    let turnCompleteness: MeasuredTokenUsage["completeness"] = "NOT_APPLICABLE";
 
     if (turnAttempts.length === 0) {
       usageSource = "NOT_APPLICABLE";
+      turnCompleteness = "NOT_APPLICABLE";
+      turnPromptTokens = null;
+      turnCompletionTokens = null;
+      turnTotalTokens = null;
+    } else if (turnUnknownAttempts === 0) {
+      // All attempts have known usage
+      usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
+      turnCompleteness = "COMPLETE";
+      turnPromptTokens = pSum;
+      turnCompletionTokens = cSum;
+      turnTotalTokens = tSum;
+      totalPromptTokens += pSum;
+      totalCompletionTokens += cSum;
+      totalTokens += tSum;
+      totalKnownTokens += tSum;
+      hasAnyKnownTokens = true;
+    } else if (turnKnownAttempts > 0 && turnUnknownAttempts > 0) {
+      // Turn with a failed attempt (no usage) and retry (usage) -> PARTIAL
+      usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
+      turnCompleteness = "PARTIAL";
+      turnPromptTokens = null;
+      turnCompletionTokens = null;
+      turnTotalTokens = null;
+      totalPromptTokens += pSum;
+      totalCompletionTokens += cSum;
+      totalKnownTokens += tSum;
+      hasAnyKnownTokens = true;
+      hasAnyUnknownTokens = true;
     } else {
-      let turnHasUsage = false;
-      let pSum = 0;
-      let cSum = 0;
-      let tSum = 0;
-      for (const a of turnAttempts) {
-        if (a.tokenUsage && typeof a.tokenUsage.totalTokens === "number") {
-          turnHasUsage = true;
-          pSum += a.tokenUsage.promptTokens ?? 0;
-          cSum += a.tokenUsage.completionTokens ?? 0;
-          tSum += a.tokenUsage.totalTokens ?? 0;
-        }
-      }
-      if (turnHasUsage) {
-        turnPromptTokens = pSum;
-        turnCompletionTokens = cSum;
-        turnTotalTokens = tSum;
-        usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
-        totalPromptTokens += pSum;
-        totalCompletionTokens += cSum;
-        totalTokens += tSum;
-        totalKnownTokens += tSum;
-        hasAnyKnownTokens = true;
-      } else {
-        usageSource = "UNKNOWN";
-        hasAnyUnknownTokens = true;
-      }
+      // No attempt had token usage
+      usageSource = "UNKNOWN";
+      turnCompleteness = "UNKNOWN";
+      turnPromptTokens = null;
+      turnCompletionTokens = null;
+      turnTotalTokens = null;
+      hasAnyUnknownTokens = true;
     }
 
     const measuredUsage: MeasuredTokenUsage = {
@@ -442,6 +477,9 @@ export async function runCurrentEngineScenario(
       completionTokens: turnCompletionTokens,
       totalTokens: turnTotalTokens,
       isEstimate: false,
+      completeness: turnCompleteness,
+      knownAttemptsCount: turnKnownAttempts,
+      unknownAttemptsCount: turnUnknownAttempts,
     };
 
     // Determine offer transition with strict identity check (id !== id -> OFFER_REPLACED)
@@ -462,46 +500,78 @@ export async function runCurrentEngineScenario(
       offerTransition = "OFFER_CLEARED";
     }
 
-    // Determine routing
-    let routeType:
-      | "STRUCTURED_SEMANTIC"
-      | "MECHANICAL_SELECTION"
-      | "DETERMINISTIC_BYPASS"
-      | "POLICY_PROHIBITED"
-      | "STAFF_DEFERRED" = "STRUCTURED_SEMANTIC";
+    const isPolicyProhibited =
+      options.aiPolicy?.primaryProvider === ("deterministic" as any);
+    const telemetry = (instrumentedAi as any).getLastTelemetry?.();
+    const capturedAi = getCapturedAi();
 
-    if (turnAttempts.length === 0) {
-      if (
-        turnWrites.length > 0 ||
-        (turnExp.input && /^[1-9]\d*$/.test(turnExp.input.trim()))
-      ) {
-        routeType = "MECHANICAL_SELECTION";
-      } else if (result.assistantAction === "DEFERRED_TO_STAFF") {
-        routeType = "STAFF_DEFERRED";
-      } else {
-        routeType = "DETERMINISTIC_BYPASS";
-      }
+    // Determine routing strictly from actual engine/gateway evidence (NO digits regex)
+    let routeType: CurrentEngineTurnTraceDetails["routing"]["route"] =
+      "UNKNOWN";
+
+    if (isPolicyProhibited) {
+      routeType = "POLICY_PROHIBITED";
+    } else if (result.assistantAction === "DEFERRED_TO_STAFF") {
+      routeType = "STAFF_DEFERRED";
+    } else if (
+      turnAttempts.length > 0 ||
+      result.observability?.routingDecision === "LLM"
+    ) {
+      routeType = "STRUCTURED_SEMANTIC";
+    } else if (
+      result.observability?.routingDecision === "DETERMINISTIC_BYPASS"
+    ) {
+      routeType = "DETERMINISTIC_BYPASS";
+    } else if (
+      turnWrites.length > 0 ||
+      (offerBefore &&
+        (offerAfter?.status === "CONSUMED" ||
+          offerAfter?.status === "CLAIMED" ||
+          offerTransition === "OFFER_CLEARED" ||
+          result.intent === "BOOKING"))
+    ) {
+      routeType = "MECHANICAL_SELECTION";
+    } else {
+      routeType = "UNKNOWN";
+    }
+
+    // Determine observed provider and model from actual telemetry / engine observability ONLY
+    let observedProvider: string | null = null;
+    let observedModel: string | null = null;
+    let finalProvider: string | null = null;
+    let finalModel: string | null = null;
+
+    if (
+      !isPolicyProhibited &&
+      (turnAttempts.length > 0 ||
+        (telemetry &&
+          telemetry.finalProvider !== "deterministic" &&
+          telemetry.finalProvider !== "deterministic-bypass"))
+    ) {
+      observedProvider =
+        telemetry?.finalProvider ?? result.observability?.provider ?? null;
+      observedModel =
+        telemetry?.finalModel ?? result.observability?.model ?? null;
+      finalProvider = observedProvider;
+      finalModel = observedModel;
+    } else if (
+      result.observability?.routingDecision === "DETERMINISTIC_BYPASS"
+    ) {
+      finalProvider = "deterministic-bypass";
+      finalModel = null;
     }
 
     // Capture model outputs separately from durable state
-    const capturedAi = getCapturedAi();
-    const capturedModelExtraction = capturedAi?.extraction
-      ? { ...capturedAi.extraction }
-      : null;
-    const capturedModelFactUpdates = capturedAi?.factUpdates
-      ? (capturedAi.factUpdates as any[])
-      : null;
+    const capturedModelExtraction =
+      capturedAi && !isPolicyProhibited && capturedAi.extraction
+        ? { ...capturedAi.extraction }
+        : null;
+    const capturedModelFactUpdates =
+      capturedAi && !isPolicyProhibited && capturedAi.factUpdates
+        ? (capturedAi.factUpdates as any[])
+        : null;
     const reconciledFacts = stateAfter?.knownFacts
       ? { ...stateAfter.knownFacts }
-      : null;
-
-    const observedProvider = capturedAi
-      ? (result.observability?.provider ??
-        policyAi.providerName ??
-        configuredProvider)
-      : null;
-    const observedModel = capturedAi
-      ? (result.observability?.model ?? configuredModel)
       : null;
 
     const currentEngineDetails: CurrentEngineTurnTraceDetails = {
@@ -512,12 +582,8 @@ export async function runCurrentEngineScenario(
         configuredModel,
         observedProvider,
         observedModel,
-        finalProvider:
-          result.observability?.provider ??
-          (turnAttempts.length > 0 ? configuredProvider : "NONE"),
-        finalModel:
-          result.observability?.model ??
-          (turnAttempts.length > 0 ? configuredModel : "NONE"),
+        finalProvider,
+        finalModel,
       },
       semantic: {
         intent: result.intent ?? result.observability?.routingDecision ?? null,
@@ -649,13 +715,9 @@ export async function runCurrentEngineScenario(
     }
 
     // Evaluate turn expectations
-    if (
-      turnExp.expectedIntent &&
-      result.intent &&
-      result.intent !== turnExp.expectedIntent
-    ) {
+    if (turnExp.expectedIntent && result.intent !== turnExp.expectedIntent) {
       scenarioVerdict = "FAIL";
-      failureReason = `Turn ${currentTurnIndex}: Expected intent '${turnExp.expectedIntent}', got '${result.intent}'`;
+      failureReason = `Turn ${currentTurnIndex}: Expected intent '${turnExp.expectedIntent}', got '${result.intent ?? "null"}'`;
     }
 
     if (
