@@ -24,27 +24,27 @@ import "./setup-test-env";
  * B. Mechanical Paths (Zero-Model Guarantees):
  *  6. Valid numeric choice from active offer executes with exactly 0 model calls
  *  7. Valid offer-bound callback (fp:<token>:1) executes with exactly 0 model calls
- *  8. Expired / replaced / consumed / unknown offer callbacks remain rejected
+ *  8. Stale / unknown offer callback token is rejected safely without model calls (lifecycle coverage noted)
  *  9. Mixed sentence ("٢ بس غير اليوم") is not reduced to its numeric prefix
- *  10. Positive controls prove HTTP attempt counters capture both provider paths
+ *  10. Positive controls prove HTTP attempt counters and valid evaluation for both provider paths
  *
  * C. End-to-End State Behavior:
- *  11. Provider REMOVE clears the preference in saved state
- *  12. Date correction reaches saved state and booking input
+ *  11. Provider REMOVE clears preference, preserves date/service, and establishes active slot offer on 2026-10-25
+ *  12. Date correction reaches durable state, dispatches availability query for corrected date, updates active typed slot offer, and rejects replaced old-date offer
  *  13. Conflicting extraction cannot override explicit factUpdates
  *  14. Invalid output causes no guessed appointment and resolves safely to NEED_HUMAN
  *
  * D. Policy and Compatibility:
- *  15. Existing AI-off/blocked policy remains effective (0 provider calls)
+ *  15. Prohibited/invalid AI policy falls back safely to deterministic assistant (0 calls); positive control reaches generative provider (1 generative, 0 JEV)
  *  16. Staff-assigned conversation preserves human ownership (DEFERRED_TO_STAFF)
- *  17. Requests without the capability preserve legacy bounded JEV behavior
- *  18. No second model chain: exactly 1 generative provider attempt on measured fixture
+ *  17. Requests without the capability: eligible turns execute bounded JEV inference (1 JEV, 0 LLM); greeting turns preserve 0-call bypass
+ *  18. No second model chain: exactly 1 generative provider attempt and 0 JEV on measured fixture
  *
  * E. Wire & Contract Invariants:
  *  19. requiredSemanticCapabilitySchema validates "structured_turn" and rejects invalid values
  *  20. parseAiRequest preserves requiredSemanticCapability
  *  21. buildPromptMessages does not leak internal routing metadata to the model
- *  22. Honest capability boundary: offline mock evidence clearly distinguished from live model accuracy
+ *  (Informational capability boundary note distinguishes offline mock evidence from live model accuracy)
  *
  * Run: pnpm check:conv-core-03b2a
  */
@@ -67,6 +67,7 @@ import {
   withPresentedOffer,
 } from "../src/features/conversations/server/conversation-state";
 import { createLlmConversationAi } from "../src/server/integrations/ai/conversation-ai";
+import { createPolicyBackedAi } from "../src/server/integrations/ai/factory";
 import {
   createJevDecisionsProvider,
   type JevDecisionsProvider,
@@ -253,34 +254,56 @@ async function runSuite(): Promise<void> {
     } catch {}
     capturedJevRequests.push({ url: String(input), body });
 
+    const questions = body.questions ?? {};
+    const answers: Record<string, any> = {};
+    for (const [key, q] of Object.entries<any>(questions)) {
+      if (q.type === "choice") {
+        const choice =
+          key === "conversationGoal"
+            ? "booking"
+            : (Object.keys(q.criteria ?? {})[0] ?? "default");
+        answers[key] = {
+          type: "choice",
+          choice,
+          confidence: null,
+          probabilities: { [choice]: 1.0 },
+        };
+      } else {
+        // noul
+        let noul = 0.05;
+        if (key === "bookingRequested") noul = 0.95;
+        else if (key === "providerPreferenceExpressed") noul = 0.05;
+        else if (key === "sensitiveTurn") noul = 0.01;
+        else if (key === "supportRequested") noul = 0.05;
+        else if (key === "greetingOnly") noul = 0.01;
+        else if (key === "ambiguousTurn") noul = 0.05;
+        answers[key] = { type: "noul", noul };
+      }
+    }
+
     return new Response(
       JSON.stringify({
-        id: "mock-jev-resp",
+        id: `mock-jev-dec-${capturedJevRequests.length}`,
         model: "typesafe/jev-1.13",
-        choices: [
-          {
-            message: {
-              role: "assistant",
-              content: JSON.stringify({
-                supportRequested: 0.05,
-                providerRequested: 0.05,
-                bookingRequested: 0.95,
-                availabilityAsked: 0.1,
-                cancellationRequested: 0.01,
-                rescheduleRequested: 0.01,
-                providerPreferenceExpressed: 0.9,
-                sensitiveTurn: 0.01,
-                serviceOrPriceAsked: 0.05,
-                greetingOnly: 0.01,
-                ambiguousTurn: 0.05,
-                conversationGoal: "BOOKING",
-              }),
-            },
-          },
-        ],
+        answers,
+        usage: {
+          input_tokens: 180,
+          output_tokens: 30,
+        },
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
+  };
+
+  const unifiedFetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/decisions")) {
+      return mockJevFetch(input, init);
+    }
+    return mockGenerativeFetch(input, init);
   };
 
   const mockGenerativeFetch = async (
@@ -370,6 +393,11 @@ async function runSuite(): Promise<void> {
   const stateStore = new InMemoryConversationStateStore();
   const messages: any[] = [];
   const createdAppointments: any[] = [];
+  const capturedAvailabilityQueries: Array<{
+    businessId: string;
+    date: string;
+    assigneeIds: string[];
+  }> = [];
   let nextMsgId = 1;
 
   const baseDeps: ConversationEngineDeps = {
@@ -453,7 +481,14 @@ async function runSuite(): Promise<void> {
         createdAppointments.push(dto);
         return { id: `appt-${createdAppointments.length}` } as any;
       },
-      listBlockingByAssignees: async () => [],
+      listBlockingByAssignees: async (
+        businessId: string,
+        date: string,
+        assigneeIds: string[],
+      ) => {
+        capturedAvailabilityQueries.push({ businessId, date, assigneeIds });
+        return [];
+      },
     } as any,
     conversationStateRepository: stateStore as any,
     ai: wrappingAi as any,
@@ -535,9 +570,8 @@ async function runSuite(): Promise<void> {
       !wireUserContent.includes("structured_turn"),
   );
 
-  check(
-    "E22. Honest capability boundary: offline mock evidence clearly distinguished from live model accuracy",
-    true,
+  console.log(
+    "  ℹ️  Evidence limitation note: offline mock evidence validates contract/routing boundaries, distinguished from live model accuracy.",
   );
 
   // =========================================================================
@@ -545,9 +579,9 @@ async function runSuite(): Promise<void> {
   // =========================================================================
   console.log("B. Mechanical Paths & Zero-Model Guarantees...");
 
-  // Positive control 1: direct call to JEV decisions provider increments JEV HTTP calls
+  // Positive control 1: direct call to JEV decisions provider increments JEV HTTP calls and returns valid evaluation
   const jevHttpBefore = capturedJevRequests.length;
-  await jevProvider.evaluate({
+  const jevEvalResult = await jevProvider.evaluate({
     state: {
       customerMessage: "test prompt",
       businessName: "test business",
@@ -563,8 +597,12 @@ async function runSuite(): Promise<void> {
     },
   });
   check(
-    "B10a. Positive control: direct JEV call increments JEV HTTP counter",
-    capturedJevRequests.length === jevHttpBefore + 1,
+    "B10a. Positive control: direct JEV call increments JEV HTTP counter and returns valid successful evaluation",
+    capturedJevRequests.length === jevHttpBefore + 1 &&
+      jevEvalResult.ok === true &&
+      jevEvalResult.errorCode === null &&
+      jevEvalResult.answers.bookingRequested?.type === "noul" &&
+      jevEvalResult.answers.bookingRequested.noul === 0.95,
   );
 
   // Positive control 2: direct call to generative adapter increments Generative HTTP calls
@@ -685,12 +723,14 @@ async function runSuite(): Promise<void> {
       capturedJevRequests.length === jevCallsBeforeCb,
   );
 
-  // Unknown / stale offer callback
+  // Unknown token offer callback (lifecycle states: expired/consumed/replaced are inherited
+  // from check-conv-core-01, check-conv-core-02, and check-booking-offer; replaced offer rejection
+  // is additionally verified end-to-end in C12d below)
   const genCallsBeforeStale = capturedGenerativeRequests.length;
   const jevCallsBeforeStale = capturedJevRequests.length;
   const staleRes = await runTurn("fp:unknowntok12:1");
   check(
-    "B8a. Stale / unknown offer callback is rejected safely",
+    "B8a. Stale / unknown offer callback token is rejected safely without model calls",
     staleRes.ok === true &&
       "delivery" in staleRes &&
       staleRes.delivery !== null,
@@ -849,8 +889,8 @@ async function runSuite(): Promise<void> {
 
   await runTurn("عايز أحجز بس مش عايز دكتور معين، أي حد متاح");
   const loadedStateAfterRemove = await stateStore.load(BUSINESS_ID, "conv-1");
-  const factsAfterRemove =
-    (loadedStateAfterRemove?.state as any)?.knownFacts ?? {};
+  const stateAfterRemove = loadedStateAfterRemove?.state as any;
+  const factsAfterRemove = stateAfterRemove?.knownFacts ?? {};
   check(
     "C11a. Provider REMOVE clears the preference from durable conversation state",
     factsAfterRemove.provider === undefined,
@@ -861,11 +901,21 @@ async function runSuite(): Promise<void> {
       factsAfterRemove.date === "2026-10-25",
   );
 
+  const priorOfferToken = stateAfterRemove?.offer?.token;
+  check(
+    "C11c. Prior turn established an active slot offer on 2026-10-25",
+    typeof priorOfferToken === "string" &&
+      stateAfterRemove?.offer?.date === "2026-10-25",
+  );
+
   // 12. Date correction reaches saved state and booking input
+  const queriesBeforeCorrection = capturedAvailabilityQueries.length;
+  const apptsBeforeCorrection = createdAppointments.length;
+
   currentGenerativeResponse = {
     intent: "BOOKING",
     action: "booking_handoff",
-    content: "تم تعديل التاريخ إلى 2026-10-27.",
+    content: "تم تعديل التاريخ إلى 2026-10-27، ودي المواعيد المتاحة.",
     summary: "تعديل التاريخ",
     handoffReason: null,
     extraction: {
@@ -879,10 +929,37 @@ async function runSuite(): Promise<void> {
 
   await runTurn("خلي الميعاد يوم 27 أكتوبر");
   const loadedStateAfterDate = await stateStore.load(BUSINESS_ID, "conv-1");
-  const factsAfterDate = (loadedStateAfterDate?.state as any)?.knownFacts ?? {};
+  const stateAfterDate = loadedStateAfterDate?.state as any;
+  const factsAfterDate = stateAfterDate?.knownFacts ?? {};
   check(
-    "C12. Date correction reaches durable saved state",
+    "C12a. Date correction reaches durable saved state knownFacts",
     factsAfterDate.date === "2026-10-27",
+  );
+
+  const latestQuery =
+    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
+  check(
+    "C12b. Exactly one new availability query dispatched for corrected date",
+    capturedAvailabilityQueries.length === queriesBeforeCorrection + 1 &&
+      latestQuery?.date === "2026-10-27" &&
+      latestQuery?.businessId === BUSINESS_ID,
+  );
+
+  const correctedOffer = stateAfterDate?.offer;
+  check(
+    "C12c. Active offer is updated to a typed slot offer on the corrected date with new token",
+    correctedOffer?.kind === "SLOT" &&
+      correctedOffer?.date === "2026-10-27" &&
+      typeof correctedOffer?.token === "string" &&
+      correctedOffer.token !== priorOfferToken,
+  );
+
+  // Assert no old-date offer remains selectable after the correction
+  const oldOfferSelectRes = await runTurn(`fp:${priorOfferToken}:1`);
+  check(
+    "C12d. Replaced old-date offer is rejected and cannot be selected (no appointment created)",
+    oldOfferSelectRes.ok === true &&
+      createdAppointments.length === apptsBeforeCorrection,
   );
 
   // 13. Conflicting extraction cannot override explicit updates
@@ -937,41 +1014,87 @@ async function runSuite(): Promise<void> {
   // =========================================================================
   console.log("D. Policy and Compatibility...");
 
-  // 15. Existing AI-off / deterministic policy remains effective
-  const deterministicAi = {
-    providerName: "deterministic",
-    async respond() {
-      return {
-        intent: "FAQ" as const,
-        action: "reply" as const,
-        content: "الرد من المساعد المحدد",
-        summary: null,
-        handoffReason: null,
-        extraction: {
-          service: null,
-          provider: null,
-          date: null,
-          timePreference: null,
-        },
-      };
-    },
-  };
+  // 15. Actual platform policy-boundary verification
+  // 15a. Prohibited/invalid policy falls back safely to deterministic AI
+  const genCallsBeforeProhibited = capturedGenerativeRequests.length;
+  const jevCallsBeforeProhibited = capturedJevRequests.length;
 
-  const genCallsBeforeDet = capturedGenerativeRequests.length;
-  const jevCallsBeforeDet = capturedJevRequests.length;
-  const detPolicyRes = await runTurn("سؤال عادي", {
-    ai: deterministicAi as any,
+  const prohibitedPolicyAi = await createPolicyBackedAi({
+    getEnvVar: (name) =>
+      name === "OPENROUTER_API_KEY" || name === "FLOWPILOT_JEV_API_KEY"
+        ? "test-key"
+        : undefined,
+    fetchImpl: unifiedFetch as any,
+    getAiPolicyImpl: async () => ({
+      success: false,
+      error: {
+        code: "INVALID_POLICY",
+        message: "تكوين سياسة الذكاء الاصطناعي غير صالح",
+      },
+    }),
   });
+
   check(
-    "D15a. Deterministic AI policy resolves successfully",
-    detPolicyRes.ok === true &&
-      "assistantProvider" in detPolicyRes &&
-      detPolicyRes.assistantProvider === "deterministic",
+    "D15a. Prohibited/invalid AI policy resolves to deterministic fallback assistant",
+    prohibitedPolicyAi.providerName === "deterministic",
   );
+
+  const prohibitedTurnRes = await runTurn("عايز أحجز كشف", {
+    ai: prohibitedPolicyAi,
+  });
+
   check(
-    "D15b. AI-off policy spends ZERO generative and ZERO JEV HTTP calls",
-    capturedGenerativeRequests.length === genCallsBeforeDet &&
-      capturedJevRequests.length === jevCallsBeforeDet,
+    "D15b. Request with requiredSemanticCapability='structured_turn' under prohibited policy spends ZERO generative and ZERO JEV calls",
+    prohibitedTurnRes.ok === true &&
+      "assistantProvider" in prohibitedTurnRes &&
+      prohibitedTurnRes.assistantProvider === "deterministic" &&
+      capturedGenerativeRequests.length === genCallsBeforeProhibited &&
+      capturedJevRequests.length === jevCallsBeforeProhibited,
+  );
+
+  // 15c. Positive control: allowed policy reaches generative provider through same factory harness
+  const allowedPolicyAi = await createPolicyBackedAi({
+    getEnvVar: (name) =>
+      name === "OPENROUTER_API_KEY" || name === "FLOWPILOT_JEV_API_KEY"
+        ? "test-key"
+        : undefined,
+    fetchImpl: unifiedFetch as any,
+    getAiPolicyImpl: async () => ({
+      success: true,
+      data: {
+        policy: {
+          primaryProvider: "openrouter",
+          primaryModel: "mock-openrouter-model",
+          secondaryProvider: null,
+          secondaryModel: null,
+          fallbackEnabled: false,
+          primarySecretRef: "OPENROUTER_API_KEY",
+          secondarySecretRef: null,
+          openRouterProviderOnly: null,
+          updatedAt: new Date(),
+        },
+        effective: {
+          primaryProvider: "openrouter",
+          primaryModel: "mock-openrouter-model",
+          secondary: null,
+          openRouterProviderOnly: null,
+        },
+      },
+    }),
+  });
+
+  const genCallsBeforeAllowed = capturedGenerativeRequests.length;
+  const jevCallsBeforeAllowed = capturedJevRequests.length;
+
+  const allowedTurnRes = await runTurn("عايز أحجز كشف", {
+    ai: allowedPolicyAi,
+  });
+
+  check(
+    "D15c. Positive control: allowed policy reaches configured generative provider (1 generative call, 0 JEV)",
+    allowedTurnRes.ok === true &&
+      capturedGenerativeRequests.length === genCallsBeforeAllowed + 1 &&
+      capturedJevRequests.length === jevCallsBeforeAllowed,
   );
 
   // 16. Staff-assigned conversation preserves human ownership (DEFERRED_TO_STAFF)
@@ -1011,33 +1134,61 @@ async function runSuite(): Promise<void> {
     decisionStrategy: jevStrategy,
   });
 
-  const legacyRequestWithoutCap: AiRequest = {
+  // 17a. Actually eligible legacy turn (no capability requirement, no bypass, no quotable facts)
+  const eligibleLegacyRequest: AiRequest = {
+    message: "محتاج معاد بكرة",
+    conversationStatus: "AI_ACTIVE",
+    recentMessages: [],
+    businessName: "عيادة د. حسام",
+    services: [], // no prices/descriptions
+    faqs: [], // no FAQs
+    // requiredSemanticCapability is omitted (legacy caller)
+  };
+
+  const genCallsBeforeLegacy = capturedGenerativeRequests.length;
+  const jevCallsBeforeLegacy = capturedJevRequests.length;
+  const legacyOrchResult = await orchestrator.callWithFallback(
+    eligibleLegacyRequest,
+  );
+  check(
+    "D17a. Eligible legacy request without capability executes real bounded JEV inference (1 JEV call, 0 LLM calls)",
+    legacyOrchResult.response !== null &&
+      legacyOrchResult.telemetry.finalProvider === "jev-deterministic" &&
+      legacyOrchResult.telemetry.jevDecision?.mode === "DETERMINISTIC" &&
+      legacyOrchResult.telemetry.jevDecision?.semantic?.jevCallSpent === true &&
+      capturedJevRequests.length === jevCallsBeforeLegacy + 1 &&
+      capturedGenerativeRequests.length === genCallsBeforeLegacy,
+  );
+
+  // 17b. Legacy greeting request preserved on deterministic bypass (0 JEV calls, 0 LLM calls)
+  const legacyGreetingRequest: AiRequest = {
     message: "السلام عليكم",
     conversationStatus: "AI_ACTIVE",
     recentMessages: [],
     businessName: "عيادة د. حسام",
     services: [],
     faqs: [],
-    // requiredSemanticCapability is omitted (legacy caller)
   };
-
-  const genCallsBeforeLegacy = capturedGenerativeRequests.length;
-  const legacyOrchResult = await orchestrator.callWithFallback(
-    legacyRequestWithoutCap,
+  const genCallsBeforeGreeting = capturedGenerativeRequests.length;
+  const jevCallsBeforeGreeting = capturedJevRequests.length;
+  const greetingOrchResult = await orchestrator.callWithFallback(
+    legacyGreetingRequest,
   );
   check(
-    "D17. Legacy request without capability preserves bounded JEV deterministic resolution (0 LLM calls)",
-    legacyOrchResult.response !== null &&
-      legacyOrchResult.telemetry.finalProvider === "jev-deterministic" &&
-      capturedGenerativeRequests.length === genCallsBeforeLegacy,
+    "D17b. Legacy greeting turn preserves 0-call deterministic bypass (0 JEV calls, 0 LLM calls)",
+    greetingOrchResult.response !== null &&
+      greetingOrchResult.telemetry.finalProvider === "jev-deterministic" &&
+      capturedJevRequests.length === jevCallsBeforeGreeting &&
+      capturedGenerativeRequests.length === genCallsBeforeGreeting,
   );
 
   // 18. No second model chain: exactly 1 generative provider attempt on measured fixture
   const measuredGenerativeCallsBefore = capturedGenerativeRequests.length;
+  const measuredJevCallsBefore = capturedJevRequests.length;
   currentGenerativeResponse = {
     intent: "BOOKING",
     action: "reply",
-    content: "تمام تم تسجيل الموعد.",
+    content: "تمام، أقدر أساعدك في حجز موعد تنظيف.",
     summary: null,
     handoffReason: null,
     extraction: {
@@ -1050,7 +1201,8 @@ async function runSuite(): Promise<void> {
   await runTurn("عايز أحجز تنظيف");
   check(
     "D18. Single model call spent without duplicate chains (exactly 1 generative call, 0 JEV)",
-    capturedGenerativeRequests.length === measuredGenerativeCallsBefore + 1,
+    capturedGenerativeRequests.length === measuredGenerativeCallsBefore + 1 &&
+      capturedJevRequests.length === measuredJevCallsBefore,
   );
 
   // =========================================================================
