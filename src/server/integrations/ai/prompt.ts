@@ -82,6 +82,9 @@ export function buildPromptMessages(
     `assistantStyle: ${request.assistantStyle ?? ASSISTANT_STYLE_DIRECTIVE}`,
     `businessAbout: ${request.businessAbout ?? "(none)"}`,
     `businessAddress: ${request.businessAddress ?? "(none)"}`,
+    ...(request.temporalContext
+      ? [`temporalContext: ${JSON.stringify(request.temporalContext)}`]
+      : []),
     ...(request.conversationContext
       ? [`conversationContext: ${JSON.stringify(request.conversationContext)}`]
       : []),

@@ -166,7 +166,9 @@ build`) inherits this automatically.
   optional `businessAbout` and per-service optional `price`/`description`
   (task-gated Slice-6 channels — PROMPT-AI-ARCH-13/-15; absent on unrelated
   turns) + optional `businessAddress` (a task-gated contact/identity/location
-  channel — PROMPT-AI-OPS-21; absent on unrelated turns, never invented).
+  channel — PROMPT-AI-OPS-21; absent on unrelated turns, never invented) +
+  optional `temporalContext` (CORE-03B1 server-derived turn reference: `referenceInstant`,
+  `timeZone`, and `localDate` — never accepted from customer prose).
   Never the whole DB, never complete history.
 - **Response — `AiResponse` (`aiResponseSchema`):** `intent` (fixed family) +
   `action` (`reply` | `handoff` | `booking_handoff`) + `content` (1–4096, already
@@ -219,6 +221,35 @@ AVAILABILITY | RESCHEDULE | CANCELLATION | HUMAN_REQUEST | AMBIGUOUS`;
   be widened by it, and the directive expressly forbids claiming to be human.
   Per-business persistence (one nullable column + a nested Zod object) is a
   deferred domain decision pending pilot evidence — **no migration, no UI today**.
+
+### Semantic & Temporal Capability Boundaries (CORE-03B1)
+
+A precise, code-backed distinction between the current pipeline capabilities:
+
+1. **Mechanical Numeric & Protocol Handling (Zero-Model)**:
+   - Evaluated by `interpretOfferReply` and executed by `completeBookingSelection` (`src/features/conversations/server/booking-selection.ts`).
+   - Resolves structured callback tokens (e.g. `opt_2`) and exact numeric choices in Arabic or English digits (`"١"`, `"1"`) deterministically against active state offers. Spends exactly zero model network attempts.
+
+2. **JEV Bounded Semantic Output & Limitations**:
+   - Implemented in `src/server/integrations/ai/jev-semantic-strategy.ts` (`buildSemanticRequest`, `evaluateSemanticReading`, `semanticResponse`).
+   - JEV evaluates a closed set of 11 atomic Noul routing questions plus 1 choice goal (`conversationGoal`).
+   - JEV's wire request schema (`JevState` in `src/server/integrations/ai/jev-decisions-provider.ts`) does not consume temporal context.
+   - Crucially, `semanticResponse` derives fact extraction solely by delegating to the lexical baseline (`classifyCustomerMessage` and `extractServiceFacts` in `src/features/conversations/server/conversation-ai.ts`). JEV itself does **not** extract dates, interpret relative dates, or produce rich `factUpdates` (`operation: "set" | "remove"`). Receiving temporal context or state does not give JEV arbitrary extraction capability.
+
+3. **Generative Structured-Output Contract**:
+   - Implemented across `createOpenRouterAdapter` (`src/server/integrations/ai/openrouter.ts`), `buildPromptMessages` (`src/server/integrations/ai/prompt.ts`), and the system prompt (`prompts/system/booking-assistant.prompt`).
+   - Carries structured conversation context (`conversationContext`) and server-derived temporal context (`temporalContext`: `referenceInstant`, `timeZone`, `localDate`). Instructed to emit schema-compliant `AiResponse` JSON containing bounded `extraction` and explicit `factUpdates` (`key: enum[service,date,timePreference,provider]`, `operation: enum[set,remove]`).
+   - Domain validation and reconciliation (`reconcileTurnSemanticFacts` in `src/features/conversations/server/semantic-facts.ts`) enforce canonical precedence and validation over these updates.
+
+4. **Server-Derived Temporal Reference**:
+   - Assembled by `buildAiContext` (`src/features/conversations/server/ai-context-builder/context-builder.ts`) using `buildAiTemporalContext` (`src/features/conversations/server/temporal-context.ts`).
+   - Derived strictly from the canonical turn clock (`inbound.receivedAt` / `now`) and business timezone (`todayIsoInTimeZone` in `src/features/conversations/server/temporal-context.ts`).
+   - Customer messages claiming alternative dates or timezones cannot overwrite this server-derived anchor.
+
+5. **Live Model Adherence & Verification Boundary**:
+   - Automated offline regression suites mock all provider network boundaries and verify serialization, schema compliance, and downstream state reconciliation.
+   - They do **not** measure live model adherence, multilingual prompt quality, or dialect understanding in production. Live model quality remains unverified in this offline slice.
+   - The architecture is not yet dictionary-free: legacy lexical helpers (`classifyCustomerMessage`, regexes, Arabic date vocabulary in `relative-date.ts`) remain active as technical debt for subsequent slices.
 
 ### Additive decision shape + turn observability (PROMPT-AI-ARCH-02 — Slice 0)
 

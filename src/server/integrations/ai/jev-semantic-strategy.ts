@@ -644,8 +644,13 @@ function semanticTarget(
  * engine-owned templates the lexical classifier uses
  * (`deterministicReplyForIntent`) — the semantic model never authors customer
  * prose, so no model text and no chain-of-thought can reach the customer
- * through this channel. The extraction carries only the lexical baseline's
- * verbatim facts (a matched service name at most); JEV never guesses facts.
+ * through this channel.
+ *
+ * CAPABILITY BOUNDARY (CORE-03B1): JEV evaluates atomic routing/goal questions
+ * only; its output schema carries no fact extraction or factUpdates. The extraction
+ * here is strictly delegated to the legacy lexical baseline (`classifyCustomerMessage`
+ * and `extractServiceFacts`). JEV cannot interpret relative dates or emit arbitrary
+ * date updates; temporal context forwarded to the turn does not grant JEV rich extraction.
  */
 function semanticResponse(
   request: AiRequest,
@@ -1000,7 +1005,14 @@ export function languageHint(message: string): string {
   return "en";
 }
 
-/** Build the provider-neutral JEV evaluation request from an assembled AiRequest. */
+/**
+ * Build the provider-neutral JEV evaluation request from an assembled AiRequest.
+ *
+ * NOTE (CORE-03B1): The underlying Decisions API state contract (`JevState`) only
+ * admits `customerMessage`, `businessName`, `services`, `faqs`, `languageHint`,
+ * and `conversationContext`. Unsupported temporal fields are not forwarded to avoid
+ * schema violations with the vendor Decisions API.
+ */
 export function buildSemanticRequest(request: AiRequest): JevEvaluationRequest {
   return {
     state: {
