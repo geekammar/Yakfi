@@ -429,6 +429,8 @@ export function deriveSemanticFacts(
 
 export const jevEligibilityReasonValues = [
   "ELIGIBLE",
+  /** Turn requires structured interpretation capability (generative route required). */
+  "CAPABILITY_STRUCTURED_TURN",
   /** The deterministic 0-call path already resolves this turn. */
   "DETERMINISTIC_BYPASS_RESOLVED",
   /** A strong stored-FAQ match: the LLM must quote the stored answer. */
@@ -465,6 +467,11 @@ export type JevEligibility = {
  * class may own the turn.
  */
 export function jevEligibility(request: AiRequest): JevEligibility {
+  // CORE-03B2A: Free-form turns requiring structured interpretation
+  // must reach the generative structured-output assistant.
+  if (request.requiredSemanticCapability === "structured_turn") {
+    return { eligible: false, reason: "CAPABILITY_STRUCTURED_TURN" };
+  }
   // 1. The deterministic 0-call path resolves the turn → JEV is INELIGIBLE and
   //    the turn terminates deterministically with zero model calls.
   if (bypassDeterministicAi(request) !== null) {

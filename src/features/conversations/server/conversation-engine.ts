@@ -75,6 +75,7 @@ import type {
   AiFactUpdate,
   AiRequest,
   AiResponse,
+  RequiredSemanticCapability,
 } from "@/features/conversations/server/ai-contract";
 import {
   AI_RECENT_MESSAGE_LIMIT,
@@ -389,6 +390,12 @@ export type ConversationEngineDeps = {
   >;
   ai: ConversationAi;
   transport: MessageTransport;
+  /**
+   * CORE-03B2A: Server-derived semantic capability requirement for free-form turns.
+   * Defaults to "structured_turn" in production. Legacy callers may supply null
+   * to preserve legacy bounded JEV behavior without capability routing.
+   */
+  requiredSemanticCapability?: RequiredSemanticCapability | null;
 };
 
 /** Production dependencies (app singletons + offline boundaries). */
@@ -409,6 +416,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   followUpRequestRepository,
   ai: policyBackedAi,
   transport: offlineMessageTransport,
+  requiredSemanticCapability: "structured_turn",
 };
 
 /**
@@ -2637,6 +2645,14 @@ async function runInboundTurn(
     //     server-derived businessId, drops provenance, and composes the
     //     minimal AiRequest. The engine keeps responsibility for
     //     orchestration; the builder owns AI-safe context assembly.
+    // CORE-03B2A: Server-derived capability requirement for free-form turns.
+    // Defaults to "structured_turn" in production. Legacy callers may supply null
+    // to preserve legacy bounded JEV behavior without capability routing.
+    const effectiveCapability =
+      deps.requiredSemanticCapability !== undefined
+        ? (deps.requiredSemanticCapability ?? undefined)
+        : "structured_turn";
+
     const builtContext = buildAiContext({
       scope: { businessId: business.id },
       sources: {
@@ -2654,6 +2670,9 @@ async function runInboundTurn(
           conversationId: conversation.id,
         },
         now,
+        ...(effectiveCapability
+          ? { requiredSemanticCapability: effectiveCapability }
+          : {}),
       },
     });
     // PROMPT-AI-JEV-03D — stamp the turn's OPAQUE correlation id onto the
@@ -2661,7 +2680,13 @@ async function runInboundTurn(
     // correlate turns deterministically without deriving anything from
     // content. Additive: the field is optional in the contract and every
     // downstream consumer behaves exactly as before when it is absent.
-    const aiRequest: AiRequest = { ...builtContext.request, traceId };
+    const aiRequest: AiRequest = {
+      ...builtContext.request,
+      traceId,
+      ...(effectiveCapability
+        ? { requiredSemanticCapability: effectiveCapability }
+        : {}),
+    };
 
     // PROMPT-AI-OPS-22 — the deterministic, text-derived task families and the
     // bounded channel facts of the ASSEMBLED request. Both are machine keys /
@@ -2673,7 +2698,12 @@ async function runInboundTurn(
     // 8. Deterministic bypass first (DECISIONS #33): turns safely
     //    decidable without an assistant never spend an AI call — and
     //    never produce an AI_TURN usage fact (no request was made).
-    let turn: AiResponse | null = bypassDeterministicAi(aiRequest);
+    // CORE-03B2A: Free-form turns requiring structured interpretation
+    // skip the lexical bypass before ai.respond to ensure structured capability.
+    let turn: AiResponse | null =
+      aiRequest.requiredSemanticCapability === "structured_turn"
+        ? null
+        : bypassDeterministicAi(aiRequest);
     // Additive observability only (PROMPT-AI-ARCH-02 Slice 0): remembers
     // WHICH routing produced the turn. It changes no branch.
     const deterministicBypass = turn !== null;

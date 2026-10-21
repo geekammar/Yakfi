@@ -60,6 +60,7 @@ import type {
   AiRequest,
   AiTemporalContext,
   ConversationContextProjection,
+  RequiredSemanticCapability,
 } from "@/features/conversations/server/ai-contract";
 import {
   AI_KNOWLEDGE_ENTRY_LIMIT,
@@ -216,6 +217,8 @@ export type ContextSources = {
   readonly now?: Date;
   /** Explicit pre-built temporal context, if provided. */
   readonly temporalContext?: AiTemporalContext;
+  /** CORE-03B2A: Server-derived semantic capability requirement. */
+  readonly requiredSemanticCapability?: RequiredSemanticCapability;
 };
 
 /**
@@ -979,6 +982,9 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
             ),
           }
         : {}),
+    ...(sources.requiredSemanticCapability
+      ? { requiredSemanticCapability: sources.requiredSemanticCapability }
+      : {}),
   };
 
   const excluded = ledger.records.filter((record) => !record.included);

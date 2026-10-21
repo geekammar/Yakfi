@@ -673,6 +673,7 @@ async function main(): Promise<void> {
         send: async () => ({ provider: "test", delivered: true }),
       },
       ai: realGatewayAi as unknown as ConversationEngineDeps["ai"],
+      requiredSemanticCapability: null,
     };
 
     let msgCounter = 0;
