@@ -26,6 +26,10 @@ import {
   type ConversationFactKey,
   type RemovableFactKey,
 } from "./conversation-facts";
+import {
+  aiTemporalContextSchema,
+  type AiTemporalContext,
+} from "./temporal-context";
 import { z } from "zod";
 
 export {
@@ -33,6 +37,8 @@ export {
   removableFactKeys,
   type ConversationFactKey,
   type RemovableFactKey,
+  aiTemporalContextSchema,
+  type AiTemporalContext,
 };
 
 // ─── Intent family (no invented intents) ─────────────────────────────────────
@@ -305,6 +311,11 @@ export const aiRequestSchema = z.object({
    * Additive and optional; present when available and tenant-validated.
    */
   conversationContext: conversationContextProjectionSchema.optional(),
+  /**
+   * CORE-03B1: Server-derived provider-neutral temporal reference for relative date interpretation.
+   * Additive and optional; present when canonical turn clock is available.
+   */
+  temporalContext: aiTemporalContextSchema.optional(),
 });
 
 export type AiRequest = z.infer<typeof aiRequestSchema>;

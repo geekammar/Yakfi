@@ -58,6 +58,7 @@
  */
 import type {
   AiRequest,
+  AiTemporalContext,
   ConversationContextProjection,
 } from "@/features/conversations/server/ai-contract";
 import {
@@ -77,6 +78,7 @@ import {
   projectConversationState,
   type ConversationState,
 } from "@/features/conversations/server/conversation-state";
+import { buildAiTemporalContext } from "@/features/conversations/server/temporal-context";
 import {
   FACT_EXCLUSION_REASONS,
   classifyBusinessField,
@@ -212,6 +214,8 @@ export type ContextSources = {
   } | null;
   /** Current turn time for freshness and expiration evaluation. */
   readonly now?: Date;
+  /** Explicit pre-built temporal context, if provided. */
+  readonly temporalContext?: AiTemporalContext;
 };
 
 /**
@@ -965,6 +969,16 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     ...(conversationContextIncluded && projectedContext
       ? { conversationContext: projectedContext }
       : {}),
+    ...(sources.temporalContext
+      ? { temporalContext: sources.temporalContext }
+      : sources.now
+        ? {
+            temporalContext: buildAiTemporalContext(
+              sources.now,
+              sources.business.timezone,
+            ),
+          }
+        : {}),
   };
 
   const excluded = ledger.records.filter((record) => !record.included);

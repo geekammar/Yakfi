@@ -9,7 +9,7 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.51.0 (feature branch; PR ready)** — `BOOK-REM-01: Reliable Appointment Reminders, Configurable Hours & Safe Message Customization` (DECISIONS #94). Production baseline: v0.50.0 (commit `022ba1cfe56c68ab4d39839e86283a47376ad7b3`). Adds automated appointment reminders configurable from Settings, Meta WhatsApp approved template (`appointment_reminder`), Telegram bot text messaging, serverless hourly cron endpoint (`/api/cron/appointment-reminders`), atomic row claiming (`SKIP LOCKED`), and additive migration `20261018180000_appointment_reminders`. Verified by 35/35 offline automated test scenarios (`pnpm check:reminders`) and clean `pnpm verify:local`. Production migration is manual operator-gated via GitHub Actions.
+**Product version: v0.60.0 (feature branch; PR ready)** — `CORE-03B1: Server-Derived Temporal Context and Semantic Capability Boundary`. Production baseline: v0.59.0 (commit `ddf75b67cd45841ba19a169c43b9ee21d328e35c`). Adds provider-neutral server-derived temporal context (`referenceInstant`, `timeZone`, `localDate`) to `AiRequest`, renders authoritative calendar reference instructions in prompt templates, records clear semantic capability boundaries for mechanical/JEV/generative paths, and maintains zero-model protocol selection and CORE-03A fact reconciliation. Verified by 42/42 offline automated test scenarios (`pnpm check:conv-core-03b1`), full regression suites, and clean `pnpm verify:local`.
 
 v0.31.3–v0.31.8 committed DECISIONS #70–#75 (Telegram completion-path wire
 fixes, the official-creation deep-link + Android launcher fixes, the customer
@@ -51,21 +51,19 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (PR ready on branch `feat/conv-core-03a-semantic-facts`) — EXPLICIT SEMANTIC FACT UPDATES & ONE RECONCILIATION PATH (CORE-03A Focused Acceptance Repair)**:
-One bounded conversation-engine slice implementing explicit semantic fact updates and unified turn reconciliation, strengthened across reviewer acceptance gaps:
+**IN-FLIGHT (PR ready on branch `feat/conv-core-03b1-temporal-context`) — SERVER-DERIVED TEMPORAL CONTEXT & SEMANTIC CAPABILITY BOUNDARY (CORE-03B1)**:
+One bounded slice giving the semantic AI boundary an authoritative temporal reference based on the business timezone and recording code-backed capability boundaries:
 
-1. **Extended AI Contract (`ai-contract.ts`)**: Reusable fact vocabulary (`conversation-facts.ts`) with `removableFactKeys` (`date`, `timePreference`, `provider`). `aiFactUpdateSchema` accepts legacy/explicit SET `{ key, operation?: "set", value }` and explicit REMOVE `{ key, operation: "remove" }` (rejects replacement values). Legacy calls and string keys remain compatible.
-2. **Unified Single-Pass Reconciliation (`semantic-facts.ts`)**: `reconcileTurnSemanticFacts` enforces canonical precedence: legacy extraction proposes SETs first; explicit `factUpdates` override extraction; last valid operation per key wins; explicit SET/REMOVE marks a key as touched and blocks lexical override; REMOVE overrides conflicting extraction; absent facts preserve existing state.
-3. **Consistent State & Downstream Booking Execution (`conversation-state.ts`, `conversation-engine.ts`)**: `mergeConversationState` clears removed facts (`date`, `timePreference`, `provider`), logs revisions (`to: null`), and invalidates dependent offers. Downstream booking execution respects touched removed keys and prevents refilling from lexical date/time/provider regex, relative-date helpers, or stale extraction.
-4. **Production Booking Defect Fixed (`booking-mapper.ts`)**: Fixed silent fallback to `defaultServiceId` when an explicit unknown service was requested by the customer. `matchServiceByName` now distinguishes `{ status: "unknown"; raw: string }` and yields `needs_clarification` (`MISSING_SERVICE`) rather than silently defaulting.
-5. **Reviewer Acceptance Evidence Repair (`check-conv-core-03a.ts`)**:
-   - **Time preference removal (A)**: Removed synthetic `timeOfDay: undefined` harness artifact; established valid morning/evening candidate slots; proved evening narrows slot offer head and REMOVE restores full morning-first order with persisted state mirrors.
-   - **Default service resolution (B)**: Verified via `receiveInboundMessage` that default service applies when no service is mentioned (no catalog list), explicit valid service overrides default, and explicit unknown service triggers clarification instead of silent fallback.
-   - **Catalog inquiry during active booking (C)**: Verified catalog reply lists active services while preserving `serviceId`, `serviceSource`, `knownFacts`, and the active booking task across turns.
-   - **Wire contract on generative adapter (D)**: Passed requests through real `createOpenRouterAdapter` intercepted via `mockFetch`; validated outgoing JSON body carries SET/REMOVE instructions, serialized `conversationContext`, and strictly excludes token/nonce canaries; proved incoming REMOVE response parses cleanly.
-   - **Zero network attempts on selections (E)**: Verified Arabic digit (`"١"`) and structured callback (`"opt_2"`) consume exactly 0 physical model network calls across JEV and generative adapters, backed by positive control canary; confirmed mixed sentence (`"٢ بس غير اليوم ده"`) bypasses early booking and reaches semantic AI pipeline intact.
-   - **Continuation & anti-vacuous validation (F)**: Verified non-vacuous domain queries via deltas; proved date removal creates no appointment and triggers `MISSING_DATE` clarification; proved reloaded state continuity without reviving removed provider, date, or time filters; verified fresh SET after REMOVE.
-     Verified offline by `scripts/check-conv-core-03a.ts` (65/65 PASS) plus full targeted suites (`check:conv-core-01`, `check:conv-core-02`, `check:conversation-state`, `check:services`), clean `pnpm verify:local` (security, ai-prompts, typecheck, lint, format), and `pnpm check:version` (0.59.0). PR #18 opened against `main` (CI validation in progress).
+1. **Server-Derived Temporal Contract (`src/features/conversations/server/temporal-context.ts`, `ai-contract.ts`)**: Added optional `temporalContext: { referenceInstant, timeZone, localDate }` on `AiRequest`. Context is derived server-side from the existing canonical turn clock (`now`) and business timezone via `Intl.DateTimeFormat`; customer statements never overwrite it. Robust fallback policy: missing/invalid timezones safely fall back to `"UTC"`. Zod schema strictly validates UTC ISO instant and enforces date consistency.
+2. **Context Pipeline & Wire Projection (`context-builder.ts`, `prompt.ts`, `prompts/system/booking-assistant.prompt`)**: Context builder injects server-derived temporal context into `AiRequest`. `buildPromptMessages` renders compact `temporalContext` into user context block. Prompt instructions declare `temporalContext` as the authoritative calendar reference for relative dates (e.g. tomorrow/next week). Generated prompts verified with byte-identical check (`pnpm check:ai-prompts`).
+3. **Semantic & JEV Capability Boundaries (`docs/ai/ARCHITECTURE.md`, `jev-semantic-strategy.ts`)**: Code-backed distinction between mechanical zero-model selections (Arabic numerals/buttons), JEV's bounded routing outputs (atomic routing questions only; current adapter mapping omits temporalContext; semanticResponse delegates extraction to lexical helpers rather than producing factUpdates), and generative structured-output contract. Avoids vendor rejection claims based on local types. Explicitly marks legacy Arabic lexical helpers as debt for future slices.
+4. **Acceptance Verification (`scripts/check-conv-core-03b1.ts`)**:
+   - Contract validation & fallback invariants (A1–A8b).
+   - Timezone correctness & boundary assertions, including Cairo DST sensitivity distinguishing runtime IANA Cairo from fixed UTC+2/UTC+3 offset errors and pure-function determinism (B9a–B12).
+   - Engine-to-wire path capturing real generative adapter payload, verifying exact temporalContext block matching canonical turn instant, absence of wall-clock drift across independent turns, single appearance, customer spoof immunity, and state persistence of controlled relative date '2026-10-23' for tomorrow without claiming premature booking completion (C13–C17b, E23).
+   - Security & zero-model boundaries: non-vacuous canary isolation (positive upstream fixture control for offer token & claim nonce, wire exclusion of token/nonce/auth-credential), zero model calls on selection, 1-call limit on measured fixture, explicit REMOVE schema validation, and default-service fixture configuration (D18a–D22).
+   - Honest language evidence & JEV boundary: offline mock evidence clearly distinguished from live model testing (NOT EVALUATED in offline suite); JEV adapter mapping omits temporalContext and delegates rich extraction (E25a–E25b).
+     Verified offline by `pnpm check:conv-core-03b1` (42/42 PASS), existing suites (`check:conv-core-03a` 65/65, `check:conv-core-02` 120/120, `check:conv-core-01` 32/32, `check:ai-prompts` 146/146), `pnpm check:version` (0.60.0), and `pnpm verify:local`.
 
 **IN-FLIGHT (uncommitted, awaiting operator review) — `PROMPT-OPS-REL-01` +
 `PROMPT-OPS-REL-01-R`:
@@ -2630,13 +2628,13 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03a-semantic-facts) CORE-03A**:
-Branch `feat/conv-core-03a-semantic-facts` ready with explicit semantic fact updates and unified reconciliation path (v0.59.0).
+**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03b1-temporal-context) CORE-03B1**:
+Branch `feat/conv-core-03b1-temporal-context` ready with server-derived temporal context and semantic capability boundaries (v0.60.0).
 
-1. Push branch `feat/conv-core-03a-semantic-facts` to `origin`.
+1. Push branch `feat/conv-core-03b1-temporal-context` to `origin`.
 2. Open PR against `main` for review.
 3. Monitor GitHub Actions CI on PR HEAD (`pr-validation.yml`).
-4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.59.0).
+4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.60.0).
 
 **JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
 DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**

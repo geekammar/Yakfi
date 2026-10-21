@@ -162,23 +162,7 @@ function nextWeekday(today: string, target: Weekday): string {
   return addDays(today, delta);
 }
 
-/**
- * The current calendar date (ISO `YYYY-MM-DD`) in a business timezone. Pure
- * given `now`; falls back to the UTC date if the timezone is unusable.
- */
-export function todayIsoInTimeZone(now: Date, timeZone: string): string {
-  try {
-    // en-CA renders `YYYY-MM-DD`.
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(now);
-  } catch {
-    return now.toISOString().slice(0, 10);
-  }
-}
+export { todayIsoInTimeZone } from "./temporal-context";
 
 const NEGATION_WORDS = new Set(["بلاش", "مش", "لا", "لأ", "غير", "بدل", "ما"]);
 const PREPOSITIONS = new Set([
