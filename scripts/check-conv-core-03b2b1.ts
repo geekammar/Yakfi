@@ -1500,6 +1500,57 @@ async function runSuite(): Promise<void> {
       strictUnknownMatch.reason === "not_found",
   );
 
+  // P1i: catalog_strict rejects punctuation-only input ("؟؟؟", "---")
+  const strictPunctuationMatch = matchProviderByName("؟؟؟", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  const strictDashesMatch = matchProviderByName("---", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1i. catalog_strict mode rejects punctuation-only input as missing/not_found",
+    strictPunctuationMatch.status === "missing" &&
+      strictPunctuationMatch.reason === "not_found" &&
+      strictDashesMatch.status === "missing" &&
+      strictDashesMatch.reason === "not_found",
+  );
+
+  // P1j: catalog_strict rejects diacritic-only input
+  const strictDiacriticsMatch = matchProviderByName("َُِِّ", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1j. catalog_strict mode rejects diacritic-only input as missing/not_found",
+    strictDiacriticsMatch.status === "missing" &&
+      strictDiacriticsMatch.reason === "not_found",
+  );
+
+  // P1k: catalog_strict rejects supplied empty/whitespace-only strings
+  const strictEmptyMatch = matchProviderByName("", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  const strictWhitespaceMatch = matchProviderByName("   ", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1k. catalog_strict mode rejects supplied empty or whitespace-only input as missing/not_found",
+    strictEmptyMatch.status === "missing" &&
+      strictEmptyMatch.reason === "not_found" &&
+      strictWhitespaceMatch.status === "missing" &&
+      strictWhitespaceMatch.reason === "not_found",
+  );
+
+  // P1l: Legacy compatibility remains intact for punctuation, empty, and whitespace
+  const legacyPunctMatch = matchProviderByName("؟؟؟", eligibleCatalog);
+  const legacyEmptyMatch = matchProviderByName("", eligibleCatalog);
+  const legacyWhitespaceMatch = matchProviderByName("   ", eligibleCatalog);
+  check(
+    "P1l. Legacy mode preserves status 'any' for empty, whitespace, and punctuation-only input",
+    legacyPunctMatch.status === "any" &&
+      legacyEmptyMatch.status === "any" &&
+      legacyWhitespaceMatch.status === "any",
+  );
+
   // P2. Engine integration test with controlled model output
   console.log(
     "  ℹ️ [HONEST BOUNDARY] Controlled model output tests downstream handling of a model proposal, not live model comprehension.",
@@ -1539,6 +1590,66 @@ async function runSuite(): Promise<void> {
   check(
     "P2c. Zero appointments created for non-catalog provider candidate",
     createdAppointments.length === apptsBeforeP2,
+  );
+
+  // P3. Engine integration test with punctuation-only provider proposal ("؟؟؟")
+  console.log(
+    "  ℹ️ [HONEST BOUNDARY] Controlled model output setting provider to '؟؟؟' tests downstream handling of a model proposal, not live model comprehension.",
+  );
+
+  const reloadedBeforeP3 = await loadHydratedState("conv-1");
+  const offerTokenBeforeP3 =
+    (reloadedBeforeP3?.state as any)?.offer?.id ?? null;
+
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة مع الطبيب المختار.",
+    summary: "طلب حجز مع طبيب غير صالح",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: "؟؟؟", // Punctuation-only candidate
+      date: "2026-10-27",
+      timePreference: null,
+    },
+    factUpdates: [
+      { key: "service", operation: "set", value: "تنظيف أسنان" },
+      { key: "provider", operation: "set", value: "؟؟؟" },
+      { key: "date", operation: "set", value: "2026-10-27" },
+    ],
+  };
+
+  const apptsBeforeP3 = createdAppointments.length;
+  const queriesBeforeP3 = capturedAvailabilityQueries.length;
+  const turnP3 = await runTurn("عايز أحجز مع ؟؟؟ يوم 27");
+  const turnQueriesP3 = capturedAvailabilityQueries.slice(queriesBeforeP3);
+
+  check(
+    "P3a. Punctuation-only provider proposal turn executes",
+    turnP3.ok === true,
+  );
+  check(
+    "P3b. Engine requests provider clarification instead of treating candidate as ANY_PROVIDER",
+    (turnP3 as any).assistantAction === "AI_REPLY" &&
+      messages[messages.length - 1]?.content?.includes("المزود"),
+  );
+  check(
+    "P3c. No availability query is dispatched for all providers",
+    turnQueriesP3.length === 0,
+  );
+  check(
+    "P3d. No appointment is created",
+    createdAppointments.length === apptsBeforeP3,
+  );
+
+  const reloadedAfterP3 = await loadHydratedState("conv-1");
+  const stateAfterP3 = reloadedAfterP3?.state as any;
+  const offerTokenAfterP3 = stateAfterP3?.offer?.id ?? null;
+  check(
+    "P3e. No valid slot offer is newly issued from the invalid candidate",
+    offerTokenAfterP3 === offerTokenBeforeP3 ||
+      stateAfterP3?.offer?.status !== "ACTIVE",
   );
 
   // ═══════════════════════════════════════════════════════════════════════════

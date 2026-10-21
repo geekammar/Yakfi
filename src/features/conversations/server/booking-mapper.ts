@@ -201,13 +201,27 @@ export function matchProviderByName(
   eligibleProviders: ReadonlyArray<{ providerId: string; displayName: string }>,
   options?: { mode?: "legacy" | "catalog_strict" },
 ): ProviderMatchResult {
-  if (!providerText) return { status: "any" };
   const mode = options?.mode ?? "legacy";
-  if (mode === "legacy" && isAnyProviderPhrase(providerText)) {
-    return { status: "any" };
+  if (providerText === null) return { status: "any" };
+
+  if (mode === "legacy") {
+    if (!providerText) return { status: "any" };
+    if (isAnyProviderPhrase(providerText)) return { status: "any" };
+  } else {
+    // catalog_strict: supplied empty or whitespace-only string must not become ANY_PROVIDER
+    if (providerText.trim().length === 0) {
+      return { status: "missing", reason: "not_found" };
+    }
   }
+
   const needle = normalizeArabicText(providerText);
-  if (needle.length === 0) return { status: "any" };
+  if (needle.length === 0) {
+    // In catalog_strict mode, normalization-empty input (e.g. punctuation or diacritics only)
+    // is an invalid candidate that must prompt clarification, not silently permit all providers.
+    return mode === "catalog_strict"
+      ? { status: "missing", reason: "not_found" }
+      : { status: "any" };
+  }
   const candidates = eligibleProviders.filter((provider) => {
     const hay = normalizeArabicText(provider.displayName);
     if (hay.length === 0) return false;
