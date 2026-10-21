@@ -4033,6 +4033,7 @@ async function runInboundTurn(
       const providerMatch = matchProviderByName(
         mapped.providerText,
         eligibility.data.providers,
+        { mode: isStructuredSemanticTurn ? "catalog_strict" : "legacy" },
       );
       if (providerMatch.status === "missing") {
         const msg =

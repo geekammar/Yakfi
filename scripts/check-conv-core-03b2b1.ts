@@ -21,6 +21,7 @@ import "./setup-test-env";
  */
 
 import { type AiResponse } from "../src/features/conversations/server/ai-contract";
+import { matchProviderByName } from "../src/features/conversations/server/booking-mapper";
 import { buildSlotOffer } from "../src/features/conversations/server/booking-offer";
 import { parseBookingSelection } from "../src/features/conversations/server/booking-selection";
 import {
@@ -565,6 +566,73 @@ async function runSuite(): Promise<void> {
     stateA?.offer?.status === "ACTIVE" && stateA?.offer?.id === "seed-token-1",
   );
 
+  // A4. Booking-path competing prose scenario: valid structured BOOKING with no updates to scoped facts
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة حالياً للمتابعة.",
+    summary: "متابعة الحجز",
+    handoffReason: null,
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    factUpdates: [],
+  };
+
+  const queriesBeforeA4 = capturedAvailabilityQueries.length;
+  const turnA4 = await runTurn(
+    "مساء الخير، لو سمحت عايز أغير الميعاد لمعاد بالليل مع دكتورة سارة يوم الأربعاء",
+  );
+  const turnQueriesA4 = capturedAvailabilityQueries.slice(queriesBeforeA4);
+
+  check(
+    "A4a. Booking-path competing prose turn executes successfully",
+    turnA4.ok === true,
+  );
+  const reloadedA4 = await loadHydratedState("conv-1");
+  const stateA4 = reloadedA4?.state as any;
+
+  check(
+    "A4b. Durable state facts remain unchanged despite competing prose (date, morning, د. أحمد علي)",
+    stateA4?.knownFacts?.date === "2026-10-25" &&
+      stateA4?.knownFacts?.timePreference === "morning" &&
+      stateA4?.knownFacts?.provider === "د. أحمد علي" &&
+      stateA4?.selectedDate === "2026-10-25" &&
+      stateA4?.selectedTimePref === "morning" &&
+      stateA4?.providerPreference === "د. أحمد علي",
+  );
+  check(
+    "A4c. Current turn emitted exactly one availability query",
+    turnQueriesA4.length === 1,
+  );
+  check(
+    "A4d. Captured availability query strictly queries authoritative prior date '2026-10-25'",
+    turnQueriesA4[0]?.businessId === BUSINESS_ID &&
+      turnQueriesA4[0]?.date === "2026-10-25",
+  );
+  check(
+    "A4e. Captured availability query strictly queries authoritative prior provider 'د. أحمد علي'",
+    turnQueriesA4[0]?.assigneeIds?.length === 1 &&
+      turnQueriesA4[0]?.assigneeIds[0] === PROVIDER_AHMED_ALI,
+  );
+  check(
+    "A4f. Downstream slot filtering respects authoritative 'morning' preference (< 12:00)",
+    stateA4?.offer?.options?.length > 0 &&
+      stateA4?.offer?.options?.every((opt: any) => {
+        const hour = parseInt(opt.startAt.slice(11, 13), 10);
+        return hour < 12;
+      }),
+  );
+  check(
+    "A4g. Competing customer prose did NOT displace durable values or slot offer",
+    stateA4?.offer?.status === "ACTIVE" &&
+      stateA4?.offer?.date === "2026-10-25" &&
+      stateA4?.offer?.providerId === PROVIDER_AHMED_ALI,
+  );
+
   // ═══════════════════════════════════════════════════════════════════════════
   // PART B: Explicit changes
   // ═══════════════════════════════════════════════════════════════════════════
@@ -593,6 +661,7 @@ async function runSuite(): Promise<void> {
 
   const queriesBeforeB1 = capturedAvailabilityQueries.length;
   const turnB1 = await runTurn("عايز أحجز مع د. أحمد علي بالاسم");
+  const turnQueriesB1 = capturedAvailabilityQueries.slice(queriesBeforeB1);
 
   check("B1a. SET provider turn executes successfully", turnB1.ok === true);
   const reloadedB1 = await loadHydratedState("conv-1");
@@ -604,13 +673,13 @@ async function runSuite(): Promise<void> {
       stateB1?.providerPreference === "د. أحمد علي",
   );
 
-  const lastQueryB1 =
-    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
   check(
     "B1c. Availability query was dispatched for 'د. أحمد علي' explicitly",
-    capturedAvailabilityQueries.length > queriesBeforeB1 &&
-      lastQueryB1?.assigneeIds?.length === 1 &&
-      lastQueryB1?.assigneeIds[0] === PROVIDER_AHMED_ALI,
+    turnQueriesB1.length === 1 &&
+      turnQueriesB1[0]?.businessId === BUSINESS_ID &&
+      turnQueriesB1[0]?.date === "2026-10-25" &&
+      turnQueriesB1[0]?.assigneeIds?.length === 1 &&
+      turnQueriesB1[0]?.assigneeIds[0] === PROVIDER_AHMED_ALI,
   );
 
   // B2. SET date: state, actual availability-query date and new offer agree
@@ -631,12 +700,11 @@ async function runSuite(): Promise<void> {
 
   const queriesBeforeB2 = capturedAvailabilityQueries.length;
   const turnB2 = await runTurn("خلي الميعاد يوم 2026-10-27");
+  const turnQueriesB2 = capturedAvailabilityQueries.slice(queriesBeforeB2);
 
   check("B2a. SET date turn executes successfully", turnB2.ok === true);
   const reloadedB2 = await loadHydratedState("conv-1");
   const stateB2 = reloadedB2?.state as any;
-  const lastQueryB2 =
-    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
 
   check(
     "B2b. State date is updated to 2026-10-27",
@@ -645,8 +713,11 @@ async function runSuite(): Promise<void> {
   );
   check(
     "B2c. Actual availability query date matches 2026-10-27",
-    capturedAvailabilityQueries.length > queriesBeforeB2 &&
-      lastQueryB2?.date === "2026-10-27",
+    turnQueriesB2.length === 1 &&
+      turnQueriesB2[0]?.businessId === BUSINESS_ID &&
+      turnQueriesB2[0]?.date === "2026-10-27" &&
+      turnQueriesB2[0]?.assigneeIds?.length === 1 &&
+      turnQueriesB2[0]?.assigneeIds[0] === PROVIDER_AHMED_ALI,
   );
   check(
     "B2d. Active typed slot offer date matches 2026-10-27",
@@ -672,12 +743,11 @@ async function runSuite(): Promise<void> {
 
   const queriesBeforeB3 = capturedAvailabilityQueries.length;
   const turnB3 = await runTurn("مش فارق معايا أي دكتور متاح");
+  const turnQueriesB3 = capturedAvailabilityQueries.slice(queriesBeforeB3);
 
   check("B3a. REMOVE provider turn executes successfully", turnB3.ok === true);
   const reloadedB3 = await loadHydratedState("conv-1");
   const stateB3 = reloadedB3?.state as any;
-  const lastQueryB3 =
-    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
 
   check(
     "B3b. Provider preference is cleared in state",
@@ -691,8 +761,10 @@ async function runSuite(): Promise<void> {
   );
   check(
     "B3d. Availability query allows all eligible providers without single-doctor filter",
-    capturedAvailabilityQueries.length > queriesBeforeB3 &&
-      lastQueryB3?.assigneeIds?.length === 3,
+    turnQueriesB3.length === 1 &&
+      turnQueriesB3[0]?.businessId === BUSINESS_ID &&
+      turnQueriesB3[0]?.date === "2026-10-27" &&
+      turnQueriesB3[0]?.assigneeIds?.length === 3,
   );
 
   // B4. REMOVE timePreference: slot results no longer carry the old filter
@@ -826,9 +898,11 @@ async function runSuite(): Promise<void> {
     ],
   };
 
+  const queriesBeforeB6 = capturedAvailabilityQueries.length;
   const turnB6 = await runTurn(
     "عايز أحجز مع د. أحمد علي مش دكتورة سارة يوم 28",
   );
+  const turnQueriesB6 = capturedAvailabilityQueries.slice(queriesBeforeB6);
 
   check(
     "B6a. Conflicting extraction turn executes successfully",
@@ -836,8 +910,6 @@ async function runSuite(): Promise<void> {
   );
   const reloadedB6 = await loadHydratedState("conv-1");
   const stateB6 = reloadedB6?.state as any;
-  const lastQueryB6 =
-    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
 
   check(
     "B6b. Explicit factUpdate 'د. أحمد علي' defeats conflicting extraction 'دكتورة سارة'",
@@ -845,9 +917,24 @@ async function runSuite(): Promise<void> {
       stateB6?.providerPreference === "د. أحمد علي",
   );
   check(
-    "B6c. Availability query was dispatched for 'د. أحمد علي' (not 'دكتورة سارة')",
-    lastQueryB6?.assigneeIds?.length === 1 &&
-      lastQueryB6?.assigneeIds[0] === PROVIDER_AHMED_ALI,
+    "B6c. Current turn emitted exactly one new availability query",
+    turnQueriesB6.length === 1,
+  );
+  check(
+    "B6d. Current turn queries the intended provider ('د. أحمد علي', not 'دكتورة سارة')",
+    turnQueriesB6[0]?.assigneeIds?.length === 1 &&
+      turnQueriesB6[0]?.assigneeIds[0] === PROVIDER_AHMED_ALI,
+  );
+  check(
+    "B6e. Current turn queries the intended date ('2026-10-28')",
+    turnQueriesB6[0]?.businessId === BUSINESS_ID &&
+      turnQueriesB6[0]?.date === "2026-10-28",
+  );
+  check(
+    "B6f. Saved state and resulting slot offer agree on provider and date",
+    stateB6?.offer?.status === "ACTIVE" &&
+      stateB6?.offer?.date === "2026-10-28" &&
+      stateB6?.offer?.providerId === PROVIDER_AHMED_ALI,
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -901,6 +988,42 @@ async function runSuite(): Promise<void> {
       stateC1?.providerPreference === null,
   );
 
+  // C1b: Subsequent booking turn after provider REMOVE keeps provider absent and searches all eligible providers
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة لكل الأطباء.",
+    summary: "متابعة الحجز لأي طبيب",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: null,
+      date: "2026-10-28",
+      timePreference: null,
+    },
+    factUpdates: [],
+  };
+
+  const queriesBeforeC1b = capturedAvailabilityQueries.length;
+  await runTurn("وريني المواعيد المتاحة يوم 28");
+  const turnQueriesC1b = capturedAvailabilityQueries.slice(queriesBeforeC1b);
+
+  const reloadedC1b = await loadHydratedState("conv-1");
+  const stateC1b = reloadedC1b?.state as any;
+
+  check(
+    "C1b. Subsequent booking turn after provider REMOVE keeps provider absent in state",
+    stateC1b?.knownFacts?.provider === undefined &&
+      stateC1b?.providerPreference === null,
+  );
+  check(
+    "C1c. Subsequent booking turn queries all eligible providers",
+    turnQueriesC1b.length === 1 &&
+      turnQueriesC1b[0]?.businessId === BUSINESS_ID &&
+      turnQueriesC1b[0]?.date === "2026-10-28" &&
+      turnQueriesC1b[0]?.assigneeIds?.length === 3,
+  );
+
   // C2. New valid SET after removal is accepted
   currentGenerativeResponse = {
     intent: "BOOKING",
@@ -920,12 +1043,12 @@ async function runSuite(): Promise<void> {
     ],
   };
 
+  const queriesBeforeC2 = capturedAvailabilityQueries.length;
   await runTurn("خلاص عايز أحجز مع دكتورة سارة");
+  const turnQueriesC2 = capturedAvailabilityQueries.slice(queriesBeforeC2);
 
   const reloadedC2 = await loadHydratedState("conv-1");
   const stateC2 = reloadedC2?.state as any;
-  const lastQueryC2 =
-    capturedAvailabilityQueries[capturedAvailabilityQueries.length - 1];
 
   check(
     "C2a. New valid SET after remove is accepted in state",
@@ -933,9 +1056,59 @@ async function runSuite(): Promise<void> {
       stateC2?.providerPreference === "دكتورة سارة",
   );
   check(
-    "C2b. Domain resolves new provider unambiguously",
-    lastQueryC2?.assigneeIds?.length === 1 &&
-      lastQueryC2?.assigneeIds[0] === PROVIDER_SARA,
+    "C2b. Domain resolves new provider unambiguously with single per-turn query",
+    turnQueriesC2.length === 1 &&
+      turnQueriesC2[0]?.businessId === BUSINESS_ID &&
+      turnQueriesC2[0]?.date === "2026-10-28" &&
+      turnQueriesC2[0]?.assigneeIds?.length === 1 &&
+      turnQueriesC2[0]?.assigneeIds[0] === PROVIDER_SARA,
+  );
+
+  // C2c. Subsequent booking turn after timePreference REMOVE keeps timePreference absent despite competing prose
+  // First clear timePreference explicitly
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "تم إلغاء تفضيل الوقت.",
+    summary: "إلغاء تفضيل الوقت",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: "دكتورة سارة",
+      date: "2026-10-28",
+      timePreference: null,
+    },
+    factUpdates: [{ key: "timePreference", operation: "remove" }],
+  };
+  await runTurn("مش مهم الوقت خالص");
+
+  // Subsequent turn: customer sends competing prose ("عايز بالليل لو ينفع"), AI proposes no updates
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة.",
+    summary: "عرض المواعيد",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: "دكتورة سارة",
+      date: "2026-10-28",
+      timePreference: null,
+    },
+    factUpdates: [],
+  };
+  await runTurn("عايز ميعاد بالليل لو ينفع");
+
+  const reloadedC2c = await loadHydratedState("conv-1");
+  const stateC2c = reloadedC2c?.state as any;
+  check(
+    "C2c. timePreference remains absent in state despite competing prose 'بالليل'",
+    stateC2c?.knownFacts?.timePreference === undefined &&
+      stateC2c?.selectedTimePref === null,
+  );
+  check(
+    "C2d. Offer options lead with morning slot (chronological, no evening bias)",
+    stateC2c?.offer?.options?.[0]?.startAt?.includes("T09:00"),
   );
 
   // C3. With missing authoritative date and no semantic date proposal,
@@ -995,6 +1168,40 @@ async function runSuite(): Promise<void> {
       messages[messages.length - 1]?.content?.includes("التاريخ"),
   );
 
+  // C3e. Subsequent booking turn after date REMOVE keeps date absent until valid date proposal
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "أهلاً بك، تحب تحجز يوم إيه؟",
+    summary: "متابعة الحجز بدون تاريخ",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: "دكتورة سارة",
+      date: null,
+      timePreference: null,
+    },
+    factUpdates: [],
+  };
+  const queriesBeforeC3e = capturedAvailabilityQueries.length;
+  const apptsBeforeC3e = createdAppointments.length;
+  await runTurn("طيب إيه المواعيد المتاحة عندكوا؟");
+  const reloadedC3e = await loadHydratedState("conv-1");
+  const stateC3e = reloadedC3e?.state as any;
+
+  check(
+    "C3e. Date remains absent on subsequent booking turn",
+    stateC3e?.knownFacts?.date === undefined && stateC3e?.selectedDate === null,
+  );
+  check(
+    "C3f. Zero availability queries dispatched while date is absent",
+    capturedAvailabilityQueries.length === queriesBeforeC3e,
+  );
+  check(
+    "C3g. Zero appointments created while date is absent",
+    createdAppointments.length === apptsBeforeC3e,
+  );
+
   // C4. Pending clarification must not bind arbitrary sentence as provider/time
   // Set up pending clarification for provider in state
   let clarifyState = emptyConversationState();
@@ -1044,6 +1251,294 @@ async function runSuite(): Promise<void> {
     "C4b. Arbitrary sentence is NOT bound as provider fact",
     stateC4?.knownFacts?.provider === undefined &&
       stateC4?.providerPreference === null,
+  );
+
+  // C4c. Pending date clarification does NOT bind arbitrary customer message as date
+  let clarifyDateState = emptyConversationState();
+  clarifyDateState = {
+    ...clarifyDateState,
+    currentGoal: "BOOKING",
+    bookingStage: "GOAL_STATED",
+    knownFacts: { service: "تنظيف أسنان" },
+    missingFacts: ["date"],
+    lastClarification: { type: "date" },
+    selectedService: "تنظيف أسنان",
+    serviceId: SERVICE_CLEANING,
+    serviceSource: "CUSTOMER",
+  };
+  const currentBeforeC4c = await stateStore.load(BUSINESS_ID, "conv-1");
+  await stateStore.save(
+    BUSINESS_ID,
+    "conv-1",
+    currentBeforeC4c?.revision ?? null,
+    dehydrateConversationState(clarifyDateState),
+  );
+
+  currentGenerativeResponse = {
+    intent: "FAQ",
+    action: "reply",
+    content: "موقعنا في المعادي.",
+    summary: null,
+    handoffReason: null,
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    factUpdates: [],
+  };
+
+  const turnC4c = await runTurn("ممكن أعرف مكان العيادة فين؟");
+  check(
+    "C4c. FAQ turn during pending date clarification executes",
+    turnC4c.ok === true,
+  );
+  const reloadedC4c = await loadHydratedState("conv-1");
+  const stateC4c = reloadedC4c?.state as any;
+  check(
+    "C4d. Arbitrary prose is NOT bound as date fact during pending date clarification",
+    stateC4c?.knownFacts?.date === undefined && stateC4c?.selectedDate === null,
+  );
+
+  // C5. Calendar Date Validation: Distinguish Schema Rejection vs Domain Rejection
+  // C5-Schema: Model proposes invalid calendar date '2026-02-31'
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة يوم 31 فبراير.",
+    summary: "تاريخ غير صالح",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: null,
+      date: "2026-02-31", // Invalid calendar date
+      timePreference: null,
+    },
+    factUpdates: [
+      { key: "service", operation: "set", value: "تنظيف أسنان" },
+      { key: "date", operation: "set", value: "2026-02-31" },
+    ],
+  };
+
+  const apptsBeforeC5Schema = createdAppointments.length;
+  const queriesBeforeC5Schema = capturedAvailabilityQueries.length;
+  const turnC5Schema = await runTurn("عايز أحجز يوم 31 فبراير 2026");
+
+  check(
+    "C5a. Invalid calendar date turn executes fail-safe",
+    turnC5Schema.ok === true,
+  );
+  check(
+    "C5b. Invalid calendar date causes schema validation rejection (parseSuccess=false / NEED_HUMAN)",
+    (turnC5Schema as any).conversationStatus === "NEED_HUMAN" &&
+      (turnC5Schema as any).handoffCause === "AI_FAILURE",
+  );
+  check(
+    "C5c. Zero appointments created for schema-rejected calendar date",
+    createdAppointments.length === apptsBeforeC5Schema,
+  );
+  check(
+    "C5d. Zero availability queries dispatched for schema-rejected calendar date",
+    capturedAvailabilityQueries.length === queriesBeforeC5Schema,
+  );
+
+  // C5-Domain: Model proposes a syntactically valid date where business is closed (Friday 2026-10-23)
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المواعيد المتاحة يوم الجمعة 2026-10-23.",
+    summary: "طلب حجز يوم مغلق",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: null,
+      date: "2026-10-23", // Valid ISO calendar date, but clinic closed
+      timePreference: null,
+    },
+    factUpdates: [
+      { key: "service", operation: "set", value: "تنظيف أسنان" },
+      { key: "date", operation: "set", value: "2026-10-23" },
+    ],
+  };
+
+  const apptsBeforeC5Domain = createdAppointments.length;
+  const queriesBeforeC5Domain = capturedAvailabilityQueries.length;
+  const turnC5Domain = await runTurn("عايز أحجز يوم الجمعة 23 أكتوبر 2026", {
+    businessRepository: {
+      ...baseDeps.businessRepository,
+      findById: async () =>
+        ({
+          ...business,
+          workingHours: {
+            ...workingHours,
+            fri: { open: "09:00", close: "21:00", closed: true },
+          },
+        }) as any,
+      findByWhatsappNumber: async () =>
+        ({
+          ...business,
+          workingHours: {
+            ...workingHours,
+            fri: { open: "09:00", close: "21:00", closed: true },
+          },
+        }) as any,
+    } as any,
+  });
+
+  check(
+    "C5e. Domain closed-date turn executes successfully",
+    turnC5Domain.ok === true,
+  );
+  check(
+    "C5f. Domain rejects closed date with DOMAIN_REQUIRES_HUMAN (differentiated from schema failure)",
+    (turnC5Domain as any).conversationStatus === "NEED_HUMAN" &&
+      (turnC5Domain as any).handoffCause === "DOMAIN_REQUIRES_HUMAN",
+  );
+  check(
+    "C5g. Zero appointments created for domain-closed date",
+    createdAppointments.length === apptsBeforeC5Domain,
+  );
+  check(
+    "C5h. Safe handoff message informs customer that business is closed on requested date",
+    messages[messages.length - 1]?.content?.includes("مغلقة"),
+  );
+  check(
+    "C5i. Zero availability queries dispatched because closed day short-circuits at domain boundary",
+    capturedAvailabilityQueries.length === queriesBeforeC5Domain,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PART P: Provider matching boundary (pure unit + engine clarification)
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("P. Provider matching boundary...");
+
+  const eligibleCatalog = providers.map((p) => ({
+    providerId: p.id,
+    displayName: p.displayName,
+  }));
+
+  // P1a: Nonempty phrase in legacy mode returns 'any'
+  const legacyPhraseMatch = matchProviderByName(
+    "أي دكتور متاح",
+    eligibleCatalog,
+    { mode: "legacy" },
+  );
+  check(
+    "P1a. Legacy mode accepts phrase-bearing 'أي دكتور متاح' as 'any' status",
+    legacyPhraseMatch.status === "any",
+  );
+
+  // P1b: Nonempty phrase in catalog_strict mode fails catalog lookup
+  const strictPhraseMatch = matchProviderByName(
+    "أي دكتور متاح",
+    eligibleCatalog,
+    { mode: "catalog_strict" },
+  );
+  check(
+    "P1b. catalog_strict mode strictly rejects 'أي دكتور متاح' as missing/not_found",
+    strictPhraseMatch.status === "missing" &&
+      strictPhraseMatch.reason === "not_found",
+  );
+
+  // P1c: 'مش فارق' in legacy returns 'any'
+  const legacyPhrase2 = matchProviderByName("مش فارق معايا", eligibleCatalog, {
+    mode: "legacy",
+  });
+  check(
+    "P1c. Legacy mode accepts 'مش فارق معايا' as 'any' status",
+    legacyPhrase2.status === "any",
+  );
+
+  // P1d: 'مش فارق' in catalog_strict mode fails catalog lookup
+  const strictPhrase2 = matchProviderByName("مش فارق معايا", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1d. catalog_strict mode strictly rejects 'مش فارق معايا' as missing/not_found",
+    strictPhrase2.status === "missing" && strictPhrase2.reason === "not_found",
+  );
+
+  // P1e: providerText null in catalog_strict mode permits all eligible providers (status: 'any')
+  const strictNullMatch = matchProviderByName(null, eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1e. catalog_strict mode with null provider permits all eligible providers (status: 'any')",
+    strictNullMatch.status === "any",
+  );
+
+  // P1f: Full valid provider name resolves correctly
+  const strictFullMatch = matchProviderByName("د. أحمد علي", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1f. catalog_strict mode resolves full valid provider name unambiguously",
+    strictFullMatch.status === "ok" &&
+      strictFullMatch.providerId === PROVIDER_AHMED_ALI,
+  );
+
+  // P1g: Colliding first names remain ambiguous
+  const strictAmbiguousMatch = matchProviderByName("د. أحمد", eligibleCatalog, {
+    mode: "catalog_strict",
+  });
+  check(
+    "P1g. catalog_strict mode flags colliding first names as missing/ambiguous",
+    strictAmbiguousMatch.status === "missing" &&
+      strictAmbiguousMatch.reason === "ambiguous",
+  );
+
+  // P1h: Unknown provider values return not_found
+  const strictUnknownMatch = matchProviderByName(
+    "د. محمود خيري",
+    eligibleCatalog,
+    { mode: "catalog_strict" },
+  );
+  check(
+    "P1h. catalog_strict mode flags unknown provider as missing/not_found",
+    strictUnknownMatch.status === "missing" &&
+      strictUnknownMatch.reason === "not_found",
+  );
+
+  // P2. Engine integration test with controlled model output
+  console.log(
+    "  ℹ️ [HONEST BOUNDARY] Controlled model output tests downstream handling of a model proposal, not live model comprehension.",
+  );
+
+  currentGenerativeResponse = {
+    intent: "BOOKING",
+    action: "booking_handoff",
+    content: "المزود المقترح أي دكتور.",
+    summary: "طلب مع أي دكتور",
+    handoffReason: null,
+    extraction: {
+      service: "تنظيف أسنان",
+      provider: "أي دكتور",
+      date: "2026-10-27",
+      timePreference: null,
+    },
+    factUpdates: [
+      { key: "service", operation: "set", value: "تنظيف أسنان" },
+      { key: "provider", operation: "set", value: "أي دكتور" },
+      { key: "date", operation: "set", value: "2026-10-27" },
+    ],
+  };
+
+  const apptsBeforeP2 = createdAppointments.length;
+  const turnP2 = await runTurn("عايز أحجز مع أي دكتور متاح");
+
+  check(
+    "P2a. Phrase-bearing provider proposal turn executes",
+    turnP2.ok === true,
+  );
+  check(
+    "P2b. Engine clarifies provider instead of treating candidate as ANY_PROVIDER",
+    (turnP2 as any).assistantAction === "AI_REPLY" &&
+      messages[messages.length - 1]?.content?.includes("المزود"),
+  );
+  check(
+    "P2c. Zero appointments created for non-catalog provider candidate",
+    createdAppointments.length === apptsBeforeP2,
   );
 
   // ═══════════════════════════════════════════════════════════════════════════

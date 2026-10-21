@@ -190,13 +190,22 @@ export type ProviderMatchResult =
 /**
  * Deterministic provider matcher against the CORE-01 eligible set.
  * Caller must have already resolved eligibility for the service/branch.
+ *
+ * @param options.mode - When "catalog_strict", nonempty provider text is strictly
+ * matched against the eligible provider catalog without falling back to natural-language
+ * "any provider" phrase dictionaries. When "legacy" (default), preserves legacy
+ * phrase-based interpretation for existing unmanaged callers.
  */
 export function matchProviderByName(
   providerText: string | null,
   eligibleProviders: ReadonlyArray<{ providerId: string; displayName: string }>,
+  options?: { mode?: "legacy" | "catalog_strict" },
 ): ProviderMatchResult {
   if (!providerText) return { status: "any" };
-  if (isAnyProviderPhrase(providerText)) return { status: "any" };
+  const mode = options?.mode ?? "legacy";
+  if (mode === "legacy" && isAnyProviderPhrase(providerText)) {
+    return { status: "any" };
+  }
   const needle = normalizeArabicText(providerText);
   if (needle.length === 0) return { status: "any" };
   const candidates = eligibleProviders.filter((provider) => {
