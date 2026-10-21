@@ -112,7 +112,11 @@ export type TurnProcessing = {
 };
 
 export type MeasuredTokenUsageSource =
-  "OFFLINE_FIXTURE" | "LIVE_PROVIDER" | "ESTIMATE" | "UNKNOWN";
+  | "OFFLINE_FIXTURE"
+  | "LIVE_PROVIDER"
+  | "ESTIMATE"
+  | "UNKNOWN"
+  | "NOT_APPLICABLE";
 
 export type MeasuredTokenUsage = {
   source: MeasuredTokenUsageSource;
@@ -120,6 +124,9 @@ export type MeasuredTokenUsage = {
   completionTokens: number | null;
   totalTokens: number | null;
   isEstimate: boolean;
+  completeness?: "COMPLETE" | "PARTIAL" | "UNKNOWN" | "NOT_APPLICABLE";
+  unknownAttemptsCount?: number;
+  knownAttemptsCount?: number;
 };
 
 export type CurrentEngineHttpAttemptTrace = {
@@ -140,18 +147,34 @@ export type CurrentEngineTurnTraceDetails = {
       | "MECHANICAL_SELECTION"
       | "DETERMINISTIC_BYPASS"
       | "POLICY_PROHIBITED"
-      | "STAFF_DEFERRED";
+      | "STAFF_DEFERRED"
+      | "UNKNOWN";
     effectiveCapability: string;
-    finalProvider: string | null;
-    finalModel: string | null;
+    configuredProvider: string;
+    configuredModel: string;
+    observedProvider: string | null;
+    observedModel: string | null;
+    finalProvider?: string | null;
+    finalModel?: string | null;
   };
   semantic: {
     intent: string | null;
-    extraction: Record<string, any> | null;
-    factUpdates: Array<{
-      field: string;
-      operation: string;
-      value?: any;
+    /** Captured directly from parsed AiResponse.extraction, NOT saved state */
+    modelExtraction: Record<string, string | null> | null;
+    /** Captured directly from parsed AiResponse.factUpdates */
+    modelFactUpdates: Array<{
+      key: string;
+      operation?: string;
+      value?: string;
+    }> | null;
+    /** Reconciled durable facts after turn from state store knownFacts */
+    reconciledKnownFacts: Record<string, string | null> | null;
+    /** Compatibility alias for legacy access */
+    extraction?: Record<string, string | null> | null;
+    factUpdates?: Array<{
+      key: string;
+      operation?: string;
+      value?: string;
     }> | null;
   };
   task: {
@@ -167,7 +190,7 @@ export type CurrentEngineTurnTraceDetails = {
   availabilityQueries: Array<{
     businessId: string;
     date: string;
-    assigneeIds: string[];
+    assigneeIds?: string[];
   }>;
   domainResult: {
     action: "AI_REPLY" | "AI_HANDOFF" | "DEFERRED_TO_STAFF";
@@ -276,15 +299,22 @@ export type ScenarioMetrics = {
   totalDurationMs: number;
   totalLlmCalls: number;
   totalJevCalls?: number;
-  totalCostUsd?: number;
+  totalCostUsd?: number | null;
   isCostEstimate?: boolean;
   p50LatencyMs?: number;
   p95LatencyMs?: number;
   totalTokens: {
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+  } | null;
+  tokenCompleteness?: "COMPLETE" | "PARTIAL" | "UNKNOWN" | "NOT_APPLICABLE";
+  knownTokensSubtotal?: {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
-  };
+  } | null;
+  unknownAttemptsCount?: number;
   appointmentBooked: boolean;
   clarificationLoopDetected: boolean;
   unnecessaryHandoffDetected: boolean;

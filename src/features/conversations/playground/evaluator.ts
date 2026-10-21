@@ -187,19 +187,19 @@ export async function evaluateBenchmark(
   );
 
   const hybridTotalTokens = hybridTraces.reduce(
-    (acc, t) => acc + t.metrics.totalTokens.totalTokens,
+    (acc, t) => acc + (t.metrics.totalTokens?.totalTokens ?? 0),
     0,
   );
   const goalDrivenTotalTokens = goalDrivenTraces.reduce(
-    (acc, t) => acc + t.metrics.totalTokens.totalTokens,
+    (acc, t) => acc + (t.metrics.totalTokens?.totalTokens ?? 0),
     0,
   );
   const typeSafeJevTotalTokens = typeSafeJevTraces.reduce(
-    (acc, t) => acc + t.metrics.totalTokens.totalTokens,
+    (acc, t) => acc + (t.metrics.totalTokens?.totalTokens ?? 0),
     0,
   );
   const agentCTotalTokens = agentCTraces.reduce(
-    (acc, t) => acc + t.metrics.totalTokens.totalTokens,
+    (acc, t) => acc + (t.metrics.totalTokens?.totalTokens ?? 0),
     0,
   );
 

@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { EgyptianScenarioDefinition } from "../src/features/conversations/playground/egyptian-scenarios";
+import { redactTrace } from "../src/features/conversations/playground/trace-sanitizer";
 import type {
   ScenarioDefinition,
   ScenarioTrace,
@@ -56,10 +57,25 @@ function ensureDir(dir: string): void {
 
 function saveTrace(trace: ScenarioTrace, outDir: string): string {
   ensureDir(outDir);
-  const fileName = `${trace.scenarioId}_${trace.architecture.toLowerCase()}.json`;
+  const sanitizedTrace = redactTrace(trace);
+  const fileName = `${sanitizedTrace.scenarioId}_${sanitizedTrace.architecture.toLowerCase()}.json`;
   const filePath = path.join(outDir, fileName);
-  fs.writeFileSync(filePath, JSON.stringify(trace, null, 2), "utf-8");
+  fs.writeFileSync(filePath, JSON.stringify(sanitizedTrace, null, 2), "utf-8");
   return filePath;
+}
+
+function parseStrictInteger(val: string | undefined): number | undefined {
+  if (val === undefined) return undefined;
+  if (!/^\d+$/.test(val.trim())) return NaN;
+  const parsed = Number(val);
+  return Number.isInteger(parsed) ? parsed : NaN;
+}
+
+function parseStrictFloat(val: string | undefined): number | undefined {
+  if (val === undefined) return undefined;
+  if (!/^\d+(\.\d+)?$/.test(val.trim())) return NaN;
+  const parsed = Number(val);
+  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
 function printTurn(turn: TurnTrace, inspectMode = false): void {
@@ -223,10 +239,16 @@ async function main(): Promise<void> {
     await import("../src/features/conversations/playground/golden-scenarios");
   const { EGYPTIAN_ARABIC_SCENARIOS } =
     await import("../src/features/conversations/playground/egyptian-scenarios");
-  const { runCurrentEngineScenario, validateLiveOperatorLimits } =
+  const { runCurrentEngineScenario } =
     await import("../src/features/conversations/playground/current-engine-runner");
   const { runHybridScenario } =
     await import("../src/features/conversations/playground/hybrid-runner");
+  const {
+    CurrentEngineExecutionSession,
+    auditPreflightLimits,
+    DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+  } =
+    await import("../src/features/conversations/playground/current-engine-session");
   const { runGoalDrivenScenario } =
     await import("../src/features/conversations/playground/goal-driven-runner");
   const { runTypeSafeJevScenario } =
@@ -249,6 +271,13 @@ async function main(): Promise<void> {
   const filterHandoffs = args.includes("--handoffs-only");
   const filterContextLoss = args.includes("--context-loss-only");
 
+  if (isCheck && (isLive || isCompare || isPreflight)) {
+    console.error(
+      "\n❌ [CONFLICTING FLAGS] --check cannot be combined with --live, --compare, or --preflight.\n",
+    );
+    process.exit(1);
+  }
+
   const replayIdx = args.indexOf("--replay");
   const scenarioIdx = args.indexOf("--scenario");
   const modeIdx = args.indexOf("--mode");
@@ -261,21 +290,15 @@ async function main(): Promise<void> {
   const scenariosIdx = args.indexOf("--scenarios");
 
   const maxRequests =
-    maxReqIdx !== -1 && args[maxReqIdx + 1]
-      ? parseInt(args[maxReqIdx + 1]!, 10)
-      : undefined;
+    maxReqIdx !== -1 ? parseStrictInteger(args[maxReqIdx + 1]) : undefined;
   const maxTokens =
-    maxTokensIdx !== -1 && args[maxTokensIdx + 1]
-      ? parseInt(args[maxTokensIdx + 1]!, 10)
+    maxTokensIdx !== -1
+      ? parseStrictInteger(args[maxTokensIdx + 1])
       : undefined;
   const timeoutMs =
-    timeoutIdx !== -1 && args[timeoutIdx + 1]
-      ? parseInt(args[timeoutIdx + 1]!, 10)
-      : undefined;
+    timeoutIdx !== -1 ? parseStrictInteger(args[timeoutIdx + 1]) : undefined;
   const approvedBudgetUsd =
-    budgetIdx !== -1 && args[budgetIdx + 1]
-      ? parseFloat(args[budgetIdx + 1]!)
-      : undefined;
+    budgetIdx !== -1 ? parseStrictFloat(args[budgetIdx + 1]) : undefined;
   const budgetBasis =
     budgetBasisIdx !== -1 && args[budgetBasisIdx + 1]
       ? args[budgetBasisIdx + 1]!
@@ -284,6 +307,55 @@ async function main(): Promise<void> {
     scenariosIdx !== -1 && args[scenariosIdx + 1]
       ? args[scenariosIdx + 1]!.toLowerCase()
       : undefined;
+
+  if (maxReqIdx !== -1) {
+    if (
+      !args[maxReqIdx + 1] ||
+      Number.isNaN(maxRequests) ||
+      (maxRequests ?? 0) <= 0
+    ) {
+      console.error(
+        "\n❌ [INVALID ARGUMENT] --max-requests must be a strict positive integer.\n",
+      );
+      process.exit(1);
+    }
+  }
+  if (maxTokensIdx !== -1) {
+    if (
+      !args[maxTokensIdx + 1] ||
+      Number.isNaN(maxTokens) ||
+      (maxTokens ?? 0) <= 0
+    ) {
+      console.error(
+        "\n❌ [INVALID ARGUMENT] --max-tokens must be a strict positive integer.\n",
+      );
+      process.exit(1);
+    }
+  }
+  if (timeoutIdx !== -1) {
+    if (
+      !args[timeoutIdx + 1] ||
+      Number.isNaN(timeoutMs) ||
+      (timeoutMs ?? 0) <= 0
+    ) {
+      console.error(
+        "\n❌ [INVALID ARGUMENT] --timeout must be a strict positive integer in milliseconds.\n",
+      );
+      process.exit(1);
+    }
+  }
+  if (budgetIdx !== -1) {
+    if (
+      !args[budgetIdx + 1] ||
+      Number.isNaN(approvedBudgetUsd) ||
+      (approvedBudgetUsd ?? 0) <= 0
+    ) {
+      console.error(
+        "\n❌ [INVALID ARGUMENT] --budget must be a positive number in USD.\n",
+      );
+      process.exit(1);
+    }
+  }
 
   const tracesDir =
     outIdx !== -1 && args[outIdx + 1] ? args[outIdx + 1]! : DEFAULT_TRACES_DIR;
@@ -463,17 +535,21 @@ async function main(): Promise<void> {
         "12 Egyptian scenarios * ~1.5 turns/scenario * ~1.2k tokens/turn = ~22k tokens on DeepSeek V3 @ $0.14/M in, $0.28/M out -> $0.005 base, capped with 10x safety margin at $0.05",
     };
 
-    const limitCheck = validateLiveOperatorLimits(opLimits);
-    if (!limitCheck.valid) {
-      console.error(
-        `\n❌ [PREFLIGHT FAILED] Invalid operator limits configuration:`,
-      );
-      console.error(`   ${limitCheck.reason}\n`);
-      process.exit(1);
-    }
+    const audit = auditPreflightLimits(
+      opLimits,
+      targetScenarios.map((s) => s.id),
+      DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+      false,
+    );
 
     console.log("\n  --- DRY-RUN / PREFLIGHT AUDIT REPORT ---");
-    console.log(`  Preflight Status        : READY FOR OPERATOR APPROVAL`);
+    console.log(`  Preflight Status        : ${audit.status}`);
+    if (audit.status === "BLOCKED") {
+      console.log(`  Blocking Reasons        :`);
+      for (const r of audit.reasons) {
+        console.log(`    - ${r}`);
+      }
+    }
     console.log(`  Evaluation Mode         : ${mode}`);
     console.log(
       `  Target Architecture     : Merged Production Conversation Engine`,
@@ -482,20 +558,35 @@ async function main(): Promise<void> {
       `  Capability Requirement  : structured_turn (production default)`,
     );
     console.log(
-      `  Provider / Model        : openrouter / deepseek/deepseek-chat`,
+      `  Provider / Model        : ${audit.resolvedConfig.provider} / ${audit.resolvedConfig.model}`,
+    );
+    console.log(
+      `  Pricing Reference       : ${audit.resolvedConfig.pricingSource}`,
     );
     console.log(
       `  Target Scenarios        : ${targetScenarios.length} scenarios [${targetScenarios.map((s) => s.id).join(", ")}]`,
     );
     console.log(
-      `  Max Physical HTTP Calls : ${opLimits.maxPhysicalHttpAttempts}`,
+      `  Max Physical HTTP Calls : ${audit.resolvedConfig.maxPhysicalHttpAttempts}`,
     );
-    console.log(`  Output Token Limit      : ${opLimits.outputTokenLimit}`);
-    console.log(`  Per-Attempt Timeout     : ${opLimits.timeoutMs}ms`);
     console.log(
-      `  Approved Budget Cap     : $${opLimits.approvedBudgetUsd.toFixed(2)} USD`,
+      `  Output Token Limit      : ${audit.resolvedConfig.outputTokenLimit}`,
     );
-    console.log(`  Cost Estimation Basis   : ${opLimits.budgetBasis}`);
+    console.log(
+      `  Per-Attempt Timeout     : ${audit.resolvedConfig.timeoutMs}ms`,
+    );
+    console.log(
+      `  Input Token Bound       : ${audit.resolvedConfig.conservativeInputBoundTokens} tokens/call`,
+    );
+    console.log(
+      `  Conservative Cost Bound : $${audit.resolvedConfig.conservativeCostCeilingUsd.toFixed(4)} USD`,
+    );
+    console.log(
+      `  Approved Budget Cap     : $${audit.resolvedConfig.approvedBudgetUsd.toFixed(4)} USD`,
+    );
+    console.log(
+      `  Cost Estimation Basis   : ${audit.resolvedConfig.costBasis}`,
+    );
     console.log(`\n  --- MONETARY ENFORCEMENT METHOD & LIMITATIONS ---`);
     console.log(
       `  1. Physical Attempt Boundary: Adapter-level fetchImpl enforces an explicit ceiling on physical HTTP attempts.`,
@@ -504,7 +595,7 @@ async function main(): Promise<void> {
       `  2. Output Token Setting     : Bounded via OpenAI-compatible max_tokens parameter to prevent runaways.`,
     );
     console.log(
-      `  3. Dollar Cap Limitations   : Generative APIs do not offer hard real-time balance webhooks before tokens generate; dollar cap is enforced via (requests * max_tokens) ceiling.`,
+      `  3. Dollar Cap Limitations   : ${audit.resolvedConfig.providerSideHardLimitSupport}`,
     );
     console.log(
       `  4. JEV Spending Flag        : FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET applies strictly to JEV Decisions API and is NOT proof of generative LLM spending caps.`,
@@ -542,11 +633,30 @@ async function main(): Promise<void> {
   }
 
   // 5. SINGLE SCENARIO OR FILTERED RUN
+  const sharedEngineSession =
+    mode === "current_engine"
+      ? new CurrentEngineExecutionSession({
+          live: isLive,
+          operatorLimits: isLive
+            ? {
+                scenarioSubset: targetScenarios.map((s) => s.id),
+                maxPhysicalHttpAttempts: maxRequests!,
+                outputTokenLimit: maxTokens!,
+                timeoutMs: timeoutMs!,
+                approvedBudgetUsd: approvedBudgetUsd!,
+                budgetBasis: budgetBasis!,
+              }
+            : undefined,
+          costConfig: DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+        })
+      : null;
+
   for (const scenario of targetScenarios) {
     let trace: ScenarioTrace;
     if (mode === "current_engine") {
       trace = await runCurrentEngineScenario(scenario, {
         live: isLive,
+        session: sharedEngineSession ?? undefined,
         operatorLimits: isLive
           ? {
               scenarioSubset: targetScenarios.map((s) => s.id),
@@ -596,8 +706,15 @@ async function main(): Promise<void> {
     if (trace.failureReason) {
       console.log(`Failure : ${trace.failureReason}`);
     }
+    const totalTokensStr =
+      trace.metrics.totalTokens?.totalTokens !== null &&
+      trace.metrics.totalTokens?.totalTokens !== undefined
+        ? `${trace.metrics.totalTokens.totalTokens} tokens`
+        : trace.metrics.knownTokensSubtotal
+          ? `${trace.metrics.knownTokensSubtotal} known tokens (partial)`
+          : "unknown tokens";
     console.log(
-      `Metrics : ${trace.metrics.totalTurns} turns | ${trace.metrics.totalDurationMs}ms execution | ${trace.metrics.totalLlmCalls} LLM calls | ${trace.metrics.totalTokens.totalTokens} tokens`,
+      `Metrics : ${trace.metrics.totalTurns} turns | ${trace.metrics.totalDurationMs}ms execution | ${trace.metrics.totalLlmCalls} LLM calls | ${totalTokensStr}`,
     );
     console.log("========================================================");
 

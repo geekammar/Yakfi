@@ -25,6 +25,7 @@ export type MockTurnResponse = {
 export type EgyptianScenarioDefinition = ScenarioDefinition & {
   mockResponses?: Record<number, MockTurnResponse>;
   referenceInstant?: string;
+  evaluationScope?: "LANGUAGE_EVALUATION" | "ENGINEERING_BOUNDARY";
 };
 
 function mockBooking(params: {
@@ -78,6 +79,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-01",
     title: "التاريخ النسبي: بكرة مع توقيت القاهرة المرجعي",
     category: "RELATIVE_DATES",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "تفسير كلمة 'بكرة' نسبة إلى تاريخ المرجع في القاهرة (الثلاثاء 2026-10-20 -> الأربعاء 2026-10-21)",
     setup: {
@@ -120,6 +122,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-02",
     title: "اختلاف تاريخ UTC عن تاريخ القاهرة المحلي في لحظة الإدخال",
     category: "RELATIVE_DATES",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "لحظة 22:30 UTC يوم 2026-10-20 تقابل 00:30 صباح 2026-10-21 في القاهرة. 'النهاردة' يجب أن تكون 2026-10-21",
     setup: {
@@ -163,6 +166,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-03",
     title: "تصحيح التاريخ عبر دورة متعددة (الأربعاء -> الخميس)",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "تعديل العميل لتاريخ الموعد من الأربعاء 2026-10-21 إلى الخميس 2026-10-22 مع تحديث الحالة والمتجر الدائم",
     setup: {
@@ -220,6 +224,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     title:
       "تصحيح مقدم الخدمة عند تشابه الأسماء الأولى (د. أحمد سامي / د. أحمد علي)",
     category: "PROVIDER_SELECTION",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "وجود طبيبين باسم أحمد يتطلب توضيحاً عند ذكر 'دكتور أحمد' فقط ثم التحديد الصريح لدكتور أحمد سامي",
     setup: {
@@ -292,6 +297,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-05",
     title: "حذف تفضيل الطبيب (REMOVE) مع استمرار الحجز لأي طبيب متاح",
     category: "PROVIDER_SELECTION",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "تحديد دكتورة سارة أولاً ثم حذف التفضيل بعبارة 'مش فارق معايا الدكتور، أي حد' واستمرار الحجز",
     setup: {
@@ -349,8 +355,9 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-06",
     title: "حذف تفضيل الفترة الزمنية (REMOVE) مع استمرار الحجز",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
-      "تفضيل الفترة الصباحية ثم إزالتها بـ 'أي وقت مش مشكلة' وإظهار كل مواعيد اليوم",
+      "تفضيل الفترة الصباحية ثم إزالتها بـ 'أي وقت يناسبكم عادي' وإظهار كل مواعيد اليوم",
     setup: {
       todayRef: "2026-10-20",
     },
@@ -360,11 +367,11 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
           content: "المواعيد الصباحية المتاحة يوم الأربعاء:",
           service: "كشف أسنان",
           date: "2026-10-21",
-          timePreference: "MORNING",
+          timePreference: "morning",
           factUpdates: [
             { key: "service", operation: "set", value: "كشف أسنان" },
             { key: "date", operation: "set", value: "2026-10-21" },
-            { key: "timePreference", operation: "set", value: "MORNING" },
+            { key: "timePreference", operation: "set", value: "morning" },
           ],
         }),
       },
@@ -381,13 +388,26 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
       {
         input: "عايز كشف أسنان الصبح يوم الأربعاء",
         assertFn: (turn) => {
-          if (turn.stateAfter?.selectedTimePref !== "MORNING") {
-            throw new Error("Turn 1 expected MORNING time preference");
+          if (turn.stateAfter?.selectedTimePref !== "morning") {
+            throw new Error("Turn 1 expected morning time preference");
+          }
+          // Verify morning slots effect: first slot starts before 12:00
+          const offer = turn.stateAfter?.offer;
+          if (offer && offer.kind === "SLOT" && offer.options.length > 0) {
+            const firstSlot = offer.options[0];
+            if (firstSlot) {
+              const startHour = parseInt(firstSlot.startAt.slice(11, 13), 10);
+              if (!Number.isNaN(startHour) && startHour >= 12) {
+                throw new Error(
+                  `Turn 1 expected morning slot (<12:00), got ${startHour}:00`,
+                );
+              }
+            }
           }
         },
       },
       {
-        input: "أي وقت يناسبكم مش مشكلة",
+        input: "أي وقت يناسبكم عادي",
         assertFn: (turn) => {
           if (turn.stateAfter?.selectedTimePref != null) {
             throw new Error("Turn 2 expected time preference removed");
@@ -403,6 +423,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-07",
     title: "حذف التاريخ (REMOVE) والتوقف لتوضيح اليوم الجديد",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "إلغاء تاريخ اليوم المحدد صراحة، والتحقق من مطالبة العميل بتحديد تاريخ جديد",
     setup: {
@@ -455,6 +476,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     title:
       "اعتراض استفسار FAQ مع الحفاظ التام على بيانات الحجز بالحالة الدائمة",
     category: "CATALOG_INQUIRY",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "طرح سؤال عن عنوان العيادة أثناء الحجز، والرد دون تصفير بيانات الخدمة والتاريخ",
     setup: {
@@ -508,6 +530,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-09",
     title: "أولوية factUpdates الصريحة على extraction المتعارض",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "ENGINEERING_BOUNDARY",
     description:
       "عند وجود تعارض بين كائن extraction القديم ومصفوفة factUpdates الصريحة، تفوز factUpdates",
     setup: {
@@ -548,6 +571,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     title:
       "المعلومات الناقصة دلالياً لا تُملأ عبر قواميس النصوص بعد الذكاء الاصطناعي",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
     description:
       "عبارات نصية عامة بدون تاريخ صريح لا يجوز استنتاجها بقواعد regex بعد مخرجات الذكاء الاصطناعي",
     setup: {
@@ -585,6 +609,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-11",
     title: "الاختيار الرقمي للموعد يستهلك 0 محاولات مزود ذكاء اصطناعي",
     category: "STANDARD_BOOKING",
+    evaluationScope: "ENGINEERING_BOUNDARY",
     description:
       "اختيار الموعد بالرقم '1' ينفذ عبر محرك الحجز الميكانيكي دون أي استدعاء شبكي للمزود",
     setup: {
@@ -632,6 +657,7 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     id: "CE-12",
     title: "مقترح غير صالح للتاريخ من المزود يتم توضيحه بأمان دون انهيار",
     category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "ENGINEERING_BOUNDARY",
     description:
       "اقتراح نص تاريخ غير صالح من المزود يتم رفضه بواسطة التحقق ويطلب توضيحاً آمناً",
     setup: {

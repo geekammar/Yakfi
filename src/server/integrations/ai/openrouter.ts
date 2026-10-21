@@ -28,6 +28,11 @@ export type OpenRouterDeps = {
    * live; no engine/orchestrator/prompt layer learns them.
    */
   providerOnly?: string | null;
+  /**
+   * OPTIONAL output token limit (max_tokens). When supplied, bounds
+   * completion length to enforce spending limits.
+   */
+  maxTokens?: number;
 };
 
 export function createOpenRouterAdapter(
@@ -39,6 +44,13 @@ export function createOpenRouterAdapter(
     secretRef: OPENROUTER_SECRET_REF,
     async call(request: AiRequest): Promise<AiProviderResult> {
       const pinned = deps.providerOnly ? deps.providerOnly.trim() : null;
+      const extraBody: Record<string, unknown> = {};
+      if (pinned) {
+        extraBody.provider = { only: [pinned], allow_fallbacks: false };
+      }
+      if (typeof deps.maxTokens === "number" && deps.maxTokens > 0) {
+        extraBody.max_tokens = deps.maxTokens;
+      }
       return callOpenAiCompatible({
         providerId: "openrouter",
         model: deps.model,
@@ -55,9 +67,7 @@ export function createOpenRouterAdapter(
         // OpenRouter request boundary. Empty pin ⇒ `extraBody` is absent and
         // the request body carries no `provider` key at all. The model id is
         // untouched: the pin is a SEPARATE OpenRouter request parameter.
-        extraBody: pinned
-          ? { provider: { only: [pinned], allow_fallbacks: false } }
-          : undefined,
+        extraBody: Object.keys(extraBody).length > 0 ? extraBody : undefined,
       });
     },
   };

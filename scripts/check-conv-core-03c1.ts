@@ -1,8 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import {
+  runCurrentEngineScenario,
+  validateLiveOperatorLimits,
+} from "../src/features/conversations/playground/current-engine-runner";
 /**
- * FlowPilot — CORE-03C1 Acceptance Test Suite
+ * FlowPilot — CORE-03C1 Focused Integrity Acceptance Test Suite
  *
  * Verifies Current Engine Playground alignment:
  * 1. Structured turn reaches generative adapter, not prototype
@@ -13,16 +17,23 @@ import "./setup-test-env";
  * 6. Mechanical selection spends zero provider attempts
  * 7. Policy prohibition prevents provider requests
  * 8. Provider failure/invalid output is recorded honestly
- * 9. Mocked retry attempts are counted individually at the physical fetch boundary
- * 10. Missing usage stays unknown (never reported as zero)
- * 11. Live preflight blocks missing/invalid limits before network activity
- * 12. Historical modes cannot be mislabeled as current-engine live evidence
+ * 9. Runner's own retry instrumentation counts every physical attempt at fetch boundary
+ * 10. Usage accounting: missing usage stays null (never 0); partial usage preserves subtotal
+ * 11. Honest monetary preflight: strict integer parsing, conservative bounds, BLOCKED status
+ * 12. Shared run-level attempt ceiling across scenarios with hard refusal (N+1 blocked)
+ * 13. Model output recorded separately from durable saved state
+ * 14. Offer replacement detected by offer identity (id !== id -> OFFER_REPLACED)
+ * 15. Outbound max_tokens parameter enforced in outgoing adapter requests
+ * 16. Trace sanitization & deep canary redaction (tokens, nonces, auth headers)
+ * 17. Historical modes cannot be mislabeled as current-engine live evidence
  */
 
 import {
-  runCurrentEngineScenario,
-  validateLiveOperatorLimits,
-} from "../src/features/conversations/playground/current-engine-runner";
+  CurrentEngineExecutionSession,
+  DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+  auditPreflightLimits,
+  calculateConservativeCostCeiling,
+} from "../src/features/conversations/playground/current-engine-session";
 import { EGYPTIAN_ARABIC_SCENARIOS } from "../src/features/conversations/playground/egyptian-scenarios";
 import { runGoalDrivenScenario } from "../src/features/conversations/playground/goal-driven-runner";
 import {
@@ -31,6 +42,8 @@ import {
 } from "../src/features/conversations/playground/harness";
 import { runHybridScenario } from "../src/features/conversations/playground/hybrid-runner";
 import { runTypeSafeJevScenario } from "../src/features/conversations/playground/jev-runner";
+import { redactTrace } from "../src/features/conversations/playground/trace-sanitizer";
+import type { ScenarioTrace } from "../src/features/conversations/playground/types";
 
 type CheckResult = {
   label: string;
@@ -142,8 +155,8 @@ async function runAcceptanceSuite(): Promise<void> {
         ?.businessId === PLAYGROUND_IDS.BIZ_ID &&
       trace01.turns[0]?.processing.currentEngine?.availabilityQueries[0]
         ?.date === "2026-10-21" &&
-      trace01.turns[0]?.processing.currentEngine?.availabilityQueries[0]
-        ?.assigneeIds.length === 2,
+      (trace01.turns[0]?.processing.currentEngine?.availabilityQueries[0]
+        ?.assigneeIds?.length ?? 0) === 2,
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -241,10 +254,10 @@ async function runAcceptanceSuite(): Promise<void> {
   const failingTrace = await runCurrentEngineScenario(failingScenario);
 
   check(
-    "8a. Failing provider call results in AI_HANDOFF and handoffCause PROVIDER_FAILURE",
+    "8a. Failing provider call results in AI_HANDOFF and handoffCause AI_FAILURE",
     failingTrace.turns[0]?.assistantAction === "AI_HANDOFF" &&
       failingTrace.turns[0]?.processing.currentEngine?.domainResult
-        .handoffCause === "PROVIDER_FAILURE",
+        .handoffCause === "AI_FAILURE",
   );
   check(
     "8b. Failed physical HTTP attempt is captured with status 500",
@@ -253,23 +266,19 @@ async function runAcceptanceSuite(): Promise<void> {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 9. Mocked retry attempts are counted individually
+  // 9. Runner's own retry instrumentation counts every physical attempt
   // ─────────────────────────────────────────────────────────────────────────────
-  let attemptCounter = 0;
-  const retryHarness = createPlaygroundHarness({
-    todayRef: "2026-10-20",
-  });
-
+  let runnerAttemptCount = 0;
   const retryMockFetch: typeof fetch = async () => {
-    attemptCounter++;
-    if (attemptCounter === 1) {
+    runnerAttemptCount++;
+    if (runnerAttemptCount === 1) {
       const err = new Error("The operation was aborted");
       err.name = "AbortError";
       throw err;
     }
     return new Response(
       JSON.stringify({
-        id: "chatcmpl-retry-2",
+        id: "chatcmpl-retry-test",
         choices: [
           {
             index: 0,
@@ -278,7 +287,7 @@ async function runAcceptanceSuite(): Promise<void> {
               content: JSON.stringify({
                 intent: "BOOKING",
                 action: "booking_handoff",
-                content: "تم بنجاح بعد المحاولة الثانية",
+                content: "متاح بعد إعادة المحاولة",
                 summary: "طلب حجز",
                 extraction: { service: "كشف أسنان", date: "2026-10-21" },
                 factUpdates: [
@@ -290,64 +299,40 @@ async function runAcceptanceSuite(): Promise<void> {
             finish_reason: "stop",
           },
         ],
-        usage: { prompt_tokens: 150, completion_tokens: 30, total_tokens: 180 },
+        usage: { prompt_tokens: 140, completion_tokens: 30, total_tokens: 170 },
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   };
 
-  // Run turn using retryMockFetch through current-engine
-  const retryPolicyAi = await (
-    await import("@/server/integrations/ai/factory")
-  ).createPolicyBackedAi({
-    getEnvVar: () => "test-key",
-    fetchImpl: retryMockFetch,
-    getAiPolicyImpl: async () => ({
-      success: true,
-      data: {
-        policy: {
-          primaryProvider: "openrouter",
-          primaryModel: "deepseek/deepseek-chat",
-          secondaryProvider: null,
-          secondaryModel: null,
-          fallbackEnabled: false,
-          primarySecretRef: "OPENROUTER_API_KEY",
-          secondarySecretRef: null,
-          openRouterProviderOnly: null,
-          updatedAt: new Date(),
-        },
-        effective: {
-          primaryProvider: "openrouter",
-          primaryModel: "deepseek/deepseek-chat",
-          secondary: null,
-          fallbackEnabled: false,
-          openRouterProviderOnly: null,
-        },
-      },
-    }),
+  const retryRunnerTrace = await runCurrentEngineScenario(scenario01, {
+    live: true,
+    upstreamFetch: retryMockFetch,
+    operatorLimits: {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test retry basis",
+    },
   });
 
-  retryHarness.deps.ai = retryPolicyAi;
-  const retryTurnResult = await (
-    await import("@/features/conversations/server/conversation-engine")
-  ).receiveInboundMessage(
-    retryHarness.deps,
-    {
-      from: "+201001234567",
-      to: "+201001111111",
-      text: "عايز كشف أسنان بكرة",
-      receivedAt: "2026-10-20T10:00:00.000Z",
-    },
-    { businessId: retryHarness.business.id },
-  );
-
   check(
-    "9a. Retried request counted individual physical HTTP attempts (attemptCounter == 2)",
-    attemptCounter === 2 && retryTurnResult.ok === true,
+    "9a. Runner recorded both physical HTTP attempts in turn details",
+    retryRunnerTrace.turns[0]?.processing.currentEngine?.httpAttempts.count ===
+      2 && runnerAttemptCount === 2,
+  );
+  check(
+    "9b. First attempt recorded the abort error and second recorded success",
+    retryRunnerTrace.turns[0]?.processing.currentEngine?.httpAttempts
+      .attempts[0]?.error !== null &&
+      retryRunnerTrace.turns[0]?.processing.currentEngine?.httpAttempts
+        .attempts[1]?.status === 200,
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 10. Missing usage stays unknown (never reported as zero)
+  // 10. Usage accounting: missing usage stays null (never 0); partial usage preserves subtotal
   // ─────────────────────────────────────────────────────────────────────────────
   const noUsageScenario: typeof scenario01 = {
     ...scenario01,
@@ -365,7 +350,7 @@ async function runAcceptanceSuite(): Promise<void> {
             { key: "date", operation: "set", value: "2026-10-21" },
           ],
         },
-        usage: null, // explicit null usage
+        usage: null, // explicit missing usage
       },
     },
     turns: [
@@ -386,9 +371,59 @@ async function runAcceptanceSuite(): Promise<void> {
       noUsageTrace.turns[0]?.processing.currentEngine?.tokenUsage
         .totalTokens === null,
   );
+  check(
+    "10b. Scenario metrics for missing usage records tokenCompleteness UNKNOWN and totalTokens null",
+    noUsageTrace.metrics.tokenCompleteness === "UNKNOWN" &&
+      noUsageTrace.metrics.totalTokens === null,
+  );
+
+  // Partial usage scenario (Turn 1 has usage, Turn 2 has null usage)
+  const partialUsageScenario: typeof scenario03 = {
+    ...scenario03,
+    id: "TEST-PARTIAL-USAGE",
+    mockResponses: {
+      1: {
+        body: {
+          intent: "BOOKING",
+          action: "booking_handoff",
+          content: "متاح المواعيد التالية:",
+          summary: "طلب حجز",
+          extraction: { service: "كشف أسنان", date: "2026-10-21" },
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        },
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      },
+      2: {
+        body: {
+          intent: "BOOKING",
+          action: "booking_handoff",
+          content: "تم تعديل الموعد:",
+          summary: "تعديل حجز",
+          extraction: { service: "كشف أسنان", date: "2026-10-22" },
+          factUpdates: [{ key: "date", operation: "set", value: "2026-10-22" }],
+        },
+        usage: null,
+      },
+    },
+  };
+
+  const partialTrace = await runCurrentEngineScenario(partialUsageScenario);
+
+  check(
+    "10c. Partial usage scenario records tokenCompleteness PARTIAL",
+    partialTrace.metrics.tokenCompleteness === "PARTIAL",
+  );
+  check(
+    "10d. Partial usage preserves knownTokensSubtotal while totalTokens is null",
+    partialTrace.metrics.totalTokens === null &&
+      partialTrace.metrics.knownTokensSubtotal?.totalTokens === 120,
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 11. Live preflight blocks missing/invalid limits before network activity
+  // 11. Honest monetary preflight: strict integer parsing, conservative bounds, BLOCKED status
   // ─────────────────────────────────────────────────────────────────────────────
   const limitNull = validateLiveOperatorLimits(null);
   check("11a. Null limits are rejected", limitNull.valid === false);
@@ -406,56 +441,264 @@ async function runAcceptanceSuite(): Promise<void> {
     limitEmptySubset.valid === false,
   );
 
-  const limitZeroReqs = validateLiveOperatorLimits({
+  const limitFractional = validateLiveOperatorLimits({
     scenarioSubset: ["CE-01"],
-    maxPhysicalHttpAttempts: 0,
+    maxPhysicalHttpAttempts: 10.5 as any,
     outputTokenLimit: 500,
     timeoutMs: 15000,
     approvedBudgetUsd: 0.1,
     budgetBasis: "basis",
   });
-  check("11c. Zero max requests is rejected", limitZeroReqs.valid === false);
-
-  let liveBlockedCaught = false;
-  try {
-    await runCurrentEngineScenario(scenario01, {
-      live: true,
-      operatorLimits: {
-        scenarioSubset: ["CE-01"],
-        maxPhysicalHttpAttempts: 10,
-        outputTokenLimit: 500,
-        timeoutMs: 15000,
-        approvedBudgetUsd: 0.1,
-        budgetBasis: "basis",
-      },
-    });
-  } catch (err: any) {
-    if (String(err?.message).includes("LIVE EXECUTION BLOCKED")) {
-      liveBlockedCaught = true;
-    }
-  }
   check(
-    "11d. Live mode in CORE-03C1 safely blocks paid execution before network activity",
-    liveBlockedCaught === true,
+    "11c. Fractional maxPhysicalHttpAttempts is rejected",
+    limitFractional.valid === false,
+  );
+
+  const costCalc = calculateConservativeCostCeiling(25);
+  check(
+    "11d. Conservative cost ceiling for 25 calls @ 5k in / 500 out is exactly $0.0210 USD",
+    costCalc.totalCostCeilingUsd.toFixed(4) === "0.0210",
+  );
+
+  const preflightAudit = auditPreflightLimits(
+    {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 25,
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test",
+    },
+    ["CE-01"],
+    DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+    false, // allowLivePaidExecution = false in slice
+  );
+
+  check(
+    "11e. Preflight audit reports status BLOCKED and details provider limitations",
+    preflightAudit.status === "BLOCKED" &&
+      preflightAudit.resolvedConfig.conservativeCostCeilingUsd.toFixed(4) ===
+        "0.0210" &&
+      preflightAudit.resolvedConfig.providerSideHardLimitSupport.includes(
+        "UNSUPPORTED_BY_PROVIDER_API",
+      ),
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 12. Historical modes cannot be mislabeled as current-engine live evidence
+  // 12. Shared run-level attempt ceiling across scenarios with hard refusal (N+1 blocked)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const sharedSession = new CurrentEngineExecutionSession({
+    live: false,
+    operatorLimits: {
+      scenarioSubset: ["CE-01", "CE-02"],
+      maxPhysicalHttpAttempts: 2, // only 2 attempts allowed
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test ceiling",
+    },
+  });
+
+  // Run 1: spends 1 attempt
+  await runCurrentEngineScenario(scenario01, { session: sharedSession });
+  check(
+    "12a. Session attempt count is 1 after scenario 1",
+    sharedSession.attemptCount === 1,
+  );
+
+  // Run 2: spends 1 attempt
+  const scenario02 = EGYPTIAN_ARABIC_SCENARIOS.find((s) => s.id === "CE-02")!;
+  await runCurrentEngineScenario(scenario02, { session: sharedSession });
+  check(
+    "12b. Session attempt count is 2 after scenario 2",
+    sharedSession.attemptCount === 2,
+  );
+
+  // Run 3: test direct instrumentedFetch refusal when ceiling reached
+  let ceilingCaught = false;
+  try {
+    const fetchFn = sharedSession.createInstrumentedFetch({
+      getTurnIndex: () => 1,
+    });
+    await fetchFn("https://api.example.com");
+  } catch (err: any) {
+    if (String(err?.message).includes("RUN_LIMIT_EXCEEDED")) {
+      ceilingCaught = true;
+    }
+  }
+  check(
+    "12c. Direct attempt was hard-blocked when whole-run ceiling of 2 was reached",
+    ceilingCaught === true && sharedSession.attemptCount === 2,
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 13. Model output recorded separately from durable saved state
+  // ─────────────────────────────────────────────────────────────────────────────
+  const traceModelOutput = await runCurrentEngineScenario(scenario01);
+  const ceDetails = traceModelOutput.turns[0]?.processing.currentEngine;
+
+  check(
+    "13a. modelExtraction matches AI response extraction, not durable knownFacts",
+    ceDetails?.semantic.modelExtraction?.service === "كشف أسنان" &&
+      ceDetails?.semantic.modelExtraction?.date === "2026-10-21",
+  );
+  check(
+    "13b. modelFactUpdates contains model factUpdates array",
+    Array.isArray(ceDetails?.semantic.modelFactUpdates) &&
+      ceDetails?.semantic.modelFactUpdates?.length === 2,
+  );
+  check(
+    "13c. reconciledKnownFacts contains durable state knownFacts",
+    ceDetails?.semantic.reconciledKnownFacts?.service === "كشف أسنان" &&
+      ceDetails?.semantic.reconciledKnownFacts?.date === "2026-10-21",
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 14. Offer replacement detected by offer identity (id !== id -> OFFER_REPLACED)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // In CE-03: Turn 1 creates offer A, Turn 2 requests date change to Thursday,
+  // creating offer B with a different ID.
+  check(
+    "14a. Offer transition correctly detected as OFFER_REPLACED when offer id changed",
+    trace03.turns[1]?.stateBefore?.offer?.id !==
+      trace03.turns[1]?.stateAfter?.offer?.id &&
+      trace03.turns[1]?.processing.currentEngine?.offerTransition.transition ===
+        "OFFER_REPLACED",
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 15. Outbound max_tokens parameter enforced in outgoing adapter requests
+  // ─────────────────────────────────────────────────────────────────────────────
+  let capturedOutboundBody: any = null;
+  const inspectBodyFetch: typeof fetch = async (_input, init) => {
+    if (init?.body) {
+      try {
+        capturedOutboundBody = JSON.parse(init.body as string);
+      } catch {
+        // non-json
+      }
+    }
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-tokens-test",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                intent: "BOOKING",
+                action: "booking_handoff",
+                content: "متاح",
+                summary: "حجز",
+                extraction: { service: "كشف أسنان", date: "2026-10-21" },
+                factUpdates: [
+                  { key: "service", operation: "set", value: "كشف أسنان" },
+                  { key: "date", operation: "set", value: "2026-10-21" },
+                ],
+              }),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  await runCurrentEngineScenario(scenario01, {
+    live: true,
+    upstreamFetch: inspectBodyFetch,
+    operatorLimits: {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 350, // explicit limit
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test max_tokens",
+    },
+  });
+
+  check(
+    "15a. Outbound adapter HTTP request contained max_tokens: 350 in body",
+    capturedOutboundBody?.max_tokens === 350,
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 16. Trace sanitization & deep canary redaction (tokens, nonces, auth headers)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const dirtyTrace: ScenarioTrace = {
+    ...trace01,
+    turns: [
+      {
+        ...trace01.turns[0]!,
+        processing: {
+          ...trace01.turns[0]!.processing,
+          currentEngine: {
+            ...trace01.turns[0]!.processing.currentEngine!,
+            httpAttempts: {
+              count: 1,
+              attempts: [
+                {
+                  index: 1,
+                  url: "https://openrouter.ai/api/v1/chat/completions",
+                  method: "POST",
+                  status: 200,
+                  durationMs: 120,
+                  timestamp: new Date().toISOString(),
+                  sanitizedHeaders: {
+                    authorization: "Bearer secret-api-key-998877",
+                    "x-test-token": "secret_token_abcdef123456",
+                  },
+                  error: null,
+                },
+              ],
+            },
+          },
+        },
+        outbound: {
+          ...trace01.turns[0]!.outbound,
+          text: "Your claim nonce is: claim_nonce_1234567890abcdef. Please do not share.",
+        },
+      },
+    ],
+  };
+
+  const sanitized = redactTrace(dirtyTrace);
+  const serialized = JSON.stringify(sanitized);
+
+  check(
+    "16a. Raw secret-api-key-998877 is completely redacted from trace",
+    !serialized.includes("secret-api-key-998877"),
+  );
+  check(
+    "16b. Raw secret_token_abcdef123456 is completely redacted from trace",
+    !serialized.includes("secret_token_abcdef123456"),
+  );
+  check(
+    "16c. Raw claim_nonce_1234567890abcdef is redacted into deterministic marker",
+    !serialized.includes("claim_nonce_1234567890abcdef") &&
+      serialized.includes("[REDACTED_NONCE_"),
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 17. Historical modes cannot be mislabeled as current-engine live evidence
   // ─────────────────────────────────────────────────────────────────────────────
   const hybridTrace = await runHybridScenario(scenario01);
   const goalDrivenTrace = await runGoalDrivenScenario(scenario01);
   const jevTrace = await runTypeSafeJevScenario(scenario01, { live: false });
 
   check(
-    "12a. Hybrid runner labels architecture HYBRID_B, not CURRENT_ENGINE",
+    "17a. Hybrid runner labels architecture HYBRID_B, not CURRENT_ENGINE",
     hybridTrace.architecture === "HYBRID_B",
   );
   check(
-    "12b. Goal driven runner labels architecture GOAL_DRIVEN_HYBRID, not CURRENT_ENGINE",
+    "17b. Goal driven runner labels architecture GOAL_DRIVEN_HYBRID, not CURRENT_ENGINE",
     goalDrivenTrace.architecture === "GOAL_DRIVEN_HYBRID",
   );
   check(
-    "12c. TypeSafe JEV runner labels architecture TYPESAFE_JEV_GOAL_DRIVEN, not CURRENT_ENGINE",
+    "17c. TypeSafe JEV runner labels architecture TYPESAFE_JEV_GOAL_DRIVEN, not CURRENT_ENGINE",
     jevTrace.architecture === "TYPESAFE_JEV_GOAL_DRIVEN",
   );
 

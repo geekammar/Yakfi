@@ -29,13 +29,18 @@
 - **Booking Invariants:** The `availability-service` is the sole booking authority and returns only genuinely selectable slots. Booking is strictly server-authoritative. Never build a second availability engine.
 - **AI Trust Boundary:** AI interprets customer intent; domain rules decide availability and eligibility; conversation orchestrates. AI output is never authoritative for booking execution (DECISIONS #33).
 - **Presentation:** Arabic-first, RTL-by-default (`dir="rtl" lang="ar"`), responsive shell (desktop right sidebar / mobile bottom nav), vertical-agnostic discovery copy.
-- **Conversation Playground Alignment (CORE-03C1):**
+- **Conversation Playground Alignment & Integrity Repair (CORE-03C1):**
   - CLI `pnpm convo:playground --mode current_engine` executes the real merged engine pipeline: `receiveInboundMessage` → structured capability routing → `createPolicyBackedAi` / provider adapter → turn planner / reconciliation → Booking Core → `InMemoryConversationStateStore` with CAS revision semantics.
+  - Run-level `CurrentEngineExecutionSession` enforces whole-run physical HTTP attempt ceiling across multiple scenarios with hard request blocking on ceiling exhaustion.
   - Physical HTTP attempt counting at injected `fetchImpl` boundary (separates offline fixtures, live provider calls, estimates, and unknown tokens; never reports 0 for unknown usage).
+  - Outbound `max_tokens` setting enforced in actual adapter payload to prevent runaway completions.
+  - Model outputs (`modelExtraction`, `modelFactUpdates`) recorded separately from durable reconciled state (`reconciledKnownFacts`).
+  - Offer replacement detected by offer identity (`offerBefore.id !== offerAfter.id` -> `OFFER_REPLACED`).
+  - Full trace sanitization & deep redaction (`redactTrace`) removing API keys, auth headers, offer tokens, and claim nonces before serialization.
   - Historical modes (`baseline`, `goal_driven`, `typesafe_jev`, `agent_c`) remain available and are strictly labeled by their respective architectures (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`), preventing misattribution.
-  - 12 Egyptian Arabic scenarios (`CE-01` to `CE-12`) covering relative dates, Cairo/UTC date boundary, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, and invalid proposal clarification.
-  - Verified by 32/32 offline automated acceptance checks (`pnpm check:conv-core-03c1`).
-  - Evaluation-readiness slice only: paid live provider execution is NOT RUN and blocked by operator limits preflight.
+  - 12 Egyptian Arabic scenarios (`CE-01` to `CE-12`, 19 turns total) covering relative dates, Cairo/UTC date boundary, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, and invalid proposal clarification.
+  - Verified by 48/48 offline automated acceptance checks (`pnpm check:conv-core-03c1`).
+  - Evaluation-readiness slice only: paid live provider execution is NOT RUN and blocked by operator limits preflight. Preflight audit reports exact conservative cost ceiling ($0.0210 USD for 25 calls @ 5k in / 500 out on DeepSeek V3) and notes provider-side real-time dollar webhooks are unsupported by OpenRouter API.
 
 ## 3. Completed Capabilities (Verified in Repository)
 

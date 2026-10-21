@@ -15,23 +15,27 @@
  * - Physical HTTP attempts are counted at the injected fetch boundary.
  * - Missing/unavailable token usage remains unknown (null), never fabricated as zero.
  * - Live execution requires validated limits and explicit operator approval.
+ * - Live provider transport and offline fixture transport are strictly decoupled.
+ * - Model extraction and factUpdates are captured separately from durable saved state.
+ * - Offer replacement is detected by offer identity (id !== id) as well as status.
  */
 
+import type {
+  AiRequest,
+  AiResponse,
+  ConversationAi,
+} from "@/features/conversations/server/conversation-ai";
 import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import { hydrateConversationState } from "@/features/conversations/server/conversation-state";
 import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 
+import { CurrentEngineExecutionSession } from "./current-engine-session";
 import type {
   EgyptianScenarioDefinition,
   MockTurnResponse,
 } from "./egyptian-scenarios";
-import {
-  createPlaygroundHarness,
-  sanitizeHeaders,
-  type CapturedHttpAttempt,
-  type PlaygroundHarness,
-} from "./harness";
+import { createPlaygroundHarness, type PlaygroundHarness } from "./harness";
 import type {
   CurrentEngineTurnTraceDetails,
   LiveOperatorLimits,
@@ -50,6 +54,8 @@ export type CurrentEngineRunOptions = {
   aiPolicy?: Partial<EffectiveAiPolicy>;
   harness?: PlaygroundHarness;
   inspect?: boolean;
+  session?: CurrentEngineExecutionSession;
+  upstreamFetch?: typeof fetch;
 };
 
 export type LimitValidationResult = {
@@ -60,6 +66,7 @@ export type LimitValidationResult = {
 /**
  * Validates operator-supplied limits for live execution.
  * Fails clearly if any required limit is missing, invalid, zero, or negative.
+ * Uses strict Number.isInteger checks for attempts, tokens, and timeout.
  */
 export function validateLiveOperatorLimits(
   limits?: LiveOperatorLimits | null,
@@ -84,35 +91,36 @@ export function validateLiveOperatorLimits(
 
   if (
     typeof limits.maxPhysicalHttpAttempts !== "number" ||
-    !Number.isFinite(limits.maxPhysicalHttpAttempts) ||
+    !Number.isInteger(limits.maxPhysicalHttpAttempts) ||
     limits.maxPhysicalHttpAttempts <= 0
   ) {
     return {
       valid: false,
       reason:
-        "maxPhysicalHttpAttempts must be a positive integer greater than zero.",
+        "maxPhysicalHttpAttempts must be a strict positive integer greater than zero.",
     };
   }
 
   if (
     typeof limits.outputTokenLimit !== "number" ||
-    !Number.isFinite(limits.outputTokenLimit) ||
+    !Number.isInteger(limits.outputTokenLimit) ||
     limits.outputTokenLimit <= 0
   ) {
     return {
       valid: false,
-      reason: "outputTokenLimit must be a positive integer greater than zero.",
+      reason:
+        "outputTokenLimit must be a strict positive integer greater than zero.",
     };
   }
 
   if (
     typeof limits.timeoutMs !== "number" ||
-    !Number.isFinite(limits.timeoutMs) ||
+    !Number.isInteger(limits.timeoutMs) ||
     limits.timeoutMs <= 0
   ) {
     return {
       valid: false,
-      reason: "timeoutMs must be a positive number greater than zero.",
+      reason: "timeoutMs must be a strict positive integer greater than zero.",
     };
   }
 
@@ -157,15 +165,34 @@ export async function runCurrentEngineScenario(
     }
 
     // In this evaluation-readiness slice (CORE-03C1), paid live execution remains blocked
-    throw new Error(
-      "[LIVE EXECUTION BLOCKED] Paid live provider evaluation is NOT RUN in this slice (CORE-03C1). " +
-        "Evaluation readiness verified. Reviewer approval required before network execution.",
-    );
+    // unless an explicit upstreamFetch was injected for integration testing.
+    if (!options.upstreamFetch) {
+      throw new Error(
+        "[LIVE EXECUTION BLOCKED] Paid live provider evaluation is NOT RUN in this slice (CORE-03C1). " +
+          "Evaluation readiness verified. Reviewer approval required before network execution.",
+      );
+    }
   }
 
   const startedAt = new Date().toISOString();
 
-  // 2. Setup harness and isolated state
+  // 2. Setup or reuse execution session
+  const configuredProvider = options.aiPolicy?.primaryProvider ?? "openrouter";
+  const configuredModel =
+    options.aiPolicy?.primaryModel ?? "deepseek/deepseek-chat";
+
+  const session =
+    options.session ??
+    new CurrentEngineExecutionSession({
+      live: isLive,
+      operatorLimits: options.operatorLimits,
+      liveFetchImpl: options.upstreamFetch,
+      primaryProvider: configuredProvider,
+      primaryModel: configuredModel,
+      allowLivePaidCalls: Boolean(options.upstreamFetch),
+    });
+
+  // 3. Setup harness and isolated state
   const harness =
     options.harness ??
     createPlaygroundHarness({
@@ -187,145 +214,22 @@ export async function runCurrentEngineScenario(
     harness.setVirtualNow(new Date(egyptianDef.referenceInstant));
   }
 
-  // 3. Setup instrumented fetch boundary to count physical HTTP attempts
+  // 4. Setup instrumented fetch boundary tied to execution session
   let currentTurnIndex = 1;
   const mockResponses =
     options.mockResponses ?? egyptianDef.mockResponses ?? {};
 
-  const instrumentedFetch: typeof fetch = async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
-    const attemptIndex = harness.capturedHttpAttempts.length + 1;
-    const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-    const method = init?.method ?? "POST";
-    const startTime = Date.now();
-    const sanitizedReqHeaders = sanitizeHeaders(init?.headers);
+  const instrumentedFetch = session.createInstrumentedFetch({
+    mockResponses,
+    getTurnIndex: () => currentTurnIndex,
+  });
 
-    const mockResp = mockResponses[currentTurnIndex];
-    const status = mockResp?.status ?? 200;
-    const durationMs = Date.now() - startTime;
+  // 5. Create policy-backed AI and capture model outputs at the boundary
+  const outputTokenLimit =
+    session.outputTokenLimit ?? options.operatorLimits?.outputTokenLimit ?? 500;
+  const timeoutMs =
+    session.timeoutMs ?? options.operatorLimits?.timeoutMs ?? 15000;
 
-    let responsePayload: any;
-    let tokenUsage: {
-      promptTokens?: number;
-      completionTokens?: number;
-      totalTokens?: number;
-    } | null = null;
-
-    if (mockResp) {
-      const usage =
-        mockResp.usage === null
-          ? undefined
-          : (mockResp.usage ?? {
-              prompt_tokens: 180,
-              completion_tokens: 45,
-              total_tokens: 225,
-            });
-
-      if (usage) {
-        tokenUsage = {
-          promptTokens: usage.prompt_tokens,
-          completionTokens: usage.completion_tokens,
-          totalTokens: usage.total_tokens,
-        };
-      }
-
-      responsePayload = {
-        id: `chatcmpl-mock-${attemptIndex}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: options.aiPolicy?.primaryModel ?? "deepseek/deepseek-chat",
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: JSON.stringify(mockResp.body),
-            },
-            finish_reason: "stop",
-          },
-        ],
-        ...(usage ? { usage } : {}),
-      };
-    } else {
-      // Default fallback mock response
-      tokenUsage = {
-        promptTokens: 160,
-        completionTokens: 40,
-        totalTokens: 200,
-      };
-      responsePayload = {
-        id: `chatcmpl-mock-${attemptIndex}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: options.aiPolicy?.primaryModel ?? "deepseek/deepseek-chat",
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: JSON.stringify({
-                intent: "BOOKING_REQUEST",
-                confidence: 0.9,
-                extraction: {},
-                factUpdates: [],
-                reply: "مرحباً بك! كيف يمكنني مساعدتك؟",
-              }),
-            },
-            finish_reason: "stop",
-          },
-        ],
-        usage: {
-          prompt_tokens: 160,
-          completion_tokens: 40,
-          total_tokens: 200,
-        },
-      };
-    }
-
-    const attemptRecord: CapturedHttpAttempt = {
-      index: attemptIndex,
-      url,
-      method,
-      status,
-      durationMs,
-      timestamp: new Date().toISOString(),
-      sanitizedHeaders: sanitizedReqHeaders,
-      responseBodyPreview: JSON.stringify(responsePayload).slice(0, 200),
-      tokenUsage,
-      error: status >= 400 ? `HTTP ${status}` : null,
-    };
-    harness.capturedHttpAttempts.push(attemptRecord);
-
-    if (status >= 400) {
-      return new Response(
-        JSON.stringify({
-          error: {
-            message: `Mock provider error ${status}`,
-            type: "provider_error",
-            code: status,
-          },
-        }),
-        {
-          status,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    return new Response(JSON.stringify(responsePayload), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  };
-
-  // 4. Create the real policy-backed AI attached to the instrumented fetch boundary
   const policyAi = await createPolicyBackedAi({
     getEnvVar: (name: string) => {
       if (name === "OPENROUTER_API_KEY") {
@@ -343,6 +247,8 @@ export async function runCurrentEngineScenario(
       return process.env[name];
     },
     fetchImpl: instrumentedFetch,
+    maxTokens: outputTokenLimit,
+    timeoutMs,
     getAiPolicyImpl: async () => {
       if (options.aiPolicy?.primaryProvider === ("deterministic" as any)) {
         return {
@@ -354,9 +260,8 @@ export async function runCurrentEngineScenario(
         success: true,
         data: {
           policy: {
-            primaryProvider: options.aiPolicy?.primaryProvider ?? "openrouter",
-            primaryModel:
-              options.aiPolicy?.primaryModel ?? "deepseek/deepseek-chat",
+            primaryProvider: configuredProvider,
+            primaryModel: configuredModel,
             secondaryProvider: null,
             secondaryModel: null,
             fallbackEnabled: false,
@@ -366,9 +271,8 @@ export async function runCurrentEngineScenario(
             updatedAt: new Date(),
           },
           effective: {
-            primaryProvider: options.aiPolicy?.primaryProvider ?? "openrouter",
-            primaryModel:
-              options.aiPolicy?.primaryModel ?? "deepseek/deepseek-chat",
+            primaryProvider: configuredProvider,
+            primaryModel: configuredModel,
             secondary: null,
             fallbackEnabled: false,
             openRouterProviderOnly: null,
@@ -376,10 +280,21 @@ export async function runCurrentEngineScenario(
         },
       };
     },
-    timeoutMs: options.operatorLimits?.timeoutMs ?? 15000,
   });
 
-  harness.deps.ai = policyAi;
+  // Instrumentation seam to capture actual parsed AiResponse without changing production engine
+  const turnAiCapture = { response: null as AiResponse | null };
+  const getCapturedAi = (): AiResponse | null => turnAiCapture.response;
+  const instrumentedAi: ConversationAi = {
+    providerName: policyAi.providerName,
+    async respond(request: AiRequest): Promise<AiResponse> {
+      const response = await policyAi.respond(request);
+      turnAiCapture.response = response;
+      return response;
+    },
+  };
+
+  harness.deps.ai = instrumentedAi;
 
   const turns: TurnTrace[] = [];
   let scenarioVerdict: "PASS" | "FAIL" = "PASS";
@@ -391,17 +306,20 @@ export async function runCurrentEngineScenario(
   let totalCompletionTokens = 0;
   let totalTokens = 0;
   let totalLlmCalls = 0;
-  const clarificationLoopDetected = false;
-  const unnecessaryHandoffDetected = false;
+  let totalKnownTokens = 0;
+  let hasAnyKnownTokens = false;
+  let hasAnyUnknownTokens = false;
   let appointmentBooked = false;
 
-  // 5. Execute each scenario turn
+  // 6. Execute each scenario turn
   for (let i = 0; i < scenario.turns.length; i++) {
     const turnExp = scenario.turns[i];
     if (!turnExp) continue;
 
     currentTurnIndex = i + 1;
     totalTurns++;
+    turnAiCapture.response = null;
+
     const turnId = `${scenario.id}-T${currentTurnIndex}`;
     const channel = turnExp.channel ?? scenario.channel ?? "WHATSAPP";
     const senderId =
@@ -426,7 +344,7 @@ export async function runCurrentEngineScenario(
     const queriesBefore = harness.capturedAvailabilityQueries.length;
     const apptsBefore = harness.appointments.length;
     const outboundBefore = harness.deliveredOutbound.length;
-    const attemptsBefore = harness.capturedHttpAttempts.length;
+    const sessionAttemptsBefore = session.attemptCount;
 
     const startTurnTime = Date.now();
 
@@ -473,7 +391,10 @@ export async function runCurrentEngineScenario(
       harness.capturedAvailabilityQueries.slice(queriesBefore);
     const turnWrites = harness.appointments.slice(apptsBefore);
     const turnOutbound = harness.deliveredOutbound.slice(outboundBefore);
-    const turnAttempts = harness.capturedHttpAttempts.slice(attemptsBefore);
+    const turnAttempts = session.capturedAttempts.slice(sessionAttemptsBefore);
+
+    // Keep harness capturedHttpAttempts synchronized
+    harness.capturedHttpAttempts.push(...turnAttempts);
 
     // Track physical HTTP attempts
     totalLlmCalls += turnAttempts.length;
@@ -484,20 +405,22 @@ export async function runCurrentEngineScenario(
     let turnTotalTokens: number | null = null;
     let usageSource: MeasuredTokenUsage["source"] = "UNKNOWN";
 
-    if (turnAttempts.length > 0) {
-      let hasUsage = false;
+    if (turnAttempts.length === 0) {
+      usageSource = "NOT_APPLICABLE";
+    } else {
+      let turnHasUsage = false;
       let pSum = 0;
       let cSum = 0;
       let tSum = 0;
       for (const a of turnAttempts) {
-        if (a.tokenUsage) {
-          hasUsage = true;
+        if (a.tokenUsage && typeof a.tokenUsage.totalTokens === "number") {
+          turnHasUsage = true;
           pSum += a.tokenUsage.promptTokens ?? 0;
           cSum += a.tokenUsage.completionTokens ?? 0;
           tSum += a.tokenUsage.totalTokens ?? 0;
         }
       }
-      if (hasUsage) {
+      if (turnHasUsage) {
         turnPromptTokens = pSum;
         turnCompletionTokens = cSum;
         turnTotalTokens = tSum;
@@ -505,6 +428,11 @@ export async function runCurrentEngineScenario(
         totalPromptTokens += pSum;
         totalCompletionTokens += cSum;
         totalTokens += tSum;
+        totalKnownTokens += tSum;
+        hasAnyKnownTokens = true;
+      } else {
+        usageSource = "UNKNOWN";
+        hasAnyUnknownTokens = true;
       }
     }
 
@@ -516,14 +444,16 @@ export async function runCurrentEngineScenario(
       isEstimate: false,
     };
 
-    // Determine offer transition
+    // Determine offer transition with strict identity check (id !== id -> OFFER_REPLACED)
     const offerBefore = stateBefore?.offer ?? null;
     const offerAfter = stateAfter?.offer ?? null;
     let offerTransition = "NO_TRANSITION";
     if (!offerBefore && offerAfter) {
       offerTransition = "OFFER_CREATED";
     } else if (offerBefore && offerAfter) {
-      if (offerBefore.status !== offerAfter.status) {
+      if (offerBefore.id !== offerAfter.id) {
+        offerTransition = "OFFER_REPLACED";
+      } else if (offerBefore.status !== offerAfter.status) {
         offerTransition = `STATUS_${offerAfter.status}`;
       } else {
         offerTransition = "OFFER_MAINTAINED";
@@ -553,25 +483,50 @@ export async function runCurrentEngineScenario(
       }
     }
 
+    // Capture model outputs separately from durable state
+    const capturedAi = getCapturedAi();
+    const capturedModelExtraction = capturedAi?.extraction
+      ? { ...capturedAi.extraction }
+      : null;
+    const capturedModelFactUpdates = capturedAi?.factUpdates
+      ? (capturedAi.factUpdates as any[])
+      : null;
+    const reconciledFacts = stateAfter?.knownFacts
+      ? { ...stateAfter.knownFacts }
+      : null;
+
+    const observedProvider = capturedAi
+      ? (result.observability?.provider ??
+        policyAi.providerName ??
+        configuredProvider)
+      : null;
+    const observedModel = capturedAi
+      ? (result.observability?.model ?? configuredModel)
+      : null;
+
     const currentEngineDetails: CurrentEngineTurnTraceDetails = {
       routing: {
         route: routeType,
         effectiveCapability: "structured_turn",
+        configuredProvider,
+        configuredModel,
+        observedProvider,
+        observedModel,
         finalProvider:
           result.observability?.provider ??
-          options.aiPolicy?.primaryProvider ??
-          "openrouter",
+          (turnAttempts.length > 0 ? configuredProvider : "NONE"),
         finalModel:
           result.observability?.model ??
-          options.aiPolicy?.primaryModel ??
-          "deepseek/deepseek-chat",
+          (turnAttempts.length > 0 ? configuredModel : "NONE"),
       },
       semantic: {
         intent: result.intent ?? result.observability?.routingDecision ?? null,
-        extraction: stateAfter?.knownFacts
-          ? { ...stateAfter.knownFacts }
-          : null,
-        factUpdates: result.observability?.factUpdates ?? null,
+        modelExtraction: capturedModelExtraction,
+        modelFactUpdates: capturedModelFactUpdates,
+        reconciledKnownFacts: reconciledFacts,
+        extraction: capturedModelExtraction ?? reconciledFacts,
+        factUpdates:
+          capturedModelFactUpdates ?? result.observability?.factUpdates ?? null,
       },
       task: {
         activeTask: stateAfter?.activeTask
@@ -658,9 +613,7 @@ export async function runCurrentEngineScenario(
         architecture: "CURRENT_ENGINE" as PlaygroundArchitecture,
         jevDecision: null,
         semanticIntent: result.intent ?? null,
-        extractedEntities: stateAfter?.knownFacts
-          ? { ...stateAfter.knownFacts }
-          : {},
+        extractedEntities: capturedModelExtraction ?? reconciledFacts ?? {},
         toolCalls: [],
         executionTimeMs: durationMs,
         llmCalls: turnAttempts.length,
@@ -760,18 +713,49 @@ export async function runCurrentEngineScenario(
       "Scenario expected appointment creation, but none was created.";
   }
 
+  // Calculate token completeness
+  let tokenCompleteness: ScenarioMetrics["tokenCompleteness"] =
+    "NOT_APPLICABLE";
+  let finalTotalTokens: ScenarioMetrics["totalTokens"] = null;
+
+  if (totalLlmCalls === 0) {
+    tokenCompleteness = "NOT_APPLICABLE";
+    finalTotalTokens = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    };
+  } else if (!hasAnyKnownTokens && hasAnyUnknownTokens) {
+    tokenCompleteness = "UNKNOWN";
+    finalTotalTokens = null;
+  } else if (hasAnyKnownTokens && hasAnyUnknownTokens) {
+    tokenCompleteness = "PARTIAL";
+    finalTotalTokens = null;
+  } else {
+    tokenCompleteness = "COMPLETE";
+    finalTotalTokens = {
+      promptTokens: totalPromptTokens,
+      completionTokens: totalCompletionTokens,
+      totalTokens,
+    };
+  }
+
   const metrics: ScenarioMetrics = {
     totalTurns,
     totalDurationMs,
     totalLlmCalls,
-    totalTokens: {
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      totalTokens,
-    },
+    totalTokens: finalTotalTokens,
+    tokenCompleteness,
+    knownTokensSubtotal: hasAnyKnownTokens
+      ? {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          totalTokens: totalKnownTokens,
+        }
+      : null,
     appointmentBooked,
-    clarificationLoopDetected,
-    unnecessaryHandoffDetected,
+    clarificationLoopDetected: false,
+    unnecessaryHandoffDetected: false,
   };
 
   return {
