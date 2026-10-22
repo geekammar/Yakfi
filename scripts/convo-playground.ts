@@ -247,13 +247,15 @@ async function main(): Promise<void> {
     CurrentEngineExecutionSession,
     auditPreflightLimits,
     VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
+    runTrackAJevEvaluation,
+    JEV_BOOKING_REQUESTED_THRESHOLD,
   } =
     await import("../src/features/conversations/playground/current-engine-session");
   const { runGoalDrivenScenario } =
     await import("../src/features/conversations/playground/goal-driven-runner");
   const { runTypeSafeJevScenario } =
     await import("../src/features/conversations/playground/jev-runner");
-  const { createJevDecisionsProvider, JEV_PINNED_MODEL } =
+  const { JEV_PINNED_MODEL } =
     await import("../src/server/integrations/ai/jev-decisions-provider");
   const { runAgentCScenario } =
     await import("../src/features/conversations/playground/agent-c-runner");
@@ -708,65 +710,55 @@ async function main(): Promise<void> {
     console.log(
       `  Pinned Model: ${JEV_PINNED_MODEL} via OpenRouter Decisions API`,
     );
+    console.log(
+      `  Declared Positive Threshold: >= ${JEV_BOOKING_REQUESTED_THRESHOLD} (0.70 represents clear positive booking intent confidence on [0, 1])`,
+    );
     console.log("========================================================");
 
-    const jevInstrumentedFetch = sharedEngineSession!.createInstrumentedFetch({
-      getTurnIndex: () => 0,
+    const jevReport = await runTrackAJevEvaluation({
+      session: sharedEngineSession!,
+      timeoutMs,
+      apiKey: process.env.OPENROUTER_API_KEY,
     });
-    const key = process.env.OPENROUTER_API_KEY;
-    const jevProvider = createJevDecisionsProvider({
-      getEnvVar: (k) => (k === "OPENROUTER_API_KEY" ? key : process.env[k]),
-      fetchImpl: jevInstrumentedFetch,
-      timeoutMs: timeoutMs ?? 15000,
-    });
-
-    const jevStart = Date.now();
-    const jevRes = await jevProvider.evaluate({
-      state: {
-        customerMessage: "عايز أحجز كشف أسنان بكرة",
-        businessName: "عيادة د. أحمد",
-        services: [],
-        faqs: [],
-        languageHint: "ar",
-      },
-      questions: {
-        bookingRequested: {
-          type: "noul",
-          instructions: "The customer is asking to book an appointment.",
-        },
-      },
-    });
-    const jevLatency = Date.now() - jevStart;
-
-    const ans = jevRes.answers["bookingRequested"];
-    const bookingProb = ans && ans.type === "noul" ? ans.noul : null;
 
     console.log(`  1. Customer Input            : "عايز أحجز كشف أسنان بكرة"`);
     console.log(
-      `  2. Observed JEV Model        : ${jevRes.servedModel ?? "Unknown"}`,
+      `  2. Observed JEV Model        : ${jevReport.servedModel ?? "Unknown"}`,
     );
-    console.log(`  3. Provider Call OK          : ${jevRes.ok}`);
+    console.log(
+      `  3. Transport Call OK         : ${jevReport.transportSuccess}`,
+    );
     console.log(
       `  4. Physical HTTP Attempts    : ${sharedEngineSession!.attemptCount}`,
     );
+    console.log(`  5. Latency                   : ${jevReport.latencyMs}ms`);
     console.log(
-      `  5. Latency                   : ${jevLatency}ms (provider reported: ${jevRes.latencyMs}ms)`,
+      `  6. Provider Token Usage      : in=${jevReport.inputTokens ?? "N/A"}, out=${jevReport.outputTokens ?? "N/A"}`,
     );
     console.log(
-      `  6. Provider Token Usage      : in=${jevRes.inputTokens ?? "N/A"}, out=${jevRes.outputTokens ?? "N/A"}`,
-    );
-    console.log(
-      `  7. Intent Routing Result     : bookingRequested prob=${bookingProb}`,
+      `  7. Semantic Evaluation       : bookingRequested prob=${jevReport.observedProbability ?? "N/A"} (threshold >= ${jevReport.declaredThreshold}) -> ${jevReport.semanticSuccess ? "PASS" : "FAIL"}`,
     );
     console.log(
       `  8. Structured Fact Updates   : UNSUPPORTED (Decisions API contract answers atomic questions; structured SET/REMOVE fact updates are not exposed)`,
     );
     console.log(
-      `  9. Verdict                   : ${jevRes.ok ? "PASS" : "FAIL"} (Intent routing PASS; structured fact extraction UNSUPPORTED by contract design)`,
+      `  9. Track A Verdict           : ${jevReport.verdict}${
+        jevReport.failureReason
+          ? ` (Failure: ${jevReport.failureReason})`
+          : " (Transport OK, probability >= threshold; structured fact updates UNSUPPORTED by contract design)"
+      }`,
     );
     console.log("========================================================\n");
 
+    if (jevReport.verdict === "FAIL") {
+      hasAnyFailure = true;
+    }
+
     if (track === "jev") {
+      if (jevReport.verdict === "FAIL") {
+        console.error("❌ Track A (JEV) evaluation failed.");
+        process.exit(1);
+      }
       return;
     }
   }

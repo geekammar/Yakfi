@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { createJevDecisionsProvider } from "../../../server/integrations/ai/jev-decisions-provider";
 import type { CapturedHttpAttempt } from "./harness";
 import type { LiveOperatorLimits } from "./types";
 
@@ -518,4 +519,147 @@ export class CurrentEngineExecutionSession {
       }
     };
   }
+}
+
+/**
+ * Predeclared threshold for positive booking intent confidence on Track A JEV.
+ *
+ * Rationale:
+ * A threshold of 0.70 represents clear positive intent confidence on a [0, 1] probability scale
+ * for an explicit booking request ("عايز أحجز كشف أسنان بكرة"). A probability below 0.70 represents
+ * low/negative booking confidence and must fail this positive booking case.
+ */
+export const JEV_BOOKING_REQUESTED_THRESHOLD = 0.7;
+
+export interface JevDecisionEvaluationResult {
+  transportSuccess: boolean;
+  semanticSuccess: boolean;
+  verdict: "PASS" | "FAIL";
+  declaredThreshold: number;
+  observedProbability: number | null;
+  observedAnswerType: string | null;
+  failureReason?: string;
+}
+
+export function evaluateJevBookingIntent(
+  jevRes: {
+    ok: boolean;
+    error?: string;
+    errorMessage?: string | null;
+    answers?: Record<string, { type: string; noul?: number; choice?: string }>;
+  },
+  threshold: number = JEV_BOOKING_REQUESTED_THRESHOLD,
+): JevDecisionEvaluationResult {
+  const transportSuccess = jevRes.ok === true;
+  const ans = jevRes.answers?.["bookingRequested"];
+  const observedAnswerType = ans?.type ?? null;
+  const observedProbability =
+    ans && ans.type === "noul" && typeof ans.noul === "number"
+      ? ans.noul
+      : null;
+
+  let semanticSuccess = false;
+  let failureReason: string | undefined;
+
+  if (!transportSuccess) {
+    failureReason = `Transport or provider failure: ${
+      jevRes.errorMessage || jevRes.error || "HTTP call failed"
+    }`;
+  } else if (!ans) {
+    failureReason = `Missing answer for 'bookingRequested' in provider response`;
+  } else if (ans.type !== "noul") {
+    failureReason = `Invalid answer type for 'bookingRequested': expected 'noul', received '${ans.type}'`;
+  } else if (
+    typeof ans.noul !== "number" ||
+    !Number.isFinite(ans.noul) ||
+    ans.noul < 0 ||
+    ans.noul > 1
+  ) {
+    failureReason = `Invalid probability for 'bookingRequested': expected finite number in [0, 1], received ${ans.noul}`;
+  } else if (ans.noul < threshold) {
+    failureReason = `Booking probability (${ans.noul}) below declared positive threshold (${threshold})`;
+  } else {
+    semanticSuccess = true;
+  }
+
+  const verdict: "PASS" | "FAIL" =
+    transportSuccess && semanticSuccess ? "PASS" : "FAIL";
+
+  return {
+    transportSuccess,
+    semanticSuccess,
+    verdict,
+    declaredThreshold: threshold,
+    observedProbability,
+    observedAnswerType,
+    failureReason,
+  };
+}
+
+export interface TrackAJevEvaluationReport extends JevDecisionEvaluationResult {
+  servedModel: string | null;
+  latencyMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+export interface TrackAJevEvaluationOptions {
+  session?: CurrentEngineExecutionSession;
+  fetchImpl?: typeof fetch;
+  apiKey?: string;
+  timeoutMs?: number;
+  threshold?: number;
+  customerMessage?: string;
+}
+
+export async function runTrackAJevEvaluation(
+  options: TrackAJevEvaluationOptions = {},
+): Promise<TrackAJevEvaluationReport> {
+  const threshold = options.threshold ?? JEV_BOOKING_REQUESTED_THRESHOLD;
+  const timeoutMs = options.timeoutMs ?? 15000;
+  const key = options.apiKey ?? process.env.OPENROUTER_API_KEY;
+
+  let instrumentedFetch = options.fetchImpl;
+  if (!instrumentedFetch && options.session) {
+    instrumentedFetch = options.session.createInstrumentedFetch({
+      getTurnIndex: () => 0,
+    });
+  }
+  if (!instrumentedFetch) {
+    instrumentedFetch = globalThis.fetch;
+  }
+
+  const jevProvider = createJevDecisionsProvider({
+    getEnvVar: (k) => (k === "OPENROUTER_API_KEY" ? key : process.env[k]),
+    fetchImpl: instrumentedFetch,
+    timeoutMs,
+  });
+
+  const jevStart = Date.now();
+  const jevRes = await jevProvider.evaluate({
+    state: {
+      customerMessage: options.customerMessage ?? "عايز أحجز كشف أسنان بكرة",
+      businessName: "عيادة د. أحمد",
+      services: [],
+      faqs: [],
+      languageHint: "ar",
+    },
+    questions: {
+      bookingRequested: {
+        type: "noul",
+        instructions: "The customer is asking to book an appointment.",
+      },
+    },
+  });
+  const jevLatency = Date.now() - jevStart;
+
+  const evalResult = evaluateJevBookingIntent(jevRes, threshold);
+
+  return {
+    ...evalResult,
+    servedModel: jevRes.servedModel ?? null,
+    latencyMs: jevRes.latencyMs ?? jevLatency,
+    inputTokens: jevRes.inputTokens ?? null,
+    outputTokens: jevRes.outputTokens ?? null,
+  };
 }

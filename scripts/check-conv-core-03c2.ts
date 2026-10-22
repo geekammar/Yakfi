@@ -7,8 +7,11 @@ import {
 } from "../src/features/conversations/playground/current-engine-runner";
 import {
   CurrentEngineExecutionSession,
+  JEV_BOOKING_REQUESTED_THRESHOLD,
   VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
   auditPreflightLimits,
+  evaluateJevBookingIntent,
+  runTrackAJevEvaluation,
 } from "../src/features/conversations/playground/current-engine-session";
 /**
  * FlowPilot — Acceptance Verification Suite (CORE-03C2)
@@ -438,7 +441,7 @@ async function main(): Promise<void> {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 7. Track A JEV contract boundary and unsupported capabilities
+  // 7. Track A JEV contract boundary, positive threshold & failure separation
   // ─────────────────────────────────────────────────────────────────────────────
   const jevStratEligibility = jevEligibility({
     message: "عايز أحجز كشف أسنان بكرة",
@@ -498,6 +501,176 @@ async function main(): Promise<void> {
   check(
     "7c. JEV Decisions contract model is pinned to typesafe/jev-1.13",
     jevSimulated.model === JEV_PINNED_MODEL,
+  );
+  check(
+    "7d. Declared positive threshold is explicitly predeclared (>= 0.70)",
+    JEV_BOOKING_REQUESTED_THRESHOLD === 0.7,
+  );
+
+  // 7e. Positive answer (0.98 >= 0.70)
+  const reportPositive = await runTrackAJevEvaluation({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.13-20260917",
+          provider: "TypeSafe",
+          answers: {
+            bookingRequested: { type: "noul", noul: 0.98 },
+          },
+          usage: { input_tokens: 300, output_tokens: 24, cost: 0.0000126 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "test-key",
+  });
+  check(
+    "7e. Positive answer (0.98 >= 0.70) produces transportSuccess true, semanticSuccess true, verdict PASS",
+    reportPositive.transportSuccess === true &&
+      reportPositive.semanticSuccess === true &&
+      reportPositive.verdict === "PASS" &&
+      reportPositive.failureReason === undefined,
+  );
+
+  // 7f. Low/negative answer (0.25 < 0.70)
+  const reportLow = await runTrackAJevEvaluation({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.13-20260917",
+          provider: "TypeSafe",
+          answers: {
+            bookingRequested: { type: "noul", noul: 0.25 },
+          },
+          usage: { input_tokens: 300, output_tokens: 24, cost: 0.0000126 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "test-key",
+  });
+  check(
+    "7f. Low/negative answer (0.25 < 0.70) produces transportSuccess true, semanticSuccess false, verdict FAIL",
+    reportLow.transportSuccess === true &&
+      reportLow.semanticSuccess === false &&
+      reportLow.verdict === "FAIL" &&
+      String(reportLow.failureReason).includes(
+        "below declared positive threshold",
+      ),
+  );
+
+  // 7g. Invalid answer type (choice instead of noul)
+  const reportInvalidType = await runTrackAJevEvaluation({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.13-20260917",
+          provider: "TypeSafe",
+          answers: {
+            bookingRequested: { type: "choice", choice: "yes" },
+          },
+          usage: { input_tokens: 300, output_tokens: 24, cost: 0.0000126 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "test-key",
+  });
+  check(
+    "7g. Invalid answer type produces transportSuccess true, semanticSuccess false, verdict FAIL",
+    reportInvalidType.transportSuccess === true &&
+      reportInvalidType.semanticSuccess === false &&
+      reportInvalidType.verdict === "FAIL" &&
+      String(reportInvalidType.failureReason).includes("Invalid answer type"),
+  );
+
+  // 7h. Missing answer key in provider payload fails closed
+  const reportMissing = await runTrackAJevEvaluation({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.13-20260917",
+          provider: "TypeSafe",
+          answers: {},
+          usage: { input_tokens: 300, output_tokens: 24, cost: 0.0000126 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    apiKey: "test-key",
+  });
+  check(
+    "7h. Missing answer key in provider payload fails closed with verdict FAIL",
+    reportMissing.verdict === "FAIL" &&
+      reportMissing.semanticSuccess === false &&
+      String(reportMissing.failureReason).length > 0,
+  );
+
+  const evalMissingDirect = evaluateJevBookingIntent({ ok: true, answers: {} });
+  check(
+    "7i. Missing answer in evaluateJevBookingIntent reports missing answer reason",
+    evalMissingDirect.verdict === "FAIL" &&
+      evalMissingDirect.semanticSuccess === false &&
+      String(evalMissingDirect.failureReason).includes("Missing answer"),
+  );
+
+  const evalNonFinite = evaluateJevBookingIntent({
+    ok: true,
+    answers: { bookingRequested: { type: "noul", noul: NaN } },
+  });
+  check(
+    "7j. Non-finite probability (NaN) reports invalid probability failure",
+    evalNonFinite.verdict === "FAIL" &&
+      evalNonFinite.semanticSuccess === false &&
+      String(evalNonFinite.failureReason).includes("Invalid probability"),
+  );
+
+  // 7k. Provider/transport failure (HTTP 500)
+  const reportProviderFailure = await runTrackAJevEvaluation({
+    fetchImpl: async () =>
+      new Response("Internal Server Error", {
+        status: 500,
+        headers: { "Content-Type": "text/plain" },
+      }),
+    apiKey: "test-key",
+  });
+  check(
+    "7k. Provider failure produces transportSuccess false, semanticSuccess false, verdict FAIL",
+    reportProviderFailure.transportSuccess === false &&
+      reportProviderFailure.semanticSuccess === false &&
+      reportProviderFailure.verdict === "FAIL" &&
+      String(reportProviderFailure.failureReason).includes(
+        "Transport or provider failure",
+      ),
+  );
+
+  // 7l. Shared session attempt counter increments on Track A evaluation
+  const sessionForTrackA = new CurrentEngineExecutionSession({
+    live: true,
+    operatorLimits: {
+      scenarioSubset: ["SMOKE-A"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 600,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.1,
+      budgetBasis: "test",
+    },
+    costConfig: VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
+    allowLivePaidCalls: true,
+    liveFetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.13-20260917",
+          provider: "TypeSafe",
+          answers: { bookingRequested: { type: "noul", noul: 0.95 } },
+          usage: { input_tokens: 200, output_tokens: 20, cost: 0.00001 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+  });
+  const reportWithSession = await runTrackAJevEvaluation({
+    session: sessionForTrackA,
+    apiKey: "test-key",
+  });
+  check(
+    "7l. Track A execution via shared session increments session attemptCount to 1",
+    reportWithSession.verdict === "PASS" && sessionForTrackA.attemptCount === 1,
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
