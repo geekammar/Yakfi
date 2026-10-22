@@ -9,7 +9,9 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.63.0 (feature branch; PR ready)** — `CORE-03C1: Align the Existing Playground with the Current Conversation Engine`. Baseline: v0.62.0 (PR #21 merged baseline, commit `8ff6182d5c74eb8ad98160ba6eee0388fe869240`). Extends the existing conversation Playground CLI (`scripts/convo-playground.ts`) with `--mode current_engine` to evaluate the actual merged conversation engine (`receiveInboundMessage` → structured capability routing with `requiredSemanticCapability: "structured_turn"` → `createPolicyBackedAi` gateway → `resolveFinishedTurn` planner → Booking Core → isolated repository doubles & `InMemoryConversationStateStore` with CAS revision semantics). Physical HTTP attempts are counted at the injected `fetchImpl` boundary and token usage is measured honestly (`UNKNOWN`/`null` instead of fixed increments; partial usage preserves subtotals). Integrates `CurrentEngineExecutionSession` enforcing a single whole-run physical attempt ceiling across scenarios with hard refusal, outbound `max_tokens` parameter enforcement in the adapter, model outputs captured separately from durable saved state, offer replacement detected by ID, and deep trace redaction (`redactTrace`) creating a single public projection for terminal output and disk persistence that preserves numeric token metrics and completeness while redacting credentials, arbitrary offer IDs, and callback payloads (`fp:<id>:<action>`). Forwards `getLastTelemetry()` on `instrumentedAi` wrapper, strictly sourcing observed provider/model from execution telemetry rather than configured defaults. Retains historical benchmark modes under distinct architectural labels (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`) to prevent misattribution. Added 13 Egyptian Arabic scenarios (`CE-01`–`CE-13`, 21 turns total) focusing on relative dates with Cairo reference, Cairo/UTC midnight difference, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, invalid proposal clarification, and tracked known defect `CE-13` (false sensitive handoff on dialectal phrase 'مش مشكلة'). Safe live execution is preflight-gated with required operator limits (scenario subset, max physical attempts, token limit, timeout, approved budget USD, and cost basis); paid live execution is blocked in this evaluation-readiness slice ($0.0210 USD conservative ceiling for 25 calls @ 5k in / 500 out on DeepSeek V3). Verified by 63/63 offline automated checks (`pnpm check:conv-core-03c1`), 13/13 scenario passes, and clean `pnpm verify:local`.
+**Product version: v0.64.0 (feature branch; PR ready)** — `CORE-03C2: Quick Real JEV + LLM Smoke Evaluation, Then Handoff to Guided Buttons UX`. Baseline: v0.63.0 (PR #22 merged baseline, commit `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41`). Executes a small, timeboxed live smoke evaluation across real JEV Decisions API (Track A) and real LLM through `current_engine` (Track B), operating under strict envelope constraints: 12 total physical provider attempts (1 JEV + 11 LLM, within 24 ceiling), $0.008117 USD measured expenditure (within $0.10 budget), max 204 tokens per completion (within 600 limit), 15s timeout reached transport, with 100% in-memory isolation for state, appointments, and outbound messaging. Track A confirmed JEV 1.13 decisions contract routing (intent probability 0.97 for bookingRequested) while proving structured fact extraction/SET/REMOVE updates are unsupported by contract design. Track B proved real LLM (`deepseek/deepseek-chat` via OpenRouter) handles direct booking (Case A), relative dates under Cairo timezone reference (Case B), date correction with availability re-query (Case C), FAQ interruption with state preservation (Case F), known defect reproduction on sensitive detector false handoff for "مش مشكلة" (Case G), and mechanical confirmation with 0 model calls (Case H). Strict repair boundary maintained: recorded provider-catalog entity resolution gap (Case D) and Arabic time-of-day normalization gap (Case E) as concrete defects for future slices rather than patching with prompt tuning or keyword heuristics. Verified by 36/36 automated offline safety checks (`pnpm check:conv-core-03c2`), 76/76 regression checks (`pnpm check:conv-core-03c1`), SemVer check (`pnpm check:version`), and clean `pnpm verify:local`.
+
+**Product version: v0.63.0 (merged to main)** — `CORE-03C1: Align the Existing Playground with the Current Conversation Engine`. Baseline: v0.62.0 (PR #21 merged baseline, commit `8ff6182d5c74eb8ad98160ba6eee0388fe869240`). Extends the existing conversation Playground CLI (`scripts/convo-playground.ts`) with `--mode current_engine` to evaluate the actual merged conversation engine (`receiveInboundMessage` → structured capability routing with `requiredSemanticCapability: "structured_turn"` → `createPolicyBackedAi` gateway → `resolveFinishedTurn` planner → Booking Core → isolated repository doubles & `InMemoryConversationStateStore` with CAS revision semantics). Physical HTTP attempts are counted at the injected `fetchImpl` boundary and token usage is measured honestly (`UNKNOWN`/`null` instead of fixed increments; partial usage preserves subtotals). Integrates `CurrentEngineExecutionSession` enforcing a single whole-run physical attempt ceiling across scenarios with hard refusal, outbound `max_tokens` parameter enforcement in the adapter, model outputs captured separately from durable saved state, offer replacement detected by ID, and deep trace redaction (`redactTrace`) creating a single public projection for terminal output and disk persistence that preserves numeric token metrics and completeness while redacting credentials, arbitrary offer IDs, and callback payloads (`fp:<id>:<action>`). Forwards `getLastTelemetry()` on `instrumentedAi` wrapper, strictly sourcing observed provider/model from execution telemetry rather than configured defaults. Retains historical benchmark modes under distinct architectural labels (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`) to prevent misattribution. Added 13 Egyptian Arabic scenarios (`CE-01`–`CE-13`, 21 turns total) focusing on relative dates with Cairo reference, Cairo/UTC midnight difference, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, invalid proposal clarification, and tracked known defect `CE-13` (false sensitive handoff on dialectal phrase 'مش مشكلة'). Safe live execution is preflight-gated with required operator limits (scenario subset, max physical attempts, token limit, timeout, approved budget USD, and cost basis); paid live execution is blocked in this evaluation-readiness slice ($0.0210 USD conservative ceiling for 25 calls @ 5k in / 500 out on DeepSeek V3). Verified by 63/63 offline automated checks (`pnpm check:conv-core-03c1`), 13/13 scenario passes, and clean `pnpm verify:local`.
 
 **Product version: v0.62.0 (merged to main)** — `CORE-03B2B1: Semantic-Authoritative Date, Time and Provider Facts`. Production baseline: v0.61.0 (commit `d4673e26d6993400f2501a28ab7068be1c58c7db`). Establishes validated AI proposals (`factUpdates` / `extraction`) and authoritative durable conversation state (`knownFacts`) as the sole sources of `date`, `timePreference`, and `provider` facts on structured semantic turns. Eliminates post-AI customer prose reinterpretation (relative dates, time-of-day phrases, provider title/name regex, and pending clarification single-fact binding) while preserving deterministic protocol selections (Arabic/Western digits, callbacks), calendar validity, operating hours, and domain conflict validation. PR #21 focused boundary repair completed: separated provider matching modes (`catalog_strict` vs `legacy`) so nonempty provider candidates never become `ANY_PROVIDER` via phrase dictionaries; strict-provider validation defect repaired so punctuation-only ("؟؟؟", "---"), diacritic-only ("َُِِّ"), and supplied empty/whitespace candidates strictly return missing/not_found and clarify instead of normalizing to `ANY_PROVIDER`; strengthened per-turn availability query assertions at the real repository seam; added booking-path competing-prose no-update coverage; and proved continuation & schema-vs-domain date validation. Verified by 101/101 offline automated test scenarios (`pnpm check:conv-core-03b2b1`), full domain regression suites, and clean `pnpm verify:local`.
 
@@ -53,8 +55,47 @@ boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
 
-**IN-FLIGHT (PR ready on branch `feat/conv-core-03b2b1-semantic-booking-facts`) — SEMANTIC-AUTHORITATIVE DATE, TIME AND PROVIDER FACTS (CORE-03B2B1)**:
-One bounded slice establishing validated AI proposals (`factUpdates` / `extraction`) and authoritative durable conversation state (`knownFacts`) as the sole sources of `date`, `timePreference`, and `provider` facts on structured semantic turns, eliminating post-AI prose reinterpretation without rebuilding existing core layers:
+**IN-FLIGHT (PR ready on branch `feat/conv-core-03c2-smoke-eval`) — QUICK REAL JEV + LLM SMOKE EVALUATION, THEN HANDOFF TO GUIDED BUTTONS UX (CORE-03C2)**:
+A small, timeboxed live evaluation slice connecting the existing `current_engine` conversation playground and existing JEV integration to real provider transports under strict envelope limits, verifying real provider contracts and establishing the handoff to the Welcome and Contextual Buttons UX:
+
+1. **Authorized Live Envelope & Resource Enforcement**:
+   - Enforced ceilings: max 24 total physical provider attempts (JEV + LLM combined), max 600 output tokens per generative request, 15-second per-attempt timeout, $0.10 planning budget, single evaluation campaign.
+   - Dual-mode usage normalization supporting both OpenAI (`prompt_tokens`/`completion_tokens`) and JEV (`input_tokens`/`output_tokens`).
+   - Verified OpenRouter DeepSeek V3 cost basis: $0.2574/M input, $1.0287/M completion.
+   - Fail-closed explicit operator opt-in (`--allow-paid` / `allowLivePaidCalls: true`); offline fixtures remain the default. Missing API keys fail before network.
+   - Complete isolation: in-memory state store, in-memory appointments, zero outbound WhatsApp/Telegram messages, zero production DB mutations.
+
+2. **Track A — Real JEV Decisions API Evaluation (`typesafe/jev-1.13` via OpenRouter)**:
+   - Endpoint: `POST https://openrouter.ai/api/alpha/decisions` with observed model `typesafe/jev-1.13-20260917` by `TypeSafe`.
+   - Measured usage: 1 physical attempt, 230ms latency, 340 input tokens, 24 output tokens, cost $0.0000126 USD.
+   - Evaluated question: `bookingRequested` (noul) -> probability 0.97 (PASS on intent routing).
+   - Contract boundary confirmed: contract evaluates atomic questions (`noul`/`choice`). Rejects partial answer sets (`EMPTY_RESPONSE`). Structured entity extraction and factUpdates (SET/REMOVE) are UNSUPPORTED by JEV contract design.
+
+3. **Track B — Real LLM through Current Engine (`deepseek/deepseek-chat` via OpenRouter)**:
+   - Evaluated Egyptian Smoke Corpus (Cairo reference: 2026-10-20T10:00:00.000+03:00):
+     - Case A (Direct booking): PASS (intent BOOKING, date 2026-10-21, availability queried, slot offer generated).
+     - Case B (Relative date): PASS ("عايز أحجز بكرة" -> derived date 2026-10-21 from Cairo reference).
+     - Case C (Date correction): PASS ("لا خليها الخميس" -> updated date 2026-10-22, availability re-queried).
+     - Case D (Provider preference removal): FAIL on Turn 1 at domain validation layer (customer omitted service; model proposed "دكتورة سارة", catalog name "د. سارة عادل", domain reported provider unavailable for service).
+     - Case E (Time preference removal): FAIL on Turn 1 at normalization layer (model extracted Arabic dialect literal "الصبح", schema assertion expected English "morning").
+     - Case F (FAQ interruption): PASS (address question answered, booking facts strictly preserved).
+     - Case G (Known defect): PASS on defect reproduction ("مش مشكلة" intercepted by legacy sensitive detector causing false handoff before planTurn completes).
+     - Case H (Mechanical confirmation): PASS (selection "1" executed with 0 model calls, appointment confirmed in isolated repository).
+   - Measured live campaign usage: 11 LLM physical attempts, max 204 output tokens, latencies <6.0s, $0.008104 USD. Combined campaign total: 12 attempts, $0.008117 USD (within $0.10 budget). Sanitized traces saved.
+
+4. **Strict Repair Boundary & Recorded Defects**:
+   - Zero prompt tuning, keyword dictionaries, or regex patches applied to force failing cases to pass.
+   - Recorded concrete defects for next slices:
+     - Entity Resolution Defect: provider name variants (titles like "دكتورة" vs catalog "د.") require service-scoped alias normalization when service is unstated.
+     - Dialect Normalization Defect: Arabic dialect time-of-day phrases ("الصبح") require canonical vocabulary mapping to `"morning"` / `"afternoon"` / `"evening"`.
+     - Sensitive Filter Defect: "مش مشكلة" in `SENSITIVE_WORDS` causes premature false handoff on polite Egyptian colloquialisms.
+
+5. **Automated Verification**:
+   - Automated offline safety suite `scripts/check-conv-core-03c2.ts` (36/36 PASS): offline transport isolation, preflight limit enforcement, attempt exhaustion refusal, max_tokens 600 payload assertion, timeout propagation, and offline corpus replay.
+   - Regression baseline `scripts/check-conv-core-03c1.ts` (76/76 PASS).
+   - Version check `pnpm check:version` (PASS) and `pnpm verify:local` (PASS).
+
+**PREVIOUS (PR #22 merged into `main` at `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41`) — ALIGN THE EXISTING PLAYGROUND WITH CURRENT CONVERSATION ENGINE (CORE-03C1)**:
 
 1. **Structured Semantic Path Precision (`conversation-engine.ts`)**:
    - Explicit boundary `isStructuredSemanticTurn` derives from `effectiveCapability === "structured_turn" && !deterministicBypass && turnRouting === "LLM" && turnTelemetry?.finalProvider !== "deterministic" && deps.ai.providerName !== "deterministic" && validated !== null`.
@@ -2667,13 +2708,24 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03b2a-capability-routing) CORE-03B2A**:
-Branch `feat/conv-core-03b2a-capability-routing` ready with capability-safe routing for free-form conversation turns (v0.61.0).
+**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03c2-smoke-eval) CORE-03C2**:
+Branch `feat/conv-core-03c2-smoke-eval` ready with Quick Real JEV + LLM Smoke Evaluation, then handoff to Guided Buttons UX (v0.64.0).
 
-1. Push branch `feat/conv-core-03b2a-capability-routing` to `origin`.
+1. Push branch `feat/conv-core-03c2-smoke-eval` to `origin`.
 2. Open PR against `main` for review.
 3. Monitor GitHub Actions CI on PR HEAD (`pr-validation.yml`).
-4. Human architectural acceptance and release review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.61.0).
+4. Human architectural review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.64.0).
+5. **Next Product Implementation Slice: Welcome and Contextual Buttons UX (UX001)**:
+   - Proactive /start welcome using real business identity.
+   - Initial booking and service-inquiry entry choices.
+   - Contextual inline choices for genuinely missing information.
+   - Valid enabled default service skips redundant service selection.
+   - Free text remains supported throughout; buttons carry validated IDs (never display labels).
+   - Single state, planner, and Booking Core.
+   - Stale/replaced/consumed choices cannot execute.
+   - Greeting or /start does not reset active booking state.
+   - Staff ownership remains authoritative.
+   - Zero-model deterministic /start protocol, with natural greetings using semantic path without keyword dictionaries.
 
 **JUST COMPLETED (uncommitted; awaiting operator review): `PROMPT-AI-OPS-28` /
 DECISIONS #92 — OpenRouter provider pin (Superadmin-only, OpenRouter-only).**

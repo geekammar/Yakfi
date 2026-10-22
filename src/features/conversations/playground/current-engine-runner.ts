@@ -50,6 +50,7 @@ import type {
 export type CurrentEngineRunOptions = {
   live?: boolean;
   operatorLimits?: LiveOperatorLimits;
+  allowLivePaidCalls?: boolean;
   mockResponses?: Record<number, MockTurnResponse>;
   aiPolicy?: Partial<EffectiveAiPolicy>;
   harness?: PlaygroundHarness;
@@ -164,12 +165,10 @@ export async function runCurrentEngineScenario(
       );
     }
 
-    // In this evaluation-readiness slice (CORE-03C1), paid live execution remains blocked
-    // unless an explicit upstreamFetch was injected for integration testing.
-    if (!options.upstreamFetch) {
+    // Paid live provider execution requires explicit operator opt-in or injected fetch
+    if (!options.upstreamFetch && !options.allowLivePaidCalls) {
       throw new Error(
-        "[LIVE EXECUTION BLOCKED] Paid live provider evaluation is NOT RUN in this slice (CORE-03C1). " +
-          "Evaluation readiness verified. Reviewer approval required before network execution.",
+        "[LIVE EXECUTION BLOCKED] Paid live provider evaluation is blocked unless explicit operator opt-in allowLivePaidCalls is provided.",
       );
     }
   }
@@ -189,7 +188,9 @@ export async function runCurrentEngineScenario(
       liveFetchImpl: options.upstreamFetch,
       primaryProvider: configuredProvider,
       primaryModel: configuredModel,
-      allowLivePaidCalls: Boolean(options.upstreamFetch),
+      allowLivePaidCalls: Boolean(
+        options.allowLivePaidCalls || options.upstreamFetch,
+      ),
     });
 
   // 3. Setup harness and isolated state
@@ -234,7 +235,8 @@ export async function runCurrentEngineScenario(
     getEnvVar: (name: string) => {
       if (name === "OPENROUTER_API_KEY") {
         const k = process.env.OPENROUTER_API_KEY;
-        return k && k.trim().length > 0 ? k : "test-openrouter-key";
+        if (k && k.trim().length > 0) return k;
+        return isLive ? undefined : "test-openrouter-key";
       }
       if (name === "ATRIA_API_KEY") {
         const k = process.env.ATRIA_API_KEY;

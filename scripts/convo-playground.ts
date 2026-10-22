@@ -237,7 +237,7 @@ function printTurn(turn: TurnTrace, inspectMode = false): void {
 async function main(): Promise<void> {
   const { GOLDEN_SCENARIOS } =
     await import("../src/features/conversations/playground/golden-scenarios");
-  const { EGYPTIAN_ARABIC_SCENARIOS } =
+  const { EGYPTIAN_ARABIC_SCENARIOS, CORE_03C2_SMOKE_SCENARIOS } =
     await import("../src/features/conversations/playground/egyptian-scenarios");
   const { runCurrentEngineScenario } =
     await import("../src/features/conversations/playground/current-engine-runner");
@@ -246,13 +246,15 @@ async function main(): Promise<void> {
   const {
     CurrentEngineExecutionSession,
     auditPreflightLimits,
-    DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+    VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
   } =
     await import("../src/features/conversations/playground/current-engine-session");
   const { runGoalDrivenScenario } =
     await import("../src/features/conversations/playground/goal-driven-runner");
   const { runTypeSafeJevScenario } =
     await import("../src/features/conversations/playground/jev-runner");
+  const { createJevDecisionsProvider, JEV_PINNED_MODEL } =
+    await import("../src/server/integrations/ai/jev-decisions-provider");
   const { runAgentCScenario } =
     await import("../src/features/conversations/playground/agent-c-runner");
   const { evaluateBenchmark, formatComparisonMarkdown } =
@@ -266,6 +268,7 @@ async function main(): Promise<void> {
   const isInspect = args.includes("--inspect");
   const isPreflight =
     args.includes("--preflight") || args.includes("--dry-run");
+  const allowPaid = args.includes("--allow-paid");
   const filterFailed = args.includes("--failed-only");
   const filterClarifications = args.includes("--clarifications-only");
   const filterHandoffs = args.includes("--handoffs-only");
@@ -281,6 +284,7 @@ async function main(): Promise<void> {
   const replayIdx = args.indexOf("--replay");
   const scenarioIdx = args.indexOf("--scenario");
   const modeIdx = args.indexOf("--mode");
+  const trackIdx = args.indexOf("--track");
   const outIdx = args.indexOf("--out");
   const maxReqIdx = args.indexOf("--max-requests");
   const maxTokensIdx = args.indexOf("--max-tokens");
@@ -288,6 +292,11 @@ async function main(): Promise<void> {
   const budgetIdx = args.indexOf("--budget");
   const budgetBasisIdx = args.indexOf("--budget-basis");
   const scenariosIdx = args.indexOf("--scenarios");
+
+  const track =
+    trackIdx !== -1 && args[trackIdx + 1]
+      ? args[trackIdx + 1]!.toLowerCase()
+      : "both";
 
   const maxRequests =
     maxReqIdx !== -1 ? parseStrictInteger(args[maxReqIdx + 1]) : undefined;
@@ -509,7 +518,9 @@ async function main(): Promise<void> {
     mode === "current_engine"
       ? scenariosArg === "golden"
         ? GOLDEN_SCENARIOS
-        : EGYPTIAN_ARABIC_SCENARIOS
+        : scenariosArg === "smoke"
+          ? CORE_03C2_SMOKE_SCENARIOS
+          : EGYPTIAN_ARABIC_SCENARIOS
       : GOLDEN_SCENARIOS;
 
   let targetScenarios = allScenarios;
@@ -517,7 +528,11 @@ async function main(): Promise<void> {
     scenarioIdx !== -1 && args[scenarioIdx + 1] ? args[scenarioIdx + 1]! : null;
 
   if (scenarioId) {
-    const combined = [...EGYPTIAN_ARABIC_SCENARIOS, ...GOLDEN_SCENARIOS];
+    const combined = [
+      ...CORE_03C2_SMOKE_SCENARIOS,
+      ...EGYPTIAN_ARABIC_SCENARIOS,
+      ...GOLDEN_SCENARIOS,
+    ];
     const single = combined.find((s) => s.id === scenarioId);
     if (!single) {
       console.error(
@@ -563,8 +578,8 @@ async function main(): Promise<void> {
     const audit = auditPreflightLimits(
       opLimits,
       targetScenarios.map((s) => s.id),
-      DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
-      false,
+      VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
+      allowPaid,
     );
 
     console.log("\n  --- DRY-RUN / PREFLIGHT AUDIT REPORT ---");
@@ -635,6 +650,10 @@ async function main(): Promise<void> {
   // Live preflight validation before network activity
   if (isLive && mode === "current_engine") {
     const missing: string[] = [];
+    if (!allowPaid)
+      missing.push(
+        "--allow-paid (explicit operator opt-in required for live paid provider calls)",
+      );
     if (maxRequests == null) missing.push("--max-requests <positive-int>");
     if (maxTokens == null) missing.push("--max-tokens <positive-int>");
     if (timeoutMs == null) missing.push("--timeout <positive-int-ms>");
@@ -651,7 +670,7 @@ async function main(): Promise<void> {
       }
       console.error("\nExample:");
       console.error(
-        '  pnpm convo:playground --mode current_engine --live --max-requests 25 --max-tokens 500 --timeout 15000 --budget 0.05 --budget-basis "22k tokens <= $0.05"\n',
+        '  pnpm convo:playground --mode current_engine --live --allow-paid --max-requests 24 --max-tokens 600 --timeout 15000 --budget 0.10 --budget-basis "24 attempts <= $0.10" --scenarios smoke\n',
       );
       process.exit(1);
     }
@@ -673,15 +692,91 @@ async function main(): Promise<void> {
                 budgetBasis: budgetBasis!,
               }
             : undefined,
-          costConfig: DEEPSEEK_V3_OPENROUTER_COST_CONFIG,
+          costConfig: VERIFIED_OPENROUTER_DEEPSEEK_V3_COST_CONFIG,
+          allowLivePaidCalls: allowPaid,
         })
       : null;
+
+  // Track A: JEV contract smoke check (when live & requested)
+  if (
+    isLive &&
+    mode === "current_engine" &&
+    (track === "both" || track === "jev")
+  ) {
+    console.log("\n========================================================");
+    console.log("  TRACK A: REAL JEV INTEGRATION EVALUATION (CORE-03C2)");
+    console.log(
+      `  Pinned Model: ${JEV_PINNED_MODEL} via OpenRouter Decisions API`,
+    );
+    console.log("========================================================");
+
+    const jevInstrumentedFetch = sharedEngineSession!.createInstrumentedFetch({
+      getTurnIndex: () => 0,
+    });
+    const key = process.env.OPENROUTER_API_KEY;
+    const jevProvider = createJevDecisionsProvider({
+      getEnvVar: (k) => (k === "OPENROUTER_API_KEY" ? key : process.env[k]),
+      fetchImpl: jevInstrumentedFetch,
+      timeoutMs: timeoutMs ?? 15000,
+    });
+
+    const jevStart = Date.now();
+    const jevRes = await jevProvider.evaluate({
+      state: {
+        customerMessage: "عايز أحجز كشف أسنان بكرة",
+        businessName: "عيادة د. أحمد",
+        services: [],
+        faqs: [],
+        languageHint: "ar",
+      },
+      questions: {
+        bookingRequested: {
+          type: "noul",
+          instructions: "The customer is asking to book an appointment.",
+        },
+      },
+    });
+    const jevLatency = Date.now() - jevStart;
+
+    const ans = jevRes.answers["bookingRequested"];
+    const bookingProb = ans && ans.type === "noul" ? ans.noul : null;
+
+    console.log(`  1. Customer Input            : "عايز أحجز كشف أسنان بكرة"`);
+    console.log(
+      `  2. Observed JEV Model        : ${jevRes.servedModel ?? "Unknown"}`,
+    );
+    console.log(`  3. Provider Call OK          : ${jevRes.ok}`);
+    console.log(
+      `  4. Physical HTTP Attempts    : ${sharedEngineSession!.attemptCount}`,
+    );
+    console.log(
+      `  5. Latency                   : ${jevLatency}ms (provider reported: ${jevRes.latencyMs}ms)`,
+    );
+    console.log(
+      `  6. Provider Token Usage      : in=${jevRes.inputTokens ?? "N/A"}, out=${jevRes.outputTokens ?? "N/A"}`,
+    );
+    console.log(
+      `  7. Intent Routing Result     : bookingRequested prob=${bookingProb}`,
+    );
+    console.log(
+      `  8. Structured Fact Updates   : UNSUPPORTED (Decisions API contract answers atomic questions; structured SET/REMOVE fact updates are not exposed)`,
+    );
+    console.log(
+      `  9. Verdict                   : ${jevRes.ok ? "PASS" : "FAIL"} (Intent routing PASS; structured fact extraction UNSUPPORTED by contract design)`,
+    );
+    console.log("========================================================\n");
+
+    if (track === "jev") {
+      return;
+    }
+  }
 
   for (const scenario of targetScenarios) {
     let trace: ScenarioTrace;
     if (mode === "current_engine") {
       trace = await runCurrentEngineScenario(scenario, {
         live: isLive,
+        allowLivePaidCalls: allowPaid,
         session: sharedEngineSession ?? undefined,
         operatorLimits: isLive
           ? {

@@ -756,3 +756,443 @@ export const EGYPTIAN_ARABIC_SCENARIOS: EgyptianScenarioDefinition[] = [
     expectations: {},
   },
 ];
+
+// =============================================================================
+// CORE-03C2 Small Fixed Egyptian Smoke Corpus (Cases A through H)
+// Fixed reference: Tuesday 2026-10-20T10:00:00.000+03:00 (Africa/Cairo)
+// Target cases:
+//   A. Direct booking
+//   B. Relative date ("عايز أحجز بكرة")
+//   C. Date correction ("لا خليها الخميس")
+//   D. Provider preference removal ("خلاص أي دكتور متاح")
+//   E. Time preference removal ("أي وقت مناسب")
+//   F. FAQ interruption (service address question during booking)
+//   G. Known application defect ("أي وقت يناسبكم مش مشكلة")
+//   H. Mechanical confirmation (slot selection '1' -> 0 model calls)
+// =============================================================================
+
+export const CORE_03C2_SMOKE_SCENARIOS: EgyptianScenarioDefinition[] = [
+  // SMOKE-A: Direct booking
+  {
+    id: "SMOKE-A",
+    title: "Case A: Direct booking with explicit catalog service and date",
+    category: "STANDARD_BOOKING",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Customer requests a catalog-valid dental service with a clear date",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة لكشف أسنان يوم الأربعاء 21 أكتوبر:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان يوم الأربعاء 2026-10-21",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedDate !== "2026-10-21") {
+            throw new Error(
+              `Case A expected date 2026-10-21, got: ${turn.stateAfter?.selectedDate}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-B: Relative date
+  {
+    id: "SMOKE-B",
+    title:
+      "Case B: Relative date 'عايز أحجز بكرة' relative to fixed Cairo reference",
+    category: "RELATIVE_DATES",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Interpretation of 'بكرة' relative to Tuesday 2026-10-20 in Cairo -> 2026-10-21",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "متاح لكشف أسنان غداً الأربعاء المواعيد التالية:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز أحجز بكرة",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedDate !== "2026-10-21") {
+            throw new Error(
+              `Case B expected date 2026-10-21, got: ${turn.stateAfter?.selectedDate}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-C: Date correction
+  {
+    id: "SMOKE-C",
+    title:
+      "Case C: Date correction 'لا خليها الخميس' updating Wednesday to Thursday",
+    category: "RELATIVE_DATES",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Start with one valid date (Wednesday 2026-10-21), then 'لا خليها الخميس' -> 2026-10-22",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة يوم الأربعاء 21 أكتوبر:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        }),
+      },
+      2: {
+        body: mockBooking({
+          content: "تم تعديل اليوم إلى الخميس 22 أكتوبر. المواعيد المتاحة:",
+          service: "كشف أسنان",
+          date: "2026-10-22",
+          factUpdates: [{ key: "date", operation: "set", value: "2026-10-22" }],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان يوم الأربعاء",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedDate !== "2026-10-21") {
+            throw new Error(`Case C Turn 1 expected 2026-10-21`);
+          }
+        },
+      },
+      {
+        input: "لا خليها الخميس",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedDate !== "2026-10-22") {
+            throw new Error(
+              `Case C Turn 2 expected 2026-10-22, got: ${turn.stateAfter?.selectedDate}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-D: Provider preference removal
+  {
+    id: "SMOKE-D",
+    title: "Case D: Provider preference removal 'خلاص أي دكتور متاح'",
+    category: "PROVIDER_SELECTION",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Begin with selected valid provider (Dr. Sara), then 'خلاص أي دكتور متاح' removes preference",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة مع د. سارة عادل يوم الأربعاء:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          provider: "د. سارة عادل",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+            { key: "provider", operation: "set", value: "د. سارة عادل" },
+          ],
+        }),
+      },
+      2: {
+        body: mockBooking({
+          content: "تمام، متاح مع أي طبيب يوم الأربعاء المواعيد التالية:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [{ key: "provider", operation: "remove" }],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف مع دكتورة سارة يوم الأربعاء",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.providerPreference !== "د. سارة عادل") {
+            throw new Error("Case D Turn 1 expected provider Sara");
+          }
+        },
+      },
+      {
+        input: "خلاص أي دكتور متاح",
+        expectedIntent: "BOOKING",
+        assertFn: (turn) => {
+          const pref = turn.stateAfter?.providerPreference;
+          if (pref && pref !== "ANY_PROVIDER") {
+            throw new Error(
+              `Case D Turn 2 expected provider removed, got: ${pref}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-E: Time preference removal
+  {
+    id: "SMOKE-E",
+    title: "Case E: Time preference removal 'أي وقت مناسب'",
+    category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Begin with morning preference, then 'أي وقت مناسب' clears morning restriction",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد الصباحية المتاحة يوم الأربعاء:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "morning",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+            { key: "timePreference", operation: "set", value: "morning" },
+          ],
+        }),
+      },
+      2: {
+        body: mockBooking({
+          content: "تمام، إليك جميع المواعيد المتاحة على مدار اليوم:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [{ key: "timePreference", operation: "remove" }],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان الصبح يوم الأربعاء",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedTimePref !== "morning") {
+            throw new Error("Case E Turn 1 expected morning time preference");
+          }
+        },
+      },
+      {
+        input: "أي وقت مناسب",
+        assertFn: (turn) => {
+          const pref = turn.stateAfter?.selectedTimePref;
+          if (pref && pref !== "ANY_TIME") {
+            throw new Error(
+              `Case E Turn 2 expected time preference removed, got: ${pref}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-F: FAQ interruption
+  {
+    id: "SMOKE-F",
+    title: "Case F: FAQ interruption preserving booking facts",
+    category: "CLARIFICATION_RECOVERY",
+    evaluationScope: "LANGUAGE_EVALUATION",
+    description:
+      "Ask clinic address question during booking; verify booking facts preserved",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة لكشف أسنان غداً الأربعاء:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        }),
+      },
+      2: {
+        body: mockFaq("عنوان العيادة: 15 شارع النصر، المعادي، القاهرة."),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedIntent: "BOOKING",
+      },
+      {
+        input: "هو عنوان العيادة فين بالظبط؟",
+        expectedIntent: "FAQ",
+        assertFn: (turn) => {
+          if (turn.stateAfter?.selectedDate !== "2026-10-21") {
+            throw new Error(
+              "Case F FAQ turn must preserve selectedDate in durable state",
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-G: Known application defect
+  {
+    id: "SMOKE-G",
+    title: "Case G: Known application defect 'أي وقت يناسبكم مش مشكلة'",
+    category: "SAFETY_HANDOFF",
+    evaluationScope: "KNOWN_APPLICATION_DEFECT",
+    description:
+      "Dialect phrase 'مش مشكلة' triggers sensitive keyword detector before model call",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة يوم الأربعاء:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "morning",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+            { key: "timePreference", operation: "set", value: "morning" },
+          ],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان الصبح يوم الأربعاء",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "أي وقت يناسبكم مش مشكلة",
+        expectedAction: "AI_HANDOFF",
+        assertFn: (turn) => {
+          if (turn.assistantAction !== "AI_HANDOFF") {
+            throw new Error(
+              "Expected AI_HANDOFF due to sensitive word trigger",
+            );
+          }
+          if (
+            turn.processing.currentEngine?.domainResult.handoffCause !==
+            "SENSITIVE_OR_RESTRICTED"
+          ) {
+            throw new Error(
+              `Expected handoff cause SENSITIVE_OR_RESTRICTED, got ${turn.processing.currentEngine?.domainResult.handoffCause}`,
+            );
+          }
+        },
+      },
+    ],
+    expectations: {},
+  },
+
+  // SMOKE-H: Mechanical confirmation
+  {
+    id: "SMOKE-H",
+    title:
+      "Case H: Mechanical confirmation (0 model calls, appointment created)",
+    category: "STANDARD_BOOKING",
+    evaluationScope: "ENGINEERING_BOUNDARY",
+    description:
+      "Slot digit selection '1' confirmed mechanically without model calls",
+    setup: {
+      todayRef: "2026-10-20",
+      businessConfig: { timezone: "Africa/Cairo" },
+    },
+    referenceInstant: "2026-10-20T10:00:00.000+03:00",
+    mockResponses: {
+      1: {
+        body: mockBooking({
+          content: "المواعيد المتاحة غداً الأربعاء: 1. الساعة 10:00 صباحاً",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        }),
+      },
+    },
+    turns: [
+      {
+        input: "عايز كشف أسنان بكرة",
+        expectedAction: "AI_REPLY",
+      },
+      {
+        input: "1",
+        expectedAction: "AI_REPLY",
+        assertFn: (turn) => {
+          if (turn.processing.currentEngine?.httpAttempts.count !== 0) {
+            throw new Error(
+              `Mechanical confirmation must spend 0 HTTP attempts, spent ${turn.processing.currentEngine?.httpAttempts.count}`,
+            );
+          }
+          if (!turn.diagnostics.appointmentCreated) {
+            throw new Error("Expected appointment creation on slot selection");
+          }
+        },
+      },
+    ],
+    expectations: {
+      shouldBook: true,
+    },
+  },
+];

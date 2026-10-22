@@ -9,15 +9,15 @@
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**
-  - Branch: `feat/conv-core-03c1-current-engine-playground` (branched from `main` at commit `8ff6182d5c74eb8ad98160ba6eee0388fe869240`).
-  - Package Version: `v0.63.0` (SemVer minor increment over v0.62.0 baseline).
-  - Baseline Commit: `8ff6182d5c74eb8ad98160ba6eee0388fe869240` (PR #21 merged baseline).
-  - Working Tree: Current-engine conversation playground alignment, 12 Egyptian Arabic test scenarios, acceptance test suite `check:conv-core-03c1`.
+  - Branch: `feat/conv-core-03c2-smoke-eval` (branched from `main` at commit `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41`).
+  - Package Version: `v0.64.0` (SemVer minor increment over v0.63.0 baseline).
+  - Baseline Commit: `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41` (PR #22 merged baseline).
+  - Working Tree: Quick real JEV + LLM smoke evaluation, live envelope enforcement, 8-scenario Egyptian smoke corpus, acceptance test suite `check:conv-core-03c2`.
 - **Production Status (Read-Only Health Verified):**
   - Production health check `GET https://flowpilot-prod.vercel.app/api/health` returned:
     - `status: "ok"`
-    - `version: "0.62.0"`
-    - `commitSha: "8ff6182d5c74eb8ad98160ba6eee0388fe869240"`
+    - `version: "0.63.0"`
+    - `commitSha: "3f87cf8a9e4ab4dfcc78529778b523fdcca64c41"`
     - `database: "connected"`
     - `deploymentReady: true`
   - Production database migrations and deployments are operator-authorized via GitHub Actions. No production config or database changes made.
@@ -43,7 +43,15 @@
   - Historical modes (`baseline`, `goal_driven`, `typesafe_jev`, `agent_c`) remain available and are strictly labeled by their respective architectures (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`), preventing misattribution.
   - 13 Egyptian Arabic scenarios (`CE-01` to `CE-13`, 21 turns total) covering relative dates, Cairo/UTC date boundary, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, invalid proposal clarification, and tracked known defect `CE-13` (false sensitive handoff on dialectal phrase 'مش مشكلة' due to sensitive keyword detector).
   - Verified by 76/76 offline automated acceptance checks (`pnpm check:conv-core-03c1`).
-  - Evaluation-readiness slice only: paid live provider execution is NOT RUN and blocked by operator limits preflight. Preflight audit reports exact conservative cost ceiling ($0.0210 USD for 25 calls @ 5k in / 500 out on DeepSeek V3) and notes provider-side real-time dollar webhooks are unsupported by OpenRouter API.
+- **Quick Real JEV + LLM Smoke Evaluation (CORE-03C2):**
+  - Authorized live envelope enforced: max 24 physical provider attempts ceiling, max 600 output tokens per generative request, 15-second per-attempt timeout, $0.10 planning budget.
+  - Fail-closed operator opt-in (`--allow-paid` / `allowLivePaidCalls: true`); offline fixtures remain the default. Missing API keys fail before network.
+  - Dual-mode usage normalization supporting both OpenAI (`prompt_tokens`/`completion_tokens`) and JEV (`input_tokens`/`output_tokens`).
+  - Track A (Real JEV Decisions API: `typesafe/jev-1.13` via OpenRouter): 1 attempt, 230ms latency, $0.0000126 USD; bookingRequested evaluated with probability 0.97 (PASS on intent routing). Confirmed JEV contract is atomic question routing; structured entity extraction and SET/REMOVE fact updates are UNSUPPORTED by contract design.
+  - Track B (Real LLM: `deepseek/deepseek-chat` via OpenRouter): 11 attempts, max 204 output tokens, latencies <6.0s, $0.008104 USD. Direct booking (Case A), relative dates under Cairo timezone (Case B), date correction (Case C), FAQ interruption with state preservation (Case F), known sensitive defect reproduction (Case G), and mechanical confirmation with 0 model calls (Case H) all passed.
+  - Combined live campaign: 12 total physical attempts, $0.008117 USD expenditure (well within 24 attempt ceiling and $0.10 budget). Complete in-memory state and booking isolation. Traces sanitized and preserved.
+  - Strict repair boundary maintained: provider-catalog entity resolution gap (Case D) and Arabic dialect time normalization gap (Case E) documented as concrete defects for future slices.
+  - Verified by 36/36 offline automated acceptance checks (`pnpm check:conv-core-03c2`) and 76/76 regression checks (`pnpm check:conv-core-03c1`).
 
 ## 3. Completed Capabilities (Verified in Repository)
 
