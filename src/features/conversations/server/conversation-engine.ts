@@ -1716,7 +1716,7 @@ async function presentSlotChoices(
         if (preferred.length > 0) bookableOptions = [...preferred, ...others];
       }
 
-      let slotOffer: SlotOffer | null = buildSlotOffer(
+      const slotOffer: SlotOffer | null = buildSlotOffer(
         {
           businessId: scope.business.id,
           conversationId: scope.conversation.id,
