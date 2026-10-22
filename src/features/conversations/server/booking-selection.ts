@@ -302,8 +302,11 @@ export function interpretOfferReply(
   now: Date,
 ): OfferReply {
   const live = isOfferLive(offer, now);
-  const callback = parseOfferCallback(rawText);
-  if (callback) {
+  if (rawText.startsWith("fp:")) {
+    const callback = parseOfferCallback(rawText);
+    if (!callback) {
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+    }
     if (!offer || callback.token !== offer.token) {
       return { kind: "stale", reason: "UNKNOWN_TOKEN" };
     }
@@ -322,6 +325,7 @@ export function interpretOfferReply(
         if (callback.action.name === "inquire") {
           return { kind: "welcome_action", action: "inquire" };
         }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
       }
       if (callback.action.kind === "index") {
         if (callback.action.index === 1) {
@@ -330,12 +334,15 @@ export function interpretOfferReply(
         if (callback.action.index === 2) {
           return { kind: "welcome_action", action: "inquire" };
         }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
       }
-      return { kind: "none" };
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
     }
 
     if (offer.kind === "SERVICE") {
-      if (callback.action.kind !== "index") return { kind: "none" };
+      if (callback.action.kind !== "index") {
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+      }
       return serviceChoice(offer, callback.action.index);
     }
 
@@ -353,6 +360,7 @@ export function interpretOfferReply(
             serviceName: offer.serviceName,
           };
         }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
       }
       if (callback.action.kind === "index") {
         const action =
@@ -371,15 +379,15 @@ export function interpretOfferReply(
             serviceName: offer.serviceName,
           };
         }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
       }
-      return { kind: "none" };
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
     }
 
     if (offer.kind === "DATE") {
       if (
-        (callback.action.kind === "action" &&
-          callback.action.name === "other_date") ||
-        callback.action.kind === "date"
+        callback.action.kind === "action" &&
+        callback.action.name === "other_date"
       ) {
         return {
           kind: "date_other",
@@ -403,7 +411,7 @@ export function interpretOfferReply(
           providerId: offer.providerId,
         };
       }
-      return { kind: "none" };
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
     }
 
     if (offer.kind === "PROVIDER") {
@@ -422,20 +430,39 @@ export function interpretOfferReply(
           date: offer.date,
         };
       }
-      return { kind: "none" };
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
     }
 
-    const selection: BookingSelection =
-      callback.action.kind === "index"
-        ? { kind: "index", index: callback.action.index }
-        : callback.action.kind === "more"
-          ? { kind: "more_times" }
-          : { kind: "change_date" };
-    return {
-      kind: "slot",
-      context: selectionContextFromSlotOffer(offer),
-      selection,
-    };
+    if (offer.kind === "SLOT") {
+      if (callback.action.kind === "index") {
+        const selection: BookingSelection = {
+          kind: "index",
+          index: callback.action.index,
+        };
+        return {
+          kind: "slot",
+          context: selectionContextFromSlotOffer(offer),
+          selection,
+        };
+      }
+      if (callback.action.kind === "more") {
+        return {
+          kind: "slot",
+          context: selectionContextFromSlotOffer(offer),
+          selection: { kind: "more_times" },
+        };
+      }
+      if (callback.action.kind === "date") {
+        return {
+          kind: "slot",
+          context: selectionContextFromSlotOffer(offer),
+          selection: { kind: "change_date" },
+        };
+      }
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+    }
+
+    return { kind: "stale", reason: "UNKNOWN_TOKEN" };
   }
 
   if (!offer) return { kind: "none" };
@@ -460,20 +487,6 @@ export function interpretOfferReply(
     if (sel?.kind === "index") {
       if (sel.index === 1) return { kind: "welcome_action", action: "book" };
       if (sel.index === 2) return { kind: "welcome_action", action: "inquire" };
-    }
-    if (
-      trimmedText.includes("حجز") ||
-      trimmedText === "احجز" ||
-      trimmedText === "حجز موعد"
-    ) {
-      return { kind: "welcome_action", action: "book" };
-    }
-    if (
-      trimmedText.includes("استفسار") ||
-      trimmedText === "خدمات" ||
-      trimmedText === "الخدمات"
-    ) {
-      return { kind: "welcome_action", action: "inquire" };
     }
     return { kind: "none" };
   }
@@ -512,46 +525,10 @@ export function interpretOfferReply(
         };
       }
     }
-    if (trimmedText.includes("حجز") || trimmedText === "احجز") {
-      return {
-        kind: "service_detail_action",
-        action: "book_service",
-        serviceId: offer.serviceId,
-        serviceName: offer.serviceName,
-      };
-    }
-    if (trimmedText.includes("أخرى") || trimmedText.includes("خدمة ثانية")) {
-      return {
-        kind: "service_detail_action",
-        action: "other_services",
-        serviceId: offer.serviceId,
-        serviceName: offer.serviceName,
-      };
-    }
-    if (trimmedText.includes("قائمة") || trimmedText.includes("رئيسية")) {
-      return {
-        kind: "service_detail_action",
-        action: "menu",
-        serviceId: offer.serviceId,
-        serviceName: offer.serviceName,
-      };
-    }
     return { kind: "none" };
   }
 
   if (offer.kind === "DATE") {
-    if (
-      trimmedText.includes("تاريخ آخر") ||
-      trimmedText.includes("يوم آخر") ||
-      trimmedText.includes("غير هذا اليوم")
-    ) {
-      return {
-        kind: "date_other",
-        serviceId: offer.serviceId,
-        serviceName: offer.serviceName,
-        providerId: offer.providerId,
-      };
-    }
     const sel = parseBookingSelection(trimmedText);
     if (sel?.kind === "index") {
       const option = offer.options.find((o) => o.index === sel.index);

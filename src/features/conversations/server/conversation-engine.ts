@@ -114,6 +114,7 @@ import {
   buildServiceOffer,
   buildSlotOffer,
   buildWelcomeOffer,
+  isOfferLive,
   dateOfferKeyboard,
   providerOfferKeyboard,
   serviceDetailKeyboard,
@@ -1581,27 +1582,39 @@ async function presentDateChoices(
   const dateMsg = lines.join("\n");
 
   if (turnSession.enabled) {
+    if (dateOffer) {
+      turnSession.state = withPresentedOffer(
+        turnSession.state ?? emptyConversationState(),
+        dateOffer,
+      );
+    }
+    const existingFacts = turnSession.state?.knownFacts ?? {};
     turnSession.state = {
       ...(turnSession.state ?? emptyConversationState()),
+      knownFacts: {
+        ...existingFacts,
+        service: input.serviceName,
+      },
       serviceId: input.serviceId,
       selectedService: input.serviceName,
       serviceSource: input.serviceSource,
-      knownFacts: {
-        ...(turnSession.state?.knownFacts ?? {}),
-        service: input.serviceName,
-        ...(input.providerId ? { provider: input.providerId } : {}),
-      },
       missingFacts: ["date"],
       lastClarification: { type: "date" },
-      offer: dateOffer,
-      pendingOffer: null,
       bookingStage: "SERVICE_SUPPLIED",
       activeTask: {
         kind: "BOOKING",
         stage: "SERVICE_SUPPLIED",
       },
     };
-    await turnSession.commit();
+    const ok = await turnSession.commit();
+    if (!ok) {
+      return selectionReply(
+        deps,
+        scope,
+        "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+        "AI_ACTIVE",
+      );
+    }
   }
 
   const replyMarkup =
@@ -1733,7 +1746,12 @@ async function presentSlotChoices(
         );
         const ok = await turnSession.commit();
         if (!ok) {
-          slotOffer = null;
+          return selectionReply(
+            deps,
+            scope,
+            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+            "AI_ACTIVE",
+          );
         }
       }
 
@@ -2719,6 +2737,44 @@ async function runInboundTurn(
       }
     } else if (offerReply.kind === "welcome_action") {
       if (offerReply.action === "book") {
+        // If there is an active suspended slot offer that is still live, resume it directly!
+        const suspended = turnSession.state?.suspendedOffer;
+        if (
+          suspended &&
+          suspended.kind === "SLOT" &&
+          isOfferLive(suspended, now)
+        ) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            suspended,
+          );
+          await turnSession.commit();
+          const isTelegram =
+            customer.phone.startsWith("tg:") ||
+            deps.transport.providerName === "telegram";
+          const replyMarkup = isTelegram
+            ? slotOfferKeyboard(suspended)
+            : undefined;
+          const optionsMsg = formatBookingOptionsMessage(
+            suspended.serviceName,
+            suspended.date,
+            suspended.options.map((o) => ({
+              index: o.index,
+              displayName: o.displayName,
+              startAt: o.startAt,
+              endAt: o.endAt,
+            })),
+          );
+          return selectionReply(
+            deps,
+            selectionScope,
+            optionsMsg,
+            "AI_ACTIVE",
+            null,
+            replyMarkup,
+          );
+        }
+
         const knownService = turnSession.state?.selectedService;
         let resolvedServiceId = turnSession.state?.serviceId ?? null;
         let resolvedServiceName = knownService ?? null;
@@ -2813,7 +2869,15 @@ async function runInboundTurn(
             turnSession.state ?? emptyConversationState(),
             serviceOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
+          }
         }
         const isTelegram =
           customer.phone.startsWith("tg:") ||
@@ -2878,7 +2942,15 @@ async function runInboundTurn(
             turnSession.state ?? emptyConversationState(),
             serviceOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
+          }
         }
         const isTelegram =
           customer.phone.startsWith("tg:") ||
@@ -2989,11 +3061,19 @@ async function runInboundTurn(
         now,
       );
       if (detailOffer && turnSession.enabled) {
-        turnSession.state = {
-          ...(turnSession.state ?? emptyConversationState()),
-          offer: detailOffer,
-        };
-        await turnSession.commit();
+        turnSession.state = withPresentedOffer(
+          turnSession.state ?? emptyConversationState(),
+          detailOffer,
+        );
+        const ok = await turnSession.commit();
+        if (!ok) {
+          return selectionReply(
+            deps,
+            selectionScope,
+            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+            "AI_ACTIVE",
+          );
+        }
       }
       const isTelegram =
         customer.phone.startsWith("tg:") ||
@@ -3064,7 +3144,15 @@ async function runInboundTurn(
             turnSession.state ?? emptyConversationState(),
             serviceOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
+          }
         }
         const isTelegram =
           customer.phone.startsWith("tg:") ||
@@ -3123,7 +3211,15 @@ async function runInboundTurn(
             turnSession.state ?? emptyConversationState(),
             welcomeOffer,
           );
-          await turnSession.commit();
+          const ok = await turnSession.commit();
+          if (!ok) {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
+          }
         }
         const isTelegram =
           customer.phone.startsWith("tg:") ||
@@ -3195,7 +3291,15 @@ async function runInboundTurn(
           offer: null,
           pendingOffer: null,
         };
-        await turnSession.commit();
+        const ok = await turnSession.commit();
+        if (!ok) {
+          return selectionReply(
+            deps,
+            selectionScope,
+            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+            "AI_ACTIVE",
+          );
+        }
       }
       const assistantMessage = await persistAssistantReply(
         deps,
@@ -3260,6 +3364,26 @@ async function runInboundTurn(
         delivery,
       };
     } else if (offerReply.kind === "provider") {
+      if (turnSession.state) {
+        if (offerReply.providerId === null) {
+          const nextFacts = { ...turnSession.state.knownFacts };
+          delete nextFacts.provider;
+          turnSession.state = {
+            ...turnSession.state,
+            knownFacts: nextFacts,
+            providerPreference: null,
+          };
+        } else {
+          turnSession.state = {
+            ...turnSession.state,
+            knownFacts: {
+              ...turnSession.state.knownFacts,
+              provider: offerReply.providerName ?? offerReply.providerId,
+            },
+            providerPreference: offerReply.providerName ?? offerReply.providerId,
+          };
+        }
+      }
       const knownDate = offerReply.date ?? turnSession.state?.knownFacts.date;
       if (knownDate) {
         return presentSlotChoices(
@@ -3268,7 +3392,7 @@ async function runInboundTurn(
           {
             serviceId: offerReply.serviceId,
             serviceName: offerReply.serviceName,
-            serviceSource: "CUSTOMER",
+            serviceSource: turnSession.state?.serviceSource ?? "CUSTOMER",
             providerId: offerReply.providerId,
             date: knownDate,
           },
@@ -3282,7 +3406,7 @@ async function runInboundTurn(
         {
           serviceId: offerReply.serviceId,
           serviceName: offerReply.serviceName,
-          serviceSource: "CUSTOMER",
+          serviceSource: turnSession.state?.serviceSource ?? "CUSTOMER",
           providerId: offerReply.providerId,
         },
         turnSession,
@@ -3406,7 +3530,7 @@ async function runInboundTurn(
     }
 
     // UX001: Telegram /start command protocol (Zero JEV & Zero generative model calls)
-    if (inbound.text.trim().toLowerCase().startsWith("/start")) {
+    if (/^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(inbound.text.trim())) {
       const isTelegram =
         customer.phone.startsWith("tg:") ||
         deps.transport.providerName === "telegram";
@@ -3528,10 +3652,18 @@ async function runInboundTurn(
           turnSession.state ?? emptyConversationState(),
           welcomeOffer,
         );
-        await turnSession.commit();
+        const ok = await turnSession.commit();
+        if (!ok) {
+          return selectionReply(
+            deps,
+            selectionScope,
+            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+            "AI_ACTIVE",
+          );
+        }
       }
 
-      const welcomeMsg = `أهلاً بك في ${business.name}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك.\n(يمكنك الاختيار من الأزرار أدناه أو كتابة رسالتك مباشرة في أي وقت)`;
+      const welcomeMsg = `أهلاً بك في ${business.name}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة\n(يمكنك الاختيار من الخيارات أعلاه أو كتابة طلبك مباشرة في أي وقت)`;
       const replyMarkup =
         isTelegram && welcomeOffer
           ? welcomeOfferKeyboard(welcomeOffer)
@@ -4838,20 +4970,46 @@ async function runInboundTurn(
         ) {
           const upcomingDates = resolveUpcomingBookingDates(business, now);
           if (upcomingDates.length > 0) {
+            let matchedProviderId: string | null = null;
+            const targetServiceId =
+              mapped.serviceId ?? turnSession.state?.serviceId ?? "";
+            const candidateProvider =
+              mapped.providerText ??
+              turnSession.state?.knownFacts.provider ??
+              null;
+            if (targetServiceId && candidateProvider) {
+              const eligDeps = buildEligibilityDeps(deps);
+              const elig = await resolveEligibleProviders(
+                eligDeps as unknown as Parameters<
+                  typeof resolveEligibleProviders
+                >[0],
+                { businessId: business.id },
+                {
+                  serviceId: targetServiceId,
+                  ...(branchId ? { branchId } : {}),
+                },
+              );
+              if (elig.success) {
+                const match = matchProviderByName(
+                  candidateProvider,
+                  elig.data.providers,
+                  { mode: "legacy" },
+                );
+                if (match.status === "ok") {
+                  matchedProviderId = match.providerId;
+                }
+              }
+            }
             dateOffer = buildDateOffer(
               { businessId: business.id, conversationId: conversation.id },
               crypto.randomUUID(),
               {
-                serviceId:
-                  mapped.serviceId ?? turnSession.state?.serviceId ?? "",
+                serviceId: targetServiceId,
                 serviceName:
                   mapped.serviceName ??
                   turnSession.state?.selectedService ??
                   "",
-                providerId:
-                  mapped.providerText ??
-                  turnSession.state?.knownFacts.provider ??
-                  null,
+                providerId: matchedProviderId,
                 dates: upcomingDates,
               },
               now,
@@ -5207,7 +5365,7 @@ async function runInboundTurn(
             serviceId: mapped.serviceId,
             serviceName: mapped.serviceName,
             serviceSource: mapped.serviceSource,
-            providerId: providerId ?? mapped.providerText ?? null,
+            providerId: providerId ?? null,
             date: mapped.date!,
             followUpRequestId: activeFollowUpId,
             shownCount: bookableOptions.length,

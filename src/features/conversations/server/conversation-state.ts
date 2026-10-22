@@ -230,7 +230,7 @@ export type ConversationState = {
    * presentation mirror derived from it (or from history for legacy threads).
    */
   readonly offer: BookingOffer | null;
-  /** CONV-CORE-01 — the last completed booking task (post-booking continuity). */
+  readonly suspendedOffer?: BookingOffer | null;
   readonly completedTask: ConversationCompletedTask | null;
 };
 
@@ -280,6 +280,7 @@ export function emptyConversationState(): ConversationState {
     serviceId: null,
     serviceSource: null,
     offer: null,
+    suspendedOffer: null,
     completedTask: null,
   };
 }
@@ -689,6 +690,7 @@ export function mergeConversationState(
     serviceId,
     serviceSource,
     offer,
+    suspendedOffer: state.suspendedOffer ?? null,
     completedTask: state.completedTask,
   };
 
@@ -801,36 +803,77 @@ export function withPresentedOffer(
   state: ConversationState,
   offer: BookingOffer,
 ): ConversationState {
-  const facts: ConversationKnownFacts =
-    offer.kind === "SLOT"
-      ? {
-          ...state.knownFacts,
-          service: offer.serviceName,
-          date: offer.date,
-          ...(offer.followUpRequestId
-            ? { followUpRequestId: offer.followUpRequestId }
-            : {}),
-        }
-      : state.knownFacts;
+  const isSlot = offer.kind === "SLOT";
+  const isBookingAction =
+    isSlot ||
+    offer.kind === "DATE" ||
+    offer.kind === "PROVIDER" ||
+    (offer.kind === "SERVICE" && offer.purpose === "BOOKING");
+  const isWelcomeOrInquiry =
+    offer.kind === "WELCOME" ||
+    offer.kind === "SERVICE_DETAIL" ||
+    (offer.kind === "SERVICE" && offer.purpose === "INQUIRY");
+
+  // If presenting welcome or inquiry while an active booking offer is live, preserve it in suspendedOffer
+  let suspendedOffer = state.suspendedOffer ?? null;
+  if (
+    isWelcomeOrInquiry &&
+    state.offer &&
+    (state.offer.kind === "SLOT" ||
+      state.offer.kind === "DATE" ||
+      state.offer.kind === "PROVIDER" ||
+      (state.offer.kind === "SERVICE" && state.offer.purpose === "BOOKING")) &&
+    state.offer.status === "ACTIVE"
+  ) {
+    suspendedOffer = state.offer;
+  } else if (isBookingAction) {
+    suspendedOffer = null;
+  }
+
+  const facts: ConversationKnownFacts = isSlot
+    ? {
+        ...state.knownFacts,
+        service: offer.serviceName,
+        date: offer.date,
+        ...(offer.followUpRequestId
+          ? { followUpRequestId: offer.followUpRequestId }
+          : {}),
+      }
+    : state.knownFacts;
+
   const pendingOffer = pendingOfferMirror(offer);
+
+  let activeTask = state.activeTask;
+  if (isWelcomeOrInquiry) {
+    activeTask = state.activeTask ?? null;
+  } else if (isSlot) {
+    activeTask = {
+      kind: "BOOKING",
+      stage: "AVAILABILITY_RESOLVED",
+    };
+  } else if (isBookingAction) {
+    activeTask = {
+      kind: "BOOKING",
+      stage: state.activeTask?.stage ?? "GOAL_STATED",
+    };
+  }
+
   return {
     ...state,
     knownFacts: facts,
     selectedService: facts.service ?? null,
     selectedDate: facts.date ?? null,
     offer,
+    suspendedOffer,
     pendingOffer,
-    ...(offer.kind === "SLOT"
+    ...(isSlot
       ? {
           serviceId: offer.serviceId,
           serviceSource: offer.serviceSource,
           bookingStage: "AVAILABILITY_RESOLVED" as const,
         }
       : {}),
-    activeTask: {
-      kind: state.activeTask?.kind ?? "BOOKING",
-      stage: offer.kind === "SLOT" ? "AVAILABILITY_RESOLVED" : "GOAL_STATED",
-    },
+    activeTask,
   };
 }
 
@@ -932,6 +975,7 @@ const persistedStateSchema = z.object({
   serviceId: z.string().max(200).nullable(),
   serviceSource: z.enum(["CUSTOMER", "DEFAULT"]).nullable(),
   offer: bookingOfferSchema.nullable(),
+  suspendedOffer: bookingOfferSchema.nullable().optional(),
   completedTask: z
     .object({
       kind: z.literal("BOOKING"),
@@ -964,6 +1008,7 @@ export function dehydrateConversationState(
     serviceId: state.serviceId,
     serviceSource: state.serviceSource,
     offer: state.offer,
+    suspendedOffer: state.suspendedOffer ?? null,
     completedTask: state.completedTask,
   };
 }
@@ -987,6 +1032,13 @@ export function hydrateConversationState(
   ) {
     return null;
   }
+  if (
+    p.suspendedOffer &&
+    (p.suspendedOffer.businessId !== scope.businessId ||
+      p.suspendedOffer.conversationId !== scope.conversationId)
+  ) {
+    return null;
+  }
   const facts: ConversationKnownFacts = p.knownFacts;
   const base: ConversationState = {
     ...emptyConversationState(),
@@ -1007,6 +1059,7 @@ export function hydrateConversationState(
     serviceId: p.serviceId,
     serviceSource: p.serviceSource,
     offer: p.offer,
+    suspendedOffer: p.suspendedOffer ?? null,
     completedTask: p.completedTask,
   };
   return {
