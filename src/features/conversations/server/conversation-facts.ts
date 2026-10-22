@@ -5,7 +5,21 @@
  * removable fact subsets across contract, engine, and state boundaries.
  */
 
+import {
+  canonicalTimePreferenceSchema,
+  canonicalTimePreferenceValues,
+  isCanonicalTimePreference,
+  type CanonicalTimePreference,
+} from "@/lib/validation";
+
 import { z } from "zod";
+
+export {
+  canonicalTimePreferenceSchema,
+  canonicalTimePreferenceValues,
+  isCanonicalTimePreference,
+  type CanonicalTimePreference,
+};
 
 /**
  * The closed set of conversation fact keys tracked in conversation state.

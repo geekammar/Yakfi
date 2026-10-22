@@ -1165,7 +1165,7 @@ async function main(): Promise<void> {
               service: null,
               provider: null,
               date: null,
-              timePreference: "10:00",
+              timePreference: "morning",
             },
           };
         }
@@ -1275,6 +1275,16 @@ async function main(): Promise<void> {
         {
           assignedUserId: "user-" + PROVIDER_SARA,
           startTime: "09:30",
+          endTime: "17:00",
+        },
+        {
+          assignedUserId: "user-" + PROVIDER_AHMED_ALI,
+          startTime: "09:00",
+          endTime: "17:00",
+        },
+        {
+          assignedUserId: "user-" + PROVIDER_AHMED_HASSAN,
+          startTime: "09:00",
           endTime: "17:00",
         },
       ],

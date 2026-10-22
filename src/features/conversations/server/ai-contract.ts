@@ -21,8 +21,12 @@
  */
 
 import {
+  canonicalTimePreferenceSchema,
+  canonicalTimePreferenceValues,
   conversationFactKeys,
+  isCanonicalTimePreference,
   removableFactKeys,
+  type CanonicalTimePreference,
   type ConversationFactKey,
   type RemovableFactKey,
 } from "./conversation-facts";
@@ -33,8 +37,12 @@ import {
 import { z } from "zod";
 
 export {
+  canonicalTimePreferenceSchema,
+  canonicalTimePreferenceValues,
   conversationFactKeys,
+  isCanonicalTimePreference,
   removableFactKeys,
+  type CanonicalTimePreference,
   type ConversationFactKey,
   type RemovableFactKey,
   aiTemporalContextSchema,
@@ -90,8 +98,10 @@ const isoDateSchema = z
 
 /**
  * Bounded facts extracted from the customer message — FACTS ONLY, never
- * reasoning. `timePreference` is free-form but short (e.g. "10:30" or
- * "صباحاً"); the DOMAIN resolves actual slots deterministically.
+ * reasoning. `timePreference` must strictly use canonical machine values
+ * ("morning" | "afternoon" | "evening"); exact times (e.g. "10:30") are not
+ * supported and must not be accepted as canonical machine preferences.
+ * The DOMAIN resolves actual slots deterministically.
  */
 export const aiExtractionSchema = z.object({
   /** Matched service name, when the message names one. */
@@ -100,8 +110,8 @@ export const aiExtractionSchema = z.object({
   provider: z.string().trim().min(1).max(120).nullable().default(null),
   /** Requested date, ISO form, when stated. */
   date: isoDateSchema.nullable().default(null),
-  /** Requested time-of-day preference, when stated. */
-  timePreference: z.string().trim().min(1).max(32).nullable().default(null),
+  /** Requested time-of-day preference, when stated. Canonical values only. */
+  timePreference: canonicalTimePreferenceSchema.nullable().default(null),
 });
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;
@@ -404,24 +414,40 @@ export const aiHandoffCauseSchema = z.string().trim().min(1).max(64);
 
 export type AiHandoffCause = z.infer<typeof aiHandoffCauseSchema>;
 
-/** Explicit or legacy SET operation (CORE-03A). */
-export const aiSetFactUpdateSchema = z.object({
-  /** Fact key in the target model. */
-  key: z.string().trim().min(1).max(64),
-  /** Explicit or default 'set' operation. */
-  operation: z.literal("set").optional(),
-  /** Customer-stated value; cannot be empty or sentinel 'null'. */
-  value: z
-    .string()
-    .trim()
-    .min(1, "قيمة الحقيقة مطلوبة")
-    .max(200)
-    .refine((v) => v.toLowerCase() !== "null", {
-      message: "نص 'null' ليس قيمة صالحة",
-    }),
-  /** True when this supersedes a previously known value. */
-  isRevision: z.boolean().optional(),
-});
+/** Explicit or legacy SET operation (CORE-03A, CORE-03D1). */
+export const aiSetFactUpdateSchema = z
+  .object({
+    /** Fact key in the target model. */
+    key: z.string().trim().min(1).max(64),
+    /** Explicit or default 'set' operation. */
+    operation: z.literal("set").optional(),
+    /** Customer-stated value; cannot be empty or sentinel 'null'. */
+    value: z
+      .string()
+      .trim()
+      .min(1, "قيمة الحقيقة مطلوبة")
+      .max(200)
+      .refine((v) => v.toLowerCase() !== "null", {
+        message: "نص 'null' ليس قيمة صالحة",
+      }),
+    /** True when this supersedes a previously known value. */
+    isRevision: z.boolean().optional(),
+  })
+  .refine(
+    (update) => {
+      if (update.key === "timePreference") {
+        return (canonicalTimePreferenceValues as readonly string[]).includes(
+          update.value,
+        );
+      }
+      return true;
+    },
+    {
+      message:
+        "قيمة تفضيل الوقت غير صالحة — القيم المعتمدة هي morning أو afternoon أو evening",
+      path: ["value"],
+    },
+  );
 
 /** Explicit REMOVE operation (date, timePreference, provider only) (CORE-03A). */
 export const aiRemoveFactUpdateSchema = z.object({

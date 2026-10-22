@@ -54,6 +54,13 @@ const NO_SLOTS_CONTENT = {
     description: "لا يمكن حجز أي وقت في هذا التاريخ حالياً. جرّب تاريخاً آخر.",
     showServiceAction: false,
   },
+  NO_PERIOD_SLOTS: {
+    icon: CalendarXIcon,
+    title: "لا توجد مواعيد متاحة في الفترة المحددة",
+    description:
+      "لا توجد مواعيد في الفترة المختارة لهذا اليوم. اختر فترة أخرى أو يوماً آخر.",
+    showServiceAction: false,
+  },
   NO_ELIGIBLE_PROVIDERS: {
     icon: CalendarXIcon,
     title: "أضف مقدم خدمة لبدء الحجز",

@@ -2158,7 +2158,7 @@ async function main(): Promise<void> {
             service: null,
             provider: null,
             date: null,
-            timePreference: "17:00",
+            timePreference: "evening",
           },
           handoffReason: null,
           summary: "استفسار عن موعد متاح",

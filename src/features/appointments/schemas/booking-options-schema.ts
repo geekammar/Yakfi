@@ -1,9 +1,13 @@
-import { appointmentDateSchema, uuidSchema } from "@/lib/validation";
+import {
+  appointmentDateSchema,
+  canonicalTimePreferenceSchema,
+  uuidSchema,
+} from "@/lib/validation";
 
 import { z } from "zod";
 
 /**
- * Booking Options request (PROMPT-CORE-02): the Business is NEVER part
+ * Booking Options request (PROMPT-CORE-02, CORE-03D1): the Business is NEVER part
  * of the client input — it is always the authenticated actor's own
  * Business, derived server-side (availability/eligibility pattern).
  * Zod strips every other key, so a hostile `businessId` / `role` /
@@ -12,12 +16,16 @@ import { z } from "zod";
  * layer supports (no natural-language parsing here). An absent
  * `providerId` means the Any-Provider preference; a present one is a
  * Provider preference verified against CORE-01 eligibility.
+ * Optional `timePreference` restricts candidate slots to the canonical
+ * day period ("morning" | "afternoon" | "evening").
  */
 export const resolveBookingOptionsInputSchema = z.object({
   serviceId: uuidSchema,
   branchId: uuidSchema.optional(),
   providerId: uuidSchema.optional(),
   date: appointmentDateSchema,
+  timePreference: canonicalTimePreferenceSchema.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
 });
 
 export type ResolveBookingOptionsInput = z.infer<

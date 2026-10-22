@@ -9,6 +9,29 @@ export const appointmentStatusValues = [
   "COMPLETED",
 ] as const;
 
+/** Canonical day periods for customer time preferences (CORE-03D1). */
+export const canonicalTimePreferenceValues = [
+  "morning",
+  "afternoon",
+  "evening",
+] as const;
+
+export type CanonicalTimePreference =
+  (typeof canonicalTimePreferenceValues)[number];
+
+export const canonicalTimePreferenceSchema = z.enum(
+  canonicalTimePreferenceValues,
+);
+
+export function isCanonicalTimePreference(
+  value: unknown,
+): value is CanonicalTimePreference {
+  return (
+    typeof value === "string" &&
+    (canonicalTimePreferenceValues as readonly string[]).includes(value)
+  );
+}
+
 /** ISO date string (YYYY-MM-DD). */
 export const appointmentDateSchema = z
   .string()
