@@ -24,6 +24,7 @@ import {
   isOfferLive,
   parseOfferCallback,
 } from "@/features/conversations/server/booking-offer";
+import type { CanonicalTimePreference } from "@/lib/validation";
 
 /** One option exactly as presented in the canonical offer message. */
 export type OfferedBookingOption = {
@@ -55,6 +56,7 @@ export type BookingSelectionContext = {
    */
   serviceId?: string;
   providerId?: string | null;
+  timePreference?: CanonicalTimePreference | null;
   shownCount?: number;
 };
 
@@ -208,6 +210,7 @@ export function selectionContextFromSlotOffer(
     followUpRequestId: offer.followUpRequestId,
     serviceId: offer.serviceId,
     providerId: offer.providerId,
+    timePreference: offer.timePreference ?? null,
     shownCount: offer.shownCount,
   };
 }

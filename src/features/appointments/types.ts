@@ -425,7 +425,8 @@ export type BookingOptionsNoOptionsReason =
   | "NO_ELIGIBLE_PROVIDERS"
   | "BUSINESS_CLOSED"
   | "SERVICE_TOO_LONG"
-  | "FULLY_BOOKED";
+  | "FULLY_BOOKED"
+  | "NO_PERIOD_SLOTS";
 
 /** One useful customer-facing option — compact identity + slot. */
 export type BookingOption = {

@@ -9,10 +9,10 @@
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**
-  - Branch: `feat/conv-core-03d1-canonical-time` (branched from `main` at PR #24 merged baseline, commit `6cd0252640ad0b3f8089185dafef3c679e7a507b`).
+  - Branch: `feat/conv-core-03d1-canonical-time` (PR #25, branched from `main` at PR #24 merged baseline, commit `6cd0252640ad0b3f8089185dafef3c679e7a507b`).
   - Package Version: `v0.66.0` (SemVer minor increment over v0.65.0 baseline).
   - Baseline Commit: `6cd0252640ad0b3f8089185dafef3c679e7a507b` (PR #24 merged baseline).
-  - Working Tree: Canonical time preferences and reliable removal on the existing Conversation Engine (CORE-03D1). Defined single canonical day-period vocabulary (`"morning" | "afternoon" | "evening"`), validated extraction and SET factUpdates against canonical schema (rejecting dialect words like "الصبح" and exact times like "10:30"), enabled Booking Core `resolveBookingOptions` to filter candidate slot pairs by canonical preference, enforced truthful no-options handoff (`DOMAIN_REQUIRES_HUMAN`), invalidated offers on preference changes/removals, and verified via dedicated acceptance suite `check:conv-core-03d1` (34/34 checks).
+  - Working Tree: Canonical time preferences, reliable removal, booking selection lifecycle repair, period-empty truthfulness, and persisted noncanonical state guards on the existing Conversation Engine (CORE-03D1). Defined single canonical day-period vocabulary (`"morning" | "afternoon" | "evening"`), validated extraction and SET factUpdates against canonical schema (rejecting dialect words like "الصبح" and exact times like "10:30"), enabled Booking Core `resolveBookingOptions` to filter candidate slot pairs by canonical preference prior to ranking with selectable limit parameter, preserved canonical timePreference and providerId through display, confirmation (`completeBookingSelection` with `limit: 50`), and slot-conflict retry paths, distinguished `NO_PERIOD_SLOTS` from `FULLY_BOOKED` without premature human handoff (`AI_ACTIVE`), guarded persisted noncanonical legacy state at consumption boundaries, invalidated offers on preference changes/removals, wired suite into CI (`.github/workflows/pr-validation.yml`), and verified via dedicated acceptance suite `check:conv-core-03d1` (53/53 checks).
 - **Production Status (Read-Only Health Verified):**
   - Production health check `GET https://flowpilot-prod.vercel.app/api/health` returned:
     - `status: "ok"`

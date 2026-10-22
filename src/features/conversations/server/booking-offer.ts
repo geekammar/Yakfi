@@ -18,6 +18,11 @@
  *
  * Pure module: no I/O, no clock reads except through explicit `now` params.
  */
+import {
+  canonicalTimePreferenceSchema,
+  type CanonicalTimePreference,
+} from "@/lib/validation";
+
 import { z } from "zod";
 
 /** Offers older than this are expired even if never consumed. */
@@ -137,6 +142,7 @@ export const slotOfferSchema = z.object({
   serviceName: shortText,
   serviceSource: z.enum(["CUSTOMER", "DEFAULT"]),
   providerId: shortText.nullable(),
+  timePreference: canonicalTimePreferenceSchema.nullable().optional(),
   date: isoDate,
   followUpRequestId: shortText.nullable(),
   /** How many fresh options were presented across "more times" batches. */
@@ -319,6 +325,7 @@ export function buildSlotOffer(
     serviceName: string;
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
+    timePreference?: CanonicalTimePreference | null;
     date: string;
     followUpRequestId: string | null;
     shownCount: number;
@@ -338,6 +345,7 @@ export function buildSlotOffer(
     serviceName: input.serviceName,
     serviceSource: input.serviceSource,
     providerId: input.providerId,
+    timePreference: input.timePreference ?? null,
     date: input.date,
     followUpRequestId: input.followUpRequestId,
     shownCount: input.shownCount,

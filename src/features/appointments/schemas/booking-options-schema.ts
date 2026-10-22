@@ -25,6 +25,7 @@ export const resolveBookingOptionsInputSchema = z.object({
   providerId: uuidSchema.optional(),
   date: appointmentDateSchema,
   timePreference: canonicalTimePreferenceSchema.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
 });
 
 export type ResolveBookingOptionsInput = z.infer<
