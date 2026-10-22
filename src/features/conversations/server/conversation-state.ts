@@ -533,6 +533,41 @@ export function mergeConversationState(
     if (invalidate) offer = { ...offer, status: "INVALIDATED" };
   }
 
+  // ── Suspended offer lifecycle (dependency invalidation & termination) ────
+  let suspendedOffer: BookingOffer | null = state.suspendedOffer ?? null;
+  if (input.booked) {
+    suspendedOffer = null;
+  } else if (suspendedOffer && suspendedOffer.status === "ACTIVE") {
+    let invalidateSuspended = false;
+    if (suspendedOffer.kind === "SLOT") {
+      invalidateSuspended =
+        slotDependencyChanged ||
+        (serviceId != null && suspendedOffer.serviceId !== serviceId) ||
+        (knownFacts.date != null && suspendedOffer.date !== knownFacts.date) ||
+        knownFacts.date == null;
+    } else if (suspendedOffer.kind === "DATE") {
+      invalidateSuspended =
+        serviceIdentityChanged ||
+        changed("date") ||
+        changed("provider") ||
+        (serviceId != null && suspendedOffer.serviceId !== serviceId);
+    } else if (suspendedOffer.kind === "PROVIDER") {
+      invalidateSuspended =
+        serviceIdentityChanged ||
+        changed("provider") ||
+        (serviceId != null && suspendedOffer.serviceId !== serviceId);
+    } else if (suspendedOffer.kind === "SERVICE") {
+      invalidateSuspended =
+        input.resolvedService != null ||
+        serviceId != null ||
+        serviceIdentityChanged ||
+        changed("service");
+    }
+    if (invalidateSuspended) {
+      suspendedOffer = null;
+    }
+  }
+
   // ── Goals (multi-intent foundation) ──────────────────────────────────────
   const goals = input.goals ? goalsFromDecision(input.goals) : [...state.goals];
 
@@ -690,7 +725,7 @@ export function mergeConversationState(
     serviceId,
     serviceSource,
     offer,
-    suspendedOffer: state.suspendedOffer ?? null,
+    suspendedOffer,
     completedTask: state.completedTask,
   };
 
@@ -776,7 +811,7 @@ export function deriveConversationStateFromHistory(
 // WHEN; these decide WHAT the next state is.
 
 /** The legacy presentation mirror of a typed slot offer. */
-function pendingOfferMirror(
+export function pendingOfferMirror(
   offer: BookingOffer,
 ): ConversationPendingOffer | null {
   if (offer.kind !== "SLOT") return null;
@@ -833,8 +868,8 @@ export function withPresentedOffer(
   const facts: ConversationKnownFacts = isSlot
     ? {
         ...state.knownFacts,
-        service: offer.serviceName,
-        date: offer.date,
+        service: state.knownFacts.service ?? offer.serviceName,
+        date: state.knownFacts.date ?? offer.date,
         ...(offer.followUpRequestId
           ? { followUpRequestId: offer.followUpRequestId }
           : {}),
@@ -918,6 +953,7 @@ export function completeBookingTask(
     currentGoal: null,
     bookingStage: "COMPLETED",
     pendingOffer: null,
+    suspendedOffer: null,
     completedTask: { kind: "BOOKING", ...completed },
   };
 }

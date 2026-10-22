@@ -150,6 +150,7 @@ import {
   deriveConversationStateFromHistory,
   emptyConversationState,
   mergeConversationState,
+  pendingOfferMirror,
   withOfferStatus,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
@@ -1537,6 +1538,166 @@ function resolveUpcomingBookingDates(
   return results;
 }
 
+type ProviderResolutionResult =
+  | { readonly kind: "resolved"; readonly providerId: string | null }
+  | {
+      readonly kind: "clarification";
+      readonly eligibleProviders: ReadonlyArray<{
+        readonly providerId: string;
+        readonly displayName: string;
+      }>;
+      readonly reason: "not_found" | "ambiguous";
+    };
+
+async function resolveProviderCandidate(
+  deps: ConversationEngineDeps,
+  businessId: string,
+  branchId: string | null,
+  serviceId: string,
+  candidateText: string | null | undefined,
+  mode: "catalog_strict" | "legacy" = "catalog_strict",
+): Promise<ProviderResolutionResult> {
+  if (!candidateText || candidateText.trim().length === 0) {
+    return { kind: "resolved", providerId: null };
+  }
+
+  const eligibilityDeps = buildEligibilityDeps(deps);
+  const elig = await resolveEligibleProviders(
+    eligibilityDeps as unknown as Parameters<
+      typeof resolveEligibleProviders
+    >[0],
+    { businessId },
+    {
+      serviceId,
+      ...(branchId ? { branchId } : {}),
+    },
+  );
+
+  if (!elig.success) {
+    return {
+      kind: "clarification",
+      eligibleProviders: [],
+      reason: "not_found",
+    };
+  }
+
+  const direct = elig.data.providers.find(
+    (p) => p.providerId === candidateText,
+  );
+  if (direct) {
+    return { kind: "resolved", providerId: direct.providerId };
+  }
+
+  const match = matchProviderByName(candidateText, elig.data.providers, {
+    mode,
+  });
+
+  if (match.status === "ok") {
+    return { kind: "resolved", providerId: match.providerId };
+  }
+  if (match.status === "any") {
+    return { kind: "resolved", providerId: null };
+  }
+
+  return {
+    kind: "clarification",
+    eligibleProviders: elig.data.providers,
+    reason: match.reason,
+  };
+}
+
+async function promptProviderClarificationReply(
+  deps: ConversationEngineDeps,
+  scope: BookingSelectionScope,
+  input: {
+    serviceId: string;
+    serviceName: string;
+    date: string | null;
+    eligibleProviders: ReadonlyArray<{
+      readonly providerId: string;
+      readonly displayName: string;
+    }>;
+    reason: "not_found" | "ambiguous";
+  },
+  turnSession: TurnStateSession,
+  now: Date,
+): Promise<InboundSuccess> {
+  const msg =
+    input.reason === "ambiguous"
+      ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
+      : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
+  const isTelegram =
+    scope.customer.phone.startsWith("tg:") ||
+    deps.transport.providerName === "telegram";
+  let providerOffer: ProviderOffer | null = null;
+  if (isTelegram && turnSession.enabled && input.eligibleProviders.length > 0) {
+    const eligibleProviders: Array<{
+      providerId: string | null;
+      name: string;
+    }> = input.eligibleProviders.map((p) => ({
+      providerId: p.providerId,
+      name: p.displayName,
+    }));
+    eligibleProviders.push({
+      providerId: null,
+      name: "أي مقدم خدمة متاح",
+    });
+    providerOffer = buildProviderOffer(
+      { businessId: scope.business.id, conversationId: scope.conversation.id },
+      crypto.randomUUID(),
+      {
+        serviceId: input.serviceId,
+        serviceName: input.serviceName,
+        date: input.date,
+        providers: eligibleProviders,
+      },
+      now,
+    );
+    if (providerOffer) {
+      turnSession.state = withPresentedOffer(
+        turnSession.state ?? emptyConversationState(),
+        providerOffer,
+      );
+      await turnSession.commit();
+    }
+  }
+  const replyMarkup =
+    isTelegram && providerOffer
+      ? providerOfferKeyboard(providerOffer)
+      : undefined;
+  const assistantMessage = await persistAssistantReply(
+    deps,
+    scope.conversation.id,
+    msg,
+    "AI_ACTIVE",
+  );
+  const delivery = await deliverAssistantReply(
+    deps,
+    scope.customer.phone,
+    scope.business.name,
+    scope.conversation.id,
+    msg,
+    assistantMessage.id,
+    scope.business.id,
+    scope.connectionId,
+    replyMarkup,
+  );
+  return {
+    ok: true,
+    duplicate: false,
+    businessId: scope.business.id,
+    conversationId: scope.conversation.id,
+    customerId: scope.customer.id,
+    customerMessageId: scope.customerMessageId,
+    assistantAction: "AI_REPLY",
+    intent: "AVAILABILITY",
+    conversationStatus: "AI_ACTIVE",
+    handoffCause: null,
+    assistantProvider: deps.ai.providerName,
+    delivery,
+  };
+}
+
 async function presentDateChoices(
   deps: ConversationEngineDeps,
   scope: BookingSelectionScope,
@@ -2737,42 +2898,157 @@ async function runInboundTurn(
       }
     } else if (offerReply.kind === "welcome_action") {
       if (offerReply.action === "book") {
-        // If there is an active suspended slot offer that is still live, resume it directly!
+        // If there is an active suspended slot or date offer that is still live, check compatibility and resume it!
         const suspended = turnSession.state?.suspendedOffer;
         if (
           suspended &&
           suspended.kind === "SLOT" &&
           isOfferLive(suspended, now)
         ) {
-          turnSession.state = withPresentedOffer(
-            turnSession.state ?? emptyConversationState(),
-            suspended,
-          );
-          await turnSession.commit();
-          const isTelegram =
-            customer.phone.startsWith("tg:") ||
-            deps.transport.providerName === "telegram";
-          const replyMarkup = isTelegram
-            ? slotOfferKeyboard(suspended)
-            : undefined;
-          const optionsMsg = formatBookingOptionsMessage(
-            suspended.serviceName,
-            suspended.date,
-            suspended.options.map((o) => ({
-              index: o.index,
-              displayName: o.displayName,
-              startAt: o.startAt,
-              endAt: o.endAt,
-            })),
-          );
-          return selectionReply(
-            deps,
-            selectionScope,
-            optionsMsg,
-            "AI_ACTIVE",
-            null,
-            replyMarkup,
-          );
+          const currServiceId = turnSession.state?.serviceId;
+          const currServiceName = turnSession.state?.knownFacts.service;
+          const currDate = turnSession.state?.knownFacts.date;
+          const currProvider = turnSession.state?.knownFacts.provider;
+
+          const serviceMatch =
+            (currServiceId == null || currServiceId === suspended.serviceId) &&
+            (currServiceName == null ||
+              currServiceName === suspended.serviceName);
+          const dateMatch = currDate != null && currDate === suspended.date;
+          let providerMatch = true;
+          if (currProvider == null || currProvider.trim().length === 0) {
+            if (suspended.providerId !== null) {
+              providerMatch = false;
+            }
+          } else {
+            const provRes = await resolveProviderCandidate(
+              deps,
+              business.id,
+              conversation.branchId as string | null,
+              suspended.serviceId,
+              currProvider,
+            );
+            if (
+              provRes.kind !== "resolved" ||
+              provRes.providerId !== suspended.providerId
+            ) {
+              providerMatch = false;
+            }
+          }
+
+          if (serviceMatch && dateMatch && providerMatch) {
+            turnSession.state = {
+              ...(turnSession.state ?? emptyConversationState()),
+              offer: suspended,
+              suspendedOffer: null,
+              pendingOffer: pendingOfferMirror(suspended),
+              activeTask: { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" },
+              bookingStage: "AVAILABILITY_RESOLVED",
+            };
+            const ok = await turnSession.commit();
+            if (!ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "عذراً، حدث تعارض أثناء تحديث المحادثة. يُرجى المحاولة مرة أخرى.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+              );
+            }
+            const isTelegram =
+              customer.phone.startsWith("tg:") ||
+              deps.transport.providerName === "telegram";
+            const replyMarkup = isTelegram
+              ? slotOfferKeyboard(suspended)
+              : undefined;
+            const optionsMsg = formatBookingOptionsMessage(
+              suspended.serviceName,
+              suspended.date,
+              suspended.options.map((o) => ({
+                index: o.index,
+                displayName: o.displayName,
+                startAt: o.startAt,
+                endAt: o.endAt,
+              })),
+            );
+            return selectionReply(
+              deps,
+              selectionScope,
+              optionsMsg,
+              "AI_ACTIVE",
+              null,
+              replyMarkup,
+            );
+          } else {
+            if (turnSession.state) {
+              turnSession.state = {
+                ...turnSession.state,
+                suspendedOffer: null,
+              };
+            }
+          }
+        } else if (
+          suspended &&
+          suspended.kind === "DATE" &&
+          isOfferLive(suspended, now)
+        ) {
+          const currServiceId = turnSession.state?.serviceId;
+          const currDate = turnSession.state?.knownFacts.date;
+          if (
+            currDate == null &&
+            (currServiceId == null || currServiceId === suspended.serviceId)
+          ) {
+            turnSession.state = {
+              ...(turnSession.state ?? emptyConversationState()),
+              offer: suspended,
+              suspendedOffer: null,
+              pendingOffer: pendingOfferMirror(suspended),
+              activeTask: {
+                kind: "BOOKING",
+                stage: turnSession.state?.activeTask?.stage ?? "GOAL_STATED",
+              },
+            };
+            const ok = await turnSession.commit();
+            if (!ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "عذراً، حدث تعارض أثناء تحديث المحادثة. يُرجى المحاولة مرة أخرى.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+              );
+            }
+            const isTelegram =
+              customer.phone.startsWith("tg:") ||
+              deps.transport.providerName === "telegram";
+            const replyMarkup = isTelegram
+              ? dateOfferKeyboard(suspended)
+              : undefined;
+            const lines = [
+              `تم اختيار خدمة "${suspended.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك:`,
+            ];
+            for (let i = 0; i < suspended.options.length; i++) {
+              lines.push(`${i + 1}️⃣ ${suspended.options[i]!.label}`);
+            }
+            lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+            return selectionReply(
+              deps,
+              selectionScope,
+              lines.join("\n"),
+              "AI_ACTIVE",
+              null,
+              replyMarkup,
+            );
+          } else {
+            if (turnSession.state) {
+              turnSession.state = {
+                ...turnSession.state,
+                suspendedOffer: null,
+              };
+            }
+          }
         }
 
         const knownService = turnSession.state?.selectedService;
@@ -2824,6 +3100,30 @@ async function runInboundTurn(
 
         if (resolvedServiceId && resolvedServiceName) {
           const knownDate = turnSession.state?.knownFacts.date;
+          const candidateProvider =
+            turnSession.state?.knownFacts.provider ?? null;
+          const provRes = await resolveProviderCandidate(
+            deps,
+            business.id,
+            conversation.branchId as string | null,
+            resolvedServiceId,
+            candidateProvider,
+          );
+          if (provRes.kind === "clarification") {
+            return promptProviderClarificationReply(
+              deps,
+              selectionScope,
+              {
+                serviceId: resolvedServiceId,
+                serviceName: resolvedServiceName,
+                date: knownDate ?? null,
+                eligibleProviders: provRes.eligibleProviders,
+                reason: provRes.reason,
+              },
+              turnSession,
+              now,
+            );
+          }
           if (knownDate) {
             return presentSlotChoices(
               deps,
@@ -2832,7 +3132,7 @@ async function runInboundTurn(
                 serviceId: resolvedServiceId,
                 serviceName: resolvedServiceName,
                 serviceSource,
-                providerId: turnSession.state?.knownFacts.provider ?? null,
+                providerId: provRes.providerId,
                 date: knownDate,
               },
               turnSession,
@@ -2846,7 +3146,7 @@ async function runInboundTurn(
               serviceId: resolvedServiceId,
               serviceName: resolvedServiceName,
               serviceSource,
-              providerId: turnSession.state?.knownFacts.provider ?? null,
+              providerId: provRes.providerId,
             },
             turnSession,
             now,
@@ -3004,6 +3304,29 @@ async function runInboundTurn(
         turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
       }
       const knownDate = turnSession.state?.knownFacts.date;
+      const candidateProvider = turnSession.state?.knownFacts.provider ?? null;
+      const provRes = await resolveProviderCandidate(
+        deps,
+        business.id,
+        conversation.branchId as string | null,
+        offerReply.serviceId,
+        candidateProvider,
+      );
+      if (provRes.kind === "clarification") {
+        return promptProviderClarificationReply(
+          deps,
+          selectionScope,
+          {
+            serviceId: offerReply.serviceId,
+            serviceName: offerReply.serviceName,
+            date: knownDate ?? null,
+            eligibleProviders: provRes.eligibleProviders,
+            reason: provRes.reason,
+          },
+          turnSession,
+          now,
+        );
+      }
       if (knownDate) {
         return presentSlotChoices(
           deps,
@@ -3012,7 +3335,7 @@ async function runInboundTurn(
             serviceId: offerReply.serviceId,
             serviceName: offerReply.serviceName,
             serviceSource: "CUSTOMER",
-            providerId: turnSession.state?.knownFacts.provider ?? null,
+            providerId: provRes.providerId,
             date: knownDate,
           },
           turnSession,
@@ -3026,7 +3349,7 @@ async function runInboundTurn(
           serviceId: offerReply.serviceId,
           serviceName: offerReply.serviceName,
           serviceSource: "CUSTOMER",
-          providerId: turnSession.state?.knownFacts.provider ?? null,
+          providerId: provRes.providerId,
         },
         turnSession,
         now,
@@ -3115,6 +3438,46 @@ async function runInboundTurn(
       };
     } else if (offerReply.kind === "service_detail_action") {
       if (offerReply.action === "book_service") {
+        const knownDate = turnSession.state?.knownFacts.date;
+        const candidateProvider =
+          turnSession.state?.knownFacts.provider ?? null;
+        const provRes = await resolveProviderCandidate(
+          deps,
+          business.id,
+          conversation.branchId as string | null,
+          offerReply.serviceId,
+          candidateProvider,
+        );
+        if (provRes.kind === "clarification") {
+          return promptProviderClarificationReply(
+            deps,
+            selectionScope,
+            {
+              serviceId: offerReply.serviceId,
+              serviceName: offerReply.serviceName,
+              date: knownDate ?? null,
+              eligibleProviders: provRes.eligibleProviders,
+              reason: provRes.reason,
+            },
+            turnSession,
+            now,
+          );
+        }
+        if (knownDate) {
+          return presentSlotChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId: offerReply.serviceId,
+              serviceName: offerReply.serviceName,
+              serviceSource: "CUSTOMER",
+              providerId: provRes.providerId,
+              date: knownDate,
+            },
+            turnSession,
+            now,
+          );
+        }
         return presentDateChoices(
           deps,
           selectionScope,
@@ -3122,7 +3485,7 @@ async function runInboundTurn(
             serviceId: offerReply.serviceId,
             serviceName: offerReply.serviceName,
             serviceSource: "CUSTOMER",
-            providerId: turnSession.state?.knownFacts.provider ?? null,
+            providerId: provRes.providerId,
           },
           turnSession,
           now,
@@ -3265,14 +3628,39 @@ async function runInboundTurn(
       if (turnSession.state) {
         turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
       }
+      const serviceSource = turnSession.state?.serviceSource ?? "CUSTOMER";
+      const candidateProvider =
+        offerReply.providerId ?? turnSession.state?.knownFacts.provider ?? null;
+      const provRes = await resolveProviderCandidate(
+        deps,
+        business.id,
+        conversation.branchId as string | null,
+        offerReply.serviceId,
+        candidateProvider,
+      );
+      if (provRes.kind === "clarification") {
+        return promptProviderClarificationReply(
+          deps,
+          selectionScope,
+          {
+            serviceId: offerReply.serviceId,
+            serviceName: offerReply.serviceName,
+            date: offerReply.date,
+            eligibleProviders: provRes.eligibleProviders,
+            reason: provRes.reason,
+          },
+          turnSession,
+          now,
+        );
+      }
       return presentSlotChoices(
         deps,
         selectionScope,
         {
           serviceId: offerReply.serviceId,
           serviceName: offerReply.serviceName,
-          serviceSource: "CUSTOMER",
-          providerId: offerReply.providerId,
+          serviceSource,
+          providerId: provRes.providerId,
           date: offerReply.date,
         },
         turnSession,
@@ -3286,6 +3674,7 @@ async function runInboundTurn(
           ...(turnSession.state ?? emptyConversationState()),
           serviceId: offerReply.serviceId,
           selectedService: offerReply.serviceName,
+          serviceSource: turnSession.state?.serviceSource ?? "CUSTOMER",
           missingFacts: ["date"],
           lastClarification: { type: "date" },
           offer: null,
@@ -3613,6 +4002,29 @@ async function runInboundTurn(
         turnSession.state.serviceId
       ) {
         const knownDate = turnSession.state.knownFacts.date;
+        const candidateProvider = turnSession.state.knownFacts.provider ?? null;
+        const provRes = await resolveProviderCandidate(
+          deps,
+          business.id,
+          conversation.branchId as string | null,
+          turnSession.state.serviceId,
+          candidateProvider,
+        );
+        if (provRes.kind === "clarification") {
+          return promptProviderClarificationReply(
+            deps,
+            selectionScope,
+            {
+              serviceId: turnSession.state.serviceId,
+              serviceName: turnSession.state.selectedService,
+              date: knownDate ?? null,
+              eligibleProviders: provRes.eligibleProviders,
+              reason: provRes.reason,
+            },
+            turnSession,
+            now,
+          );
+        }
         if (knownDate) {
           return presentSlotChoices(
             deps,
@@ -3621,7 +4033,7 @@ async function runInboundTurn(
               serviceId: turnSession.state.serviceId,
               serviceName: turnSession.state.selectedService,
               serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
-              providerId: turnSession.state.knownFacts.provider ?? null,
+              providerId: provRes.providerId,
               date: knownDate,
             },
             turnSession,
@@ -3635,7 +4047,7 @@ async function runInboundTurn(
             serviceId: turnSession.state.serviceId,
             serviceName: turnSession.state.selectedService,
             serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
-            providerId: turnSession.state.knownFacts.provider ?? null,
+            providerId: provRes.providerId,
           },
           turnSession,
           now,
@@ -4979,26 +5391,33 @@ async function runInboundTurn(
               turnSession.state?.knownFacts.provider ??
               null;
             if (targetServiceId && candidateProvider) {
-              const eligDeps = buildEligibilityDeps(deps);
-              const elig = await resolveEligibleProviders(
-                eligDeps as unknown as Parameters<
-                  typeof resolveEligibleProviders
-                >[0],
-                { businessId: business.id },
-                {
-                  serviceId: targetServiceId,
-                  ...(branchId ? { branchId } : {}),
-                },
+              const provRes = await resolveProviderCandidate(
+                deps,
+                business.id,
+                branchId,
+                targetServiceId,
+                candidateProvider,
+                isStructuredSemanticTurn ? "catalog_strict" : "legacy",
               );
-              if (elig.success) {
-                const match = matchProviderByName(
-                  candidateProvider,
-                  elig.data.providers,
-                  { mode: "legacy" },
+              if (provRes.kind === "resolved") {
+                matchedProviderId = provRes.providerId;
+              } else {
+                return promptProviderClarificationReply(
+                  deps,
+                  selectionScope,
+                  {
+                    serviceId: targetServiceId,
+                    serviceName:
+                      mapped.serviceName ??
+                      turnSession.state?.selectedService ??
+                      "",
+                    date: null,
+                    eligibleProviders: provRes.eligibleProviders,
+                    reason: provRes.reason,
+                  },
+                  turnSession,
+                  now,
                 );
-                if (match.status === "ok") {
-                  matchedProviderId = match.providerId;
-                }
               }
             }
             dateOffer = buildDateOffer(

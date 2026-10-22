@@ -793,21 +793,24 @@ async function main(): Promise<void> {
     await h.sendInbound(offerCallbackData(state.offer, 1), 6009);
     const finalAppointments = h.getAppointments();
 
+    const failedConditions = [
+      !isInitialSlotOffer && "isInitialSlotOffer",
+      !activeTaskPreservedDuringInquiry && "activeTaskPreservedDuringInquiry",
+      !factsPreservedDuringInquiry && "factsPreservedDuringInquiry",
+      !suspendedOfferPreserved && "suspendedOfferPreserved",
+      !isInquiryServiceOffer && "isInquiryServiceOffer",
+      !hasCatalogPrice && "hasCatalogPrice",
+      !hasCatalogDuration && "hasCatalogDuration",
+      !(appointmentsDuringInquiry === 0) && "appointmentsDuringInquiry",
+      !resumedSlotOffer && "resumedSlotOffer",
+      !(finalAppointments.length === 1) && "finalAppointments.length",
+      !(finalAppointments[0]?.serviceId === SRV_CONSULT) && "serviceId",
+    ].filter(Boolean);
+
     check(
       "6. Service inquiry preserves active booking facts, displays catalog info, and resumes cleanly",
-      Boolean(
-        isInitialSlotOffer &&
-        activeTaskPreservedDuringInquiry &&
-        factsPreservedDuringInquiry &&
-        suspendedOfferPreserved &&
-        isInquiryServiceOffer &&
-        hasCatalogPrice &&
-        hasCatalogDuration &&
-        appointmentsDuringInquiry === 0 &&
-        resumedSlotOffer &&
-        finalAppointments.length === 1 &&
-        finalAppointments[0]!.serviceId === SRV_CONSULT,
-      ),
+      failedConditions.length === 0,
+      failedConditions.join(", "),
     );
   }
 
@@ -1198,6 +1201,315 @@ async function main(): Promise<void> {
     check(
       "14. Command boundary rejects /starter from deterministic /start, and negation reaches semantic path intact",
       Boolean(starterReachedSemantic && negationReachedSemantic),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Scenario 15: Suspended offer lifecycle invalidation on dependency change
+  // and CAS save conflict on resume (Requirement 1)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    const convId = "conv-susp-15";
+    const h = createTestHarness({ conversationId: convId });
+
+    // 1. Establish active booking: /start -> book -> service 1 -> date 1
+    await h.sendInbound("/start", 15001);
+    let state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    await h.sendInbound(offerCallbackData(state.offer, "book"), 15002);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    await h.sendInbound(offerCallbackData(state.offer, 1), 15003); // Service 1 ("كشف عام")
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    await h.sendInbound(offerCallbackData(state.offer, 1), 15004); // Date 1 ("2026-10-22")
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const initialSlotOffer = state.offer;
+
+    // 2. Suspend with inquiry
+    const inqOffer = buildServiceOffer(
+      { businessId: B_ID, conversationId: convId },
+      "inq-tok-15",
+      h.catalogServices.map((s) => ({ id: s.id, name: s.name })),
+      SIMULATED_NOW,
+      "INQUIRY",
+    );
+    state = withPresentedOffer(state, inqOffer!);
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 10,
+      state: dehydrateConversationState(state),
+      updatedAt: new Date(),
+    });
+
+    // 3. Customer makes date correction in free text during inquiry
+    h.setCustomAiResponder(() => ({
+      intent: "AVAILABILITY",
+      action: "reply",
+      content: "تم تعديل التاريخ إلى 2026-10-25",
+      extraction: {
+        service: "كشف عام",
+        date: "2026-10-25",
+        provider: null,
+        timePreference: null,
+      },
+      handoffReason: null,
+      summary: null,
+    }));
+    await h.sendInbound("غير اليوم لـ 2026-10-25", 15005);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+
+    // Assert: suspendedOffer is invalidated/cleared by mergeConversationState
+    const suspendedClearedOnDateChange = state.suspendedOffer == null;
+
+    // 4. Customer returns to menu and clicks book -> old offer cannot return
+    const welcomeOffer = buildWelcomeOffer(
+      { businessId: B_ID, conversationId: convId },
+      "wel-tok-15",
+      SIMULATED_NOW,
+    );
+    state = withPresentedOffer(state, welcomeOffer!);
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 20,
+      state: dehydrateConversationState(state),
+      updatedAt: new Date(),
+    });
+    await h.sendInbound(offerCallbackData(welcomeOffer!, "book"), 15006);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const oldOfferDidNotReturn =
+      state.offer?.id !== initialSlotOffer.id &&
+      state.offer?.date === "2026-10-25";
+
+    // 5. CAS conflict on resume: mock save returning conflict
+    const hConflict = createTestHarness({ conversationId: "conv-conflict-15" });
+    await hConflict.sendInbound("/start", 15101);
+    let confState = (await hConflict.stateStore.load(B_ID, "conv-conflict-15"))
+      ?.state as any;
+    await hConflict.sendInbound(
+      offerCallbackData(confState.offer, "book"),
+      15102,
+    );
+    confState = (await hConflict.stateStore.load(B_ID, "conv-conflict-15"))
+      ?.state as any;
+    await hConflict.sendInbound(offerCallbackData(confState.offer, 1), 15103);
+    confState = (await hConflict.stateStore.load(B_ID, "conv-conflict-15"))
+      ?.state as any;
+    await hConflict.sendInbound(offerCallbackData(confState.offer, 1), 15104);
+    confState = (await hConflict.stateStore.load(B_ID, "conv-conflict-15"))
+      ?.state as any;
+
+    // Suspend with welcome offer
+    const confWelOffer = buildWelcomeOffer(
+      { businessId: B_ID, conversationId: "conv-conflict-15" },
+      "wel-tok-conf",
+      SIMULATED_NOW,
+    );
+    confState = withPresentedOffer(confState, confWelOffer!);
+    hConflict.stateStore.rows.set("conv-conflict-15", {
+      businessId: B_ID,
+      revision: 30,
+      state: dehydrateConversationState(confState),
+      updatedAt: new Date(),
+    });
+
+    // Induce CAS save conflict on resume turn
+    const origSave = hConflict.stateStore.save.bind(hConflict.stateStore);
+    hConflict.stateStore.save = async () => ({ status: "conflict" });
+    await hConflict.sendInbound(
+      offerCallbackData(confWelOffer!, "book"),
+      15105,
+    );
+    hConflict.stateStore.save = origSave;
+
+    const sent = hConflict.getSentMessages();
+    const conflictMsg = sent[sent.length - 1];
+    const safeConflictReply =
+      conflictMsg?.content.includes("تعارض") &&
+      conflictMsg?.replyMarkup === undefined;
+
+    check(
+      "15. Suspended offer is invalidated on dependency change; resume CAS conflict returns safe response without markup",
+      Boolean(
+        suspendedClearedOnDateChange &&
+        oldOfferDidNotReturn &&
+        safeConflictReply,
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Scenario 16: Provider identity resolution across reload, /start, unknown,
+  // ambiguous candidate, and explicit ANY removal (Requirement 2)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    const convId = "conv-prov-16";
+    const h = createTestHarness({ conversationId: convId });
+
+    // 16a. Valid named provider ("د. أحمد") in knownFacts.provider after reload and /start
+    const initialFactsState: any = {
+      ...emptyConversationState(),
+      activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
+      knownFacts: { service: "كشف عام", provider: "د. أحمد" },
+      serviceId: SRV_CONSULT,
+      selectedService: "كشف عام",
+      serviceSource: "CUSTOMER",
+      providerPreference: "د. أحمد",
+      bookingStage: "SERVICE_SUPPLIED",
+    };
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 1,
+      state: dehydrateConversationState(initialFactsState),
+      updatedAt: new Date(),
+    });
+
+    // Trigger /start: engine resolves "د. أحمد" to PRV_1 UUID and presents dates
+    await h.sendInbound("/start", 16001);
+    let state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const dateOfferWithResolvedProvider =
+      state.offer?.kind === "DATE" && state.offer?.providerId === PRV_1;
+
+    // Pick Date 1 -> queries slots with exact provider scope [PRV_1 -> u-1]
+    h.clearAvailabilityQueries();
+    await h.sendInbound(offerCallbackData(state.offer, 1), 16002);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const queries = h.getAvailabilityQueries();
+    const queriedAhmedOnly = queries.some(
+      (q) => q.date === "2026-10-22" && q.providerId === "u-1",
+    );
+
+    // 16b. Unknown provider candidate ("طبيب غير معروف بالعيادة") prompts clarification
+    const unknownProvState: any = {
+      ...emptyConversationState(),
+      activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
+      knownFacts: {
+        service: "كشف عام",
+        date: "2026-10-22",
+        provider: "طبيب غير معروف بالعيادة",
+      },
+      serviceId: SRV_CONSULT,
+      selectedService: "كشف عام",
+      serviceSource: "CUSTOMER",
+      providerPreference: "طبيب غير معروف بالعيادة",
+      bookingStage: "SERVICE_SUPPLIED",
+    };
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 10,
+      state: dehydrateConversationState(unknownProvState),
+      updatedAt: new Date(),
+    });
+    await h.sendInbound("/start", 16003);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const clarificationPresented = state.offer?.kind === "PROVIDER";
+    const factsUnchangedOnClarification =
+      state.knownFacts?.provider === "طبيب غير معروف بالعيادة";
+
+    // 16c. Ambiguous candidate ("دكتور") prompts clarification
+    const ambiguousState: any = {
+      ...emptyConversationState(),
+      activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
+      knownFacts: { service: "كشف عام", provider: "دكتور" },
+      serviceId: SRV_CONSULT,
+      selectedService: "كشف عام",
+      serviceSource: "CUSTOMER",
+      providerPreference: "دكتور",
+      bookingStage: "SERVICE_SUPPLIED",
+    };
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 20,
+      state: dehydrateConversationState(ambiguousState),
+      updatedAt: new Date(),
+    });
+    await h.sendInbound("/start", 16004);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const ambiguousClarification = state.offer?.kind === "PROVIDER";
+    const ambiguousFactsUnchanged = state.knownFacts?.provider === "دكتور";
+
+    // 16d. Explicit ANY removal removes provider preference from durable facts and queries unconstrained
+    // Select option 3 ("أي مقدم خدمة متاح", providerId: null) -> presents date choices
+    await h.sendInbound(offerCallbackData(state.offer, 3), 16005);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const providerRemovedFromFacts = state.knownFacts?.provider == null;
+    const dateOfferPresented = state.offer?.kind === "DATE";
+
+    // Choose Date 1 -> queries availability unconstrained (providerId === null)
+    h.clearAvailabilityQueries();
+    await h.sendInbound(offerCallbackData(state.offer, 1), 16006);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const anyQueries = h.getAvailabilityQueries();
+    const queriedUnconstrainedAny = anyQueries.some(
+      (q) => q.date === "2026-10-22" && q.providerId === null,
+    );
+
+    const failed16 = [
+      !dateOfferWithResolvedProvider && "dateOfferWithResolvedProvider",
+      !queriedAhmedOnly && "queriedAhmedOnly",
+      !clarificationPresented && "clarificationPresented",
+      !factsUnchangedOnClarification && "factsUnchangedOnClarification",
+      !ambiguousClarification && "ambiguousClarification",
+      !ambiguousFactsUnchanged && "ambiguousFactsUnchanged",
+      !providerRemovedFromFacts && "providerRemovedFromFacts",
+      !dateOfferPresented && "dateOfferPresented",
+      !queriedUnconstrainedAny && "queriedUnconstrainedAny",
+    ].filter(Boolean);
+
+    check(
+      "16. Provider identity resolves to UUID after reload and /start, clarifies unknown/ambiguous candidates without mutating facts, and removes preference on ANY",
+      failed16.length === 0,
+      failed16.join(", "),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Scenario 17: Service provenance preservation across default-service ->
+  // date -> slots (Requirement 3)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    const convId = "conv-prov-17";
+    const h = createTestHarness({
+      conversationId: convId,
+      defaultServiceId: SRV_CONSULT,
+      defaultBookingEnabled: true,
+    });
+
+    // 1. /start -> presents Welcome offer
+    await h.sendInbound("/start", 17001);
+    let state = (await h.stateStore.load(B_ID, convId))?.state as any;
+
+    // 2. Click "حجز موعد" -> with default service enabled, skips service choice and presents dates
+    await h.sendInbound(offerCallbackData(state.offer, "book"), 17002);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const isDateOffer = state.offer?.kind === "DATE";
+    const provenanceAfterDateChoices = state.serviceSource === "DEFAULT";
+
+    // 3. Choose date 1 -> presents slots
+    await h.sendInbound(offerCallbackData(state.offer, 1), 17003);
+    state = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const isSlotOffer = state.offer?.kind === "SLOT";
+    const provenancePreservedInSlotOffer =
+      state.offer?.serviceSource === "DEFAULT";
+    const provenancePreservedInState = state.serviceSource === "DEFAULT";
+
+    // 4. Select slot 1 -> completes booking
+    await h.sendInbound(offerCallbackData(state.offer, 1), 17004);
+    const apts = h.getAppointments();
+    const completedApt = apts[0];
+    const bookingCompleted =
+      apts.length === 1 && completedApt?.serviceId === SRV_CONSULT;
+
+    const failed17 = [
+      !isDateOffer && "isDateOffer",
+      !provenanceAfterDateChoices && "provenanceAfterDateChoices",
+      !isSlotOffer && "isSlotOffer",
+      !provenancePreservedInSlotOffer && "provenancePreservedInSlotOffer",
+      !provenancePreservedInState && "provenancePreservedInState",
+      !bookingCompleted && "bookingCompleted",
+    ].filter(Boolean);
+
+    check(
+      "17. Default service provenance (DEFAULT) is preserved through date selection and slot offer presentation",
+      failed17.length === 0,
+      failed17.join(", "),
     );
   }
 
