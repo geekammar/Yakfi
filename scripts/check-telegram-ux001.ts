@@ -153,7 +153,6 @@ async function main(): Promise<void> {
     assignedUserId?: string | null;
   }) {
     let modelCallCount = 0;
-    let physicalFetchAttempts = 0;
     let customAiResponder: ((prompt: unknown) => Promise<any> | any) | null =
       null;
 
@@ -394,7 +393,6 @@ async function main(): Promise<void> {
         providerName: "mock-model",
         respond: async (input: unknown) => {
           modelCallCount++;
-          physicalFetchAttempts++;
           if (customAiResponder) {
             return customAiResponder(input);
           }
@@ -438,7 +436,6 @@ async function main(): Promise<void> {
       catalogServices,
       eligibleProviders,
       getModelCalls: () => modelCallCount,
-      getPhysicalFetchAttempts: () => physicalFetchAttempts,
       setCustomAiResponder: (
         fn: ((prompt: unknown) => Promise<any> | any) | null,
       ) => {
@@ -493,16 +490,14 @@ async function main(): Promise<void> {
     const stateRow = await h.stateStore.load(B_ID, h.convId);
     const offer = (stateRow?.state as { offer?: { kind: string } })?.offer;
 
-    const zeroModelCalls =
-      h.getModelCalls() === 0 && h.getPhysicalFetchAttempts() === 0;
+    const zeroModelCalls = h.getModelCalls() === 0;
 
     // Positive control: normal free-text question DOES exercise the model
     await h.sendInbound("عايز استفسار بخصوص مواعيد العمل", 1002);
-    const positiveControlInvoked =
-      h.getModelCalls() === 1 && h.getPhysicalFetchAttempts() === 1;
+    const positiveControlInvoked = h.getModelCalls() === 1;
 
     check(
-      "1. /start renders real business name + initial choices with ZERO model calls (positive control verified)",
+      "1. /start renders real business name + initial choices with ZERO model invocations (positive control verified)",
       Boolean(
         result.ok &&
         hasBizName &&
@@ -1510,6 +1505,112 @@ async function main(): Promise<void> {
       "17. Default service provenance (DEFAULT) is preserved through date selection and slot offer presentation",
       failed17.length === 0,
       failed17.join(", "),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Scenario 18: Provider clarification save conflict returns safe retry
+  // response without actionable keyboard, preserves facts, and creates zero
+  // appointments (Finding 1)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    const convId = "conv-prov-cas-18";
+    const h = createTestHarness({ conversationId: convId });
+
+    // 18a. Active booking with unknown provider requiring clarification
+    const initialUnknownState: any = {
+      ...emptyConversationState(),
+      activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
+      knownFacts: { service: "كشف عام", provider: "طبيب غير معروف بالعيادة" },
+      serviceId: SRV_CONSULT,
+      selectedService: "كشف عام",
+      serviceSource: "CUSTOMER",
+      providerPreference: "طبيب غير معروف بالعيادة",
+      bookingStage: "SERVICE_SUPPLIED",
+    };
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 10,
+      state: dehydrateConversationState(initialUnknownState),
+      updatedAt: new Date(),
+    });
+
+    // Induce CAS conflict on save
+    const origSave = h.stateStore.save.bind(h.stateStore);
+    h.stateStore.save = async () => ({ status: "conflict" });
+
+    await h.sendInbound("/start", 18001);
+    h.stateStore.save = origSave;
+
+    let sent = h.getSentMessages();
+    const lastMsgA = sent[sent.length - 1];
+
+    const safeTextA = Boolean(
+      lastMsgA?.content.includes("تعارض") &&
+      lastMsgA.content.includes("المحاولة"),
+    );
+    const noMarkupA = lastMsgA?.replyMarkup === undefined;
+    const persistedA = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const factsUnchangedA =
+      persistedA.knownFacts?.service === "كشف عام" &&
+      persistedA.knownFacts?.provider === "طبيب غير معروف بالعيادة" &&
+      persistedA.serviceId === SRV_CONSULT &&
+      persistedA.offer == null;
+    const zeroAptsA = h.getAppointments().length === 0;
+
+    // 18b. Active booking with ambiguous provider candidate requiring clarification
+    const initialAmbiguousState: any = {
+      ...emptyConversationState(),
+      activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
+      knownFacts: { service: "كشف عام", provider: "دكتور" },
+      serviceId: SRV_CONSULT,
+      selectedService: "كشف عام",
+      serviceSource: "CUSTOMER",
+      providerPreference: "دكتور",
+      bookingStage: "SERVICE_SUPPLIED",
+    };
+    h.stateStore.rows.set(convId, {
+      businessId: B_ID,
+      revision: 20,
+      state: dehydrateConversationState(initialAmbiguousState),
+      updatedAt: new Date(),
+    });
+
+    h.stateStore.save = async () => ({ status: "conflict" });
+    await h.sendInbound("/start", 18002);
+    h.stateStore.save = origSave;
+
+    sent = h.getSentMessages();
+    const lastMsgB = sent[sent.length - 1];
+
+    const safeTextB = Boolean(
+      lastMsgB?.content.includes("تعارض") &&
+      lastMsgB.content.includes("المحاولة"),
+    );
+    const noMarkupB = lastMsgB?.replyMarkup === undefined;
+    const persistedB = (await h.stateStore.load(B_ID, convId))?.state as any;
+    const factsUnchangedB =
+      persistedB.knownFacts?.service === "كشف عام" &&
+      persistedB.knownFacts?.provider === "دكتور" &&
+      persistedB.serviceId === SRV_CONSULT &&
+      persistedB.offer == null;
+    const zeroAptsB = h.getAppointments().length === 0;
+
+    const failed18 = [
+      !safeTextA && "safeTextA",
+      !noMarkupA && "noMarkupA",
+      !factsUnchangedA && "factsUnchangedA",
+      !zeroAptsA && "zeroAptsA",
+      !safeTextB && "safeTextB",
+      !noMarkupB && "noMarkupB",
+      !factsUnchangedB && "factsUnchangedB",
+      !zeroAptsB && "zeroAptsB",
+    ].filter(Boolean);
+
+    check(
+      "18. Unknown or ambiguous provider clarification save conflict returns safe retry response without actionable keyboard, preserves durable facts, and creates zero appointments",
+      failed18.length === 0,
+      failed18.join(", "),
     );
   }
 

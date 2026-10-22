@@ -1618,6 +1618,8 @@ async function promptProviderClarificationReply(
       readonly displayName: string;
     }>;
     reason: "not_found" | "ambiguous";
+    intent?: AiResponse["intent"] | null;
+    observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -1658,7 +1660,15 @@ async function promptProviderClarificationReply(
         turnSession.state ?? emptyConversationState(),
         providerOffer,
       );
-      await turnSession.commit();
+      const ok = await turnSession.commit();
+      if (!ok) {
+        return selectionReply(
+          deps,
+          scope,
+          "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+          "AI_ACTIVE",
+        );
+      }
     }
   }
   const replyMarkup =
@@ -1690,10 +1700,11 @@ async function promptProviderClarificationReply(
     customerId: scope.customer.id,
     customerMessageId: scope.customerMessageId,
     assistantAction: "AI_REPLY",
-    intent: "AVAILABILITY",
+    intent: input.intent ?? "AVAILABILITY",
     conversationStatus: "AI_ACTIVE",
     handoffCause: null,
     assistantProvider: deps.ai.providerName,
+    observability: input.observability,
     delivery,
   };
 }
@@ -5569,85 +5580,21 @@ async function runInboundTurn(
         { mode: isStructuredSemanticTurn ? "catalog_strict" : "legacy" },
       );
       if (providerMatch.status === "missing") {
-        const msg =
-          providerMatch.reason === "ambiguous"
-            ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
-            : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
-        let providerOffer: ProviderOffer | null = null;
-        if (
-          isTelegram &&
-          turnSession.enabled &&
-          eligibility.data.providers.length > 0
-        ) {
-          const eligibleProviders: Array<{
-            providerId: string | null;
-            name: string;
-          }> = eligibility.data.providers.map((p) => ({
-            providerId: p.providerId,
-            name: p.displayName,
-          }));
-          eligibleProviders.push({
-            providerId: null,
-            name: "أي مقدم خدمة متاح",
-          });
-          providerOffer = buildProviderOffer(
-            { businessId: business.id, conversationId: conversation.id },
-            crypto.randomUUID(),
-            {
-              serviceId: mapped.serviceId,
-              serviceName: mapped.serviceName,
-              date: mapped.date,
-              providers: eligibleProviders,
-            },
-            now,
-          );
-          if (providerOffer) {
-            turnSession.state = withPresentedOffer(
-              turnSession.state ?? resolvedState ?? emptyConversationState(),
-              providerOffer,
-            );
-            await turnSession.commit();
-          }
-        }
-        const replyMarkup =
-          isTelegram && providerOffer
-            ? providerOfferKeyboard(providerOffer)
-            : undefined;
-        const assistantMessage = await persistAssistantReply(
+        return promptProviderClarificationReply(
           deps,
-          conversation.id,
-          msg,
-          "AI_ACTIVE",
+          selectionScope,
+          {
+            serviceId: mapped.serviceId,
+            serviceName: mapped.serviceName,
+            date: mapped.date,
+            eligibleProviders: eligibility.data.providers,
+            reason: providerMatch.reason,
+            intent: validated.intent,
+            observability: turnObservability,
+          },
+          turnSession,
+          now,
         );
-        const delivery = await deliverAssistantReply(
-          deps,
-          customer.phone,
-          business.name,
-          conversation.id,
-          msg,
-          assistantMessage.id,
-          business.id,
-          outboundConnectionId,
-          replyMarkup,
-        );
-        return {
-          ok: true,
-          duplicate: false,
-          businessId: business.id,
-          conversationId: conversation.id,
-          customerId: customer.id,
-          customerMessageId: customerMessage.id,
-          assistantAction: "AI_REPLY",
-          intent: validated.intent,
-          conversationStatus: "AI_ACTIVE",
-          handoffCause: null,
-          assistantProvider: deps.ai.providerName,
-          observability: turnObservability,
-          delivery,
-        };
       }
       const providerId =
         providerMatch.status === "ok" ? providerMatch.providerId : undefined;
