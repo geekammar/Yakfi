@@ -720,6 +720,38 @@ async function main(): Promise<void> {
       !traceE.turns[1]?.stateAfter?.selectedTimePref,
   );
 
+  const { aiExtractionSchema, aiFactUpdateSchema } =
+    await import("../src/features/conversations/server/ai-contract");
+  const noncanonicalExtraction = aiExtractionSchema.safeParse({
+    service: null,
+    provider: null,
+    date: null,
+    timePreference: "الصبح",
+  });
+  const canonicalExtraction = aiExtractionSchema.safeParse({
+    service: null,
+    provider: null,
+    date: null,
+    timePreference: "morning",
+  });
+  const noncanonicalUpdate = aiFactUpdateSchema.safeParse({
+    key: "timePreference",
+    operation: "set",
+    value: "الصبح",
+  });
+  const canonicalUpdate = aiFactUpdateSchema.safeParse({
+    key: "timePreference",
+    operation: "set",
+    value: "morning",
+  });
+  check(
+    "8f2. Dialect timePreference ('الصبح') rejected by contract; canonical 'morning' accepted",
+    !noncanonicalExtraction.success &&
+      canonicalExtraction.success &&
+      !noncanonicalUpdate.success &&
+      canonicalUpdate.success,
+  );
+
   const traceF = await runCurrentEngineScenario(smokeF);
   check(
     "8g. Case F (FAQ interruption) preserves booking facts across FAQ question",

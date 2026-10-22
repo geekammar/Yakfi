@@ -79,10 +79,12 @@ import type {
   AiFactUpdate,
   AiRequest,
   AiResponse,
+  CanonicalTimePreference,
   RequiredSemanticCapability,
 } from "@/features/conversations/server/ai-contract";
 import {
   AI_RECENT_MESSAGE_LIMIT,
+  isCanonicalTimePreference,
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
 import {
@@ -1145,12 +1147,14 @@ function resumeBookingExtraction(
       ? turnProvider
       : (turnProvider ?? state.knownFacts.provider ?? null);
 
-  const timePreference = rec.isRemoved("timePreference")
+  const rawTimePreference = rec.isRemoved("timePreference")
     ? null
     : (rec.setFacts.get("timePreference")?.value ??
       e.timePreference ??
       state.knownFacts.timePreference ??
       null);
+  const timePreference: CanonicalTimePreference | null =
+    isCanonicalTimePreference(rawTimePreference) ? rawTimePreference : null;
 
   const stateDate = serviceChanged ? null : (state.knownFacts.date ?? null);
   const date = rec.isRemoved("date")
@@ -1856,6 +1860,11 @@ async function presentSlotChoices(
 
   if (eligibility.success) {
     const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+    const timeOfDayPref = isCanonicalTimePreference(
+      turnSession.state?.knownFacts.timePreference,
+    )
+      ? turnSession.state.knownFacts.timePreference
+      : null;
     const bookingResult = await resolveBookingOptions(
       bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
       { userId: scope.customer.id, businessId: scope.business.id },
@@ -1864,6 +1873,7 @@ async function presentSlotChoices(
         ...(branchId ? { branchId } : {}),
         date: input.date,
         ...(input.providerId ? { providerId: input.providerId } : {}),
+        ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
       },
     );
 
@@ -1873,98 +1883,96 @@ async function presentSlotChoices(
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
-          if (Number.isNaN(hour)) return true;
+          if (Number.isNaN(hour)) return false;
           if (timeOfDayPref === "morning") return hour < 12;
           if (timeOfDayPref === "afternoon") return hour >= 12 && hour < 17;
           if (timeOfDayPref === "evening") return hour >= 17;
-          return true;
+          return false;
         };
-        const preferred = bookableOptions.filter((o) =>
+        bookableOptions = bookableOptions.filter((o) =>
           matchesPref(o.startAt.slice(11, 16)),
         );
-        const others = bookableOptions.filter(
-          (o) => !matchesPref(o.startAt.slice(11, 16)),
-        );
-        if (preferred.length > 0) bookableOptions = [...preferred, ...others];
       }
 
-      const slotOffer: SlotOffer | null = buildSlotOffer(
-        {
+      if (bookableOptions.length > 0) {
+        const slotOffer: SlotOffer | null = buildSlotOffer(
+          {
+            businessId: scope.business.id,
+            conversationId: scope.conversation.id,
+          },
+          crypto.randomUUID(),
+          {
+            serviceId: input.serviceId,
+            serviceName: input.serviceName,
+            serviceSource: input.serviceSource,
+            providerId: input.providerId,
+            date: input.date,
+            followUpRequestId: null,
+            shownCount: bookableOptions.length,
+            options: bookableOptions.map((o) => ({
+              providerId: o.providerId,
+              displayName: o.displayName,
+              startAt: o.startAt,
+              endAt: o.endAt,
+            })),
+          },
+          now,
+        );
+        if (slotOffer && turnSession.enabled) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            slotOffer,
+          );
+          const ok = await turnSession.commit();
+          if (!ok) {
+            return selectionReply(
+              deps,
+              scope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
+          }
+        }
+
+        const replyMarkup =
+          isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
+        const optionsMsg = formatBookingOptionsMessage(
+          input.serviceName,
+          input.date,
+          bookableOptions,
+        );
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          scope.conversation.id,
+          optionsMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          scope.customer.phone,
+          scope.business.name,
+          scope.conversation.id,
+          optionsMsg,
+          assistantMessage.id,
+          scope.business.id,
+          scope.connectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
           businessId: scope.business.id,
           conversationId: scope.conversation.id,
-        },
-        crypto.randomUUID(),
-        {
-          serviceId: input.serviceId,
-          serviceName: input.serviceName,
-          serviceSource: input.serviceSource,
-          providerId: input.providerId,
-          date: input.date,
-          followUpRequestId: null,
-          shownCount: bookableOptions.length,
-          options: bookableOptions.map((o) => ({
-            providerId: o.providerId,
-            displayName: o.displayName,
-            startAt: o.startAt,
-            endAt: o.endAt,
-          })),
-        },
-        now,
-      );
-      if (slotOffer && turnSession.enabled) {
-        turnSession.state = withPresentedOffer(
-          turnSession.state ?? emptyConversationState(),
-          slotOffer,
-        );
-        const ok = await turnSession.commit();
-        if (!ok) {
-          return selectionReply(
-            deps,
-            scope,
-            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
-            "AI_ACTIVE",
-          );
-        }
+          customerId: scope.customer.id,
+          customerMessageId: scope.customerMessageId,
+          assistantAction: "AI_REPLY",
+          intent: "AVAILABILITY",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
       }
-
-      const replyMarkup =
-        isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
-      const optionsMsg = formatBookingOptionsMessage(
-        input.serviceName,
-        input.date,
-        bookableOptions,
-      );
-      const assistantMessage = await persistAssistantReply(
-        deps,
-        scope.conversation.id,
-        optionsMsg,
-        "AI_ACTIVE",
-      );
-      const delivery = await deliverAssistantReply(
-        deps,
-        scope.customer.phone,
-        scope.business.name,
-        scope.conversation.id,
-        optionsMsg,
-        assistantMessage.id,
-        scope.business.id,
-        scope.connectionId,
-        replyMarkup,
-      );
-      return {
-        ok: true,
-        duplicate: false,
-        businessId: scope.business.id,
-        conversationId: scope.conversation.id,
-        customerId: scope.customer.id,
-        customerMessageId: scope.customerMessageId,
-        assistantAction: "AI_REPLY",
-        intent: "AVAILABILITY",
-        conversationStatus: "AI_ACTIVE",
-        handoffCause: null,
-        assistantProvider: deps.ai.providerName,
-        delivery,
-      };
     }
   }
 
@@ -4670,10 +4678,14 @@ async function runInboundTurn(
               }
             }
           } else {
-            const explicitTime =
+            const rawExplicitTime =
               turnReconciled.setFacts.get("timePreference")?.value ??
               bookingAiResponse.extraction.timePreference ??
               null;
+            const explicitTime: CanonicalTimePreference | null =
+              isCanonicalTimePreference(rawExplicitTime)
+                ? rawExplicitTime
+                : null;
             bookingAiResponse = {
               ...bookingAiResponse,
               extraction: {
@@ -4865,10 +4877,14 @@ async function runInboundTurn(
               }
             }
           } else {
-            const explicitTime =
+            const rawExplicitTime =
               turnReconciled.setFacts.get("timePreference")?.value ??
               bookingAiResponse.extraction.timePreference ??
               null;
+            const explicitTime: CanonicalTimePreference | null =
+              isCanonicalTimePreference(rawExplicitTime)
+                ? rawExplicitTime
+                : null;
             bookingAiResponse = {
               ...bookingAiResponse,
               extraction: {
@@ -5599,6 +5615,17 @@ async function runInboundTurn(
       const providerId =
         providerMatch.status === "ok" ? providerMatch.providerId : undefined;
 
+      // CORE-03B2B1, CORE-03D1: Final time-preference filtering on structured semantic turns respects
+      // validated extraction / durable state only — never reinterprets raw inbound prose.
+      const rawTimeOfDayPref = isStructuredSemanticTurn
+        ? (bookingAiResponse.extraction.timePreference ?? null)
+        : turnReconciled.isTouched("timePreference")
+          ? (bookingAiResponse.extraction.timePreference ?? null)
+          : (bookingAiResponse.extraction.timePreference ??
+            extractTimeOfDayPreference(inbound.text));
+      const timeOfDayPref: CanonicalTimePreference | null =
+        isCanonicalTimePreference(rawTimeOfDayPref) ? rawTimeOfDayPref : null;
+
       // CORE-02 — deterministic booking options (reuses CORE-01 + availability layer)
       const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
       const bookingResult = await resolveBookingOptions(
@@ -5609,6 +5636,7 @@ async function runInboundTurn(
           ...(mapped.branchId ? { branchId: mapped.branchId } : {}),
           ...(providerId ? { providerId } : {}),
           date: mapped.date!,
+          ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
         },
       );
       if (!bookingResult.success) {
@@ -5651,8 +5679,27 @@ async function runInboundTurn(
           delivery,
         };
       }
-      if (bookingResult.data.options.length === 0) {
-        const reason = bookingResult.reason ?? "FULLY_BOOKED";
+
+      let bookableOptions = bookingResult.data.options;
+      if (timeOfDayPref) {
+        const matchesPref = (startTime: string) => {
+          const hour = parseInt(startTime.slice(0, 2), 10);
+          if (Number.isNaN(hour)) return false;
+          if (timeOfDayPref === "morning") return hour < 12;
+          if (timeOfDayPref === "afternoon") return hour >= 12 && hour < 17;
+          if (timeOfDayPref === "evening") return hour >= 17;
+          return false;
+        };
+        bookableOptions = bookableOptions.filter((o) =>
+          matchesPref(o.startAt.slice(11, 16)),
+        );
+      }
+
+      if (bookableOptions.length === 0) {
+        const reason =
+          bookingResult.data.options.length === 0
+            ? (bookingResult.reason ?? "FULLY_BOOKED")
+            : "FULLY_BOOKED";
         const msg = bookingEmptyReasonMessage(reason, mapped.date!);
         const assistantMessage = await persistAssistantReply(
           deps,
@@ -5692,35 +5739,6 @@ async function runInboundTurn(
           observability: turnObservability,
           delivery,
         };
-      }
-      // CORE-03B2B1: Final time-preference filtering on structured semantic turns respects
-      // validated extraction / durable state only — never reinterprets raw inbound prose.
-      const timeOfDayPref = isStructuredSemanticTurn
-        ? (bookingAiResponse.extraction.timePreference ?? null)
-        : turnReconciled.isTouched("timePreference")
-          ? (bookingAiResponse.extraction.timePreference ?? null)
-          : (bookingAiResponse.extraction.timePreference ??
-            extractTimeOfDayPreference(inbound.text));
-
-      let bookableOptions = bookingResult.data.options;
-      if (timeOfDayPref) {
-        const matchesPref = (startTime: string) => {
-          const hour = parseInt(startTime.slice(0, 2), 10);
-          if (Number.isNaN(hour)) return true;
-          if (timeOfDayPref === "morning") return hour < 12;
-          if (timeOfDayPref === "afternoon") return hour >= 12 && hour < 17;
-          if (timeOfDayPref === "evening") return hour >= 17;
-          return true;
-        };
-        const preferred = bookableOptions.filter((o) =>
-          matchesPref(o.startAt.slice(11, 16)),
-        );
-        const others = bookableOptions.filter(
-          (o) => !matchesPref(o.startAt.slice(11, 16)),
-        );
-        if (preferred.length > 0) {
-          bookableOptions = [...preferred, ...others];
-        }
       }
 
       let slotOffer: SlotOffer | null = null;

@@ -16,8 +16,10 @@
 import type {
   AiExtraction,
   AiFactUpdate,
+  CanonicalTimePreference,
 } from "@/features/conversations/server/ai-contract";
 import {
+  isCanonicalTimePreference,
   isFactKey,
   isRemovableFactKey,
   type ConversationFactKey,
@@ -135,16 +137,20 @@ export function reconcileTurnSemanticFacts(
     operations.values(),
   );
 
+  const rawTimePref = removedKeys.has("timePreference")
+    ? null
+    : (setFacts.get("timePreference")?.value ??
+      extraction?.timePreference ??
+      null);
+  const timePreference: CanonicalTimePreference | null =
+    isCanonicalTimePreference(rawTimePref) ? rawTimePref : null;
+
   const normalizedExtraction: AiExtraction = {
     service: setFacts.get("service")?.value ?? extraction?.service ?? null,
     date: removedKeys.has("date")
       ? null
       : (setFacts.get("date")?.value ?? extraction?.date ?? null),
-    timePreference: removedKeys.has("timePreference")
-      ? null
-      : (setFacts.get("timePreference")?.value ??
-        extraction?.timePreference ??
-        null),
+    timePreference,
     provider: removedKeys.has("provider")
       ? null
       : (setFacts.get("provider")?.value ?? extraction?.provider ?? null),

@@ -9,10 +9,10 @@
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**
-  - Branch: `feat/conv-core-03c2-smoke-eval` (branched from `main` at commit `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41`).
-  - Package Version: `v0.64.0` (SemVer minor increment over v0.63.0 baseline).
-  - Baseline Commit: `3f87cf8a9e4ab4dfcc78529778b523fdcca64c41` (PR #22 merged baseline).
-  - Working Tree: Quick real JEV + LLM smoke evaluation, live envelope enforcement, 8-scenario Egyptian smoke corpus, acceptance test suite `check:conv-core-03c2`.
+  - Branch: `feat/conv-core-03d1-canonical-time` (branched from `main` at PR #24 merged baseline, commit `6cd0252640ad0b3f8089185dafef3c679e7a507b`).
+  - Package Version: `v0.66.0` (SemVer minor increment over v0.65.0 baseline).
+  - Baseline Commit: `6cd0252640ad0b3f8089185dafef3c679e7a507b` (PR #24 merged baseline).
+  - Working Tree: Canonical time preferences and reliable removal on the existing Conversation Engine (CORE-03D1). Defined single canonical day-period vocabulary (`"morning" | "afternoon" | "evening"`), validated extraction and SET factUpdates against canonical schema (rejecting dialect words like "الصبح" and exact times like "10:30"), enabled Booking Core `resolveBookingOptions` to filter candidate slot pairs by canonical preference, enforced truthful no-options handoff (`DOMAIN_REQUIRES_HUMAN`), invalidated offers on preference changes/removals, and verified via dedicated acceptance suite `check:conv-core-03d1` (34/34 checks).
 - **Production Status (Read-Only Health Verified):**
   - Production health check `GET https://flowpilot-prod.vercel.app/api/health` returned:
     - `status: "ok"`

@@ -203,7 +203,7 @@ export async function resolveBookingOptions(
     };
   }
 
-  const { serviceId, branchId, providerId, date } = parsed.data;
+  const { serviceId, branchId, providerId, date, timePreference } = parsed.data;
   const preference: BookingOptionsData["preference"] = providerId
     ? "PROVIDER"
     : "ANY";
@@ -349,7 +349,19 @@ export async function resolveBookingOptions(
     }
   });
 
-  const ranked = rankBookingOptions(pairs, MAX_BOOKING_OPTIONS);
+  let candidatePairs = pairs;
+  if (timePreference) {
+    candidatePairs = pairs.filter((p) => {
+      const hour = parseInt(p.startTime.slice(0, 2), 10);
+      if (Number.isNaN(hour)) return false;
+      if (timePreference === "morning") return hour < 12;
+      if (timePreference === "afternoon") return hour >= 12 && hour < 17;
+      if (timePreference === "evening") return hour >= 17;
+      return false;
+    });
+  }
+
+  const ranked = rankBookingOptions(candidatePairs, MAX_BOOKING_OPTIONS);
   const options: BookingOption[] = ranked.map((pair) => ({
     providerId: pair.providerId,
     displayName: pair.displayName,
