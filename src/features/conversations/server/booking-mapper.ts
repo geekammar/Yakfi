@@ -286,6 +286,9 @@ export type BookingMapperOutput =
       kind: "needs_clarification";
       message: string;
       reason: "MISSING_SERVICE" | "AMBIGUOUS_SERVICE" | "MISSING_DATE";
+      serviceId?: string;
+      serviceName?: string;
+      providerText?: string | null;
     }
   | {
       kind: "ready";
@@ -381,6 +384,9 @@ export function mapAiResponseToBookingInput(
       kind: "needs_clarification",
       message: "يرجى تحديد التاريخ المطلوب — مثال: 2026-09-14.",
       reason: "MISSING_DATE",
+      serviceId: serviceMatch.serviceId,
+      serviceName: serviceMatch.serviceName,
+      providerText: extraction.provider,
     };
   }
 

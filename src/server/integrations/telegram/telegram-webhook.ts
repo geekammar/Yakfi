@@ -131,6 +131,14 @@ export type ParsedTelegramUpdate =
       message: NormalizedInboundTransportMessage;
     }
   | {
+      status: "callback_query";
+      updateId: string;
+      callbackQueryId: string;
+      chatId: string;
+      data: string;
+      message: NormalizedInboundTransportMessage;
+    }
+  | {
       /**
        * A customer `/start` control command (with or without a payload).
        * Classified BEFORE the message path so it never becomes an engine
@@ -262,9 +270,13 @@ export function parseTelegramUpdate(
     if (!result.ok) {
       return { status: "malformed", error: result.error };
     }
+    const callbackQueryId = typeof cb.id === "string" ? cb.id : "";
     return {
-      status: "message",
+      status: "callback_query",
       updateId,
+      callbackQueryId,
+      chatId: String(chatId),
+      data,
       message: result.message,
     };
   }

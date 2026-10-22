@@ -4,12 +4,19 @@ import {
 } from "@/features/conversations/server/conversation-engine";
 import { env } from "@/lib/env";
 import { defaultRuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
-import { defaultTelegramApiDeps } from "@/server/integrations/telegram/telegram-client";
+import {
+  defaultTelegramApiDeps,
+  resolveTelegramBotToken,
+  telegramAnswerCallbackQuery,
+} from "@/server/integrations/telegram/telegram-client";
 import {
   completeManagedBotProvisioning,
   type TelegramProvisioningDeps,
 } from "@/server/integrations/telegram/telegram-provisioning";
-import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
+import {
+  createTelegramMessageTransport,
+  resolveTelegramConnectionForSend,
+} from "@/server/integrations/telegram/telegram-transport";
 import { handleTelegramWebhook } from "@/server/integrations/telegram/telegram-webhook-handler";
 import {
   telegramConnectionRepository,
@@ -110,6 +117,27 @@ export async function POST(request: Request): Promise<Response> {
           // A provisioning failure must never crash the webhook; the
           // event is acknowledged and the ledger carries the outcome.
           return { ok: false, code: "PROVISIONING_FAILED" };
+        }
+      },
+      async answerCallbackQuery({ callbackQueryId, connectionId, businessId }) {
+        try {
+          const resolution = await resolveTelegramConnectionForSend(
+            { connectionRepository: telegramConnectionRepository },
+            { connectionId, businessId },
+          );
+          if (!resolution.ok) return;
+          const tokenRes = await resolveTelegramBotToken(
+            defaultTelegramApiDeps,
+            resolution.credentialsRef,
+          );
+          if (!tokenRes.ok) return;
+          await telegramAnswerCallbackQuery(
+            defaultTelegramApiDeps,
+            tokenRes.token,
+            { callbackQueryId },
+          );
+        } catch {
+          // Acknowledgment failure must not crash webhook
         }
       },
       // A customer `/start` is a DETERMINISTIC welcome, never an engine turn
