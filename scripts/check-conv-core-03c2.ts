@@ -762,11 +762,12 @@ async function main(): Promise<void> {
 
   const traceG = await runCurrentEngineScenario(smokeG);
   check(
-    "8h. Case G (Known defect) records sensitive trigger on 'مش مشكلة' with SENSITIVE_OR_RESTRICTED cause",
+    "8h. Case G (Repaired) continues AI_REPLY on 'مش مشكلة' with safe semantic assessment and removed timePreference",
     traceG.verdict === "PASS" &&
-      traceG.turns[1]?.assistantAction === "AI_HANDOFF" &&
+      traceG.turns[1]?.assistantAction === "AI_REPLY" &&
       traceG.turns[1]?.processing.currentEngine?.domainResult.handoffCause ===
-        "SENSITIVE_OR_RESTRICTED",
+        null &&
+      traceG.turns[1]?.stateAfter?.knownFacts?.timePreference == null,
   );
 
   check(

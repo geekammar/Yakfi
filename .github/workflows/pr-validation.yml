@@ -94,6 +94,7 @@ jobs:
           pnpm check:conv-core-03c1
           pnpm check:conv-core-03c2
           pnpm check:conv-core-03d1
+          pnpm check:conv-core-03d2
           pnpm check:telegram
           pnpm check:telegram-ux001
 

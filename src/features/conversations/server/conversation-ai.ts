@@ -32,6 +32,8 @@ import {
   emptyAiExtraction,
   parseAiRequest,
 } from "@/features/conversations/server/ai-contract";
+import type { AiRoutingDecision } from "@/features/conversations/server/ai-observability";
+import type { AiTelemetry } from "@/server/integrations/ai/types";
 
 export type {
   AiIntent,
@@ -708,6 +710,91 @@ export function detectTurnControlSignals(message: string): TurnControlSignals {
     explicitHuman: human.explicitHuman,
     nonCommittal,
   };
+}
+
+export type ResolveTurnControlSignalsOptions = {
+  currentMessage: string;
+  routing: AiRoutingDecision;
+  decision?: AiResponse | null;
+  turnTelemetry?: AiTelemetry | null;
+  isStructuredSemanticTurn?: boolean;
+};
+
+/**
+ * Pure source-selection helper for turn control signals (CORE-03D2).
+ *
+ * Centralizes source-selection and contradiction rules:
+ * 1. JEV semantic strategy owns signals when routing === "JEV" and valid JEV telemetry is present.
+ * 2. Structured generative turns (isStructuredSemanticTurn === true):
+ *    - A validated "safe" assessment replaces the broad lexical sensitive interpretation for that turn,
+ *      provided there are no contradictions (decision.handoffReason !== "SENSITIVE" and no sensitive handoff goal).
+ *    - A "sensitive" assessment escalates through the existing Planner (signals.sensitive = true).
+ *    - An "uncertain" assessment must not execute booking and safely escalates (signals.sensitive = true).
+ *    - A missing/undefined assessment on a structured turn must not be treated as safe and must not execute booking;
+ *      it safely escalates (signals.sensitive = true).
+ *    - Explicit human requests remain authoritatively governed by the deterministic lexical classifier.
+ *    - Non-committal fragments remain governed by the lexical classifier.
+ * 3. Legacy and non-structured turns fall back to the deterministic lexical detector (detectTurnControlSignals).
+ */
+export function resolveTurnControlSignals(
+  options: ResolveTurnControlSignalsOptions,
+): TurnControlSignals {
+  const lexical = detectTurnControlSignals(options.currentMessage);
+
+  // 1. JEV semantic ownership (CONV-CORE-02 / PROMPT-AI-JEV-03B §8)
+  if (options.routing === "JEV") {
+    const semantic = options.turnTelemetry?.jevDecision?.semantic?.signals;
+    if (semantic) {
+      return semantic;
+    }
+    return lexical;
+  }
+
+  // 2. Structured generative semantic turn ownership (CORE-03D2)
+  if (options.isStructuredSemanticTurn && options.decision) {
+    const decision = options.decision;
+    const assessment = decision.safetyAssessment;
+
+    // Contradiction detection: a safe top-level assessment cannot downgrade a required handoff
+    const hasSensitiveContradiction =
+      (decision.handoffReason as string) === "SENSITIVE" ||
+      (decision.goals != null &&
+        decision.goals.some(
+          (g) =>
+            g.kind === "HANDOFF" &&
+            (g.intent === "SENSITIVE" ||
+              g.requiredKnowledge === "SENSITIVE" ||
+              (g as Record<string, unknown>).reason === "SENSITIVE"),
+        ));
+
+    let sensitive: boolean;
+    if (hasSensitiveContradiction) {
+      // Contradictory output must not downgrade a required handoff
+      sensitive = true;
+    } else if (assessment === "safe") {
+      // Validated no-sensitive assessment replaces broad lexical interpretation
+      sensitive = false;
+    } else if (assessment === "sensitive") {
+      // Sensitive handling required
+      sensitive = true;
+    } else if (assessment === "uncertain") {
+      // Uncertainty must not execute a booking; safely escalate
+      sensitive = true;
+    } else {
+      // Missing assessment on structured turn: must NOT be treated as "safe",
+      // cannot replace lexical interpretation, and falls back to lexical detector
+      sensitive = lexical.sensitive;
+    }
+
+    return {
+      sensitive,
+      explicitHuman: lexical.explicitHuman,
+      nonCommittal: lexical.nonCommittal,
+    };
+  }
+
+  // 3. Fallback: deterministic lexical detector
+  return lexical;
 }
 
 // ─── Task relevance (deterministic, text-derived — never AI-derived) ────────

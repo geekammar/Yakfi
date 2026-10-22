@@ -144,8 +144,8 @@ import type { ConversationAi } from "@/features/conversations/server/conversatio
 import {
   bypassDeterministicAi,
   classifyCustomerMessage,
-  detectTurnControlSignals,
   normalizeArabicText,
+  resolveTurnControlSignals,
 } from "@/features/conversations/server/conversation-ai";
 import {
   completeBookingTask,
@@ -831,18 +831,20 @@ function resolveFinishedTurn(
     // once and still decides the actual action (JEV never calls it). For every
     // other turn the lexical detector stays authoritative (the exact
     // pre-AI-JEV-03 behaviour).
-    const lexicalControl = detectTurnControlSignals(currentMessage);
-    const semanticSignals =
-      routing === "JEV"
-        ? turnTelemetry?.jevDecision?.semantic?.signals
-        : undefined;
-    // CONV-CORE-02: Single Decision Ownership & Safety Precedence.
-    // When JEV owns the turn, its validated semantic signals are authoritative
-    // and must not be overwritten by competing broad lexical classifiers.
-    // Genuine explicit human requests and sensitive/safety restrictions are evaluated
-    // within the validated semantic reading when JEV runs. For non-JEV turns or on
-    // fallback, the lexical detector remains authoritative.
-    const signals = semanticSignals ?? lexicalControl;
+    // CONV-CORE-02 & CORE-03D2: Single Decision Ownership & Safety Precedence.
+    // Pure source-selection helper centralizes turn control signals:
+    // - JEV semantic signals remain authoritative for JEV-owned turns.
+    // - Structured generative turns use validated semantic safety assessment,
+    //   preventing broad lexical false-handoffs on harmless wording while
+    //   preserving genuine sensitive escalation, contradiction guards, and explicit human requests.
+    // - Legacy turns fall back to the deterministic lexical detector.
+    const signals = resolveTurnControlSignals({
+      currentMessage,
+      routing,
+      decision,
+      turnTelemetry,
+      isStructuredSemanticTurn,
+    });
 
     const base =
       priorState ?? deriveConversationStateFromHistory(recentChronological);

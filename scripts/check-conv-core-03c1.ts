@@ -1212,7 +1212,7 @@ async function runAcceptanceSuite(): Promise<void> {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 21. Tracked known defect CE-13: False sensitive handoff on dialectal phrase 'مش مشكلة'
+  // 21. CE-13: Repaired false sensitive handoff on dialectal phrase 'مش مشكلة' (CORE-03D2)
   // ─────────────────────────────────────────────────────────────────────────────
   const scenario13 = EGYPTIAN_ARABIC_SCENARIOS.find((s) => s.id === "CE-13")!;
   check(
@@ -1221,14 +1221,15 @@ async function runAcceptanceSuite(): Promise<void> {
   );
   const trace13 = await runCurrentEngineScenario(scenario13);
   check(
-    "21b. CE-13 passes and faithfully records the defect",
+    "21b. CE-13 passes and faithfully records the repair",
     trace13.verdict === "PASS",
   );
   check(
-    "21c. CE-13 turn 2 triggers AI_HANDOFF with cause SENSITIVE_OR_RESTRICTED",
-    trace13.turns[1]?.assistantAction === "AI_HANDOFF" &&
+    "21c. CE-13 turn 2 continues AI_REPLY without handoff (cause null, timePreference removed)",
+    trace13.turns[1]?.assistantAction === "AI_REPLY" &&
       trace13.turns[1]?.processing.currentEngine?.domainResult.handoffCause ===
-        "SENSITIVE_OR_RESTRICTED",
+        null &&
+      trace13.turns[1]?.stateAfter?.knownFacts?.timePreference == null,
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
