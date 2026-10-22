@@ -43,6 +43,7 @@ export type AiFactoryEnvDeps = {
     codecraft?: string;
   };
   timeoutMs?: number;
+  maxTokens?: number;
 };
 
 export type AiFactoryDeps = AiFactoryEnvDeps & {
@@ -68,6 +69,7 @@ function adapterForProvider(
       endpoint: env.endpointOverrides?.openrouter,
       timeoutMs: env.timeoutMs,
       providerOnly: openRouterProviderOnly,
+      maxTokens: env.maxTokens,
     });
   }
   if (provider === "atria") {

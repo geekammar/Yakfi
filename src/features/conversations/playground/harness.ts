@@ -4,7 +4,13 @@
  * Provides isolated, side-effect-free execution for Hybrid B and Full Agent C.
  */
 
+import type { RequiredSemanticCapability } from "@/features/conversations/server/ai-contract";
 import type { ConversationEngineDeps } from "@/features/conversations/server/conversation-engine";
+import type { ConversationStateStore } from "@/features/conversations/server/conversation-state-store";
+import type {
+  ConversationStateRow,
+  ConversationStateSaveResult,
+} from "@/server/repositories/conversation-state.repository";
 import type {
   Business,
   Conversation,
@@ -12,6 +18,94 @@ import type {
   Customer,
   Message,
 } from "@/types/domain";
+
+export class InMemoryConversationStateStore implements ConversationStateStore {
+  public rows = new Map<
+    string,
+    { businessId: string; revision: number; state: unknown; updatedAt: Date }
+  >();
+
+  async load(
+    businessId: string,
+    conversationId: string,
+  ): Promise<ConversationStateRow | null> {
+    const row = this.rows.get(conversationId);
+    if (!row || row.businessId !== businessId) return null;
+    return {
+      conversationId,
+      businessId: row.businessId,
+      revision: row.revision,
+      state: JSON.parse(JSON.stringify(row.state)),
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async save(
+    businessId: string,
+    conversationId: string,
+    expectedRevision: number | null,
+    state: unknown,
+  ): Promise<ConversationStateSaveResult> {
+    const existing = this.rows.get(conversationId);
+    if (expectedRevision === null) {
+      if (existing) return { status: "conflict" as const };
+      this.rows.set(conversationId, {
+        businessId,
+        revision: 1,
+        state: JSON.parse(JSON.stringify(state)),
+        updatedAt: new Date(),
+      });
+      return { status: "saved" as const, revision: 1 };
+    }
+    if (
+      !existing ||
+      existing.businessId !== businessId ||
+      existing.revision !== expectedRevision
+    ) {
+      return { status: "conflict" as const };
+    }
+    const nextRevision = existing.revision + 1;
+    this.rows.set(conversationId, {
+      businessId,
+      revision: nextRevision,
+      state: JSON.parse(JSON.stringify(state)),
+      updatedAt: new Date(),
+    });
+    return { status: "saved" as const, revision: nextRevision };
+  }
+
+  clear(): void {
+    this.rows.clear();
+  }
+}
+
+export function sanitizeHeaders(
+  headers: HeadersInit | undefined,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!headers) return result;
+  const entries =
+    headers instanceof Headers
+      ? Array.from(headers.entries())
+      : Array.isArray(headers)
+        ? headers
+        : Object.entries(headers);
+  for (const [key, value] of entries) {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes("auth") ||
+      lower.includes("key") ||
+      lower.includes("secret") ||
+      lower.includes("token") ||
+      lower.includes("cookie")
+    ) {
+      result[key] = "[REDACTED]";
+    } else {
+      result[key] = String(value);
+    }
+  }
+  return result;
+}
 
 export const PLAYGROUND_IDS = {
   BIZ_ID: "11111111-1111-4111-8111-111111111111",
@@ -25,6 +119,44 @@ export const PLAYGROUND_IDS = {
   SERV_CLEAN: "33333333-3333-4333-8333-333333333332",
 };
 
+export type CapturedAvailabilityQuery = {
+  businessId: string;
+  date: string;
+  assigneeIds: string[];
+};
+
+export type CapturedAppointmentWrite = {
+  businessId: string;
+  branchId: string;
+  customerId: string;
+  serviceId: string;
+  providerId?: string | null;
+  assignedUserId?: string | null;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  status: string;
+  notes?: string | null;
+  followUpRequestId?: string | null;
+};
+
+export type CapturedHttpAttempt = {
+  index: number;
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+  timestamp: string;
+  sanitizedHeaders: Record<string, string>;
+  error?: string | null;
+  responseBodyPreview?: string;
+  tokenUsage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  } | null;
+};
+
 export type PlaygroundHarnessOptions = {
   businessConfig?: Partial<Business>;
   customServices?: any[];
@@ -35,6 +167,9 @@ export type PlaygroundHarnessOptions = {
   todayRef?: string;
   conversationStatus?: any;
   assignedUserId?: string | null;
+  stateStore?: InMemoryConversationStateStore;
+  customAi?: any;
+  requiredSemanticCapability?: RequiredSemanticCapability | null;
 };
 
 export type DeliveredOutbound = {
@@ -54,6 +189,10 @@ export type PlaygroundHarness = {
   messages: Message[];
   appointments: any[];
   deliveredOutbound: DeliveredOutbound[];
+  capturedAvailabilityQueries: CapturedAvailabilityQuery[];
+  capturedAppointmentWrites: CapturedAppointmentWrite[];
+  capturedHttpAttempts: CapturedHttpAttempt[];
+  stateStore: InMemoryConversationStateStore;
   dedupeLedger: Set<string>;
   llmStats: {
     callCount: number;
@@ -65,6 +204,7 @@ export type PlaygroundHarness = {
   getVirtualNow: () => Date;
   setVirtualNow: (date: Date) => void;
   resetConversation: () => void;
+  reset: () => void;
 };
 
 export function createPlaygroundHarness(
@@ -147,6 +287,10 @@ export function createPlaygroundHarness(
   const appointments: any[] = [];
   const deliveredOutbound: DeliveredOutbound[] = [];
   const dedupeLedger = new Set<string>();
+  const stateStore = options.stateStore ?? new InMemoryConversationStateStore();
+  const capturedAvailabilityQueries: CapturedAvailabilityQuery[] = [];
+  const capturedAppointmentWrites: CapturedAppointmentWrite[] = [];
+  const capturedHttpAttempts: CapturedHttpAttempt[] = [];
 
   const llmStats = {
     callCount: 0,
@@ -358,9 +502,19 @@ export function createPlaygroundHarness(
           isActive: true,
         })),
     } as any,
+    conversationStateRepository: stateStore,
+    requiredSemanticCapability:
+      options.requiredSemanticCapability !== undefined
+        ? options.requiredSemanticCapability
+        : "structured_turn",
     appointmentRepository: {
-      listBlockingByAssignees: async () =>
-        appointments.map((a) => ({
+      listBlockingByAssignees: async (
+        businessId: string,
+        date: string,
+        assigneeIds: string[],
+      ) => {
+        capturedAvailabilityQueries.push({ businessId, date, assigneeIds });
+        return appointments.map((a) => ({
           id: a.id,
           assignedUserId: a.assignedUserId ?? "default-user",
           providerId: a.providerId ?? undefined,
@@ -371,8 +525,26 @@ export function createPlaygroundHarness(
           startTime: a.startTime,
           endTime: a.endTime,
           status: a.status,
-        })),
+        }));
+      },
       createWithConflictCheck: async (dto: any) => {
+        capturedAppointmentWrites.push({
+          businessId: dto.businessId,
+          branchId: dto.branchId,
+          customerId: dto.customerId,
+          serviceId: dto.serviceId,
+          providerId: dto.providerId ?? null,
+          assignedUserId: dto.assignedUserId ?? null,
+          date:
+            dto.date instanceof Date
+              ? dto.date
+              : new Date(`${dto.date}T00:00:00Z`),
+          startTime: dto.startTime,
+          endTime: dto.endTime,
+          status: dto.status,
+          notes: dto.notes ?? null,
+          followUpRequestId: dto.followUpRequestId ?? null,
+        });
         const appt = {
           id: `appt-${appointments.length + 1}`,
           businessId: dto.businessId,
@@ -403,18 +575,20 @@ export function createPlaygroundHarness(
       findById: async () => null,
       updateStatus: async () => {},
     } as any,
-    ai: {
-      providerName: "PLAYGROUND_AI",
-      respond: async (req: any) => {
-        llmStats.callCount++;
-        llmStats.promptTokens += 180;
-        llmStats.completionTokens += 60;
-        llmStats.totalTokens += 240;
-        const { deterministicConversationAi } =
-          await import("@/features/conversations/server/conversation-ai");
-        return deterministicConversationAi.respond(req);
-      },
-    } as any,
+    ai:
+      options.customAi ??
+      ({
+        providerName: "PLAYGROUND_AI",
+        respond: async (req: any) => {
+          llmStats.callCount++;
+          llmStats.promptTokens += 180;
+          llmStats.completionTokens += 60;
+          llmStats.totalTokens += 240;
+          const { deterministicConversationAi } =
+            await import("@/features/conversations/server/conversation-ai");
+          return deterministicConversationAi.respond(req);
+        },
+      } as any),
     transport: {
       providerName: "PLAYGROUND_TRANSPORT",
       send: async (out: any) => {
@@ -431,6 +605,47 @@ export function createPlaygroundHarness(
     } as any,
   };
 
+  const reset = () => {
+    messages.length = 0;
+    appointments.length = 0;
+    if (options.priorAppointment) {
+      appointments.push({
+        id: "appt-prior-1",
+        businessId: business.id,
+        branchId: business.defaultBranchId,
+        customerId: customer.id,
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        providerId: PLAYGROUND_IDS.PROV_1,
+        assignedUserId: PLAYGROUND_IDS.USER_P1,
+        date: new Date("2026-10-10T00:00:00Z"),
+        startTime: "10:00",
+        endTime: "10:30",
+        status: "CONFIRMED",
+        notes: null,
+        followUpRequestId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      });
+    }
+    if (options.initialAppointments) {
+      appointments.push(...options.initialAppointments);
+    }
+    deliveredOutbound.length = 0;
+    capturedAvailabilityQueries.length = 0;
+    capturedAppointmentWrites.length = 0;
+    capturedHttpAttempts.length = 0;
+    dedupeLedger.clear();
+    stateStore.clear();
+    conversation.status = (options.conversationStatus ??
+      "AI_ACTIVE") as ConversationStatus;
+    conversation.assignedUserId = options.assignedUserId ?? null;
+    llmStats.callCount = 0;
+    llmStats.promptTokens = 0;
+    llmStats.completionTokens = 0;
+    llmStats.totalTokens = 0;
+  };
+
   return {
     deps,
     business,
@@ -439,6 +654,10 @@ export function createPlaygroundHarness(
     messages,
     appointments,
     deliveredOutbound,
+    capturedAvailabilityQueries,
+    capturedAppointmentWrites,
+    capturedHttpAttempts,
+    stateStore,
     dedupeLedger,
     llmStats,
     options,
@@ -446,10 +665,7 @@ export function createPlaygroundHarness(
     setVirtualNow: (date: Date) => {
       virtualNow = date;
     },
-    resetConversation: () => {
-      messages.length = 0;
-      deliveredOutbound.length = 0;
-      conversation.status = "AI_ACTIVE" as ConversationStatus;
-    },
+    resetConversation: reset,
+    reset,
   };
 }

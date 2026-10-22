@@ -13,7 +13,8 @@ export type PlaygroundArchitecture =
   | "TYPESAFE_JEV_GOAL_DRIVEN"
   | "AGENT_C"
   | "DETERMINISTIC_BASELINE"
-  | "FULL_AGENT";
+  | "FULL_AGENT"
+  | "CURRENT_ENGINE";
 
 export type InboundChannel = "WHATSAPP" | "TELEGRAM";
 
@@ -100,10 +101,119 @@ export type TurnProcessing = {
   llmCalls: number;
   jevCalls?: number;
   tokenUsageEstimate: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
   };
+  /** CORE-03C1: Explicit measurement classification */
+  measuredUsage?: MeasuredTokenUsage;
+  /** CORE-03C1: Current Engine detailed execution record */
+  currentEngine?: CurrentEngineTurnTraceDetails;
+};
+
+export type MeasuredTokenUsageSource =
+  | "OFFLINE_FIXTURE"
+  | "LIVE_PROVIDER"
+  | "ESTIMATE"
+  | "UNKNOWN"
+  | "NOT_APPLICABLE";
+
+export type MeasuredTokenUsage = {
+  source: MeasuredTokenUsageSource;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  isEstimate: boolean;
+  completeness?: "COMPLETE" | "PARTIAL" | "UNKNOWN" | "NOT_APPLICABLE";
+  unknownAttemptsCount?: number;
+  knownAttemptsCount?: number;
+};
+
+export type CurrentEngineHttpAttemptTrace = {
+  index: number;
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+  timestamp: string;
+  sanitizedHeaders: Record<string, string>;
+  error?: string | null;
+};
+
+export type CurrentEngineTurnTraceDetails = {
+  routing: {
+    route:
+      | "STRUCTURED_SEMANTIC"
+      | "MECHANICAL_SELECTION"
+      | "DETERMINISTIC_BYPASS"
+      | "POLICY_PROHIBITED"
+      | "STAFF_DEFERRED"
+      | "UNKNOWN";
+    effectiveCapability: string;
+    configuredProvider: string;
+    configuredModel: string;
+    observedProvider: string | null;
+    observedModel: string | null;
+    finalProvider?: string | null;
+    finalModel?: string | null;
+  };
+  semantic: {
+    intent: string | null;
+    /** Captured directly from parsed AiResponse.extraction, NOT saved state */
+    modelExtraction: Record<string, string | null> | null;
+    /** Captured directly from parsed AiResponse.factUpdates */
+    modelFactUpdates: Array<{
+      key: string;
+      operation?: string;
+      value?: string;
+    }> | null;
+    /** Reconciled durable facts after turn from state store knownFacts */
+    reconciledKnownFacts: Record<string, string | null> | null;
+    /** Compatibility alias for legacy access */
+    extraction?: Record<string, string | null> | null;
+    factUpdates?: Array<{
+      key: string;
+      operation?: string;
+      value?: string;
+    }> | null;
+  };
+  task: {
+    activeTask: string | null;
+    missingFacts: string[];
+    currentGoal: string | null;
+  };
+  offerTransition: {
+    offerBefore: any | null;
+    offerAfter: any | null;
+    transition: string;
+  };
+  availabilityQueries: Array<{
+    businessId: string;
+    date: string;
+    assigneeIds?: string[];
+  }>;
+  domainResult: {
+    action: "AI_REPLY" | "AI_HANDOFF" | "DEFERRED_TO_STAFF";
+    conversationStatus: ConversationStatus;
+    clarificationCause?: string | null;
+    handoffCause?: string | null;
+    preventedConflict?: boolean;
+    createdAppointment?: any | null;
+  };
+  httpAttempts: {
+    count: number;
+    attempts: CurrentEngineHttpAttemptTrace[];
+  };
+  tokenUsage: MeasuredTokenUsage;
+};
+
+export type LiveOperatorLimits = {
+  scenarioSubset: string[];
+  maxPhysicalHttpAttempts: number;
+  outputTokenLimit: number;
+  timeoutMs: number;
+  approvedBudgetUsd: number;
+  budgetBasis: string;
 };
 
 export type TurnOutbound = {
@@ -127,6 +237,8 @@ export type TurnTrace = {
   turnIndex: number; // 1-based index
   turnId: string;
   timestamp: string; // ISO
+  referenceTime?: string;
+  timezone?: string;
   inbound: TurnInbound;
   stateBefore: Partial<ConversationState> | null;
   processing: TurnProcessing;
@@ -187,15 +299,22 @@ export type ScenarioMetrics = {
   totalDurationMs: number;
   totalLlmCalls: number;
   totalJevCalls?: number;
-  totalCostUsd?: number;
+  totalCostUsd?: number | null;
   isCostEstimate?: boolean;
   p50LatencyMs?: number;
   p95LatencyMs?: number;
   totalTokens: {
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+  } | null;
+  tokenCompleteness?: "COMPLETE" | "PARTIAL" | "UNKNOWN" | "NOT_APPLICABLE";
+  knownTokensSubtotal?: {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
-  };
+  } | null;
+  unknownAttemptsCount?: number;
   appointmentBooked: boolean;
   clarificationLoopDetected: boolean;
   unnecessaryHandoffDetected: boolean;

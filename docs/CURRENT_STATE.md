@@ -9,14 +9,18 @@
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**
-  - Branch: `main` (up to date with `origin/main`).
-  - Package Version: `v0.46.1`.
-  - HEAD Commit: `74bfd578322784b906fe99a0640afb9c09140ac5`.
-  - Working Tree: Clean baseline; all previous in-flight prompts are committed and released.
-- **Production Status (Reported / Operator-Managed):**
-  - Last offline-documented live verification was at `v0.40.2` (`GET /api/health` → `status:"ok"`, `database:"connected"`).
-  - Code releases through `v0.46.1` are committed on `main`. Production deployment on Vercel and database migrations on Neon are operator-owned actions.
-  - Production database migrations can be dispatched via GitHub Action (`.github/workflows/production-db-migrate.yml`).
+  - Branch: `feat/conv-core-03c1-current-engine-playground` (branched from `main` at commit `8ff6182d5c74eb8ad98160ba6eee0388fe869240`).
+  - Package Version: `v0.63.0` (SemVer minor increment over v0.62.0 baseline).
+  - Baseline Commit: `8ff6182d5c74eb8ad98160ba6eee0388fe869240` (PR #21 merged baseline).
+  - Working Tree: Current-engine conversation playground alignment, 12 Egyptian Arabic test scenarios, acceptance test suite `check:conv-core-03c1`.
+- **Production Status (Read-Only Health Verified):**
+  - Production health check `GET https://flowpilot-prod.vercel.app/api/health` returned:
+    - `status: "ok"`
+    - `version: "0.62.0"`
+    - `commitSha: "8ff6182d5c74eb8ad98160ba6eee0388fe869240"`
+    - `database: "connected"`
+    - `deploymentReady: true`
+  - Production database migrations and deployments are operator-authorized via GitHub Actions. No production config or database changes made.
 
 ## 2. Architecture & Invariants
 
@@ -25,6 +29,21 @@
 - **Booking Invariants:** The `availability-service` is the sole booking authority and returns only genuinely selectable slots. Booking is strictly server-authoritative. Never build a second availability engine.
 - **AI Trust Boundary:** AI interprets customer intent; domain rules decide availability and eligibility; conversation orchestrates. AI output is never authoritative for booking execution (DECISIONS #33).
 - **Presentation:** Arabic-first, RTL-by-default (`dir="rtl" lang="ar"`), responsive shell (desktop right sidebar / mobile bottom nav), vertical-agnostic discovery copy.
+- **Conversation Playground Alignment & Integrity Repair (CORE-03C1):**
+  - CLI `pnpm convo:playground --mode current_engine` executes the real merged engine pipeline: `receiveInboundMessage` → structured capability routing → `createPolicyBackedAi` / provider adapter → turn planner / reconciliation → Booking Core → `InMemoryConversationStateStore` with CAS revision semantics.
+  - Run-level `CurrentEngineExecutionSession` enforces whole-run physical HTTP attempt ceiling across multiple scenarios with hard request blocking on ceiling exhaustion.
+  - Physical HTTP attempt counting at injected `fetchImpl` boundary (separates offline fixtures, live provider calls, estimates, and unknown tokens; never reports 0 for unknown usage).
+  - Outbound `max_tokens` setting enforced in actual adapter payload to prevent runaway completions.
+  - Model outputs (`modelExtraction`, `modelFactUpdates`) recorded separately from durable reconciled state (`reconciledKnownFacts`).
+  - Offer replacement detected by offer identity (`offerBefore.id !== offerAfter.id` -> `OFFER_REPLACED`).
+  - Full trace sanitization & deep redaction (`redactTrace`) creating a single public projection for both terminal display and disk export; preserves numeric token counts, usage structures, and completeness metadata while redacting credentials, authorization headers, arbitrary offer IDs, claim nonces, and callback payloads (`fp:<id>:<action>`) using stable local references for cross-turn identity comparison.
+  - Forwarded `getLastTelemetry()` on `instrumentedAi` wrapper, ensuring the conversation engine receives real gateway/adapter telemetry, and strictly sourcing observed provider/model from execution telemetry rather than configured defaults.
+  - Usage completeness tracked honestly per attempt within turns (`COMPLETE`, `PARTIAL`, `UNKNOWN`, `NOT_APPLICABLE`), keeping missing components, compatibility fields (`tokenUsageEstimate`), and totalTokens `null` when partial/unknown attempts exist, while preserving genuine zero-call counts for non-generative turns and retaining `knownTokensSubtotal`.
+  - Evaluation verdict integrity: removed truthiness gate on `result.intent` so missing expected intents fail immediately, verified passing scenarios exit 0, and failing evaluations reach the failed-evaluation exit path with code 1.
+  - Historical modes (`baseline`, `goal_driven`, `typesafe_jev`, `agent_c`) remain available and are strictly labeled by their respective architectures (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`), preventing misattribution.
+  - 13 Egyptian Arabic scenarios (`CE-01` to `CE-13`, 21 turns total) covering relative dates, Cairo/UTC date boundary, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, invalid proposal clarification, and tracked known defect `CE-13` (false sensitive handoff on dialectal phrase 'مش مشكلة' due to sensitive keyword detector).
+  - Verified by 76/76 offline automated acceptance checks (`pnpm check:conv-core-03c1`).
+  - Evaluation-readiness slice only: paid live provider execution is NOT RUN and blocked by operator limits preflight. Preflight audit reports exact conservative cost ceiling ($0.0210 USD for 25 calls @ 5k in / 500 out on DeepSeek V3) and notes provider-side real-time dollar webhooks are unsupported by OpenRouter API.
 
 ## 3. Completed Capabilities (Verified in Repository)
 
@@ -42,9 +61,21 @@
 - **Meta WhatsApp Embedded Signup:** Implemented in code but kept on **DEFERRED / HOLD** awaiting external Meta App Dashboard configuration (`docs/INTEGRATION_CHECKPOINTS.md`).
 - **Deferred Areas:** Billing, subscriptions, payments (DECISIONS #36); Spec B instrumentation/economics; multi-tenant branch routing beyond selective scoping.
 
-## 5. Upcoming Direction: UX001 Workstreams
+## 5. Upcoming Direction: UX001 Workstreams & Welcome/Button UX Constraints
 
 FlowPilot is currently in Product Discovery. The approved upcoming direction is **UX001**.
+The immediate next product change following baseline conversation engine evaluation is the **Welcome and Button UX**.
+The intended constraints are established here as architectural boundaries:
+
+1. **Proactive /start welcome with contextual inline choices:** Welcomes incoming customers with contextual actions/buttons where channel supports it.
+2. **Free text remains supported:** Customer may choose to type naturally at any point; buttons are assistive, never coercive.
+3. **One state, planner, and Booking Core:** The existing single `ConversationEngine`, `resolveFinishedTurn`, and Booking Core remain authoritative.
+4. **No parallel wizard:** Do not construct a second wizard or alternative conversation state machine for button clicks.
+5. **No greeting keyword dictionary:** Greetings are recognized organically; do not build fragile regex/keyword greeting dictionaries.
+6. **No reset of active tasks on greeting or /start:** A customer saying hello or re-triggering `/start` mid-conversation must not wipe active booking tasks or known facts.
+7. **Valid default service skips redundant service questions:** When a business has a single service or an unambiguous default, skip asking "which service?" and proceed directly to scheduling.
+8. **Staff ownership remains authoritative:** Handed-off or staff-assigned conversations stay assigned to staff; incoming buttons/messages do not silently unassign or override human staff.
+
 Implementation tasks follow this planned sequence:
 
 1. **BOOK-UX-00 — Booking Core Validation:** Validating booking creation flow, provider eligibility, availability coherence, and slot presentation.
