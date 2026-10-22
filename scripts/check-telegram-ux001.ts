@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/consistent-type-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
  * FlowPilot — UX001 Acceptance Suite:
@@ -101,17 +101,12 @@ async function main(): Promise<void> {
   process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 
-  const engine = await import(
-    "@/features/conversations/server/conversation-engine"
-  );
-  const {
-    buildWelcomeOffer,
-    offerCallbackData,
-    parseOfferCallback,
-  } = await import("@/features/conversations/server/booking-offer");
-  const { parseTelegramUpdate } = await import(
-    "@/server/integrations/telegram/telegram-webhook"
-  );
+  const engine =
+    await import("@/features/conversations/server/conversation-engine");
+  const { buildWelcomeOffer, offerCallbackData, parseOfferCallback } =
+    await import("@/features/conversations/server/booking-offer");
+  const { parseTelegramUpdate } =
+    await import("@/server/integrations/telegram/telegram-webhook");
 
   const B_ID = "11111111-1111-4111-8111-111111111111";
   const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
@@ -228,7 +223,7 @@ async function main(): Promise<void> {
       phone: CHAT_ID,
     };
 
-    let conversation = {
+    const conversation = {
       id: "conv-ux001",
       businessId: B_ID,
       customerId: customer.id,
@@ -427,12 +422,12 @@ async function main(): Promise<void> {
     const sent = h.getSentMessages();
     const lastMsg = sent[sent.length - 1];
     const keyboard = lastMsg?.replyMarkup?.inline_keyboard as
-      | Array<Array<{ text: string; callback_data: string }>>
-      | undefined;
+      Array<Array<{ text: string; callback_data: string }>> | undefined;
 
     const hasBizName = lastMsg?.content.includes(BUSINESS_NAME);
     const hasFreeTextNotice =
-      lastMsg?.content.includes("الكتابة") || lastMsg?.content.includes("كتابة");
+      lastMsg?.content.includes("الكتابة") ||
+      lastMsg?.content.includes("كتابة");
     const hasButtons =
       keyboard &&
       keyboard.length >= 2 &&
@@ -446,11 +441,11 @@ async function main(): Promise<void> {
       "1. /start renders real business name + initial choices with ZERO model calls",
       Boolean(
         result.ok &&
-          hasBizName &&
-          hasFreeTextNotice &&
-          hasButtons &&
-          offer?.kind === "WELCOME" &&
-          h.getModelCalls() === 0,
+        hasBizName &&
+        hasFreeTextNotice &&
+        hasButtons &&
+        offer?.kind === "WELCOME" &&
+        h.getModelCalls() === 0,
       ),
     );
   }
@@ -573,9 +568,8 @@ async function main(): Promise<void> {
   // ══════════════════════════════════════════════════════════════════════════
   {
     // Verify provider keyboard builder produces explicit ANY button
-    const { buildProviderOffer, providerOfferKeyboard } = await import(
-      "@/features/conversations/server/booking-offer"
-    );
+    const { buildProviderOffer, providerOfferKeyboard } =
+      await import("@/features/conversations/server/booking-offer");
     const providerOffer = buildProviderOffer(
       { businessId: B_ID, conversationId: "conv-ux001" },
       "prov-tok-1",
@@ -593,13 +587,12 @@ async function main(): Promise<void> {
     );
 
     const keyboard = providerOfferKeyboard(providerOffer!) as any;
-    const anyBtn = keyboard.inline_keyboard?.find(
-      (row: any[]) => row[0]?.text?.includes("أي مقدم خدمة متاح"),
+    const anyBtn = keyboard.inline_keyboard?.find((row: any[]) =>
+      row[0]?.text?.includes("أي مقدم خدمة متاح"),
     );
 
-    const { interpretOfferReply } = await import(
-      "@/features/conversations/server/booking-selection"
-    );
+    const { interpretOfferReply } =
+      await import("@/features/conversations/server/booking-selection");
     // Index 3 is the ANY choice
     const anySelection = interpretOfferReply(
       offerCallbackData(providerOffer!, 3),
@@ -627,8 +620,7 @@ async function main(): Promise<void> {
     await h.sendInbound(offerCallbackData(state.offer, "inquire"), 6002);
     state = (await h.stateStore.load(B_ID, "conv-ux001"))?.state as any;
     const isInquiryServiceOffer =
-      state.offer?.kind === "SERVICE" &&
-      state.offer?.purpose === "INQUIRY";
+      state.offer?.kind === "SERVICE" && state.offer?.purpose === "INQUIRY";
 
     // 2. Select service 2 ("تحاليل معملية") to inspect
     await h.sendInbound(offerCallbackData(state.offer, 2), 6003);
@@ -659,12 +651,12 @@ async function main(): Promise<void> {
       "6. Service inquiry presents catalog data and only explicit book_service begins booking",
       Boolean(
         isInquiryServiceOffer &&
-          isServiceDetailOffer &&
-          hasCatalogPrice &&
-          hasCatalogDuration &&
-          hasDetailKeyboard &&
-          appointmentsBefore === 0 &&
-          isNowBookingService,
+        isServiceDetailOffer &&
+        hasCatalogPrice &&
+        hasCatalogDuration &&
+        hasDetailKeyboard &&
+        appointmentsBefore === 0 &&
+        isNowBookingService,
       ),
     );
   }
@@ -722,11 +714,11 @@ async function main(): Promise<void> {
       "8. /start during active task preserves valid facts and slot offer",
       Boolean(
         startResult.ok &&
-          initialSlotKind === "SLOT" &&
-          state.offer?.id === initialSlotOffer.id &&
-          state.offer?.kind === "SLOT" &&
-          lastMsg?.content.includes("المواعيد المقترحة") &&
-          h.getModelCalls() === 0,
+        initialSlotKind === "SLOT" &&
+        state.offer?.id === initialSlotOffer.id &&
+        state.offer?.kind === "SLOT" &&
+        lastMsg?.content.includes("المواعيد المقترحة") &&
+        h.getModelCalls() === 0,
       ),
     );
   }
@@ -747,12 +739,12 @@ async function main(): Promise<void> {
       "9. Staff-owned conversations cannot be resumed by /start or callbacks (DEFERRED_TO_STAFF)",
       Boolean(
         startTurn.ok &&
-          !startTurn.duplicate &&
-          startTurn.assistantAction === "DEFERRED_TO_STAFF" &&
-          cbTurn.ok &&
-          !cbTurn.duplicate &&
-          cbTurn.assistantAction === "DEFERRED_TO_STAFF" &&
-          h.getSentMessages().length === 0,
+        !startTurn.duplicate &&
+        startTurn.assistantAction === "DEFERRED_TO_STAFF" &&
+        cbTurn.ok &&
+        !cbTurn.duplicate &&
+        cbTurn.assistantAction === "DEFERRED_TO_STAFF" &&
+        h.getSentMessages().length === 0,
       ),
     );
   }
@@ -763,12 +755,12 @@ async function main(): Promise<void> {
   {
     const h = createTestHarness();
     await h.sendInbound("/start", 10001);
-    let state = (await h.stateStore.load(B_ID, "conv-ux001"))?.state as any;
+    const state = (await h.stateStore.load(B_ID, "conv-ux001"))?.state as any;
 
     // 10a. Foreign token (from different conversation)
     const foreignCb = "fp:foreign-token-xyz:1";
     await h.sendInbound(foreignCb, 10002);
-    let stateAfterForeign = (await h.stateStore.load(B_ID, "conv-ux001"))
+    const stateAfterForeign = (await h.stateStore.load(B_ID, "conv-ux001"))
       ?.state as any;
 
     // 10b. Malformed callback data
@@ -895,7 +887,9 @@ async function main(): Promise<void> {
   const failed = checks.filter((c) => !c.pass);
   console.log("\n──────────────────────────────────────────");
   if (failed.length === 0) {
-    console.log(`All ${checks.length}/${checks.length} UX001 acceptance checks PASSED.`);
+    console.log(
+      `All ${checks.length}/${checks.length} UX001 acceptance checks PASSED.`,
+    );
   } else {
     console.error(`${failed.length}/${checks.length} UX001 checks FAILED.`);
     process.exit(1);

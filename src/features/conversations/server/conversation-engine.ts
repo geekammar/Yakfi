@@ -60,6 +60,10 @@
 import { createHash } from "node:crypto";
 
 import { addMinutes } from "@/features/appointments/server/appointment-create-service";
+import {
+  resolveWorkingDay,
+  weekdayOf,
+} from "@/features/appointments/server/availability-service";
 import { resolveBookingOptions } from "@/features/appointments/server/booking-options-service";
 import { resolveEligibleProviders } from "@/features/appointments/server/provider-eligibility-service";
 import {
@@ -117,12 +121,6 @@ import {
   slotOfferKeyboard,
   welcomeOfferKeyboard,
 } from "@/features/conversations/server/booking-offer";
-import {
-  resolveWorkingDay,
-  weekdayOf,
-} from "@/features/appointments/server/availability-service";
-import { nowTimeInTimeZone } from "@/lib/scheduling/slot-grid";
-import { resolveValidTimeZone } from "@/features/conversations/server/temporal-context";
 import type {
   BookingSelection,
   BookingSelectionContext,
@@ -184,6 +182,7 @@ import {
   reconcileTurnSemanticFacts,
   type ReconciledTurnFacts,
 } from "@/features/conversations/server/semantic-facts";
+import { resolveValidTimeZone } from "@/features/conversations/server/temporal-context";
 import {
   armedRelevance,
   buildTurnEvidence,
@@ -194,6 +193,7 @@ import { resolveTurnPlan } from "@/features/conversations/server/turn-planner";
 import type { ResolvedTurn } from "@/features/conversations/server/turn-planner";
 import type { TurnTelemetrySink } from "@/lib/observability/turn-telemetry";
 import { turnTelemetrySink } from "@/lib/observability/turn-telemetry";
+import { nowTimeInTimeZone } from "@/lib/scheduling/slot-grid";
 import type {
   AttentionReason,
   KnowledgeGapCategory,
@@ -1658,7 +1658,9 @@ async function presentSlotChoices(
   const branchId = (scope.conversation.branchId as string | null) ?? null;
   const eligibilityDeps = buildEligibilityDeps(deps);
   const eligibility = await resolveEligibleProviders(
-    eligibilityDeps as unknown as Parameters<typeof resolveEligibleProviders>[0],
+    eligibilityDeps as unknown as Parameters<
+      typeof resolveEligibleProviders
+    >[0],
     { businessId: scope.business.id },
     {
       serviceId: input.serviceId,
@@ -1702,7 +1704,10 @@ async function presentSlotChoices(
       }
 
       let slotOffer: SlotOffer | null = buildSlotOffer(
-        { businessId: scope.business.id, conversationId: scope.conversation.id },
+        {
+          businessId: scope.business.id,
+          conversationId: scope.conversation.id,
+        },
         crypto.randomUUID(),
         {
           serviceId: input.serviceId,
@@ -2726,8 +2731,11 @@ async function runInboundTurn(
               .defaultServiceBookingEnabled,
           );
           const defaultServiceId = defaultServiceBookingEnabled
-            ? ((business as unknown as { defaultBookingServiceId?: string | null })
-                .defaultBookingServiceId ??
+            ? ((
+                business as unknown as {
+                  defaultBookingServiceId?: string | null;
+                }
+              ).defaultBookingServiceId ??
               (business as unknown as { defaultServiceId?: string | null })
                 .defaultServiceId ??
               (
@@ -2952,9 +2960,7 @@ async function runInboundTurn(
         now,
       );
     } else if (offerReply.kind === "service_inquiry") {
-      const targetService = services.find(
-        (s) => s.id === offerReply.serviceId,
-      );
+      const targetService = services.find((s) => s.id === offerReply.serviceId);
       const sName = targetService?.name ?? offerReply.serviceName;
       const lines = [`خدمة "${sName}":`];
       const priceVal =
@@ -3422,16 +3428,24 @@ async function runInboundTurn(
           replyMarkup = isTelegram ? dateOfferKeyboard(activeOffer) : undefined;
         } else if (activeOffer.kind === "SERVICE") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار الخدمة المطلوبة لمتابعة حجزك:\n(أو يمكنك كتابة اسم الخدمة مباشرة)`;
-          replyMarkup = isTelegram ? serviceOfferKeyboard(activeOffer) : undefined;
+          replyMarkup = isTelegram
+            ? serviceOfferKeyboard(activeOffer)
+            : undefined;
         } else if (activeOffer.kind === "PROVIDER") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار مقدم الخدمة:\n(أو يمكنك كتابة اسم الطبيب أو الاختيار مباشرة)`;
-          replyMarkup = isTelegram ? providerOfferKeyboard(activeOffer) : undefined;
+          replyMarkup = isTelegram
+            ? providerOfferKeyboard(activeOffer)
+            : undefined;
         } else if (activeOffer.kind === "SERVICE_DETAIL") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. تفاصيل الخدمة معروضة أدناه للمتابعة:`;
-          replyMarkup = isTelegram ? serviceDetailKeyboard(activeOffer) : undefined;
+          replyMarkup = isTelegram
+            ? serviceDetailKeyboard(activeOffer)
+            : undefined;
         } else {
           continuationMsg = `أهلاً بك في ${business.name}! يمكنك الاختيار من الخيارات التالية أو كتابة استفسارك مباشرة:`;
-          replyMarkup = isTelegram ? welcomeOfferKeyboard(activeOffer) : undefined;
+          replyMarkup = isTelegram
+            ? welcomeOfferKeyboard(activeOffer)
+            : undefined;
         }
 
         const assistantMessage = await persistAssistantReply(
@@ -4823,9 +4837,12 @@ async function runInboundTurn(
               { businessId: business.id, conversationId: conversation.id },
               crypto.randomUUID(),
               {
-                serviceId: mapped.serviceId ?? turnSession.state?.serviceId ?? "",
+                serviceId:
+                  mapped.serviceId ?? turnSession.state?.serviceId ?? "",
                 serviceName:
-                  mapped.serviceName ?? turnSession.state?.selectedService ?? "",
+                  mapped.serviceName ??
+                  turnSession.state?.selectedService ??
+                  "",
                 providerId:
                   mapped.providerText ??
                   turnSession.state?.knownFacts.provider ??
@@ -4868,7 +4885,11 @@ async function runInboundTurn(
                   },
                 ]),
               };
-        } else if (isTelegram && mapped.reason === "MISSING_DATE" && dateOffer) {
+        } else if (
+          isTelegram &&
+          mapped.reason === "MISSING_DATE" &&
+          dateOffer
+        ) {
           replyMarkup = dateOfferKeyboard(dateOffer);
         }
         const delivery = await deliverAssistantReply(

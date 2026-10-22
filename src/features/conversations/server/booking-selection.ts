@@ -390,9 +390,7 @@ export function interpretOfferReply(
       }
       if (callback.action.kind === "index") {
         const actionIndex = callback.action.index;
-        const option = offer.options.find(
-          (o) => o.index === actionIndex,
-        );
+        const option = offer.options.find((o) => o.index === actionIndex);
         if (!option) {
           return { kind: "date_invalid_index", max: offer.options.length };
         }
@@ -411,9 +409,7 @@ export function interpretOfferReply(
     if (offer.kind === "PROVIDER") {
       if (callback.action.kind === "index") {
         const actionIndex = callback.action.index;
-        const option = offer.options.find(
-          (o) => o.index === actionIndex,
-        );
+        const option = offer.options.find((o) => o.index === actionIndex);
         if (!option) {
           return { kind: "provider_invalid_index", max: offer.options.length };
         }
