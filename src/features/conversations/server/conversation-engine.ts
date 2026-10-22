@@ -114,8 +114,8 @@ import {
   buildServiceOffer,
   buildSlotOffer,
   buildWelcomeOffer,
-  isOfferLive,
   dateOfferKeyboard,
+  isOfferLive,
   providerOfferKeyboard,
   serviceDetailKeyboard,
   serviceOfferKeyboard,
@@ -3380,7 +3380,8 @@ async function runInboundTurn(
               ...turnSession.state.knownFacts,
               provider: offerReply.providerName ?? offerReply.providerId,
             },
-            providerPreference: offerReply.providerName ?? offerReply.providerId,
+            providerPreference:
+              offerReply.providerName ?? offerReply.providerId,
           };
         }
       }

@@ -670,7 +670,11 @@ async function main(): Promise<void> {
     state = {
       ...state,
       offer: providerOffer,
-      knownFacts: { service: "كشف عام", provider: "د. أحمد", date: "2026-10-23" },
+      knownFacts: {
+        service: "كشف عام",
+        provider: "د. أحمد",
+        date: "2026-10-23",
+      },
       providerPreference: "د. أحمد",
       serviceId: SRV_CONSULT,
       selectedService: "كشف عام",
@@ -856,7 +860,8 @@ async function main(): Promise<void> {
     const oldAptCount = h.getAppointments().length;
     const rejectedTurn = await h.sendInbound(oldSlotCallback, 7006);
     const newAptCount = h.getAppointments().length;
-    const oldCallbackRejected = oldAptCount === newAptCount && oldAptCount === 0;
+    const oldCallbackRejected =
+      oldAptCount === newAptCount && oldAptCount === 0;
 
     check(
       "7. Free-text correction updates exact durable fact, queries availability for new date, and rejects previous callback",
@@ -1061,7 +1066,8 @@ async function main(): Promise<void> {
     const h = createTestHarness({ conversationId: "conv-roundtrip-12" });
     // Prepare a welcome offer in state
     await h.sendInbound("/start", 12001);
-    const state = (await h.stateStore.load(B_ID, "conv-roundtrip-12"))?.state as any;
+    const state = (await h.stateStore.load(B_ID, "conv-roundtrip-12"))
+      ?.state as any;
     const bookCallbackData = offerCallbackData(state.offer, "book");
 
     const scheduledWork: Array<Promise<void>> = [];
@@ -1180,7 +1186,8 @@ async function main(): Promise<void> {
     const h1 = createTestHarness({ conversationId: "conv-bound-14a" });
     const starterCallsBefore = h1.getModelCalls();
     await h1.sendInbound("/starter", 14001);
-    const starterReachedSemantic = h1.getModelCalls() === starterCallsBefore + 1;
+    const starterReachedSemantic =
+      h1.getModelCalls() === starterCallsBefore + 1;
 
     const h2 = createTestHarness({ conversationId: "conv-bound-14b" });
     const negationCallsBefore = h2.getModelCalls();
