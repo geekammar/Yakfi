@@ -4995,8 +4995,15 @@ async function runInboundTurn(
           providerMatch.reason === "ambiguous"
             ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
             : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
         let providerOffer: ProviderOffer | null = null;
-        if (turnSession.enabled && eligibility.data.providers.length > 0) {
+        if (
+          isTelegram &&
+          turnSession.enabled &&
+          eligibility.data.providers.length > 0
+        ) {
           const eligibleProviders: Array<{
             providerId: string | null;
             name: string;
@@ -5027,9 +5034,6 @@ async function runInboundTurn(
             await turnSession.commit();
           }
         }
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
         const replyMarkup =
           isTelegram && providerOffer
             ? providerOfferKeyboard(providerOffer)
