@@ -101,9 +101,9 @@ export type TurnProcessing = {
   llmCalls: number;
   jevCalls?: number;
   tokenUsageEstimate: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
   };
   /** CORE-03C1: Explicit measurement classification */
   measuredUsage?: MeasuredTokenUsage;

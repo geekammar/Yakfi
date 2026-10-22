@@ -529,6 +529,25 @@ async function main(): Promise<void> {
     targetScenarios = [single];
   }
 
+  // Test seam: allow acceptance/regression tests to evaluate expectation mismatch
+  // on a valid scenario without network calls or arbitrary code execution
+  if (
+    process.env.FLOWPILOT_TEST_EVAL_FAILURE_INTENT &&
+    targetScenarios.length > 0
+  ) {
+    targetScenarios = targetScenarios.map((s) => ({
+      ...s,
+      turns: s.turns.map((t, idx) =>
+        idx === 0
+          ? {
+              ...t,
+              expectedIntent: process.env.FLOWPILOT_TEST_EVAL_FAILURE_INTENT!,
+            }
+          : t,
+      ),
+    }));
+  }
+
   if (isPreflight) {
     const opLimits = {
       scenarioSubset: targetScenarios.map((s) => s.id),

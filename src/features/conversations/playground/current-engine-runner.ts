@@ -452,9 +452,9 @@ export async function runCurrentEngineScenario(
     if (turnAttempts.length === 0) {
       usageSource = "NOT_APPLICABLE";
       turnCompleteness = "NOT_APPLICABLE";
-      turnPromptTokens = null;
-      turnCompletionTokens = null;
-      turnTotalTokens = null;
+      turnPromptTokens = 0;
+      turnCompletionTokens = 0;
+      turnTotalTokens = 0;
     } else if (turnUnknownAttempts === 0) {
       // All attempts have at least totalTokens known
       usageSource = isLive ? "LIVE_PROVIDER" : "OFFLINE_FIXTURE";
@@ -718,9 +718,9 @@ export async function runCurrentEngineScenario(
         executionTimeMs: durationMs,
         llmCalls: turnAttempts.length,
         tokenUsageEstimate: {
-          promptTokens: turnPromptTokens ?? 0,
-          completionTokens: turnCompletionTokens ?? 0,
-          totalTokens: turnTotalTokens ?? 0,
+          promptTokens: turnPromptTokens,
+          completionTokens: turnCompletionTokens,
+          totalTokens: turnTotalTokens,
         },
         measuredUsage,
         currentEngine: currentEngineDetails,

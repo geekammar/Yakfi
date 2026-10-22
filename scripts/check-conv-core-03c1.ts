@@ -1010,6 +1010,136 @@ async function runAcceptanceSuite(): Promise<void> {
       partialFieldsTrace.turns[0]?.processing.measuredUsage?.totalTokens ===
         120,
   );
+  check(
+    "19f. Turn with failed attempt + retry leaves tokenUsageEstimate.totalTokens as null (not 0)",
+    retryTrace.turns[0]?.processing.tokenUsageEstimate?.totalTokens === null,
+  );
+  check(
+    "19g. Turn with partial fields leaves tokenUsageEstimate missing fields as null (not 0)",
+    partialFieldsTrace.turns[0]?.processing.tokenUsageEstimate?.promptTokens ===
+      null &&
+      partialFieldsTrace.turns[0]?.processing.tokenUsageEstimate
+        ?.completionTokens === null &&
+      partialFieldsTrace.turns[0]?.processing.tokenUsageEstimate
+        ?.totalTokens === 120,
+  );
+
+  // 19h: Generative response without usage object at all
+  const noUsageFetch: typeof fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        id: "chatcmpl-no-usage-test",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                intent: "BOOKING",
+                action: "booking_handoff",
+                content: "متاح",
+                summary: "حجز",
+                extraction: { service: "كشف أسنان", date: "2026-10-21" },
+                factUpdates: [
+                  { key: "service", operation: "set", value: "كشف أسنان" },
+                  { key: "date", operation: "set", value: "2026-10-21" },
+                ],
+              }),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        // usage field entirely omitted
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  const liveNoUsageTrace = await runCurrentEngineScenario(scenario01, {
+    live: true,
+    upstreamFetch: noUsageFetch,
+    operatorLimits: {
+      scenarioSubset: ["CE-01"],
+      maxPhysicalHttpAttempts: 5,
+      outputTokenLimit: 500,
+      timeoutMs: 15000,
+      approvedBudgetUsd: 0.05,
+      budgetBasis: "test no usage completeness",
+    },
+  });
+
+  check(
+    "19h. Generative response without usage reports UNKNOWN with null counts in measuredUsage and tokenUsageEstimate (not 0)",
+    liveNoUsageTrace.turns[0]?.processing.measuredUsage?.completeness ===
+      "UNKNOWN" &&
+      liveNoUsageTrace.turns[0]?.processing.measuredUsage?.promptTokens ===
+        null &&
+      liveNoUsageTrace.turns[0]?.processing.measuredUsage?.completionTokens ===
+        null &&
+      liveNoUsageTrace.turns[0]?.processing.measuredUsage?.totalTokens ===
+        null &&
+      liveNoUsageTrace.turns[0]?.processing.tokenUsageEstimate?.promptTokens ===
+        null &&
+      liveNoUsageTrace.turns[0]?.processing.tokenUsageEstimate
+        ?.completionTokens === null &&
+      liveNoUsageTrace.turns[0]?.processing.tokenUsageEstimate?.totalTokens ===
+        null &&
+      liveNoUsageTrace.metrics.tokenCompleteness === "UNKNOWN" &&
+      liveNoUsageTrace.metrics.totalTokens === null,
+  );
+
+  // 19i: Non-generative turn preserves genuine zero counts with NOT_APPLICABLE
+  check(
+    "19i. Non-generative turn preserves genuine zero counts with NOT_APPLICABLE",
+    trace11.turns[1]?.processing.llmCalls === 0 &&
+      trace11.turns[1]?.processing.measuredUsage?.completeness ===
+        "NOT_APPLICABLE" &&
+      trace11.turns[1]?.processing.measuredUsage?.source === "NOT_APPLICABLE" &&
+      trace11.turns[1]?.processing.measuredUsage?.promptTokens === 0 &&
+      trace11.turns[1]?.processing.measuredUsage?.completionTokens === 0 &&
+      trace11.turns[1]?.processing.measuredUsage?.totalTokens === 0 &&
+      trace11.turns[1]?.processing.tokenUsageEstimate?.promptTokens === 0 &&
+      trace11.turns[1]?.processing.tokenUsageEstimate?.completionTokens === 0 &&
+      trace11.turns[1]?.processing.tokenUsageEstimate?.totalTokens === 0,
+  );
+
+  // 19j: Public trace output does not contradict measuredUsage by displaying unknown generative usage as zero
+  const publicNoUsage = redactTrace(liveNoUsageTrace);
+  const publicPartial = redactTrace(partialFieldsTrace);
+  const publicRetry = redactTrace(retryTrace);
+  const publicNonGen = redactTrace(trace11);
+
+  const noUsagePublicValid =
+    publicNoUsage.turns[0]?.processing.tokenUsageEstimate?.totalTokens ===
+      null &&
+    publicNoUsage.turns[0]?.processing.measuredUsage?.totalTokens === null &&
+    publicNoUsage.metrics.totalTokens === null;
+
+  const partialPublicValid =
+    publicPartial.turns[0]?.processing.tokenUsageEstimate?.promptTokens ===
+      null &&
+    publicPartial.turns[0]?.processing.measuredUsage?.promptTokens === null &&
+    publicPartial.turns[0]?.processing.tokenUsageEstimate?.totalTokens ===
+      120 &&
+    publicPartial.turns[0]?.processing.measuredUsage?.totalTokens === 120;
+
+  const retryPublicValid =
+    publicRetry.turns[0]?.processing.tokenUsageEstimate?.totalTokens === null &&
+    publicRetry.turns[0]?.processing.measuredUsage?.totalTokens === null;
+
+  const nonGenPublicValid =
+    publicNonGen.turns[1]?.processing.tokenUsageEstimate?.totalTokens === 0 &&
+    publicNonGen.turns[1]?.processing.measuredUsage?.totalTokens === 0 &&
+    publicNonGen.turns[1]?.processing.measuredUsage?.completeness ===
+      "NOT_APPLICABLE";
+
+  check(
+    "19j. Public trace projection does not contradict measuredUsage by converting unknown generative usage to zero",
+    noUsagePublicValid &&
+      partialPublicValid &&
+      retryPublicValid &&
+      nonGenPublicValid,
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 20. Evaluation Verdict Integrity
@@ -1037,18 +1167,48 @@ async function runAcceptanceSuite(): Promise<void> {
       ),
   );
 
-  let cliExitCode = 0;
+  // 20b. Actual passing evaluated scenario produces zero exit code
+  let passingCliExitCode = 1;
   try {
     execSync(
-      "pnpm tsx scripts/convo-playground.ts --mode current_engine --scenario UNKNOWN_SCENARIO_XYZ",
+      "pnpm tsx scripts/convo-playground.ts --mode current_engine --scenario CE-01",
       { stdio: "pipe" },
     );
+    passingCliExitCode = 0;
   } catch (err: any) {
-    cliExitCode = err.status ?? 1;
+    passingCliExitCode = err.status ?? 1;
   }
   check(
-    "20b. Deliberate failure in playground CLI results in non-zero exit code",
-    cliExitCode !== 0,
+    "20b. Passing evaluated scenario in playground CLI produces zero exit code",
+    passingCliExitCode === 0,
+  );
+
+  // 20c. Actual evaluated scenario failure reaches failed-evaluation path and produces non-zero exit code
+  let failingCliExitCode = 0;
+  let failingOutput = "";
+  try {
+    const res = execSync(
+      "pnpm tsx scripts/convo-playground.ts --mode current_engine --scenario CE-01",
+      {
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          FLOWPILOT_TEST_EVAL_FAILURE_INTENT:
+            "__INTENTIONALLY_MISMATCHED_INTENT__",
+        },
+      },
+    );
+    failingOutput = res.toString();
+  } catch (err: any) {
+    failingCliExitCode = err.status ?? 1;
+    failingOutput =
+      (err.stdout?.toString() ?? "") + (err.stderr?.toString() ?? "");
+  }
+  check(
+    "20c. Actual evaluated scenario failure reaches failed-evaluation path and produces non-zero exit code",
+    failingCliExitCode !== 0 &&
+      failingOutput.includes("Verdict : FAIL") &&
+      failingOutput.includes("One or more scenarios failed"),
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
