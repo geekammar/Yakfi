@@ -98,15 +98,31 @@ import {
   matchServiceByName,
 } from "@/features/conversations/server/booking-mapper";
 import type {
+  DateOffer,
+  ProviderOffer,
   ServiceOffer,
   SlotOffer,
 } from "@/features/conversations/server/booking-offer";
 import {
+  buildDateOffer,
+  buildProviderOffer,
+  buildServiceDetailOffer,
   buildServiceOffer,
   buildSlotOffer,
+  buildWelcomeOffer,
+  dateOfferKeyboard,
+  providerOfferKeyboard,
+  serviceDetailKeyboard,
   serviceOfferKeyboard,
   slotOfferKeyboard,
+  welcomeOfferKeyboard,
 } from "@/features/conversations/server/booking-offer";
+import {
+  resolveWorkingDay,
+  weekdayOf,
+} from "@/features/appointments/server/availability-service";
+import { nowTimeInTimeZone } from "@/lib/scheduling/slot-grid";
+import { resolveValidTimeZone } from "@/features/conversations/server/temporal-context";
 import type {
   BookingSelection,
   BookingSelectionContext,
@@ -1401,6 +1417,11 @@ type BookingSelectionScope = {
     name: string;
     confirmationMode: string;
     defaultBranchId: string | null;
+    timezone?: string | null;
+    workingHours?: unknown;
+    defaultServiceBookingEnabled?: boolean;
+    defaultBookingServiceId?: string | null;
+    defaultServiceId?: string | null;
   };
   conversation: Conversation;
   customer: { id: string; phone: string };
@@ -1411,6 +1432,9 @@ type BookingSelectionScope = {
     id: string;
     name: string;
     durationMinutes: number;
+    price?: number | null;
+    description?: string | null;
+    isActive?: boolean;
   }>;
 };
 
@@ -1460,6 +1484,310 @@ async function selectionReply(
   };
 }
 
+const WEEKDAY_ARABIC_NAMES: Record<string, string> = {
+  sat: "السبت",
+  sun: "الأحد",
+  mon: "الإثنين",
+  tue: "الثلاثاء",
+  wed: "الأربعاء",
+  thu: "الخميس",
+  fri: "الجمعة",
+};
+
+function resolveUpcomingBookingDates(
+  business: { timezone?: string | null; workingHours?: unknown },
+  now: Date,
+  count = 4,
+): Array<{ date: string; label: string }> {
+  const tz = resolveValidTimeZone(business.timezone);
+  const todayIso = todayIsoInTimeZone(now, tz);
+  const [y, m, d] = todayIso.split("-").map(Number);
+  const results: Array<{ date: string; label: string }> = [];
+
+  for (let i = 0; i < 14 && results.length < count; i++) {
+    const candidate = new Date(Date.UTC(y!, m! - 1, d! + i));
+    const iso = candidate.toISOString().slice(0, 10);
+    const weekday = weekdayOf(iso);
+    const workingDay = resolveWorkingDay(
+      business as unknown as Parameters<typeof resolveWorkingDay>[0],
+      weekday,
+    );
+    if (workingDay) {
+      if (i === 0) {
+        const timeStr = nowTimeInTimeZone(now, tz);
+        const [hh, mm] = timeStr.split(":").map(Number);
+        const currentMins = (hh ?? 0) * 60 + (mm ?? 0);
+        if (currentMins >= workingDay.closeMinutes) {
+          continue; // Today's business hours have closed
+        }
+      }
+      let label: string;
+      if (i === 0) {
+        label = `اليوم (${iso})`;
+      } else if (i === 1) {
+        label = `غداً (${iso})`;
+      } else {
+        const dayName = WEEKDAY_ARABIC_NAMES[weekday] ?? weekday;
+        label = `${dayName} (${iso})`;
+      }
+      results.push({ date: iso, label });
+    }
+  }
+  return results;
+}
+
+async function presentDateChoices(
+  deps: ConversationEngineDeps,
+  scope: BookingSelectionScope,
+  input: {
+    serviceId: string;
+    serviceName: string;
+    serviceSource: "CUSTOMER" | "DEFAULT";
+    providerId: string | null;
+  },
+  turnSession: TurnStateSession,
+  now: Date,
+): Promise<InboundSuccess> {
+  const isTelegram =
+    scope.customer.phone.startsWith("tg:") ||
+    deps.transport.providerName === "telegram";
+  const upcomingDates = resolveUpcomingBookingDates(scope.business, now);
+  let dateOffer: DateOffer | null = null;
+  if (upcomingDates.length > 0) {
+    dateOffer = buildDateOffer(
+      { businessId: scope.business.id, conversationId: scope.conversation.id },
+      crypto.randomUUID(),
+      {
+        serviceId: input.serviceId,
+        serviceName: input.serviceName,
+        providerId: input.providerId,
+        dates: upcomingDates,
+      },
+      now,
+    );
+  }
+
+  const lines = [
+    `تم اختيار خدمة "${input.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك:`,
+  ];
+  if (upcomingDates.length > 0) {
+    for (let i = 0; i < upcomingDates.length; i++) {
+      lines.push(`${i + 1}️⃣ ${upcomingDates[i]!.label}`);
+    }
+    lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+  } else {
+    lines.push("(مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):");
+  }
+  const dateMsg = lines.join("\n");
+
+  if (turnSession.enabled) {
+    turnSession.state = {
+      ...(turnSession.state ?? emptyConversationState()),
+      serviceId: input.serviceId,
+      selectedService: input.serviceName,
+      serviceSource: input.serviceSource,
+      knownFacts: {
+        ...(turnSession.state?.knownFacts ?? {}),
+        service: input.serviceName,
+        ...(input.providerId ? { provider: input.providerId } : {}),
+      },
+      missingFacts: ["date"],
+      lastClarification: { type: "date" },
+      offer: dateOffer,
+      pendingOffer: null,
+      bookingStage: "SERVICE_SUPPLIED",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "SERVICE_SUPPLIED",
+      },
+    };
+    await turnSession.commit();
+  }
+
+  const replyMarkup =
+    isTelegram && dateOffer ? dateOfferKeyboard(dateOffer) : undefined;
+  const assistantMessage = await persistAssistantReply(
+    deps,
+    scope.conversation.id,
+    dateMsg,
+    "AI_ACTIVE",
+  );
+  const delivery = await deliverAssistantReply(
+    deps,
+    scope.customer.phone,
+    scope.business.name,
+    scope.conversation.id,
+    dateMsg,
+    assistantMessage.id,
+    scope.business.id,
+    scope.connectionId,
+    replyMarkup,
+  );
+  return {
+    ok: true,
+    duplicate: false,
+    businessId: scope.business.id,
+    conversationId: scope.conversation.id,
+    customerId: scope.customer.id,
+    customerMessageId: scope.customerMessageId,
+    assistantAction: "AI_REPLY",
+    intent: "AVAILABILITY",
+    conversationStatus: "AI_ACTIVE",
+    handoffCause: null,
+    assistantProvider: deps.ai.providerName,
+    delivery,
+  };
+}
+
+async function presentSlotChoices(
+  deps: ConversationEngineDeps,
+  scope: BookingSelectionScope,
+  input: {
+    serviceId: string;
+    serviceName: string;
+    serviceSource: "CUSTOMER" | "DEFAULT";
+    providerId: string | null;
+    date: string;
+  },
+  turnSession: TurnStateSession,
+  now: Date,
+): Promise<InboundSuccess> {
+  const isTelegram =
+    scope.customer.phone.startsWith("tg:") ||
+    deps.transport.providerName === "telegram";
+  const branchId = (scope.conversation.branchId as string | null) ?? null;
+  const eligibilityDeps = buildEligibilityDeps(deps);
+  const eligibility = await resolveEligibleProviders(
+    eligibilityDeps as unknown as Parameters<typeof resolveEligibleProviders>[0],
+    { businessId: scope.business.id },
+    {
+      serviceId: input.serviceId,
+      ...(branchId ? { branchId } : {}),
+      ...(input.providerId ? { providerId: input.providerId } : {}),
+    },
+  );
+
+  if (eligibility.success) {
+    const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+    const bookingResult = await resolveBookingOptions(
+      bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
+      { userId: scope.customer.id, businessId: scope.business.id },
+      {
+        serviceId: input.serviceId,
+        ...(branchId ? { branchId } : {}),
+        date: input.date,
+        ...(input.providerId ? { providerId: input.providerId } : {}),
+      },
+    );
+
+    if (bookingResult.success && bookingResult.data.options.length > 0) {
+      let bookableOptions = bookingResult.data.options;
+      const timeOfDayPref = turnSession.state?.knownFacts.timePreference;
+      if (timeOfDayPref) {
+        const matchesPref = (startTime: string) => {
+          const hour = parseInt(startTime.slice(0, 2), 10);
+          if (Number.isNaN(hour)) return true;
+          if (timeOfDayPref === "morning") return hour < 12;
+          if (timeOfDayPref === "afternoon") return hour >= 12 && hour < 17;
+          if (timeOfDayPref === "evening") return hour >= 17;
+          return true;
+        };
+        const preferred = bookableOptions.filter((o) =>
+          matchesPref(o.startAt.slice(11, 16)),
+        );
+        const others = bookableOptions.filter(
+          (o) => !matchesPref(o.startAt.slice(11, 16)),
+        );
+        if (preferred.length > 0) bookableOptions = [...preferred, ...others];
+      }
+
+      let slotOffer: SlotOffer | null = buildSlotOffer(
+        { businessId: scope.business.id, conversationId: scope.conversation.id },
+        crypto.randomUUID(),
+        {
+          serviceId: input.serviceId,
+          serviceName: input.serviceName,
+          serviceSource: input.serviceSource,
+          providerId: input.providerId,
+          date: input.date,
+          followUpRequestId: null,
+          shownCount: bookableOptions.length,
+          options: bookableOptions.map((o) => ({
+            providerId: o.providerId,
+            displayName: o.displayName,
+            startAt: o.startAt,
+            endAt: o.endAt,
+          })),
+        },
+        now,
+      );
+      if (slotOffer && turnSession.enabled) {
+        turnSession.state = withPresentedOffer(
+          turnSession.state ?? emptyConversationState(),
+          slotOffer,
+        );
+        const ok = await turnSession.commit();
+        if (!ok) {
+          slotOffer = null;
+        }
+      }
+
+      const replyMarkup =
+        isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
+      const optionsMsg = formatBookingOptionsMessage(
+        input.serviceName,
+        input.date,
+        bookableOptions,
+      );
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        scope.conversation.id,
+        optionsMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        scope.customer.phone,
+        scope.business.name,
+        scope.conversation.id,
+        optionsMsg,
+        assistantMessage.id,
+        scope.business.id,
+        scope.connectionId,
+        replyMarkup,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: scope.business.id,
+        conversationId: scope.conversation.id,
+        customerId: scope.customer.id,
+        customerMessageId: scope.customerMessageId,
+        assistantAction: "AI_REPLY",
+        intent: "AVAILABILITY",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    }
+  }
+
+  // No slots available on this date
+  return presentDateChoices(
+    deps,
+    scope,
+    {
+      serviceId: input.serviceId,
+      serviceName: input.serviceName,
+      serviceSource: input.serviceSource,
+      providerId: input.providerId,
+    },
+    turnSession,
+    now,
+  );
+}
+
 const BOOKING_RETRY_MESSAGE =
   "تعذر إتمام الحجز الآن — سيتواصل معك أحد أعضاء الفريق.";
 const BOOKING_INVALID_INDEX_MESSAGE = "الاختيار غير صالح";
@@ -1497,7 +1825,9 @@ async function completeBookingSelection(
   selection: BookingSelection,
   turnSession?: TurnStateSession,
 ): Promise<InboundSuccess | null> {
-  const isTelegram = scope.customer.phone.startsWith("tg:");
+  const isTelegram =
+    scope.customer.phone.startsWith("tg:") ||
+    deps.transport.providerName === "telegram";
   const reply = (
     content: string,
     status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
@@ -2382,173 +2712,294 @@ async function runInboundTurn(
       ) {
         await turnSession.releaseClaim();
       }
+    } else if (offerReply.kind === "welcome_action") {
+      if (offerReply.action === "book") {
+        const knownService = turnSession.state?.selectedService;
+        let resolvedServiceId = turnSession.state?.serviceId ?? null;
+        let resolvedServiceName = knownService ?? null;
+        let serviceSource: "CUSTOMER" | "DEFAULT" =
+          turnSession.state?.serviceSource ?? "CUSTOMER";
+
+        if (!resolvedServiceId || !resolvedServiceName) {
+          const defaultServiceBookingEnabled = Boolean(
+            (business as unknown as { defaultServiceBookingEnabled?: boolean })
+              .defaultServiceBookingEnabled,
+          );
+          const defaultServiceId = defaultServiceBookingEnabled
+            ? ((business as unknown as { defaultBookingServiceId?: string | null })
+                .defaultBookingServiceId ??
+              (business as unknown as { defaultServiceId?: string | null })
+                .defaultServiceId ??
+              (
+                (
+                  business as unknown as {
+                    assistantStyle?: Record<string, unknown>;
+                  }
+                ).assistantStyle as { defaultServiceId?: string } | undefined
+              )?.defaultServiceId ??
+              null)
+            : null;
+
+          const defaultService = defaultServiceId
+            ? services.find(
+                (s) => s.id === defaultServiceId && s.isActive !== false,
+              )
+            : null;
+          const activeServices = services.filter((s) => s.isActive !== false);
+          const singleService =
+            !defaultService && activeServices.length === 1
+              ? activeServices[0]
+              : null;
+          const autoService = defaultService ?? singleService;
+          if (autoService) {
+            resolvedServiceId = autoService.id;
+            resolvedServiceName = autoService.name;
+            serviceSource = defaultService ? "DEFAULT" : "CUSTOMER";
+          }
+        }
+
+        if (resolvedServiceId && resolvedServiceName) {
+          const knownDate = turnSession.state?.knownFacts.date;
+          if (knownDate) {
+            return presentSlotChoices(
+              deps,
+              selectionScope,
+              {
+                serviceId: resolvedServiceId,
+                serviceName: resolvedServiceName,
+                serviceSource,
+                providerId: turnSession.state?.knownFacts.provider ?? null,
+                date: knownDate,
+              },
+              turnSession,
+              now,
+            );
+          }
+          return presentDateChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId: resolvedServiceId,
+              serviceName: resolvedServiceName,
+              serviceSource,
+              providerId: turnSession.state?.knownFacts.provider ?? null,
+            },
+            turnSession,
+            now,
+          );
+        }
+
+        const activeServices = services.filter((s) => s.isActive !== false);
+        let serviceOffer: ServiceOffer | null = null;
+        if (activeServices.length > 0) {
+          serviceOffer = buildServiceOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            activeServices.map((s) => ({ id: s.id, name: s.name })),
+            now,
+            "BOOKING",
+          );
+        }
+        if (serviceOffer && turnSession.enabled) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            serviceOffer,
+          );
+          await turnSession.commit();
+        }
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
+        const replyMarkup =
+          isTelegram && serviceOffer
+            ? serviceOfferKeyboard(serviceOffer)
+            : undefined;
+        const listText =
+          activeServices.length > 0
+            ? activeServices
+                .slice(0, 5)
+                .map((s, idx) => `${idx + 1}️⃣ ${s.name}`)
+                .join("\n")
+            : "";
+        const serviceMsg = `يرجى تحديد الخدمة المطلوبة — الخدمات المتاحة لدينا:\n${listText}\n(يمكنك اختيار الخدمة أو كتابة اسمها مباشرة)`;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          serviceMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          serviceMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: "AVAILABILITY",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      } else {
+        const activeServices = services.filter((s) => s.isActive !== false);
+        let serviceOffer: ServiceOffer | null = null;
+        if (activeServices.length > 0) {
+          serviceOffer = buildServiceOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            activeServices.map((s) => ({ id: s.id, name: s.name })),
+            now,
+            "INQUIRY",
+          );
+        }
+        if (serviceOffer && turnSession.enabled) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            serviceOffer,
+          );
+          await turnSession.commit();
+        }
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
+        const replyMarkup =
+          isTelegram && serviceOffer
+            ? serviceOfferKeyboard(serviceOffer)
+            : undefined;
+        const listText =
+          activeServices.length > 0
+            ? activeServices
+                .slice(0, 5)
+                .map((s, idx) => `${idx + 1}️⃣ ${s.name}`)
+                .join("\n")
+            : "";
+        const inquiryMsg = `تفضل بالاطلاع على خدماتنا المتاحة، اختر الخدمة لمعرفة تفاصيلها:\n${listText}\n(يمكنك الضغط على الخدمة أو كتابة اسمها للاستفسار عنها)`;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          inquiryMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          inquiryMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: "FAQ",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
     } else if (offerReply.kind === "service") {
       if (turnSession.state) {
         turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
       }
       const knownDate = turnSession.state?.knownFacts.date;
       if (knownDate) {
-        const branchId = (conversation.branchId as string | null) ?? null;
-        const eligibilityDeps = buildEligibilityDeps(deps);
-        const eligibility = await resolveEligibleProviders(
-          eligibilityDeps as unknown as Parameters<
-            typeof resolveEligibleProviders
-          >[0],
-          { businessId: business.id },
+        return presentSlotChoices(
+          deps,
+          selectionScope,
           {
             serviceId: offerReply.serviceId,
-            ...(branchId ? { branchId } : {}),
+            serviceName: offerReply.serviceName,
+            serviceSource: "CUSTOMER",
+            providerId: turnSession.state?.knownFacts.provider ?? null,
+            date: knownDate,
           },
+          turnSession,
+          now,
         );
-        if (eligibility.success) {
-          const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
-          const bookingResult = await resolveBookingOptions(
-            bookingDeps as unknown as Parameters<
-              typeof resolveBookingOptions
-            >[0],
-            { userId: customer.id, businessId: business.id },
-            {
-              serviceId: offerReply.serviceId,
-              ...(branchId ? { branchId } : {}),
-              date: knownDate,
-            },
-          );
-          if (bookingResult.success && bookingResult.data.options.length > 0) {
-            let bookableOptions = bookingResult.data.options;
-            const timeOfDayPref = turnSession.state?.knownFacts.timePreference;
-            if (timeOfDayPref) {
-              const matchesPref = (startTime: string) => {
-                const hour = parseInt(startTime.slice(0, 2), 10);
-                if (Number.isNaN(hour)) return true;
-                if (timeOfDayPref === "morning") return hour < 12;
-                if (timeOfDayPref === "afternoon")
-                  return hour >= 12 && hour < 17;
-                if (timeOfDayPref === "evening") return hour >= 17;
-                return true;
-              };
-              const preferred = bookableOptions.filter((o) =>
-                matchesPref(o.startAt.slice(11, 16)),
-              );
-              const others = bookableOptions.filter(
-                (o) => !matchesPref(o.startAt.slice(11, 16)),
-              );
-              if (preferred.length > 0)
-                bookableOptions = [...preferred, ...others];
-            }
-            let slotOffer: SlotOffer | null = buildSlotOffer(
-              { businessId: business.id, conversationId: conversation.id },
-              crypto.randomUUID(),
-              {
-                serviceId: offerReply.serviceId,
-                serviceName: offerReply.serviceName,
-                serviceSource: "CUSTOMER",
-                providerId: null,
-                date: knownDate,
-                followUpRequestId: null,
-                shownCount: bookableOptions.length,
-                options: bookableOptions.map((o) => ({
-                  providerId: o.providerId,
-                  displayName: o.displayName,
-                  startAt: o.startAt,
-                  endAt: o.endAt,
-                })),
-              },
-              now,
-            );
-            if (slotOffer && turnSession.enabled) {
-              turnSession.state = withPresentedOffer(
-                turnSession.state ?? emptyConversationState(),
-                slotOffer,
-              );
-              const ok = await turnSession.commit();
-              if (!ok) {
-                slotOffer = null;
-              }
-            }
-            const isTelegram = customer.phone.startsWith("tg:");
-            const replyMarkup =
-              isTelegram && slotOffer
-                ? slotOfferKeyboard(slotOffer)
-                : undefined;
-            const optionsMsg = formatBookingOptionsMessage(
-              offerReply.serviceName,
-              knownDate,
-              bookableOptions,
-            );
-            const assistantMessage = await persistAssistantReply(
-              deps,
-              conversation.id,
-              optionsMsg,
-              "AI_ACTIVE",
-            );
-            const delivery = await deliverAssistantReply(
-              deps,
-              customer.phone,
-              business.name,
-              conversation.id,
-              optionsMsg,
-              assistantMessage.id,
-              business.id,
-              outboundConnectionId,
-              replyMarkup,
-            );
-            return {
-              ok: true,
-              duplicate: false,
-              businessId: business.id,
-              conversationId: conversation.id,
-              customerId: customer.id,
-              customerMessageId: customerMessage.id,
-              assistantAction: "AI_REPLY",
-              intent: "AVAILABILITY",
-              conversationStatus: "AI_ACTIVE",
-              handoffCause: null,
-              assistantProvider: deps.ai.providerName,
-              delivery,
-            };
-          }
-        }
       }
-      const dateMsg = `تم اختيار خدمة "${offerReply.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):`;
-      if (turnSession.enabled) {
+      return presentDateChoices(
+        deps,
+        selectionScope,
+        {
+          serviceId: offerReply.serviceId,
+          serviceName: offerReply.serviceName,
+          serviceSource: "CUSTOMER",
+          providerId: turnSession.state?.knownFacts.provider ?? null,
+        },
+        turnSession,
+        now,
+      );
+    } else if (offerReply.kind === "service_inquiry") {
+      const targetService = services.find(
+        (s) => s.id === offerReply.serviceId,
+      );
+      const sName = targetService?.name ?? offerReply.serviceName;
+      const lines = [`خدمة "${sName}":`];
+      const priceVal =
+        targetService?.priceAmount ??
+        (targetService as unknown as { price?: number | null })?.price;
+      if (priceVal != null) {
+        const currencyVal = targetService?.priceCurrency ?? "ج.م";
+        lines.push(`💵 السعر: ${priceVal} ${currencyVal}`);
+      }
+      if (targetService?.durationMinutes != null) {
+        lines.push(`⏱️ المدة: ${targetService.durationMinutes} دقيقة`);
+      }
+      if (targetService?.description) {
+        lines.push(`📝 الوصف: ${targetService.description}`);
+      }
+      lines.push(
+        "\nيمكنك حجز هذه الخدمة الآن أو الاستفسار عن خدمة أخرى:\n1️⃣ حجز هذه الخدمة\n2️⃣ خدمة أخرى\n3️⃣ القائمة الرئيسية",
+      );
+      const inquiryText = lines.join("\n");
+
+      const detailOffer = buildServiceDetailOffer(
+        { businessId: business.id, conversationId: conversation.id },
+        crypto.randomUUID(),
+        offerReply.serviceId,
+        sName,
+        now,
+      );
+      if (detailOffer && turnSession.enabled) {
         turnSession.state = {
           ...(turnSession.state ?? emptyConversationState()),
-          serviceId: offerReply.serviceId,
-          selectedService: offerReply.serviceName,
-          serviceSource: "CUSTOMER",
-          knownFacts: {
-            ...(turnSession.state?.knownFacts ?? {}),
-            service: offerReply.serviceName,
-          },
-          missingFacts: ["date"],
-          lastClarification: { type: "date" },
-          offer: null,
-          pendingOffer: null,
+          offer: detailOffer,
         };
-        const ok = await turnSession.commit();
-        if (!ok) {
-          await turnSession.reload();
-          turnSession.state = {
-            ...(turnSession.state ?? emptyConversationState()),
-            serviceId: offerReply.serviceId,
-            selectedService: offerReply.serviceName,
-            serviceSource: "CUSTOMER",
-            knownFacts: {
-              ...(turnSession.state?.knownFacts ?? {}),
-              service: offerReply.serviceName,
-            },
-            missingFacts: ["date"],
-            lastClarification: { type: "date" },
-            offer: null,
-            pendingOffer: null,
-          };
-          await turnSession.commit();
-        }
+        await turnSession.commit();
       }
+      const isTelegram =
+        customer.phone.startsWith("tg:") ||
+        deps.transport.providerName === "telegram";
+      const replyMarkup =
+        isTelegram && detailOffer
+          ? serviceDetailKeyboard(detailOffer)
+          : undefined;
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
-        dateMsg,
+        inquiryText,
         "AI_ACTIVE",
       );
       const delivery = await deliverAssistantReply(
@@ -2556,7 +3007,202 @@ async function runInboundTurn(
         customer.phone,
         business.name,
         conversation.id,
-        dateMsg,
+        inquiryText,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+        replyMarkup,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "FAQ",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else if (offerReply.kind === "service_detail_action") {
+      if (offerReply.action === "book_service") {
+        return presentDateChoices(
+          deps,
+          selectionScope,
+          {
+            serviceId: offerReply.serviceId,
+            serviceName: offerReply.serviceName,
+            serviceSource: "CUSTOMER",
+            providerId: turnSession.state?.knownFacts.provider ?? null,
+          },
+          turnSession,
+          now,
+        );
+      } else if (offerReply.action === "other_services") {
+        const activeServices = services.filter((s) => s.isActive !== false);
+        let serviceOffer: ServiceOffer | null = null;
+        if (activeServices.length > 0) {
+          serviceOffer = buildServiceOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            activeServices.map((s) => ({ id: s.id, name: s.name })),
+            now,
+            "INQUIRY",
+          );
+        }
+        if (serviceOffer && turnSession.enabled) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            serviceOffer,
+          );
+          await turnSession.commit();
+        }
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
+        const replyMarkup =
+          isTelegram && serviceOffer
+            ? serviceOfferKeyboard(serviceOffer)
+            : undefined;
+        const listText =
+          activeServices.length > 0
+            ? activeServices
+                .slice(0, 5)
+                .map((s, idx) => `${idx + 1}️⃣ ${s.name}`)
+                .join("\n")
+            : "";
+        const inquiryMsg = `تفضل بالاطلاع على بقية الخدمات:\n${listText}`;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          inquiryMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          inquiryMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: "FAQ",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      } else {
+        const welcomeOffer = buildWelcomeOffer(
+          { businessId: business.id, conversationId: conversation.id },
+          crypto.randomUUID(),
+          now,
+        );
+        if (welcomeOffer && turnSession.enabled) {
+          turnSession.state = withPresentedOffer(
+            turnSession.state ?? emptyConversationState(),
+            welcomeOffer,
+          );
+          await turnSession.commit();
+        }
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
+        const welcomeText = `القائمة الرئيسية:\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة`;
+        const replyMarkup =
+          isTelegram && welcomeOffer
+            ? welcomeOfferKeyboard(welcomeOffer)
+            : undefined;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          welcomeText,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          welcomeText,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: "GREETING",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+    } else if (offerReply.kind === "date") {
+      if (turnSession.state) {
+        turnSession.state = withOfferStatus(turnSession.state, "CONSUMED");
+      }
+      return presentSlotChoices(
+        deps,
+        selectionScope,
+        {
+          serviceId: offerReply.serviceId,
+          serviceName: offerReply.serviceName,
+          serviceSource: "CUSTOMER",
+          providerId: offerReply.providerId,
+          date: offerReply.date,
+        },
+        turnSession,
+        now,
+      );
+    } else if (offerReply.kind === "date_other") {
+      const askMsg =
+        "يرجى كتابة التاريخ أو اليوم الذي يناسبك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):";
+      if (turnSession.enabled) {
+        turnSession.state = {
+          ...(turnSession.state ?? emptyConversationState()),
+          serviceId: offerReply.serviceId,
+          selectedService: offerReply.serviceName,
+          missingFacts: ["date"],
+          lastClarification: { type: "date" },
+          offer: null,
+          pendingOffer: null,
+        };
+        await turnSession.commit();
+      }
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        askMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        askMsg,
         assistantMessage.id,
         business.id,
         outboundConnectionId,
@@ -2569,7 +3215,100 @@ async function runInboundTurn(
         customerId: customer.id,
         customerMessageId: customerMessage.id,
         assistantAction: "AI_REPLY",
-        intent: "BOOKING",
+        intent: "AVAILABILITY",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else if (offerReply.kind === "date_invalid_index") {
+      const invalidMsg = `يرجى اختيار رقم تاريخ من 1 إلى ${offerReply.max}.`;
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        invalidMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        invalidMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "AVAILABILITY",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
+    } else if (offerReply.kind === "provider") {
+      const knownDate = offerReply.date ?? turnSession.state?.knownFacts.date;
+      if (knownDate) {
+        return presentSlotChoices(
+          deps,
+          selectionScope,
+          {
+            serviceId: offerReply.serviceId,
+            serviceName: offerReply.serviceName,
+            serviceSource: "CUSTOMER",
+            providerId: offerReply.providerId,
+            date: knownDate,
+          },
+          turnSession,
+          now,
+        );
+      }
+      return presentDateChoices(
+        deps,
+        selectionScope,
+        {
+          serviceId: offerReply.serviceId,
+          serviceName: offerReply.serviceName,
+          serviceSource: "CUSTOMER",
+          providerId: offerReply.providerId,
+        },
+        turnSession,
+        now,
+      );
+    } else if (offerReply.kind === "provider_invalid_index") {
+      const invalidMsg = `يرجى اختيار رقم مقدم خدمة من 1 إلى ${offerReply.max}.`;
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        invalidMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        invalidMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "AVAILABILITY",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
         assistantProvider: deps.ai.providerName,
@@ -2658,6 +3397,162 @@ async function runInboundTurn(
         );
         if (selectionResult) return selectionResult;
       }
+    }
+
+    // UX001: Telegram /start command protocol (Zero JEV & Zero generative model calls)
+    if (inbound.text.trim().toLowerCase().startsWith("/start")) {
+      const isTelegram =
+        customer.phone.startsWith("tg:") ||
+        deps.transport.providerName === "telegram";
+      const activeOffer = turnSession.state?.offer;
+      const isOfferValid =
+        activeOffer &&
+        activeOffer.status === "ACTIVE" &&
+        new Date(activeOffer.expiresAt).getTime() > now.getTime();
+
+      if (isOfferValid) {
+        let continuationMsg: string;
+        let replyMarkup: Record<string, unknown> | undefined;
+
+        if (activeOffer.kind === "SLOT") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. ما زالت المواعيد المقترحة متاحة لاختيارك:\n(أو يمكنك كتابة أي استفسار أو موعد آخر مباشرة)`;
+          replyMarkup = isTelegram ? slotOfferKeyboard(activeOffer) : undefined;
+        } else if (activeOffer.kind === "DATE") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى تحديد اليوم أو التاريخ المناسب لمتابعة حجزك:\n(أو يمكنك كتابة أي تاريخ مباشرة)`;
+          replyMarkup = isTelegram ? dateOfferKeyboard(activeOffer) : undefined;
+        } else if (activeOffer.kind === "SERVICE") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار الخدمة المطلوبة لمتابعة حجزك:\n(أو يمكنك كتابة اسم الخدمة مباشرة)`;
+          replyMarkup = isTelegram ? serviceOfferKeyboard(activeOffer) : undefined;
+        } else if (activeOffer.kind === "PROVIDER") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار مقدم الخدمة:\n(أو يمكنك كتابة اسم الطبيب أو الاختيار مباشرة)`;
+          replyMarkup = isTelegram ? providerOfferKeyboard(activeOffer) : undefined;
+        } else if (activeOffer.kind === "SERVICE_DETAIL") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. تفاصيل الخدمة معروضة أدناه للمتابعة:`;
+          replyMarkup = isTelegram ? serviceDetailKeyboard(activeOffer) : undefined;
+        } else {
+          continuationMsg = `أهلاً بك في ${business.name}! يمكنك الاختيار من الخيارات التالية أو كتابة استفسارك مباشرة:`;
+          replyMarkup = isTelegram ? welcomeOfferKeyboard(activeOffer) : undefined;
+        }
+
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          continuationMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          continuationMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          replyMarkup,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: "GREETING",
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          delivery,
+        };
+      }
+
+      // If active booking task is missing date
+      if (
+        turnSession.state?.activeTask?.kind === "BOOKING" &&
+        turnSession.state.selectedService &&
+        turnSession.state.serviceId
+      ) {
+        const knownDate = turnSession.state.knownFacts.date;
+        if (knownDate) {
+          return presentSlotChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId: turnSession.state.serviceId,
+              serviceName: turnSession.state.selectedService,
+              serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
+              providerId: turnSession.state.knownFacts.provider ?? null,
+              date: knownDate,
+            },
+            turnSession,
+            now,
+          );
+        }
+        return presentDateChoices(
+          deps,
+          selectionScope,
+          {
+            serviceId: turnSession.state.serviceId,
+            serviceName: turnSession.state.selectedService,
+            serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
+            providerId: turnSession.state.knownFacts.provider ?? null,
+          },
+          turnSession,
+          now,
+        );
+      }
+
+      // Idle or fresh conversation: present Welcome offer
+      const welcomeOffer = buildWelcomeOffer(
+        { businessId: business.id, conversationId: conversation.id },
+        crypto.randomUUID(),
+        now,
+      );
+      if (welcomeOffer && turnSession.enabled) {
+        turnSession.state = withPresentedOffer(
+          turnSession.state ?? emptyConversationState(),
+          welcomeOffer,
+        );
+        await turnSession.commit();
+      }
+
+      const welcomeMsg = `أهلاً بك في ${business.name}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك.\n(يمكنك الاختيار من الأزرار أدناه أو كتابة رسالتك مباشرة في أي وقت)`;
+      const replyMarkup =
+        isTelegram && welcomeOffer
+          ? welcomeOfferKeyboard(welcomeOffer)
+          : undefined;
+      const assistantMessage = await persistAssistantReply(
+        deps,
+        conversation.id,
+        welcomeMsg,
+        "AI_ACTIVE",
+      );
+      const delivery = await deliverAssistantReply(
+        deps,
+        customer.phone,
+        business.name,
+        conversation.id,
+        welcomeMsg,
+        assistantMessage.id,
+        business.id,
+        outboundConnectionId,
+        replyMarkup,
+      );
+      return {
+        ok: true,
+        duplicate: false,
+        businessId: business.id,
+        conversationId: conversation.id,
+        customerId: customer.id,
+        customerMessageId: customerMessage.id,
+        assistantAction: "AI_REPLY",
+        intent: "GREETING",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: deps.ai.providerName,
+        delivery,
+      };
     }
     // 7c. B-02 — the Context Builder is the explicit AI boundary
     //     (PROMPT-B02): it takes the structured source facts already loaded
@@ -3893,8 +4788,11 @@ async function runInboundTurn(
           mapped.message,
           "AI_ACTIVE",
         );
-        const isTelegram = customer.phone.startsWith("tg:");
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
         let serviceOffer: ServiceOffer | null = null;
+        let dateOffer: DateOffer | null = null;
         if (
           turnSession.enabled &&
           (mapped.reason === "MISSING_SERVICE" ||
@@ -3918,8 +4816,37 @@ async function runInboundTurn(
               serviceOffer = null;
             }
           }
+        } else if (turnSession.enabled && mapped.reason === "MISSING_DATE") {
+          const upcomingDates = resolveUpcomingBookingDates(business, now);
+          if (upcomingDates.length > 0) {
+            dateOffer = buildDateOffer(
+              { businessId: business.id, conversationId: conversation.id },
+              crypto.randomUUID(),
+              {
+                serviceId: mapped.serviceId ?? turnSession.state?.serviceId ?? "",
+                serviceName:
+                  mapped.serviceName ?? turnSession.state?.selectedService ?? "",
+                providerId:
+                  mapped.providerText ??
+                  turnSession.state?.knownFacts.provider ??
+                  null,
+                dates: upcomingDates,
+              },
+              now,
+            );
+            if (dateOffer) {
+              turnSession.state = withPresentedOffer(
+                turnSession.state ?? resolvedState ?? emptyConversationState(),
+                dateOffer,
+              );
+              const ok = await turnSession.commit();
+              if (!ok) {
+                dateOffer = null;
+              }
+            }
+          }
         }
-        if (turnSession.enabled && !serviceOffer) {
+        if (turnSession.enabled && !serviceOffer && !dateOffer) {
           turnSession.state =
             turnSession.state ?? resolvedState ?? emptyConversationState();
           await turnSession.commit();
@@ -3941,6 +4868,8 @@ async function runInboundTurn(
                   },
                 ]),
               };
+        } else if (isTelegram && mapped.reason === "MISSING_DATE" && dateOffer) {
+          replyMarkup = dateOfferKeyboard(dateOffer);
         }
         const delivery = await deliverAssistantReply(
           deps,
@@ -4040,6 +4969,45 @@ async function runInboundTurn(
           providerMatch.reason === "ambiguous"
             ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
             : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
+        let providerOffer: ProviderOffer | null = null;
+        if (turnSession.enabled && eligibility.data.providers.length > 0) {
+          const eligibleProviders: Array<{
+            providerId: string | null;
+            name: string;
+          }> = eligibility.data.providers.map((p) => ({
+            providerId: p.providerId,
+            name: p.displayName,
+          }));
+          eligibleProviders.push({
+            providerId: null,
+            name: "أي مقدم خدمة متاح",
+          });
+          providerOffer = buildProviderOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            {
+              serviceId: mapped.serviceId,
+              serviceName: mapped.serviceName,
+              date: mapped.date,
+              providers: eligibleProviders,
+            },
+            now,
+          );
+          if (providerOffer) {
+            turnSession.state = withPresentedOffer(
+              turnSession.state ?? resolvedState ?? emptyConversationState(),
+              providerOffer,
+            );
+            await turnSession.commit();
+          }
+        }
+        const isTelegram =
+          customer.phone.startsWith("tg:") ||
+          deps.transport.providerName === "telegram";
+        const replyMarkup =
+          isTelegram && providerOffer
+            ? providerOfferKeyboard(providerOffer)
+            : undefined;
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -4055,6 +5023,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
+          replyMarkup,
         );
         return {
           ok: true,
@@ -4495,6 +5464,49 @@ async function runInboundTurn(
       });
     }
 
+    let replyMarkup: Record<string, unknown> | undefined;
+    const isTelegram =
+      customer.phone.startsWith("tg:") ||
+      deps.transport.providerName === "telegram";
+
+    if (isTelegram && validated.action === "reply") {
+      const activeOffer = turnSession.state?.offer;
+      const isOfferValid =
+        activeOffer &&
+        activeOffer.status === "ACTIVE" &&
+        new Date(activeOffer.expiresAt).getTime() > now.getTime();
+
+      if (isOfferValid) {
+        if (activeOffer.kind === "SLOT") {
+          replyMarkup = slotOfferKeyboard(activeOffer);
+        } else if (activeOffer.kind === "DATE") {
+          replyMarkup = dateOfferKeyboard(activeOffer);
+        } else if (activeOffer.kind === "SERVICE") {
+          replyMarkup = serviceOfferKeyboard(activeOffer);
+        } else if (activeOffer.kind === "PROVIDER") {
+          replyMarkup = providerOfferKeyboard(activeOffer);
+        }
+      } else if (
+        validated.intent === "GREETING" &&
+        !turnSession.state?.activeTask
+      ) {
+        const welcomeOffer = buildWelcomeOffer(
+          { businessId: business.id, conversationId: conversation.id },
+          crypto.randomUUID(),
+          now,
+        );
+        if (welcomeOffer) {
+          if (turnSession.enabled) {
+            turnSession.state = withPresentedOffer(
+              turnSession.state ?? resolvedState ?? emptyConversationState(),
+              welcomeOffer,
+            );
+          }
+          replyMarkup = welcomeOfferKeyboard(welcomeOffer);
+        }
+      }
+    }
+
     // 11. Deliver through the transport boundary — best-effort; the
     //     persisted message is the record of truth, delivery is reported.
     let delivery: InboundSuccess["delivery"] = null;
@@ -4506,6 +5518,7 @@ async function runInboundTurn(
         conversationId: conversation.id,
         content: finalContent,
         connectionId: outboundConnectionId ?? undefined,
+        ...(replyMarkup ? { replyMarkup } : {}),
       });
       delivery = {
         provider: sent.provider,
@@ -4529,8 +5542,8 @@ async function runInboundTurn(
       occurredAt: new Date(),
     });
 
-    if (turnSession.enabled && resolvedState) {
-      let finalState = resolvedState;
+    if (turnSession.enabled && (resolvedState || turnSession.state)) {
+      let finalState = turnSession.state ?? resolvedState!;
       if (
         validated.action !== "reply" ||
         validated.intent === "HUMAN_REQUEST" ||

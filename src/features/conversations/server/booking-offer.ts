@@ -42,9 +42,33 @@ export const offerStatusValues = [
 ] as const;
 export type OfferStatus = (typeof offerStatusValues)[number];
 
+export const welcomeOfferOptionSchema = z.object({
+  index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
+  action: z.enum(["book", "inquire"]),
+  label: shortText,
+});
+
 export const serviceOfferOptionSchema = z.object({
   index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
   serviceId: shortText,
+  name: shortText,
+});
+
+export const serviceDetailOptionSchema = z.object({
+  index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
+  action: z.enum(["book_service", "other_services", "menu"]),
+  label: shortText,
+});
+
+export const dateOfferOptionSchema = z.object({
+  index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
+  date: isoDate,
+  label: shortText,
+});
+
+export const providerOfferOptionSchema = z.object({
+  index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
+  providerId: shortText.nullable(),
   name: shortText,
 });
 
@@ -67,10 +91,43 @@ const offerBase = {
   expiresAt: z.iso.datetime(),
 };
 
+export const welcomeOfferSchema = z.object({
+  ...offerBase,
+  kind: z.literal("WELCOME"),
+  options: z.array(welcomeOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+});
+
 export const serviceOfferSchema = z.object({
   ...offerBase,
   kind: z.literal("SERVICE"),
+  purpose: z.enum(["BOOKING", "INQUIRY"]).default("BOOKING"),
   options: z.array(serviceOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+});
+
+export const serviceDetailOfferSchema = z.object({
+  ...offerBase,
+  kind: z.literal("SERVICE_DETAIL"),
+  serviceId: shortText,
+  serviceName: shortText,
+  options: z.array(serviceDetailOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+});
+
+export const dateOfferSchema = z.object({
+  ...offerBase,
+  kind: z.literal("DATE"),
+  serviceId: shortText,
+  serviceName: shortText,
+  providerId: shortText.nullable(),
+  options: z.array(dateOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+});
+
+export const providerOfferSchema = z.object({
+  ...offerBase,
+  kind: z.literal("PROVIDER"),
+  serviceId: shortText,
+  serviceName: shortText,
+  date: isoDate.nullable(),
+  options: z.array(providerOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
 });
 
 export const slotOfferSchema = z.object({
@@ -88,11 +145,19 @@ export const slotOfferSchema = z.object({
 });
 
 export const bookingOfferSchema = z.discriminatedUnion("kind", [
+  welcomeOfferSchema,
   serviceOfferSchema,
+  serviceDetailOfferSchema,
+  dateOfferSchema,
+  providerOfferSchema,
   slotOfferSchema,
 ]);
 
+export type WelcomeOffer = z.infer<typeof welcomeOfferSchema>;
 export type ServiceOffer = z.infer<typeof serviceOfferSchema>;
+export type ServiceDetailOffer = z.infer<typeof serviceDetailOfferSchema>;
+export type DateOffer = z.infer<typeof dateOfferSchema>;
+export type ProviderOffer = z.infer<typeof providerOfferSchema>;
 export type SlotOffer = z.infer<typeof slotOfferSchema>;
 export type BookingOffer = z.infer<typeof bookingOfferSchema>;
 
@@ -126,16 +191,36 @@ function offerEnvelope(scope: OfferScope, id: string, now: Date) {
   };
 }
 
+/** Build a validated welcome offer for initial customer choices. */
+export function buildWelcomeOffer(
+  scope: OfferScope,
+  id: string,
+  now: Date,
+): WelcomeOffer | null {
+  const candidate = {
+    ...offerEnvelope(scope, id, now),
+    kind: "WELCOME" as const,
+    options: [
+      { index: 1, action: "book" as const, label: "حجز موعد" },
+      { index: 2, action: "inquire" as const, label: "استفسار عن خدمة" },
+    ],
+  };
+  const parsed = welcomeOfferSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 /** Build a validated service-list offer (indices 1..n, in shown order). */
 export function buildServiceOffer(
   scope: OfferScope,
   id: string,
   services: ReadonlyArray<{ id: string; name: string }>,
   now: Date,
+  purpose: "BOOKING" | "INQUIRY" = "BOOKING",
 ): ServiceOffer | null {
   const candidate = {
     ...offerEnvelope(scope, id, now),
     kind: "SERVICE" as const,
+    purpose,
     options: services.slice(0, MAX_OFFER_OPTIONS).map((service, i) => ({
       index: i + 1,
       serviceId: service.id,
@@ -143,6 +228,85 @@ export function buildServiceOffer(
     })),
   };
   const parsed = serviceOfferSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Build a validated service-detail action offer (explicit book / continue inquiry). */
+export function buildServiceDetailOffer(
+  scope: OfferScope,
+  id: string,
+  serviceId: string,
+  serviceName: string,
+  now: Date,
+): ServiceDetailOffer | null {
+  const candidate = {
+    ...offerEnvelope(scope, id, now),
+    kind: "SERVICE_DETAIL" as const,
+    serviceId,
+    serviceName,
+    options: [
+      { index: 1, action: "book_service" as const, label: "حجز هذه الخدمة" },
+      { index: 2, action: "other_services" as const, label: "خدمة أخرى" },
+      { index: 3, action: "menu" as const, label: "القائمة الرئيسية" },
+    ],
+  };
+  const parsed = serviceDetailOfferSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Build a validated date selection offer from sensible upcoming dates. */
+export function buildDateOffer(
+  scope: OfferScope,
+  id: string,
+  input: {
+    serviceId: string;
+    serviceName: string;
+    providerId: string | null;
+    dates: ReadonlyArray<{ date: string; label: string }>;
+  },
+  now: Date,
+): DateOffer | null {
+  const candidate = {
+    ...offerEnvelope(scope, id, now),
+    kind: "DATE" as const,
+    serviceId: input.serviceId,
+    serviceName: input.serviceName,
+    providerId: input.providerId,
+    options: input.dates.slice(0, MAX_OFFER_OPTIONS).map((d, i) => ({
+      index: i + 1,
+      date: d.date,
+      label: d.label,
+    })),
+  };
+  const parsed = dateOfferSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Build a validated provider selection offer. */
+export function buildProviderOffer(
+  scope: OfferScope,
+  id: string,
+  input: {
+    serviceId: string;
+    serviceName: string;
+    date: string | null;
+    providers: ReadonlyArray<{ providerId: string | null; name: string }>;
+  },
+  now: Date,
+): ProviderOffer | null {
+  const candidate = {
+    ...offerEnvelope(scope, id, now),
+    kind: "PROVIDER" as const,
+    serviceId: input.serviceId,
+    serviceName: input.serviceName,
+    date: input.date,
+    options: input.providers.slice(0, MAX_OFFER_OPTIONS).map((p, i) => ({
+      index: i + 1,
+      providerId: p.providerId,
+      name: p.name,
+    })),
+  };
+  const parsed = providerOfferSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
 
@@ -192,46 +356,56 @@ export function buildSlotOffer(
 // ─── Offer-bound Telegram callbacks ─────────────────────────────────────────
 
 /**
- * Callback data for an offer-bound button. Format `fp:<token>:<action>` where
- * action is a 1-based index, `more` or `date`. ≤ 64 bytes (Telegram limit).
+ * Callback data for an offer-bound button. Format `fp:<token>:<action>`.
+ * Action is a 1-based index or a semantic action keyword. ≤ 64 bytes (Telegram limit).
  */
 export function offerCallbackData(
   offer: Pick<BookingOffer, "token">,
-  action: number | "more" | "date",
+  action: number | string,
 ): string {
   return `fp:${offer.token}:${action}`;
 }
 
 export type OfferCallback = {
   readonly token: string;
-  readonly action: { kind: "index"; index: number } | { kind: "more" | "date" };
+  readonly action:
+    | { kind: "index"; index: number }
+    | { kind: "more" | "date" }
+    | { kind: "action"; name: string };
 };
 
 /** Parse an offer-bound callback (`fp:<token>:<action>`); null otherwise. */
 export function parseOfferCallback(text: string): OfferCallback | null {
-  const match = text.trim().match(/^fp:([a-z0-9]{6,12}):([1-9]\d?|more|date)$/);
+  const match = text.trim().match(/^fp:([a-z0-9]{6,12}):([a-z0-9_]+)$/);
   if (!match || !match[1] || !match[2]) return null;
+  const token = match[1];
   const raw = match[2];
   if (raw === "more" || raw === "date") {
-    return { token: match[1], action: { kind: raw } };
+    return { token, action: { kind: raw } };
   }
-  return { token: match[1], action: { kind: "index", index: Number(raw) } };
+  if (/^[1-9]\d?$/.test(raw)) {
+    return { token, action: { kind: "index", index: Number(raw) } };
+  }
+  return { token, action: { kind: "action", name: raw } };
 }
 
-/** Telegram keyboard for a slot offer (first 3 options + navigation). */
-export function slotOfferKeyboard(offer: SlotOffer): Record<string, unknown> {
+/** Telegram keyboard for a welcome offer (Booking / Inquiry). */
+export function welcomeOfferKeyboard(
+  offer: WelcomeOffer,
+): Record<string, unknown> {
   return {
     inline_keyboard: [
-      offer.options.slice(0, 3).map((option) => ({
-        text: `${option.index}️⃣ اختيار ${option.index}`,
-        callback_data: offerCallbackData(offer, option.index),
-      })),
       [
         {
-          text: "🔄 أوقات أخرى",
-          callback_data: offerCallbackData(offer, "more"),
+          text: "📅 حجز موعد",
+          callback_data: offerCallbackData(offer, "book"),
         },
-        { text: "📅 يوم آخر", callback_data: offerCallbackData(offer, "date") },
+      ],
+      [
+        {
+          text: "ℹ️ استفسار عن خدمة",
+          callback_data: offerCallbackData(offer, "inquire"),
+        },
       ],
     ],
   };
@@ -248,5 +422,88 @@ export function serviceOfferKeyboard(
         callback_data: offerCallbackData(offer, option.index),
       },
     ]),
+  };
+}
+
+/** Telegram keyboard for service details inquiry actions. */
+export function serviceDetailKeyboard(
+  offer: ServiceDetailOffer,
+): Record<string, unknown> {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "📅 حجز هذه الخدمة",
+          callback_data: offerCallbackData(offer, "book_service"),
+        },
+      ],
+      [
+        {
+          text: "📋 خدمة أخرى",
+          callback_data: offerCallbackData(offer, "other_services"),
+        },
+        {
+          text: "🏠 القائمة الرئيسية",
+          callback_data: offerCallbackData(offer, "menu"),
+        },
+      ],
+    ],
+  };
+}
+
+/** Telegram keyboard for date choices. */
+export function dateOfferKeyboard(offer: DateOffer): Record<string, unknown> {
+  const rows = offer.options.slice(0, 4).map((option) => [
+    {
+      text: `📅 ${option.label}`,
+      callback_data: offerCallbackData(offer, option.index),
+    },
+  ]);
+  rows.push([
+    {
+      text: "✏️ تاريخ آخر",
+      callback_data: offerCallbackData(offer, "other_date"),
+    },
+  ]);
+  return { inline_keyboard: rows };
+}
+
+/** Telegram keyboard for provider choices. */
+export function providerOfferKeyboard(
+  offer: ProviderOffer,
+): Record<string, unknown> {
+  return {
+    inline_keyboard: offer.options.map((option) => [
+      {
+        text:
+          option.providerId === null
+            ? "👥 أي مقدم خدمة متاح"
+            : `👤 ${option.name}`,
+        callback_data: offerCallbackData(offer, option.index),
+      },
+    ]),
+  };
+}
+
+/** Telegram keyboard for a slot offer (first 3 options + navigation, with informative labels). */
+export function slotOfferKeyboard(offer: SlotOffer): Record<string, unknown> {
+  return {
+    inline_keyboard: [
+      offer.options.slice(0, 3).map((option) => {
+        const time = option.startAt.slice(11, 16);
+        const provider = option.displayName ? ` (${option.displayName})` : "";
+        return {
+          text: `${option.index}️⃣ ${time}${provider}`,
+          callback_data: offerCallbackData(offer, option.index),
+        };
+      }),
+      [
+        {
+          text: "🔄 أوقات أخرى",
+          callback_data: offerCallbackData(offer, "more"),
+        },
+        { text: "📅 يوم آخر", callback_data: offerCallbackData(offer, "date") },
+      ],
+    ],
   };
 }

@@ -228,10 +228,50 @@ export type OfferReply =
       context: BookingSelectionContext;
       selection: BookingSelection;
     }
-  /** A service-list selection resolved to the offered service id. */
+  /** A service-list selection resolved to the offered service id (for booking). */
   | { kind: "service"; serviceId: string; serviceName: string }
+  /** A service-list selection resolved to the offered service id (for inquiry). */
+  | { kind: "service_inquiry"; serviceId: string; serviceName: string }
   /** An index outside the offered service list. */
-  | { kind: "service_invalid_index"; max: number };
+  | { kind: "service_invalid_index"; max: number }
+  /** Welcome menu action (book or inquire). */
+  | { kind: "welcome_action"; action: "book" | "inquire" }
+  /** Service detail action (book_service, other_services, menu). */
+  | {
+      kind: "service_detail_action";
+      action: "book_service" | "other_services" | "menu";
+      serviceId: string;
+      serviceName: string;
+    }
+  /** A date selection from offered dates. */
+  | {
+      kind: "date";
+      date: string;
+      label: string;
+      serviceId: string;
+      serviceName: string;
+      providerId: string | null;
+    }
+  /** Customer requested to type another date. */
+  | {
+      kind: "date_other";
+      serviceId: string;
+      serviceName: string;
+      providerId: string | null;
+    }
+  /** An index outside the offered date list. */
+  | { kind: "date_invalid_index"; max: number }
+  /** A provider selection. */
+  | {
+      kind: "provider";
+      providerId: string | null;
+      providerName: string;
+      serviceId: string;
+      serviceName: string;
+      date: string | null;
+    }
+  /** An index outside the offered provider list. */
+  | { kind: "provider_invalid_index"; max: number };
 
 function serviceIndexFromText(text: string): number | null {
   const trimmed = text.trim();
@@ -273,10 +313,122 @@ export function interpretOfferReply(
         reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
       };
     }
+
+    if (offer.kind === "WELCOME") {
+      if (callback.action.kind === "action") {
+        if (callback.action.name === "book") {
+          return { kind: "welcome_action", action: "book" };
+        }
+        if (callback.action.name === "inquire") {
+          return { kind: "welcome_action", action: "inquire" };
+        }
+      }
+      if (callback.action.kind === "index") {
+        if (callback.action.index === 1) {
+          return { kind: "welcome_action", action: "book" };
+        }
+        if (callback.action.index === 2) {
+          return { kind: "welcome_action", action: "inquire" };
+        }
+      }
+      return { kind: "none" };
+    }
+
     if (offer.kind === "SERVICE") {
       if (callback.action.kind !== "index") return { kind: "none" };
       return serviceChoice(offer, callback.action.index);
     }
+
+    if (offer.kind === "SERVICE_DETAIL") {
+      if (callback.action.kind === "action") {
+        if (
+          callback.action.name === "book_service" ||
+          callback.action.name === "other_services" ||
+          callback.action.name === "menu"
+        ) {
+          return {
+            kind: "service_detail_action",
+            action: callback.action.name,
+            serviceId: offer.serviceId,
+            serviceName: offer.serviceName,
+          };
+        }
+      }
+      if (callback.action.kind === "index") {
+        const action =
+          callback.action.index === 1
+            ? "book_service"
+            : callback.action.index === 2
+              ? "other_services"
+              : callback.action.index === 3
+                ? "menu"
+                : null;
+        if (action) {
+          return {
+            kind: "service_detail_action",
+            action,
+            serviceId: offer.serviceId,
+            serviceName: offer.serviceName,
+          };
+        }
+      }
+      return { kind: "none" };
+    }
+
+    if (offer.kind === "DATE") {
+      if (
+        (callback.action.kind === "action" &&
+          callback.action.name === "other_date") ||
+        callback.action.kind === "date"
+      ) {
+        return {
+          kind: "date_other",
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+          providerId: offer.providerId,
+        };
+      }
+      if (callback.action.kind === "index") {
+        const actionIndex = callback.action.index;
+        const option = offer.options.find(
+          (o) => o.index === actionIndex,
+        );
+        if (!option) {
+          return { kind: "date_invalid_index", max: offer.options.length };
+        }
+        return {
+          kind: "date",
+          date: option.date,
+          label: option.label,
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+          providerId: offer.providerId,
+        };
+      }
+      return { kind: "none" };
+    }
+
+    if (offer.kind === "PROVIDER") {
+      if (callback.action.kind === "index") {
+        const actionIndex = callback.action.index;
+        const option = offer.options.find(
+          (o) => o.index === actionIndex,
+        );
+        if (!option) {
+          return { kind: "provider_invalid_index", max: offer.options.length };
+        }
+        return {
+          kind: "provider",
+          providerId: option.providerId,
+          providerName: option.name,
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+          date: offer.date,
+        };
+      }
+      return { kind: "none" };
+    }
+
     const selection: BookingSelection =
       callback.action.kind === "index"
         ? { kind: "index", index: callback.action.index }
@@ -305,13 +457,143 @@ export function interpretOfferReply(
     };
   }
 
+  const trimmedText = rawText.trim();
+
+  if (offer.kind === "WELCOME") {
+    const sel = parseBookingSelection(trimmedText);
+    if (sel?.kind === "index") {
+      if (sel.index === 1) return { kind: "welcome_action", action: "book" };
+      if (sel.index === 2) return { kind: "welcome_action", action: "inquire" };
+    }
+    if (
+      trimmedText.includes("حجز") ||
+      trimmedText === "احجز" ||
+      trimmedText === "حجز موعد"
+    ) {
+      return { kind: "welcome_action", action: "book" };
+    }
+    if (
+      trimmedText.includes("استفسار") ||
+      trimmedText === "خدمات" ||
+      trimmedText === "الخدمات"
+    ) {
+      return { kind: "welcome_action", action: "inquire" };
+    }
+    return { kind: "none" };
+  }
+
   if (offer.kind === "SERVICE") {
-    const index = serviceIndexFromText(rawText);
+    const index = serviceIndexFromText(trimmedText);
     if (index === null) return { kind: "none" };
     return serviceChoice(offer, index);
   }
 
-  const selection = parseBookingSelection(rawText);
+  if (offer.kind === "SERVICE_DETAIL") {
+    const sel = parseBookingSelection(trimmedText);
+    if (sel?.kind === "index") {
+      if (sel.index === 1) {
+        return {
+          kind: "service_detail_action",
+          action: "book_service",
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+        };
+      }
+      if (sel.index === 2) {
+        return {
+          kind: "service_detail_action",
+          action: "other_services",
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+        };
+      }
+      if (sel.index === 3) {
+        return {
+          kind: "service_detail_action",
+          action: "menu",
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+        };
+      }
+    }
+    if (trimmedText.includes("حجز") || trimmedText === "احجز") {
+      return {
+        kind: "service_detail_action",
+        action: "book_service",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+      };
+    }
+    if (trimmedText.includes("أخرى") || trimmedText.includes("خدمة ثانية")) {
+      return {
+        kind: "service_detail_action",
+        action: "other_services",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+      };
+    }
+    if (trimmedText.includes("قائمة") || trimmedText.includes("رئيسية")) {
+      return {
+        kind: "service_detail_action",
+        action: "menu",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+      };
+    }
+    return { kind: "none" };
+  }
+
+  if (offer.kind === "DATE") {
+    if (
+      trimmedText.includes("تاريخ آخر") ||
+      trimmedText.includes("يوم آخر") ||
+      trimmedText.includes("غير هذا اليوم")
+    ) {
+      return {
+        kind: "date_other",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+        providerId: offer.providerId,
+      };
+    }
+    const sel = parseBookingSelection(trimmedText);
+    if (sel?.kind === "index") {
+      const option = offer.options.find((o) => o.index === sel.index);
+      if (!option) {
+        return { kind: "date_invalid_index", max: offer.options.length };
+      }
+      return {
+        kind: "date",
+        date: option.date,
+        label: option.label,
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+        providerId: offer.providerId,
+      };
+    }
+    return { kind: "none" };
+  }
+
+  if (offer.kind === "PROVIDER") {
+    const sel = parseBookingSelection(trimmedText);
+    if (sel?.kind === "index") {
+      const option = offer.options.find((o) => o.index === sel.index);
+      if (!option) {
+        return { kind: "provider_invalid_index", max: offer.options.length };
+      }
+      return {
+        kind: "provider",
+        providerId: option.providerId,
+        providerName: option.name,
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+        date: offer.date,
+      };
+    }
+    return { kind: "none" };
+  }
+
+  const selection = parseBookingSelection(trimmedText);
   if (!selection) return { kind: "none" };
   return {
     kind: "slot",
@@ -327,6 +609,13 @@ function serviceChoice(
   const option = offer.options.find((o) => o.index === index);
   if (!option) {
     return { kind: "service_invalid_index", max: offer.options.length };
+  }
+  if (offer.purpose === "INQUIRY") {
+    return {
+      kind: "service_inquiry",
+      serviceId: option.serviceId,
+      serviceName: option.name,
+    };
   }
   return {
     kind: "service",

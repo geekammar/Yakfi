@@ -95,6 +95,15 @@ export type TelegramWebhookHandlerDeps = {
     event: ParsedManagedBotEvent;
   }) => Promise<ManagedBotProvisioningOutcome>;
   /**
+   * Acknowledge a customer inline keyboard callback query (UX001).
+   * Tells Telegram client to dismiss the button loading spinner.
+   */
+  answerCallbackQuery?: (params: {
+    callbackQueryId: string;
+    businessId: string;
+    connectionId: string;
+  }) => Promise<void>;
+  /**
    * Send the deterministic customer `/start` welcome through the EXISTING
    * Telegram `MessageTransport` (DECISIONS #73). Supplied by the route (the
    * composition layer) — it closes over the SAME Telegram-backed transport
@@ -249,39 +258,63 @@ export async function handleTelegramWebhook(
     });
   }
 
-  // A customer `/start` (with or without a payload) is a DETERMINISTIC
-  // control command, NOT a conversation turn (DECISIONS #73). It terminates
-  // HERE — before any engine dispatch, AI context building, AI invocation,
-  // disclosure, or human/operator-attention routing — and replies with the
-  // fixed welcome through the EXISTING transport. The welcome send is
-  // scheduled so the webhook still returns 200 promptly (it is a single,
-  // fast, deterministic send; a lost deferral simply means no welcome, never
-  // a stuck conversation). The `startPayload` is preserved as safe metadata
-  // only and is NEVER fed to the AI as user text.
+  // A customer `/start` (with or without a payload) is routed through the
+  // existing application path (DECISIONS #63/#73 / UX001): business identity,
+  // active-state handling, dedupe, and staff ownership are resolved server-side
+  // with zero JEV and zero generative model calls. The start payload is
+  // preserved as safe command metadata.
   if (parsed.status === "start_command") {
-    const send = deps.sendStartWelcome;
-    if (send) {
-      const { chatId } = parsed;
-      deps.schedule(async () => {
-        try {
-          await send({
-            chatId,
-            businessId: connection.businessId,
-            connectionId: connection.id,
-            branchId: connection.branchId,
-            text: CUSTOMER_START_WELCOME,
-          });
-        } catch {
-          // A deferred welcome must never crash the process after the 200.
-        }
-      });
-    }
+    const text = parsed.startPayload
+      ? `/start ${parsed.startPayload}`
+      : "/start";
+    const dispatch: DispatchParams = {
+      engineInput: {
+        externalId: `tg:${connection.botExternalId}:${parsed.updateId}`,
+        from: parsed.chatId,
+        to: connection.botExternalId,
+        receivedAt: new Date().toISOString(),
+        text,
+      },
+      identity: {
+        businessId: connection.businessId,
+        branchId: connection.branchId,
+        connectionId: connection.id,
+      },
+    };
+
+    deps.schedule(async () => {
+      try {
+        await deps.processInboundMessage(dispatch);
+      } catch {
+        // A deferred turn must never crash the process after the 200.
+      }
+    });
+
     return Response.json({
       success: true,
       accepted: true,
       start: "WELCOME",
       updateId: parsed.updateId,
     });
+  }
+
+  // A customer interactive callback query (UX001): acknowledge promptly to
+  // dismiss the Telegram button spinner, then dispatch the selection to the engine.
+  if (parsed.status === "callback_query") {
+    if (parsed.callbackQueryId && deps.answerCallbackQuery) {
+      const cbId = parsed.callbackQueryId;
+      deps.schedule(async () => {
+        try {
+          await deps.answerCallbackQuery!({
+            callbackQueryId: cbId,
+            businessId: connection.businessId,
+            connectionId: connection.id,
+          });
+        } catch {
+          // Acknowledgment failure must not crash the handler
+        }
+      });
+    }
   }
 
   // 3. A supported private TEXT message: the SAME envelope → engine mapping

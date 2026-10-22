@@ -1302,8 +1302,6 @@ async function main(): Promise<void> {
 
   const { handleTelegramWebhook } =
     await import("@/server/integrations/telegram/telegram-webhook-handler");
-  const { CUSTOMER_START_WELCOME } =
-    await import("@/server/integrations/telegram/telegram-webhook-handler");
 
   const SECRET_A = "webhook-secret-bot-a-aaaaaaaaaa";
   const SECRET_B = "webhook-secret-bot-b-bbbbbbbbbbb";
@@ -1339,7 +1337,12 @@ async function main(): Promise<void> {
   }
 
   type Deferred = {
-    engineInput: { to: string; from: string; externalId?: string };
+    engineInput: {
+      to: string;
+      from: string;
+      externalId?: string;
+      text?: string;
+    };
     identity: { businessId: string; branchId: string | null };
   };
   const dispatched: Deferred[] = [];
@@ -1381,6 +1384,7 @@ async function main(): Promise<void> {
               to: engineInput.to,
               from: engineInput.from,
               externalId: engineInput.externalId,
+              text: engineInput.text,
             },
             identity: {
               businessId: identity.businessId,
@@ -1574,10 +1578,9 @@ async function main(): Promise<void> {
       dispatched.length === 5, // H2 + H5 + H6 + H11×2 — this event dispatches nothing
   );
 
-  // H13–H16. Customer `/start` is a DETERMINISTIC control command
-  // (DECISIONS #73): it NEVER enters the engine (so never AI, disclosure, or
-  // human handoff) and replies with exactly ONE fixed welcome through the
-  // EXISTING transport.
+  // H13–H16. Customer `/start` routed through the existing application path
+  // (UX001 / DECISIONS #63/#73): business identity, active-state handling, dedupe,
+  // and staff ownership are resolved server-side with zero JEV and zero generative model calls.
   const dispatchedBeforeStart = dispatched.length;
   welcomes.length = 0;
   result = await runRoute(privateUpdate(8880010, "/start"), SECRET_A);
@@ -1586,20 +1589,23 @@ async function main(): Promise<void> {
     result.status === 200 && eq(result.body.start, "WELCOME"),
   );
   check(
-    "H14. /start لا يدخل المحرك إطلاقاً (لا AI، لا تحويل بشري، لا انتباه مشغّل)",
+    "H14. /start يؤجَّل للجدولة ولا يُنفَّذ تزامناً قبل الرد 200",
     dispatched.length === dispatchedBeforeStart,
   );
   await flushOne();
   check(
-    "H15. /start يرسل ترحيباً حتمياً واحداً فقط عبر النقل القائم",
-    welcomes.length === 1 &&
-      eq(welcomes[0]!.chatId, CHAT_ID) &&
-      eq(welcomes[0]!.businessId, BUSINESS_A) &&
-      eq(welcomes[0]!.connectionId, CONNECTION_A) &&
-      eq(welcomes[0]!.text, CUSTOMER_START_WELCOME),
+    "H15. /start يُوجَّه إلى مسار التطبيق مع الهوية المحللة ومفتاح dedupe",
+    dispatched.length === dispatchedBeforeStart + 1 &&
+      eq(dispatched[dispatched.length - 1]!.engineInput.from, CHAT_ID) &&
+      eq(dispatched[dispatched.length - 1]!.engineInput.to, BOT_ID) &&
+      eq(
+        dispatched[dispatched.length - 1]!.engineInput.externalId,
+        `tg:${BOT_ID}:8880010`,
+      ) &&
+      eq(dispatched[dispatched.length - 1]!.identity.businessId, BUSINESS_A) &&
+      eq(dispatched[dispatched.length - 1]!.identity.branchId, BRANCH_A),
   );
-  // `/start <payload>` is the SAME control command — the payload is never
-  // fed to the engine as user text, and the welcome is unchanged.
+  // `/start <payload>` is routed through the same application path with payload metadata
   welcomes.length = 0;
   const dispatchedBeforePayload = dispatched.length;
   result = await runRoute(
@@ -1608,12 +1614,14 @@ async function main(): Promise<void> {
   );
   await flushOne();
   check(
-    "H16. /start <payload> → START_COMMAND: نفس الترحيب، لا دخول للمحرك",
+    "H16. /start <payload> → START_COMMAND: نفس المسار مع تسليم الحمولة",
     result.status === 200 &&
       eq(result.body.start, "WELCOME") &&
-      dispatched.length === dispatchedBeforePayload &&
-      welcomes.length === 1 &&
-      eq(welcomes[0]!.text, CUSTOMER_START_WELCOME),
+      dispatched.length === dispatchedBeforePayload + 1 &&
+      eq(
+        dispatched[dispatched.length - 1]!.engineInput.text,
+        "/start deep_link_payload_123",
+      ),
   );
 
   // ════════════════════════════════════════════════════════════════════════

@@ -335,6 +335,32 @@ export async function telegramGetManagedBotToken(
   return { ok: true, result: token };
 }
 
+export type TelegramAnswerCallbackQueryResult = { ok?: boolean };
+
+/**
+ * `answerCallbackQuery` — acknowledges a Telegram callback query (DECISIONS #63 / UX001).
+ * Tells Telegram client to dismiss the button loading spinner.
+ */
+export async function telegramAnswerCallbackQuery(
+  deps: TelegramApiDeps,
+  token: string,
+  params: {
+    callbackQueryId: string;
+    text?: string;
+    showAlert?: boolean;
+  },
+): Promise<TelegramApiResult<TelegramAnswerCallbackQueryResult>> {
+  return callTelegramApi<TelegramAnswerCallbackQueryResult>(deps, {
+    token,
+    method: "answerCallbackQuery",
+    body: {
+      callback_query_id: params.callbackQueryId,
+      ...(params.text ? { text: params.text } : {}),
+      ...(params.showAlert ? { show_alert: params.showAlert } : {}),
+    },
+  });
+}
+
 /** The production adapter deps (app singletons; `fetch` = the runtime's). */
 export const defaultTelegramApiDeps: TelegramApiDeps = {
   fetchImpl: globalThis.fetch,

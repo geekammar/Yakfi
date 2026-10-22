@@ -1045,7 +1045,8 @@ export function projectConversationState(
   if (
     state.offer &&
     state.offer.status === "ACTIVE" &&
-    isOfferLive(state.offer, now)
+    isOfferLive(state.offer, now) &&
+    (state.offer.kind === "SERVICE" || state.offer.kind === "SLOT")
   ) {
     activeOffer = {
       type: state.offer.kind,
