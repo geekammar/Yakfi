@@ -4830,7 +4830,12 @@ async function runInboundTurn(
               serviceOffer = null;
             }
           }
-        } else if (turnSession.enabled && mapped.reason === "MISSING_DATE") {
+        } else if (
+          isTelegram &&
+          turnSession.enabled &&
+          mapped.reason === "MISSING_DATE" &&
+          turnSession.state?.offer?.status !== "INVALIDATED"
+        ) {
           const upcomingDates = resolveUpcomingBookingDates(business, now);
           if (upcomingDates.length > 0) {
             dateOffer = buildDateOffer(
