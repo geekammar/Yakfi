@@ -34,6 +34,7 @@ import { classifyCustomerMessage } from "@/features/conversations/server/convers
 
 import { computeCostAggregation } from "../http";
 import type {
+  AiCallOptions,
   AiProviderAdapter,
   AiProviderErrorCode,
   AiProviderResult,
@@ -90,9 +91,14 @@ function defaultIsHumanRequest(request: AiRequest): boolean {
 
 export type ConversationControl = AiProviderAdapter & {
   /** The full policy outcome for one logical turn. */
-  executeTurn(request: AiRequest): Promise<ConversationControlOutcome>;
+  executeTurn(
+    request: AiRequest,
+    options?: AiCallOptions,
+  ): Promise<ConversationControlOutcome>;
   /** The notification sink in use (telemetry / tests). */
   getNotificationSink(): NotificationSink;
+  /** Configured max attempts for this control layer. */
+  readonly maxAttempts: number;
 };
 
 export function createConversationControl(
@@ -115,6 +121,7 @@ export function createConversationControl(
   async function runAttempts(
     request: AiRequest,
     explicitHuman: boolean,
+    options?: AiCallOptions,
   ): Promise<{
     result: AiProviderResult;
     trace: AiRetryTrace;
@@ -123,8 +130,11 @@ export function createConversationControl(
   }> {
     const started = getNow();
     const deadline =
+      options?.session?.deadlineMs ??
       deps.deadlineMs ??
-      getNow() + DEFAULT_ROUTE_BUDGET_MS - ROUTE_BUDGET_SAFETY_MARGIN_MS;
+      (options?.timeoutMs !== undefined
+        ? getNow() + options.timeoutMs
+        : getNow() + DEFAULT_ROUTE_BUDGET_MS - ROUTE_BUDGET_SAFETY_MARGIN_MS);
     const attemptTimeoutMs = deps.attemptTimeoutMs ?? null;
     const maxAttempts = config.enabled
       ? clampMaxAttempts(config.maxAttempts)
@@ -140,8 +150,37 @@ export function createConversationControl(
     // Hard-bounded countdown. `remaining` only decreases; no recursion.
     for (let remaining = maxAttempts; remaining > 0; remaining -= 1) {
       const attemptNumber = maxAttempts - remaining + 1;
+
+      // Check session allowance and stop condition before dispatch (CORE-04B)
+      if (options?.session) {
+        const check = options.session.canDispatch();
+        if (!check.allowed) {
+          skipReason =
+            check.reason === "ATTEMPT_LIMIT_EXHAUSTED"
+              ? "MAX_ATTEMPTS_REACHED"
+              : check.reason === "DEADLINE_EXHAUSTED"
+                ? "INSUFFICIENT_DEADLINE"
+                : (check.reason as AiRetrySkipReason);
+          break;
+        }
+      }
+
+      const remainingBudgetMs = deadline - getNow();
+      if (attemptNumber > 1 && remainingBudgetMs <= 0) {
+        skipReason = "INSUFFICIENT_DEADLINE";
+        break;
+      }
+
+      const attemptTimeout =
+        attemptTimeoutMs !== null
+          ? Math.min(attemptTimeoutMs, remainingBudgetMs)
+          : remainingBudgetMs;
+
       // ── ONE adapter invocation = ONE provider attempt.
-      const result = await provider.call(request);
+      const result = await provider.call(request, {
+        ...options,
+        timeoutMs: attemptTimeout,
+      });
       last = result;
       attemptRecords.push({
         attempt: attemptNumber,
@@ -159,14 +198,14 @@ export function createConversationControl(
       if (result.ok) break;
 
       // Ask the RETRY POLICY (never the adapter) what to do next.
-      const remainingBudgetMs = deadline - getNow();
+      const remainingAfterAttemptMs = deadline - getNow();
       const verdict = decideRetry({
         attempt: attemptNumber,
         errorCode: result.error.code,
         maxAttempts,
         retryEnabled: config.retryEnabled,
-        remainingBudgetMs,
-        attemptTimeoutMs,
+        remainingBudgetMs: remainingAfterAttemptMs,
+        attemptTimeoutMs: options?.session ? null : attemptTimeoutMs,
         explicitHumanRequest: explicitHuman,
       });
 
@@ -193,13 +232,40 @@ export function createConversationControl(
       retryTimeoutUsed =
         attemptTimeoutMs === null
           ? (attemptTimeoutMs ?? 0)
-          : Math.min(attemptTimeoutMs, Math.max(0, remainingBudgetMs));
+          : Math.min(attemptTimeoutMs, Math.max(0, remainingAfterAttemptMs));
     }
 
     if (last === null) {
-      throw new Error(
-        "conversation control produced no provider result (invariant)",
-      );
+      const idle = idleFailure(provider.providerId, provider.model);
+      const idleTrace: AiRetryTrace = {
+        provider: provider.providerId,
+        maxAttempts,
+        attempts: [],
+        retryAttempted: false,
+        retryTriggerCode: null,
+        retrySkippedReason: skipReason,
+        deadlineMs: deadline,
+        retryTimeoutMs: 0,
+        finalOutcome: "FAILURE",
+        totalElapsedMs: getNow() - started,
+        totalHttpAttempts: 0,
+        totalCostUsd: null,
+        knownCostSubtotalUsd: null,
+        costCompleteness: "UNAVAILABLE",
+        stopReason:
+          options?.session?.getStopReason() ??
+          (skipReason === "INSUFFICIENT_DEADLINE"
+            ? "DEADLINE_EXHAUSTED"
+            : skipReason === "MAX_ATTEMPTS_REACHED"
+              ? "ATTEMPT_LIMIT_EXHAUSTED"
+              : null),
+      };
+      return {
+        result: idle,
+        trace: idleTrace,
+        skipped: skipReason,
+        retriesStarted: 0,
+      };
     }
 
     const allKnown = attemptRecords.every(
@@ -225,6 +291,14 @@ export function createConversationControl(
       totalCostUsd: costAgg.totalCostUsd,
       knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
       costCompleteness: costAgg.costCompleteness,
+      stopReason:
+        options?.session?.getStopReason() ??
+        (skipReason === "INSUFFICIENT_DEADLINE"
+          ? "DEADLINE_EXHAUSTED"
+          : skipReason === "MAX_ATTEMPTS_REACHED" &&
+              attemptRecords.length >= maxAttempts
+            ? "ATTEMPT_LIMIT_EXHAUSTED"
+            : null),
     };
 
     return { result: last, trace, skipped: skipReason, retriesStarted };
@@ -232,6 +306,7 @@ export function createConversationControl(
 
   async function executeTurn(
     request: AiRequest,
+    options?: AiCallOptions,
   ): Promise<ConversationControlOutcome> {
     const now = getNow();
     const turnKey = `t${(turnCounter += 1)}`;
@@ -282,6 +357,7 @@ export function createConversationControl(
     const { result, trace, skipped, retriesStarted } = await runAttempts(
       request,
       explicitHuman,
+      options,
     );
 
     // ── Phases 7–9: the handoff DECISION (the engine executes it).
@@ -373,8 +449,11 @@ export function createConversationControl(
      * policy now lives here. The sanitized trace and the control outcome
      * ride on the result exactly once (never per attempt).
      */
-    async call(request: AiRequest): Promise<AiProviderResult> {
-      const outcome = await executeTurn(request);
+    async call(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<AiProviderResult> {
+      const outcome = await executeTurn(request, options);
       return {
         ...outcome.result,
         retryTrace: outcome.retryTrace,
@@ -382,6 +461,7 @@ export function createConversationControl(
       };
     },
     executeTurn,
+    maxAttempts: config.enabled ? clampMaxAttempts(config.maxAttempts) : 1,
     getNotificationSink() {
       return sink;
     },

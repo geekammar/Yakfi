@@ -391,16 +391,13 @@ async function runSuite(): Promise<void> {
   }
 
   // -------------------------------------------------------------------------
-  // E. Secondary retry supported: full aggregate without duplicate counting (2 + 2 = 4)
+  // E. Secondary retry supported: full aggregate within hard ceiling (1 Primary + 2 Secondary = 3)
   // -------------------------------------------------------------------------
   console.log(
-    "\n--- Group E: Secondary Internal Retry (2 Primary + 2 Secondary = 4) ---",
+    "\n--- Group E: Secondary Internal Retry (1 Primary + 2 Secondary = 3) ---",
   );
   {
-    const primaryFetch = createScriptedFetch([
-      { kind: "abort" },
-      { kind: "abort" },
-    ]);
+    const primaryFetch = createScriptedFetch([{ kind: "abort" }]);
     const secondaryFetch = createScriptedFetch([
       { kind: "abort" },
       { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
@@ -415,8 +412,8 @@ async function runSuite(): Promise<void> {
       settings: {
         conversationControl: {
           enabled: true,
-          maxAttempts: 2,
-          retryEnabled: true,
+          maxAttempts: 1,
+          retryEnabled: false,
         },
       },
     });
@@ -445,21 +442,21 @@ async function runSuite(): Promise<void> {
     const res = await orch.callWithFallback(baseRequest);
 
     check(
-      "E1. Primary dispatched 2 calls and secondary dispatched 2 calls",
-      primaryFetch.getCallCount() === 2 && secondaryFetch.getCallCount() === 2,
+      "E1. Primary dispatched 1 call and secondary dispatched 2 calls",
+      primaryFetch.getCallCount() === 1 && secondaryFetch.getCallCount() === 2,
     );
     check(
-      "E2. Total physical HTTP attempts is strictly 4",
-      res.telemetry.totalHttpAttempts === 4,
+      "E2. Total physical HTTP attempts is strictly 3",
+      res.telemetry.totalHttpAttempts === 3,
     );
     check(
-      "E3. Unified retryTrace has 4 attempts",
-      res.telemetry.retryTrace?.attempts.length === 4,
+      "E3. Unified retryTrace has 3 attempts",
+      res.telemetry.retryTrace?.attempts.length === 3,
     );
     check(
-      "E4. Sequential attempt indices are 1, 2, 3, 4 without collisions",
+      "E4. Sequential attempt indices are 1, 2, 3 without collisions",
       res.telemetry.retryTrace?.attempts.map((a) => a.attempt).join(",") ===
-        "1,2,3,4",
+        "1,2,3",
     );
     check("E5. Outcome is SUCCESS", res.telemetry.finalStatus === "SUCCESS");
   }

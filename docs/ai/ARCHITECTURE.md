@@ -803,6 +803,91 @@ Policy-backed today (`createPolicyBackedAi` → real adapters; deterministic is 
 ▼ same engine contract — no engine change
 No other layer needs to change: Domain/availability/booking/tenancy stay deterministic.
 
+## Operational AI Controls & Shared Per-Turn Execution Limits (CORE-04B)
+
+### 1. Control Audit
+
+Audit of existing AI controls across the factory, orchestrator, adapters, and conversation engine:
+
+| Control                                  | Current Owner                                                                                                                                                           | Actual Scope                                                               | Verified Gap                                                                                                          | Proposed Reuse / Resolution                                                                                                           |
+| :--------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------ |
+| **Conversation Control Adapter Wrapper** | `src/server/integrations/ai/factory.ts`                                                                                                                                 | Primary adapter only (`maxAttempts = 2`, `backoffMs = 250`, timeout retry) | Secondary adapter constructed separately without retry wrapping; no cross-adapter attempt tracking                    | Reused as per-adapter retry manager; bounded by request-scoped `ServingExecutionSession` across both primary and secondary            |
+| **Primary-to-Secondary Fallback**        | `src/server/integrations/ai/orchestrator.ts`                                                                                                                            | Orchestrator fallback dispatch to secondary on retryable primary failure   | Secondary execution dispatches fresh independent request without shared attempt limit; deadline is reset/re-allocated | Shared `ServingExecutionSession` coordinates attempt allowance and remaining timeout deadline across primary + secondary              |
+| **JEV Semantic Enablement & Budget**     | `src/server/integrations/ai/factory.ts` (`FLOWPILOT_JEV_SEMANTIC_ENABLED`, `FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET`)                                                     | JEV decisions route activation gate                                        | Scoped strictly to JEV; does not stop generative LLM or shadow execution; validating budget is not a spend cap        | Preserved for JEV-specific activation; superseded by authoritative `FLOWPILOT_AI_GLOBAL_STOP` for all external AI models              |
+| **Shadow Execution Controls**            | `src/server/integrations/ai/factory.ts` / `orchestrator.ts` (`FLOWPILOT_JEV_SHADOW_ENABLED`, `SHADOW_MAX_CALLS_PER_DAY`, `SHADOW_SAMPLE_RATE`, `JEV_SHADOW_TIMEOUT_MS`) | Shadow sampling, timeout, daily max                                        | Daily counters are process-local memory, not global limits; shadow was not gated by global operational stop           | Shadow execution halted immediately when `FLOWPILOT_AI_GLOBAL_STOP` is active; shadow maintains isolated allowance from serving       |
+| **Request / Route Timeout**              | `src/server/integrations/ai/factory.ts` (`timeoutMs`, provider defaults: OpenRouter=15000, Atria=12000, JEV=3000, JEV Shadow=6000; route fallback=280_000ms)            | Per-call parameter passed to primary and secondary                         | Fresh timeout was passed to secondary fallback independently; timer cleared before body reading finished              | Enforced as non-resetting shared serving deadline: `session.getRemainingTimeoutMs()` bounds dispatch and body reading                 |
+| **Physical HTTP Dispatch Boundary**      | `src/server/integrations/ai/http.ts` & `jev-decisions-provider.ts`                                                                                                      | Network fetch wrapper                                                      | Physical attempts were recorded on completion; attempts were not checked or reserved prior to wire dispatch           | `session.canDispatch()` checked and `session.recordDispatch(1)` reserved immediately before `fetchImpl` dispatch                      |
+| **Turn Evidence & Observability**        | `src/features/conversations/server/ai-observability.ts` & `turn-evidence.ts`                                                                                            | Turn-level telemetry emission                                              | Lacked bounded machine-readable classification for prevented dispatches and control stops                             | Extended with `stopReason` (`AiStopReason`: `GLOBAL_STOP`, `ATTEMPT_LIMIT_EXHAUSTED`, `DEADLINE_EXHAUSTED`, `INVALID_CONTROL_CONFIG`) |
+
+### 2. Architecture & Control Semantics
+
+CORE-04B establishes a bounded, request-scoped operational control layer without adding a second AI gateway:
+
+1. **Global External-Model Stop (`FLOWPILOT_AI_GLOBAL_STOP`)**:
+   - Authoritative operational kill-switch for all external AI model invocations (serving LLM, serving JEV, and shadow model requests).
+   - Validated values: Truthy (`"1"`, `"true"`, `"yes"`, `"on"`, case-insensitive) halts all provider HTTP calls immediately; falsy (`"0"`, `"false"`, `"no"`, `"off"`, `""`, absent) permits normal authorized execution.
+   - Fail-closed semantics: Any invalid or malformed non-empty value (e.g. `"stop"`, `"disabled"`, `"2"`) fails closed immediately with stop reason `"INVALID_CONTROL_CONFIG"`.
+   - Mechanical turn execution, exact Telegram `/start`, and active offer selection continue unimpeded with zero model calls.
+   - Model-required turns fail gracefully through controlled safe handoff (`AI_FAILURE` / `NEED_HUMAN`), preserving durable facts and creating zero unintended appointments.
+   - **Operational Reality**: Configuration is read from process environment variables. Changes require process restart or redeployment on Vercel; this is an operational deployment control, not an instant live dashboard toggle. The global stop prevents future request dispatching and does not proactively abort in-flight requests that were already sent over the wire before the flag changed.
+
+2. **Shared Per-Execution Serving-Attempt Allowance & Precedence**:
+   - Managed by request-scoped `ServingExecutionSession` (`src/server/integrations/ai/execution-limits.ts`).
+   - Shared across initial primary dispatch, Conversation Control internal retries, and secondary provider fallback.
+   - Default upper bound is 3 physical HTTP attempts (derived from real factory path: 2 primary attempts max + 1 secondary attempt max).
+   - Operator configurable via `FLOWPILOT_AI_MAX_SERVING_ATTEMPTS`: allows lowering the allowance (e.g. `1` or `2`). The ceiling is clamped at 3; it cannot be raised beyond existing permitted execution. Invalid/negative/non-integer/zero values fail closed with `"INVALID_CONTROL_CONFIG"`.
+   - **Attempt-Limit Precedence Table**:
+
+| Operator Env (`FLOWPILOT_AI_MAX_SERVING_ATTEMPTS`) | Programmatic Override (`maxAttemptsOverride`) | Effective `maxAttempts` | Stop Reason / Rule                                                         |
+| :------------------------------------------------- | :-------------------------------------------- | :---------------------- | :------------------------------------------------------------------------- |
+| Absent / unset                                     | Absent / unset                                | 3                       | Default ceiling preserved (2 primary + 1 secondary)                        |
+| `"1"`                                              | Absent / unset                                | 1                       | Operator limit tightens to 1 attempt                                       |
+| `"2"`                                              | Absent / unset                                | 2                       | Operator limit tightens to 2 attempts                                      |
+| `"1"`                                              | 3                                             | 1                       | Programmatic override CANNOT weaken operator limit (`Math.min(1, 3) = 1`)  |
+| `"3"` or unset                                     | 1                                             | 1                       | Programmatic override can tighten operator limit (`Math.min(3, 1) = 1`)    |
+| `"3"` or unset                                     | 5                                             | 3                       | Hard ceiling of 3 strictly enforced (`Math.min(3, 3) = 3`)                 |
+| `"5"`                                              | Absent                                        | 3                       | Hard ceiling of 3 clamps operator env to 3                                 |
+| Invalid (`"0"`, `"-1"`, `"abc"`, `"2.5"`)          | Any                                           | 0                       | Malformed operator env fails closed with `INVALID_CONTROL_CONFIG`          |
+| Valid (`"1"`, `"2"`, `"3"`)                        | Invalid (0, -1, NaN, 2.5)                     | 0                       | Malformed programmatic override fails closed with `INVALID_CONTROL_CONFIG` |
+
+- Physical reservation: `session.recordDispatch(1)` is executed immediately before `fetchImpl` wire dispatch. Preflight configuration rejections consume 0 attempts.
+- JEV boundary: `JevStrategy.decide` forwards `options` with `session` and remaining deadline down to `JevDecisionsProvider.evaluate`, which validates allowance, reserves physical dispatch immediately before fetch, and avoids double-recording. A spent serving JEV attempt strictly blocks subsequent serving generative requests.
+- Isolation: Allowance is strictly request-local. Reusing an AI adapter across turns or executing concurrent turns receives independent, non-interfering allowances.
+
+3. **Shared Non-Resetting Serving Deadline & Response-Body Protection**:
+   - A single serving deadline is established at execution initiation (`deadlineTimestamp = startedAtMs + timeoutMs`).
+   - Timeouts are recomputed close to dispatch via `session.getRemainingTimeoutMs()`, preventing a fresh full budget on retries or fallback.
+   - Timeout and abort listeners remain active through the entire HTTP operation, including header resolution (`fetchImpl`) AND response body reading (`await response.text()`).
+   - Cleanup: timers and abort event listeners are cleaned up deterministically in `finally` blocks (implemented via standard `AbortController` and listener pairs, avoiding non-standard signal merging).
+   - Aborted body reads are classified truthfully as `code: "TIMEOUT"` (not `INVALID_RESPONSE`). Dispatched requests whose body read times out remain counted as 1 physical attempt.
+   - **Response Completion Validity vs Dispatch Permission**: Response completion validity is strictly decoupled from request dispatch permission via explicit predicate `evaluateResponseCompletion` (`src/server/integrations/ai/execution-limits.ts`). Previously, post-body validation checked `session.canDispatch().reason === "DEADLINE_EXHAUSTED"`; on the final permitted attempt (e.g. limit 1, or attempt 3 of 3), `canDispatch()` prioritized attempt limit exhaustion and returned `ATTEMPT_LIMIT_EXHAUSTED` even when the deadline had also expired, causing late responses on the last attempt to be erroneously accepted as success. With `evaluateResponseCompletion`:
+     - Both the shared serving deadline (`session.isDeadlineExpired(completedAtMs)`) and the request's effective timeout (`elapsedMs >= effectiveTimeoutMs`) are verified upon response body completion.
+     - A response completing after the effective deadline or effective timeout is rejected across the first, middle, and final allowed attempts.
+     - In-time completions on the final permitted attempt succeed for both LLM and JEV.
+     - Cancelled responses (via caller or controller abort signals) are rejected cleanly.
+   - Subsequent retry or fallback is prevented if the deadline is exhausted.
+
+4. **JEV and Shadow Model Exposure Limits**:
+   - Spent serving JEV execution consumes 1 serving attempt. No serving generative request follows spent JEV.
+   - Ineligible or preflight-rejected JEV routes consume 0 physical attempts.
+   - Non-authoritative shadow requests never consume serving allowance and never affect customer turn outcomes.
+   - Global stop blocks shadow dispatch with zero HTTP calls.
+   - Maximum possible total exposure per inbound turn: **4 physical requests** (up to 3 serving attempts + at most 1 non-authoritative shadow attempt).
+   - Process-local shadow daily counters are not distributed global limits.
+
+5. **Truthful Evidence & Error Classification**:
+   - Bounded machine-readable stop reasons: `GLOBAL_STOP`, `ATTEMPT_LIMIT_EXHAUSTED`, `DEADLINE_EXHAUSTED`, `INVALID_CONTROL_CONFIG`.
+   - Attached to `AiTelemetry.stopReason`, `AiRetryTrace.stopReason`, `TurnObservability.stopReason`, and `TurnEvidence.stopReason` (`flowpilot.turn.evidence@v1`).
+   - Succeeded executions always report `stopReason: null`. Prevented dispatches consume 0 physical HTTP calls and do not fabricate network attempts or costs.
+
+6. **Acceptance Verification & CI Integration**:
+   - `pnpm check:core-04b`: **159/159 passed** across Groups A–R (including Group Q focused deadline enforcement, factory-level wiring, slow body cancellations, limit precedence, turn isolation, and Group R final-attempt completion deadline repair & `evaluateResponseCompletion` predicate).
+   - `pnpm check:core-04a`: **144/144 passed** across Groups A–Q.
+   - `pnpm check:jev-semantic`: **58/58 passed**.
+   - `pnpm check:jev-shadow`: **155/155 passed**.
+   - `pnpm check:version`: **v0.70.0** passed.
+   - `pnpm verify:local`: **PASSED** (security 1.0s, ai-prompts 1.2s, typecheck 17.7s, lint 24.5s, format 26.2s).
+
 ## Bounded Lexical Dependency Review (CORE-03D3)
 
 Task-scoped bounded inventory of lexical dependencies across the production conversation engine, distinguishing protocol/domain validation (such as `/start`, button callbacks, 1..N digit indices, ISO dates, and business catalog matching) from natural-language intent heuristics.

@@ -7,10 +7,12 @@
  */
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
+import { evaluateResponseCompletion } from "./execution-limits";
 import { buildPromptMessages, buildRequestBody } from "./prompt";
 import { normalizeResponse } from "./response-normalizer";
 import type { NormalizerPolicy } from "./response-normalizer";
 import type {
+  AiCallOptions,
   AiParseMode,
   AiProviderError,
   AiProviderId,
@@ -46,6 +48,8 @@ export type CallOpenAiCompatibleParams = {
    * the shared strict path is byte-for-byte unchanged.
    */
   policy?: NormalizerPolicy;
+  /** Optional per-call options (CORE-04B shared session, deadline, signal). */
+  options?: AiCallOptions;
 };
 
 function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
@@ -132,8 +136,11 @@ export async function callOpenAiCompatible(
     extraSystemInstructions,
     extraBody,
     policy,
+    options,
   } = params;
-  const started = Date.now();
+  const session = options?.session;
+  const nowFn = session ? () => session.getNow() : Date.now;
+  const started = nowFn();
   const apiKey = getEnvVar(secretRef);
   if (!apiKey) {
     return {
@@ -150,6 +157,48 @@ export async function callOpenAiCompatible(
     };
   }
 
+  // Pre-dispatch session checks (CORE-04B: Global Stop, Allowance, and Deadline)
+  if (options?.session) {
+    const check = options.session.canDispatch();
+    if (!check.allowed) {
+      return {
+        ok: false,
+        provider: providerId,
+        model,
+        latencyMs: Date.now() - started,
+        httpAttempts: 0,
+        error: {
+          code: "CONTROLLED_FAILURE",
+          message: check.reason ?? "execution stopped",
+          retryable: false,
+        },
+      };
+    }
+  }
+
+  // Bound request timeout by remaining serving deadline (CORE-04B)
+  const remainingDeadlineMs = options?.session
+    ? options.session.getRemainingTimeoutMs(timeoutMs)
+    : options?.timeoutMs !== undefined
+      ? Math.min(timeoutMs, options.timeoutMs)
+      : timeoutMs;
+  const effectiveTimeoutMs = Math.min(timeoutMs, remainingDeadlineMs);
+
+  if (effectiveTimeoutMs <= 0) {
+    return {
+      ok: false,
+      provider: providerId,
+      model,
+      latencyMs: Date.now() - started,
+      httpAttempts: 0,
+      error: {
+        code: "TIMEOUT",
+        message: "deadline exhausted before dispatch",
+        retryable: false,
+      },
+    };
+  }
+
   const messages = buildPromptMessages(request, extraSystemInstructions);
   const body = buildRequestBody(model, messages) as Record<string, unknown>;
   // A provider extension (OpenRouter pin) is merged, never restructured —
@@ -157,8 +206,26 @@ export async function callOpenAiCompatible(
   const requestBody = extraBody ? { ...body, ...extraBody } : body;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
+  const onSignalAbort = () => controller.abort();
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", onSignalAbort, {
+        once: true,
+      });
+    }
+  }
+
+  // Reserve/record physical HTTP dispatch immediately before wire call (CORE-04B)
+  const dispatchStarted = nowFn();
+  if (options?.session) {
+    options.session.recordDispatch(1);
+  }
+
   let httpResponse: Response;
+  let rawText = "";
   try {
     httpResponse = await fetchImpl(endpoint, {
       method: "POST",
@@ -169,9 +236,11 @@ export async function callOpenAiCompatible(
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
+
+    rawText = await httpResponse.text();
   } catch (err) {
-    clearTimeout(timeout);
     const isAbort =
+      controller.signal.aborted ||
       (err instanceof DOMException && err.name === "AbortError") ||
       (err instanceof Error && err.name === "AbortError") ||
       (err instanceof Error && err.message.includes("aborted"));
@@ -203,14 +272,41 @@ export async function callOpenAiCompatible(
     };
   } finally {
     clearTimeout(timeout);
+    if (options?.signal) {
+      options.signal.removeEventListener("abort", onSignalAbort);
+    }
   }
 
-  const latencyMs = Date.now() - started;
+  const completedAt = nowFn();
+  const latencyMs = completedAt - started;
+
+  // Do not accept a response that completes after the effective deadline or was cancelled
+  const completionVerdict = evaluateResponseCompletion({
+    startedAtMs: dispatchStarted,
+    effectiveTimeoutMs,
+    completedAtMs: completedAt,
+    session: options?.session,
+    signal: options?.signal,
+    controllerSignal: controller.signal,
+  });
+
+  if (!completionVerdict.ok) {
+    return {
+      ok: false,
+      provider: providerId,
+      model,
+      latencyMs,
+      httpAttempts: 1,
+      error: {
+        code: "TIMEOUT",
+        message: completionVerdict.message,
+        retryable: false,
+      },
+    };
+  }
 
   let json: unknown = null;
-  let rawText = "";
   try {
-    rawText = await httpResponse.text();
     json = rawText ? JSON.parse(rawText) : null;
   } catch {
     return {

@@ -44,6 +44,7 @@ export type AiFactoryEnvDeps = {
   };
   timeoutMs?: number;
   maxTokens?: number;
+  maxServingAttempts?: number;
 };
 
 export type AiFactoryDeps = AiFactoryEnvDeps & {
@@ -237,6 +238,9 @@ export async function createPolicyBackedAi(
     decisionStrategy,
     shadowStrategy,
     shadowTimeoutMs,
+    getEnvVar: deps.getEnvVar,
+    servingTimeoutMs: deps.timeoutMs,
+    maxServingAttempts: deps.maxServingAttempts,
   });
 }
 
@@ -368,3 +372,21 @@ export async function getEffectiveAiPolicy(): Promise<EffectiveAiPolicy | null> 
 
 /** Synchronous helper for callers that already have the row. */
 export { toEffectivePolicy } from "@/features/platform/server/ai-policy-service";
+
+/** CORE-04B: Operational exposure control exports */
+export {
+  FLOWPILOT_AI_GLOBAL_STOP_FLAG,
+  FLOWPILOT_AI_MAX_SERVING_ATTEMPTS_FLAG,
+  DEFAULT_MAX_SERVING_ATTEMPTS,
+  HARD_CEILING_SERVING_ATTEMPTS,
+  MIN_SERVING_ATTEMPTS,
+  parseGlobalAiStop,
+  parseMaxServingAttempts,
+  createServingExecutionSession,
+} from "./execution-limits";
+export type {
+  AiStopReason,
+  ServingExecutionSession,
+  GlobalStopConfig,
+  MaxServingAttemptsConfig,
+} from "./execution-limits";

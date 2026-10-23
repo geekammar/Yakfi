@@ -13,6 +13,11 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 
+import {
+  DEFAULT_SERVING_ROUTE_BUDGET_MS,
+  HARD_CEILING_SERVING_ATTEMPTS,
+  createServingExecutionSession,
+} from "./execution-limits";
 import { computeCostAggregation, type CostAggregation } from "./http";
 import type { JevSemanticEvidence } from "./jev-semantic-strategy";
 import type { ShadowJevStrategy } from "./jev-shadow-strategy";
@@ -23,6 +28,7 @@ import {
 import type { JevStrategy } from "./jev-strategy";
 import { JEV_DETERMINISTIC_PROVIDER } from "./jev-strategy";
 import type {
+  AiCallOptions,
   AiProviderAdapter,
   AiProviderResult,
   AiRetryAttemptRecord,
@@ -59,6 +65,14 @@ export type CreateAiOrchestratorParams = {
    * never bounds or delays the authoritative call itself.
    */
   shadowTimeoutMs?: number;
+  /** Injected environment getter for reading operational controls (CORE-04B). */
+  getEnvVar?: (name: string) => string | undefined;
+  /** Test clock seam; defaults to Date.now (CORE-04B). */
+  getNow?: () => number;
+  /** Operational serving timeout / deadline for the logical turn (CORE-04B). */
+  servingTimeoutMs?: number;
+  /** Operator-configured serving attempt ceiling (1-3; CORE-04B). */
+  maxServingAttempts?: number;
 };
 
 export type OrchestratorResult = {
@@ -265,58 +279,41 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
 
   async function callWithFallback(
     request: AiRequest,
+    options?: AiCallOptions,
   ): Promise<OrchestratorResult> {
+    const primaryMax = (primary as { maxAttempts?: number }).maxAttempts ?? 2;
+    const secondaryMax =
+      fallbackEnabled && secondary
+        ? ((secondary as { maxAttempts?: number }).maxAttempts ?? 1)
+        : 0;
+    const derivedMaxAttempts = Math.min(
+      HARD_CEILING_SERVING_ATTEMPTS,
+      primaryMax + secondaryMax,
+    );
+
+    const session =
+      options?.session ??
+      createServingExecutionSession({
+        getEnvVar: params.getEnvVar,
+        getNow: params.getNow,
+        timeoutMs: options?.timeoutMs ?? params.servingTimeoutMs,
+        maxAttemptsOverride:
+          params.maxServingAttempts !== undefined
+            ? params.maxServingAttempts
+            : params.getEnvVar
+              ? undefined
+              : derivedMaxAttempts,
+      });
+
     const requiresStructuredTurn =
       request.requiredSemanticCapability === "structured_turn";
 
     let jevDecision: AiTelemetry["jevDecision"];
 
     if (!requiresStructuredTurn) {
-      // JEV decision strategy (PROMPT-AI-ARCH-17 — Slice 8; PROMPT-AI-JEV-03B):
-      // an OPTIONAL, provider-neutral decision behind this gateway. A
-      // DETERMINISTIC decision terminates the turn with a complete response and
-      // ZERO provider attempts; a GENERATIVE decision falls through to the
-      // gateway's single existing call. The strategy never calls the generative
-      // provider, so the one-call budget is held HERE (the gateway), never by the
-      // strategy.
-      //
-      // PROMPT-AI-JEV-03B §6: the seam is async so a SEMANTIC strategy may spend
-      // its ONE JEV call inside `decide`. The truth table is then exact:
-      //   · a proven 0-call bypass (or a JEV success / fail-closed termination)
-      //     returns DETERMINISTIC → ZERO generative attempts;
-      //   · a pre-attempt unavailability or a JEV-ineligible turn returns
-      //     GENERATIVE → the gateway's ONE existing call;
-      //   · a JEV failure AFTER an attempt was spent also returns DETERMINISTIC
-      //     (the strategy terminates on the lexical baseline) → the LLM is NEVER
-      //     called after a spent JEV attempt. There is no two-call row.
-      const jev = decisionStrategy
-        ? await decisionStrategy.decide(request)
-        : null;
-      jevDecision = jev
-        ? {
-            mode: jev.mode,
-            reason: jev.reason,
-            ...(jev.semantic ? { semantic: jev.semantic } : {}),
-          }
-        : undefined;
-      if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
-        const jevCallSpent = !!jev.semantic?.jevCallSpent;
-        const totalHttpAttempts = jevCallSpent ? 1 : 0;
-        return {
-          response: jev.response,
-          telemetry: {
-            attempts: [],
-            fallbackUsed: false,
-            finalProvider: JEV_DETERMINISTIC_PROVIDER,
-            finalModel: null,
-            finalStatus: "SUCCESS",
-            jevDecision,
-            totalHttpAttempts,
-          },
-        };
-      }
-      // No strategy configured: the built-in deterministic bypass is the exact
-      // prior behaviour (disabling JEV changes nothing but the audit field).
+      // Mechanical / deterministic bypass first (DECISIONS #33, CORE-04B §5).
+      // Zero-call offer selection and greetings proceed deterministically without AI
+      // even when the external model global stop is engaged.
       const bypass = !decisionStrategy ? bypassDeterministicAi(request) : null;
       if (bypass) {
         return {
@@ -329,24 +326,120 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
             finalStatus: "SUCCESS",
             jevDecision,
             totalHttpAttempts: 0,
+            stopReason: null,
           },
+        };
+      }
+
+      // Check operational limits before external model dispatch (JEV / LLM)
+      const dispatchCheck = session.canDispatch();
+      if (!dispatchCheck.allowed) {
+        return {
+          response: null,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: primary.providerId,
+            finalModel: primary.model,
+            finalStatus: "FAILURE",
+            totalHttpAttempts: 0,
+            stopReason: session.getStopReason(),
+          },
+          lastErrorCode: "CONTROLLED_FAILURE",
+        };
+      }
+
+      // JEV decision strategy (Slice 8, PROMPT-AI-JEV-03B, CORE-04B §3)
+      const attemptsBeforeJev = session.getDispatchedAttempts();
+      const jev = decisionStrategy
+        ? await decisionStrategy.decide(request, {
+            ...options,
+            session,
+            timeoutMs: session.getRemainingTimeoutMs(
+              options?.timeoutMs ??
+                params.servingTimeoutMs ??
+                DEFAULT_SERVING_ROUTE_BUDGET_MS,
+            ),
+          })
+        : null;
+      jevDecision = jev
+        ? {
+            mode: jev.mode,
+            reason: jev.reason,
+            ...(jev.semantic ? { semantic: jev.semantic } : {}),
+          }
+        : undefined;
+
+      const jevCallSpent = !!jev?.semantic?.jevCallSpent;
+      // If JEV spent an attempt but provider did not record it via session (legacy/mock provider):
+      if (
+        jevCallSpent &&
+        session.getDispatchedAttempts() === attemptsBeforeJev
+      ) {
+        session.recordDispatch(1);
+      }
+
+      if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
+        return {
+          response: jev.response,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: JEV_DETERMINISTIC_PROVIDER,
+            finalModel: null,
+            finalStatus: "SUCCESS",
+            jevDecision,
+            totalHttpAttempts: session.getDispatchedAttempts(),
+            stopReason: session.getStopReason(),
+          },
+        };
+      }
+
+      // If JEV spent a serving attempt, NO serving LLM request may follow it! (CORE-04B §3/§8)
+      if (jevCallSpent) {
+        return {
+          response: jev?.response ?? null,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: JEV_DETERMINISTIC_PROVIDER,
+            finalModel: null,
+            finalStatus: jev?.response ? "SUCCESS" : "FAILURE",
+            jevDecision,
+            totalHttpAttempts: session.getDispatchedAttempts() || 1,
+            stopReason: session.getStopReason(),
+          },
+          lastErrorCode: jev?.response ? undefined : "CONTROLLED_FAILURE",
+        };
+      }
+    } else {
+      // Structured turn: check operational limits before external model dispatch
+      const dispatchCheck = session.canDispatch();
+      if (!dispatchCheck.allowed) {
+        return {
+          response: null,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: primary.providerId,
+            finalModel: primary.model,
+            finalStatus: "FAILURE",
+            totalHttpAttempts: 0,
+            stopReason: session.getStopReason(),
+          },
+          lastErrorCode: "CONTROLLED_FAILURE",
         };
       }
     }
 
-    // PROMPT-AI-JEV-03D — OPTION E: the NON-AUTHORITATIVE shadow seam. The
-    // authoritative decision ALREADY returned GENERATIVE above, so this turn
-    // provably spends the gateway's one generative call — exactly the turn
-    // class a semantic activation would replace. Admission is PURE and
-    // zero-cost (the ACTIVE eligibility gate + a deterministic sampler), and
-    // when admitted the shadow evaluation is STARTED BUT NOT AWAITED right
-    // here, so it overlaps `primary.call` instead of serializing after it:
-    // the turn's wall clock is max(serving, shadow), never serving + shadow.
-    // A deterministic bypass turn (both early returns above) and an ACTIVE
-    // semantic turn (the factory installs no shadow in that state) NEVER
-    // reach here, so neither can start a shadow model call.
+    // Shadow evaluation (OPTION E) — global stop blocks shadow too (CORE-04B §8)
+    const stopReasonBeforeShadow = session.getStopReason();
+    const isGloballyStopped =
+      stopReasonBeforeShadow === "GLOBAL_STOP" ||
+      stopReasonBeforeShadow === "INVALID_CONTROL_CONFIG";
+
     const shadowAdmission =
-      shadowStrategy && !requiresStructuredTurn
+      shadowStrategy && !requiresStructuredTurn && !isGloballyStopped
         ? shadowStrategy.admit(request)
         : null;
     const shadowWillRun =
@@ -357,20 +450,45 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
       shadowStrategy && shadowWillRun
         ? shadowStrategy.evaluate(request).catch(() => null)
         : null;
-    // The pure zero-call marker keeps the eligible → sampled → completed
-    // funnel observable for turns that were NOT evaluated.
     const shadowMarker =
       shadowAdmission !== null && !shadowWillRun
         ? shadowMarkerEvidence(shadowAdmission, request)
         : null;
 
-    const first = await primary.call(request);
+    // Primary LLM dispatch: check remaining serving allowance and deadline
+    const canDispatchPrimary = session.canDispatch();
+    if (!canDispatchPrimary.allowed) {
+      return {
+        response: null,
+        telemetry: {
+          attempts: [],
+          fallbackUsed: false,
+          finalProvider: primary.providerId,
+          finalModel: primary.model,
+          finalStatus: "FAILURE",
+          totalHttpAttempts: 0,
+          stopReason: session.getStopReason(),
+          shadow: await joinShadow(shadowPromise, shadowMarker),
+        },
+        lastErrorCode: "CONTROLLED_FAILURE",
+      };
+    }
+
+    const primaryRemainingTimeout = session.getRemainingTimeoutMs(
+      options?.timeoutMs ??
+        params.servingTimeoutMs ??
+        DEFAULT_SERVING_ROUTE_BUDGET_MS,
+    );
+    const first = await primary.call(request, {
+      ...options,
+      session,
+      timeoutMs: primaryRemainingTimeout,
+    });
+    // Record physical attempt if adapter did not already record via session
+    if (first.httpAttempts && session.getDispatchedAttempts() === 0) {
+      session.recordDispatch(first.httpAttempts);
+    }
     const firstAttempt = toAttempt(first);
-    // The Conversation Control Layer's bounded retry (if any) is one
-    // logical AI turn: surface its sanitized attempt trace and handoff/
-    // notification outcome exactly once here, so the engine's AI_TURN
-    // record can observe retry behaviour without any schema change and
-    // without double-counting a provider call.
     const conversationControl = first.conversationControl;
     if (first.ok) {
       const {
@@ -394,6 +512,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           totalCostUsd: costAgg.totalCostUsd,
           knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
           costCompleteness: costAgg.costCompleteness,
+          stopReason: null,
         },
       };
     }
@@ -422,12 +541,58 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           totalCostUsd: costAgg.totalCostUsd,
           knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
           costCompleteness: costAgg.costCompleteness,
+          stopReason: session.getStopReason() ?? null,
         },
         lastErrorCode: first.error.code,
       };
     }
 
-    const second = await secondary!.call(request);
+    // Shared per-execution serving-attempt allowance and deadline check before fallback (CORE-04B)
+    const canDispatchSecondary = session.canDispatch();
+    if (!canDispatchSecondary.allowed) {
+      const {
+        retryTrace: aggregatedTrace,
+        totalHttpAttempts,
+        costAgg,
+      } = aggregateExecutionTrace(first);
+      return {
+        response: null,
+        telemetry: {
+          attempts: [firstAttempt],
+          fallbackUsed: false,
+          finalProvider: first.provider,
+          finalModel: first.model,
+          finalStatus: "FAILURE",
+          retryTrace: aggregatedTrace,
+          conversationControl,
+          jevDecision,
+          shadow: await joinShadow(shadowPromise, shadowMarker),
+          totalHttpAttempts,
+          totalCostUsd: costAgg.totalCostUsd,
+          knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+          costCompleteness: costAgg.costCompleteness,
+          stopReason: session.getStopReason() ?? canDispatchSecondary.reason,
+        },
+        lastErrorCode: first.error.code,
+      };
+    }
+
+    const secondaryRemainingTimeout = session.getRemainingTimeoutMs(
+      options?.timeoutMs ??
+        params.servingTimeoutMs ??
+        DEFAULT_SERVING_ROUTE_BUDGET_MS,
+    );
+    const second = await secondary!.call(request, {
+      ...options,
+      session,
+      timeoutMs: secondaryRemainingTimeout,
+    });
+    if (
+      second.httpAttempts &&
+      session.getDispatchedAttempts() <= (first.httpAttempts ?? 0)
+    ) {
+      session.recordDispatch(second.httpAttempts);
+    }
     const secondAttempt = toAttempt(second);
     const {
       retryTrace: aggregatedTrace,
@@ -452,6 +617,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           totalCostUsd: costAgg.totalCostUsd,
           knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
           costCompleteness: costAgg.costCompleteness,
+          stopReason: null,
         },
       };
     }
@@ -471,6 +637,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         totalCostUsd: costAgg.totalCostUsd,
         knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
         costCompleteness: costAgg.costCompleteness,
+        stopReason: session.getStopReason() ?? null,
       },
       lastErrorCode: second.error.code,
     };

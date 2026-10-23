@@ -4800,6 +4800,7 @@ async function runInboundTurn(
       totalCostUsd,
       knownCostSubtotalUsd,
       costCompleteness,
+      stopReason: turnTelemetry?.stopReason ?? null,
       // PROMPT-AI-JEV-03B §12 — clarification anti-repeat / resume state: true
       // when the ONE resolver PRESERVED a pending task by re-asking its bounded
       // question instead of escalating (precedence rule 6).

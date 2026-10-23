@@ -108,6 +108,8 @@ export type TurnEvidence = {
   readonly knownCostSubtotalUsd: number | null;
   /** Cost completeness status across all attempts. */
   readonly costCompleteness: string | null;
+  /** Machine-readable stop or prevention reason (CORE-04B). */
+  readonly stopReason: string | null;
   /**
    * The NON-AUTHORITATIVE shadow JEV evidence (PROMPT-AI-JEV-03D — OPTION E).
    * Present only when a shadow strategy was installed this turn. DISJOINT from
@@ -289,6 +291,7 @@ export function buildTurnEvidence(
     totalCostUsd: observability?.totalCostUsd ?? null,
     knownCostSubtotalUsd: observability?.knownCostSubtotalUsd ?? null,
     costCompleteness: observability?.costCompleteness ?? null,
+    stopReason: observability?.stopReason ?? null,
     // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E). Pure
     // pass-through of the projection
     // (`projectShadowEvidence` → `TurnShadowObservation`); no recomputation,
@@ -352,6 +355,8 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "status",
   "costSource",
   "costCompleteness",
+  // CORE-04B: Operational exposure control closed stop reasons
+  "stopReason",
   // PROMPT-AI-JEV-03D — the disjoint shadow slot's CLOSED string keys. Each
   // carries only a bounded machine vocabulary (a result class, a JEV error
   // code, a pinned model id, a script-block language hint, a confidence band,

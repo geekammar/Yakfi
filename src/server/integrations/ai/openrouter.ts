@@ -5,7 +5,11 @@ import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
 import { OPENROUTER_NORMALIZATION_POLICY } from "./response-normalizer";
-import type { AiProviderAdapter, AiProviderResult } from "./types";
+import type {
+  AiCallOptions,
+  AiProviderAdapter,
+  AiProviderResult,
+} from "./types";
 
 export const OPENROUTER_ENDPOINT =
   "https://openrouter.ai/api/v1/chat/completions";
@@ -42,7 +46,10 @@ export function createOpenRouterAdapter(
     providerId: "openrouter",
     model: deps.model,
     secretRef: OPENROUTER_SECRET_REF,
-    async call(request: AiRequest): Promise<AiProviderResult> {
+    async call(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<AiProviderResult> {
       const pinned = deps.providerOnly ? deps.providerOnly.trim() : null;
       const extraBody: Record<string, unknown> = {};
       if (pinned) {
@@ -60,14 +67,9 @@ export function createOpenRouterAdapter(
         fetchImpl: deps.fetchImpl,
         timeoutMs: deps.timeoutMs ?? OPENROUTER_TIMEOUT_MS,
         request,
-        // Explicit EMPTY policy: OpenRouter stays on the strict parser +
-        // unchanged aiResponseSchema alone (byte-for-byte unchanged).
         policy: OPENROUTER_NORMALIZATION_POLICY,
-        // PROMPT-AI-OPS-28 — the provider pin is built HERE, at the
-        // OpenRouter request boundary. Empty pin ⇒ `extraBody` is absent and
-        // the request body carries no `provider` key at all. The model id is
-        // untouched: the pin is a SEPARATE OpenRouter request parameter.
         extraBody: Object.keys(extraBody).length > 0 ? extraBody : undefined,
+        options,
       });
     },
   };

@@ -12,9 +12,12 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 
 import type { ConversationControlOutcome } from "./conversation-control/types";
+import type { AiStopReason, ServingExecutionSession } from "./execution-limits";
 import type { JevSemanticEvidence } from "./jev-semantic-strategy";
 import type { JevDecisionMode, JevDecisionReason } from "./jev-strategy";
 import type { NormalizerTrace } from "./response-normalizer/types";
+
+export type { AiStopReason, ServingExecutionSession } from "./execution-limits";
 
 export type AiProviderId = "openrouter" | "agentrouter" | "atria" | "codecraft";
 
@@ -109,11 +112,17 @@ export type AiProviderFailure = {
 
 export type AiProviderResult = AiProviderSuccess | AiProviderFailure;
 
+export type AiCallOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  session?: ServingExecutionSession;
+};
+
 export interface AiProviderAdapter {
   readonly providerId: AiProviderId;
   readonly model: string;
   readonly secretRef: string;
-  call(request: AiRequest): Promise<AiProviderResult>;
+  call(request: AiRequest, options?: AiCallOptions): Promise<AiProviderResult>;
 }
 
 export type AiTelemetryAttempt = {
@@ -161,7 +170,11 @@ export type AiRetrySkipReason =
   | "MAX_ATTEMPTS_REACHED"
   | "NON_RETRYABLE_CLASSIFICATION"
   | "HUMAN_REQUEST"
-  | "INSUFFICIENT_DEADLINE";
+  | "INSUFFICIENT_DEADLINE"
+  | "GLOBAL_STOP"
+  | "ATTEMPT_LIMIT_EXHAUSTED"
+  | "DEADLINE_EXHAUSTED"
+  | "INVALID_CONTROL_CONFIG";
 
 export type AiRetryTrace = {
   provider: AiProviderId;
@@ -190,6 +203,8 @@ export type AiRetryTrace = {
   knownCostSubtotalUsd?: number | null;
   /** Cost completeness status across all attempts. */
   costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+  /** Machine-readable stop or prevention reason (CORE-04B). */
+  stopReason?: AiStopReason | null;
 };
 
 export type AiTelemetry = {
@@ -198,6 +213,8 @@ export type AiTelemetry = {
   finalProvider: string;
   finalModel: string | null;
   finalStatus: "SUCCESS" | "FAILURE";
+  /** Machine-readable stop or prevention reason (CORE-04B). */
+  readonly stopReason?: AiStopReason | null;
   /**
    * Sanitized attempt-level trace of the bounded retry, when the logical
    * AI turn went through the Conversation Control Layer
