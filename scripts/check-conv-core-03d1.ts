@@ -72,6 +72,7 @@ function mockBooking(params: {
   date?: string | null;
   provider?: string | null;
   timePreference?: CanonicalTimePreference | null;
+  safetyAssessment?: "safe" | "sensitive" | "uncertain" | null;
   factUpdates?: Array<{
     key: string;
     operation?: "set" | "remove";
@@ -84,6 +85,7 @@ function mockBooking(params: {
     content: params.content,
     summary: "طلب حجز كشف أسنان",
     handoffReason: null,
+    safetyAssessment: (params.safetyAssessment ?? "safe") as any,
     extraction: {
       service: params.service ?? null,
       date: params.date ?? null,

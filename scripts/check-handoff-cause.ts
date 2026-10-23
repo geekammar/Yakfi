@@ -618,6 +618,7 @@ async function main(): Promise<void> {
     content: "سيتواصل معك أحد أعضاء الفريق.",
     extraction: emptyExtraction,
     handoffReason,
+    safetyAssessment: handoffReason === "SENSITIVE" ? "sensitive" : "safe",
     summary: action === "booking_handoff" ? "طلب يتطلب تدخل الفريق" : null,
     ...extra,
   });
@@ -720,6 +721,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "FAQ",
+            safetyAssessment: "safe",
             action: "reply",
             content: "الأسعار تبدأ من 500 جنيه للجلسة الواحدة.",
             extraction: emptyExtraction,
@@ -829,6 +831,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "BOOKING",
+            safetyAssessment: "safe",
             action: "reply",
             content: "سأتحقق من المواعيد المتاحة.",
             extraction: {
@@ -880,6 +883,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "FAQ",
+            safetyAssessment: "safe",
             action: "reply",
             content: "من 9 صباحاً حتى 6 مساءً",
             extraction: emptyExtraction,
@@ -907,6 +911,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "FAQ",
+            safetyAssessment: "sensitive",
             action: "reply",
             content: "هذا سؤال عادي والإجابة كذا.",
             extraction: emptyExtraction,
@@ -937,6 +942,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "HUMAN_REQUEST",
+            safetyAssessment: "sensitive",
             action: "handoff",
             content: "سيتواصل معك أحد أعضاء الفريق.",
             extraction: emptyExtraction,
@@ -964,6 +970,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "HUMAN_REQUEST",
+            safetyAssessment: "safe",
             action: "handoff",
             content: "سأحوّلك لأحد أعضاء الفريق.",
             extraction: emptyExtraction,
@@ -1004,6 +1011,7 @@ async function main(): Promise<void> {
         async () =>
           ({
             intent: "FAQ",
+            safetyAssessment: "safe",
             action: "reply",
             content: "من 9 صباحاً حتى 6 مساءً",
             extraction: emptyExtraction,

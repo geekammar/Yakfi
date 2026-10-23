@@ -83,6 +83,26 @@ export const aiActionValues = ["reply", "handoff", "booking_handoff"] as const;
 
 export type AiAction = (typeof aiActionValues)[number];
 
+// ─── Semantic Safety Assessment (CORE-03D2) ──────────────────────────────────
+
+/**
+ * Canonical three-state safety assessment (CORE-03D2):
+ * - safe: ordinary booking preferences, harmless polite phrasing, negation (e.g. "مش مشكلة"),
+ *   or general queries that do not require sensitive escalation.
+ * - sensitive: high-stakes customer situations (medical emergency, severe complaint, harm,
+ *   legal dispute) requiring immediate human staff escalation.
+ * - uncertain: ambiguous or unclassifiable high-stakes context that must not proceed to booking.
+ */
+export const aiSafetyAssessmentValues = [
+  "safe",
+  "sensitive",
+  "uncertain",
+] as const;
+
+export type AiSafetyAssessment = (typeof aiSafetyAssessmentValues)[number];
+
+export const aiSafetyAssessmentSchema = z.enum(aiSafetyAssessmentValues);
+
 // ─── Bounded extraction facts ────────────────────────────────────────────────
 
 /** "YYYY-MM-DD" — the only date form that crosses the boundary. */
@@ -497,6 +517,11 @@ const aiResponseBase = {
   handoffReason: handoffReasonSchema.nullable().default(null),
   /** Short staff-facing summary (required for booking_handoff). */
   summary: z.string().trim().min(1).max(400).nullable().default(null),
+  /**
+   * Bounded semantic safety assessment for the customer utterance (CORE-03D2).
+   * Distinguishes contextual meaning from isolated lexical triggers like "مشكلة".
+   */
+  safetyAssessment: aiSafetyAssessmentSchema.optional(),
   // ── Additive target-architecture fields (OPTIONAL; unused by producers today)
   /** Structured goals when a producer can express more than one intent. */
   goals: z.array(aiGoalSchema).max(8).optional(),

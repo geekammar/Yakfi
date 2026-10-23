@@ -421,6 +421,7 @@ async function runSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content:
                   "تمام، هشوف لحضرتك المواعيد المتاحة لتنظيف الأسنان يوم 2026-10-23.",
@@ -846,6 +847,7 @@ async function runSuite(): Promise<void> {
                 role: "assistant",
                 content: JSON.stringify({
                   intent: "BOOKING",
+                  safetyAssessment: "safe",
                   action: "reply",
                   content: "تمام بدون تفضيل وقت.",
                   summary: null,
@@ -947,6 +949,7 @@ async function runSuite(): Promise<void> {
   // 21. Explicit REMOVE schema contract validation
   const removeProviderResponse: AiResponse = {
     intent: "BOOKING",
+    safetyAssessment: "safe",
     action: "reply",
     content: "تمام شلت أي تفضيل للطبيب.",
     summary: null,

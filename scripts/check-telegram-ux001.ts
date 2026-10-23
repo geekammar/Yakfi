@@ -831,6 +831,7 @@ async function main(): Promise<void> {
     // 2. Free-text correction with controlled structured model response
     h.setCustomAiResponder(() => ({
       intent: "AVAILABILITY",
+      safetyAssessment: "safe",
       action: "reply",
       content: "تم تغيير اليوم إلى 2026-10-25، إليك المواعيد المتاحة:",
       extraction: {
@@ -1237,6 +1238,7 @@ async function main(): Promise<void> {
     // 3. Customer makes date correction in free text during inquiry
     h.setCustomAiResponder(() => ({
       intent: "AVAILABILITY",
+      safetyAssessment: "safe",
       action: "reply",
       content: "تم تعديل التاريخ إلى 2026-10-25",
       extraction: {

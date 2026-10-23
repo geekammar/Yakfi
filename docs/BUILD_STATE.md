@@ -9,7 +9,15 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.66.0 (feature branch; PR ready)** — `CORE-03D1: Canonical Time Preferences and Reliable Removal on the Existing Engine`. Baseline: v0.65.0 (PR #24 merged baseline, commit `6cd0252640ad0b3f8089185dafef3c679e7a507b`). Makes customer time preferences consistent across the AI contract, semantic reconciliation, durable conversation state/mirrors, availability-option filtering, booking confirmation lifecycle, period-empty truthfulness, and offer invalidation/continuation:
+**Product version: v0.67.0 (feature branch; PR ready)** — `CORE-03D2: Semantic Safety Ownership and False-Handoff Repair`. Baseline: v0.66.0 (PR #25 merged baseline, commit `bcb63e8bb9af51012c4ea556745fce54b6f11d6f`). Fixes false sensitive escalations on harmless customer phrases (e.g. «أي وقت يناسبكم مش مشكلة») through the existing semantic boundary:
+
+1. **Canonical Three-State Safety Assessment**: Defined `aiSafetyAssessmentValues = ["safe", "sensitive", "uncertain"]` on `aiResponseSchema` (`ai-contract.ts`). Structured generative turns carry a bounded assessment of contextual meaning, distinguishing negation/preferences from medical emergencies. On structured generative turns, valid assessment is strictly required; missing assessment fails closed at the capability-aware engine boundary (`isMissingRequiredSafetyAssessment`) via `AI_FAILURE` with 0 appointments and fact preservation, without keyword dependence.
+2. **Pure Source-Selection Helper & Isolated Goal Contradiction Protection**: Centralized signal derivation in `resolveTurnControlSignals` (`conversation-ai.ts`): JEV-owned turns retain validated JEV semantic signals; structured generative turns use validated semantic `safetyAssessment` to replace broad lexical sensitive triggers (e.g. on «مشكلة») unless contradictory (top-level `handoffReason === "SENSITIVE"` or isolated HANDOFF goals with supported `intent === "SENSITIVE"` / `requiredKnowledge === "SENSITIVE"`), where safety cannot be downgraded; legacy/mechanical turns fall back to the deterministic lexical detector (`detectTurnControlSignals`).
+3. **Safety Precedence & Existing Authority Preserved**: Explicit customer human requests (`CUSTOMER_REQUESTED_HUMAN`) stay authoritative over model claims. Staff-owned threads remain deferred to staff. Closed-day and domain constraints remain binding. Disclosure refusal (B-03 policy) triggers `POLICY_REFUSED` regardless of model claims. Uncertainty and missing assessments safely escalate without completing bookings.
+4. **Prompt Workspace & Runtime Artifact**: Updated `booking-assistant.prompt` with contextual Egyptian Arabic safety instructions and explicit requirement on structured turns; regenerated `ai-prompts.generated.ts` via generator (verified byte-identical, 146/146 checks).
+5. **Acceptance Verification & CI Integration**: Verified by 90/90 offline automated checks in `scripts/check-conv-core-03d2.ts` (`pnpm check:conv-core-03d2`), outbound HTTP system message and structured context wire verification, repaired offline CE-13 and Case G expectations, wired into CI (`.github/workflows/pr-validation.yml`), with clean regression across all domain suites.
+
+**Product version: v0.66.0 (merged to main; PR #25)** — `CORE-03D1: Canonical Time Preferences and Reliable Removal on the Existing Engine`. Baseline: v0.65.0 (PR #24 merged baseline, commit `6cd0252640ad0b3f8089185dafef3c679e7a507b`). Makes customer time preferences consistent across the AI contract, semantic reconciliation, durable conversation state/mirrors, availability-option filtering, booking confirmation lifecycle, period-empty truthfulness, and offer invalidation/continuation:
 
 1. **Single Canonical Vocabulary**: Defined `canonicalTimePreferenceValues` (`"morning" | "afternoon" | "evening"`) in `src/lib/validation/appointment.ts` and re-exported uniformly across contract, facts, and conversation engine boundaries.
 2. **Strict Contract Validation Boundary**: `aiExtractionSchema.timePreference` and `aiSetFactUpdateSchema` strictly require canonical day-period values. Colloquial dialect terms (e.g. "الصبح") and unsupported exact-time strings (e.g. "10:30") fail schema validation rather than being accepted as valid machine preferences or silently falling through to unrestricted time.
@@ -2729,13 +2737,13 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03c2-smoke-eval) CORE-03C2**:
-Branch `feat/conv-core-03c2-smoke-eval` ready with Quick Real JEV + LLM Smoke Evaluation, then handoff to Guided Buttons UX (v0.64.0).
+**AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03d2-semantic-safety) CORE-03D2**:
+Branch `feat/conv-core-03d2-semantic-safety` ready with Semantic Safety Ownership and False-Handoff Repair (v0.67.0).
 
-1. Push branch `feat/conv-core-03c2-smoke-eval` to `origin`.
+1. Push branch `feat/conv-core-03d2-semantic-safety` to `origin`.
 2. Open PR against `main` for review.
 3. Monitor GitHub Actions CI on PR HEAD (`pr-validation.yml`).
-4. Human architectural review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.64.0).
+4. Human architectural review by reviewer / Ammar (no auto-merge, no local DB migrations, version 0.67.0).
 5. **Next Product Implementation Slice: Welcome and Contextual Buttons UX (UX001)**:
    - Proactive /start welcome using real business identity.
    - Initial booking and service-inquiry entry choices.
