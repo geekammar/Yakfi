@@ -475,6 +475,8 @@ function resolveContextTaskRelevance(
       Boolean(sources.providerPreference) ||
       state?.offer?.kind === "PROVIDER";
 
+    const base = deriveTaskRelevance(message);
+
     return {
       // Bounded public catalog & business context is authorized for structured interpretation
       bookingOrAvailability:
@@ -483,7 +485,9 @@ function resolveContextTaskRelevance(
       cancellationOrReschedule: false,
       providerChoice: hasProviderContext,
       contactOrIdentity: true,
-      businessIdentity: true,
+      // businessIdentity family is armed ONLY on an identity ask — preserving disclosure
+      // validation against unbacked self-authored price/general replies (B-03 UX-02)
+      businessIdentity: base.businessIdentity,
       priceOrFee: true,
       businessInfo: true,
       serviceInfo: true,

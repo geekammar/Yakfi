@@ -1651,8 +1651,10 @@ async function runSuite(): Promise<void> {
   const offerTokenAfterP3 = stateAfterP3?.offer?.id ?? null;
   check(
     "P3e. No valid slot offer is newly issued from the invalid candidate",
-    offerTokenAfterP3 === offerTokenBeforeP3 ||
+    stateAfterP3?.offer?.type !== "SLOT" ||
+      offerTokenAfterP3 === offerTokenBeforeP3 ||
       stateAfterP3?.offer?.status !== "ACTIVE",
+    { offer: stateAfterP3?.offer, offerTokenBeforeP3, offerTokenAfterP3 },
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
