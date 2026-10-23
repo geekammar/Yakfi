@@ -7,6 +7,7 @@
  */
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
+import { evaluateResponseCompletion } from "./execution-limits";
 import { buildPromptMessages, buildRequestBody } from "./prompt";
 import { normalizeResponse } from "./response-normalizer";
 import type { NormalizerPolicy } from "./response-normalizer";
@@ -137,7 +138,9 @@ export async function callOpenAiCompatible(
     policy,
     options,
   } = params;
-  const started = Date.now();
+  const session = options?.session;
+  const nowFn = session ? () => session.getNow() : Date.now;
+  const started = nowFn();
   const apiKey = getEnvVar(secretRef);
   if (!apiKey) {
     return {
@@ -216,6 +219,7 @@ export async function callOpenAiCompatible(
   }
 
   // Reserve/record physical HTTP dispatch immediately before wire call (CORE-04B)
+  const dispatchStarted = nowFn();
   if (options?.session) {
     options.session.recordDispatch(1);
   }
@@ -273,25 +277,32 @@ export async function callOpenAiCompatible(
     }
   }
 
-  const latencyMs = Date.now() - started;
+  const completedAt = nowFn();
+  const latencyMs = completedAt - started;
 
-  // Do not accept a response that completes after the effective deadline
-  if (options?.session) {
-    const check = options.session.canDispatch();
-    if (!check.allowed && check.reason === "DEADLINE_EXHAUSTED") {
-      return {
-        ok: false,
-        provider: providerId,
-        model,
-        latencyMs,
-        httpAttempts: 1,
-        error: {
-          code: "TIMEOUT",
-          message: "response completed after deadline",
-          retryable: false,
-        },
-      };
-    }
+  // Do not accept a response that completes after the effective deadline or was cancelled
+  const completionVerdict = evaluateResponseCompletion({
+    startedAtMs: dispatchStarted,
+    effectiveTimeoutMs,
+    completedAtMs: completedAt,
+    session: options?.session,
+    signal: options?.signal,
+    controllerSignal: controller.signal,
+  });
+
+  if (!completionVerdict.ok) {
+    return {
+      ok: false,
+      provider: providerId,
+      model,
+      latencyMs,
+      httpAttempts: 1,
+      error: {
+        code: "TIMEOUT",
+        message: completionVerdict.message,
+        retryable: false,
+      },
+    };
   }
 
   let json: unknown = null;

@@ -156,6 +156,9 @@ export interface ServingExecutionSession {
   canDispatch(): { allowed: boolean; reason: AiStopReason | null };
   recordDispatch(httpAttempts: number): void;
   getRemainingTimeoutMs(configuredTimeoutMs: number): number;
+  isDeadlineExpired(atMs?: number): boolean;
+  getNow(): number;
+  markDeadlineExhausted(): void;
 }
 
 export type CreateServingExecutionSessionParams = {
@@ -244,13 +247,13 @@ export function createServingExecutionSession(
       if (initialStopReason) {
         return { allowed: false, reason: initialStopReason };
       }
-      if (dispatchedAttempts >= maxAttempts) {
-        activeStopReason = "ATTEMPT_LIMIT_EXHAUSTED";
-        return { allowed: false, reason: "ATTEMPT_LIMIT_EXHAUSTED" };
-      }
       if (getNow() >= deadlineMs) {
         activeStopReason = "DEADLINE_EXHAUSTED";
         return { allowed: false, reason: "DEADLINE_EXHAUSTED" };
+      }
+      if (dispatchedAttempts >= maxAttempts) {
+        activeStopReason = "ATTEMPT_LIMIT_EXHAUSTED";
+        return { allowed: false, reason: "ATTEMPT_LIMIT_EXHAUSTED" };
       }
       return { allowed: true, reason: null };
     },
@@ -264,5 +267,117 @@ export function createServingExecutionSession(
       if (remainingMs <= 0) return 0;
       return Math.min(configuredTimeoutMs, remainingMs);
     },
+    isDeadlineExpired(atMs?: number): boolean {
+      const current = atMs !== undefined ? atMs : getNow();
+      return current >= deadlineMs;
+    },
+    getNow(): number {
+      return getNow();
+    },
+    markDeadlineExhausted(): void {
+      if (!initialStopReason) {
+        activeStopReason = "DEADLINE_EXHAUSTED";
+      }
+    },
   };
+}
+
+export type ResponseCompletionVerdict =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: "TIMEOUT";
+      readonly reason: "DEADLINE_EXHAUSTED" | "REQUEST_TIMEOUT" | "ABORTED";
+      readonly message: string;
+    };
+
+/**
+ * Evaluates whether a completed HTTP response finished within its effective deadline
+ * and was not cancelled.
+ *
+ * Requirements (CORE-04B Final-Attempt Completion Deadline Repair):
+ * - Separates permission to start a NEW request from the validity of a COMPLETED response.
+ * - Enforces both the shared serving deadline and the request's effective timeout through response completion.
+ * - A response completing after the effective deadline cannot become success on the first, middle, or last allowed attempt.
+ * - Does not classify a successful in-time final attempt as failure merely because no further attempts remain.
+ */
+export function evaluateResponseCompletion(params: {
+  startedAtMs: number;
+  effectiveTimeoutMs: number;
+  completedAtMs?: number;
+  session?: ServingExecutionSession | null;
+  signal?: AbortSignal | null;
+  controllerSignal?: AbortSignal | null;
+}): ResponseCompletionVerdict {
+  // 1. Explicit caller abort signal
+  if (params.signal?.aborted) {
+    if (
+      params.session?.markDeadlineExhausted &&
+      params.session.isDeadlineExpired()
+    ) {
+      params.session.markDeadlineExhausted();
+    }
+    return {
+      ok: false,
+      code: "TIMEOUT",
+      reason: "ABORTED",
+      message: "request was aborted by caller",
+    };
+  }
+
+  // 2. Controller signal aborted (timeout timer popped or abort propagated)
+  if (params.controllerSignal?.aborted) {
+    if (params.session?.markDeadlineExhausted) {
+      params.session.markDeadlineExhausted();
+    }
+    return {
+      ok: false,
+      code: "TIMEOUT",
+      reason: "REQUEST_TIMEOUT",
+      message: `request timed out after ${params.effectiveTimeoutMs}ms`,
+    };
+  }
+
+  // 3. Determine completion timestamp using session clock if present
+  const now =
+    params.completedAtMs !== undefined
+      ? params.completedAtMs
+      : params.session?.getNow
+        ? params.session.getNow()
+        : Date.now();
+
+  const elapsedMs = now - params.startedAtMs;
+
+  // 4. Enforce shared serving deadline
+  if (params.session) {
+    const isSessionExpired = params.session.isDeadlineExpired
+      ? params.session.isDeadlineExpired(now)
+      : now >= params.session.deadlineMs;
+    if (isSessionExpired) {
+      if (params.session.markDeadlineExhausted) {
+        params.session.markDeadlineExhausted();
+      }
+      return {
+        ok: false,
+        code: "TIMEOUT",
+        reason: "DEADLINE_EXHAUSTED",
+        message: "response completed after shared serving deadline",
+      };
+    }
+  }
+
+  // 5. Enforce request effective timeout
+  if (elapsedMs >= params.effectiveTimeoutMs) {
+    if (params.session?.markDeadlineExhausted) {
+      params.session.markDeadlineExhausted();
+    }
+    return {
+      ok: false,
+      code: "TIMEOUT",
+      reason: "REQUEST_TIMEOUT",
+      message: `response completed after effective timeout (${elapsedMs}ms >= ${params.effectiveTimeoutMs}ms)`,
+    };
+  }
+
+  return { ok: true };
 }

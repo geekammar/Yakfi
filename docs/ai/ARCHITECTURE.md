@@ -860,7 +860,12 @@ CORE-04B establishes a bounded, request-scoped operational control layer without
    - Timeout and abort listeners remain active through the entire HTTP operation, including header resolution (`fetchImpl`) AND response body reading (`await response.text()`).
    - Cleanup: timers and abort event listeners are cleaned up deterministically in `finally` blocks (implemented via standard `AbortController` and listener pairs, avoiding non-standard signal merging).
    - Aborted body reads are classified truthfully as `code: "TIMEOUT"` (not `INVALID_RESPONSE`). Dispatched requests whose body read times out remain counted as 1 physical attempt.
-   - Responses that resolve after the effective deadline are rejected. Subsequent retry or fallback is prevented if the deadline is exhausted.
+   - **Response Completion Validity vs Dispatch Permission**: Response completion validity is strictly decoupled from request dispatch permission via explicit predicate `evaluateResponseCompletion` (`src/server/integrations/ai/execution-limits.ts`). Previously, post-body validation checked `session.canDispatch().reason === "DEADLINE_EXHAUSTED"`; on the final permitted attempt (e.g. limit 1, or attempt 3 of 3), `canDispatch()` prioritized attempt limit exhaustion and returned `ATTEMPT_LIMIT_EXHAUSTED` even when the deadline had also expired, causing late responses on the last attempt to be erroneously accepted as success. With `evaluateResponseCompletion`:
+     - Both the shared serving deadline (`session.isDeadlineExpired(completedAtMs)`) and the request's effective timeout (`elapsedMs >= effectiveTimeoutMs`) are verified upon response body completion.
+     - A response completing after the effective deadline or effective timeout is rejected across the first, middle, and final allowed attempts.
+     - In-time completions on the final permitted attempt succeed for both LLM and JEV.
+     - Cancelled responses (via caller or controller abort signals) are rejected cleanly.
+   - Subsequent retry or fallback is prevented if the deadline is exhausted.
 
 4. **JEV and Shadow Model Exposure Limits**:
    - Spent serving JEV execution consumes 1 serving attempt. No serving generative request follows spent JEV.
@@ -876,7 +881,7 @@ CORE-04B establishes a bounded, request-scoped operational control layer without
    - Succeeded executions always report `stopReason: null`. Prevented dispatches consume 0 physical HTTP calls and do not fabricate network attempts or costs.
 
 6. **Acceptance Verification & CI Integration**:
-   - `pnpm check:core-04b`: **140/140 passed** across Groups A–Q (including Group Q focused deadline enforcement, factory-level wiring, slow body cancellations, limit precedence, and turn isolation).
+   - `pnpm check:core-04b`: **159/159 passed** across Groups A–R (including Group Q focused deadline enforcement, factory-level wiring, slow body cancellations, limit precedence, turn isolation, and Group R final-attempt completion deadline repair & `evaluateResponseCompletion` predicate).
    - `pnpm check:core-04a`: **144/144 passed** across Groups A–Q.
    - `pnpm check:jev-semantic`: **58/58 passed**.
    - `pnpm check:jev-shadow`: **155/155 passed**.

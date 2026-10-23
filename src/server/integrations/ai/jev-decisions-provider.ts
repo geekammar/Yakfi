@@ -57,6 +57,7 @@
 
 import type { ConversationContextProjection } from "@/features/conversations/server/conversation-state";
 
+import { evaluateResponseCompletion } from "./execution-limits";
 import type { AiCallOptions } from "./types";
 
 export const JEV_DECISIONS_ENDPOINT =
@@ -462,7 +463,9 @@ export function createJevDecisionsProvider(
       request: JevEvaluationRequest,
       options?: AiCallOptions,
     ): Promise<JevDecisionsResult> {
-      const started = Date.now();
+      const session = options?.session;
+      const nowFn = session ? () => session.getNow() : Date.now;
+      const started = nowFn();
 
       // ── Check serving execution session allowance & deadline before dispatch
       if (options?.session) {
@@ -548,6 +551,7 @@ export function createJevDecisionsProvider(
       const payload = JSON.stringify(body);
 
       // Reserve physical HTTP attempt immediately before wire dispatch (CORE-04B)
+      const dispatchStarted = nowFn();
       if (options?.session) {
         options.session.recordDispatch(1);
       }
@@ -578,22 +582,29 @@ export function createJevDecisionsProvider(
 
         const text = await httpResponse.text();
 
-        // Check if deadline was exceeded while waiting for response body
-        if (options?.session) {
-          const check = options.session.canDispatch();
-          if (!check.allowed && check.reason === "DEADLINE_EXHAUSTED") {
-            return {
-              ok: false,
-              errorCode: "TIMEOUT",
-              errorMessage: `request completed after deadline (${effectiveTimeoutMs}ms)`,
-              answers: {},
-              latencyMs: Date.now() - started,
-              servedModel: null,
-              inputTokens: null,
-              outputTokens: null,
-              attemptSpent: true,
-            };
-          }
+        // Check if deadline was exceeded while waiting for response body or request was cancelled (CORE-04B)
+        const completedAt = nowFn();
+        const completionVerdict = evaluateResponseCompletion({
+          startedAtMs: dispatchStarted,
+          effectiveTimeoutMs,
+          completedAtMs: completedAt,
+          session: options?.session,
+          signal: options?.signal,
+          controllerSignal: controller.signal,
+        });
+
+        if (!completionVerdict.ok) {
+          return {
+            ok: false,
+            errorCode: "TIMEOUT",
+            errorMessage: completionVerdict.message,
+            answers: {},
+            latencyMs: completedAt - started,
+            servedModel: null,
+            inputTokens: null,
+            outputTokens: null,
+            attemptSpent: true,
+          };
         }
 
         if (!httpResponse.ok) {
@@ -689,6 +700,9 @@ export function createJevDecisionsProvider(
           (err instanceof DOMException && err.name === "AbortError") ||
           (err instanceof Error && err.name === "AbortError") ||
           (err instanceof Error && err.message.includes("aborted"));
+        if (isAbort && options?.session?.markDeadlineExhausted) {
+          options.session.markDeadlineExhausted();
+        }
         return {
           ok: false,
           errorCode: isAbort ? "TIMEOUT" : "NETWORK",
@@ -696,7 +710,7 @@ export function createJevDecisionsProvider(
             ? `request exceeded ${effectiveTimeoutMs}ms`
             : describeError(err),
           answers: {},
-          latencyMs: Date.now() - started,
+          latencyMs: nowFn() - started,
           servedModel: null,
           inputTokens: null,
           outputTokens: null,

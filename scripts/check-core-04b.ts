@@ -17,6 +17,7 @@ import {
   FLOWPILOT_AI_MAX_SERVING_ATTEMPTS_FLAG,
   HARD_CEILING_SERVING_ATTEMPTS,
   createServingExecutionSession,
+  evaluateResponseCompletion,
   parseGlobalAiStop,
   parseMaxServingAttempts,
 } from "@/server/integrations/ai/execution-limits";
@@ -2199,6 +2200,356 @@ async function run() {
     check(
       "Q_I2. Expired deadline prevents dispatch with 0 physical attempts",
       sessionQI_Deadline.getDispatchedAttempts() === 0,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Group R: Final-Attempt Completion Deadline & Completion Predicate Suite
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group R: Final-Attempt Completion Deadline & Completion Predicate ---",
+  );
+  {
+    // R_A: Generative last allowed attempt (limit 1; body completes after deadline)
+    let genClockRA = 1000;
+    let genCallsRA = 0;
+    const sessionRA = createServingExecutionSession({
+      getNow: () => genClockRA,
+      timeoutMs: 10,
+      maxAttemptsOverride: 1, // Limit 1
+    });
+
+    const slowBodyGenFetchRA: typeof fetch = async () => {
+      genCallsRA += 1;
+      // Body completes after deadline (at simulated 1020ms vs deadline 1010ms)
+      genClockRA += 20;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const adapterRA = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: slowBodyGenFetchRA,
+    });
+    const orchRA = createAiOrchestrator({
+      primary: adapterRA,
+      fallbackEnabled: false,
+      getNow: () => genClockRA,
+    });
+
+    const resRA = await orchRA.callWithFallback(sampleRequest(), {
+      session: sessionRA,
+    });
+
+    check(
+      "R_A1. Generative last allowed attempt (limit 1) late body returns failure/null response",
+      resRA.response === null,
+    );
+    check(
+      "R_A2. Generative last allowed attempt dispatched exactly 1 physical attempt",
+      resRA.telemetry.totalHttpAttempts === 1 && genCallsRA === 1,
+    );
+    check(
+      "R_A3. Generative last allowed attempt errorCode is TIMEOUT",
+      resRA.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+    check(
+      "R_A4. Generative last allowed attempt stopReason is DEADLINE_EXHAUSTED",
+      resRA.telemetry.stopReason === "DEADLINE_EXHAUSTED",
+    );
+
+    // R_B: JEV last allowed attempt (limit 1; body completes after deadline)
+    let jevClockRB = 1000;
+    let jevCallsRB = 0;
+    let llmCallsAfterLateJev = 0;
+    const sessionRB = createServingExecutionSession({
+      getNow: () => jevClockRB,
+      timeoutMs: 10,
+      maxAttemptsOverride: 1, // Limit 1
+    });
+
+    const slowBodyJevFetchRB: typeof fetch = async () => {
+      jevCallsRB += 1;
+      jevClockRB += 20; // Completed after deadline
+      return new Response(JSON.stringify(jevDecisionsEnvelope()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const llmFetchAfterLateJev: typeof fetch = async () => {
+      llmCallsAfterLateJev += 1;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const jevProviderRB = createJevDecisionsProvider({
+      getEnvVar: () => "valid-key",
+      fetchImpl: slowBodyJevFetchRB,
+    });
+    const jevStrategyRB = createSemanticJevStrategy({
+      provider: jevProviderRB,
+      enabled: true,
+    });
+    const llmAdapterRB = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: llmFetchAfterLateJev,
+    });
+
+    const orchRB = createAiOrchestrator({
+      primary: llmAdapterRB,
+      decisionStrategy: jevStrategyRB,
+      fallbackEnabled: false,
+      getNow: () => jevClockRB,
+    });
+
+    const resRB = await orchRB.callWithFallback(
+      { ...sampleRequest(), message: "عايز أحجز كشف أسنان" },
+      { session: sessionRB },
+    );
+
+    check(
+      "R_B1. JEV last allowed attempt late body returns TIMEOUT failureCode",
+      resRB.telemetry.jevDecision?.semantic?.failureCode === "TIMEOUT",
+    );
+    check(
+      "R_B2. Exactly 1 dispatched JEV request remains counted as spent attempt",
+      resRB.telemetry.totalHttpAttempts === 1 &&
+        jevCallsRB === 1 &&
+        resRB.telemetry.jevDecision?.semantic?.jevCallSpent === true,
+    );
+    check(
+      "R_B3. Strictly ZERO serving LLM requests follow spent late JEV timeout",
+      llmCallsAfterLateJev === 0,
+    );
+    check(
+      "R_B4. JEV last allowed attempt stopReason is DEADLINE_EXHAUSTED",
+      resRB.telemetry.stopReason === "DEADLINE_EXHAUSTED",
+    );
+
+    // R_C: Exhausted limit 3: exercise the final permitted request and verify late response is rejected
+    let clockRC = 1000;
+    let attemptsDispatchedRC = 0;
+    const sessionRC = createServingExecutionSession({
+      getNow: () => clockRC,
+      timeoutMs: 50,
+      maxAttemptsOverride: 3, // Limit 3
+    });
+
+    const multiAttemptFetchRC: typeof fetch = async () => {
+      attemptsDispatchedRC += 1;
+      if (attemptsDispatchedRC === 1) {
+        // Attempt 1: primary initial timeout (retryable)
+        clockRC += 10;
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      if (attemptsDispatchedRC === 2) {
+        // Attempt 2: primary retry timeout (exhausts primary ceiling)
+        clockRC += 10;
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      // Attempt 3: final permitted request (secondary fallback) completes after deadline!
+      clockRC += 40; // 1000 + 10 + 10 + 40 = 1060 > 1050 deadline
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const primaryRC = createConversationControl({
+      provider: createOpenRouterAdapter({
+        model: "m1",
+        getEnvVar: () => "valid-key",
+        fetchImpl: multiAttemptFetchRC,
+      }),
+      settings: {
+        conversationControl: {
+          maxAttempts: 2,
+          enabled: true,
+          retryEnabled: true,
+        },
+      },
+      getNow: () => clockRC,
+    });
+    const secondaryRC = createAtriaAdapter({
+      model: "m2",
+      getEnvVar: () => "valid-key-2",
+      fetchImpl: multiAttemptFetchRC,
+    });
+
+    const orchRC = createAiOrchestrator({
+      primary: primaryRC,
+      secondary: secondaryRC,
+      fallbackEnabled: true,
+      getNow: () => clockRC,
+    });
+
+    const resRC = await orchRC.callWithFallback(sampleRequest(), {
+      session: sessionRC,
+    });
+
+    check(
+      "R_C1. Final permitted request under limit 3 completing after deadline is rejected",
+      resRC.response === null && resRC.telemetry.finalStatus === "FAILURE",
+    );
+    check(
+      "R_C2. Exactly 3 physical attempts dispatched and counted",
+      resRC.telemetry.totalHttpAttempts === 3 && attemptsDispatchedRC === 3,
+    );
+    check(
+      "R_C3. Exhausted limit 3 late response stopReason is DEADLINE_EXHAUSTED",
+      resRC.telemetry.stopReason === "DEADLINE_EXHAUSTED",
+    );
+
+    // R_D: Positive controls: in-time completion on the last permitted attempt succeeds for both LLM and JEV
+    // R_D1: LLM in-time on last attempt (limit 1)
+    let clockRD1 = 1000;
+    let callsRD1 = 0;
+    const sessionRD1 = createServingExecutionSession({
+      getNow: () => clockRD1,
+      timeoutMs: 50,
+      maxAttemptsOverride: 1, // Final attempt is attempt 1
+    });
+
+    const inTimeLlmFetchRD1: typeof fetch = async () => {
+      callsRD1 += 1;
+      clockRD1 += 15; // 1015 < 1050 (in time)
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const adapterRD1 = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: inTimeLlmFetchRD1,
+    });
+    const orchRD1 = createAiOrchestrator({
+      primary: adapterRD1,
+      fallbackEnabled: false,
+      getNow: () => clockRD1,
+    });
+
+    const resRD1 = await orchRD1.callWithFallback(sampleRequest(), {
+      session: sessionRD1,
+    });
+
+    check(
+      "R_D1. In-time completion on final permitted attempt (limit 1) succeeds",
+      resRD1.response !== null && resRD1.telemetry.finalStatus === "SUCCESS",
+    );
+    check(
+      "R_D2. In-time LLM reports exactly 1 totalHttpAttempts and stopReason null",
+      resRD1.telemetry.totalHttpAttempts === 1 &&
+        callsRD1 === 1 &&
+        resRD1.telemetry.stopReason === null,
+    );
+
+    // R_D2: JEV in-time on last attempt (limit 1)
+    let clockRD2 = 1000;
+    let callsRD2 = 0;
+    const sessionRD2 = createServingExecutionSession({
+      getNow: () => clockRD2,
+      timeoutMs: 50,
+      maxAttemptsOverride: 1, // Final attempt is attempt 1
+    });
+
+    const inTimeJevFetchRD2: typeof fetch = async () => {
+      callsRD2 += 1;
+      clockRD2 += 15; // 1015 < 1050 (in time)
+      return new Response(JSON.stringify(jevDecisionsEnvelope()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const jevProviderRD2 = createJevDecisionsProvider({
+      getEnvVar: () => "valid-key",
+      fetchImpl: inTimeJevFetchRD2,
+    });
+    const jevStrategyRD2 = createSemanticJevStrategy({
+      provider: jevProviderRD2,
+      enabled: true,
+    });
+    const orchRD2 = createAiOrchestrator({
+      primary: adapterRD1,
+      decisionStrategy: jevStrategyRD2,
+      fallbackEnabled: false,
+      getNow: () => clockRD2,
+    });
+
+    const resRD2 = await orchRD2.callWithFallback(
+      { ...sampleRequest(), message: "عايز أحجز كشف أسنان" },
+      { session: sessionRD2 },
+    );
+
+    check(
+      "R_D3. In-time JEV completion on final attempt succeeds with DETERMINISTIC mode",
+      resRD2.response !== null &&
+        resRD2.telemetry.finalStatus === "SUCCESS" &&
+        resRD2.telemetry.jevDecision?.mode === "DETERMINISTIC",
+    );
+    check(
+      "R_D4. In-time JEV reports exactly 1 totalHttpAttempts and stopReason null",
+      resRD2.telemetry.totalHttpAttempts === 1 &&
+        callsRD2 === 1 &&
+        resRD2.telemetry.stopReason === null,
+    );
+
+    // R_E: Controlled clock advancement: pure predicate test
+    const dummySession = createServingExecutionSession({
+      getNow: () => 0,
+      timeoutMs: 10,
+    });
+    const lateSessionVerdict = evaluateResponseCompletion({
+      startedAtMs: 0,
+      effectiveTimeoutMs: 10,
+      completedAtMs: 20, // 20 > 10
+      session: dummySession,
+    });
+    check(
+      "R_E1. evaluateResponseCompletion rejects when completedAtMs exceeds session deadline",
+      lateSessionVerdict.ok === false &&
+        lateSessionVerdict.reason === "DEADLINE_EXHAUSTED",
+    );
+
+    const inTimeSessionVerdict = evaluateResponseCompletion({
+      startedAtMs: 0,
+      effectiveTimeoutMs: 10,
+      completedAtMs: 5,
+      session: dummySession,
+    });
+    check(
+      "R_E2. evaluateResponseCompletion accepts in-time response regardless of remaining attempt allowance",
+      inTimeSessionVerdict.ok === true,
+    );
+
+    const requestTimeoutVerdict = evaluateResponseCompletion({
+      startedAtMs: 0,
+      effectiveTimeoutMs: 5,
+      completedAtMs: 8,
+    });
+    check(
+      "R_E3. evaluateResponseCompletion rejects when completedAtMs exceeds effective request timeout",
+      requestTimeoutVerdict.ok === false &&
+        requestTimeoutVerdict.reason === "REQUEST_TIMEOUT",
+    );
+
+    const userAbortController = new AbortController();
+    userAbortController.abort();
+    const abortedVerdict = evaluateResponseCompletion({
+      startedAtMs: 0,
+      effectiveTimeoutMs: 50,
+      completedAtMs: 5,
+      signal: userAbortController.signal,
+    });
+    check(
+      "R_E4. evaluateResponseCompletion rejects cancelled response via caller signal",
+      abortedVerdict.ok === false && abortedVerdict.reason === "ABORTED",
     );
   }
 
