@@ -3,7 +3,14 @@ import "./setup-test-env";
 
 import { createPlaygroundHarness } from "@/features/conversations/playground/harness";
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
-import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
+import {
+  receiveInboundMessage,
+  resolveTurnCounters,
+} from "@/features/conversations/server/conversation-engine";
+import {
+  dehydrateConversationState,
+  emptyConversationState,
+} from "@/features/conversations/server/conversation-state";
 import type { TurnEvidence } from "@/features/conversations/server/turn-evidence";
 import { createAtriaAdapter } from "@/server/integrations/ai/atria";
 import { createLlmConversationAi } from "@/server/integrations/ai/conversation-ai";
@@ -35,6 +42,10 @@ import {
   isTypeSafeJevPreferred,
   parseApprovedMonthlyBudget,
 } from "@/server/integrations/ai/factory";
+import {
+  computeCostAggregation,
+  parseReportedCost,
+} from "@/server/integrations/ai/http";
 import { createJevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
 import { createSemanticJevStrategy } from "@/server/integrations/ai/jev-semantic-strategy";
 import {
@@ -81,6 +92,7 @@ function validAiResponseJson(
       date: null,
       timePreference: null,
     },
+    safetyAssessment: "safe",
     handoffReason: null,
     summary: null,
     ...overrides,
@@ -588,6 +600,16 @@ async function runSuite(): Promise<void> {
       "H6. finalProvider is jev-deterministic",
       res.telemetry.finalProvider === "jev-deterministic",
     );
+
+    const jevCounters = resolveTurnCounters({
+      deterministicBypass: false,
+      providerName: "openrouter",
+      turnTelemetry: res.telemetry,
+    });
+    check(
+      "H7. JEV serving 1-call invariant: providerAttempts === 1 and modelCallCount === 1 (no double counting to 2)",
+      jevCounters.providerAttempts === 1 && jevCounters.modelCallCount === 1,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -711,6 +733,51 @@ async function runSuite(): Promise<void> {
       "J3. Does not silently convert unknown to 0",
       res.telemetry.totalHttpAttempts !== 0,
     );
+
+    const jCounters = resolveTurnCounters({
+      deterministicBypass: false,
+      providerName: "legacy-provider",
+      turnTelemetry: res.telemetry,
+    });
+    check(
+      "J4. Unknown physical telemetry derives modelCallCount=1 honestly while providerAttempts remains strictly null",
+      jCounters.providerAttempts === null && jCounters.modelCallCount === 1,
+    );
+
+    // Mixed known / unknown fallback
+    const p1Fetch = createScriptedFetch([
+      { kind: "status", status: 500, body: { error: "down" } },
+    ]);
+    const pKnown = createOpenRouterAdapter({
+      model: "openrouter/p1",
+      getEnvVar: () => "k",
+      fetchImpl: p1Fetch.fetchImpl,
+    });
+    const sUnknown: AiProviderAdapter = {
+      providerId: "atria",
+      model: "custom-model",
+      secretRef: "CUSTOM_KEY",
+      async call() {
+        return {
+          ok: true,
+          provider: "atria",
+          model: "custom-model",
+          latencyMs: 15,
+          response: JSON.parse(validAiResponseJson()),
+        };
+      },
+    };
+    const orchMixed = createAiOrchestrator({
+      primary: pKnown,
+      secondary: sUnknown,
+      fallbackEnabled: true,
+    });
+    const resMixed = await orchMixed.callWithFallback(baseRequest);
+    check(
+      "J5. Mixed known and unknown physical attempts aggregates strictly to null (no fabricated total)",
+      resMixed.telemetry.totalHttpAttempts === null &&
+        resMixed.telemetry.fallbackUsed === true,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -814,6 +881,68 @@ async function runSuite(): Promise<void> {
     check(
       "K6. Secondary provider does not claim primary tokens (no misattribution)",
       resFallback.telemetry.attempts[1]?.inputTokens !== 70,
+    );
+
+    // K7: Reported cost parsing validation
+    check(
+      "K7. parseReportedCost parses valid numeric cost and rejects negative/NaN/non-numeric",
+      parseReportedCost({ cost: 0.0025 }) === 0.0025 &&
+        parseReportedCost({ total_cost: 0.015 }) === 0.015 &&
+        parseReportedCost({ cost: -0.5 }) === undefined &&
+        parseReportedCost({ cost: NaN }) === undefined &&
+        parseReportedCost({ cost: Infinity }) === undefined &&
+        parseReportedCost({ cost: "0.05" }) === undefined &&
+        parseReportedCost(undefined) === undefined &&
+        parseReportedCost(null) === undefined,
+    );
+
+    // K8: Cost completeness COMPLETE
+    const costComplete = computeCostAggregation([
+      { costUsd: 0.001 },
+      { costUsd: 0.002 },
+    ]);
+    check(
+      "K8. computeCostAggregation is COMPLETE when all attempts report cost",
+      costComplete.costCompleteness === "COMPLETE" &&
+        costComplete.totalCostUsd === 0.003 &&
+        costComplete.knownCostSubtotalUsd === 0.003,
+    );
+
+    // K9: Cost completeness PARTIAL
+    const costPartial = computeCostAggregation([
+      { costUsd: 0.0015 },
+      { costUsd: undefined },
+    ]);
+    check(
+      "K9. computeCostAggregation is PARTIAL with knownCostSubtotalUsd when some attempts lack cost",
+      costPartial.costCompleteness === "PARTIAL" &&
+        costPartial.totalCostUsd === null &&
+        costPartial.knownCostSubtotalUsd === 0.0015,
+    );
+
+    // K10: Cost completeness UNAVAILABLE
+    const costUnavailable = computeCostAggregation([
+      { costUsd: undefined },
+      { costUsd: undefined },
+    ]);
+    check(
+      "K10. computeCostAggregation is UNAVAILABLE when no attempt has cost",
+      costUnavailable.costCompleteness === "UNAVAILABLE" &&
+        costUnavailable.totalCostUsd === null &&
+        costUnavailable.knownCostSubtotalUsd === null,
+    );
+
+    // K11: Malformed cost rejected in computeCostAggregation
+    const costMalformed = computeCostAggregation([
+      { costUsd: 0.005 },
+      { costUsd: -0.01 as any },
+      { costUsd: NaN as any },
+    ]);
+    check(
+      "K11. Malformed cost values (negative, NaN) are excluded rather than corrupting aggregate",
+      costMalformed.costCompleteness === "PARTIAL" &&
+        costMalformed.totalCostUsd === null &&
+        costMalformed.knownCostSubtotalUsd === 0.005,
     );
   }
 
@@ -931,6 +1060,7 @@ async function runSuite(): Promise<void> {
         kind: "ok",
         body: openAiEnvelope(
           validAiResponseJson({ content: "نحن في خدمتكم من ٩ إلى ٥" }),
+          { prompt_tokens: 30, completion_tokens: 15, cost: 0.0025 } as any,
         ),
       },
     ]);
@@ -1022,6 +1152,169 @@ async function runSuite(): Promise<void> {
           u.provider === "atria" &&
           u.status === "SUCCESS",
       ),
+    );
+    check(
+      "M7. TurnEvidence preserves bounded executionAttempts for all 3 attempts",
+      emittedEvidence[0]?.executionAttempts?.length === 3,
+    );
+    check(
+      "M8. ExecutionAttempts preserves attempt-level provider attribution (primary=openrouter, secondary=atria)",
+      emittedEvidence[0]?.executionAttempts?.[0]?.provider === "openrouter" &&
+        emittedEvidence[0]?.executionAttempts?.[1]?.provider === "openrouter" &&
+        emittedEvidence[0]?.executionAttempts?.[2]?.provider === "atria",
+    );
+    check(
+      "M9. ExecutionAttempts captures per-attempt reported cost on successful attempt",
+      emittedEvidence[0]?.executionAttempts?.[2]?.costUsd === 0.0025 &&
+        emittedEvidence[0]?.executionAttempts?.[2]?.costSource ===
+          "PROVIDER_REPORTED",
+    );
+    check(
+      "M10. TurnEvidence costCompleteness is PARTIAL and knownCostSubtotalUsd is 0.0025",
+      emittedEvidence[0]?.costCompleteness === "PARTIAL" &&
+        emittedEvidence[0]?.knownCostSubtotalUsd === 0.0025 &&
+        emittedEvidence[0]?.totalCostUsd === null,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // N. Mechanical Selection & Positive Control Integration
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group N: Mechanical Selection & Positive Control Integration ---",
+  );
+  {
+    let wireCalls = 0;
+    const testFetch = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({ content: "نعم متوفر لدينا كشف أسنان" }),
+        ),
+      },
+    ]);
+    const monitoredFetch: typeof fetch = async (info, init) => {
+      wireCalls++;
+      return testFetch.fetchImpl(info, init);
+    };
+
+    const primaryAdapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredFetch,
+    });
+    const testAi = createLlmConversationAi({
+      primary: primaryAdapter,
+      fallbackEnabled: false,
+    });
+
+    const emittedEvidence: TurnEvidence[] = [];
+    const harness = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+    });
+    harness.deps.ai = testAi;
+    harness.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidence.push(ev);
+      },
+    };
+
+    // 1. Mechanical Selection: set up an active offer in conversation state for harness.conversation
+    const services = await harness.deps.serviceRepository.listByBusiness(
+      harness.business.id,
+    );
+    const nowMech = new Date();
+    const testOffer = {
+      id: "off-mech-1",
+      token: "off00001",
+      kind: "SLOT" as const,
+      businessId: harness.business.id,
+      conversationId: harness.conversation.id,
+      serviceId: services[0]!.id,
+      serviceName: services[0]!.name,
+      serviceSource: "CUSTOMER" as const,
+      date: "2026-10-25",
+      providerId: null,
+      followUpRequestId: null,
+      shownCount: 1,
+      options: [
+        {
+          index: 1,
+          providerId: "prov-1",
+          displayName: "د. سارة",
+          startAt: "2026-10-25T10:00",
+          endAt: "2026-10-25T10:30",
+        },
+      ],
+      issuedAt: nowMech.toISOString(),
+      expiresAt: new Date(nowMech.getTime() + 3600000).toISOString(),
+      status: "ACTIVE" as const,
+    };
+    const st = {
+      ...emptyConversationState(),
+      offer: testOffer as any,
+    };
+    const persisted = dehydrateConversationState(st);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      persisted,
+    );
+
+    // Customer sends numeric choice "1"
+    const mechRes = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      from: harness.customer.phone,
+      text: "1",
+      receivedAt: nowMech.toISOString(),
+      externalId: "ext-msg-mech-01",
+    });
+
+    check(
+      "N1. Mechanical selection (/start or numeric choice) succeeds",
+      mechRes.ok === true && !mechRes.duplicate,
+    );
+    check(
+      "N2. Mechanical selection dispatched strictly ZERO HTTP requests over wire",
+      wireCalls === 0,
+    );
+    check(
+      "N3. Mechanical selection emitted TurnEvidence with providerAttempts === 0 (not null or 1)",
+      emittedEvidence.length > 0 && emittedEvidence[0]?.providerAttempts === 0,
+    );
+    check(
+      "N4. Mechanical selection TurnEvidence providerStatus is NOT_CALLED",
+      emittedEvidence[0]?.providerStatus === "NOT_CALLED",
+    );
+    check(
+      "N5. Mechanical selection shadow did not run (shadowModelCallCount is null)",
+      emittedEvidence[0]?.shadowModelCallCount === null,
+    );
+
+    // 2. Positive Control: conversational turn that DOES require model request
+    const posRes = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      from: harness.customer.phone,
+      text: "هل عندكم كشف أسنان اليوم؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-positive-ctrl",
+    });
+
+    check(
+      "N6. Positive control conversational turn succeeds",
+      posRes.ok === true && !posRes.duplicate,
+    );
+    check(
+      "N7. Positive control dispatched exactly 1 wire HTTP request (proving harness operates)",
+      wireCalls === 1,
+    );
+    check(
+      "N8. Positive control emitted TurnEvidence with providerAttempts === 1 and SUCCESS",
+      emittedEvidence.length > 1 &&
+        emittedEvidence[1]?.providerAttempts === 1 &&
+        emittedEvidence[1]?.providerStatus === "SUCCESS",
     );
   }
 

@@ -13,6 +13,7 @@ import type {
 } from "@/features/conversations/server/ai-contract";
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 
+import { computeCostAggregation, type CostAggregation } from "./http";
 import type { JevSemanticEvidence } from "./jev-semantic-strategy";
 import type { ShadowJevStrategy } from "./jev-shadow-strategy";
 import {
@@ -85,6 +86,7 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       status: "SUCCESS",
+      ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
       ...(httpAttempts !== undefined ? { httpAttempts } : {}),
     };
   }
@@ -94,6 +96,7 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
     latencyMs: logicalLatency,
     status: "FAILURE",
     errorCode: result.error.code,
+    ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
     ...(result.inputTokens !== undefined
       ? { inputTokens: result.inputTokens }
       : {}),
@@ -119,6 +122,7 @@ function extractAttemptsFrom(result: AiProviderResult): AiRetryAttemptRecord[] {
       model: result.model,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
+      costUsd: result.costUsd,
     },
   ];
 }
@@ -129,6 +133,7 @@ function aggregateExecutionTrace(
 ): {
   retryTrace: AiRetryTrace | undefined;
   totalHttpAttempts: number | null;
+  costAgg: CostAggregation;
 } {
   const firstAttempts = extractAttemptsFrom(first);
   if (!second) {
@@ -138,16 +143,27 @@ function aggregateExecutionTrace(
     const totalHttpAttempts = allKnown
       ? firstAttempts.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
       : null;
+    const costAgg = computeCostAggregation(firstAttempts);
 
     if (first.retryTrace) {
       return {
-        retryTrace: first.retryTrace,
+        retryTrace: {
+          ...first.retryTrace,
+          totalCostUsd: first.retryTrace.totalCostUsd ?? costAgg.totalCostUsd,
+          knownCostSubtotalUsd:
+            first.retryTrace.knownCostSubtotalUsd ??
+            costAgg.knownCostSubtotalUsd,
+          costCompleteness:
+            first.retryTrace.costCompleteness ?? costAgg.costCompleteness,
+        },
         totalHttpAttempts,
+        costAgg,
       };
     }
     return {
       retryTrace: undefined,
       totalHttpAttempts,
+      costAgg,
     };
   }
 
@@ -168,6 +184,8 @@ function aggregateExecutionTrace(
   const totalHttpAttempts = allKnown
     ? combinedAttempts.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
     : null;
+
+  const costAgg = computeCostAggregation(combinedAttempts);
 
   const totalElapsedMs =
     (first.retryTrace?.totalElapsedMs ?? first.latencyMs) +
@@ -197,9 +215,12 @@ function aggregateExecutionTrace(
     finalOutcome: second.ok ? "SUCCESS" : "FAILURE",
     totalElapsedMs,
     ...(totalHttpAttempts !== null ? { totalHttpAttempts } : {}),
+    totalCostUsd: costAgg.totalCostUsd,
+    knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+    costCompleteness: costAgg.costCompleteness,
   };
 
-  return { retryTrace, totalHttpAttempts };
+  return { retryTrace, totalHttpAttempts, costAgg };
 }
 
 export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
@@ -352,8 +373,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     // without double-counting a provider call.
     const conversationControl = first.conversationControl;
     if (first.ok) {
-      const { retryTrace: aggregatedTrace, totalHttpAttempts } =
-        aggregateExecutionTrace(first);
+      const {
+        retryTrace: aggregatedTrace,
+        totalHttpAttempts,
+        costAgg,
+      } = aggregateExecutionTrace(first);
       return {
         response: first.response,
         telemetry: {
@@ -367,6 +391,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
           totalHttpAttempts,
+          totalCostUsd: costAgg.totalCostUsd,
+          knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+          costCompleteness: costAgg.costCompleteness,
         },
       };
     }
@@ -374,8 +401,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     const retryable = isRetryableAiError(first.error.code);
     const canFallback = fallbackEnabled && !!secondary && retryable;
     if (!canFallback) {
-      const { retryTrace: aggregatedTrace, totalHttpAttempts } =
-        aggregateExecutionTrace(first);
+      const {
+        retryTrace: aggregatedTrace,
+        totalHttpAttempts,
+        costAgg,
+      } = aggregateExecutionTrace(first);
       return {
         response: null,
         telemetry: {
@@ -389,6 +419,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
           totalHttpAttempts,
+          totalCostUsd: costAgg.totalCostUsd,
+          knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+          costCompleteness: costAgg.costCompleteness,
         },
         lastErrorCode: first.error.code,
       };
@@ -396,8 +429,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
 
     const second = await secondary!.call(request);
     const secondAttempt = toAttempt(second);
-    const { retryTrace: aggregatedTrace, totalHttpAttempts } =
-      aggregateExecutionTrace(first, second);
+    const {
+      retryTrace: aggregatedTrace,
+      totalHttpAttempts,
+      costAgg,
+    } = aggregateExecutionTrace(first, second);
     if (second.ok) {
       return {
         response: second.response,
@@ -413,6 +449,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
           totalHttpAttempts,
+          totalCostUsd: costAgg.totalCostUsd,
+          knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+          costCompleteness: costAgg.costCompleteness,
         },
       };
     }
@@ -429,6 +468,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         jevDecision,
         shadow: await joinShadow(shadowPromise, shadowMarker),
         totalHttpAttempts,
+        totalCostUsd: costAgg.totalCostUsd,
+        knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+        costCompleteness: costAgg.costCompleteness,
       },
       lastErrorCode: second.error.code,
     };

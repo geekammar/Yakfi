@@ -53,6 +53,7 @@ import type { TaskRelevance } from "@/features/conversations/server/ai-context-b
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 import type {
   TurnContextChannels,
+  TurnExecutionAttempt,
   TurnObservability,
 } from "@/features/conversations/server/ai-observability";
 
@@ -99,6 +100,14 @@ export type TurnEvidence = {
   readonly finalOutcome: string;
   readonly outboundSendAttempted: boolean;
   readonly outboundSendDelivered: boolean | null;
+  /** Bounded per-attempt execution and usage records across retries and fallback. */
+  readonly executionAttempts: readonly TurnExecutionAttempt[] | null;
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  readonly totalCostUsd: number | null;
+  /** Subtotal of known attempt costs in USD. Null if no attempt has cost. */
+  readonly knownCostSubtotalUsd: number | null;
+  /** Cost completeness status across all attempts. */
+  readonly costCompleteness: string | null;
   /**
    * The NON-AUTHORITATIVE shadow JEV evidence (PROMPT-AI-JEV-03D — OPTION E).
    * Present only when a shadow strategy was installed this turn. DISJOINT from
@@ -276,6 +285,10 @@ export function buildTurnEvidence(
     outboundSendAttempted:
       input.delivery !== null && input.delivery !== undefined,
     outboundSendDelivered: input.delivery ? input.delivery.delivered : null,
+    executionAttempts: observability?.executionAttempts ?? null,
+    totalCostUsd: observability?.totalCostUsd ?? null,
+    knownCostSubtotalUsd: observability?.knownCostSubtotalUsd ?? null,
+    costCompleteness: observability?.costCompleteness ?? null,
     // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E). Pure
     // pass-through of the projection
     // (`projectShadowEvidence` → `TurnShadowObservation`); no recomputation,
@@ -335,6 +348,10 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "knowledgeGapCategory",
   "finalOutcome",
   "emittedAt",
+  // CORE-04A: Bounded execution attempt and cost completeness closed keys
+  "status",
+  "costSource",
+  "costCompleteness",
   // PROMPT-AI-JEV-03D — the disjoint shadow slot's CLOSED string keys. Each
   // carries only a bounded machine vocabulary (a result class, a JEV error
   // code, a pinned model id, a script-block language hint, a confidence band,

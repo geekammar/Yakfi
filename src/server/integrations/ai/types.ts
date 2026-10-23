@@ -65,6 +65,7 @@ export type AiProviderSuccess = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   /** How the content JSON was accepted. Absent on failures. */
   parseMode?: AiParseMode;
   /** Sanitized structural trace (shape statistics only; never content). */
@@ -91,6 +92,7 @@ export type AiProviderFailure = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   /** Physical HTTP requests actually dispatched (0 if preflight rejected, 1 if fetch called, undefined if unknown). */
   httpAttempts?: number;
   /**
@@ -120,6 +122,7 @@ export type AiTelemetryAttempt = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   status: "SUCCESS" | "FAILURE";
   errorCode?: AiProviderErrorCode;
   httpAttempts?: number;
@@ -145,6 +148,7 @@ export type AiRetryAttemptRecord = {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
 };
 
 /**
@@ -180,6 +184,12 @@ export type AiRetryTrace = {
   totalElapsedMs: number;
   /** Total physical HTTP requests actually dispatched across all attempts. Undefined if any attempt is unknown. */
   totalHttpAttempts?: number;
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD (even if other attempts have unavailable cost). Null if no attempt has cost. */
+  knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 };
 
 export type AiTelemetry = {
@@ -241,4 +251,10 @@ export type AiTelemetry = {
    * Never fabricated as 1 or 0 when unknown.
    */
   readonly totalHttpAttempts?: number | null;
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  readonly totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD (even if other attempts have unavailable cost). Null if no attempt has cost. */
+  readonly knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  readonly costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 };

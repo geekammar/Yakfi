@@ -306,6 +306,26 @@ export type TurnObservability = {
   readonly inputTokens?: number;
   /** See {@link TurnObservability.inputTokens} — the output-token counterpart. */
   readonly outputTokens?: number;
+  /** Bounded per-attempt execution and usage records across retries and fallback. */
+  readonly executionAttempts?: readonly TurnExecutionAttempt[];
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  readonly totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD (even if other attempts have unavailable cost). Null if no attempt has cost. */
+  readonly knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  readonly costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+};
+
+export type TurnExecutionAttempt = {
+  readonly attempt: number;
+  readonly provider: string;
+  readonly model?: string;
+  readonly status: "SUCCESS" | "FAILURE";
+  readonly httpAttempts?: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly costUsd?: number;
+  readonly costSource?: "PROVIDER_REPORTED";
 };
 
 export type BuildTurnObservabilityInput = {
@@ -386,6 +406,14 @@ export type BuildTurnObservabilityInput = {
   modelCallCount?: number | null;
   /** Clarification anti-repeat / resume state (PROMPT-AI-JEV-03B §12). */
   clarifyAntiRepeat?: boolean | null;
+  /** Bounded per-attempt execution and usage records across retries and fallback. */
+  executionAttempts?: readonly TurnExecutionAttempt[] | null;
+  /** Total provider-reported cost in USD if all attempts have known cost. */
+  totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD. */
+  knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE" | null;
 };
 
 /**
@@ -477,5 +505,17 @@ export function buildTurnObservability(
       ? { modelCallCount: input.modelCallCount }
       : {}),
     ...(input.clarifyAntiRepeat ? { clarifyAntiRepeat: true } : {}),
+    ...(input.executionAttempts && input.executionAttempts.length > 0
+      ? { executionAttempts: [...input.executionAttempts] }
+      : {}),
+    ...(input.totalCostUsd !== undefined
+      ? { totalCostUsd: input.totalCostUsd }
+      : {}),
+    ...(input.knownCostSubtotalUsd !== undefined
+      ? { knownCostSubtotalUsd: input.knownCostSubtotalUsd }
+      : {}),
+    ...(input.costCompleteness !== undefined && input.costCompleteness !== null
+      ? { costCompleteness: input.costCompleteness }
+      : {}),
   };
 }

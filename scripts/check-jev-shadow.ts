@@ -140,6 +140,7 @@ async function main(): Promise<void> {
     action: "reply",
     content: "نفتح من 9 حتى 6 يومياً.",
     extraction: emptyExtraction,
+    safetyAssessment: "safe",
     handoffReason: null,
     summary: null,
   });
@@ -540,6 +541,7 @@ async function main(): Promise<void> {
           provider: "openrouter",
           model: "openrouter/test-model",
           latencyMs: 2,
+          httpAttempts: 1,
         } as AiProviderResult;
       },
     };
@@ -1035,17 +1037,18 @@ async function main(): Promise<void> {
       "utf8",
     );
     check(
-      "S17b the engine still counts modelCallCount from jevDecision.semantic + attempts ONLY",
+      "S17b the engine resolves modelCallCount from serving activity without double-counting JEV",
       engineSrc.includes(
         "const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;",
       ) === true &&
+        engineSrc.includes("resolveTurnCounters") === true &&
         engineSrc.includes(
-          "const modelCallCount = providerAttempts + (jevCallSpent ? 1 : 0);",
+          "const { providerAttempts, modelCallCount } = resolveTurnCounters",
         ) === true,
     );
     check(
       "S17c the engine's serving computation never references the shadow slot",
-      /const modelCallCount[^;]*;/.exec(engineSrc)?.[0].includes("shadow") ===
+      /resolveTurnCounters[^;]*;/.exec(engineSrc)?.[0]?.includes("shadow") ===
         false && /modelCallCount\s*=[^;]*shadow/.test(engineSrc) === false,
     );
   }
@@ -1669,6 +1672,7 @@ async function main(): Promise<void> {
           };
 
     const deps: ConversationEngineDeps = {
+      requiredSemanticCapability: null,
       businessRepository: {
         findByWhatsappNumber: async (number: string) =>
           number === NUMBER ? business : null,

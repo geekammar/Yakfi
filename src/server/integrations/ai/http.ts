@@ -102,6 +102,21 @@ function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
   };
 }
 
+export function parseReportedCost(usage: unknown): number | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const u = usage as Record<string, unknown>;
+  const raw = u.cost ?? u.total_cost;
+  if (
+    typeof raw === "number" &&
+    Number.isFinite(raw) &&
+    !Number.isNaN(raw) &&
+    raw >= 0
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
 export async function callOpenAiCompatible(
   params: CallOpenAiCompatibleParams,
 ): Promise<AiProviderResult> {
@@ -230,6 +245,7 @@ export async function callOpenAiCompatible(
     j?.usage?.prompt_tokens ?? j?.usage?.input_tokens ?? undefined;
   const outputTokens =
     j?.usage?.completion_tokens ?? j?.usage?.output_tokens ?? undefined;
+  const costUsd = parseReportedCost(j?.usage);
 
   if (!httpResponse.ok) {
     const mapped = mapHttpStatusToError(httpResponse.status, json);
@@ -241,6 +257,7 @@ export async function callOpenAiCompatible(
       httpAttempts: 1,
       inputTokens,
       outputTokens,
+      costUsd,
       error: mapped,
     };
   }
@@ -255,6 +272,7 @@ export async function callOpenAiCompatible(
       httpAttempts: 1,
       inputTokens,
       outputTokens,
+      costUsd,
       error: {
         code: "INVALID_RESPONSE",
         message: "empty content from provider",
@@ -292,6 +310,7 @@ export async function callOpenAiCompatible(
       httpAttempts: 1,
       inputTokens,
       outputTokens,
+      costUsd,
       error: {
         code: "INVALID_RESPONSE",
         message,
@@ -312,6 +331,7 @@ export async function callOpenAiCompatible(
     response: normalized.value,
     inputTokens,
     outputTokens,
+    costUsd,
     parseMode,
     normalizerTrace: normalized.trace,
   };
@@ -320,4 +340,54 @@ export async function callOpenAiCompatible(
 export function isRetryableResult(result: AiProviderResult): boolean {
   if (result.ok) return false;
   return isRetryableAiError(result.error.code);
+}
+
+export type CostAggregation = {
+  totalCostUsd: number | null;
+  knownCostSubtotalUsd: number | null;
+  costCompleteness: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+};
+
+export function computeCostAggregation(
+  attempts: Array<{ costUsd?: number | null }>,
+): CostAggregation {
+  if (attempts.length === 0) {
+    return {
+      totalCostUsd: null,
+      knownCostSubtotalUsd: null,
+      costCompleteness: "UNAVAILABLE",
+    };
+  }
+  let knownCount = 0;
+  let subtotal = 0;
+  for (const a of attempts) {
+    if (
+      typeof a.costUsd === "number" &&
+      Number.isFinite(a.costUsd) &&
+      !Number.isNaN(a.costUsd) &&
+      a.costUsd >= 0
+    ) {
+      knownCount += 1;
+      subtotal += a.costUsd;
+    }
+  }
+  if (knownCount === attempts.length) {
+    return {
+      totalCostUsd: subtotal,
+      knownCostSubtotalUsd: subtotal,
+      costCompleteness: "COMPLETE",
+    };
+  }
+  if (knownCount > 0) {
+    return {
+      totalCostUsd: null,
+      knownCostSubtotalUsd: subtotal,
+      costCompleteness: "PARTIAL",
+    };
+  }
+  return {
+    totalCostUsd: null,
+    knownCostSubtotalUsd: null,
+    costCompleteness: "UNAVAILABLE",
+  };
 }

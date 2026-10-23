@@ -157,6 +157,32 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
           },
         ]
       : []),
+    ...(record.totalCostUsd !== null && record.totalCostUsd !== undefined
+      ? [
+          {
+            key: "flowpilot.total_cost_usd",
+            value: { doubleValue: record.totalCostUsd },
+          },
+        ]
+      : []),
+    ...(record.knownCostSubtotalUsd !== null &&
+    record.knownCostSubtotalUsd !== undefined
+      ? [
+          {
+            key: "flowpilot.known_cost_subtotal_usd",
+            value: { doubleValue: record.knownCostSubtotalUsd },
+          },
+        ]
+      : []),
+    ...(record.costCompleteness !== null &&
+    record.costCompleteness !== undefined
+      ? [
+          {
+            key: "flowpilot.cost_completeness",
+            value: { stringValue: record.costCompleteness },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.parse_success",
       value: { boolValue: record.parseSuccess ?? false },

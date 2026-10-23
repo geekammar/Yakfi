@@ -32,6 +32,7 @@
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
 import { classifyCustomerMessage } from "@/features/conversations/server/conversation-ai";
 
+import { computeCostAggregation } from "../http";
 import type {
   AiProviderAdapter,
   AiProviderErrorCode,
@@ -152,6 +153,7 @@ export function createConversationControl(
         model: result.model,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
+        costUsd: result.costUsd,
       });
 
       if (result.ok) break;
@@ -206,6 +208,7 @@ export function createConversationControl(
     const totalHttpAttempts = allKnown
       ? attemptRecords.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
       : undefined;
+    const costAgg = computeCostAggregation(attemptRecords);
 
     const trace: AiRetryTrace = {
       provider: provider.providerId,
@@ -219,6 +222,9 @@ export function createConversationControl(
       finalOutcome: last.ok ? "SUCCESS" : "FAILURE",
       totalElapsedMs: getNow() - started,
       totalHttpAttempts,
+      totalCostUsd: costAgg.totalCostUsd,
+      knownCostSubtotalUsd: costAgg.knownCostSubtotalUsd,
+      costCompleteness: costAgg.costCompleteness,
     };
 
     return { result: last, trace, skipped: skipReason, retriesStarted };
@@ -251,6 +257,9 @@ export function createConversationControl(
         retryTimeoutMs: 0,
         finalOutcome: "FAILURE",
         totalElapsedMs: 0,
+        totalCostUsd: null,
+        knownCostSubtotalUsd: null,
+        costCompleteness: "UNAVAILABLE",
       };
       return {
         result: {
