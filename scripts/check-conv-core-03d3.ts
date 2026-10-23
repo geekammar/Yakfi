@@ -6,7 +6,7 @@ import {
   createPlaygroundHarness,
 } from "../src/features/conversations/playground/harness";
 import { type AiResponse } from "../src/features/conversations/server/ai-contract";
-import { offerCallbackData } from "../src/features/conversations/server/booking-offer";
+import { offerCallbackData } from "../src/features/conversations/server/channel-choice";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
   dehydrateConversationState,

@@ -360,21 +360,3 @@ export function buildSlotOffer(
   const parsed = slotOfferSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
-
-// ─── Offer-bound Telegram callbacks & presentation re-exports ───────────────
-// Telegram presentation boundary owns callback formatting and inline keyboards.
-// Re-exported here for compatibility with existing tests.
-
-export {
-  offerCallbackData,
-  parseOfferCallback,
-  welcomeOfferKeyboard,
-  serviceOfferKeyboard,
-  serviceDetailKeyboard,
-  dateOfferKeyboard,
-  providerOfferKeyboard,
-  slotOfferKeyboard,
-  type OfferCallback,
-  type TelegramInlineKeyboardButton,
-  type TelegramInlineKeyboardMarkup,
-} from "@/server/integrations/telegram/telegram-presentation";

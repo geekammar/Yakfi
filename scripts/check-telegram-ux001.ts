@@ -104,14 +104,11 @@ async function main(): Promise<void> {
 
   const engine =
     await import("@/features/conversations/server/conversation-engine");
-  const {
-    buildWelcomeOffer,
-    buildServiceOffer,
-    buildProviderOffer,
-    offerCallbackData,
-    providerOfferKeyboard,
-  } = await import("@/features/conversations/server/booking-offer");
-  const { renderTelegramInlineKeyboard } =
+  const { buildWelcomeOffer, buildServiceOffer, buildProviderOffer } =
+    await import("@/features/conversations/server/booking-offer");
+  const { offerCallbackData } =
+    await import("@/features/conversations/server/channel-choice");
+  const { providerOfferKeyboard, renderTelegramInlineKeyboard } =
     await import("@/server/integrations/telegram/telegram-presentation");
   const {
     withPresentedOffer,

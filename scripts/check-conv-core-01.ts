@@ -118,8 +118,10 @@ async function main(): Promise<void> {
   process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
 
-  const { buildSlotOffer, isOfferLive, offerCallbackData } =
+  const { buildSlotOffer, isOfferLive } =
     await import("../src/features/conversations/server/booking-offer");
+  const { offerCallbackData } =
+    await import("../src/features/conversations/server/channel-choice");
   const { interpretOfferReply } =
     await import("../src/features/conversations/server/booking-selection");
   const {

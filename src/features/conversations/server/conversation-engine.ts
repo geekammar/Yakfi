@@ -1662,11 +1662,8 @@ async function promptProviderClarificationReply(
     input.reason === "ambiguous"
       ? "هناك أكثر من مزود يطابق طلبك — يرجى تحديد المزود بدقة."
       : "المزود المطلوب غير متاح لهذه الخدمة — يرجى اختيار مزود آخر أو اختيار أي مزود متاح.";
-  const isTelegram =
-    scope.customer.phone.startsWith("tg:") ||
-    deps.transport.providerName === "telegram";
   let providerOffer: ProviderOffer | null = null;
-  if (isTelegram && turnSession.enabled && input.eligibleProviders.length > 0) {
+  if (turnSession.enabled && input.eligibleProviders.length > 0) {
     const eligibleProviders: Array<{
       providerId: string | null;
       name: string;
@@ -5715,9 +5712,6 @@ async function runInboundTurn(
           mapped.message,
           "AI_ACTIVE",
         );
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
         let serviceOffer: ServiceOffer | null = null;
         let dateOffer: DateOffer | null = null;
         if (
@@ -5752,7 +5746,6 @@ async function runInboundTurn(
             }
           }
         } else if (
-          isTelegram &&
           turnSession.enabled &&
           mapped.reason === "MISSING_DATE" &&
           turnSession.state?.offer?.status !== "INVALIDATED"

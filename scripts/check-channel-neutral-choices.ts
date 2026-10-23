@@ -2,6 +2,7 @@
 import "./setup-test-env";
 
 import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
+import { buildAiContext } from "../src/features/conversations/server/ai-context-builder/context-builder";
 import type { AiResponse } from "../src/features/conversations/server/ai-contract";
 import type {
   DateOffer,
@@ -11,15 +12,16 @@ import type {
   SlotOffer,
   WelcomeOffer,
 } from "../src/features/conversations/server/booking-offer";
-import { buildChannelChoices } from "../src/features/conversations/server/channel-choice";
+import {
+  buildChannelChoices,
+  offerCallbackData,
+  parseOfferCallback,
+} from "../src/features/conversations/server/channel-choice";
 import {
   detectTurnControlSignals,
   resolveTurnControlSignals,
 } from "../src/features/conversations/server/conversation-ai";
-import {
-  parseOfferCallback,
-  renderTelegramInlineKeyboard,
-} from "../src/server/integrations/telegram/telegram-presentation";
+import { createTelegramMessageTransport } from "../src/server/integrations/telegram/telegram-transport";
 
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
@@ -205,78 +207,355 @@ async function run(): Promise<void> {
       slotChoices.groups[1]?.[1]?.id === "date",
   );
 
-  // ── Area 2: Telegram Presentation Boundary ──────────────────────────────────
+  // ── Area 2: Reusable Token Codec ────────────────────────────────────────────
   console.log(
-    "\nArea 2: Telegram presentation boundary rendering & callback encoding",
+    "\nArea 2: Reusable offer-bound token codec in channel-choice boundary",
   );
 
-  const kb = renderTelegramInlineKeyboard(slotChoices);
+  const formattedToken = offerCallbackData(slotOffer, 1);
   check(
-    "2.1 Telegram presentation boundary renders valid InlineKeyboardMarkup",
-    Array.isArray(kb.inline_keyboard) && kb.inline_keyboard.length === 2,
-  );
-
-  const firstButton = kb.inline_keyboard[0]?.[0];
-  if (!firstButton) throw new Error("firstButton missing");
-
-  check(
-    "2.2 Telegram button uses compact token format fp:<token>:<action>",
-    firstButton.text.includes("10:00") &&
-      firstButton.callback_data === "fp:toktest12:1",
+    "2.1 offerCallbackData formats compact fp:<token>:<action> token",
+    formattedToken === "fp:toktest12:1",
   );
 
   check(
-    "2.3 Telegram callback_data length conforms to Telegram <= 64 byte limit",
-    Buffer.byteLength(firstButton.callback_data, "utf8") <= 64,
+    "2.2 formatted token adheres to <= 64 bytes limit",
+    Buffer.byteLength(formattedToken, "utf8") <= 64,
   );
 
-  const parsed = parseOfferCallback(firstButton.callback_data);
+  const parsed = parseOfferCallback(formattedToken);
   check(
-    "2.4 parseOfferCallback correctly parses valid index callback_data",
+    "2.3 parseOfferCallback parses index action correctly",
     parsed !== null &&
       parsed.token === "toktest12" &&
       parsed.action.kind === "index" &&
       parsed.action.index === 1,
   );
 
-  const navButton = kb.inline_keyboard[1]?.[0];
-  if (!navButton) throw new Error("navButton missing");
-
-  const parsedNav = parseOfferCallback(navButton.callback_data);
+  const actionToken = offerCallbackData(welcomeOffer, "book");
+  const parsedAction = parseOfferCallback(actionToken);
   check(
-    "2.5 parseOfferCallback correctly parses action callback_data (more)",
-    parsedNav !== null &&
-      parsedNav.token === "toktest12" &&
-      parsedNav.action.kind === "more",
+    "2.4 parseOfferCallback parses action name correctly",
+    parsedAction !== null &&
+      parsedAction.token === "toktest12" &&
+      parsedAction.action.kind === "action" &&
+      parsedAction.action.name === "book",
   );
 
-  const parsedInvalid = parseOfferCallback("invalid:data:format");
   check(
-    "2.6 parseOfferCallback rejects invalid non-flowpilot callback",
-    parsedInvalid === null,
+    "2.5 parseOfferCallback rejects invalid tokens",
+    parseOfferCallback("invalid") === null,
+  );
+  check(
+    "2.6 parseOfferCallback rejects empty token",
+    parseOfferCallback("fp::1") === null,
   );
 
-  const parsedEmpty = parseOfferCallback("fp::1");
-  check("2.7 parseOfferCallback rejects empty token", parsedEmpty === null);
-
-  // ── Area 3: Semantic Intent Ownership (Removing Lexical Hijacking) ────────────
+  // ── Area 3: Real Telegram Transport Boundary Execution ──────────────────────
   console.log(
-    "\nArea 3: Semantic intent ownership & resolution in structured turns",
+    "\nArea 3: createTelegramMessageTransport edge rendering & delivery",
   );
 
-  const lexicalSignalsWithDoctor = detectTurnControlSignals(
-    "ممكن اتكلم مع الدكتور حسام لو سمحت",
+  const capturedSends: Array<{ url: string; body: any }> = [];
+  const resolver = {
+    resolve: async (ref: string) => {
+      if (ref === "fp:cred_tg_1") {
+        return { ok: true, value: "bot123456:secret-token" };
+      }
+      return {
+        ok: false,
+        error: {
+          code: "UNAUTHORIZED_CREDENTIALS",
+          message: "invalid credentials",
+        },
+      } as any;
+    },
+  };
+
+  const realTransport = createTelegramMessageTransport({
+    api: {
+      fetchImpl: async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        const body = init?.body ? JSON.parse(init.body as string) : {};
+        capturedSends.push({ url: urlStr, body });
+        return new Response(
+          JSON.stringify({ ok: true, result: { message_id: 12345 } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+      apiHost: "https://api.telegram.org",
+      credentialsResolver: resolver as any,
+    },
+    connectionRepository: {
+      findByIdWithinBusiness: async (id: string, bizId: string) => {
+        if (id !== "conn_biz1" || bizId !== "biz_1") return null;
+        return {
+          id: "conn_biz1",
+          businessId: "biz_1",
+          branchId: null,
+          isActive: true,
+          status: "CONNECTED",
+          credentialsRef: "fp:cred_tg_1",
+        } as any;
+      },
+    },
+    credentialsResolver: resolver as any,
+  });
+
+  const sendResult = await realTransport.send({
+    to: "987654321",
+    content: "اختر خدمة مناسبة:",
+    businessId: "biz_1",
+    businessName: "عيادة الشفاء",
+    conversationId: "conv_1",
+    connectionId: "conn_biz1",
+    choices: serviceChoices,
+  });
+
+  check(
+    "3.1 Real Telegram transport accepts neutral choices and delivers successfully",
+    sendResult.delivered === true && capturedSends.length === 1,
+  );
+
+  const sentPayload = capturedSends[0]?.body;
+  check(
+    "3.2 Real Telegram transport renders reply_markup.inline_keyboard correctly",
+    sentPayload != null &&
+      Array.isArray(sentPayload.reply_markup?.inline_keyboard) &&
+      sentPayload.reply_markup.inline_keyboard.length === 2 &&
+      sentPayload.reply_markup.inline_keyboard[0][0].callback_data ===
+        "fp:toktest12:1",
+  );
+
+  // Cross-tenant send refusal
+  const foreignSendResult = await realTransport.send({
+    to: "987654321",
+    content: "مرحبا",
+    businessId: "biz_FOREIGN",
+    businessName: "عيادة أخرى",
+    conversationId: "conv_1",
+    connectionId: "conn_biz1",
+  });
+  check(
+    "3.3 Cross-tenant connection access is refused by transport boundary",
+    foreignSendResult.delivered === false &&
+      foreignSendResult.errorCode === "INVALID_CONNECTION",
+  );
+
+  // ── Area 4: Structured Context Assembly & Ownership ─────────────────────────
+  console.log(
+    "\nArea 4: Structured context assembly, cold-start & disclosure bounds",
+  );
+
+  const sampleServices = [
+    {
+      id: "srv_1",
+      businessId: "biz_1",
+      name: "كشف عام",
+      description: "فحص طبي شامل مع قياس الضغط",
+      priceType: "FIXED",
+      priceAmount: 300,
+      priceMaxAmount: null,
+      priceCurrency: "EGP",
+      priceNote: null,
+      isActive: true,
+    },
+    {
+      id: "srv_2",
+      businessId: "biz_1",
+      name: "استشارة",
+      description: "متابعة طبية سريعة",
+      priceType: "FIXED",
+      priceAmount: 150,
+      priceMaxAmount: null,
+      priceCurrency: "EGP",
+      priceNote: null,
+      isActive: true,
+    },
+    {
+      id: "srv_foreign",
+      businessId: "biz_OTHER",
+      name: "خدمة منشأة أخرى",
+      description: "بيانات مسربة",
+      priceType: "FIXED",
+      priceAmount: 1000,
+      priceMaxAmount: null,
+      priceCurrency: "EGP",
+      priceNote: null,
+      isActive: true,
+    },
+  ];
+
+  const sampleBusiness = {
+    id: "biz_1",
+    businessId: "biz_1",
+    name: "عيادة الشفاء التخصصية",
+    about: "عيادة رائدة لطب الأسرة والجلدية في القاهرة",
+    address: "15 شارع النصر، المعادي",
+    timezone: "Africa/Cairo",
+    faqs: [{ question: "مواعيد العمل؟", answer: "من 9 صباحاً حتى 9 مساءً" }],
+  };
+
+  // 4.1 Cold-start with NO recognized booking/price/identity keywords
+  // Utterance: "ممكن تساعدني؟" (Could you help me?)
+  const coldStartBuilt = buildAiContext({
+    scope: { businessId: "biz_1" },
+    sources: {
+      business: sampleBusiness as any,
+      services: sampleServices as any,
+      conversation: {
+        id: "conv_cold",
+        status: "AI_ACTIVE",
+        recentMessages: [],
+      },
+      message: "ممكن تساعدني؟",
+      now: new Date("2026-10-23T12:00:00Z"),
+      requiredSemanticCapability: "structured_turn",
+    },
+  });
+
+  check(
+    "4.1 Structured cold-start provides bounded catalog and business info without keywords",
+    coldStartBuilt.request.businessName === "عيادة الشفاء التخصصية" &&
+      coldStartBuilt.request.businessAddress === "15 شارع النصر، المعادي" &&
+      coldStartBuilt.request.businessAbout ===
+        "عيادة رائدة لطب الأسرة والجلدية في القاهرة" &&
+      coldStartBuilt.request.services.length === 2 &&
+      coldStartBuilt.request.services[0]?.price === "300 جنيه",
+  );
+
+  // Check disclosure ledger allows backed replies on structured turn
+  const catalogRecord = coldStartBuilt.facts.find(
+    (f) => f.key === "service.name",
+  );
+  const addressRecord = coldStartBuilt.facts.find(
+    (f) => f.key === "business.address",
+  );
+  const priceRecord = coldStartBuilt.facts.find(
+    (f) => f.key === "service.price",
   );
   check(
-    "3.1 Lexical detector historically triggers explicitHuman on doctor mention with request cue",
-    lexicalSignalsWithDoctor.explicitHuman === true,
+    "4.2 Structured cold-start ledger marks authorized business facts disclosable",
+    catalogRecord?.disclosable === true &&
+      addressRecord?.disclosable === true &&
+      priceRecord?.disclosable === true,
   );
 
-  // Structured semantic decision correctly interprets this as BOOKING
-  const structuredBookingDecision: AiResponse = {
+  // Contrast with legacy path: where cold start without keywords has address and catalog excluded
+  const legacyColdStart = buildAiContext({
+    scope: { businessId: "biz_1" },
+    sources: {
+      business: sampleBusiness as any,
+      services: sampleServices as any,
+      conversation: {
+        id: "conv_cold",
+        status: "AI_ACTIVE",
+        recentMessages: [],
+      },
+      message: "ممكن تساعدني؟",
+      now: new Date("2026-10-23T12:00:00Z"),
+      // No requiredSemanticCapability
+    },
+  });
+  check(
+    "4.3 Legacy path without capability remains keyword-gated (address excluded)",
+    legacyColdStart.request.businessAddress === undefined,
+  );
+
+  // 4.4 Active booking followed by location question
+  const activeBookingWithLocation = buildAiContext({
+    scope: { businessId: "biz_1" },
+    sources: {
+      business: sampleBusiness as any,
+      services: sampleServices as any,
+      conversation: {
+        id: "conv_booking",
+        status: "AI_ACTIVE",
+        recentMessages: [],
+      },
+      conversationState: {
+        activeTask: { kind: "BOOKING", stage: "DATE" },
+        knownFacts: { service: "كشف عام" },
+        offer: null,
+      } as any,
+      conversationStateEnvelope: {
+        businessId: "biz_1",
+        conversationId: "conv_booking",
+      },
+      message: "مكانكم فين بالضبط؟",
+      now: new Date("2026-10-23T12:00:00Z"),
+      requiredSemanticCapability: "structured_turn",
+    },
+  });
+  check(
+    "4.4 Active booking followed by location question preserves both booking state & address",
+    activeBookingWithLocation.request.businessAddress ===
+      "15 شارع النصر، المعادي" &&
+      activeBookingWithLocation.request.conversationContext?.activeTask
+        ?.kind === "BOOKING" &&
+      activeBookingWithLocation.request.conversationContext?.knownService ===
+        "كشف عام",
+  );
+
+  // 4.5 Cross-tenant services strictly excluded
+  const foreignServiceInRequest = coldStartBuilt.request.services.some(
+    (s) => s.name === "خدمة منشأة أخرى",
+  );
+  const foreignServiceRecord = coldStartBuilt.facts.find((f) =>
+    f.key.includes("خدمة منشأة أخرى"),
+  );
+  check(
+    "4.5 Cross-tenant service excluded with UNPROVEN_TENANT",
+    foreignServiceInRequest === false &&
+      foreignServiceRecord?.included === false &&
+      foreignServiceRecord?.exclusionReason === "UNPROVEN_TENANT",
+  );
+
+  // 4.6 Missing data remains missing (never invented)
+  const businessWithoutAddress = {
+    ...sampleBusiness,
+    address: null,
+  };
+  const missingAddressBuilt = buildAiContext({
+    scope: { businessId: "biz_1" },
+    sources: {
+      business: businessWithoutAddress as any,
+      services: sampleServices as any,
+      conversation: {
+        id: "conv_cold",
+        status: "AI_ACTIVE",
+        recentMessages: [],
+      },
+      message: "عنوانكم ايه؟",
+      now: new Date("2026-10-23T12:00:00Z"),
+      requiredSemanticCapability: "structured_turn",
+    },
+  });
+  check(
+    "4.6 Missing business address is omitted from request (not invented)",
+    missingAddressBuilt.request.businessAddress === undefined,
+  );
+
+  // ── Area 5: Semantic Intent Ownership (Exact-Message Counterexamples) ────────
+  console.log(
+    "\nArea 5: Semantic intent ownership & resolution in structured turns",
+  );
+
+  // Exact same test message: "ممكن اتكلم مع الدكتور حسام لو سمحت"
+  const doctorUtterance = "ممكن اتكلم مع الدكتور حسام لو سمحت";
+
+  // 5.1 Historical lexical detection flags explicitHuman because of doctor title + request cue
+  const lexicalDoctorResult = detectTurnControlSignals(doctorUtterance);
+  check(
+    "5.1 Lexical detector historically flags explicitHuman on doctor + request cue",
+    lexicalDoctorResult.explicitHuman === true,
+  );
+
+  // 5.2 Structured semantic decision on the EXACT SAME utterance
+  const structuredDoctorBooking: AiResponse = {
     intent: "BOOKING",
     action: "reply",
-    content: "تمام، هحجزلك مع دكتور حسام بكرة.",
+    content: "تمام يا فندم، هساعدك تحجز استشارة مع دكتور حسام.",
     safetyAssessment: "safe",
     extraction: {
       service: null,
@@ -295,24 +574,25 @@ async function run(): Promise<void> {
     ],
   };
 
-  const resolvedControl = resolveTurnControlSignals({
-    currentMessage: "عايز احجز مع دكتور حسام بكرة",
+  const resolvedDoctorBooking = resolveTurnControlSignals({
+    currentMessage: doctorUtterance,
     routing: "LLM",
-    decision: structuredBookingDecision,
+    decision: structuredDoctorBooking,
     isStructuredSemanticTurn: true,
   });
 
   check(
-    "3.2 Structured semantic turn overrides lexical explicitHuman for booking intent",
-    resolvedControl.explicitHuman === false &&
-      resolvedControl.nonCommittal === false,
+    "5.2 Structured decision overrides lexical detection: BOOKING intent stays AI_ACTIVE",
+    resolvedDoctorBooking.explicitHuman === false &&
+      resolvedDoctorBooking.nonCommittal === false,
   );
 
-  // Explicit human request from customer
+  // 5.3 Genuine human request
+  const genuineHumanText = "محتاج اكلم شخص بشري ضروري لو سمحت";
   const structuredHumanDecision: AiResponse = {
     intent: "HUMAN_REQUEST",
     action: "handoff",
-    content: "سأقوم بتحويلك لأحد ممثلي الخدمة.",
+    content: "سأقوم بتحويلك لأحد ممثلي الخدمة لمساعدتك.",
     safetyAssessment: "safe",
     extraction: {
       service: null,
@@ -321,7 +601,7 @@ async function run(): Promise<void> {
       timePreference: null,
     },
     handoffReason: "HUMAN_REQUEST",
-    summary: "Customer requested human staff",
+    summary: "Customer requested human representative",
     goals: [
       {
         kind: "HANDOFF",
@@ -332,22 +612,22 @@ async function run(): Promise<void> {
   };
 
   const resolvedHumanControl = resolveTurnControlSignals({
-    currentMessage: "محتاج اكلم شخص حقيقي لو سمحت",
+    currentMessage: genuineHumanText,
     routing: "LLM",
     decision: structuredHumanDecision,
     isStructuredSemanticTurn: true,
   });
 
   check(
-    "3.3 Structured turn honors explicit human request when semantic decision dictates",
+    "5.3 Structured turn honors explicit customer human request when semantic decision dictates",
     resolvedHumanControl.explicitHuman === true,
   );
 
-  // Harmless wording with historical keywords ("أي وقت يناسبكم مش مشكلة")
-  const structuredAnyTimeDecision: AiResponse = {
+  // 5.4 Contradictory output: safe assessment but sensitive handoffReason
+  const contradictoryDecision: AiResponse = {
     intent: "BOOKING",
-    action: "reply",
-    content: "تم اختيار أقرب موعد متاح.",
+    action: "handoff",
+    content: "تحويل لطبيب الطوارئ",
     safetyAssessment: "safe",
     extraction: {
       service: null,
@@ -355,27 +635,24 @@ async function run(): Promise<void> {
       date: null,
       timePreference: null,
     },
-    handoffReason: null,
-    summary: null,
+    handoffReason: "SENSITIVE",
+    summary: "Customer mentioned acute chest pain",
   };
 
-  const resolvedAnyTimeControl = resolveTurnControlSignals({
-    currentMessage: "أي وقت يناسبكم مش مشكلة",
+  const resolvedContradiction = resolveTurnControlSignals({
+    currentMessage: "عندي وجع شديد في صدري وعايز ميعاد",
     routing: "LLM",
-    decision: structuredAnyTimeDecision,
+    decision: contradictoryDecision,
     isStructuredSemanticTurn: true,
   });
 
   check(
-    "3.4 Harmless wording with historical trigger words stays AI_ACTIVE without false handoff",
-    resolvedAnyTimeControl.explicitHuman === false &&
-      resolvedAnyTimeControl.nonCommittal === false,
+    "5.4 Contradictory output fails safe: sensitive handoffReason forces sensitive escalation",
+    resolvedContradiction.sensitive === true,
   );
 
-  // ── Area 4: Mechanical zero-model execution ──────────────────────────────────
-  console.log(
-    "\nArea 4: End-to-end mechanical selection zero-model verification",
-  );
+  // ── Area 6: Mechanical Execution & Regressions ───────────────────────────────
+  console.log("\nArea 6: Mechanical zero-model execution & regressions");
 
   const { receiveInboundMessage } =
     await import("../src/features/conversations/server/conversation-engine");
@@ -384,7 +661,6 @@ async function run(): Promise<void> {
     channel: "TELEGRAM",
   });
 
-  // Track AI calls through the harness's ai dependency
   let aiCalls = 0;
   const originalAiRespond = harness.deps.ai.respond.bind(harness.deps.ai);
   harness.deps.ai.respond = async (req: any) => {
@@ -392,7 +668,7 @@ async function run(): Promise<void> {
     return originalAiRespond(req);
   };
 
-  // 4.1 /start command triggers welcome offer with 0 AI calls
+  // 6.1 /start command triggers welcome offer with 0 AI calls
   const startResult = await receiveInboundMessage(
     harness.deps as any,
     {
@@ -413,33 +689,16 @@ async function run(): Promise<void> {
   if (!firstOutbound) throw new Error("firstOutbound missing");
 
   check(
-    "4.1 /start renders choices and executes 0 AI calls",
+    "6.1 /start renders choices and executes 0 AI calls",
     aiCalls === 0 &&
       startResult.ok === true &&
       harness.deliveredOutbound.length > 0 &&
       firstOutbound.choices !== null,
   );
 
-  // Check choices format in delivered outbound
-  const outChoices = firstOutbound.choices;
-  check(
-    "4.2 Delivered outbound carries neutral ChannelChoicePresentation",
-    outChoices !== null &&
-      outChoices.offerKind === "WELCOME" &&
-      Array.isArray(outChoices.groups),
-  );
-
-  // Check Telegram replyMarkup was produced at transport boundary
-  const replyMarkup = firstOutbound.replyMarkup;
-  check(
-    "4.3 Delivered outbound replyMarkup was rendered by Telegram transport boundary",
-    replyMarkup !== null &&
-      Array.isArray(replyMarkup.inline_keyboard) &&
-      replyMarkup.inline_keyboard[0][0].callback_data.startsWith("fp:"),
-  );
-
-  // 4.4 Mechanical selection of button triggers 0 AI calls
-  const bookButtonCallback = replyMarkup.inline_keyboard[0][0].callback_data;
+  // 6.2 Button callback executes mechanically with 0 AI calls
+  const bookButtonCallback =
+    firstOutbound.replyMarkup?.inline_keyboard[0][0].callback_data;
   const selectionResult = await receiveInboundMessage(
     harness.deps as any,
     {
@@ -457,10 +716,32 @@ async function run(): Promise<void> {
   );
 
   check(
-    "4.4 Mechanical button callback executes with 0 AI calls",
+    "6.2 Mechanical button callback executes with 0 AI calls",
     aiCalls === 0 &&
       selectionResult.ok === true &&
       harness.deliveredOutbound.length >= 2,
+  );
+
+  // 6.3 Stale button rejection on superseded token
+  const staleButtonResult = await receiveInboundMessage(
+    harness.deps as any,
+    {
+      to: "123456789",
+      from: "987654321",
+      text: bookButtonCallback, // old welcome offer token was superseded
+      receivedAt: new Date().toISOString(),
+      externalId: `tg:123456789:${Date.now() + 2}`,
+    },
+    {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    },
+  );
+
+  check(
+    "6.3 Superseded offer token callback is rejected safely",
+    staleButtonResult.ok === true && harness.appointments.length === 0,
   );
 
   const allPassed = checks.every((c) => c.pass);

@@ -9,7 +9,6 @@
  * do not import or build Telegram API payload structures.
  */
 import type {
-  BookingOffer,
   DateOffer,
   ProviderOffer,
   ServiceDetailOffer,
@@ -19,8 +18,13 @@ import type {
 } from "@/features/conversations/server/booking-offer";
 import {
   buildChannelChoices,
+  offerCallbackData,
+  parseOfferCallback,
   type ChannelChoicePresentation,
+  type OfferCallback,
 } from "@/features/conversations/server/channel-choice";
+
+export { offerCallbackData, parseOfferCallback, type OfferCallback };
 
 export type TelegramInlineKeyboardButton = {
   text: string;
@@ -30,42 +34,6 @@ export type TelegramInlineKeyboardButton = {
 export type TelegramInlineKeyboardMarkup = {
   inline_keyboard: TelegramInlineKeyboardButton[][];
 };
-
-/**
- * Format callback data for a Telegram button: `fp:<token>:<action>`.
- * Action is a stable id (1-based index or action key). <= 64 bytes.
- */
-export function offerCallbackData(
-  offer: Pick<BookingOffer, "token">,
-  action: number | string,
-): string {
-  return `fp:${offer.token}:${action}`;
-}
-
-export type OfferCallback = {
-  readonly token: string;
-  readonly action:
-    | { kind: "index"; index: number }
-    | { kind: "more" | "date" }
-    | { kind: "action"; name: string };
-};
-
-/**
- * Parse an offer-bound callback (`fp:<token>:<action>`); null otherwise.
- */
-export function parseOfferCallback(text: string): OfferCallback | null {
-  const match = text.trim().match(/^fp:([a-z0-9]{6,12}):([a-z0-9_]+)$/);
-  if (!match || !match[1] || !match[2]) return null;
-  const token = match[1];
-  const raw = match[2];
-  if (raw === "more" || raw === "date") {
-    return { token, action: { kind: raw } };
-  }
-  if (/^[1-9]\d?$/.test(raw)) {
-    return { token, action: { kind: "index", index: Number(raw) } };
-  }
-  return { token, action: { kind: "action", name: raw } };
-}
 
 /**
  * Render a ChannelChoicePresentation into a Telegram InlineKeyboardMarkup.
