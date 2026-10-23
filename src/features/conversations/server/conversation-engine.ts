@@ -93,6 +93,7 @@ import {
 } from "@/features/conversations/server/ai-disclosure";
 import type {
   AiRoutingDecision,
+  TurnExecutionAttempt,
   TurnObservability,
   TurnStateTransitionObservation,
 } from "@/features/conversations/server/ai-observability";
@@ -1473,6 +1474,7 @@ async function selectionReply(
   status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
   cause: HandoffCause | null = null,
   replyMarkup?: Record<string, unknown>,
+  observability?: TurnObservability,
 ): Promise<InboundSuccess> {
   const assistantMessage = await persistAssistantReply(
     deps,
@@ -1502,8 +1504,17 @@ async function selectionReply(
     intent: "BOOKING",
     conversationStatus: status,
     handoffCause: status === "NEED_HUMAN" ? cause : null,
-    assistantProvider: deps.ai.providerName,
+    assistantProvider: observability?.provider ?? deps.ai.providerName,
     delivery,
+    observability:
+      observability ??
+      buildTurnObservability({
+        routingDecision: "DETERMINISTIC_BYPASS",
+        provider: deps.ai.providerName,
+        providerAttempts: 0,
+        providerStatus: "NOT_CALLED",
+        modelCallCount: 0,
+      }),
   };
 }
 
@@ -1688,6 +1699,9 @@ async function promptProviderClarificationReply(
           scope,
           "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
           "AI_ACTIVE",
+          null,
+          undefined,
+          input.observability,
         );
       }
     }
@@ -1738,6 +1752,7 @@ async function presentDateChoices(
     serviceName: string;
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
+    observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -1806,6 +1821,9 @@ async function presentDateChoices(
         scope,
         "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
         "AI_ACTIVE",
+        null,
+        undefined,
+        input.observability,
       );
     }
   }
@@ -1840,8 +1858,17 @@ async function presentDateChoices(
     intent: "AVAILABILITY",
     conversationStatus: "AI_ACTIVE",
     handoffCause: null,
-    assistantProvider: deps.ai.providerName,
+    assistantProvider: input.observability?.provider ?? deps.ai.providerName,
     delivery,
+    observability:
+      input.observability ??
+      buildTurnObservability({
+        routingDecision: "DETERMINISTIC_BYPASS",
+        provider: deps.ai.providerName,
+        providerAttempts: 0,
+        providerStatus: "NOT_CALLED",
+        modelCallCount: 0,
+      }),
   };
 }
 
@@ -1854,6 +1881,7 @@ async function presentSlotChoices(
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
     date: string;
+    observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -1991,6 +2019,9 @@ async function presentSlotChoices(
               scope,
               "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
               "AI_ACTIVE",
+              null,
+              undefined,
+              input.observability,
             );
           }
         }
@@ -2030,8 +2061,18 @@ async function presentSlotChoices(
           intent: "AVAILABILITY",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider:
+            input.observability?.provider ?? deps.ai.providerName,
           delivery,
+          observability:
+            input.observability ??
+            buildTurnObservability({
+              routingDecision: "DETERMINISTIC_BYPASS",
+              provider: deps.ai.providerName,
+              providerAttempts: 0,
+              providerStatus: "NOT_CALLED",
+              modelCallCount: 0,
+            }),
         };
       }
     }
@@ -2713,6 +2754,83 @@ async function recordKnowledgeGapOffPath(
     // PROVIDER_FAILURE, and it must never surface to the customer.
     return null;
   }
+}
+
+/**
+ * CORE-04A: Truthful physical and logical counter resolution for an inbound turn.
+ * Disentangles physical HTTP attempts across wire calls from logical serving activity.
+ */
+export function resolveTurnCounters(params: {
+  deterministicBypass: boolean;
+  providerName: string;
+  turnTelemetry: AiTelemetry | null;
+}): {
+  providerAttempts: number | null;
+  modelCallCount: number;
+} {
+  const { deterministicBypass, providerName, turnTelemetry } = params;
+  const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
+
+  if (
+    deterministicBypass ||
+    providerName === "deterministic" ||
+    turnTelemetry?.finalProvider === "deterministic-bypass"
+  ) {
+    return {
+      providerAttempts: 0,
+      modelCallCount: 0,
+    };
+  }
+
+  if (turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER) {
+    const attempts = jevCallSpent ? 1 : 0;
+    return {
+      providerAttempts: attempts,
+      modelCallCount: attempts,
+    };
+  }
+
+  // Generative LLM path
+  let providerAttempts: number | null = null;
+  if (turnTelemetry?.totalHttpAttempts !== undefined) {
+    providerAttempts = turnTelemetry.totalHttpAttempts;
+  } else if (turnTelemetry?.retryTrace?.totalHttpAttempts !== undefined) {
+    providerAttempts = turnTelemetry.retryTrace.totalHttpAttempts;
+  } else if (
+    turnTelemetry?.retryTrace?.attempts &&
+    turnTelemetry.retryTrace.attempts.length > 0
+  ) {
+    const allKnown = turnTelemetry.retryTrace.attempts.every(
+      (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+    );
+    providerAttempts = allKnown
+      ? turnTelemetry.retryTrace.attempts.reduce(
+          (sum, a) => sum + (a.httpAttempts ?? 0),
+          0,
+        )
+      : null;
+  } else if (turnTelemetry?.attempts && turnTelemetry.attempts.length > 0) {
+    const allKnown = turnTelemetry.attempts.every(
+      (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+    );
+    providerAttempts = allKnown
+      ? turnTelemetry.attempts.reduce(
+          (sum, a) => sum + (a.httpAttempts ?? 0),
+          0,
+        )
+      : null;
+  } else {
+    providerAttempts = null;
+  }
+
+  // Logical serving activity: if physical attempts are known to be 0 (e.g. preflight failure),
+  // then no model call was made. Otherwise, exactly 1 logical generative call was attempted/served.
+  const modelCallCount = providerAttempts === 0 ? 0 : 1;
+
+  return {
+    providerAttempts,
+    modelCallCount,
+  };
 }
 
 /**
@@ -4422,12 +4540,12 @@ async function runInboundTurn(
       }
       turnTelemetry = readAiTelemetry(deps.ai);
       const telemetry = turnTelemetry;
-      // A JEV deterministic termination (Slice 8) spends no provider call,
-      // exactly like the built-in deterministic bypass: no AI_TURN usage fact
-      // is recorded (no request was made).
+      const jevCallSpent = !!telemetry?.jevDecision?.semantic?.jevCallSpent;
       const isBypassTelemetry =
+        deps.ai.providerName === "deterministic" ||
         telemetry?.finalProvider === "deterministic-bypass" ||
-        telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER;
+        (telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER &&
+          !jevCallSpent);
       if (!isBypassTelemetry) {
         lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
         successAttempt = telemetry
@@ -4435,6 +4553,9 @@ async function runInboundTurn(
               .reverse()
               .find((a) => a.status === "SUCCESS")
           : undefined;
+        // CORE-04A: In the legacy AI_TURN record, record the final/successful model metrics.
+        // Full multi-attempt execution, tokens, and reported cost (including failed primary
+        // requests before secondary fallback) are preserved truthfully on TurnEvidence.executionAttempts.
         await recordUsage(deps, {
           businessId: business.id,
           kind: "AI_TURN",
@@ -4532,28 +4653,81 @@ async function runInboundTurn(
     if (resolvedState && turnSession.enabled) {
       turnSession.state = resolvedState;
     }
-    // PROMPT-AI-OPS-22 — provider execution facts for the evidence record.
-    // `NOT_CALLED` marks a turn that spent no physical provider call (the
-    // deterministic bypass / a JEV deterministic termination). When an adapter
-    // exposes no telemetry the count falls back to 1 — a non-bypass turn DID
-    // consult the adapter exactly once (the one-call invariant).
-    const providerAttempts = deterministicBypass
-      ? 0
-      : (turnTelemetry?.retryTrace?.attempts.length ??
-        turnTelemetry?.attempts.length ??
-        1);
+    // PROMPT-AI-OPS-22 & CORE-04A: Truthful physical-attempt accounting.
+    // Count physical HTTP attempts actually invoked over the wire.
+    // Deterministic bypass = 0. Mechanical protocol = 0. Preflight failure = 0.
+    // Disentangles physical HTTP attempts across wire calls from logical serving activity.
+    const { providerAttempts, modelCallCount } = resolveTurnCounters({
+      deterministicBypass,
+      providerName: deps.ai.providerName,
+      turnTelemetry,
+    });
+
+    const executionAttempts: TurnExecutionAttempt[] =
+      turnTelemetry?.retryTrace?.attempts &&
+      turnTelemetry.retryTrace.attempts.length > 0
+        ? turnTelemetry.retryTrace.attempts.map((a, idx) => ({
+            attempt: a.attempt ?? idx + 1,
+            provider:
+              a.provider ??
+              turnTelemetry?.finalProvider ??
+              deps.ai.providerName,
+            model: a.model ?? undefined,
+            status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
+            ...(a.httpAttempts !== undefined
+              ? { httpAttempts: a.httpAttempts }
+              : {}),
+            ...(a.inputTokens !== undefined
+              ? { inputTokens: a.inputTokens }
+              : {}),
+            ...(a.outputTokens !== undefined
+              ? { outputTokens: a.outputTokens }
+              : {}),
+            ...(a.costUsd !== undefined ? { costUsd: a.costUsd } : {}),
+            ...(a.costUsd !== undefined
+              ? { costSource: "PROVIDER_REPORTED" as const }
+              : {}),
+          }))
+        : turnTelemetry?.attempts && turnTelemetry.attempts.length > 0
+          ? turnTelemetry.attempts.map((a, idx) => ({
+              attempt: idx + 1,
+              provider: a.provider,
+              model: a.model ?? undefined,
+              status: a.status,
+              ...(a.httpAttempts !== undefined
+                ? { httpAttempts: a.httpAttempts }
+                : {}),
+              ...(a.inputTokens !== undefined
+                ? { inputTokens: a.inputTokens }
+                : {}),
+              ...(a.outputTokens !== undefined
+                ? { outputTokens: a.outputTokens }
+                : {}),
+              ...(a.costUsd !== undefined ? { costUsd: a.costUsd } : {}),
+              ...(a.costUsd !== undefined
+                ? { costSource: "PROVIDER_REPORTED" as const }
+                : {}),
+            }))
+          : [];
+
+    const totalCostUsd =
+      turnTelemetry?.totalCostUsd ??
+      turnTelemetry?.retryTrace?.totalCostUsd ??
+      null;
+    const knownCostSubtotalUsd =
+      turnTelemetry?.knownCostSubtotalUsd ??
+      turnTelemetry?.retryTrace?.knownCostSubtotalUsd ??
+      null;
+    const costCompleteness =
+      turnTelemetry?.costCompleteness ??
+      turnTelemetry?.retryTrace?.costCompleteness ??
+      (executionAttempts.length > 0 ? "UNAVAILABLE" : null);
+
     const providerStatus: "SUCCESS" | "FAILURE" | "NOT_CALLED" =
-      deterministicBypass
+      deterministicBypass || providerAttempts === 0
         ? "NOT_CALLED"
         : (turnTelemetry?.finalStatus ?? (validated ? "SUCCESS" : "FAILURE"));
-    // PROMPT-AI-JEV-03B §12 — the TOTAL LOGICAL MODEL-CALL COUNT, INCLUDING a
-    // JEV inference. A semantic JEV turn that spent one JEV call reports 1 even
-    // though the generative provider's `providerAttempts` is [] (no LLM ran);
-    // a deterministic turn reports 0; an ordinary generative turn reports its
-    // physical attempt count. This is the ONE counter that makes the 0/1
-    // model-call invariant measurable end-to-end.
-    const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
-    const modelCallCount = providerAttempts + (jevCallSpent ? 1 : 0);
+
     let turnObservability: TurnObservability = buildTurnObservability({
       routingDecision: turnRouting,
       response: validated,
@@ -4621,6 +4795,11 @@ async function runInboundTurn(
       // PROMPT-AI-JEV-03B §12 — the total logical model-call count (JEV +
       // generative). See `modelCallCount` above.
       modelCallCount,
+      executionAttempts:
+        executionAttempts.length > 0 ? executionAttempts : null,
+      totalCostUsd,
+      knownCostSubtotalUsd,
+      costCompleteness,
       // PROMPT-AI-JEV-03B §12 — clarification anti-repeat / resume state: true
       // when the ONE resolver PRESERVED a pending task by re-asking its bounded
       // question instead of escalating (precedence rule 6).
@@ -5623,6 +5802,9 @@ async function runInboundTurn(
                 selectionScope,
                 "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
                 "AI_ACTIVE",
+                null,
+                undefined,
+                clarifyObservability,
               );
             }
           }
@@ -5665,6 +5847,8 @@ async function runInboundTurn(
                     date: null,
                     eligibleProviders: provRes.eligibleProviders,
                     reason: provRes.reason,
+                    intent: validated.intent,
+                    observability: clarifyObservability,
                   },
                   turnSession,
                   now,
@@ -5697,6 +5881,9 @@ async function runInboundTurn(
                   selectionScope,
                   "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
                   "AI_ACTIVE",
+                  null,
+                  undefined,
+                  clarifyObservability,
                 );
               }
             }
@@ -6084,6 +6271,9 @@ async function runInboundTurn(
               selectionScope,
               "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
               "AI_ACTIVE",
+              null,
+              undefined,
+              turnObservability,
             );
           }
         }

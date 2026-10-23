@@ -65,10 +65,13 @@ export type AiProviderSuccess = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   /** How the content JSON was accepted. Absent on failures. */
   parseMode?: AiParseMode;
   /** Sanitized structural trace (shape statistics only; never content). */
   normalizerTrace?: NormalizerTrace;
+  /** Physical HTTP requests actually dispatched (0 if preflight rejected, 1 if fetch called, undefined if unknown). */
+  httpAttempts?: number;
   /**
    * Sanitized attempt-level trace of the bounded retry, produced by the
    * provider-agnostic Conversation Control Layer
@@ -87,6 +90,11 @@ export type AiProviderFailure = {
   provider: AiProviderId;
   model: string;
   latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  /** Physical HTTP requests actually dispatched (0 if preflight rejected, 1 if fetch called, undefined if unknown). */
+  httpAttempts?: number;
   /**
    * Sanitized structural trace of the content normalization attempt, when the
    * failure is content-related (shape statistics + rejection reason only;
@@ -114,8 +122,10 @@ export type AiTelemetryAttempt = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   status: "SUCCESS" | "FAILURE";
   errorCode?: AiProviderErrorCode;
+  httpAttempts?: number;
 };
 
 // ─── Bounded retry trace (owned by the Conversation Control Layer) ────────
@@ -133,6 +143,12 @@ export type AiRetryAttemptRecord = {
   /** Sanitized failure classification (never a provider message/body). */
   errorCode?: AiProviderErrorCode;
   latencyMs: number;
+  httpAttempts?: number;
+  provider?: AiProviderId;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
 };
 
 /**
@@ -166,6 +182,14 @@ export type AiRetryTrace = {
   finalOutcome: "SUCCESS" | "FAILURE";
   /** Wall-clock for the whole logical AI turn (all attempts). */
   totalElapsedMs: number;
+  /** Total physical HTTP requests actually dispatched across all attempts. Undefined if any attempt is unknown. */
+  totalHttpAttempts?: number;
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD (even if other attempts have unavailable cost). Null if no attempt has cost. */
+  knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 };
 
 export type AiTelemetry = {
@@ -221,4 +245,16 @@ export type AiTelemetry = {
    * `shadowModelCallCount` accounts for shadow calls instead.
    */
   readonly shadow?: JevSemanticEvidence | null;
+  /**
+   * Total physical HTTP requests actually dispatched across all serving attempts for this logical turn.
+   * Null iff unknown/unavailable (e.g. legacy/custom adapter with no telemetry).
+   * Never fabricated as 1 or 0 when unknown.
+   */
+  readonly totalHttpAttempts?: number | null;
+  /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
+  readonly totalCostUsd?: number | null;
+  /** Subtotal of known attempt costs in USD (even if other attempts have unavailable cost). Null if no attempt has cost. */
+  readonly knownCostSubtotalUsd?: number | null;
+  /** Cost completeness status across all attempts. */
+  readonly costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 };

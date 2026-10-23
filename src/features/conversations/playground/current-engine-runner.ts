@@ -552,10 +552,6 @@ export async function runCurrentEngineScenario(
     ) {
       routeType = "STRUCTURED_SEMANTIC";
     } else if (
-      result.observability?.routingDecision === "DETERMINISTIC_BYPASS"
-    ) {
-      routeType = "DETERMINISTIC_BYPASS";
-    } else if (
       turnWrites.length > 0 ||
       (offerBefore &&
         (offerAfter?.status === "CONSUMED" ||
@@ -564,6 +560,10 @@ export async function runCurrentEngineScenario(
           result.intent === "BOOKING"))
     ) {
       routeType = "MECHANICAL_SELECTION";
+    } else if (
+      result.observability?.routingDecision === "DETERMINISTIC_BYPASS"
+    ) {
+      routeType = "DETERMINISTIC_BYPASS";
     } else {
       routeType = "UNKNOWN";
     }
