@@ -101,6 +101,7 @@ jobs:
           pnpm check:telegram
           pnpm check:telegram-ux001
           pnpm check:telegram-acceptance
+          pnpm check:channel-neutral-choices
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

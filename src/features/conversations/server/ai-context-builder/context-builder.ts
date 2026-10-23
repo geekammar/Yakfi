@@ -447,6 +447,83 @@ function evaluateCandidate(input: {
 
 // ─── The builder ─────────────────────────────────────────────────────────────
 
+function resolveContextTaskRelevance(
+  message: string,
+  sources: ContextSources,
+  explicitRelevance?: TaskRelevance,
+): TaskRelevance {
+  if (explicitRelevance) return explicitRelevance;
+
+  // 1. Structured capability path:
+  // When requiredSemanticCapability === "structured_turn", the structured model owns
+  // semantic interpretation of customer intent (both cold-start and active tasks).
+  // Keyword-only gates are removed so the model receives the bounded authorized context
+  // needed for interpretation, while respecting tenant proof, field visibility, and confidentiality.
+  if (sources.requiredSemanticCapability === "structured_turn") {
+    const state = sources.conversationState;
+    const hasActiveBooking =
+      state?.activeTask?.kind === "BOOKING" ||
+      (state?.offer != null && state.offer.status === "ACTIVE") ||
+      (state?.pendingGoals != null &&
+        state.pendingGoals.some(
+          (g) => g.kind === "DOMAIN_ACTION" || g.intent === "BOOKING",
+        )) ||
+      (sources.availability != null && sources.availability.length > 0);
+
+    const hasProviderContext =
+      Boolean(state?.knownFacts?.provider) ||
+      Boolean(sources.providerPreference) ||
+      state?.offer?.kind === "PROVIDER";
+
+    const base = deriveTaskRelevance(message);
+
+    return {
+      // Bounded public catalog & business context is authorized for structured interpretation
+      bookingOrAvailability:
+        hasActiveBooking ||
+        Boolean(sources.availability && sources.availability.length > 0),
+      cancellationOrReschedule: false,
+      providerChoice: hasProviderContext,
+      contactOrIdentity: true,
+      // businessIdentity family is armed ONLY on an identity ask — preserving disclosure
+      // validation against unbacked self-authored price/general replies (B-03 UX-02)
+      businessIdentity: base.businessIdentity,
+      priceOrFee: true,
+      businessInfo: true,
+      serviceInfo: true,
+      serviceCatalog: true,
+    };
+  }
+
+  // 2. Legacy / non-structured path: retains keyword-driven task relevance
+  const base = deriveTaskRelevance(message);
+  const state = sources.conversationState;
+
+  const hasActiveBooking =
+    state?.activeTask?.kind === "BOOKING" ||
+    (state?.offer != null && state.offer.status === "ACTIVE") ||
+    (state?.pendingGoals != null &&
+      state.pendingGoals.some(
+        (g) => g.kind === "DOMAIN_ACTION" || g.intent === "BOOKING",
+      )) ||
+    (sources.availability != null && sources.availability.length > 0);
+
+  const hasProviderContext =
+    Boolean(state?.knownFacts?.provider) ||
+    Boolean(sources.providerPreference) ||
+    state?.offer?.kind === "PROVIDER";
+
+  const hasServiceContext =
+    state?.offer?.kind === "SERVICE" || state?.offer?.kind === "SERVICE_DETAIL";
+
+  return {
+    ...base,
+    bookingOrAvailability: base.bookingOrAvailability || hasActiveBooking,
+    providerChoice: base.providerChoice || hasProviderContext,
+    serviceCatalog: base.serviceCatalog || hasServiceContext,
+  };
+}
+
 /**
  * Build the AI-safe context for one turn. Pure and total: no I/O, no LLM,
  * no env, no Prisma, no credential. Always returns a structured result —
@@ -456,7 +533,11 @@ function evaluateCandidate(input: {
 export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
   const scope = input.scope;
   const sources = input.sources;
-  const relevance = input.taskRelevance ?? deriveTaskRelevance(sources.message);
+  const relevance = resolveContextTaskRelevance(
+    sources.message,
+    sources,
+    input.taskRelevance,
+  );
   const ledger: Ledger = { records: [], keys: new Set() };
 
   // The server-derived tenant scope. An empty/blank scope is UNPROVEN —

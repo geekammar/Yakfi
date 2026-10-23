@@ -20,10 +20,8 @@ import type {
   BookingOffer,
   SlotOffer,
 } from "@/features/conversations/server/booking-offer";
-import {
-  isOfferLive,
-  parseOfferCallback,
-} from "@/features/conversations/server/booking-offer";
+import { isOfferLive } from "@/features/conversations/server/booking-offer";
+import { parseOfferCallback } from "@/features/conversations/server/channel-choice";
 import type { CanonicalTimePreference } from "@/lib/validation";
 
 /** One option exactly as presented in the canonical offer message. */

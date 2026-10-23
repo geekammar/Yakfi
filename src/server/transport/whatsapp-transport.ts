@@ -30,6 +30,7 @@
  * normalization + tenant resolution.
  */
 
+import type { ChannelChoicePresentation } from "@/features/conversations/server/channel-choice";
 import { externalHandleSchema } from "@/lib/validation";
 import type { CredentialKind } from "@/lib/validation";
 import type {
@@ -303,6 +304,8 @@ export type OutboundMessage = {
   kind?: "TEXT" | "TEMPLATE";
   /** Approved template descriptor when sending via approved-template pathway (e.g. Meta Cloud API). */
   template?: OutboundTemplateMessage;
+  /** Channel-neutral choice presentation (options and navigation actions). */
+  choices?: ChannelChoicePresentation;
   /** Optional interactive reply markup for channels that support it (e.g. Telegram inline keyboard). */
   replyMarkup?: Record<string, unknown>;
 };

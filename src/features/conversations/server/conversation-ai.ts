@@ -784,10 +784,42 @@ export function resolveTurnControlSignals(
       sensitive = true;
     }
 
+    // Semantic intent ownership (CORE-CHOICE-02):
+    // On structured turns with a valid decision, explicit human request and
+    // non-committal state are owned by the structured decision rather than
+    // lexical regex/keyword matching.
+    const explicitHuman =
+      decision.intent === "HUMAN_REQUEST" ||
+      decision.handoffReason === "HUMAN_REQUEST" ||
+      (decision.goals != null &&
+        decision.goals.some(
+          (g) =>
+            g.kind === "HANDOFF" &&
+            (g.intent === "HUMAN_REQUEST" ||
+              g.requiredKnowledge === "HUMAN_REQUEST"),
+        ));
+
+    const hasAnyExtractionFact = Boolean(
+      decision.extraction?.service ||
+      decision.extraction?.provider ||
+      decision.extraction?.date ||
+      decision.extraction?.timePreference,
+    );
+    const hasDomainGoal = Boolean(
+      decision.goals?.some(
+        (g) => g.kind === "DOMAIN_ACTION" || g.intent === "BOOKING",
+      ),
+    );
+    const nonCommittal =
+      (decision.intent === "AMBIGUOUS" ||
+        decision.handoffReason === "AMBIGUOUS") &&
+      !hasAnyExtractionFact &&
+      !hasDomainGoal;
+
     return {
       sensitive,
-      explicitHuman: lexical.explicitHuman,
-      nonCommittal: lexical.nonCommittal,
+      explicitHuman,
+      nonCommittal,
     };
   }
 

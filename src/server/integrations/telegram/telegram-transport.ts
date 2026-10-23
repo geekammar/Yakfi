@@ -7,6 +7,7 @@ import {
   telegramSendMessage,
   type TelegramApiDeps,
 } from "@/server/integrations/telegram/telegram-client";
+import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
 import type { TelegramConnectionRepository } from "@/server/repositories";
 import { telegramConnectionRepository } from "@/server/repositories";
 import type {
@@ -147,13 +148,19 @@ export function createTelegramMessageTransport(
         };
       }
 
+      const replyMarkup =
+        message.replyMarkup ??
+        (message.choices
+          ? renderTelegramInlineKeyboard(message.choices)
+          : undefined);
+
       const result = await telegramSendMessage(
         deps.api,
         tokenResolution.token,
         {
           chatId: message.to,
           text: message.content,
-          ...(message.replyMarkup ? { replyMarkup: message.replyMarkup } : {}),
+          ...(replyMarkup ? { replyMarkup } : {}),
         },
       );
       if (!result.ok) {

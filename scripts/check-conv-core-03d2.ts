@@ -69,6 +69,24 @@ function check(title: string, passed: boolean, extraInfo?: string): void {
   }
 }
 
+function mockResponse(params: Partial<AiResponse> = {}): AiResponse {
+  return {
+    intent: params.intent ?? "BOOKING",
+    action: params.action ?? "reply",
+    content: params.content ?? "نعم",
+    summary: params.summary ?? null,
+    handoffReason: params.handoffReason ?? null,
+    extraction: {
+      service: null,
+      date: null,
+      provider: null,
+      timePreference: null,
+      ...params.extraction,
+    },
+    ...params,
+  };
+}
+
 function mockBooking(params: {
   content: string;
   service?: string | null;
@@ -877,8 +895,11 @@ async function main(): Promise<void> {
       currentMessage: "حولني لموظف خدمة العملاء لو سمحت",
       routing: "LLM",
       isStructuredSemanticTurn: true,
-      decision: mockBooking({
-        content: "نعم",
+      decision: mockResponse({
+        intent: "HUMAN_REQUEST",
+        action: "handoff",
+        handoffReason: "HUMAN_REQUEST",
+        content: "نعم تفضل",
         safetyAssessment: "safe", // Model claims safe
       }),
     });
@@ -894,7 +915,10 @@ async function main(): Promise<void> {
     harnessF1.deps.ai = {
       providerName: "mock-controlled-ai",
       async respond(_req: AiRequest): Promise<AiResponse> {
-        return mockBooking({
+        return mockResponse({
+          intent: "HUMAN_REQUEST",
+          action: "handoff",
+          handoffReason: "HUMAN_REQUEST",
           content: "نعم تفضل",
           safetyAssessment: "safe",
         });
