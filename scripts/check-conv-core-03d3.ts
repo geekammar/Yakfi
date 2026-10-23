@@ -8,7 +8,11 @@ import {
 import { type AiResponse } from "../src/features/conversations/server/ai-contract";
 import { offerCallbackData } from "../src/features/conversations/server/booking-offer";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
-import { hydrateConversationState } from "../src/features/conversations/server/conversation-state";
+import {
+  dehydrateConversationState,
+  emptyConversationState,
+  hydrateConversationState,
+} from "../src/features/conversations/server/conversation-state";
 
 let totalChecks = 0;
 let passedChecks = 0;
@@ -855,44 +859,138 @@ async function runJourneys(): Promise<void> {
       staffModelCalls === 0 && harnessStaff.appointments.length === 0,
     );
 
-    // F4: Failed offer persistence (CAS conflict) suppresses actionable keyboard
-    const harnessCas = createPlaygroundHarness({
-      channel: "TELEGRAM",
-      todayRef: "2026-10-20",
-    });
-
-    harnessCas.deps.ai = {
-      providerName: "mock-model",
-      respond: async () =>
-        mockBooking({
+    // F4: Table-driven CAS conflict regression across SERVICE, DATE, and SLOT offer branches
+    const casTestCases = [
+      {
+        kind: "SERVICE" as const,
+        label: "Missing service -> SERVICE offer",
+        customerText: "عايز أحجز ميعاد مع دكتور بكرة",
+        response: mockBooking({
+          content: "أي خدمة تحب تحجزها؟",
+          date: "2026-10-21",
+          safetyAssessment: "safe",
+          factUpdates: [{ key: "date", operation: "set", value: "2026-10-21" }],
+        }),
+      },
+      {
+        kind: "DATE" as const,
+        label: "Resolved service with missing date -> DATE offer",
+        customerText: "عايز كشف أسنان",
+        response: mockBooking({
+          content: "أي يوم يناسبك لحجز كشف أسنان؟",
+          service: "كشف أسنان",
+          safetyAssessment: "safe",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+          ],
+        }),
+      },
+      {
+        kind: "SLOT" as const,
+        label: "Resolved service and date -> SLOT offer",
+        customerText: "عايز كشف أسنان يوم الأربعاء",
+        response: mockBooking({
           content: "المواعيد المتاحة:",
           service: "كشف أسنان",
           date: "2026-10-21",
+          safetyAssessment: "safe",
           factUpdates: [
             { key: "service", operation: "set", value: "كشف أسنان" },
             { key: "date", operation: "set", value: "2026-10-21" },
           ],
         }),
-    } as any;
+      },
+    ];
 
-    // Simulate CAS failure on save
-    harnessCas.stateStore.save = async () => ({ status: "conflict" });
+    for (const tc of casTestCases) {
+      // 1. Normal-save baseline: prove it produces the intended offer and actionable markup
+      const harnessNormal = createPlaygroundHarness({
+        channel: "TELEGRAM",
+        todayRef: "2026-10-20",
+      });
+      harnessNormal.deps.ai = {
+        providerName: "mock-model",
+        respond: async () => tc.response,
+      } as any;
 
-    const turnCas = await sendCustomer(
-      harnessCas,
-      "عايز كشف أسنان يوم الأربعاء",
-    );
+      const turnNormal = await sendCustomer(harnessNormal, tc.customerText);
+      const stateNormal = await loadState(harnessNormal);
+      const lastOutboundNormal =
+        harnessNormal.deliveredOutbound[
+          harnessNormal.deliveredOutbound.length - 1
+        ];
 
-    check(
-      "F4a. CAS conflict returns safe retry notice",
-      turnCas.ok && (turnCas as any).conversationStatus === "AI_ACTIVE",
-    );
-    const lastOutbound =
-      harnessCas.deliveredOutbound[harnessCas.deliveredOutbound.length - 1];
-    check(
-      "F4b. Failed offer persistence suppresses actionable replyMarkup / buttons",
-      lastOutbound?.replyMarkup == null,
-    );
+      check(
+        `F4-${tc.kind}a. Normal save produces ${tc.kind} offer with ACTIVE status`,
+        turnNormal.ok &&
+          stateNormal?.offer?.kind === tc.kind &&
+          stateNormal?.offer?.status === "ACTIVE",
+      );
+      check(
+        `F4-${tc.kind}b. Normal save produces actionable Telegram markup`,
+        Boolean(lastOutboundNormal?.replyMarkup),
+      );
+
+      // 2. Conflict case: force conflict at the intended offer save boundary
+      const harnessConflict = createPlaygroundHarness({
+        channel: "TELEGRAM",
+        todayRef: "2026-10-20",
+      });
+      harnessConflict.deps.ai = {
+        providerName: "mock-model",
+        respond: async () => tc.response,
+      } as any;
+
+      // Pre-seed an initial state with a known baseline fact so we can prove it is not corrupted
+      await harnessConflict.stateStore.save(
+        PLAYGROUND_IDS.BIZ_ID,
+        harnessConflict.conversation.id,
+        null,
+        dehydrateConversationState({
+          ...emptyConversationState(),
+          knownFacts: { provider: "د. أحمد سامي" },
+        }),
+      );
+
+      // Intercept save to force conflict strictly when saving the intended offer
+      const origSave = harnessConflict.stateStore.save.bind(
+        harnessConflict.stateStore,
+      );
+      harnessConflict.stateStore.save = async (bId, cId, expRev, st: any) => {
+        if (st?.offer?.kind === tc.kind) {
+          return { status: "conflict" as const };
+        }
+        return origSave(bId, cId, expRev, st);
+      };
+
+      const turnConflict = await sendCustomer(harnessConflict, tc.customerText);
+      const stateConflict = await loadState(harnessConflict);
+      const lastOutboundConflict =
+        harnessConflict.deliveredOutbound[
+          harnessConflict.deliveredOutbound.length - 1
+        ];
+
+      check(
+        `F4-${tc.kind}c. CAS conflict returns safe retry notice`,
+        turnConflict.ok &&
+          (turnConflict as any).conversationStatus === "AI_ACTIVE" &&
+          lastOutboundConflict?.body ===
+            "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+      );
+      check(
+        `F4-${tc.kind}d. CAS conflict suppresses actionable replyMarkup / buttons`,
+        lastOutboundConflict?.replyMarkup == null,
+      );
+      check(
+        `F4-${tc.kind}e. CAS conflict creates zero appointments`,
+        harnessConflict.appointments.length === 0,
+      );
+      check(
+        `F4-${tc.kind}f. CAS conflict leaves persisted facts uncorrupted with offer uncommitted`,
+        stateConflict?.knownFacts.provider === "د. أحمد سامي" &&
+          stateConflict?.offer == null,
+      );
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
