@@ -511,21 +511,27 @@ async function main(): Promise<void> {
 
     const httpCalls: HttpCall[] = [];
     const capturedRequests: AiRequest[] = [];
-    const currentGenerativeReply: (req: AiRequest) => AiResponse =
-      opts?.customGenerativeReply ??
-      ((_req) => ({
-        intent: "BOOKING",
-        action: "booking_handoff",
-        summary: "حجز موعد",
-        content: "أهلاً بك! هساعدك في حجز الموعد.",
-        handoffReason: null,
-        extraction: {
-          service: "تنظيف أسنان",
-          provider: null,
-          date: "2026-09-15",
-          timePreference: null,
-        },
-      }));
+    const currentGenerativeReply: (req: AiRequest) => AiResponse = (req) => {
+      const base = opts?.customGenerativeReply
+        ? opts.customGenerativeReply(req)
+        : {
+            intent: "BOOKING" as const,
+            action: "booking_handoff" as const,
+            summary: "حجز موعد",
+            content: "أهلاً بك! هساعدك في حجز الموعد.",
+            handoffReason: null,
+            extraction: {
+              service: "تنظيف أسنان",
+              provider: null,
+              date: "2026-09-15",
+              timePreference: null,
+            },
+          };
+      return {
+        safetyAssessment: "safe",
+        ...base,
+      };
+    };
 
     const mockFetch: typeof fetch = async (input, init) => {
       const url = String(input);

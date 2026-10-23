@@ -256,7 +256,10 @@ async function runSuite(): Promise<void> {
           {
             message: {
               role: "assistant",
-              content: JSON.stringify(currentGenerativeResponse),
+              content: JSON.stringify({
+                safetyAssessment: "safe",
+                ...currentGenerativeResponse,
+              }),
             },
           },
         ],
