@@ -46,7 +46,11 @@ import {
   resolveTurnControlSignals,
 } from "../src/features/conversations/server/conversation-ai";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
-import { hydrateConversationState } from "../src/features/conversations/server/conversation-state";
+import {
+  dehydrateConversationState,
+  emptyConversationState,
+  hydrateConversationState,
+} from "../src/features/conversations/server/conversation-state";
 import { createOpenRouterAdapter } from "../src/server/integrations/ai/openrouter";
 import { buildPromptMessages } from "../src/server/integrations/ai/prompt";
 
@@ -409,7 +413,7 @@ async function main(): Promise<void> {
   // ─────────────────────────────────────────────────────────────────────────────
   console.log("\n--- Area D: Contradictory Output Guards ---");
   {
-    // D1: Model emits safetyAssessment: "safe", but handoffReason: "SENSITIVE"
+    // D1: Top-level contradiction (safetyAssessment: "safe", but handoffReason: "SENSITIVE", no goals)
     const contradiction1Signals = resolveTurnControlSignals({
       currentMessage: "عايز كشف أسنان",
       routing: "LLM",
@@ -426,53 +430,134 @@ async function main(): Promise<void> {
       contradiction1Signals.sensitive === true,
     );
 
-    // D2: Model emits safetyAssessment: "safe", but goals contains HANDOFF with SENSITIVE
-    const contradiction2Signals = resolveTurnControlSignals({
+    // D2a: Goal-only contradiction (intent === "SENSITIVE", top-level handoffReason: null)
+    // Parsed through canonical parseAiResponse to prove it survives contract validation
+    const parsedGoalIntentRaw = parseAiResponse({
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "سيتواصل معك الفريق الطبي",
+      summary: "طلب حجز",
+      extraction: {},
+      safetyAssessment: "safe", // Model claims safe
+      handoffReason: null, // Top-level is null (not SENSITIVE!)
+      goals: [{ kind: "HANDOFF", intent: "SENSITIVE", priority: 1 }],
+    });
+    check(
+      "D2a1. Goal with intent 'SENSITIVE' survives contract validation",
+      parsedGoalIntentRaw !== null,
+    );
+    const goalIntentSignals = resolveTurnControlSignals({
       currentMessage: "عايز كشف أسنان",
       routing: "LLM",
       isStructuredSemanticTurn: true,
-      decision: mockBooking({
-        content: "إليك المواعيد المتاحة",
-        action: "reply",
-        handoffReason: "SENSITIVE",
-        goals: [{ kind: "HANDOFF", intent: "AMBIGUOUS", priority: 1 }],
-        safetyAssessment: "safe", // Contradiction!
-      }),
+      decision: parsedGoalIntentRaw,
     });
     check(
-      "D2. Contradictory safetyAssessment 'safe' + sensitive HANDOFF goal forces sensitive: true",
-      contradiction2Signals.sensitive === true,
+      "D2a2. Isolated HANDOFF goal with intent 'SENSITIVE' forces sensitive: true in source selection",
+      goalIntentSignals.sensitive === true,
     );
 
-    // D3: Engine integration verification of contradiction D1
-    const harness = createPlaygroundHarness({
+    // D2b: Goal-only contradiction (requiredKnowledge === "SENSITIVE", top-level handoffReason: null)
+    const parsedGoalReqKnowledgeRaw = parseAiResponse({
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "سيتواصل معك الفريق الطبي",
+      summary: "طلب حجز",
+      extraction: {},
+      safetyAssessment: "safe", // Model claims safe
+      handoffReason: null, // Top-level is null
+      goals: [{ kind: "HANDOFF", requiredKnowledge: "SENSITIVE", priority: 1 }],
+    });
+    check(
+      "D2b1. Goal with requiredKnowledge 'SENSITIVE' survives contract validation",
+      parsedGoalReqKnowledgeRaw !== null,
+    );
+    const goalReqKnowledgeSignals = resolveTurnControlSignals({
+      currentMessage: "عايز كشف أسنان",
+      routing: "LLM",
+      isStructuredSemanticTurn: true,
+      decision: parsedGoalReqKnowledgeRaw,
+    });
+    check(
+      "D2b2. Isolated HANDOFF goal with requiredKnowledge 'SENSITIVE' forces sensitive: true in source selection",
+      goalReqKnowledgeSignals.sensitive === true,
+    );
+
+    // D3: Engine integration verification of isolated goal-only contradiction
+    // Inbound booking message where top-level handoffReason is null and model claims safe,
+    // but carries a HANDOFF goal with intent SENSITIVE
+    const harnessD3 = createPlaygroundHarness({
       businessConfig: { workingHours: longHours },
       todayRef: "2026-10-20",
     });
-    harness.deps.ai = {
+    harnessD3.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        return parsedGoalIntentRaw!;
+      },
+    };
+
+    const resD3 = await receiveInboundMessage(harnessD3.deps, {
+      to: harnessD3.business.whatsappNumber,
+      from: harnessD3.customer.phone,
+      text: "عايز كشف أسنان",
+      receivedAt: harnessD3.getVirtualNow().toISOString(),
+      externalId: "msg-d-goal-1",
+    });
+
+    check(
+      "D3a. Goal-only contradiction produces required SENSITIVE_OR_RESTRICTED handoff in engine",
+      (resD3 as any).assistantAction === "AI_HANDOFF" &&
+        (resD3 as any).conversationStatus === "NEED_HUMAN" &&
+        (resD3 as any).handoffCause === "SENSITIVE_OR_RESTRICTED",
+    );
+    check(
+      "D3b. Goal-only contradiction creates exactly zero appointments",
+      harnessD3.capturedAppointmentWrites.length === 0,
+    );
+    const rawStateD3 = await harnessD3.stateStore.load(
+      harnessD3.business.id,
+      harnessD3.conversation.id,
+    );
+    const stateD3 = hydrateConversationState(rawStateD3?.state, {
+      businessId: harnessD3.business.id,
+      conversationId: harnessD3.conversation.id,
+    });
+    check(
+      "D3c. Goal-only contradiction creates no newly actionable booking offer",
+      stateD3?.offer == null,
+    );
+
+    // D4: Engine integration verification of top-level SENSITIVE contradiction
+    const harnessD4 = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    harnessD4.deps.ai = {
       providerName: "mock-controlled-ai",
       async respond(_req: AiRequest): Promise<AiResponse> {
         return mockBooking({
           content: "تحويل",
           action: "handoff",
           handoffReason: "SENSITIVE",
-          safetyAssessment: "safe",
+          safetyAssessment: "safe", // Contradiction!
         });
       },
     };
 
-    const resD = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
+    const resD4 = await receiveInboundMessage(harnessD4.deps, {
+      to: harnessD4.business.whatsappNumber,
+      from: harnessD4.customer.phone,
       text: "عايز كشف أسنان",
-      receivedAt: harness.getVirtualNow().toISOString(),
-      externalId: "msg-d-1",
+      receivedAt: harnessD4.getVirtualNow().toISOString(),
+      externalId: "msg-d-top-1",
     });
 
     check(
-      "D3. Contradictory safe assessment does not downgrade required SENSITIVE_OR_RESTRICTED handoff",
-      (resD as any).handoffCause === "SENSITIVE_OR_RESTRICTED" &&
-        (resD as any).conversationStatus === "NEED_HUMAN",
+      "D4. Top-level SENSITIVE contradiction does not downgrade required handoff",
+      (resD4 as any).handoffCause === "SENSITIVE_OR_RESTRICTED" &&
+        (resD4 as any).conversationStatus === "NEED_HUMAN" &&
+        harnessD4.capturedAppointmentWrites.length === 0,
     );
   }
 
@@ -526,47 +611,171 @@ async function main(): Promise<void> {
       apptsE1.length === 0,
     );
 
-    // E2: Missing assessment with trigger word "مشكلة" cannot count as safe
-    const missingSignals = resolveTurnControlSignals({
-      currentMessage: "أي وقت يناسبكم مش مشكلة",
-      routing: "LLM",
-      isStructuredSemanticTurn: true,
-      decision: mockBooking({
-        content: "المواعيد المتاحة",
-        // safetyAssessment is deliberately omitted (undefined)
-      }),
-    });
-    check(
-      "E2a. Missing assessment on trigger word falls back to lexical sensitive: true",
-      missingSignals.sensitive === true,
-    );
+    // E2: Controlled real-engine cases for missing, invalid, and positive control
+    // Uses a complete booking fixture (service 'كشف أسنان' + date '2026-10-21')
+    // which would normally produce active slot options.
 
-    const harnessE2 = createPlaygroundHarness({
+    // Case A: Missing assessment, ordinary booking text WITHOUT sensitive keyword
+    const harnessE2A = createPlaygroundHarness({
       businessConfig: { workingHours: longHours },
       todayRef: "2026-10-20",
     });
-    harnessE2.deps.ai = {
+    harnessE2A.deps.ai = {
       providerName: "mock-controlled-ai",
       async respond(_req: AiRequest): Promise<AiResponse> {
         return mockBooking({
-          content: "المواعيد المتاحة",
-          // safetyAssessment is omitted
+          content: "المواعيد المتاحة يوم الأربعاء 2026-10-21:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+          // safetyAssessment is deliberately omitted (undefined)
         });
       },
     };
-    const resE2 = await receiveInboundMessage(harnessE2.deps, {
-      to: harnessE2.business.whatsappNumber,
-      from: harnessE2.customer.phone,
-      text: "أي وقت يناسبكم مش مشكلة",
-      receivedAt: harnessE2.getVirtualNow().toISOString(),
-      externalId: "msg-e-2",
+    const resE2A = await receiveInboundMessage(harnessE2A.deps, {
+      to: harnessE2A.business.whatsappNumber,
+      from: harnessE2A.customer.phone,
+      text: "عايز كشف أسنان بكرة", // Ordinary text WITHOUT sensitive keywords
+      receivedAt: harnessE2A.getVirtualNow().toISOString(),
+      externalId: "msg-e-2a",
     });
     check(
-      "E2b. Missing assessment with trigger word does not execute booking, escalates safely",
-      (resE2 as any).handoffCause === "SENSITIVE_OR_RESTRICTED",
+      "E2A1. Missing assessment without keyword triggers AI_HANDOFF",
+      (resE2A as any).assistantAction === "AI_HANDOFF",
+    );
+    check(
+      "E2A2. Missing assessment without keyword sets NEED_HUMAN",
+      (resE2A as any).conversationStatus === "NEED_HUMAN",
+    );
+    check(
+      "E2A3. Missing assessment without keyword uses honest AI_FAILURE cause",
+      (resE2A as any).handoffCause === "AI_FAILURE",
+    );
+    check(
+      "E2A4. Missing assessment without keyword creates zero appointments",
+      harnessE2A.capturedAppointmentWrites.length === 0,
+    );
+    const rawStateE2A = await harnessE2A.stateStore.load(
+      harnessE2A.business.id,
+      harnessE2A.conversation.id,
+    );
+    const stateE2A = hydrateConversationState(rawStateE2A?.state, {
+      businessId: harnessE2A.business.id,
+      conversationId: harnessE2A.conversation.id,
+    });
+    check(
+      "E2A5. Missing assessment without keyword creates no newly actionable offer",
+      stateE2A?.offer == null,
     );
 
-    // E3: Malformed assessment rejected at contract boundary
+    // Case B: Missing assessment, text WITH the legacy sensitive keyword
+    const harnessE2B = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    harnessE2B.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        return mockBooking({
+          content: "المواعيد المتاحة يوم الأربعاء 2026-10-21:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+          // safetyAssessment is deliberately omitted (undefined)
+        });
+      },
+    };
+    const resE2B = await receiveInboundMessage(harnessE2B.deps, {
+      to: harnessE2B.business.whatsappNumber,
+      from: harnessE2B.customer.phone,
+      text: "عايز كشف أسنان بكرة ومش مشكلة في الميعاد", // Text WITH sensitive keyword "مشكلة"
+      receivedAt: harnessE2B.getVirtualNow().toISOString(),
+      externalId: "msg-e-2b",
+    });
+    check(
+      "E2B1. Missing assessment with keyword triggers AI_HANDOFF",
+      (resE2B as any).assistantAction === "AI_HANDOFF",
+    );
+    check(
+      "E2B2. Missing assessment with keyword sets NEED_HUMAN",
+      (resE2B as any).conversationStatus === "NEED_HUMAN",
+    );
+    check(
+      "E2B3. Missing assessment with keyword uses honest AI_FAILURE cause (identical to Case A)",
+      (resE2B as any).handoffCause === "AI_FAILURE",
+    );
+    check(
+      "E2B4. Missing assessment with keyword creates zero appointments",
+      harnessE2B.capturedAppointmentWrites.length === 0,
+    );
+    const rawStateE2B = await harnessE2B.stateStore.load(
+      harnessE2B.business.id,
+      harnessE2B.conversation.id,
+    );
+    const stateE2B = hydrateConversationState(rawStateE2B?.state, {
+      businessId: harnessE2B.business.id,
+      conversationId: harnessE2B.conversation.id,
+    });
+    check(
+      "E2B5. Missing assessment with keyword creates no newly actionable offer",
+      stateE2B?.offer == null,
+    );
+
+    // Case B2: Missing assessment preserves pre-existing durable booking facts
+    const harnessE2Facts = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    // Pre-seed durable state with service and date
+    const initialSeedState = {
+      ...emptyConversationState(),
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-21",
+      },
+    };
+    await harnessE2Facts.stateStore.save(
+      harnessE2Facts.business.id,
+      harnessE2Facts.conversation.id,
+      null,
+      dehydrateConversationState(initialSeedState),
+    );
+    harnessE2Facts.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        return mockBooking({
+          content: "المواعيد",
+          // omitted safetyAssessment
+        });
+      },
+    };
+    await receiveInboundMessage(harnessE2Facts.deps, {
+      to: harnessE2Facts.business.whatsappNumber,
+      from: harnessE2Facts.customer.phone,
+      text: "الو",
+      receivedAt: harnessE2Facts.getVirtualNow().toISOString(),
+      externalId: "msg-e-facts",
+    });
+    const loadedFactsState = await harnessE2Facts.stateStore.load(
+      harnessE2Facts.business.id,
+      harnessE2Facts.conversation.id,
+    );
+    const factsStateAfter = hydrateConversationState(loadedFactsState?.state, {
+      businessId: harnessE2Facts.business.id,
+      conversationId: harnessE2Facts.conversation.id,
+    });
+    check(
+      "E2C. Missing assessment failure preserves pre-existing durable facts",
+      factsStateAfter?.knownFacts.service === "كشف أسنان",
+    );
+
+    // Case C: Malformed assessment value
     const malformedRaw = {
       intent: "BOOKING",
       action: "booking_handoff",
@@ -577,35 +786,84 @@ async function main(): Promise<void> {
     };
     const parsedMalformed = parseAiResponse(malformedRaw);
     check(
-      "E3a. Malformed safetyAssessment value rejected by schema",
+      "E2D1. Malformed safetyAssessment value rejected by schema",
       parsedMalformed === null,
     );
 
-    const harnessE3 = createPlaygroundHarness({
+    const harnessE2C = createPlaygroundHarness({
       businessConfig: { workingHours: longHours },
       todayRef: "2026-10-20",
     });
-    harnessE3.deps.ai = {
+    harnessE2C.deps.ai = {
       providerName: "mock-controlled-ai",
       async respond(_req: AiRequest): Promise<AiResponse> {
         return malformedRaw as any;
       },
     };
-    const resE3 = await receiveInboundMessage(harnessE3.deps, {
-      to: harnessE3.business.whatsappNumber,
-      from: harnessE3.customer.phone,
+    const resE2C = await receiveInboundMessage(harnessE2C.deps, {
+      to: harnessE2C.business.whatsappNumber,
+      from: harnessE2C.customer.phone,
       text: "عايز كشف أسنان",
-      receivedAt: harnessE3.getVirtualNow().toISOString(),
-      externalId: "msg-e-3",
+      receivedAt: harnessE2C.getVirtualNow().toISOString(),
+      externalId: "msg-e-malformed",
     });
     check(
-      "E3b. Malformed response triggers safe failure handoff (AI_FAILURE)",
-      (resE3 as any).handoffCause === "AI_FAILURE",
+      "E2D2. Malformed response triggers safe failure handoff (AI_FAILURE)",
+      (resE2C as any).handoffCause === "AI_FAILURE",
     );
-    const apptsE3 = harnessE3.capturedAppointmentWrites;
     check(
-      "E3c. Malformed response creates zero appointments",
-      apptsE3.length === 0,
+      "E2D3. Malformed response creates zero appointments",
+      harnessE2C.capturedAppointmentWrites.length === 0,
+    );
+
+    // Case D: Valid safe assessment positive control on the exact same fixture
+    const harnessE2D = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    harnessE2D.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        return mockBooking({
+          content: "المواعيد المتاحة يوم الأربعاء 2026-10-21:",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          safetyAssessment: "safe", // Valid safe assessment
+          factUpdates: [
+            { key: "service", operation: "set", value: "كشف أسنان" },
+            { key: "date", operation: "set", value: "2026-10-21" },
+          ],
+        });
+      },
+    };
+    const resE2D = await receiveInboundMessage(harnessE2D.deps, {
+      to: harnessE2D.business.whatsappNumber,
+      from: harnessE2D.customer.phone,
+      text: "عايز كشف أسنان بكرة ومش مشكلة في الميعاد",
+      receivedAt: harnessE2D.getVirtualNow().toISOString(),
+      externalId: "msg-e-positive",
+    });
+    check(
+      "E2E1. Positive control with safe assessment continues AI_REPLY",
+      (resE2D as any).assistantAction === "AI_REPLY",
+    );
+    check(
+      "E2E2. Positive control stays AI_ACTIVE with null handoffCause",
+      (resE2D as any).conversationStatus === "AI_ACTIVE" &&
+        (resE2D as any).handoffCause === null,
+    );
+    const rawStateE2D = await harnessE2D.stateStore.load(
+      harnessE2D.business.id,
+      harnessE2D.conversation.id,
+    );
+    const stateE2D = hydrateConversationState(rawStateE2D?.state, {
+      businessId: harnessE2D.business.id,
+      conversationId: harnessE2D.conversation.id,
+    });
+    check(
+      "E2E3. Positive control creates active slot offer with available options",
+      stateE2D?.offer?.kind === "SLOT" &&
+        (stateE2D.offer.options?.length ?? 0) > 0,
     );
   }
 
@@ -714,6 +972,44 @@ async function main(): Promise<void> {
     );
     const apptsF3 = harnessF3.capturedAppointmentWrites;
     check("F3b. Zero appointments created on closed day", apptsF3.length === 0);
+
+    // F4: Disclosure refusal (B-03) outranks safe assessment
+    const harnessF4 = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours, faqs: [] },
+      todayRef: "2026-10-20",
+    });
+    // Remove services so any authored price quote has no business fact backing
+    harnessF4.deps.serviceRepository = {
+      listByBusiness: async () => [],
+      findById: async () => null,
+    };
+    harnessF4.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        return {
+          intent: "FAQ",
+          action: "reply",
+          content: "الأسعار تبدأ من 500 جنيه للجلسة الواحدة.", // Unbacked price quote
+          summary: null,
+          handoffReason: null,
+          safetyAssessment: "safe", // Model claims safe
+          extraction: {},
+        } as any;
+      },
+    };
+    const resF4 = await receiveInboundMessage(harnessF4.deps, {
+      to: harnessF4.business.whatsappNumber,
+      from: harnessF4.customer.phone,
+      text: "بكام الكشف عندكم؟",
+      receivedAt: harnessF4.getVirtualNow().toISOString(),
+      externalId: "msg-f-4",
+    });
+    check(
+      "F4. Disclosure refusal (B-03) triggers POLICY_REFUSED regardless of safe assessment",
+      (resF4 as any).assistantAction === "AI_HANDOFF" &&
+        (resF4 as any).conversationStatus === "NEED_HUMAN" &&
+        (resF4 as any).handoffCause === "POLICY_REFUSED",
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -803,6 +1099,11 @@ async function main(): Promise<void> {
       businessName: "عيادة الزهور",
       faqs: [],
       services: [],
+      conversationContext: {
+        activeTask: { kind: "BOOKING", stage: "IN_PROGRESS" },
+        knownService: "كشف أسنان",
+        knownDate: "2026-10-21",
+      },
     };
     const messages = buildPromptMessages(dummyRequest);
     const systemPrompt =
@@ -874,10 +1175,35 @@ async function main(): Promise<void> {
       safetyAssessment: "safe",
     };
     const resultSafe = await adapter.call(dummyRequest);
+    const outboundMessages = capturedRequestBody?.messages ?? [];
+    const outboundSysMsg = outboundMessages.find(
+      (m: any) => m.role === "system",
+    );
+    const outboundUserMsg = outboundMessages.find(
+      (m: any) => m.role === "user",
+    );
+
     check(
-      "H2a. Adapter successfully parses safetyAssessment 'safe'",
+      "H2a1. Outbound HTTP request system message carries safetyAssessment contract instruction",
+      outboundSysMsg !== undefined &&
+        outboundSysMsg.content.includes(
+          "safetyAssessment: enum[safe,sensitive,uncertain]",
+        ) &&
+        outboundSysMsg.content.includes(
+          "Safety assessment: you MUST include safetyAssessment",
+        ),
+    );
+    check(
+      "H2a2. Outbound HTTP request user message carries structured-turn request context",
+      outboundUserMsg !== undefined &&
+        outboundUserMsg.content.includes("conversationContext") &&
+        outboundUserMsg.content.includes(
+          "CURRENT message: أي وقت يناسبكم مش مشكلة",
+        ),
+    );
+    check(
+      "H2a3. Adapter successfully parses safetyAssessment 'safe'",
       resultSafe.ok &&
-        capturedRequestBody !== null &&
         (resultSafe as any).response?.safetyAssessment === "safe",
     );
 
@@ -907,13 +1233,42 @@ async function main(): Promise<void> {
       !resultMalformed.ok,
     );
 
-    // Test parse missing value
+    // Test parse missing value on adapter (remains optional for legacy callers)
     delete mockHttpPayload.safetyAssessment;
     const resultMissing = await adapter.call(dummyRequest);
     check(
-      "H2e. Adapter parses response with omitted safetyAssessment as undefined",
+      "H2e. Adapter preserves omitted safetyAssessment for legacy callers",
       resultMissing.ok &&
         (resultMissing as any).response?.safetyAssessment === undefined,
+    );
+
+    // Verify engine stops missing assessment on structured turn
+    const harnessH2f = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    harnessH2f.deps.ai = {
+      providerName: "openrouter",
+      async respond(req: AiRequest): Promise<AiResponse> {
+        const res = await adapter.call(req);
+        if (!res.ok || !res.response) {
+          throw new Error("Adapter call failed");
+        }
+        return res.response;
+      },
+    };
+    const resH2f = await receiveInboundMessage(harnessH2f.deps, {
+      to: harnessH2f.business.whatsappNumber,
+      from: harnessH2f.customer.phone,
+      text: "عايز كشف أسنان بكرة",
+      receivedAt: harnessH2f.getVirtualNow().toISOString(),
+      externalId: "msg-h-missing-engine",
+    });
+    check(
+      "H2f. Missing assessment is stopped at capability-aware execution boundary (AI_FAILURE)",
+      (resH2f as any).assistantAction === "AI_HANDOFF" &&
+        (resH2f as any).conversationStatus === "NEED_HUMAN" &&
+        (resH2f as any).handoffCause === "AI_FAILURE",
     );
   }
 

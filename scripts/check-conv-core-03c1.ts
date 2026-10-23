@@ -290,6 +290,7 @@ async function runAcceptanceSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content: "متاح بعد إعادة المحاولة",
                 summary: "طلب حجز",
@@ -349,6 +350,7 @@ async function runAcceptanceSuite(): Promise<void> {
           content: "متاح المواعيد التالية:",
           summary: "طلب حجز",
           extraction: { service: "كشف أسنان", date: "2026-10-21" },
+          safetyAssessment: "safe",
           factUpdates: [
             { key: "service", operation: "set", value: "كشف أسنان" },
             { key: "date", operation: "set", value: "2026-10-21" },
@@ -389,6 +391,7 @@ async function runAcceptanceSuite(): Promise<void> {
       1: {
         body: {
           intent: "BOOKING",
+          safetyAssessment: "safe",
           action: "booking_handoff",
           content: "متاح المواعيد التالية:",
           summary: "طلب حجز",
@@ -403,6 +406,7 @@ async function runAcceptanceSuite(): Promise<void> {
       2: {
         body: {
           intent: "BOOKING",
+          safetyAssessment: "safe",
           action: "booking_handoff",
           content: "تم تعديل الموعد:",
           summary: "تعديل حجز",
@@ -592,6 +596,7 @@ async function runAcceptanceSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content: "متاح",
                 summary: "حجز",
@@ -904,6 +909,7 @@ async function runAcceptanceSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content: "تم الحجز",
                 summary: "حجز",
@@ -963,6 +969,7 @@ async function runAcceptanceSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content: "متاح",
                 summary: "حجز",
@@ -1036,6 +1043,7 @@ async function runAcceptanceSuite(): Promise<void> {
               role: "assistant",
               content: JSON.stringify({
                 intent: "BOOKING",
+                safetyAssessment: "safe",
                 action: "booking_handoff",
                 content: "متاح",
                 summary: "حجز",

@@ -4470,7 +4470,7 @@ async function runInboundTurn(
     //    Control. The AI/domain separation is unchanged: the
     //    acknowledgment is deterministic, and no AI-authored content is
     //    trusted, persisted, or sent.
-    const validated = turn ? parseAiResponse(turn) : null;
+    const rawValidated = turn ? parseAiResponse(turn) : null;
 
     // 9a. ADDITIVE observability (PROMPT-AI-ARCH-02 Slice 0): a PURE
     //     projection of the finished decision through the ONE canonical
@@ -4487,15 +4487,30 @@ async function runInboundTurn(
           ? "DETERMINISTIC"
           : "LLM";
 
-    // CORE-03B2B1: Identify the structured semantic path precisely.
-    // Reuses server-derived capability and verified generative response provenance.
-    const isStructuredSemanticTurn =
+    // CORE-03B2B1: Identify candidate generative structured turn.
+    const isGenerativeStructuredTurn =
       effectiveCapability === "structured_turn" &&
       !deterministicBypass &&
       turnRouting === "LLM" &&
       turnTelemetry?.finalProvider !== "deterministic" &&
-      deps.ai.providerName !== "deterministic" &&
-      validated !== null;
+      deps.ai.providerName !== "deterministic";
+
+    // CORE-03D2: On structured generative turns, a valid explicit safetyAssessment
+    // is strictly required before ordinary structured execution can proceed.
+    // Missing or malformed assessment must not count as safe and must not fall back
+    // to lexical absence to authorize execution; it fails closed via the existing
+    // safe failure/handoff path (AI_FAILURE).
+    const isMissingRequiredSafetyAssessment =
+      isGenerativeStructuredTurn &&
+      rawValidated !== null &&
+      rawValidated.safetyAssessment == null;
+
+    const validated = isMissingRequiredSafetyAssessment ? null : rawValidated;
+
+    // CORE-03B2B1 & CORE-03D2: Identify the structured semantic path precisely.
+    // Reuses server-derived capability and verified generative response provenance.
+    const isStructuredSemanticTurn =
+      isGenerativeStructuredTurn && validated !== null;
 
     // PROMPT-AI-ARCH-05 (Slice 3): the ONE deterministic resolver's ordered
     // single-goal TurnPlan. PROMPT-AI-ARCH-06 (Slice 4): its `decisionClass`

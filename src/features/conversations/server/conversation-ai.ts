@@ -762,9 +762,7 @@ export function resolveTurnControlSignals(
         decision.goals.some(
           (g) =>
             g.kind === "HANDOFF" &&
-            (g.intent === "SENSITIVE" ||
-              g.requiredKnowledge === "SENSITIVE" ||
-              (g as Record<string, unknown>).reason === "SENSITIVE"),
+            (g.intent === "SENSITIVE" || g.requiredKnowledge === "SENSITIVE"),
         ));
 
     let sensitive: boolean;
@@ -781,9 +779,9 @@ export function resolveTurnControlSignals(
       // Uncertainty must not execute a booking; safely escalate
       sensitive = true;
     } else {
-      // Missing assessment on structured turn: must NOT be treated as "safe",
-      // cannot replace lexical interpretation, and falls back to lexical detector
-      sensitive = lexical.sensitive;
+      // Missing or unrecognized assessment on structured turn: must NOT be treated as safe
+      // and must NOT fall back to lexical absence to authorize execution.
+      sensitive = true;
     }
 
     return {

@@ -54,9 +54,8 @@ function mockBooking(params: {
       provider: params.provider ?? null,
       timePreference: params.timePreference ?? null,
     },
-    ...(params.safetyAssessment
-      ? { safetyAssessment: params.safetyAssessment }
-      : {}),
+    safetyAssessment:
+      params.safetyAssessment !== undefined ? params.safetyAssessment : "safe",
     ...(params.factUpdates ? { factUpdates: params.factUpdates } : {}),
   };
 }
@@ -68,6 +67,7 @@ function mockFaq(content: string): Record<string, unknown> {
     content,
     summary: null,
     handoffReason: null,
+    safetyAssessment: "safe",
     extraction: {
       service: null,
       date: null,
