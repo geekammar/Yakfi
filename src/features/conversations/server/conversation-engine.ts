@@ -5618,7 +5618,12 @@ async function runInboundTurn(
             );
             const ok = await turnSession.commit();
             if (!ok) {
-              serviceOffer = null;
+              return selectionReply(
+                deps,
+                selectionScope,
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                "AI_ACTIVE",
+              );
             }
           }
         } else if (
@@ -5687,7 +5692,12 @@ async function runInboundTurn(
               );
               const ok = await turnSession.commit();
               if (!ok) {
-                dateOffer = null;
+                return selectionReply(
+                  deps,
+                  selectionScope,
+                  "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                  "AI_ACTIVE",
+                );
               }
             }
           }
@@ -5702,18 +5712,10 @@ async function runInboundTurn(
           isTelegram &&
           (mapped.reason === "MISSING_SERVICE" ||
             mapped.reason === "AMBIGUOUS_SERVICE") &&
-          services.length > 0
+          services.length > 0 &&
+          serviceOffer
         ) {
-          replyMarkup = serviceOffer
-            ? serviceOfferKeyboard(serviceOffer)
-            : {
-                inline_keyboard: services.slice(0, 5).map((s, idx) => [
-                  {
-                    text: `${idx + 1}️⃣ ${s.name}`,
-                    callback_data: `service_${idx + 1}`,
-                  },
-                ]),
-              };
+          replyMarkup = serviceOfferKeyboard(serviceOffer);
         } else if (
           isTelegram &&
           mapped.reason === "MISSING_DATE" &&
@@ -6077,28 +6079,19 @@ async function runInboundTurn(
           );
           const ok = await turnSession.commit();
           if (!ok) {
-            slotOffer = null;
+            return selectionReply(
+              deps,
+              selectionScope,
+              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+              "AI_ACTIVE",
+            );
           }
         }
       }
 
       const isTelegram = customer.phone.startsWith("tg:");
-      const replyMarkup = isTelegram
-        ? slotOffer
-          ? slotOfferKeyboard(slotOffer)
-          : {
-              inline_keyboard: [
-                bookableOptions.slice(0, 3).map((_, i) => ({
-                  text: `${i + 1}️⃣ اختيار ${i + 1}`,
-                  callback_data: `opt_${i + 1}`,
-                })),
-                [
-                  { text: "🔄 أوقات أخرى", callback_data: "more_times" },
-                  { text: "📅 يوم آخر", callback_data: "change_date" },
-                ],
-              ],
-            }
-        : undefined;
+      const replyMarkup =
+        isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
 
       // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
       const optionsMsg = formatBookingOptionsMessage(
