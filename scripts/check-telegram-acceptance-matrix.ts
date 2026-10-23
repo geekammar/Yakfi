@@ -68,7 +68,7 @@ export type JourneyEvidence = {
   testDescription: string;
   mockInvocations: number;
   physicalBoundaryCalls: number | null;
-  modelCallCount: number;
+  modelCallCount: number | null;
   providerAttempts: number | null;
   stopReason: string | null;
   observedFacts: Record<string, unknown>;
@@ -295,16 +295,20 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       syntheticInput: "/start",
       testDescription: "Mechanical turn (zero model calls)",
       mockInvocations: mockCalls,
-      physicalBoundaryCalls: 0,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 0,
-      providerAttempts: turnEv?.providerAttempts ?? 0,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
-      observedFacts: {},
+      observedFacts: {
+        mockInvocations: mockCalls,
+        engineObservabilityEmitted: (res as any).observability != null,
+        turnEvidenceEmitted: turnEv != null,
+      },
       offerTransition: `NONE -> WELCOME(${durable?.offer?.id?.slice(0, 8) ?? "none"})`,
       appointmentsCountBefore: aptsBefore,
       appointmentsCountAfter: aptsAfter,
       details:
-        "Zero model calls verified; Welcome buttons presented with free-text guidance.",
+        "Mechanical /start turn: 0 mock invocations measured; engine emitted no generative observability (modelCallCount & providerAttempts preserved as null); Welcome buttons presented with free-text guidance.",
     });
   }
 
@@ -342,6 +346,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 1 &&
+      (res as any).observability?.modelCallCount === 1 &&
       serviceResolved &&
       serviceIdMatches &&
       offerActive &&
@@ -359,10 +364,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         service: durable?.knownFacts.service,
         serviceId: (durable?.offer as any)?.serviceId,
       },
@@ -412,6 +419,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 1 &&
+      (res as any).observability?.modelCallCount === 1 &&
       providerPreserved &&
       missingServiceClarification &&
       aptsBefore === 0 &&
@@ -428,10 +436,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         provider: durable?.knownFacts.provider,
         providerPreference: durable?.providerPreference,
         service: durable?.knownFacts.service,
@@ -483,6 +493,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 1 &&
+      (res as any).observability?.modelCallCount === 1 &&
       noSilentAssignment &&
       aptsBefore === 0 &&
       aptsAfter === 0;
@@ -498,10 +509,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         provider: durable?.knownFacts.provider,
         resolvedProviderId: (durable as any)?.providerId ?? null,
       },
@@ -559,6 +572,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 1 &&
+      (res as any).observability?.modelCallCount === 1 &&
       timePref === "morning" &&
       dateResolved &&
       hasSlots &&
@@ -577,10 +591,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         date: durable?.knownFacts.date,
         timePreference: durable?.knownFacts.timePreference,
         slotsCount: slotOffer?.options?.length ?? 0,
@@ -652,6 +668,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 2 &&
+      (res as any).observability?.modelCallCount === 1 &&
       offerReplaced &&
       dateUpdated &&
       compatibleFactsPreserved &&
@@ -669,10 +686,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         date: durable2?.knownFacts.date,
         service: durable2?.knownFacts.service,
         timePreference: durable2?.knownFacts.timePreference,
@@ -742,6 +761,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 2 &&
+      (res as any).observability?.modelCallCount === 1 &&
       timePrefBefore === "morning" &&
       timePrefRemoved &&
       datePreserved &&
@@ -760,10 +780,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         timePreferenceBefore: timePrefBefore,
         timePreferenceAfter: durable2?.knownFacts.timePreference,
         service: durable2?.knownFacts.service,
@@ -831,6 +853,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 2 &&
+      (res as any).observability?.modelCallCount === 1 &&
       taskPreserved &&
       factsPreserved &&
       aptsBefore === 0 &&
@@ -847,10 +870,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         activeTask: durable2?.activeTask?.kind,
         service: durable2?.knownFacts.service,
         date: durable2?.knownFacts.date,
@@ -901,11 +926,21 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const durable2 = await getDurableState(harness);
     const turnEv = getLatestTurnEvidence(harness);
 
-    const zeroNewModelCalls = callsAfterSelection === callsBeforeSelection;
+    const selectionMockInvocations = callsAfterSelection - callsBeforeSelection;
+    const zeroNewModelCalls = selectionMockInvocations === 0;
     const aptCreated = aptsAfter === aptsBefore + 1;
     const offerConsumed = durable2?.offer?.status === "CONSUMED";
+    const deterministicBypassAsserted =
+      (res as any).observability?.modelCallCount === 0 &&
+      turnEv?.providerAttempts === 0 &&
+      turnEv?.routingDecision === "DETERMINISTIC_BYPASS";
 
-    const passed = res.ok && zeroNewModelCalls && aptCreated && offerConsumed;
+    const passed =
+      res.ok &&
+      zeroNewModelCalls &&
+      aptCreated &&
+      offerConsumed &&
+      deterministicBypassAsserted;
 
     recordJourney({
       journeyId: 9,
@@ -915,12 +950,15 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       initialStateSummary: "Active slot offer with valid options",
       syntheticInput: callbackData,
       testDescription: "Mechanical turn (zero model calls)",
-      mockInvocations: 0,
-      physicalBoundaryCalls: 0,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 0,
-      providerAttempts: turnEv?.providerAttempts ?? 0,
+      mockInvocations: selectionMockInvocations,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
+        routingDecision: turnEv?.routingDecision ?? null,
         appointmentId: harness.appointments[0]?.id,
         offerStatus: durable2?.offer?.status,
       },
@@ -928,7 +966,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       appointmentsCountBefore: aptsBefore,
       appointmentsCountAfter: aptsAfter,
       details:
-        "Zero new model calls consumed; exactly 1 appointment committed; offer status CONSUMED.",
+        "Zero new model calls consumed (measured 0 mock invocations, modelCallCount=0, providerAttempts=0); exactly 1 appointment committed; offer status CONSUMED.",
     });
   }
 
@@ -1106,6 +1144,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const res10e = await sendInbound(harness, foreignCb, 10006);
     const last10e =
       harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    const turnEv10e = getLatestTurnEvidence(harness);
     const pass10e =
       res10e.ok &&
       harness.appointments.length === 0 &&
@@ -1133,22 +1172,24 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "10a malformed, 10b unknown, 10c expired, 10d replaced, 10e cross-scope",
       testDescription: "Mechanical turn (zero model calls)",
       mockInvocations: mockCalls,
-      physicalBoundaryCalls: 0,
-      modelCallCount: 0,
-      providerAttempts: 0,
-      stopReason: null,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res10e as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv10e?.providerAttempts ?? null,
+      stopReason: turnEv10e?.stopReason ?? null,
       observedFacts: {
         pass10a_malformed: pass10a,
         pass10b_unknownAction: pass10b,
         pass10c_expired: pass10c,
         pass10d_replaced: pass10d,
         pass10e_crossScope: pass10e,
+        modelCallCount: (res10e as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv10e?.providerAttempts ?? null,
       },
       offerTransition: `NO_MUTATION / SAFE_REJECTION`,
       appointmentsCountBefore: aptsBefore,
       appointmentsCountAfter: aptsAfter,
       details:
-        "All 5 invalid callback vectors safely rejected with 0 appointments, 0 model calls, valid fixture revisions, and no actionable keyboard.",
+        "Mechanical callback rejections: 0 mock invocations measured; engine emitted no generative observability (modelCallCount & providerAttempts preserved as null); all 5 invalid callback vectors safely rejected with 0 appointments.",
     });
   }
 
@@ -1158,16 +1199,19 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
   // ─────────────────────────────────────────────────────────────────────────
   {
     const harness = createAcceptanceHarness({ conversationId: "conv-j11" });
+    let mockCalls = 0;
     harness.deps.ai = {
       providerName: "controlled-mock",
-      respond: async () =>
-        mockResponse({
+      respond: async () => {
+        mockCalls++;
+        return mockResponse({
           intent: "BOOKING",
           action: "booking_handoff",
           content: "المواعيد:",
           service: "كشف أسنان",
           date: "2026-10-24",
-        }),
+        });
+      },
     };
 
     await sendInbound(harness, "كشف السبت", 11001);
@@ -1177,38 +1221,90 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
 
     const fixedExternalId = "tg:testbot:dup-check-11002";
     const aptsBefore = harness.appointments.length;
+    const mockCallsSetup = mockCalls;
 
     // 11a. First delivery -> confirms booking
+    const emittedBefore11a = (
+      (harness as any).emittedEvidence as TurnEvidence[]
+    ).length;
     const res1 = await sendInbound(harness, callbackData, 11002, {
       externalId: fixedExternalId,
     });
     const aptsMid = harness.appointments.length;
+    const emittedAfter11a = ((harness as any).emittedEvidence as TurnEvidence[])
+      .length;
+    const turnEv1 =
+      emittedAfter11a > emittedBefore11a
+        ? (((harness as any).emittedEvidence as TurnEvidence[])[
+            emittedAfter11a - 1
+          ] ?? null)
+        : null;
+    const mockCallsAfter11a = mockCalls;
+
+    const firstSuccess =
+      res1.ok &&
+      !(res1 as any).duplicate &&
+      aptsMid === aptsBefore + 1 &&
+      mockCallsAfter11a - mockCallsSetup === 0 &&
+      (res1 as any).observability?.modelCallCount === 0 &&
+      turnEv1?.providerAttempts === 0 &&
+      turnEv1?.routingDecision === "DETERMINISTIC_BYPASS";
 
     // 11b. Second delivery with identical externalId -> deduplicated
+    const emittedBefore11b = (
+      (harness as any).emittedEvidence as TurnEvidence[]
+    ).length;
     const res2 = await sendInbound(harness, callbackData, 11002, {
       externalId: fixedExternalId,
     });
     const aptsAfterDedupe = harness.appointments.length;
+    const emittedAfter11b = ((harness as any).emittedEvidence as TurnEvidence[])
+      .length;
+    const mockCallsAfter11b = mockCalls;
+    // Duplicate delivery must NOT emit new TurnEvidence; do NOT reuse stale evidence from 11a
+    const turnEv2 =
+      emittedAfter11b > emittedBefore11b
+        ? (((harness as any).emittedEvidence as TurnEvidence[])[
+            emittedAfter11b - 1
+          ] ?? null)
+        : null;
+
+    const secondDedupe =
+      res2.ok &&
+      (res2 as any).duplicate === true &&
+      aptsAfterDedupe === aptsMid &&
+      mockCallsAfter11b - mockCallsAfter11a === 0 &&
+      emittedAfter11b === emittedBefore11b &&
+      turnEv2 == null;
 
     // 11c. Repeated selection with a NEW externalId (representing another button tap)
+    const emittedBefore11c = (
+      (harness as any).emittedEvidence as TurnEvidence[]
+    ).length;
     const res3 = await sendInbound(harness, callbackData, 11003, {
       externalId: "tg:testbot:repeated-tap-11003",
     });
     const aptsFinal = harness.appointments.length;
+    const emittedAfter11c = ((harness as any).emittedEvidence as TurnEvidence[])
+      .length;
+    const turnEv3 =
+      emittedAfter11c > emittedBefore11c
+        ? (((harness as any).emittedEvidence as TurnEvidence[])[
+            emittedAfter11c - 1
+          ] ?? null)
+        : null;
     const lastSent3 =
       harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    const mockCallsAfter11c = mockCalls;
 
-    const firstSuccess =
-      res1.ok && !(res1 as any).duplicate && aptsMid === aptsBefore + 1;
-    const secondDedupe =
-      res2.ok &&
-      (res2 as any).duplicate === true &&
-      aptsAfterDedupe === aptsMid;
     const thirdStaleRejection =
       res3.ok &&
       !(res3 as any).duplicate &&
       aptsFinal === 1 &&
-      lastSent3?.body.includes("لم يعد متاحاً");
+      Boolean(lastSent3?.body.includes("لم يعد متاحاً")) &&
+      mockCallsAfter11c - mockCallsAfter11b === 0 &&
+      emittedAfter11c > emittedBefore11c &&
+      turnEv3?.providerAttempts === null;
 
     const passed = Boolean(firstSuccess && secondDedupe && thirdStaleRejection);
 
@@ -1220,21 +1316,41 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       initialStateSummary: "Slot offer ready for confirmation",
       syntheticInput: `${callbackData} (delivered twice with same externalId, then once with new externalId)`,
       testDescription: "Mechanical turn (zero model calls)",
-      mockInvocations: 0,
-      physicalBoundaryCalls: 0,
-      modelCallCount: 0,
-      providerAttempts: 0,
+      mockInvocations: mockCallsAfter11c - mockCallsSetup,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res1 as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv1?.providerAttempts ?? null,
       stopReason: null,
       observedFacts: {
-        firstResultOk: res1.ok,
-        secondResultDuplicate: (res2 as any).duplicate,
-        thirdRepeatedTapAptsStaysOne: aptsFinal === 1,
+        firstSelection: {
+          ok: res1.ok,
+          duplicate: (res1 as any).duplicate,
+          modelCallCount: (res1 as any).observability?.modelCallCount ?? null,
+          providerAttempts: turnEv1?.providerAttempts ?? null,
+          routingDecision: turnEv1?.routingDecision ?? null,
+          newTurnEvidenceEmitted: emittedAfter11a > emittedBefore11a,
+        },
+        duplicateDelivery: {
+          ok: res2.ok,
+          duplicate: (res2 as any).duplicate,
+          newTurnEvidenceEmitted: emittedAfter11b > emittedBefore11b,
+          staleEvidenceReused: false,
+        },
+        repeatedTapWithNewExternalId: {
+          ok: res3.ok,
+          duplicate: (res3 as any).duplicate,
+          modelCallCount: (res3 as any).observability?.modelCallCount ?? null,
+          providerAttempts: turnEv3?.providerAttempts ?? null,
+          rejectionNotice: Boolean(lastSent3?.body.includes("لم يعد متاحاً")),
+          newTurnEvidenceEmitted: emittedAfter11c > emittedBefore11c,
+        },
+        appointmentsCountFinal: aptsFinal,
       },
       offerTransition: `ACTIVE -> CONSUMED -> DEDUPLICATED -> CLOSED`,
       appointmentsCountBefore: aptsBefore,
       appointmentsCountAfter: aptsFinal,
       details:
-        "First delivery created 1 appointment; same-externalId deduplicated; repeated selection with new externalId produced 0 new appointments.",
+        "First delivery confirmed booking (modelCallCount=0, providerAttempts=0); identical externalId deduplicated with zero stale TurnEvidence emission; repeated tap with new externalId cleanly rejected without new model invocations (appointments count strictly 1).",
     });
   }
 
@@ -1248,6 +1364,14 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const harness12a = createAcceptanceHarness({
       conversationId: "conv-j12a",
     });
+    let mockCalls12a = 0;
+    harness12a.deps.ai = {
+      providerName: "controlled-mock",
+      respond: async () => {
+        mockCalls12a++;
+        return mockResponse({ content: "unexpected" });
+      },
+    };
     const initialUnknownState: any = {
       ...emptyConversationState(),
       activeTask: { kind: "BOOKING", stage: "SERVICE_SUPPLIED" },
@@ -1269,12 +1393,13 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     harness12a.stateStore.save = async () => ({ status: "conflict" });
 
     const aptsBefore12a = harness12a.appointments.length;
-    await sendInbound(harness12a, "/start", 12001);
+    const res12a = await sendInbound(harness12a, "/start", 12001);
     harness12a.stateStore.save = origSave12a;
 
     const aptsAfter12a = harness12a.appointments.length;
     const lastSent12a =
       harness12a.deliveredOutbound[harness12a.deliveredOutbound.length - 1];
+    const turnEv12a = getLatestTurnEvidence(harness12a);
 
     const safeConflictMsg12a = Boolean(
       lastSent12a?.body.includes("تعارض") &&
@@ -1283,10 +1408,15 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const noUnpersistedMarkup12a = !lastSent12a?.replyMarkup;
 
     const passed12a =
+      res12a.ok &&
+      mockCalls12a === 0 &&
       safeConflictMsg12a &&
       noUnpersistedMarkup12a &&
       aptsBefore12a === 0 &&
-      aptsAfter12a === 0;
+      aptsAfter12a === 0 &&
+      (res12a as any).observability?.modelCallCount === 0 &&
+      turnEv12a?.providerAttempts === 0 &&
+      turnEv12a?.routingDecision === "DETERMINISTIC_BYPASS";
 
     recordJourney({
       journeyId: "12a",
@@ -1297,20 +1427,23 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Active booking with injected state revision conflict",
       syntheticInput: "/start",
       testDescription: "Mechanical turn (zero model calls)",
-      mockInvocations: 0,
-      physicalBoundaryCalls: 0,
-      modelCallCount: 0,
-      providerAttempts: 0,
+      mockInvocations: mockCalls12a,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res12a as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv12a?.providerAttempts ?? null,
       stopReason: null,
       observedFacts: {
         conflictHandled: safeConflictMsg12a,
         unpersistedKeyboardSuppressed: noUnpersistedMarkup12a,
+        modelCallCount: (res12a as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv12a?.providerAttempts ?? null,
+        routingDecision: turnEv12a?.routingDecision ?? null,
       },
       offerTransition: `CAS_CONFLICT -> SAFE_RETRY`,
       appointmentsCountBefore: aptsBefore12a,
       appointmentsCountAfter: aptsAfter12a,
       details:
-        "Pre-AI CAS conflict safely handled; retry message returned; actionable buttons suppressed.",
+        "Pre-AI CAS conflict safely handled; retry message returned; actionable buttons suppressed (modelCallCount=0, providerAttempts=0).",
     });
 
     // 12b. Post-AI SLOT offer CAS conflict with instrumented wire dispatch
@@ -1424,8 +1557,8 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       testDescription: "Instrumented physical wire dispatch",
       mockInvocations: 0,
       physicalBoundaryCalls: wireCalls12b,
-      modelCallCount: (res12b as any).observability?.modelCallCount ?? 1,
-      providerAttempts: turnEv12b?.providerAttempts ?? 1,
+      modelCallCount: (res12b as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv12b?.providerAttempts ?? null,
       stopReason: turnEv12b?.stopReason ?? null,
       observedFacts: {
         wireCalls: wireCalls12b,
@@ -1479,7 +1612,8 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       deferredToStaff &&
       noAutomatedDelivery &&
       aptsBefore === 0 &&
-      aptsAfter === 0;
+      aptsAfter === 0 &&
+      turnEv?.assistantAction === "DEFERRED_TO_STAFF";
 
     recordJourney({
       journeyId: 13,
@@ -1490,19 +1624,20 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       syntheticInput: "عايز أحجز كشف بسرعة",
       testDescription: "Mechanical turn (zero model calls)",
       mockInvocations: mockCalls,
-      physicalBoundaryCalls: 0,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 0,
-      providerAttempts: turnEv?.providerAttempts ?? 0,
+      physicalBoundaryCalls: null,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
+      providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
         assistantAction: (res as any).assistantAction,
         conversationStatus: (res as any).conversationStatus,
+        turnEvidenceAction: turnEv?.assistantAction ?? null,
       },
       offerTransition: `BLOCKED_BY_STAFF_OWNERSHIP`,
       appointmentsCountBefore: aptsBefore,
       appointmentsCountAfter: aptsAfter,
       details:
-        "Conversation engine yielded DEFERRED_TO_STAFF; zero automated AI turns; zero messages delivered.",
+        "Conversation engine yielded DEFERRED_TO_STAFF; zero automated AI turns (0 mock calls measured, modelCallCount and providerAttempts preserved as null); zero messages delivered.",
     });
   }
 
@@ -1543,6 +1678,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed14a =
       res14a.ok &&
       mockCalls14a === 1 &&
+      (res14a as any).observability?.modelCallCount === 1 &&
       (res14a as any).handoffCause === "CUSTOMER_REQUESTED_HUMAN" &&
       (res14a as any).conversationStatus === "NEED_HUMAN" &&
       aptsBefore14a === 0 &&
@@ -1559,10 +1695,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls14a,
       physicalBoundaryCalls: null,
-      modelCallCount: (res14a as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res14a as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv14a?.providerAttempts ?? null,
       stopReason: turnEv14a?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res14a as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv14a?.providerAttempts ?? null,
         handoffCause: (res14a as any).handoffCause,
         conversationStatus: (res14a as any).conversationStatus,
       },
@@ -1604,6 +1742,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed14b =
       res14b.ok &&
       mockCalls14b === 1 &&
+      (res14b as any).observability?.modelCallCount === 1 &&
       (res14b as any).handoffCause === "SENSITIVE_OR_RESTRICTED" &&
       (res14b as any).conversationStatus === "NEED_HUMAN" &&
       aptsBefore14b === 0 &&
@@ -1620,10 +1759,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls14b,
       physicalBoundaryCalls: null,
-      modelCallCount: (res14b as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res14b as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv14b?.providerAttempts ?? null,
       stopReason: turnEv14b?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res14b as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv14b?.providerAttempts ?? null,
         handoffCause: (res14b as any).handoffCause,
         conversationStatus: (res14b as any).conversationStatus,
       },
@@ -1665,6 +1806,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed14c =
       res14c.ok &&
       mockCalls14c === 1 &&
+      (res14c as any).observability?.modelCallCount === 1 &&
       (res14c as any).handoffCause === "SENSITIVE_OR_RESTRICTED" &&
       (res14c as any).conversationStatus === "NEED_HUMAN" &&
       (res14c as any).assistantAction === "AI_HANDOFF" &&
@@ -1682,10 +1824,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls14c,
       physicalBoundaryCalls: null,
-      modelCallCount: (res14c as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res14c as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv14c?.providerAttempts ?? null,
       stopReason: turnEv14c?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res14c as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv14c?.providerAttempts ?? null,
         handoffCause: (res14c as any).handoffCause,
         conversationStatus: (res14c as any).conversationStatus,
         assistantAction: (res14c as any).assistantAction,
@@ -1739,6 +1883,7 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const passed =
       res.ok &&
       mockCalls === 1 &&
+      (res as any).observability?.modelCallCount === 1 &&
       noFalseSafetyHandoff &&
       aptsBefore === 0 &&
       aptsAfter === 0;
@@ -1754,10 +1899,12 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
         "Downstream engine behavior under supplied semantic facts (no real language-understanding accuracy claimed)",
       mockInvocations: mockCalls,
       physicalBoundaryCalls: null,
-      modelCallCount: (res as any).observability?.modelCallCount ?? 1,
+      modelCallCount: (res as any).observability?.modelCallCount ?? null,
       providerAttempts: turnEv?.providerAttempts ?? null,
       stopReason: turnEv?.stopReason ?? null,
       observedFacts: {
+        modelCallCount: (res as any).observability?.modelCallCount ?? null,
+        providerAttempts: turnEv?.providerAttempts ?? null,
         conversationStatus,
         handoffCause: handoffCause ?? "none",
       },
@@ -1811,6 +1958,8 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const pass16a =
       res16a.ok &&
       wireCalls16a === 0 &&
+      (res16a as any).observability?.modelCallCount === 0 &&
+      turnEv16a?.providerAttempts === 0 &&
       stopReason16a === "GLOBAL_STOP" &&
       harness16a.appointments.length === 0;
 
@@ -1851,6 +2000,8 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
     const pass16b =
       res16b.ok &&
       wireCalls16b === 1 &&
+      (res16b as any).observability?.modelCallCount === 1 &&
+      turnEv16b?.providerAttempts === 1 &&
       stopReason16b === "ATTEMPT_LIMIT_EXHAUSTED" &&
       harness16b.appointments.length === 0;
 
@@ -1875,19 +2026,35 @@ export async function runAcceptanceMatrix(): Promise<JourneyEvidence[]> {
       testDescription: "Instrumented physical wire dispatch",
       mockInvocations: 0,
       physicalBoundaryCalls: wireCalls16a + wireCalls16b,
-      modelCallCount: wireCalls16a + wireCalls16b,
-      providerAttempts: wireCalls16a + wireCalls16b,
+      modelCallCount:
+        ((res16a as any).observability?.modelCallCount ?? 0) +
+        ((res16b as any).observability?.modelCallCount ?? 0),
+      providerAttempts:
+        (turnEv16a?.providerAttempts ?? 0) + (turnEv16b?.providerAttempts ?? 0),
       stopReason: `${stopReason16a} / ${stopReason16b} / DEADLINE_EXHAUSTED`,
       observedFacts: {
-        globalStopWireCalls: wireCalls16a,
-        attemptLimitWireCalls: wireCalls16b,
-        deadlineWireCalls: session16c.getDispatchedAttempts(),
+        step16a_globalStop: {
+          wireCalls: wireCalls16a,
+          modelCallCount: (res16a as any).observability?.modelCallCount ?? null,
+          providerAttempts: turnEv16a?.providerAttempts ?? null,
+          stopReason: stopReason16a,
+        },
+        step16b_attemptLimit: {
+          wireCalls: wireCalls16b,
+          modelCallCount: (res16b as any).observability?.modelCallCount ?? null,
+          providerAttempts: turnEv16b?.providerAttempts ?? null,
+          stopReason: stopReason16b,
+        },
+        step16c_deadlineExhaustion: {
+          dispatchedAttempts: session16c.getDispatchedAttempts(),
+          stopReason: deadlineDispatch.reason,
+        },
       },
       offerTransition: `CONTROLLED_STOP_SAFE_TERMINATION`,
       appointmentsCountBefore: 0,
       appointmentsCountAfter: 0,
       details:
-        "16a GLOBAL_STOP (0 wire calls); 16b ATTEMPT_LIMIT_EXHAUSTED (1 wire call); 16c DEADLINE_EXHAUSTED (0 wire calls).",
+        "16a GLOBAL_STOP (0 wire calls, modelCallCount=0, providerAttempts=0); 16b ATTEMPT_LIMIT_EXHAUSTED (1 wire call, modelCallCount=1, providerAttempts=1); 16c DEADLINE_EXHAUSTED (0 wire calls).",
     });
   }
 
