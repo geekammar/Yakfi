@@ -24,6 +24,8 @@ import { JEV_DETERMINISTIC_PROVIDER } from "./jev-strategy";
 import type {
   AiProviderAdapter,
   AiProviderResult,
+  AiRetryAttemptRecord,
+  AiRetryTrace,
   AiTelemetry,
   AiTelemetryAttempt,
 } from "./types";
@@ -71,6 +73,10 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
   // trace's total, so prefer it; results without a retry trace are
   // byte-for-byte unchanged.
   const logicalLatency = result.retryTrace?.totalElapsedMs ?? result.latencyMs;
+  const httpAttempts =
+    result.retryTrace?.totalHttpAttempts !== undefined
+      ? result.retryTrace.totalHttpAttempts
+      : result.httpAttempts;
   if (result.ok) {
     return {
       provider: result.provider,
@@ -79,6 +85,7 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       status: "SUCCESS",
+      ...(httpAttempts !== undefined ? { httpAttempts } : {}),
     };
   }
   return {
@@ -87,7 +94,112 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
     latencyMs: logicalLatency,
     status: "FAILURE",
     errorCode: result.error.code,
+    ...(result.inputTokens !== undefined
+      ? { inputTokens: result.inputTokens }
+      : {}),
+    ...(result.outputTokens !== undefined
+      ? { outputTokens: result.outputTokens }
+      : {}),
+    ...(httpAttempts !== undefined ? { httpAttempts } : {}),
   };
+}
+
+function extractAttemptsFrom(result: AiProviderResult): AiRetryAttemptRecord[] {
+  if (result.retryTrace?.attempts && result.retryTrace.attempts.length > 0) {
+    return result.retryTrace.attempts;
+  }
+  return [
+    {
+      attempt: 1,
+      outcome: result.ok ? "SUCCESS" : "FAILURE",
+      errorCode: result.ok ? undefined : result.error.code,
+      latencyMs: result.latencyMs,
+      httpAttempts: result.httpAttempts,
+      provider: result.provider,
+      model: result.model,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    },
+  ];
+}
+
+function aggregateExecutionTrace(
+  first: AiProviderResult,
+  second?: AiProviderResult | null,
+): {
+  retryTrace: AiRetryTrace | undefined;
+  totalHttpAttempts: number | null;
+} {
+  const firstAttempts = extractAttemptsFrom(first);
+  if (!second) {
+    const allKnown = firstAttempts.every(
+      (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+    );
+    const totalHttpAttempts = allKnown
+      ? firstAttempts.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
+      : null;
+
+    if (first.retryTrace) {
+      return {
+        retryTrace: first.retryTrace,
+        totalHttpAttempts,
+      };
+    }
+    return {
+      retryTrace: undefined,
+      totalHttpAttempts,
+    };
+  }
+
+  // Fallback: aggregate primary and secondary attempt traces truthfully
+  const secondAttempts = extractAttemptsFrom(second);
+  const combinedAttempts: AiRetryAttemptRecord[] = [];
+  let seq = 1;
+  for (const a of firstAttempts) {
+    combinedAttempts.push({ ...a, attempt: seq++ });
+  }
+  for (const a of secondAttempts) {
+    combinedAttempts.push({ ...a, attempt: seq++ });
+  }
+
+  const allKnown = combinedAttempts.every(
+    (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+  );
+  const totalHttpAttempts = allKnown
+    ? combinedAttempts.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
+    : null;
+
+  const totalElapsedMs =
+    (first.retryTrace?.totalElapsedMs ?? first.latencyMs) +
+    (second.retryTrace?.totalElapsedMs ?? second.latencyMs);
+
+  const retryTrace: AiRetryTrace = {
+    provider: second.provider,
+    maxAttempts:
+      (first.retryTrace?.maxAttempts ?? 1) +
+      (second.retryTrace?.maxAttempts ?? 1),
+    attempts: combinedAttempts,
+    retryAttempted: combinedAttempts.length > 1,
+    retryTriggerCode:
+      first.retryTrace?.retryTriggerCode ??
+      (first.ok ? null : first.error.code),
+    retrySkippedReason:
+      second.retryTrace?.retrySkippedReason ??
+      (second.ok ? "NONE" : "MAX_ATTEMPTS_REACHED"),
+    deadlineMs:
+      second.retryTrace?.deadlineMs ??
+      first.retryTrace?.deadlineMs ??
+      Date.now(),
+    retryTimeoutMs:
+      second.retryTrace?.retryTimeoutMs ??
+      first.retryTrace?.retryTimeoutMs ??
+      0,
+    finalOutcome: second.ok ? "SUCCESS" : "FAILURE",
+    totalElapsedMs,
+    ...(totalHttpAttempts !== null ? { totalHttpAttempts } : {}),
+  };
+
+  return { retryTrace, totalHttpAttempts };
 }
 
 export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
@@ -167,6 +279,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           }
         : undefined;
       if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
+        const jevCallSpent = !!jev.semantic?.jevCallSpent;
+        const totalHttpAttempts = jevCallSpent ? 1 : 0;
         return {
           response: jev.response,
           telemetry: {
@@ -176,6 +290,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
             finalModel: null,
             finalStatus: "SUCCESS",
             jevDecision,
+            totalHttpAttempts,
           },
         };
       }
@@ -192,6 +307,7 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
             finalModel: null,
             finalStatus: "SUCCESS",
             jevDecision,
+            totalHttpAttempts: 0,
           },
         };
       }
@@ -234,9 +350,10 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     // notification outcome exactly once here, so the engine's AI_TURN
     // record can observe retry behaviour without any schema change and
     // without double-counting a provider call.
-    const retryTrace = first.retryTrace;
     const conversationControl = first.conversationControl;
     if (first.ok) {
+      const { retryTrace: aggregatedTrace, totalHttpAttempts } =
+        aggregateExecutionTrace(first);
       return {
         response: first.response,
         telemetry: {
@@ -245,10 +362,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: first.provider,
           finalModel: first.model,
           finalStatus: "SUCCESS",
-          retryTrace,
+          retryTrace: aggregatedTrace,
           conversationControl,
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
+          totalHttpAttempts,
         },
       };
     }
@@ -256,6 +374,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     const retryable = isRetryableAiError(first.error.code);
     const canFallback = fallbackEnabled && !!secondary && retryable;
     if (!canFallback) {
+      const { retryTrace: aggregatedTrace, totalHttpAttempts } =
+        aggregateExecutionTrace(first);
       return {
         response: null,
         telemetry: {
@@ -264,10 +384,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: first.provider,
           finalModel: first.model,
           finalStatus: "FAILURE",
-          retryTrace,
+          retryTrace: aggregatedTrace,
           conversationControl,
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
+          totalHttpAttempts,
         },
         lastErrorCode: first.error.code,
       };
@@ -275,6 +396,8 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
 
     const second = await secondary!.call(request);
     const secondAttempt = toAttempt(second);
+    const { retryTrace: aggregatedTrace, totalHttpAttempts } =
+      aggregateExecutionTrace(first, second);
     if (second.ok) {
       return {
         response: second.response,
@@ -284,11 +407,12 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           finalProvider: second.provider,
           finalModel: second.model,
           finalStatus: "SUCCESS",
-          retryTrace: retryTrace ?? second.retryTrace,
+          retryTrace: aggregatedTrace,
           conversationControl:
             conversationControl ?? second.conversationControl,
           jevDecision,
           shadow: await joinShadow(shadowPromise, shadowMarker),
+          totalHttpAttempts,
         },
       };
     }
@@ -300,10 +424,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         finalProvider: second.provider,
         finalModel: second.model,
         finalStatus: "FAILURE",
-        retryTrace: retryTrace ?? second.retryTrace,
+        retryTrace: aggregatedTrace,
         conversationControl: conversationControl ?? second.conversationControl,
         jevDecision,
         shadow: await joinShadow(shadowPromise, shadowMarker),
+        totalHttpAttempts,
       },
       lastErrorCode: second.error.code,
     };

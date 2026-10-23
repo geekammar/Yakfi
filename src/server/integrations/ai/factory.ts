@@ -269,6 +269,30 @@ export const SEMANTIC_JEV_ENABLEMENTS = new Set(["1", "true", "yes"]);
 export const SEMANTIC_JEV_DISABLEMENTS = new Set(["0", "false", "no", "off"]);
 
 /**
+ * Validates and parses the operator-approved monthly budget USD string (CORE-04A).
+ *
+ * Requirements:
+ * - Requires a finite positive numeric USD value (> 0).
+ * - Rejects blank, whitespace-only, zero, negative, non-numeric, NaN, and infinite values.
+ * - Does NOT print secrets or dump environment variables.
+ *
+ * NOTE: Validating an operator-approved budget amount is an activation gate.
+ * It is not by itself enforcement of a global monthly spend cap.
+ */
+export function parseApprovedMonthlyBudget(
+  raw: string | undefined,
+): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || Number.isNaN(num) || num <= 0) {
+    return null;
+  }
+  return num;
+}
+
+/**
  * Checks whether the emergency kill switch is actively engaged to disable JEV.
  * Returns true if FLOWPILOT_JEV_SEMANTIC_ENABLED is explicitly 0, false, no, or off.
  */
@@ -285,20 +309,27 @@ export function isSemanticJevEmergencyDisabled(
  * Preferred by default unless:
  * 1. Explicit emergency kill switch is engaged (FLOWPILOT_JEV_SEMANTIC_ENABLED=false)
  * 2. In production without an approved operator budget.
+ *
+ * Validating an operator-approved budget amount is an activation gate.
+ * It is not by itself enforcement of a global monthly spend cap.
  */
 export function isTypeSafeJevPreferred(
   getEnvVar: (name: string) => string | undefined,
 ): boolean {
   if (isSemanticJevEmergencyDisabled(getEnvVar)) return false;
 
-  // Production budget safety rule (CONV-JEV-01 Step C):
+  // Production budget safety rule (CONV-JEV-01 Step C / CORE-04A):
   // Unbudgeted live production spending is blocked until an approved budget is supplied.
+  // Validating an operator-approved budget amount is an activation gate.
+  // It is not by itself enforcement of a global monthly spend cap.
   const isProd =
     getEnvVar("NODE_ENV") === "production" ||
     getEnvVar("VERCEL_ENV") === "production";
   if (isProd) {
-    const approvedBudget = getEnvVar(JEV_BUDGET_APPROVAL_FLAG);
-    if (!approvedBudget || approvedBudget.trim().length === 0) {
+    const approvedBudget = parseApprovedMonthlyBudget(
+      getEnvVar(JEV_BUDGET_APPROVAL_FLAG),
+    );
+    if (approvedBudget === null) {
       return false; // Leave live production spending safely blocked
     }
   }

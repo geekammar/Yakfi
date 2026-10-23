@@ -147,6 +147,11 @@ export function createConversationControl(
         outcome: result.ok ? "SUCCESS" : "FAILURE",
         errorCode: result.ok ? undefined : result.error.code,
         latencyMs: result.latencyMs,
+        httpAttempts: result.httpAttempts,
+        provider: result.provider,
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
       });
 
       if (result.ok) break;
@@ -195,6 +200,13 @@ export function createConversationControl(
       );
     }
 
+    const allKnown = attemptRecords.every(
+      (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+    );
+    const totalHttpAttempts = allKnown
+      ? attemptRecords.reduce((acc, a) => acc + (a.httpAttempts ?? 0), 0)
+      : undefined;
+
     const trace: AiRetryTrace = {
       provider: provider.providerId,
       maxAttempts,
@@ -206,6 +218,7 @@ export function createConversationControl(
       retryTimeoutMs: retryTimeoutUsed,
       finalOutcome: last.ok ? "SUCCESS" : "FAILURE",
       totalElapsedMs: getNow() - started,
+      totalHttpAttempts,
     };
 
     return { result: last, trace, skipped: skipReason, retriesStarted };
@@ -324,6 +337,9 @@ export function createConversationControl(
     const finalResult: AiProviderResult = {
       ...result,
       retryTrace: trace,
+      ...(trace.totalHttpAttempts !== undefined
+        ? { httpAttempts: trace.totalHttpAttempts }
+        : {}),
     };
 
     return {

@@ -126,6 +126,7 @@ export async function callOpenAiCompatible(
       provider: providerId,
       model,
       latencyMs: Date.now() - started,
+      httpAttempts: 0,
       error: {
         code: "CONFIG_ERROR",
         message: `secret ${secretRef} not configured`,
@@ -165,6 +166,7 @@ export async function callOpenAiCompatible(
         provider: providerId,
         model,
         latencyMs: Date.now() - started,
+        httpAttempts: 1,
         error: {
           code: "TIMEOUT",
           message: "provider timeout",
@@ -177,6 +179,7 @@ export async function callOpenAiCompatible(
       provider: providerId,
       model,
       latencyMs: Date.now() - started,
+      httpAttempts: 1,
       error: {
         code: "RETRYABLE",
         message: err instanceof Error ? err.message : "network error",
@@ -200,6 +203,7 @@ export async function callOpenAiCompatible(
       provider: providerId,
       model,
       latencyMs,
+      httpAttempts: 1,
       error: {
         code: "INVALID_RESPONSE",
         message: "invalid JSON from provider",
@@ -207,11 +211,6 @@ export async function callOpenAiCompatible(
         httpStatus: httpResponse.status,
       },
     };
-  }
-
-  if (!httpResponse.ok) {
-    const mapped = mapHttpStatusToError(httpResponse.status, json);
-    return { ok: false, provider: providerId, model, latencyMs, error: mapped };
   }
 
   const j = json as {
@@ -225,7 +224,26 @@ export async function callOpenAiCompatible(
       output_tokens?: number;
     };
     error?: { message?: string };
-  };
+  } | null;
+
+  const inputTokens =
+    j?.usage?.prompt_tokens ?? j?.usage?.input_tokens ?? undefined;
+  const outputTokens =
+    j?.usage?.completion_tokens ?? j?.usage?.output_tokens ?? undefined;
+
+  if (!httpResponse.ok) {
+    const mapped = mapHttpStatusToError(httpResponse.status, json);
+    return {
+      ok: false,
+      provider: providerId,
+      model,
+      latencyMs,
+      httpAttempts: 1,
+      inputTokens,
+      outputTokens,
+      error: mapped,
+    };
+  }
 
   const contentRaw = j?.choices?.[0]?.message?.content;
   if (typeof contentRaw !== "string" || contentRaw.trim().length === 0) {
@@ -234,6 +252,9 @@ export async function callOpenAiCompatible(
       provider: providerId,
       model,
       latencyMs,
+      httpAttempts: 1,
+      inputTokens,
+      outputTokens,
       error: {
         code: "INVALID_RESPONSE",
         message: "empty content from provider",
@@ -268,6 +289,9 @@ export async function callOpenAiCompatible(
       provider: providerId,
       model,
       latencyMs,
+      httpAttempts: 1,
+      inputTokens,
+      outputTokens,
       error: {
         code: "INVALID_RESPONSE",
         message,
@@ -279,16 +303,12 @@ export async function callOpenAiCompatible(
 
   const parseMode: AiParseMode = normalized.mode;
 
-  const inputTokens =
-    j.usage?.prompt_tokens ?? j.usage?.input_tokens ?? undefined;
-  const outputTokens =
-    j.usage?.completion_tokens ?? j.usage?.output_tokens ?? undefined;
-
   return {
     ok: true,
     provider: providerId,
     model,
     latencyMs,
+    httpAttempts: 1,
     response: normalized.value,
     inputTokens,
     outputTokens,

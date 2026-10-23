@@ -13,6 +13,7 @@
  * key or budget block, returns REAL_JEV_BENCHMARK_BLOCKED.
  */
 
+import { parseApprovedMonthlyBudget } from "@/server/integrations/ai/factory";
 import {
   JEV_PINNED_MODEL,
   createJevDecisionsProvider,
@@ -169,7 +170,9 @@ export async function runTypeSafeJevScenario(
 
     if (
       process.env.NODE_ENV === "production" &&
-      !process.env.FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET
+      parseApprovedMonthlyBudget(
+        process.env.FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET,
+      ) === null
     ) {
       const now = new Date().toISOString();
       return {

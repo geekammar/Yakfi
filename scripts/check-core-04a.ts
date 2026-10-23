@@ -1,0 +1,1047 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import "./setup-test-env";
+
+import { createPlaygroundHarness } from "@/features/conversations/playground/harness";
+import type { AiRequest } from "@/features/conversations/server/ai-contract";
+import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
+import type { TurnEvidence } from "@/features/conversations/server/turn-evidence";
+import { createAtriaAdapter } from "@/server/integrations/ai/atria";
+import { createLlmConversationAi } from "@/server/integrations/ai/conversation-ai";
+/**
+ * FlowPilot — CORE-04A Acceptance Suite
+ * Production AI Physical-Attempt Accounting and Control Audit
+ *
+ * Verifies:
+ *   A. Mechanical selection: zero serving and shadow physical HTTP attempts
+ *   B. Primary success: exactly 1 physical request
+ *   C. Primary internal retry then success: exactly 2 physical requests
+ *   D. Primary retry exhaustion followed by secondary success: exact aggregate count (e.g. 3, not 2)
+ *   E. Secondary retry: full aggregate without duplicate counting (e.g. 2 + 2 = 4)
+ *   F. Preflight rejection: zero HTTP requests (fails before network I/O)
+ *   G. Provider timeout or transport failure: invoked HTTP attempt remains counted
+ *   H. Serving JEV: real mocked HTTP invocation counts as model activity; no extra generative request follows
+ *   I. Shadow: counters are separate; shadow failure does not alter customer outcome
+ *   J. Missing telemetry on supported legacy/custom seam: unknown stays unknown (null), not 0 or 1
+ *   K. Usage/cost honesty: known, unavailable, and partially known cases; no provider misattribution
+ *   L. Budget approval: positive finite numeric USD accepted; invalid values rejected; emergency disable authoritative
+ *   M. Integration: full production engine receives the correct aggregate for retry-plus-fallback
+ *
+ * Run: pnpm check:core-04a
+ */
+
+import { createConversationControl } from "@/server/integrations/ai/conversation-control";
+import {
+  isSemanticJevEmergencyDisabled,
+  isTypeSafeJevPreferred,
+  parseApprovedMonthlyBudget,
+} from "@/server/integrations/ai/factory";
+import { createJevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
+import { createSemanticJevStrategy } from "@/server/integrations/ai/jev-semantic-strategy";
+import {
+  createShadowJevStrategy,
+  createShadowSampler,
+} from "@/server/integrations/ai/jev-shadow-strategy";
+import { createOpenRouterAdapter } from "@/server/integrations/ai/openrouter";
+import { createAiOrchestrator } from "@/server/integrations/ai/orchestrator";
+import type {
+  AiProviderAdapter,
+  AiProviderResult,
+} from "@/server/integrations/ai/types";
+import type { UsageRecord } from "@/types/domain";
+
+type CheckResult = { label: string; pass: boolean; detail?: string };
+const results: CheckResult[] = [];
+
+function check(label: string, pass: boolean, detail?: string) {
+  results.push({ label, pass, detail });
+  const icon = pass ? "✔" : "✘";
+  console.log(`  ${icon} ${label}${!pass && detail ? ` (${detail})` : ""}`);
+}
+
+function openAiEnvelope(
+  content: string,
+  usage = { prompt_tokens: 15, completion_tokens: 10 },
+): Record<string, unknown> {
+  return {
+    choices: [{ message: { content } }],
+    usage,
+  };
+}
+
+function validAiResponseJson(
+  overrides: Partial<Record<string, unknown>> = {},
+): string {
+  return JSON.stringify({
+    intent: "FAQ",
+    action: "reply",
+    content: "مواعيد العمل من ٩ صباحاً إلى ٥ مساءً",
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: null,
+    summary: null,
+    ...overrides,
+  });
+}
+
+function jevDecisionsEnvelope(
+  answers: Record<string, unknown> = {
+    bookingRequested: { type: "noul", noul: 0.95 },
+  },
+): Record<string, unknown> {
+  return {
+    model: "typesafe/jev-1.13",
+    provider: "openrouter",
+    answers,
+    usage: {
+      input_tokens: 42,
+      output_tokens: 18,
+    },
+  };
+}
+
+type ScriptedStep =
+  | { kind: "ok"; body: unknown; status?: number }
+  | { kind: "status"; status: number; body: unknown }
+  | { kind: "abort" }
+  | { kind: "throw"; error: Error };
+
+function createScriptedFetch(steps: ScriptedStep[]): {
+  fetchImpl: typeof fetch;
+  getCallCount: () => number;
+} {
+  let callCount = 0;
+  const fetchImpl = (async () => {
+    const idx = callCount;
+    callCount += 1;
+    const step = steps[idx] ?? steps[steps.length - 1];
+    if (!step) {
+      throw new Error(`Scripted fetch exhausted at call ${callCount}`);
+    }
+    if (step.kind === "abort") {
+      throw new DOMException("The operation was aborted", "AbortError");
+    }
+    if (step.kind === "throw") {
+      throw step.error;
+    }
+    const status = step.kind === "status" ? step.status : (step.status ?? 200);
+    return new Response(JSON.stringify(step.body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  return { fetchImpl, getCallCount: () => callCount };
+}
+
+const baseRequest: AiRequest = {
+  message: "ما هي ساعات العمل؟",
+  businessName: "عيادة د. أحمد",
+  conversationStatus: "AI_ACTIVE",
+  recentMessages: [],
+  services: [],
+  faqs: [],
+};
+
+async function runSuite(): Promise<void> {
+  console.log(
+    "\n=== FlowPilot CORE-04A: Production AI Physical-Attempt Accounting & Control Audit ===\n",
+  );
+
+  // -------------------------------------------------------------------------
+  // A. Mechanical selection: zero serving and shadow physical HTTP attempts
+  // -------------------------------------------------------------------------
+  console.log("--- Group A: Mechanical Selection Zero-Call Invariant ---");
+  {
+    const scripted = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+    const mockEnv = (name: string) =>
+      name.includes("KEY") ? "test-key" : undefined;
+    const adapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: mockEnv,
+      fetchImpl: scripted.fetchImpl,
+    });
+    const orch = createAiOrchestrator({
+      primary: adapter,
+      fallbackEnabled: false,
+    });
+
+    // When customer input is handled deterministically by bypass
+    const res = await orch.callWithFallback({
+      ...baseRequest,
+      message: "م", // 1 character -> deterministic bypass
+    });
+
+    check(
+      "A1. Mechanical/deterministic bypass produces ZERO physical HTTP requests",
+      scripted.getCallCount() === 0,
+    );
+    check(
+      "A2. Telemetry totalHttpAttempts is explicitly 0",
+      res.telemetry.totalHttpAttempts === 0,
+    );
+    check(
+      "A3. Telemetry attempts is empty",
+      res.telemetry.attempts.length === 0,
+    );
+    check(
+      "A4. Final provider is deterministic-bypass",
+      res.telemetry.finalProvider === "deterministic-bypass",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // B. Primary success: exactly 1 physical request
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group B: Primary Success Accounting ---");
+  {
+    const scripted = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+    const adapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: scripted.fetchImpl,
+    });
+    const orch = createAiOrchestrator({
+      primary: adapter,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "B1. Exactly one physical HTTP call dispatched",
+      scripted.getCallCount() === 1,
+    );
+    check(
+      "B2. Telemetry totalHttpAttempts equals 1",
+      res.telemetry.totalHttpAttempts === 1,
+    );
+    check(
+      "B3. Exactly one attempt record in telemetry",
+      res.telemetry.attempts.length === 1,
+    );
+    check(
+      "B4. Attempt status is SUCCESS",
+      res.telemetry.attempts[0]?.status === "SUCCESS",
+    );
+    check(
+      "B5. Attempt reports httpAttempts=1",
+      res.telemetry.attempts[0]?.httpAttempts === 1,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // C. Primary internal retry then success: exactly 2 physical requests
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group C: Primary Internal Retry Accounting ---");
+  {
+    const scripted = createScriptedFetch([
+      { kind: "abort" },
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+    const rawAdapter = createAtriaAdapter({
+      model: "atria-1",
+      getEnvVar: () => "valid-key",
+      fetchImpl: scripted.fetchImpl,
+    });
+    const controlledPrimary = createConversationControl({
+      provider: rawAdapter,
+      settings: {
+        conversationControl: {
+          enabled: true,
+          maxAttempts: 2,
+          retryEnabled: true,
+        },
+      },
+    });
+    const orch = createAiOrchestrator({
+      primary: controlledPrimary,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "C1. Exactly two physical HTTP calls dispatched",
+      scripted.getCallCount() === 2,
+    );
+    check(
+      "C2. Telemetry totalHttpAttempts is 2",
+      res.telemetry.totalHttpAttempts === 2,
+    );
+    check(
+      "C3. RetryTrace captures exactly 2 attempt records",
+      res.telemetry.retryTrace?.attempts.length === 2,
+    );
+    check(
+      "C4. RetryTrace totalHttpAttempts is 2",
+      res.telemetry.retryTrace?.totalHttpAttempts === 2,
+    );
+    check(
+      "C5. First attempt marked FAILURE, second marked SUCCESS",
+      res.telemetry.retryTrace?.attempts[0]?.outcome === "FAILURE" &&
+        res.telemetry.retryTrace?.attempts[1]?.outcome === "SUCCESS",
+    );
+    check(
+      "C6. Logical result outcome is SUCCESS",
+      res.telemetry.finalStatus === "SUCCESS",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // D. Primary retry exhaustion followed by secondary success: exact count = 3
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group D: Retry-Exhaustion Plus Fallback (2 Primary + 1 Secondary = 3) ---",
+  );
+  {
+    const primaryFetch = createScriptedFetch([
+      { kind: "abort" },
+      { kind: "abort" },
+    ]);
+    const secondaryFetch = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+
+    const rawPrimary = createOpenRouterAdapter({
+      model: "deepseek/deepseek-chat",
+      getEnvVar: () => "valid-key-1",
+      fetchImpl: primaryFetch.fetchImpl,
+    });
+    const primary = createConversationControl({
+      provider: rawPrimary,
+      settings: {
+        conversationControl: {
+          enabled: true,
+          maxAttempts: 2,
+          retryEnabled: true,
+        },
+      },
+    });
+
+    const secondary = createAtriaAdapter({
+      model: "atria-1",
+      getEnvVar: () => "valid-key-2",
+      fetchImpl: secondaryFetch.fetchImpl,
+    });
+
+    const orch = createAiOrchestrator({
+      primary,
+      secondary,
+      fallbackEnabled: true,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "D1. Primary dispatched exactly 2 physical calls",
+      primaryFetch.getCallCount() === 2,
+    );
+    check(
+      "D2. Secondary dispatched exactly 1 physical call",
+      secondaryFetch.getCallCount() === 1,
+    );
+    check(
+      "D3. Combined total physical HTTP attempts is strictly 3 (not 2)",
+      res.telemetry.totalHttpAttempts === 3,
+    );
+    check(
+      "D4. Unified retryTrace aggregates all 3 attempts sequentially",
+      res.telemetry.retryTrace?.attempts.length === 3,
+    );
+    check(
+      "D5. Attempt sequence reflects providers: primary, primary, secondary",
+      res.telemetry.retryTrace?.attempts[0]?.provider === "openrouter" &&
+        res.telemetry.retryTrace?.attempts[1]?.provider === "openrouter" &&
+        res.telemetry.retryTrace?.attempts[2]?.provider === "atria",
+    );
+    check(
+      "D6. Each attempt carries exactly 1 httpAttempt",
+      res.telemetry.retryTrace?.attempts.every((a) => a.httpAttempts === 1) ===
+        true,
+    );
+    check("D7. Fallback was marked used", res.telemetry.fallbackUsed === true);
+    check(
+      "D8. Final provider is secondary",
+      res.telemetry.finalProvider === "atria",
+    );
+    check(
+      "D9. Final status is SUCCESS",
+      res.telemetry.finalStatus === "SUCCESS",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // E. Secondary retry supported: full aggregate without duplicate counting (2 + 2 = 4)
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group E: Secondary Internal Retry (2 Primary + 2 Secondary = 4) ---",
+  );
+  {
+    const primaryFetch = createScriptedFetch([
+      { kind: "abort" },
+      { kind: "abort" },
+    ]);
+    const secondaryFetch = createScriptedFetch([
+      { kind: "abort" },
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+
+    const primary = createConversationControl({
+      provider: createOpenRouterAdapter({
+        model: "model-1",
+        getEnvVar: () => "valid-key-1",
+        fetchImpl: primaryFetch.fetchImpl,
+      }),
+      settings: {
+        conversationControl: {
+          enabled: true,
+          maxAttempts: 2,
+          retryEnabled: true,
+        },
+      },
+    });
+
+    const secondary = createConversationControl({
+      provider: createAtriaAdapter({
+        model: "model-2",
+        getEnvVar: () => "valid-key-2",
+        fetchImpl: secondaryFetch.fetchImpl,
+      }),
+      settings: {
+        conversationControl: {
+          enabled: true,
+          maxAttempts: 2,
+          retryEnabled: true,
+        },
+      },
+    });
+
+    const orch = createAiOrchestrator({
+      primary,
+      secondary,
+      fallbackEnabled: true,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "E1. Primary dispatched 2 calls and secondary dispatched 2 calls",
+      primaryFetch.getCallCount() === 2 && secondaryFetch.getCallCount() === 2,
+    );
+    check(
+      "E2. Total physical HTTP attempts is strictly 4",
+      res.telemetry.totalHttpAttempts === 4,
+    );
+    check(
+      "E3. Unified retryTrace has 4 attempts",
+      res.telemetry.retryTrace?.attempts.length === 4,
+    );
+    check(
+      "E4. Sequential attempt indices are 1, 2, 3, 4 without collisions",
+      res.telemetry.retryTrace?.attempts.map((a) => a.attempt).join(",") ===
+        "1,2,3,4",
+    );
+    check("E5. Outcome is SUCCESS", res.telemetry.finalStatus === "SUCCESS");
+  }
+
+  // -------------------------------------------------------------------------
+  // F. Preflight rejection: zero HTTP requests
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group F: Preflight Rejection (0 Physical HTTP Requests) ---",
+  );
+  {
+    const scripted = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+    const adapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => undefined, // missing API key -> preflight rejection
+      fetchImpl: scripted.fetchImpl,
+    });
+    const orch = createAiOrchestrator({
+      primary: adapter,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "F1. Preflight rejection made ZERO physical HTTP requests",
+      scripted.getCallCount() === 0,
+    );
+    check(
+      "F2. Telemetry totalHttpAttempts is strictly 0",
+      res.telemetry.totalHttpAttempts === 0,
+    );
+    check(
+      "F3. Telemetry attempts reports CONFIG_ERROR",
+      res.telemetry.attempts[0]?.errorCode === "CONFIG_ERROR",
+    );
+    check(
+      "F4. Attempt record reports httpAttempts=0",
+      res.telemetry.attempts[0]?.httpAttempts === 0,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // G. Provider timeout or transport failure: invoked attempt remains counted
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group G: Transport Failure / Timeout Accounting ---");
+  {
+    const scripted = createScriptedFetch([{ kind: "abort" }]);
+    const adapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: scripted.fetchImpl,
+      timeoutMs: 50,
+    });
+    const orch = createAiOrchestrator({
+      primary: adapter,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "G1. Fetch was invoked before timeout",
+      scripted.getCallCount() === 1,
+    );
+    check(
+      "G2. Timeout attempt remains counted as 1 physical HTTP attempt",
+      res.telemetry.totalHttpAttempts === 1,
+    );
+    check(
+      "G3. Error code is TIMEOUT",
+      res.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+    check("G4. Status is FAILURE", res.telemetry.finalStatus === "FAILURE");
+  }
+
+  // -------------------------------------------------------------------------
+  // H. Serving JEV: real mocked HTTP counts as model activity; no extra LLM
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group H: Serving JEV Accounting ---");
+  {
+    const jevFetch = createScriptedFetch([
+      { kind: "ok", body: jevDecisionsEnvelope() },
+    ]);
+    const llmFetch = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+
+    const jevProvider = createJevDecisionsProvider({
+      getEnvVar: () => "valid-openrouter-key",
+      fetchImpl: jevFetch.fetchImpl,
+    });
+    const decisionStrategy = createSemanticJevStrategy({
+      provider: jevProvider,
+      enabled: true,
+    });
+
+    const llmAdapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-llm-key",
+      fetchImpl: llmFetch.fetchImpl,
+    });
+
+    const orch = createAiOrchestrator({
+      primary: llmAdapter,
+      decisionStrategy,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback({
+      ...baseRequest,
+      message: "عايز أحجز كشف أسنان",
+    });
+
+    check(
+      "H1. JEV Decisions API dispatched exactly 1 physical HTTP call",
+      jevFetch.getCallCount() === 1,
+    );
+    check(
+      "H2. Serving LLM dispatched strictly ZERO calls after spent JEV",
+      llmFetch.getCallCount() === 0,
+    );
+    check(
+      "H3. Telemetry totalHttpAttempts reflects JEV invocation (1)",
+      res.telemetry.totalHttpAttempts === 1,
+    );
+    check(
+      "H4. Telemetry jevDecision mode is DETERMINISTIC",
+      res.telemetry.jevDecision?.mode === "DETERMINISTIC",
+    );
+    check(
+      "H5. jevCallSpent is true",
+      res.telemetry.jevDecision?.semantic?.jevCallSpent === true,
+    );
+    check(
+      "H6. finalProvider is jev-deterministic",
+      res.telemetry.finalProvider === "jev-deterministic",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // I. Shadow: separate counters; failure does not alter customer outcome
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group I: Shadow Evaluation Isolation ---");
+  {
+    const servingFetch = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({ content: "خدمتنا الأساسية كشف أسنان" }),
+        ),
+      },
+    ]);
+    const shadowFetch = createScriptedFetch([
+      { kind: "status", status: 500, body: { error: "shadow error" } },
+    ]);
+
+    const primary = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: servingFetch.fetchImpl,
+    });
+
+    const shadowProvider = createJevDecisionsProvider({
+      getEnvVar: () => "valid-key",
+      fetchImpl: shadowFetch.fetchImpl,
+      timeoutMs: 1000,
+    });
+
+    const shadowStrategy = createShadowJevStrategy({
+      provider: shadowProvider,
+      sampler: createShadowSampler({ getEnvVar: () => "1" }), // 100% sample rate
+    });
+
+    const orch = createAiOrchestrator({
+      primary,
+      shadowStrategy,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback({
+      ...baseRequest,
+      message: "عايز أعرف الخدمات",
+      traceId: "trace-shadow-test-01",
+    });
+
+    check(
+      "I1. Serving HTTP call dispatched exactly once",
+      servingFetch.getCallCount() === 1,
+    );
+    check(
+      "I2. Shadow HTTP call dispatched once",
+      shadowFetch.getCallCount() === 1,
+    );
+    check(
+      "I3. Serving totalHttpAttempts is 1 (shadow does NOT inflate serving count)",
+      res.telemetry.totalHttpAttempts === 1,
+    );
+    check(
+      "I4. Shadow evidence captures failure isolation",
+      res.telemetry.shadow?.jevCallSpent === true,
+    );
+    check(
+      "I5. Shadow failure did NOT corrupt or alter customer serving response",
+      res.response !== null &&
+        res.response.content === "خدمتنا الأساسية كشف أسنان",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // J. Missing telemetry on supported legacy/custom seam: unknown stays null
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group J: Legacy/Custom Adapter Unknown Telemetry ---");
+  {
+    const legacyAdapter: AiProviderAdapter = {
+      providerId: "openrouter",
+      model: "legacy-model",
+      secretRef: "OPENROUTER_API_KEY",
+      async call(): Promise<AiProviderResult> {
+        return {
+          ok: true,
+          response: {
+            action: "reply",
+            intent: "FAQ",
+            content: "legacy reply",
+            extraction: {
+              service: null,
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            handoffReason: null,
+            summary: null,
+          },
+          provider: "openrouter",
+          model: "legacy-model",
+          latencyMs: 50,
+          // Explicitly OMITTING httpAttempts to represent legacy adapter
+        };
+      },
+    };
+
+    const orch = createAiOrchestrator({
+      primary: legacyAdapter,
+      fallbackEnabled: false,
+    });
+
+    const res = await orch.callWithFallback(baseRequest);
+
+    check(
+      "J1. Telemetry totalHttpAttempts is explicitly null when unknown",
+      res.telemetry.totalHttpAttempts === null,
+    );
+    check(
+      "J2. Does not fabricate a physical count of 1",
+      res.telemetry.totalHttpAttempts !== 1,
+    );
+    check(
+      "J3. Does not silently convert unknown to 0",
+      res.telemetry.totalHttpAttempts !== 0,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // K. Usage and cost honesty: token preservation & attribution
+  // -------------------------------------------------------------------------
+  console.log("\n--- Group K: Usage & Cost Honesty ---");
+  {
+    // Complete case
+    const step1 = openAiEnvelope(validAiResponseJson(), {
+      prompt_tokens: 25,
+      completion_tokens: 15,
+    });
+    const scripted1 = createScriptedFetch([{ kind: "ok", body: step1 }]);
+    const adapter1 = createOpenRouterAdapter({
+      model: "openrouter/model-1",
+      getEnvVar: () => "key",
+      fetchImpl: scripted1.fetchImpl,
+    });
+    const res1 = await createAiOrchestrator({
+      primary: adapter1,
+      fallbackEnabled: false,
+    }).callWithFallback(baseRequest);
+
+    check(
+      "K1. Complete reported usage preserved in attempt record",
+      res1.telemetry.attempts[0]?.inputTokens === 25 &&
+        res1.telemetry.attempts[0]?.outputTokens === 15,
+    );
+
+    // Unavailable tokens case (transport failure)
+    const scripted2 = createScriptedFetch([
+      { kind: "status", status: 500, body: { error: "down" } },
+    ]);
+    const adapter2 = createOpenRouterAdapter({
+      model: "openrouter/model-2",
+      getEnvVar: () => "key",
+      fetchImpl: scripted2.fetchImpl,
+    });
+    const res2 = await createAiOrchestrator({
+      primary: adapter2,
+      fallbackEnabled: false,
+    }).callWithFallback(baseRequest);
+
+    check(
+      "K2. Failed attempt without tokens has undefined inputTokens (not fabricated 0)",
+      res2.telemetry.attempts[0]?.inputTokens === undefined,
+    );
+    check(
+      "K3. Failed attempt without tokens has undefined outputTokens (not fabricated 0)",
+      res2.telemetry.attempts[0]?.outputTokens === undefined,
+    );
+
+    // No misattribution across fallback
+    const primaryFetch = createScriptedFetch([
+      {
+        kind: "status",
+        status: 500,
+        body: {
+          error: "p-fail",
+          usage: { prompt_tokens: 30, completion_tokens: 0 },
+        },
+      },
+    ]);
+    const secondaryFetch = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(validAiResponseJson(), {
+          prompt_tokens: 40,
+          completion_tokens: 20,
+        }),
+      },
+    ]);
+
+    const p = createOpenRouterAdapter({
+      model: "model-p",
+      getEnvVar: () => "key-p",
+      fetchImpl: primaryFetch.fetchImpl,
+    });
+    const s = createAtriaAdapter({
+      model: "model-s",
+      getEnvVar: () => "key-s",
+      fetchImpl: secondaryFetch.fetchImpl,
+    });
+    const resFallback = await createAiOrchestrator({
+      primary: p,
+      secondary: s,
+      fallbackEnabled: true,
+    }).callWithFallback(baseRequest);
+
+    check(
+      "K4. Primary attempts preserve primary provider and tokens",
+      resFallback.telemetry.attempts[0]?.provider === "openrouter" &&
+        resFallback.telemetry.attempts[0]?.inputTokens === 30,
+    );
+    check(
+      "K5. Secondary attempt preserves secondary provider and tokens",
+      resFallback.telemetry.attempts[1]?.provider === "atria" &&
+        resFallback.telemetry.attempts[1]?.inputTokens === 40 &&
+        resFallback.telemetry.attempts[1]?.outputTokens === 20,
+    );
+    check(
+      "K6. Secondary provider does not claim primary tokens (no misattribution)",
+      resFallback.telemetry.attempts[1]?.inputTokens !== 70,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // L. Budget approval: finite positive numeric USD validation & emergency disable
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group L: FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET Validation ---",
+  );
+  {
+    // Valid positive finite numeric USD values
+    check(
+      "L1. Accepts integer USD string '50'",
+      parseApprovedMonthlyBudget("50") === 50,
+    );
+    check(
+      "L2. Accepts decimal USD string '0.05'",
+      parseApprovedMonthlyBudget("0.05") === 0.05,
+    );
+    check(
+      "L3. Accepts decimal with surrounding whitespace '  100.50  '",
+      parseApprovedMonthlyBudget("  100.50  ") === 100.5,
+    );
+
+    // Rejected invalid values
+    check(
+      "L4. Rejects undefined",
+      parseApprovedMonthlyBudget(undefined) === null,
+    );
+    check("L5. Rejects empty string", parseApprovedMonthlyBudget("") === null);
+    check(
+      "L6. Rejects whitespace only",
+      parseApprovedMonthlyBudget("   ") === null,
+    );
+    check("L7. Rejects zero '0'", parseApprovedMonthlyBudget("0") === null);
+    check(
+      "L8. Rejects negative amount '-25'",
+      parseApprovedMonthlyBudget("-25") === null,
+    );
+    check(
+      "L9. Rejects non-numeric string 'approved'",
+      parseApprovedMonthlyBudget("approved") === null,
+    );
+    check(
+      "L10. Rejects NaN string 'NaN'",
+      parseApprovedMonthlyBudget("NaN") === null,
+    );
+    check(
+      "L11. Rejects positive Infinity 'Infinity'",
+      parseApprovedMonthlyBudget("Infinity") === null,
+    );
+    check(
+      "L12. Rejects negative Infinity '-Infinity'",
+      parseApprovedMonthlyBudget("-Infinity") === null,
+    );
+
+    // Production gating integration
+    const prodEnv =
+      (budget: string | undefined, killSwitch?: string) => (name: string) => {
+        if (name === "NODE_ENV") return "production";
+        if (name === "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET") return budget;
+        if (name === "FLOWPILOT_JEV_SEMANTIC_ENABLED") return killSwitch;
+        return undefined;
+      };
+
+    check(
+      "L13. Production with valid budget is approved",
+      isTypeSafeJevPreferred(prodEnv("25.00")) === true,
+    );
+    check(
+      "L14. Production with empty budget is blocked",
+      isTypeSafeJevPreferred(prodEnv("")) === false,
+    );
+    check(
+      "L15. Production with zero budget is blocked",
+      isTypeSafeJevPreferred(prodEnv("0")) === false,
+    );
+    check(
+      "L16. Production with negative budget is blocked",
+      isTypeSafeJevPreferred(prodEnv("-10")) === false,
+    );
+    check(
+      "L17. Production with non-numeric budget is blocked",
+      isTypeSafeJevPreferred(prodEnv("yes")) === false,
+    );
+
+    // Emergency kill switch overrides any budget
+    check(
+      "L18. Emergency kill switch is engaged on 'false'",
+      isSemanticJevEmergencyDisabled(prodEnv("100", "false")) === true,
+    );
+    check(
+      "L19. Emergency kill switch is engaged on '0'",
+      isSemanticJevEmergencyDisabled(prodEnv("100", "0")) === true,
+    );
+    check(
+      "L20. Emergency kill switch overrides valid budget in production",
+      isTypeSafeJevPreferred(prodEnv("100", "false")) === false,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // M. Integration: full production engine receives correct aggregate for retry+fallback
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group M: Full Engine Pipeline Integration (Retry + Fallback Aggregate) ---",
+  );
+  {
+    const primaryFetch = createScriptedFetch([
+      { kind: "abort" },
+      { kind: "abort" },
+    ]);
+    const secondaryFetch = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({ content: "نحن في خدمتكم من ٩ إلى ٥" }),
+        ),
+      },
+    ]);
+
+    const primaryRaw = createOpenRouterAdapter({
+      model: "deepseek/deepseek-chat",
+      getEnvVar: () => "key-1",
+      fetchImpl: primaryFetch.fetchImpl,
+    });
+    const primaryControlled = createConversationControl({
+      provider: primaryRaw,
+      settings: {
+        conversationControl: {
+          enabled: true,
+          maxAttempts: 2,
+          retryEnabled: true,
+        },
+      },
+    });
+    const secondaryAdapter = createAtriaAdapter({
+      model: "atria-1",
+      getEnvVar: () => "key-2",
+      fetchImpl: secondaryFetch.fetchImpl,
+    });
+
+    const testAi = createLlmConversationAi({
+      primary: primaryControlled,
+      secondary: secondaryAdapter,
+      fallbackEnabled: true,
+    });
+
+    const emittedEvidence: TurnEvidence[] = [];
+    const recordedUsage: Record<string, unknown>[] = [];
+
+    const harness = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+    });
+    harness.deps.ai = testAi;
+    harness.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidence.push(ev);
+      },
+    };
+    harness.deps.usageRepository = {
+      record: async (u) => {
+        recordedUsage.push(u as unknown as Record<string, unknown>);
+        return u as unknown as UsageRecord;
+      },
+    };
+
+    const res = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      from: "+201234567890",
+      text: "ما هي ساعات العمل؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-core04a",
+    });
+
+    if (!res.ok) {
+      console.log("M result failed:", res);
+    }
+
+    check(
+      "M1. receiveInboundMessage returns success",
+      res.ok === true && !res.duplicate,
+    );
+    check(
+      "M2. Exactly 2 primary calls dispatched",
+      primaryFetch.getCallCount() === 2,
+    );
+    check(
+      "M3. Exactly 1 secondary call dispatched",
+      secondaryFetch.getCallCount() === 1,
+    );
+    check(
+      "M4. Emitted TurnEvidence receives providerAttempts === 3 (NOT 2 or 1)",
+      emittedEvidence.length > 0 && emittedEvidence[0]?.providerAttempts === 3,
+    );
+    check(
+      "M5. TurnEvidence providerStatus is SUCCESS",
+      emittedEvidence[0]?.providerStatus === "SUCCESS",
+    );
+    check(
+      "M6. AI_TURN usage record recorded with secondary provider and tokens",
+      recordedUsage.some(
+        (u) =>
+          u.kind === "AI_TURN" &&
+          u.provider === "atria" &&
+          u.status === "SUCCESS",
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Summary
+  // -------------------------------------------------------------------------
+  const passed = results.filter((r) => r.pass).length;
+  const failed = results.filter((r) => !r.pass).length;
+  console.log("\n========================================================");
+  console.log(
+    `TOTAL CHECKS: ${results.length} | PASSED: ${passed} | FAILED: ${failed}`,
+  );
+  console.log("========================================================\n");
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+runSuite().catch((err) => {
+  console.error("FATAL in CORE-04A acceptance suite:", err);
+  process.exit(1);
+});

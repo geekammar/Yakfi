@@ -126,10 +126,14 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.provider_status",
       value: { stringValue: record.providerStatus ?? "null" },
     },
-    {
-      key: "flowpilot.provider_attempts",
-      value: { intValue: String(record.providerAttempts ?? 0) },
-    },
+    ...(record.providerAttempts !== null
+      ? [
+          {
+            key: "flowpilot.provider_attempts",
+            value: { intValue: String(record.providerAttempts) },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.provider_latency_ms",
       value: { doubleValue: record.providerLatencyMs ?? 0 },

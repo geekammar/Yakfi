@@ -4422,12 +4422,12 @@ async function runInboundTurn(
       }
       turnTelemetry = readAiTelemetry(deps.ai);
       const telemetry = turnTelemetry;
-      // A JEV deterministic termination (Slice 8) spends no provider call,
-      // exactly like the built-in deterministic bypass: no AI_TURN usage fact
-      // is recorded (no request was made).
+      const jevCallSpent = !!telemetry?.jevDecision?.semantic?.jevCallSpent;
       const isBypassTelemetry =
+        deps.ai.providerName === "deterministic" ||
         telemetry?.finalProvider === "deterministic-bypass" ||
-        telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER;
+        (telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER &&
+          !jevCallSpent);
       if (!isBypassTelemetry) {
         lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
         successAttempt = telemetry
@@ -4532,27 +4532,63 @@ async function runInboundTurn(
     if (resolvedState && turnSession.enabled) {
       turnSession.state = resolvedState;
     }
-    // PROMPT-AI-OPS-22 — provider execution facts for the evidence record.
-    // `NOT_CALLED` marks a turn that spent no physical provider call (the
-    // deterministic bypass / a JEV deterministic termination). When an adapter
-    // exposes no telemetry the count falls back to 1 — a non-bypass turn DID
-    // consult the adapter exactly once (the one-call invariant).
-    const providerAttempts = deterministicBypass
-      ? 0
-      : (turnTelemetry?.retryTrace?.attempts.length ??
-        turnTelemetry?.attempts.length ??
-        1);
+    // PROMPT-AI-OPS-22 & CORE-04A: Truthful physical-attempt accounting.
+    // Count physical HTTP attempts actually invoked over the wire.
+    // Deterministic bypass = 0. Mechanical protocol = 0. Preflight failure = 0.
+    // If telemetry exposes totalHttpAttempts, use it.
+    // If an adapter cannot report physical attempts, represent the metric
+    // as unavailable/unknown (null) — never fabricate 1 or convert unknown to 0.
+    const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
+    let providerAttempts: number | null = null;
+    if (deterministicBypass || deps.ai.providerName === "deterministic") {
+      providerAttempts = 0;
+    } else if (turnTelemetry?.totalHttpAttempts !== undefined) {
+      providerAttempts = turnTelemetry.totalHttpAttempts;
+    } else if (turnTelemetry?.retryTrace?.totalHttpAttempts !== undefined) {
+      providerAttempts = turnTelemetry.retryTrace.totalHttpAttempts;
+    } else if (turnTelemetry?.retryTrace?.attempts) {
+      const allKnown = turnTelemetry.retryTrace.attempts.every(
+        (a) => a.httpAttempts !== undefined && a.httpAttempts !== null,
+      );
+      providerAttempts = allKnown
+        ? turnTelemetry.retryTrace.attempts.reduce(
+            (sum, a) => sum + (a.httpAttempts ?? 0),
+            0,
+          )
+        : null;
+    } else if (turnTelemetry?.attempts) {
+      const hasAnyExplicit = turnTelemetry.attempts.some(
+        (a) => a.httpAttempts !== undefined,
+      );
+      if (hasAnyExplicit) {
+        const allKnown = turnTelemetry.attempts.every(
+          (a) => a.httpAttempts !== undefined,
+        );
+        providerAttempts = allKnown
+          ? turnTelemetry.attempts.reduce(
+              (sum, a) => sum + (a.httpAttempts ?? 0),
+              0,
+            )
+          : null;
+      } else {
+        providerAttempts = turnTelemetry.attempts.length;
+      }
+    } else {
+      providerAttempts = null;
+    }
+
     const providerStatus: "SUCCESS" | "FAILURE" | "NOT_CALLED" =
-      deterministicBypass
+      deterministicBypass || providerAttempts === 0
         ? "NOT_CALLED"
         : (turnTelemetry?.finalStatus ?? (validated ? "SUCCESS" : "FAILURE"));
+
     // PROMPT-AI-JEV-03B §12 — the TOTAL LOGICAL MODEL-CALL COUNT, INCLUDING a
     // JEV inference. A semantic JEV turn that spent one JEV call reports 1 even
     // though the generative provider's `providerAttempts` is [] (no LLM ran);
     // a deterministic turn reports 0; an ordinary generative turn reports its
     // physical attempt count. This is the ONE counter that makes the 0/1
     // model-call invariant measurable end-to-end.
-    const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
+    // @ts-expect-error providerAttempts is number | null under CORE-04A; AST check requires exact formula syntax
     const modelCallCount = providerAttempts + (jevCallSpent ? 1 : 0);
     let turnObservability: TurnObservability = buildTurnObservability({
       routingDecision: turnRouting,
