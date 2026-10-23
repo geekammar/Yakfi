@@ -174,10 +174,12 @@ export async function callOpenAiCompatible(
   }
 
   // Bound request timeout by remaining serving deadline (CORE-04B)
-  const effectiveTimeoutMs =
-    options?.timeoutMs !== undefined
+  const remainingDeadlineMs = options?.session
+    ? options.session.getRemainingTimeoutMs(timeoutMs)
+    : options?.timeoutMs !== undefined
       ? Math.min(timeoutMs, options.timeoutMs)
       : timeoutMs;
+  const effectiveTimeoutMs = Math.min(timeoutMs, remainingDeadlineMs);
 
   if (effectiveTimeoutMs <= 0) {
     return {
@@ -187,8 +189,8 @@ export async function callOpenAiCompatible(
       latencyMs: Date.now() - started,
       httpAttempts: 0,
       error: {
-        code: "CONTROLLED_FAILURE",
-        message: "DEADLINE_EXHAUSTED",
+        code: "TIMEOUT",
+        message: "deadline exhausted before dispatch",
         retryable: false,
       },
     };
@@ -202,11 +204,12 @@ export async function callOpenAiCompatible(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
+  const onSignalAbort = () => controller.abort();
   if (options?.signal) {
     if (options.signal.aborted) {
       controller.abort();
     } else {
-      options.signal.addEventListener("abort", () => controller.abort(), {
+      options.signal.addEventListener("abort", onSignalAbort, {
         once: true,
       });
     }
@@ -218,6 +221,7 @@ export async function callOpenAiCompatible(
   }
 
   let httpResponse: Response;
+  let rawText = "";
   try {
     httpResponse = await fetchImpl(endpoint, {
       method: "POST",
@@ -228,9 +232,11 @@ export async function callOpenAiCompatible(
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
+
+    rawText = await httpResponse.text();
   } catch (err) {
-    clearTimeout(timeout);
     const isAbort =
+      controller.signal.aborted ||
       (err instanceof DOMException && err.name === "AbortError") ||
       (err instanceof Error && err.name === "AbortError") ||
       (err instanceof Error && err.message.includes("aborted"));
@@ -262,14 +268,34 @@ export async function callOpenAiCompatible(
     };
   } finally {
     clearTimeout(timeout);
+    if (options?.signal) {
+      options.signal.removeEventListener("abort", onSignalAbort);
+    }
   }
 
   const latencyMs = Date.now() - started;
 
+  // Do not accept a response that completes after the effective deadline
+  if (options?.session) {
+    const check = options.session.canDispatch();
+    if (!check.allowed && check.reason === "DEADLINE_EXHAUSTED") {
+      return {
+        ok: false,
+        provider: providerId,
+        model,
+        latencyMs,
+        httpAttempts: 1,
+        error: {
+          code: "TIMEOUT",
+          message: "response completed after deadline",
+          retryable: false,
+        },
+      };
+    }
+  }
+
   let json: unknown = null;
-  let rawText = "";
   try {
-    rawText = await httpResponse.text();
     json = rawText ? JSON.parse(rawText) : null;
   } catch {
     return {

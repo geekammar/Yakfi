@@ -92,6 +92,7 @@ import type {
 } from "./jev-decisions-provider";
 import { jevDecisionFromProvenResponse } from "./jev-strategy";
 import type { JevDecision, JevDecisionReason } from "./jev-strategy";
+import type { AiCallOptions } from "./types";
 
 // ─── 1. The production question contract (the approved semantics) ─────────────
 //
@@ -811,12 +812,15 @@ export type SemanticJevStrategyDeps = {
 
 export function createSemanticJevStrategy(deps: SemanticJevStrategyDeps): {
   readonly strategyId: string;
-  decide(request: AiRequest): Promise<JevDecision>;
+  decide(request: AiRequest, options?: AiCallOptions): Promise<JevDecision>;
 } {
   return {
     strategyId: SEMANTIC_JEV_STRATEGY_ID,
 
-    async decide(request: AiRequest): Promise<JevDecision> {
+    async decide(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<JevDecision> {
       // ── KILL SWITCH (§11): OFF ⇒ the exact pre-AI-JEV-03 behaviour. ────────
       // The strategy becomes the conservative strategy: it terminates only on
       // the proven zero-call bypass and never consults the provider, so a
@@ -930,6 +934,7 @@ export function createSemanticJevStrategy(deps: SemanticJevStrategyDeps): {
       // ── 2. THE ONE JEV MODEL CALL. ─────────────────────────────────────────
       const evaluation = await deps.provider.evaluate(
         buildSemanticRequest(request),
+        options,
       );
 
       // The shared semantic reading (PROMPT-AI-JEV-03D §4.2): the evidence

@@ -15,6 +15,7 @@ import { bypassDeterministicAi } from "@/features/conversations/server/conversat
 
 import {
   DEFAULT_SERVING_ROUTE_BUDGET_MS,
+  HARD_CEILING_SERVING_ATTEMPTS,
   createServingExecutionSession,
 } from "./execution-limits";
 import { computeCostAggregation, type CostAggregation } from "./http";
@@ -285,7 +286,10 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
       fallbackEnabled && secondary
         ? ((secondary as { maxAttempts?: number }).maxAttempts ?? 1)
         : 0;
-    const derivedMaxAttempts = primaryMax + secondaryMax;
+    const derivedMaxAttempts = Math.min(
+      HARD_CEILING_SERVING_ATTEMPTS,
+      primaryMax + secondaryMax,
+    );
 
     const session =
       options?.session ??
@@ -294,8 +298,11 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         getNow: params.getNow,
         timeoutMs: options?.timeoutMs ?? params.servingTimeoutMs,
         maxAttemptsOverride:
-          params.maxServingAttempts ??
-          (params.getEnvVar ? undefined : derivedMaxAttempts),
+          params.maxServingAttempts !== undefined
+            ? params.maxServingAttempts
+            : params.getEnvVar
+              ? undefined
+              : derivedMaxAttempts,
       });
 
     const requiresStructuredTurn =
@@ -342,9 +349,18 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
         };
       }
 
-      // JEV decision strategy (Slice 8, PROMPT-AI-JEV-03B)
+      // JEV decision strategy (Slice 8, PROMPT-AI-JEV-03B, CORE-04B §3)
+      const attemptsBeforeJev = session.getDispatchedAttempts();
       const jev = decisionStrategy
-        ? await decisionStrategy.decide(request)
+        ? await decisionStrategy.decide(request, {
+            ...options,
+            session,
+            timeoutMs: session.getRemainingTimeoutMs(
+              options?.timeoutMs ??
+                params.servingTimeoutMs ??
+                DEFAULT_SERVING_ROUTE_BUDGET_MS,
+            ),
+          })
         : null;
       jevDecision = jev
         ? {
@@ -354,12 +370,16 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
           }
         : undefined;
 
+      const jevCallSpent = !!jev?.semantic?.jevCallSpent;
+      // If JEV spent an attempt but provider did not record it via session (legacy/mock provider):
+      if (
+        jevCallSpent &&
+        session.getDispatchedAttempts() === attemptsBeforeJev
+      ) {
+        session.recordDispatch(1);
+      }
+
       if (jev && jev.mode === "DETERMINISTIC" && jev.response) {
-        const jevCallSpent = !!jev.semantic?.jevCallSpent;
-        const totalHttpAttempts = jevCallSpent ? 1 : 0;
-        if (jevCallSpent) {
-          session.recordDispatch(1);
-        }
         return {
           response: jev.response,
           telemetry: {
@@ -369,9 +389,27 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
             finalModel: null,
             finalStatus: "SUCCESS",
             jevDecision,
-            totalHttpAttempts,
+            totalHttpAttempts: session.getDispatchedAttempts(),
             stopReason: session.getStopReason(),
           },
+        };
+      }
+
+      // If JEV spent a serving attempt, NO serving LLM request may follow it! (CORE-04B §3/§8)
+      if (jevCallSpent) {
+        return {
+          response: jev?.response ?? null,
+          telemetry: {
+            attempts: [],
+            fallbackUsed: false,
+            finalProvider: JEV_DETERMINISTIC_PROVIDER,
+            finalModel: null,
+            finalStatus: jev?.response ? "SUCCESS" : "FAILURE",
+            jevDecision,
+            totalHttpAttempts: session.getDispatchedAttempts() || 1,
+            stopReason: session.getStopReason(),
+          },
+          lastErrorCode: jev?.response ? undefined : "CONTROLLED_FAILURE",
         };
       }
     } else {
@@ -437,7 +475,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     }
 
     const primaryRemainingTimeout = session.getRemainingTimeoutMs(
-      DEFAULT_SERVING_ROUTE_BUDGET_MS,
+      options?.timeoutMs ??
+        params.servingTimeoutMs ??
+        DEFAULT_SERVING_ROUTE_BUDGET_MS,
     );
     const first = await primary.call(request, {
       ...options,
@@ -538,7 +578,9 @@ export function createAiOrchestrator(params: CreateAiOrchestratorParams) {
     }
 
     const secondaryRemainingTimeout = session.getRemainingTimeoutMs(
-      DEFAULT_SERVING_ROUTE_BUDGET_MS,
+      options?.timeoutMs ??
+        params.servingTimeoutMs ??
+        DEFAULT_SERVING_ROUTE_BUDGET_MS,
     );
     const second = await secondary!.call(request, {
       ...options,

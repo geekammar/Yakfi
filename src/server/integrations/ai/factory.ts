@@ -44,6 +44,7 @@ export type AiFactoryEnvDeps = {
   };
   timeoutMs?: number;
   maxTokens?: number;
+  maxServingAttempts?: number;
 };
 
 export type AiFactoryDeps = AiFactoryEnvDeps & {
@@ -239,6 +240,7 @@ export async function createPolicyBackedAi(
     shadowTimeoutMs,
     getEnvVar: deps.getEnvVar,
     servingTimeoutMs: deps.timeoutMs,
+    maxServingAttempts: deps.maxServingAttempts,
   });
 }
 

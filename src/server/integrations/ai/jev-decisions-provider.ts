@@ -57,6 +57,8 @@
 
 import type { ConversationContextProjection } from "@/features/conversations/server/conversation-state";
 
+import type { AiCallOptions } from "./types";
+
 export const JEV_DECISIONS_ENDPOINT =
   "https://openrouter.ai/api/alpha/decisions";
 
@@ -155,6 +157,8 @@ export const jevErrorCodeValues = [
   "NETWORK",
   /** HTTP 5xx — the provider or edge failed. */
   "PROVIDER",
+  /** Operationally stopped or prevented before dispatch (attemptSpent=false). */
+  "OPERATIONALLY_PREVENTED",
 ] as const;
 
 export type JevErrorCode = (typeof jevErrorCodeValues)[number];
@@ -192,7 +196,10 @@ export type JevDecisionsProvider = {
    * as `{ ok: false, errorCode, attemptSpent }` so one bad turn can never
    * abort the conversation, and the strategy can account for it exactly.
    */
-  evaluate(request: JevEvaluationRequest): Promise<JevDecisionsResult>;
+  evaluate(
+    request: JevEvaluationRequest,
+    options?: AiCallOptions,
+  ): Promise<JevDecisionsResult>;
 };
 
 export type JevDecisionsProviderDeps = {
@@ -451,8 +458,29 @@ export function createJevDecisionsProvider(
     model,
     secretRef: JEV_SECRET_REF,
 
-    async evaluate(request: JevEvaluationRequest): Promise<JevDecisionsResult> {
+    async evaluate(
+      request: JevEvaluationRequest,
+      options?: AiCallOptions,
+    ): Promise<JevDecisionsResult> {
       const started = Date.now();
+
+      // ── Check serving execution session allowance & deadline before dispatch
+      if (options?.session) {
+        const check = options.session.canDispatch();
+        if (!check.allowed) {
+          return {
+            ok: false,
+            errorCode: "OPERATIONALLY_PREVENTED",
+            errorMessage: `request prevented: ${check.reason ?? "LIMIT_EXHAUSTED"}`,
+            answers: {},
+            latencyMs: Date.now() - started,
+            servedModel: null,
+            inputTokens: null,
+            outputTokens: null,
+            attemptSpent: false,
+          };
+        }
+      }
 
       // ── Pinned-model guard: the alias is never the primary model. ────────
       if (model === JEV_FORBIDDEN_ALIAS) {
@@ -485,6 +513,28 @@ export function createJevDecisionsProvider(
         };
       }
 
+      // ── Bound JEV timeout by remaining serving deadline (CORE-04B §7) ─────
+      const remainingDeadlineMs = options?.session
+        ? options.session.getRemainingTimeoutMs(timeoutMs)
+        : options?.timeoutMs !== undefined
+          ? Math.min(timeoutMs, options.timeoutMs)
+          : timeoutMs;
+      const effectiveTimeoutMs = Math.min(timeoutMs, remainingDeadlineMs);
+
+      if (effectiveTimeoutMs <= 0) {
+        return {
+          ok: false,
+          errorCode: "OPERATIONALLY_PREVENTED",
+          errorMessage: "deadline exhausted before dispatch",
+          answers: {},
+          latencyMs: Date.now() - started,
+          servedModel: null,
+          inputTokens: null,
+          outputTokens: null,
+          attemptSpent: false,
+        };
+      }
+
       const body: DecisionsRequest = {
         model,
         state: mapState(request.state),
@@ -497,10 +547,24 @@ export function createJevDecisionsProvider(
       };
       const payload = JSON.stringify(body);
 
+      // Reserve physical HTTP attempt immediately before wire dispatch (CORE-04B)
+      if (options?.session) {
+        options.session.recordDispatch(1);
+      }
+
       // ── ONE attempt. No retry: a second attempt would be a second model
       //    call and would break the 0/1 model-call budget the gateway owns.
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
+      const onUserAbort = () => controller.abort();
+      if (options?.signal) {
+        if (options.signal.aborted) {
+          controller.abort();
+        } else {
+          options.signal.addEventListener("abort", onUserAbort, { once: true });
+        }
+      }
+
       try {
         const httpResponse = await deps.fetchImpl(endpoint, {
           method: "POST",
@@ -513,6 +577,25 @@ export function createJevDecisionsProvider(
         });
 
         const text = await httpResponse.text();
+
+        // Check if deadline was exceeded while waiting for response body
+        if (options?.session) {
+          const check = options.session.canDispatch();
+          if (!check.allowed && check.reason === "DEADLINE_EXHAUSTED") {
+            return {
+              ok: false,
+              errorCode: "TIMEOUT",
+              errorMessage: `request completed after deadline (${effectiveTimeoutMs}ms)`,
+              answers: {},
+              latencyMs: Date.now() - started,
+              servedModel: null,
+              inputTokens: null,
+              outputTokens: null,
+              attemptSpent: true,
+            };
+          }
+        }
+
         if (!httpResponse.ok) {
           return {
             ok: false,
@@ -602,6 +685,7 @@ export function createJevDecisionsProvider(
         };
       } catch (err) {
         const isAbort =
+          controller.signal.aborted ||
           (err instanceof DOMException && err.name === "AbortError") ||
           (err instanceof Error && err.name === "AbortError") ||
           (err instanceof Error && err.message.includes("aborted"));
@@ -609,7 +693,7 @@ export function createJevDecisionsProvider(
           ok: false,
           errorCode: isAbort ? "TIMEOUT" : "NETWORK",
           errorMessage: isAbort
-            ? `request exceeded ${timeoutMs}ms`
+            ? `request exceeded ${effectiveTimeoutMs}ms`
             : describeError(err),
           answers: {},
           latencyMs: Date.now() - started,
@@ -620,6 +704,9 @@ export function createJevDecisionsProvider(
         };
       } finally {
         clearTimeout(timer);
+        if (options?.signal) {
+          options.signal.removeEventListener("abort", onUserAbort);
+        }
       }
     },
   };

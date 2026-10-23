@@ -52,6 +52,7 @@ import type {
 import { bypassDeterministicAi } from "@/features/conversations/server/conversation-ai";
 
 import type { JevSemanticEvidence } from "./jev-semantic-strategy";
+import type { AiCallOptions } from "./types";
 
 // ─── The bounded decision contract (the smallest justified representation) ──
 
@@ -156,7 +157,7 @@ export type JevStrategy = {
    * and a GENERATIVE decision leaves the budget untouched for the gateway's
    * single existing call.
    */
-  decide(request: AiRequest): Promise<JevDecision>;
+  decide(request: AiRequest, options?: AiCallOptions): Promise<JevDecision>;
 };
 
 // ─── Deterministic Baseline Strategy (CONV-JEV-01 Terminology Authority) ──
@@ -225,7 +226,10 @@ export const DETERMINISTIC_BASELINE_STRATEGY_ID = "deterministic-baseline@v1";
 export function createConservativeJevStrategy(): JevStrategy {
   return {
     strategyId: CONSERVATIVE_JEV_STRATEGY_ID,
-    async decide(request: AiRequest): Promise<JevDecision> {
+    async decide(
+      request: AiRequest,
+      _options?: AiCallOptions,
+    ): Promise<JevDecision> {
       const proven = bypassDeterministicAi(request);
       if (!proven) {
         return {

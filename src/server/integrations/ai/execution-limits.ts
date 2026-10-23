@@ -34,22 +34,8 @@ export type AiStopReason =
   | "DEADLINE_EXHAUSTED"
   | "INVALID_CONTROL_CONFIG";
 
-export const GLOBAL_STOP_ENABLEMENTS = new Set([
-  "1",
-  "true",
-  "yes",
-  "stop",
-  "stopped",
-  "on",
-]);
-export const GLOBAL_STOP_DISABLEMENTS = new Set([
-  "0",
-  "false",
-  "no",
-  "off",
-  "unstopped",
-  "disabled",
-]);
+export const GLOBAL_STOP_ENABLEMENTS = new Set(["1", "true", "yes", "on"]);
+export const GLOBAL_STOP_DISABLEMENTS = new Set(["0", "false", "no", "off"]);
 
 export type GlobalStopConfig = {
   readonly stopped: boolean;
@@ -138,7 +124,12 @@ export function parseMaxServingAttempts(
     };
   }
   const num = Number(trimmed);
-  if (!Number.isInteger(num) || Number.isNaN(num) || num < 1) {
+  if (
+    !Number.isInteger(num) ||
+    !Number.isFinite(num) ||
+    Number.isNaN(num) ||
+    num < 1
+  ) {
     return {
       maxAttempts: 0,
       malformed: true,
@@ -196,11 +187,33 @@ export function createServingExecutionSession(
     initialStopReason = "GLOBAL_STOP";
   }
 
+  // Validate programmatic maxAttemptsOverride if provided
+  let validatedOverride: number | undefined = undefined;
+  if (params.maxAttemptsOverride !== undefined) {
+    const o = params.maxAttemptsOverride;
+    if (
+      typeof o !== "number" ||
+      !Number.isFinite(o) ||
+      !Number.isInteger(o) ||
+      Number.isNaN(o) ||
+      o < 1
+    ) {
+      initialStopReason = "INVALID_CONTROL_CONFIG";
+    } else {
+      // Programmatic override is clamped to hard ceiling of 3
+      validatedOverride = Math.min(HARD_CEILING_SERVING_ATTEMPTS, o);
+    }
+  }
+
+  // Max attempts calculation:
+  // - If invalid config: 0 attempts
+  // - Programmatic override can only tighten the operator limit, never weaken it
+  // - Hard ceiling of 3 is strictly enforced across all paths
   const maxAttempts =
     initialStopReason === "INVALID_CONTROL_CONFIG"
       ? 0
-      : params.maxAttemptsOverride !== undefined
-        ? Math.max(MIN_SERVING_ATTEMPTS, params.maxAttemptsOverride)
+      : validatedOverride !== undefined
+        ? Math.min(attemptsConfig.maxAttempts, validatedOverride)
         : attemptsConfig.maxAttempts;
 
   const deadlineMs =

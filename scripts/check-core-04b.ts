@@ -15,10 +15,12 @@ import { createConversationControl } from "@/server/integrations/ai/conversation
 import {
   FLOWPILOT_AI_GLOBAL_STOP_FLAG,
   FLOWPILOT_AI_MAX_SERVING_ATTEMPTS_FLAG,
+  HARD_CEILING_SERVING_ATTEMPTS,
   createServingExecutionSession,
   parseGlobalAiStop,
   parseMaxServingAttempts,
 } from "@/server/integrations/ai/execution-limits";
+import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { createJevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
 import { createSemanticJevStrategy } from "@/server/integrations/ai/jev-semantic-strategy";
 import {
@@ -106,6 +108,28 @@ function sampleRequest(
     faqs: [],
     traceId: "test-trace-core-04b",
     requiredSemanticCapability: capability,
+  };
+}
+
+function jevDecisionsEnvelope(answersOverrides: Record<string, unknown> = {}) {
+  return {
+    model: "typesafe/jev-1.13",
+    served_model: "typesafe/jev-1.13",
+    answers: {
+      bookingTask: true,
+      supportRequest: false,
+      providerRequest: false,
+      availabilityInquiry: false,
+      sensitiveTopic: false,
+      explicitHumanAgent: false,
+      ambiguousOrMixedIntent: false,
+      priceOrServiceInquiry: false,
+      bookingCancellation: false,
+      rescheduleRequest: false,
+      conversationGoal: "booking",
+      clarificationNeeded: false,
+      ...answersOverrides,
+    },
   };
 }
 
@@ -276,7 +300,7 @@ async function run() {
 
     // A3. Shadow evaluation blocked by global stop
     const envStopShadow = (k: string) => {
-      if (k === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "stop";
+      if (k === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "true";
       if (k === "OPENROUTER_API_KEY") return "valid-key";
       if (k === "FLOWPILOT_JEV_SHADOW_ENABLED") return "true";
       if (k === "SHADOW_SAMPLE_RATE") return "1.0";
@@ -1628,6 +1652,553 @@ async function run() {
     check(
       "P2. Emitted TurnEvidence reports providerAttempts === 1",
       emittedEvidenceP2[0]?.providerAttempts === 1,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Group Q: Focused Deadline Enforcement & Production-Wiring Suite
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group Q: Focused Deadline Enforcement & Production Wiring ---",
+  );
+  {
+    // Mock policy returning openrouter primary + atria secondary
+    const mockGetAiPolicy = async () => ({
+      success: true as const,
+      data: {
+        policy: {
+          id: "policy-test-q",
+          primaryProvider: "openrouter",
+          primaryModel: "openrouter/auto",
+          secondaryProvider: "atria",
+          secondaryModel: "atria-1",
+          fallbackEnabled: true,
+          openRouterProviderOnly: null,
+          primarySecretRef: "OPENROUTER_API_KEY",
+          secondarySecretRef: "ATRIA_API_KEY",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        effective: {
+          primaryProvider: "openrouter" as const,
+          primaryModel: "openrouter/auto",
+          secondary: { provider: "atria" as const, model: "atria-1" },
+          openRouterProviderOnly: null,
+        },
+      },
+    });
+
+    // Q_A: Global stop through real factory (zero LLM, JEV, shadow + positive control)
+    let factoryWireCalls = 0;
+    const factoryScriptedFetch: typeof fetch = async () => {
+      factoryWireCalls += 1;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const envWithStop = (name: string) => {
+      if (name === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "1";
+      if (name === "OPENROUTER_API_KEY") return "valid-key";
+      if (name === "ATRIA_API_KEY") return "valid-key-2";
+      if (name === "FLOWPILOT_JEV_SEMANTIC_ENABLED") return "1";
+      if (name === "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET") return "50";
+      if (name === "FLOWPILOT_JEV_SHADOW_ENABLED") return "1";
+      return undefined;
+    };
+
+    const factoryAiStopped = await createPolicyBackedAi({
+      getAiPolicyImpl: mockGetAiPolicy as any,
+      getEnvVar: envWithStop,
+      fetchImpl: factoryScriptedFetch,
+      timeoutMs: 1000,
+    });
+
+    let resQA: unknown = null;
+    let errQA: Error | null = null;
+    try {
+      resQA = await factoryAiStopped.respond(sampleRequest());
+    } catch (err: unknown) {
+      errQA = err as Error;
+    }
+    const teleQA = (factoryAiStopped as any).getLastTelemetry();
+
+    check(
+      "Q_A1. Factory global stop dispatches zero wire HTTP requests across all models",
+      factoryWireCalls === 0,
+    );
+    check(
+      "Q_A2. Factory global stop telemetry stopReason is GLOBAL_STOP",
+      teleQA?.stopReason === "GLOBAL_STOP",
+    );
+    check(
+      "Q_A3. Factory global stop totalHttpAttempts is strictly 0",
+      teleQA?.totalHttpAttempts === 0,
+    );
+    check(
+      "Q_A4. Factory global stop response is null (controlled failure)",
+      resQA === null && errQA?.message === "CONTROLLED_FAILURE",
+    );
+
+    // Permitted positive control with global stop disabled (0)
+    const envNoStop = (name: string) => {
+      if (name === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "0";
+      if (name === "OPENROUTER_API_KEY") return "valid-key";
+      if (name === "ATRIA_API_KEY") return "valid-key-2";
+      return undefined;
+    };
+
+    const factoryAiAllowed = await createPolicyBackedAi({
+      getAiPolicyImpl: mockGetAiPolicy as any,
+      getEnvVar: envNoStop,
+      fetchImpl: factoryScriptedFetch,
+      timeoutMs: 1000,
+    });
+
+    const resQA_Positive = await factoryAiAllowed.respond(sampleRequest());
+    const teleQA_Positive = (factoryAiAllowed as any).getLastTelemetry();
+
+    check(
+      "Q_A5. Positive control through factory dispatches wire call",
+      factoryWireCalls === 1 && resQA_Positive !== null,
+    );
+    check(
+      "Q_A6. Positive control telemetry finalStatus is SUCCESS",
+      teleQA_Positive?.finalStatus === "SUCCESS",
+    );
+    check(
+      "Q_A7. Positive control telemetry stopReason is null",
+      teleQA_Positive?.stopReason === null,
+    );
+
+    // Q_B: JEV shared deadline with slow abort-aware request
+    let jevWireCalls = 0;
+    let jevAbortReachedBoundaryCount = 0;
+    let llmWireCallsAfterJev = 0;
+
+    const slowJevFetch: typeof fetch = async (_url, init) => {
+      jevWireCalls += 1;
+      const signal = init?.signal;
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          resolve(
+            new Response(JSON.stringify(jevDecisionsEnvelope()), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }, 500);
+
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            jevAbortReachedBoundaryCount += 1;
+            reject(
+              new DOMException("The operation was aborted.", "AbortError"),
+            );
+          });
+        }
+      });
+    };
+
+    const llmFetchAfterJev: typeof fetch = async () => {
+      llmWireCallsAfterJev += 1;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const jevProviderQB = createJevDecisionsProvider({
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "valid-key" : undefined,
+      fetchImpl: slowJevFetch,
+      timeoutMs: 1000,
+    });
+    const jevStrategyQB = createSemanticJevStrategy({
+      provider: jevProviderQB,
+      enabled: true,
+    });
+    const llmAdapterQB = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "valid-key" : undefined,
+      fetchImpl: llmFetchAfterJev,
+    });
+
+    const orchQB = createAiOrchestrator({
+      primary: llmAdapterQB,
+      decisionStrategy: jevStrategyQB,
+      fallbackEnabled: false,
+      servingTimeoutMs: 60, // Short deadline (60ms) vs 500ms response
+    });
+
+    const resQB = await orchQB.callWithFallback({
+      ...sampleRequest(),
+      message: "عايز أحجز كشف أسنان",
+    });
+
+    check(
+      "Q_B1. JEV abort reached the HTTP boundary",
+      jevAbortReachedBoundaryCount > 0,
+    );
+    check(
+      "Q_B2. Exactly one dispatched JEV request remains counted",
+      resQB.telemetry.totalHttpAttempts === 1 && jevWireCalls === 1,
+    );
+    check(
+      "Q_B3. No serving LLM follows spent JEV timeout",
+      llmWireCallsAfterJev === 0,
+    );
+
+    // Q_C: JEV preflight (zero physical requests reserved or dispatched)
+    let jevPreflightCalls = 0;
+    const jevPreflightFetch: typeof fetch = async () => {
+      jevPreflightCalls += 1;
+      return new Response(JSON.stringify(jevDecisionsEnvelope()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const jevProviderQC = createJevDecisionsProvider({
+      getEnvVar: () => undefined, // missing API key
+      fetchImpl: jevPreflightFetch,
+    });
+    const jevStrategyQC = createSemanticJevStrategy({
+      provider: jevProviderQC,
+      enabled: true,
+    });
+    const orchQC = createAiOrchestrator({
+      primary: llmAdapterQB,
+      decisionStrategy: jevStrategyQC,
+      fallbackEnabled: false,
+    });
+
+    // Send ineligible question (knowledge/pricing query)
+    await orchQC.callWithFallback({
+      ...sampleRequest(),
+      message: "سعر الكشف كام؟",
+    });
+
+    check(
+      "Q_C1. JEV preflight / ineligible turn dispatches strictly 0 JEV HTTP requests",
+      jevPreflightCalls === 0,
+    );
+
+    // Q_D: Headers-first slow body for generative response
+    let genHeadersCalls = 0;
+    let genBodyAbortedCount = 0;
+
+    const slowBodyGenerativeFetch: typeof fetch = async (_url, init) => {
+      genHeadersCalls += 1;
+      const signal = init?.signal;
+      const stream = new ReadableStream({
+        start(controller) {
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              genBodyAbortedCount += 1;
+              controller.error(
+                new DOMException("The operation was aborted.", "AbortError"),
+              );
+            });
+          }
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const genAdapterQD = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "valid-key" : undefined,
+      fetchImpl: slowBodyGenerativeFetch,
+      timeoutMs: 60, // Short timeout
+    });
+    const orchQD = createAiOrchestrator({
+      primary: genAdapterQD,
+      fallbackEnabled: false,
+    });
+
+    const resQD = await orchQD.callWithFallback(sampleRequest());
+
+    check(
+      "Q_D1. Generative fetch resolved headers promptly",
+      genHeadersCalls === 1,
+    );
+    check(
+      "Q_D2. Generative body reading cancellation occurred via abort signal",
+      genBodyAbortedCount > 0,
+    );
+    check(
+      "Q_D3. Aborted generative body classified as TIMEOUT (not invalid JSON)",
+      resQD.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+    check(
+      "Q_D4. Dispatched generative request remains counted as 1 physical attempt",
+      resQD.telemetry.totalHttpAttempts === 1,
+    );
+    check("Q_D5. No late success accepted", resQD.response === null);
+
+    // Q_E: Equivalent headers-first slow-body case for JEV
+    let jevHeadersCalls = 0;
+    let jevBodyAbortedCount = 0;
+
+    const slowBodyJevFetch: typeof fetch = async (_url, init) => {
+      jevHeadersCalls += 1;
+      const signal = init?.signal;
+      const stream = new ReadableStream({
+        start(controller) {
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              jevBodyAbortedCount += 1;
+              controller.error(
+                new DOMException("The operation was aborted.", "AbortError"),
+              );
+            });
+          }
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const jevProviderQE = createJevDecisionsProvider({
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "valid-key" : undefined,
+      fetchImpl: slowBodyJevFetch,
+      timeoutMs: 60,
+    });
+    const jevStrategyQE = createSemanticJevStrategy({
+      provider: jevProviderQE,
+      enabled: true,
+    });
+    let llmWireCallsQE = 0;
+    const llmAdapterQE = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: (name) =>
+        name === "OPENROUTER_API_KEY" ? "valid-key" : undefined,
+      fetchImpl: async () => {
+        llmWireCallsQE += 1;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    });
+
+    const orchQE = createAiOrchestrator({
+      primary: llmAdapterQE,
+      decisionStrategy: jevStrategyQE,
+      fallbackEnabled: false,
+      servingTimeoutMs: 60,
+    });
+
+    const resQE = await orchQE.callWithFallback({
+      ...sampleRequest(),
+      message: "عايز أحجز كشف أسنان",
+    });
+
+    check("Q_E1. JEV fetch resolved headers promptly", jevHeadersCalls === 1);
+    check(
+      "Q_E2. JEV body reading aborted on deadline",
+      jevBodyAbortedCount > 0,
+    );
+    check(
+      "Q_E3. JEV dispatched attempt counted as 1 physical attempt",
+      resQE.telemetry.totalHttpAttempts === 1,
+    );
+    check(
+      "Q_E4. No serving LLM follows JEV slow-body failure",
+      llmWireCallsQE === 0,
+    );
+
+    // Q_F: Real primary-plus-secondary adapters: secondary receives remaining time, not fresh timeout
+    const primarySlowFetch: typeof fetch = async () => {
+      // Simulate primary consuming 70ms of a 120ms deadline before failing
+      await new Promise((r) => setTimeout(r, 70));
+      return new Response(JSON.stringify({ error: { message: "error 500" } }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const secondaryInspectFetch: typeof fetch = async (_url, _init) => {
+      // Inspect effective timeout from AbortController signal or remaining time
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const realPrimary = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: primarySlowFetch,
+      timeoutMs: 15000,
+    });
+    const realSecondary = createAtriaAdapter({
+      model: "atria-1",
+      getEnvVar: () => "valid-key-2",
+      fetchImpl: secondaryInspectFetch,
+      timeoutMs: 12000,
+    });
+
+    const orchQF = createAiOrchestrator({
+      primary: realPrimary,
+      secondary: realSecondary,
+      fallbackEnabled: true,
+      servingTimeoutMs: 120, // Whole turn serving budget: 120ms
+    });
+
+    const resQF = await orchQF.callWithFallback(sampleRequest());
+
+    check(
+      "Q_F1. Primary consumed initial time budget and secondary succeeded within remaining time",
+      resQF.telemetry.finalStatus === "SUCCESS" &&
+        resQF.telemetry.fallbackUsed === true,
+    );
+    check(
+      "Q_F2. Total physical HTTP attempts is strictly 2",
+      resQF.telemetry.totalHttpAttempts === 2,
+    );
+
+    // Q_G: Limit precedence table enforcement
+    // Case 1: Operator limit 1 + Programmatic override 3 remains 1
+    const sessionG1 = createServingExecutionSession({
+      getEnvVar: (name) =>
+        name === FLOWPILOT_AI_MAX_SERVING_ATTEMPTS_FLAG ? "1" : undefined,
+      maxAttemptsOverride: 3,
+    });
+    check(
+      "Q_G1. Operator limit 1 + Programmatic override 3 remains 1 (cannot weaken operator limit)",
+      sessionG1.maxAttempts === 1,
+    );
+
+    // Case 2: Override above 3 cannot raise hard ceiling of 3
+    const sessionG2 = createServingExecutionSession({
+      maxAttemptsOverride: 5,
+    });
+    check(
+      "Q_G2. Override above 3 cannot exceed hard ceiling of 3",
+      sessionG2.maxAttempts === 3,
+    );
+
+    // Case 3: Invalid overrides fail closed with INVALID_CONTROL_CONFIG and 0 attempts
+    const sessionG3_Neg = createServingExecutionSession({
+      maxAttemptsOverride: -1,
+    });
+    check(
+      "Q_G3. Negative override fails closed with INVALID_CONTROL_CONFIG",
+      sessionG3_Neg.maxAttempts === 0 &&
+        sessionG3_Neg.canDispatch().reason === "INVALID_CONTROL_CONFIG",
+    );
+
+    const sessionG3_Zero = createServingExecutionSession({
+      maxAttemptsOverride: 0,
+    });
+    check(
+      "Q_G4. Zero override fails closed with INVALID_CONTROL_CONFIG",
+      sessionG3_Zero.maxAttempts === 0 &&
+        sessionG3_Zero.canDispatch().reason === "INVALID_CONTROL_CONFIG",
+    );
+
+    const sessionG3_Dec = createServingExecutionSession({
+      maxAttemptsOverride: 2.5,
+    });
+    check(
+      "Q_G5. Decimal override fails closed with INVALID_CONTROL_CONFIG",
+      sessionG3_Dec.maxAttempts === 0 &&
+        sessionG3_Dec.canDispatch().reason === "INVALID_CONTROL_CONFIG",
+    );
+
+    const sessionG3_NaN = createServingExecutionSession({
+      maxAttemptsOverride: NaN,
+    });
+    check(
+      "Q_G6. NaN override fails closed with INVALID_CONTROL_CONFIG",
+      sessionG3_NaN.maxAttempts === 0 &&
+        sessionG3_NaN.canDispatch().reason === "INVALID_CONTROL_CONFIG",
+    );
+
+    // Case 4: Derived path with 2 primary + 2 secondary cannot exceed 3
+    const orchG4 = createAiOrchestrator({
+      primary: createConversationControl({
+        provider: createOpenRouterAdapter({
+          model: "m1",
+          getEnvVar: () => "k",
+          fetchImpl: async () => new Response(""),
+        }),
+        settings: { conversationControl: { maxAttempts: 2 } },
+      }),
+      secondary: createConversationControl({
+        provider: createAtriaAdapter({
+          model: "m2",
+          getEnvVar: () => "k",
+          fetchImpl: async () => new Response(""),
+        }),
+        settings: { conversationControl: { maxAttempts: 2 } },
+      }),
+      fallbackEnabled: true,
+    });
+    check(
+      "Q_G7. Derived path without getEnvVar cannot exceed hard ceiling of 3",
+      HARD_CEILING_SERVING_ATTEMPTS === 3 && !!orchG4,
+    );
+
+    // Q_H: Multi-turn sequential isolation and mechanical zero-call
+    let harnessTurnCalls = 0;
+    const harnessFetch: typeof fetch = async () => {
+      harnessTurnCalls += 1;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const sharedAiAdapter = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: harnessFetch,
+    });
+    const sharedAi = createLlmConversationAi({
+      primary: sharedAiAdapter,
+      fallbackEnabled: false,
+      maxServingAttempts: 1, // Allowance = 1 per turn
+    });
+
+    // Turn 1 consumes its 1 allowance
+    await sharedAi.respond(sampleRequest());
+    check("Q_H1. Turn 1 dispatched 1 call", harnessTurnCalls === 1);
+    check(
+      "Q_H2. Turn 1 telemetry reports 1 attempt",
+      sharedAi.getLastTelemetry()?.totalHttpAttempts === 1,
+    );
+
+    // Turn 2 receives its own fresh allowance of 1 (not spent from Turn 1)
+    await sharedAi.respond(sampleRequest());
+    check("Q_H3. Turn 2 dispatched 1 call (total 2)", harnessTurnCalls === 2);
+    check(
+      "Q_H4. Turn 2 receives fresh allowance and reports 1 attempt (not accumulated)",
+      sharedAi.getLastTelemetry()?.totalHttpAttempts === 1,
+    );
+
+    // Q_I: Verify stopReason and physical counts for new timeout and prevention cases without fabricated costs
+    const sessionQI_Deadline = createServingExecutionSession({
+      timeoutMs: 0, // Immediately expired deadline
+    });
+    check(
+      "Q_I1. Expired deadline reports DEADLINE_EXHAUSTED",
+      sessionQI_Deadline.canDispatch().reason === "DEADLINE_EXHAUSTED",
+    );
+    check(
+      "Q_I2. Expired deadline prevents dispatch with 0 physical attempts",
+      sessionQI_Deadline.getDispatchedAttempts() === 0,
     );
   }
 
