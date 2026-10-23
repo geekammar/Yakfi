@@ -1,7 +1,7 @@
 # FlowPilot — Post-Merge Telegram Acceptance Readiness & Operator Runbook
 
 > **Authoritative Acceptance Readiness Record & Operator Runbook**  
-> Covers baseline lineage verification, offline acceptance matrix results, and the executable live acceptance plan for Telegram bot integration.
+> Covers baseline lineage verification, offline acceptance matrix results, concrete execution limit classifications, and the executable live acceptance plan for Telegram bot integration.
 
 ---
 
@@ -10,8 +10,9 @@
 | Check / Dimension               | Expected Fact / Standard                                 | Observed Reality                                                                              | Verification Source / Command                                            | Status           |
 | :------------------------------ | :------------------------------------------------------- | :-------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- | :--------------- |
 | **Merged Baseline PR**          | PR #29 (`feat/core-04b-global-ai-stop-execution-limits`) | PR #29 merged to `main` at `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4`                         | `git show origin/main -s`                                                | ✅ MATCH         |
-| **Package Version**             | `0.70.0` (PR #29 baseline)                               | `0.70.0` (PR #29 baseline); incremented to `0.70.1` on feature branch for PR gate             | `git show origin/main:package.json`, `pnpm check:version`                | ✅ VERIFIED      |
+| **Baseline Package Version**    | `0.70.0` (PR #29 baseline)                               | `0.70.0` (PR #29 baseline); incremented to `0.70.1` on feature branch for PR #30 quality gate | `git show origin/main:package.json`, `pnpm check:version`                | ✅ VERIFIED      |
 | **Current origin/main SHA**     | `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4`               | `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4` (tag `v0.70.0`)                                    | `git rev-parse origin/main`                                              | ✅ UP-TO-DATE    |
+| **Current Feature Branch HEAD** | PR #30 (`feat/telegram-acceptance-readiness`)            | Tracked on `origin/feat/telegram-acceptance-readiness`                                        | `git rev-parse HEAD`                                                     | ✅ CURRENT       |
 | **Production Health URL**       | `https://flowpilot-prod.vercel.app/api/health`           | HTTP 200 OK                                                                                   | `curl -sS https://flowpilot-prod.vercel.app/api/health`                  | ✅ HEALTHY       |
 | **Deployed Production SHA**     | `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4`               | `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4`                                                    | `/api/health` `commitSha`                                                | ✅ DEPLOYED_HEAD |
 | **Deployed Production Version** | `0.70.0`                                                 | `0.70.0`                                                                                      | `/api/health` `version`                                                  | ✅ MATCH         |
@@ -44,11 +45,11 @@ All test cases and execution stages are classified strictly by the following fou
 
 ## 3. Acceptance Matrix: 16 Journeys Verified Offline (Level A)
 
-Fixed Synthetic Business:
+### Fixed Synthetic Business Configuration:
 
 - **Business Name:** `عيادة النور لطب الأسنان`
-- **Timezone:** `Africa/Cairo` (UTC+3 / UTC+2 DST-aware)
-- **Reference Instant:** `2026-10-22T10:00:00.000Z` (Thursday morning 12:00 PM Cairo)
+- **Timezone:** `Africa/Cairo` (UTC+3 in late October under Egypt DST; UTC+2 standard time)
+- **Reference Instant:** `2026-10-22T10:00:00.000Z` = **Thursday 13:00 (1:00 PM) Cairo time (UTC+3)**
 - **Catalog Services:**
   1. `33333333-3333-4333-8333-333333333331`: "كشف أسنان" (30 min, 150 EGP)
   2. `33333333-3333-4333-8333-333333333332`: "تنظيف جير" (45 min, 300 EGP)
@@ -57,119 +58,140 @@ Fixed Synthetic Business:
   2. `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2`: "د. علي محمود"
 - **Working Hours:** Sat–Thu 09:00–18:00 (Cairo), Friday closed.
 
-|   #    | Journey Description                                           | Initial State                                                | Exact Synthetic Input                                                            | Expected Semantic Facts & Durable State                                                                                   | Customer Visible Result                                                         | Appointments (Before → After) | Model Calls (Log/Phys) |   Level & Result    |
-| :----: | :------------------------------------------------------------ | :----------------------------------------------------------- | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------ | :---------------------------: | :--------------------: | :-----------------: |
-| **1**  | **Telegram `/start`**                                         | Empty conversation, unassigned, `AI_ACTIVE`                  | `/start`                                                                         | 0 model calls; `offer.kind: "WELCOME"`; business name & free text guidance                                                | Welcome message + inline choices («حجز موعد», «استفسار عن خدمة»)                |             0 → 0             |         0 / 0          | **Level A** ✅ PASS |
-| **2**  | **Natural-Language Booking Request**                          | Empty conversation                                           | «عايز أحجز كشف أسنان»                                                            | `knownFacts.service: "كشف أسنان"`; `serviceId: SERV_DENTAL`; `activeTask.stage: "SERVICE_SUPPLIED"`; `offer.kind: "DATE"` | Scheduling offer presented with dates                                           |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **3**  | **Provider Requested Before Service**                         | Empty conversation                                           | «عايز أحجز مع دكتور أحمد»                                                        | `knownFacts.provider: "د. أحمد"`; `providerPreference: "د. أحمد"`; `offer.kind: "SERVICE"`                                | Clarifies missing service while preserving doctor preference                    |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **4**  | **Unknown or Ambiguous Provider**                             | Empty conversation                                           | «عايز كشف أسنان مع دكتور حسام»                                                   | Provider not in catalog; zero silent provider assignment; clarification requested                                         | Clarification prompt listing valid doctors (د. أحمد, د. علي)                    |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **5**  | **Relative Date & Morning/Afternoon Preference**              | Empty conversation                                           | «عايز ميعاد كشف السبت الصبح»                                                     | `knownFacts.date: "2026-10-24"`; `timePreference: "morning"`; `offer.kind: "SLOT"`; slots strictly `< 12:00`              | Morning-only slots presented                                                    |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **6**  | **Date Correction After Offer**                               | Active slot offer on `2026-10-24`                            | «لا خليه يوم الأحد في نفس الوقت»                                                 | Old offer invalidated (`id !== id`); `knownFacts.date: "2026-10-25"`; compatible facts preserved                          | New slot offer for Sunday 2026-10-25                                            |             0 → 0             |         2 / 2          | **Level A** ✅ PASS |
-| **7**  | **Provider/Time-Preference Removal**                          | Active slot offer with `timePreference: "morning"`           | «أي وقت يناسبكم مش مشكلة صباحاً أو مساءً»                                        | FactUpdate `REMOVE` executed; `timePreference: null`; compatible date/service preserved                                   | Unrestricted slots across the whole day presented                               |             0 → 0             |         2 / 2          | **Level A** ✅ PASS |
-| **8**  | **FAQ Interruption During Booking**                           | Active booking task with service and date                    | «أين يقع مكان العيادة بالضبط؟»                                                   | AI answers FAQ; `activeTask.kind: "BOOKING"` and all known facts preserved in durable state                               | Clinic address delivered; booking continues unbroken                            |             0 → 0             |         2 / 2          | **Level A** ✅ PASS |
-| **9**  | **Valid Mechanical Selection**                                | Active slot offer with valid options                         | `fp:<token>:1` (button callback)                                                 | Exactly 0 new model calls; offer status transitions to `CONSUMED`; booking committed                                      | Confirmed booking notification with date/time details                           |             0 → 1             |         0 / 0          | **Level A** ✅ PASS |
-| **10** | **Invalid Callback (Expired/Replaced/Malformed/Cross-Scope)** | Active conversation                                          | `fp:malformed`, `fp:99999999:1`, `fp:<token>:unknown`, expired `fp:<token>:book` | Rejection of foreign/stale tokens; facts unchanged; zero appointments                                                     | Safe guidance/fallback message; zero state corruption                           |             0 → 0             |         0 / 0          | **Level A** ✅ PASS |
-| **11** | **Duplicate Inbound & Repeated Confirmation**                 | Active slot offer                                            | `fp:<token>:1` delivered twice with same `externalId`                            | First delivery claims dedupe key & confirms; second returns `{ duplicate: true }`                                         | Single confirmation delivered; second attempt safely ignored                    |       0 → 1 (remains 1)       |         0 / 0          | **Level A** ✅ PASS |
-| **12** | **Offer Persistence / CAS Conflict**                          | Active booking; state store returns `{ status: "conflict" }` | `/start` (or any turn saving offer)                                              | CAS collision detected; safe retry message; actionable inline keyboard suppressed                                         | Safe conflict message: «حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.» |             0 → 0             |         0 / 0          | **Level A** ✅ PASS |
-| **13** | **Staff-Owned Conversation Boundary**                         | Assigned to `staff-operator-1`, `NEED_HUMAN`                 | «عايز أحجز كشف بسرعة»                                                            | Engine halts with `DEFERRED_TO_STAFF`; zero automated model calls; delivery suppressed                                    | No automated message sent; customer routed to staff inbox                       |             0 → 0             |         0 / 0          | **Level A** ✅ PASS |
-| **14** | **Explicit Human Request & Sensitive Handoff**                | Active conversation, `AI_ACTIVE`                             | «ممكن أكلم حد من خدمة العملاء؟»                                                  | Intent `HUMAN_REQUEST`; typed cause `CUSTOMER_REQUESTED_HUMAN`; status `NEED_HUMAN`                                       | Handoff acknowledgment delivered; staff attention opened                        |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **15** | **Harmless Dialectal Wording Near Lexical Triggers**          | Active conversation, `AI_ACTIVE`                             | «عايز كشف أسنان وأي وقت يناسبكم مش مشكلة»                                        | Semantic safety evaluates utterance as `safe`; NO false `SENSITIVE_OR_RESTRICTED` handoff                                 | Conversation remains `AI_ACTIVE`; booking proceeds                              |             0 → 0             |         1 / 1          | **Level A** ✅ PASS |
-| **16** | **Global Stop, Attempt Ceiling & Deadline Exhaustion**        | Injected controls (CORE-04B)                                 | Dispatches under `GLOBAL_STOP=1`, `MAX_ATTEMPTS=1` abort, deadline 0ms           | Truthful stop reasons (`GLOBAL_STOP`, `ATTEMPT_LIMIT_EXHAUSTED`, `DEADLINE_EXHAUSTED`); bounded wire calls                | Fail-safe replies; 0 wire calls under global stop; 0 appointments               |             0 → 0             |    Bounded (0/1/0)     | **Level A** ✅ PASS |
-
-**Result Summary:** 16/16 PASSED (0 FAILED) in `scripts/check-telegram-acceptance-matrix.ts` (`pnpm check:telegram-acceptance`).
-
----
-
-## 4. Preserved Architecture and Safety Invariants
-
-- **Single Conversation Architecture:** All 16 journeys run through the merged `receiveInboundMessage` entrypoint, `resolveFinishedTurn` planner, Booking Core, and CAS-guarded `ConversationStateStore`.
-- **Zero-Call Mechanical Execution:** Telegram `/start` welcome command and button callback selections (`fp:<token>:<action>`) execute with **strictly zero** LLM or JEV calls.
-- **Server Authorization Boundary:** AI only extracts customer language intent; server code validates provider availability, slot conflicts, service durations, and tenancy authorization.
-- **Durable CAS Guarantees:** Offers are assigned durable random tokens and validated against conversation state revision before buttons are actionable; CAS conflicts suppress unpersisted keyboard markup.
-- **Idempotent Inbound Deduplication:** Webhook redeliveries and button double-taps are trapped by the durable `inboundDedupeRepository` claim before business execution.
-- **Execution Limits (CORE-04B):** Global stop switch halts external HTTP dispatches with `GLOBAL_STOP`; retry/fallback chains are strictly bounded by serving attempt allowances (clamped to 3) and a shared non-resetting deadline.
-
----
-
-## 5. Live Acceptance Operator Runbook
-
-> [!CAUTION]
-> **DO NOT EXECUTE WITHOUT OPERATOR AUTHORIZATION.**  
-> Real-provider calls consume paid API quota; database writes mutate persistent storage. Live acceptance must run only under the parameters and controls specified below.
-
-### 5.1 Prerequisites and Isolation Verification
-
-Before executing any live acceptance turn:
-
-1. **Isolated Test Tenant:** Verify a dedicated test `businessId` exists (e.g. `مركز الاختبارات التجريبي`). Never run test scripts against a live clinic (`مركز أفنان`).
-2. **Dedicated Test Bot:** The test bot must be a dedicated Telegram Bot created via `@BotFather` (e.g. `@FlowPilotTestBot`), completely distinct from `@FlowPilotManagerBot` or the live pilot bot.
-3. **Database Target:** Verify `DATABASE_URL` targets an isolated test database (e.g. Neon branch `test` or local Postgres). If `DATABASE_URL` points to production, the run is **BLOCKED**.
-4. **Environment Variables Required:**
-   ```bash
-   FLOWPILOT_AI_GLOBAL_STOP=0
-   FLOWPILOT_AI_MAX_SERVING_ATTEMPTS=2
-   TELEGRAM_BOT_TOKEN="<dedicated-test-bot-token>"
-   TELEGRAM_WEBHOOK_SECRET="<secret-for-test-bot>"
-   OPENROUTER_API_KEY="<authorized-openrouter-key>"
-   ```
-
-### 5.2 Proposed Live Campaign Envelope
-
-| Parameter                     | Limit                                                                 | Enforcement Mechanism                                     |
-| :---------------------------- | :-------------------------------------------------------------------- | :-------------------------------------------------------- |
-| **Max Physical Requests**     | **20 physical calls** total across campaign                           | Enforced by run-level execution session ceiling           |
-| **Max Output Tokens**         | **400 tokens** per generative turn                                    | Enforced on adapter wire payload (`max_tokens: 400`)      |
-| **Per-Turn Serving Deadline** | **12,000 ms** (12 seconds)                                            | Enforced by shared `ServingExecutionSession` deadline     |
-| **Max Turns**                 | **10 conversational turns**                                           | Hard execution limit in test script                       |
-| **Planning Budget**           | **$0.05 USD**                                                         | Planning basis: DeepSeek V3 @ $0.2574/M in, $1.0287/M out |
-| **Stop Conditions**           | Global stop flag, 3 consecutive provider errors, or budget exceedance | Immediate process exit code 1; no retries                 |
+### Detailed Journey Results and Evidence Separation:
 
 > [!NOTE]
-> Pricing estimates are rate-based planning bounds, not guaranteed provider-side dollar limits. OpenRouter does not support real-time monetary spending caps via API.
+> Physical wire calls are distinguished from mock adapter invocations. When direct mock responses are supplied, tests evaluate downstream engine behavior under supplied semantic facts without claiming real-language understanding accuracy. Missing provider telemetry is preserved truthfully as `null` rather than fabricated zeros.
 
-### 5.3 Manual Mobile Telegram Acceptance Script (For Operator)
+| Journey ID | Name                                         | Test Nature / Description                                                                                     | Mock Invocations |      Physical Boundary Calls      | Engine ModelCallCount | Engine ProviderAttempts | Apts (Before → After) |          Offer Transition           | Result  |
+| :--------: | :------------------------------------------- | :------------------------------------------------------------------------------------------------------------ | :--------------: | :-------------------------------: | :-------------------: | :---------------------: | :-------------------: | :---------------------------------: | :-----: |
+|   **1**    | Telegram `/start`                            | Mechanical turn (zero model calls)                                                                            |        0         |                 0                 |           0           |            0            |         0 → 0         |          `NONE -> WELCOME`          | ✅ PASS |
+|   **2**    | Natural-Language Booking Request             | Downstream engine behavior under supplied semantic facts                                                      |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |       `NONE -> DATE(ACTIVE)`        | ✅ PASS |
+|   **3**    | Provider Requested Before Service            | Downstream engine behavior under supplied semantic facts                                                      |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |     `NONE -> SERVICE(CLARIFY)`      | ✅ PASS |
+|   **4**    | Unknown or Ambiguous Provider                | Downstream engine behavior under supplied semantic facts                                                      |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |       `NONE -> CLARIFICATION`       | ✅ PASS |
+|   **5**    | Relative Date & Morning/Afternoon Preference | Downstream engine behavior; slots verified non-empty & Cairo morning (< 12:00)                                |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |    `NONE -> SLOT(morning-only)`     | ✅ PASS |
+|   **6**    | Date Correction After Offer                  | Downstream engine behavior; invalidates stale offer, preserves facts                                          |        2         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |         `OFFER -> REPLACED`         | ✅ PASS |
+|   **7**    | Provider / Time-Preference Removal           | Downstream engine behavior; FactUpdate `REMOVE` cleans preference                                             |        2         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         | `OFFER(morning) -> OFFER(all-day)`  | ✅ PASS |
+|   **8**    | FAQ Interruption During Booking              | Downstream engine behavior; FAQ answered, active task & facts preserved                                       |        2         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |    `OFFER_SUSPENDED / PRESERVED`    | ✅ PASS |
+|   **9**    | Valid Mechanical Selection                   | Mechanical turn (zero new model calls); creates appointment, consumes offer                                   |        0         |                 0                 |           0           |            0            |         0 → 1         |  `SLOT(ACTIVE) -> SLOT(CONSUMED)`   | ✅ PASS |
+|   **10**   | Invalid Callbacks (5 subcases: 10a–10e)      | Mechanical turns; malformed, unknown action, expired (virtual clock), replaced, and cross-scope foreign token |        0         |                 0                 |           0           |            0            |         0 → 0         |      `NO_MUTATION / REJECTED`       | ✅ PASS |
+|   **11**   | Duplicate Inbound & Repeated Tap             | Mechanical turns; same-externalId dedupe (11b) AND new-externalId repeated selection (11c)                    |        0         |                 0                 |           0           |            0            |    0 → 1 (stays 1)    |   `ACTIVE -> CONSUMED -> CLOSED`    | ✅ PASS |
+|  **12a**   | Pre-AI `/start` CAS Conflict                 | Mechanical turn; state store CAS conflict intercepted; safe retry returned                                    |        0         |                 0                 |           0           |            0            |         0 → 0         |    `CAS_CONFLICT -> SAFE_RETRY`     | ✅ PASS |
+|  **12b**   | Post-AI SLOT Offer CAS Conflict              | Instrumented physical wire dispatch; AI wire call dispatched before conflict                                  |        0         |          **1 wire call**          |           1           |            1            |         0 → 0         |  `SLOT_CAS_CONFLICT -> SAFE_RETRY`  | ✅ PASS |
+|   **13**   | Staff-Owned Conversation Boundary            | Boundary enforcement; `DEFERRED_TO_STAFF`, zero model calls, zero outbound delivery                           |        0         |                 0                 |           0           |            0            |         0 → 0         |    `BLOCKED_BY_STAFF_OWNERSHIP`     | ✅ PASS |
+|  **14a**   | Explicit Human Request Handoff               | Downstream engine behavior; intent `HUMAN_REQUEST` -> `CUSTOMER_REQUESTED_HUMAN`                              |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         | `HANDOFF(CUSTOMER_REQUESTED_HUMAN)` | ✅ PASS |
+|  **14b**   | Sensitive Assessment Handoff                 | Downstream engine behavior; `safetyAssessment: "sensitive"` -> `SENSITIVE_OR_RESTRICTED`                      |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         | `HANDOFF(SENSITIVE_OR_RESTRICTED)`  | ✅ PASS |
+|  **14c**   | Uncertain Assessment Handoff                 | Downstream engine behavior; `safetyAssessment: "uncertain"` fails safe to `SENSITIVE_OR_RESTRICTED`           |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         | `HANDOFF(SENSITIVE_OR_RESTRICTED)`  | ✅ PASS |
+|   **15**   | Harmless Dialectal Utterance                 | Downstream engine behavior; semantic safety evaluates `safe`; no false handoff                                |        1         |     `null` (not instrumented)     |           1           |      `null` (mock)      |         0 → 0         |       `CONTINUED(AI_ACTIVE)`        | ✅ PASS |
+|   **16**   | Global Stop, Attempt Limit & Deadline        | Injected controls (CORE-04B); truthful stop reasons; bounded physical dispatches                              |        0         | **1 wire call total** (0 + 1 + 0) |           1           |            1            |         0 → 0         | `CONTROLLED_STOP_SAFE_TERMINATION`  | ✅ PASS |
 
-The operator executes these 6 exact steps from a mobile Telegram client talking to the dedicated test bot:
+**Matrix Execution Summary:** 19/19 checks PASSED (0 FAILED) in `scripts/check-telegram-acceptance-matrix.ts` (`pnpm check:telegram-acceptance`).
 
-1. **Send `/start`**
-   - _Expected:_ Fixed welcome greeting with business name, instructions that free text is accepted, and inline buttons («حجز موعد», «استفسار عن خدمة»).
-   - _Evidence to collect:_ Bot response time (< 1.5s), button layout rendering.
-2. **Tap «حجز موعد»**
-   - _Expected:_ Bot replies with service catalog buttons or date selection options without any generative AI request (0 model calls).
-   - _Evidence to collect:_ Instantaneous response (< 800ms).
-3. **Type Natural Text: «عايز كشف أسنان بكرة الصبح»**
-   - _Expected:_ Bot acknowledges dental appointment request, filters slots for tomorrow morning (< 12:00 Cairo time), and presents interactive time slot buttons.
-   - _Evidence to collect:_ Time slot candidates match Cairo working hours.
-4. **Type Correction: «لا خليه بعد الظهر أفضل»**
-   - _Expected:_ Bot replaces the previous offer, preserves the dental service and date, and presents afternoon time slots (>= 12:00 Cairo time).
-   - _Evidence to collect:_ Old buttons become invalid if tapped; new afternoon buttons appear.
-5. **Tap a Specific Time Slot Button**
-   - _Expected:_ Single confirmed appointment message with date, time, and service; offer status marked `CONSUMED`.
-   - _Evidence to collect:_ Exactly 1 appointment row created in the test database.
-6. **Tap the Same Time Slot Button Again (Double-Tap Test)**
-   - _Expected:_ Safe rejection or idempotent notice; zero duplicate appointment created.
-   - _Evidence to collect:_ Database appointment count remains exactly 1.
+---
+
+## 4. Execution Limits: Implemented vs. Proposed Analysis
+
+The table below provides a truthful classification of all proposed and implemented operational limits:
+
+| Limit Dimension                            | Proposed Value         | Status in Codebase          | Scope of Enforcement          | Exact Enforcement Path & Mechanism                                                                                                                                                                                                                             | Verification Method                                                               |
+| :----------------------------------------- | :--------------------- | :-------------------------- | :---------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------- |
+| **Per-Turn Serving Attempt Ceiling**       | Max 1–3 attempts       | **IMPLEMENTED**             | Single serving turn execution | `ServingExecutionSession` (`src/server/integrations/ai/execution-limits.ts`). Reads `FLOWPILOT_AI_MAX_SERVING_ATTEMPTS`, clamps to `[1, 3]`. Traps retries and secondary fallback. Note: shadow JEV runs asynchronously and is disjoint from serving attempts. | `pnpm check:core-04b`, `check-telegram-acceptance-matrix.ts` (Journey 16b)        |
+| **Global AI Stop Switch**                  | Immediate halt         | **IMPLEMENTED**             | All AI executions             | Checked at entry of `ServingExecutionSession`. If `FLOWPILOT_AI_GLOBAL_STOP="1"`, `canDispatch()` returns `{ allowed: false, reason: "GLOBAL_STOP" }` before any wire call.                                                                                    | `pnpm check:core-04b`, `check-telegram-acceptance-matrix.ts` (Journey 16a)        |
+| **Per-Turn Serving Deadline**              | Non-resetting deadline | **IMPLEMENTED**             | Single serving turn execution | `ServingExecutionSession` enforces monotonic start clock and `timeoutMs`. Shared across primary dispatch, internal retries, and secondary fallback.                                                                                                            | `pnpm check:core-04b`, `check-telegram-acceptance-matrix.ts` (Journey 16c)        |
+| **Per-Request Output Tokens**              | 400 tokens             | **IMPLEMENTED**             | Single HTTP request           | `createOpenRouterAdapter` passes `max_tokens: 400` directly in the OpenRouter API payload.                                                                                                                                                                     | Inspected on outbound adapter wire payload                                        |
+| **Campaign-Wide Physical Request Ceiling** | 20 physical calls      | **PROPOSED / HARNESS-ONLY** | Multi-turn campaign           | **Not implemented as a distributed serverless service.** CORE-04B bounds a single turn; there is no distributed cross-invocation call counter across Vercel serverless lambda executions.                                                                      | **BLOCKED for automated live execution.** Must be monitored manually by operator. |
+| **Campaign Turn Ceiling**                  | 10 turns               | **PROPOSED / HARNESS-ONLY** | Conversation lifecycle        | **Not implemented in engine/database.** The conversation engine does not terminate conversations after N turns.                                                                                                                                                | Manual operator stop                                                              |
+| **Hard Dollar Spend Cap**                  | $0.05 USD              | **PROPOSED ESTIMATE ONLY**  | Campaign planning             | **Not enforceable via OpenRouter API.** OpenRouter does not support real-time programmatic monetary budget termination. Dollar figures are planning estimates based on DeepSeek-V3 pricing ($0.2574/M input, $1.0287/M output).                                | Operator dashboard post-run inspection                                            |
+
+---
+
+## 5. Live Acceptance Operator Runbook (Managed Bot Architecture)
+
+> [!CAUTION]
+> **LIVE EXECUTION STATUS: BLOCKED.**  
+> Live acceptance against `flowpilot-prod.vercel.app` is blocked because it shares production Neon PostgreSQL data and production credentials. Live execution requires an isolated staging database and a dedicated test bot.
+
+### 5.1 Real Codebase Telegram Configuration (Managed Bot Architecture)
+
+FlowPilot does **NOT** configure business bots via global `.env` tokens (`TELEGRAM_BOT_TOKEN`). Instead, it uses the **Managed Bot Architecture**:
+
+```mermaid
+flowchart TD
+    A["Operator / Business"] -->|"/start & onboarding"| B["@FlowPilotManagerBot"]
+    A -->|"Web UI"| C["/settings/telegram"]
+    B & C -->|"AES-256-GCM Encrypted"| D["runtime_credentials (Handle: fp:id)"]
+    D -->|"Register Webhook"| E["Telegram Bot API (/setWebhook)"]
+    E -->|"Inbound Updates + X-Telegram-Bot-Api-Secret-Token"| F["POST /api/telegram/webhook"]
+    F -->|"Constant-time SHA-256 digest match"| G["telegram_connections.webhook_secret_hash"]
+    G -->|"Tenant resolved"| H["Conversation Engine (receiveInboundMessage)"]
+```
+
+1. **Test Business Provisioning:**
+   Ensure the isolated operator test business exists in the database:
+
+   ```bash
+   pnpm bootstrap:test-business
+   ```
+
+   _Test Business ID:_ `f47ac10b-58cc-4372-a567-0e02b2c3d479` (`مركز الاختبارات التجريبي`).
+
+2. **Dedicated Test Bot Provisioning:**
+   - Create a dedicated test bot via `@BotFather` (e.g. `@FlowPilotAcceptanceTestBot`).
+   - Navigate to `/settings/telegram` or initiate onboarding through `@FlowPilotManagerBot`.
+   - The bot token is encrypted using AES-256-GCM and stored **only** as an opaque `fp:<id>` runtime reference in `runtime_credentials` (never stored in plain text, logs, or client-side payloads).
+   - The webhook is set to `https://<isolated-test-domain>/api/telegram/webhook` with a cryptographically random secret token.
+   - The SHA-256 digest of the secret is stored in `telegram_connections.webhook_secret_hash`.
+
+3. **Inbound Webhook Verification:**
+   On inbound update, `POST /api/telegram/webhook` reads the `X-Telegram-Bot-Api-Secret-Token` header, computes its SHA-256 digest, and performs a constant-time comparison against `telegram_connections.webhook_secret_hash` to resolve the test business tenant. An invalid or foreign token returns HTTP 401 immediately.
+
+### 5.2 Manual Mobile Telegram Acceptance Script (When Authorized on Isolated Environment)
+
+When an isolated test environment is provisioned and authorized:
+
+1. **Step 1: Send `/start`**
+   - _Action:_ Send `/start` to the dedicated test bot.
+   - _Expected:_ Welcome greeting with business name, free-text guidance, and inline buttons («حجز موعد», «استفسار عن خدمة»). Zero model calls consumed.
+2. **Step 2: Tap «حجز موعد»**
+   - _Action:_ Tap the inline button.
+   - _Expected:_ Service catalog options presented with zero generative model calls.
+3. **Step 3: Natural Text Booking Request**
+   - _Action:_ Type «عايز كشف أسنان السبت الصبح».
+   - _Expected:_ Slots filtered for Saturday morning (< 12:00 Cairo time) presented as interactive buttons.
+4. **Step 4: Date/Time Correction**
+   - _Action:_ Type «لا خليه يوم الأحد بعد الظهر أفضل».
+   - _Expected:_ Previous slot offer invalidated; new afternoon slots for Sunday presented.
+5. **Step 5: Slot Selection Confirmation**
+   - _Action:_ Tap an available slot button.
+   - _Expected:_ Booking confirmed message with date/time details; exactly 1 appointment created in database; offer marked `CONSUMED`.
+6. **Step 6: Repeated Button Tap (Double-Tap Test)**
+   - _Action:_ Tap the already-consumed slot button again.
+   - _Expected:_ Safe notice that the offer is no longer available / already consumed; zero duplicate appointment created.
 
 ---
 
 ## 6. Blocker and Risk Register
 
-|       Severity       | Item                                      | Impact                                                                                                                                          | Mitigation / Status                                                                                                         |
-| :------------------: | :---------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------- |
-|   **P1 (Blocker)**   | **Production Environment Shared Target**  | `flowpilot-prod.vercel.app` is production; running live tests directly against it would risk customer data mutation and live channel crosstalk. | **BLOCKED for direct live execution on production.** Operator must run live stage against dedicated test tenant & test bot. |
-|   **P2 (Caution)**   | **Lack of Provider-Side Hard Dollar Cap** | OpenRouter lacks hard real-time balance caps via API; runaway loops could consume funds if unmonitored.                                         | Enforced by CORE-04B attempt ceilings (max 20 physical requests per run) and 12s per-turn deadline.                         |
-| **P3 (Operational)** | **Vercel Log Inspection Visibility**      | Structured turn evidence JSON is logged to stdout/runtime logs, but cannot be read locally without Vercel CLI credentials or OTLP sink.         | Verified locally and in CI via `check:turn-evidence` and in-memory trace capture.                                           |
+|     Severity     | Item                                             | Impact                                                                                                                                | Status & Remediation                                                                                    |
+| :--------------: | :----------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------ |
+| **P1 (Blocker)** | **Production Environment Shared Target**         | `flowpilot-prod.vercel.app` is production; running live tests directly against it risks customer data mutation and channel crosstalk. | **BLOCKED for direct live execution on production.** Operator must provision isolated test environment. |
+| **P2 (Blocker)** | **Campaign-Wide Execution Limits Unimplemented** | Multi-turn 20-call campaign ceilings and dollar caps are proposed/harness-only, not implemented as a distributed serverless service.  | **BLOCKED for automated live execution.** Live trial requires manual operator monitoring.               |
+| **P3 (Caution)** | **Lack of Provider-Side Monetary Cap**           | OpenRouter lacks API-driven balance cutoff; runaway loops could consume funds if unmonitored.                                         | Guarded per-turn by CORE-04B attempt limits (max 3) and 12s non-resetting deadline.                     |
 
 ---
 
 ## 7. Recommendation and Verdict
 
-### Recommendation: `READY_FOR_AUTHORIZED_LIVE_ACCEPTANCE`
+### Final Authoritative Verdict:
 
-**Reasons:**
+`ACCEPTANCE_MATRIX_OFFLINE_VERIFIED_LEVEL_A__LIVE_STAGE_BLOCKED`
 
-1. **Baseline & Deployment Verified:** The deployed production system (`flowpilot-prod.vercel.app`) is verified healthy, database connected, and running the exact merged PR #29 HEAD (`d291f1a`, v0.70.0).
-2. **16/16 Acceptance Journeys Verified Offline:** The complete acceptance matrix (Journeys 1–16) has been implemented and 100% verified offline under Level A (controlled-provider, in-memory isolation) via `pnpm check:telegram-acceptance`.
-3. **Execution Limits Intact:** Global AI stop (`FLOWPILOT_AI_GLOBAL_STOP`), serving attempt ceilings (clamped to 3), non-resetting deadlines, and zero-model mechanical execution are fully operational and verified by `pnpm check:core-04b` (159/159 PASS).
-4. **Live Runbook Prepared:** A minimal, safe operator runbook with an explicit spend envelope (20 calls, 400 max tokens, 12s deadline, $0.05 budget) and manual mobile test script is ready for operator authorization.
-5. **No Production Mutation:** In accordance with task constraints, zero paid calls were dispatched, zero database migrations or mutations were executed, and zero live messages were sent.
+**Evaluation Summary:**
+
+1. **Lineage Baseline Verified:** PR #29 merged commit `d291f1ac7cd22c7b8ac80cc05a6a39be97df53c4` (v0.70.0) is verified both in repository git history and on the live production `/api/health` deployment endpoint.
+2. **Offline Acceptance Matrix (Level A) 100% Passed:** 19/19 checks passed in `scripts/check-telegram-acceptance-matrix.ts` (`pnpm check:telegram-acceptance`).
+3. **Evidence Integrity Repaired:** Removed all fabricated physical attempt counts. Distinguished mock invocations, physical boundary calls (1 wire call in 12b, 0 wire calls in 12a/10/11), logical modelCallCount, and engine `providerAttempts` (retaining `null` when telemetry is absent).
+4. **Missing Coverage Completed:** Completed Journey 10 (5 distinct subcases with verified revision saves and virtual clock), Journey 11 (same-externalId dedupe AND repeated tap with new externalId), Journey 12 (pre-AI CAS conflict 12a AND post-AI wire-dispatched slot conflict 12b), and Journey 14 (explicit human 14a, sensitive 14b, and uncertain 14c).
+5. **Timezone Assertions Corrected:** Documented `2026-10-22T10:00:00Z` as 13:00 (1:00 PM) in `Africa/Cairo` (UTC+3 Egypt DST). Verified slot lists are non-empty before checking morning filtering in Cairo timezone.
+6. **Limits & Runbook Truthfulness:** Correctly classified implemented vs proposed limits (CORE-04B is strictly per-turn, not campaign-wide). Described actual Managed Bot architecture (`@FlowPilotManagerBot`, `/settings/telegram`, `fp:<id>` in `runtime_credentials`, SHA-256 digest in `telegram_connections`).
+7. **Live Stage Status:** Formally marked **BLOCKED** pending isolated staging resources and operator authorization.
