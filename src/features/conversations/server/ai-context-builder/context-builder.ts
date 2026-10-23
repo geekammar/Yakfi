@@ -447,6 +447,43 @@ function evaluateCandidate(input: {
 
 // ─── The builder ─────────────────────────────────────────────────────────────
 
+function resolveContextTaskRelevance(
+  message: string,
+  sources: ContextSources,
+  explicitRelevance?: TaskRelevance,
+): TaskRelevance {
+  if (explicitRelevance) return explicitRelevance;
+  const base = deriveTaskRelevance(message);
+  const state = sources.conversationState;
+
+  // Semantic/durable task relevance expansion (CORE-CHOICE-03):
+  // When an active booking task, live offer, pending domain goal, or domain availability
+  // exists, the turn is booking-relevant without requiring isolated lexical triggers.
+  const hasActiveBooking =
+    state?.activeTask?.kind === "BOOKING" ||
+    (state?.offer != null && state.offer.status === "ACTIVE") ||
+    (state?.pendingGoals != null &&
+      state.pendingGoals.some(
+        (g) => g.kind === "DOMAIN_ACTION" || g.intent === "BOOKING",
+      )) ||
+    (sources.availability != null && sources.availability.length > 0);
+
+  const hasProviderContext =
+    Boolean(state?.knownFacts?.provider) ||
+    Boolean(sources.providerPreference) ||
+    state?.offer?.kind === "PROVIDER";
+
+  const hasServiceContext =
+    state?.offer?.kind === "SERVICE" || state?.offer?.kind === "SERVICE_DETAIL";
+
+  return {
+    ...base,
+    bookingOrAvailability: base.bookingOrAvailability || hasActiveBooking,
+    providerChoice: base.providerChoice || hasProviderContext,
+    serviceCatalog: base.serviceCatalog || hasServiceContext,
+  };
+}
+
 /**
  * Build the AI-safe context for one turn. Pure and total: no I/O, no LLM,
  * no env, no Prisma, no credential. Always returns a structured result —
@@ -456,7 +493,11 @@ function evaluateCandidate(input: {
 export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
   const scope = input.scope;
   const sources = input.sources;
-  const relevance = input.taskRelevance ?? deriveTaskRelevance(sources.message);
+  const relevance = resolveContextTaskRelevance(
+    sources.message,
+    sources,
+    input.taskRelevance,
+  );
   const ledger: Ledger = { records: [], keys: new Set() };
 
   // The server-derived tenant scope. An empty/blank scope is UNPROVEN —

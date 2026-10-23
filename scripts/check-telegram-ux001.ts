@@ -111,6 +111,8 @@ async function main(): Promise<void> {
     offerCallbackData,
     providerOfferKeyboard,
   } = await import("@/features/conversations/server/booking-offer");
+  const { renderTelegramInlineKeyboard } =
+    await import("@/server/integrations/telegram/telegram-presentation");
   const {
     withPresentedOffer,
     dehydrateConversationState,
@@ -416,12 +418,18 @@ async function main(): Promise<void> {
         send: async (input: {
           to: string;
           content: string;
+          choices?: any;
           replyMarkup?: Record<string, unknown>;
         }) => {
+          const replyMarkup =
+            input.replyMarkup ??
+            (input.choices
+              ? renderTelegramInlineKeyboard(input.choices)
+              : undefined);
           sentMessages.push({
             to: input.to,
             content: input.content,
-            replyMarkup: input.replyMarkup,
+            replyMarkup,
           });
           return { provider: "telegram", delivered: true };
         },
@@ -1102,10 +1110,15 @@ async function main(): Promise<void> {
     };
 
     h.deps.transport.send = async (input: any) => {
+      const replyMarkup =
+        input.replyMarkup ??
+        (input.choices
+          ? renderTelegramInlineKeyboard(input.choices)
+          : undefined);
       outboundDeliveries.push({
         chatId: input.to,
         text: input.content,
-        replyMarkup: input.replyMarkup,
+        replyMarkup,
       });
       return { provider: "telegram", delivered: true };
     };

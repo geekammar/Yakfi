@@ -117,13 +117,7 @@ import {
   buildServiceOffer,
   buildSlotOffer,
   buildWelcomeOffer,
-  dateOfferKeyboard,
   isOfferLive,
-  providerOfferKeyboard,
-  serviceDetailKeyboard,
-  serviceOfferKeyboard,
-  slotOfferKeyboard,
-  welcomeOfferKeyboard,
 } from "@/features/conversations/server/booking-offer";
 import type {
   BookingSelection,
@@ -134,6 +128,10 @@ import {
   interpretOfferReply,
   tryParseBookingSelection,
 } from "@/features/conversations/server/booking-selection";
+import {
+  buildChannelChoices,
+  type ChannelChoicePresentation,
+} from "@/features/conversations/server/channel-choice";
 import {
   CONTINUE_DOMAIN_INVITE,
   clarificationForBookingReason,
@@ -1215,6 +1213,7 @@ async function deliverAssistantReply(
   assistantMessageId: string,
   businessId: string,
   connectionId: string | null,
+  choices?: ChannelChoicePresentation,
   replyMarkup?: Record<string, unknown>,
 ): Promise<InboundSuccess["delivery"]> {
   let delivery: InboundSuccess["delivery"] = null;
@@ -1226,6 +1225,7 @@ async function deliverAssistantReply(
       conversationId,
       content,
       connectionId: connectionId ?? undefined,
+      ...(choices ? { choices } : {}),
       ...(replyMarkup ? { replyMarkup } : {}),
     });
     delivery = {
@@ -1475,6 +1475,7 @@ async function selectionReply(
   cause: HandoffCause | null = null,
   replyMarkup?: Record<string, unknown>,
   observability?: TurnObservability,
+  choices?: ChannelChoicePresentation,
 ): Promise<InboundSuccess> {
   const assistantMessage = await persistAssistantReply(
     deps,
@@ -1491,6 +1492,7 @@ async function selectionReply(
     assistantMessage.id,
     scope.business.id,
     scope.connectionId,
+    choices,
     replyMarkup,
   );
   return {
@@ -1706,10 +1708,9 @@ async function promptProviderClarificationReply(
       }
     }
   }
-  const replyMarkup =
-    isTelegram && providerOffer
-      ? providerOfferKeyboard(providerOffer)
-      : undefined;
+  const choices = providerOffer
+    ? buildChannelChoices(providerOffer)
+    : undefined;
   const assistantMessage = await persistAssistantReply(
     deps,
     scope.conversation.id,
@@ -1725,7 +1726,7 @@ async function promptProviderClarificationReply(
     assistantMessage.id,
     scope.business.id,
     scope.connectionId,
-    replyMarkup,
+    choices,
   );
   return {
     ok: true,
@@ -1757,9 +1758,6 @@ async function presentDateChoices(
   turnSession: TurnStateSession,
   now: Date,
 ): Promise<InboundSuccess> {
-  const isTelegram =
-    scope.customer.phone.startsWith("tg:") ||
-    deps.transport.providerName === "telegram";
   const upcomingDates = resolveUpcomingBookingDates(scope.business, now);
   let dateOffer: DateOffer | null = null;
   if (upcomingDates.length > 0) {
@@ -1828,8 +1826,7 @@ async function presentDateChoices(
     }
   }
 
-  const replyMarkup =
-    isTelegram && dateOffer ? dateOfferKeyboard(dateOffer) : undefined;
+  const choices = dateOffer ? buildChannelChoices(dateOffer) : undefined;
   const assistantMessage = await persistAssistantReply(
     deps,
     scope.conversation.id,
@@ -1845,7 +1842,7 @@ async function presentDateChoices(
     assistantMessage.id,
     scope.business.id,
     scope.connectionId,
-    replyMarkup,
+    choices,
   );
   return {
     ok: true,
@@ -1886,10 +1883,6 @@ async function presentSlotChoices(
   turnSession: TurnStateSession,
   now: Date,
 ): Promise<InboundSuccess> {
-  const isTelegram =
-    scope.customer.phone.startsWith("tg:") ||
-    deps.transport.providerName === "telegram";
-
   const rawSavedTimeOfDay = turnSession.state?.knownFacts.timePreference;
   if (
     typeof rawSavedTimeOfDay === "string" &&
@@ -2026,8 +2019,7 @@ async function presentSlotChoices(
           }
         }
 
-        const replyMarkup =
-          isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
+        const choices = slotOffer ? buildChannelChoices(slotOffer) : undefined;
         const optionsMsg = formatBookingOptionsMessage(
           input.serviceName,
           input.date,
@@ -2048,7 +2040,7 @@ async function presentSlotChoices(
           assistantMessage.id,
           scope.business.id,
           scope.connectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -2168,15 +2160,23 @@ async function completeBookingSelection(
   selection: BookingSelection,
   turnSession?: TurnStateSession,
 ): Promise<InboundSuccess | null> {
-  const isTelegram =
-    scope.customer.phone.startsWith("tg:") ||
-    deps.transport.providerName === "telegram";
   const reply = (
     content: string,
     status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
     cause: HandoffCause | null = null,
     replyMarkup?: Record<string, unknown>,
-  ) => selectionReply(deps, scope, content, status, cause, replyMarkup);
+    choices?: ChannelChoicePresentation,
+  ) =>
+    selectionReply(
+      deps,
+      scope,
+      content,
+      status,
+      cause,
+      replyMarkup,
+      undefined,
+      choices,
+    );
 
   // 1. Service — matched ONLY against the persisted Business services
   //    (the offer's service name is the selector, never an id source).
@@ -2360,27 +2360,13 @@ async function completeBookingSelection(
           }
         }
       }
-      const replyMarkup = isTelegram
-        ? nextOffer
-          ? slotOfferKeyboard(nextOffer)
-          : {
-              inline_keyboard: [
-                nextBatch.map((_, i) => ({
-                  text: `${maxPresentedIndex + i + 1}️⃣ اختيار ${maxPresentedIndex + i + 1}`,
-                  callback_data: `opt_${maxPresentedIndex + i + 1}`,
-                })),
-                [
-                  { text: "🔄 أوقات أخرى", callback_data: "more_times" },
-                  { text: "📅 يوم آخر", callback_data: "change_date" },
-                ],
-              ],
-            }
-        : undefined;
+      const choices = nextOffer ? buildChannelChoices(nextOffer) : undefined;
       return reply(
         `إليك أوقاتاً أخرى متاحة لخدمة "${serviceName}" يوم ${date}:\n${formatBookingOptionsMessage(serviceName, date, nextBatch, context.followUpRequestId)}`,
         "AI_ACTIVE",
         null,
-        replyMarkup,
+        undefined,
+        choices,
       );
     }
     if (turnSession?.enabled) {
@@ -2602,13 +2588,13 @@ async function completeBookingSelection(
           }
         }
       }
-      const replyMarkup =
-        isTelegram && retryOffer ? slotOfferKeyboard(retryOffer) : undefined;
+      const choices = retryOffer ? buildChannelChoices(retryOffer) : undefined;
       return reply(
         `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options, followUpRequestId)}`,
         "AI_ACTIVE",
         null,
-        replyMarkup,
+        undefined,
+        choices,
       );
     }
     if (turnSession?.enabled) {
@@ -3255,12 +3241,7 @@ async function runInboundTurn(
                 undefined,
               );
             }
-            const isTelegram =
-              customer.phone.startsWith("tg:") ||
-              deps.transport.providerName === "telegram";
-            const replyMarkup = isTelegram
-              ? slotOfferKeyboard(suspended)
-              : undefined;
+            const choices = buildChannelChoices(suspended);
             const optionsMsg = formatBookingOptionsMessage(
               suspended.serviceName,
               suspended.date,
@@ -3277,7 +3258,9 @@ async function runInboundTurn(
               optionsMsg,
               "AI_ACTIVE",
               null,
-              replyMarkup,
+              undefined,
+              undefined,
+              choices,
             );
           } else {
             if (turnSession.state) {
@@ -3319,12 +3302,7 @@ async function runInboundTurn(
                 undefined,
               );
             }
-            const isTelegram =
-              customer.phone.startsWith("tg:") ||
-              deps.transport.providerName === "telegram";
-            const replyMarkup = isTelegram
-              ? dateOfferKeyboard(suspended)
-              : undefined;
+            const choices = buildChannelChoices(suspended);
             const lines = [
               `تم اختيار خدمة "${suspended.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك:`,
             ];
@@ -3338,7 +3316,9 @@ async function runInboundTurn(
               lines.join("\n"),
               "AI_ACTIVE",
               null,
-              replyMarkup,
+              undefined,
+              undefined,
+              choices,
             );
           } else {
             if (turnSession.state) {
@@ -3478,13 +3458,9 @@ async function runInboundTurn(
             );
           }
         }
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
-        const replyMarkup =
-          isTelegram && serviceOffer
-            ? serviceOfferKeyboard(serviceOffer)
-            : undefined;
+        const choices = serviceOffer
+          ? buildChannelChoices(serviceOffer)
+          : undefined;
         const listText =
           activeServices.length > 0
             ? activeServices
@@ -3508,7 +3484,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -3551,13 +3527,9 @@ async function runInboundTurn(
             );
           }
         }
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
-        const replyMarkup =
-          isTelegram && serviceOffer
-            ? serviceOfferKeyboard(serviceOffer)
-            : undefined;
+        const choices = serviceOffer
+          ? buildChannelChoices(serviceOffer)
+          : undefined;
         const listText =
           activeServices.length > 0
             ? activeServices
@@ -3581,7 +3553,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -3697,13 +3669,9 @@ async function runInboundTurn(
           );
         }
       }
-      const isTelegram =
-        customer.phone.startsWith("tg:") ||
-        deps.transport.providerName === "telegram";
-      const replyMarkup =
-        isTelegram && detailOffer
-          ? serviceDetailKeyboard(detailOffer)
-          : undefined;
+      const choices = detailOffer
+        ? buildChannelChoices(detailOffer)
+        : undefined;
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
@@ -3719,7 +3687,7 @@ async function runInboundTurn(
         assistantMessage.id,
         business.id,
         outboundConnectionId,
-        replyMarkup,
+        choices,
       );
       return {
         ok: true,
@@ -3816,13 +3784,9 @@ async function runInboundTurn(
             );
           }
         }
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
-        const replyMarkup =
-          isTelegram && serviceOffer
-            ? serviceOfferKeyboard(serviceOffer)
-            : undefined;
+        const choices = serviceOffer
+          ? buildChannelChoices(serviceOffer)
+          : undefined;
         const listText =
           activeServices.length > 0
             ? activeServices
@@ -3846,7 +3810,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -3883,14 +3847,10 @@ async function runInboundTurn(
             );
           }
         }
-        const isTelegram =
-          customer.phone.startsWith("tg:") ||
-          deps.transport.providerName === "telegram";
         const welcomeText = `القائمة الرئيسية:\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة`;
-        const replyMarkup =
-          isTelegram && welcomeOffer
-            ? welcomeOfferKeyboard(welcomeOffer)
-            : undefined;
+        const choices = welcomeOffer
+          ? buildChannelChoices(welcomeOffer)
+          : undefined;
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -3906,7 +3866,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -4220,9 +4180,6 @@ async function runInboundTurn(
 
     // UX001: Telegram /start command protocol (Zero JEV & Zero generative model calls)
     if (/^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(inbound.text.trim())) {
-      const isTelegram =
-        customer.phone.startsWith("tg:") ||
-        deps.transport.providerName === "telegram";
       const rawPersistedTimePref = turnSession.state?.knownFacts.timePreference;
       if (
         typeof rawPersistedTimePref === "string" &&
@@ -4273,36 +4230,22 @@ async function runInboundTurn(
 
       if (isOfferValid) {
         let continuationMsg: string;
-        let replyMarkup: Record<string, unknown> | undefined;
 
         if (activeOffer.kind === "SLOT") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. ما زالت المواعيد المقترحة متاحة لاختيارك:\n(أو يمكنك كتابة أي استفسار أو موعد آخر مباشرة)`;
-          replyMarkup = isTelegram ? slotOfferKeyboard(activeOffer) : undefined;
         } else if (activeOffer.kind === "DATE") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى تحديد اليوم أو التاريخ المناسب لمتابعة حجزك:\n(أو يمكنك كتابة أي تاريخ مباشرة)`;
-          replyMarkup = isTelegram ? dateOfferKeyboard(activeOffer) : undefined;
         } else if (activeOffer.kind === "SERVICE") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار الخدمة المطلوبة لمتابعة حجزك:\n(أو يمكنك كتابة اسم الخدمة مباشرة)`;
-          replyMarkup = isTelegram
-            ? serviceOfferKeyboard(activeOffer)
-            : undefined;
         } else if (activeOffer.kind === "PROVIDER") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار مقدم الخدمة:\n(أو يمكنك كتابة اسم الطبيب أو الاختيار مباشرة)`;
-          replyMarkup = isTelegram
-            ? providerOfferKeyboard(activeOffer)
-            : undefined;
         } else if (activeOffer.kind === "SERVICE_DETAIL") {
           continuationMsg = `أهلاً بك مجدداً في ${business.name}. تفاصيل الخدمة معروضة أدناه للمتابعة:`;
-          replyMarkup = isTelegram
-            ? serviceDetailKeyboard(activeOffer)
-            : undefined;
         } else {
           continuationMsg = `أهلاً بك في ${business.name}! يمكنك الاختيار من الخيارات التالية أو كتابة استفسارك مباشرة:`;
-          replyMarkup = isTelegram
-            ? welcomeOfferKeyboard(activeOffer)
-            : undefined;
         }
 
+        const choices = buildChannelChoices(activeOffer);
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -4318,7 +4261,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -4418,10 +4361,9 @@ async function runInboundTurn(
       }
 
       const welcomeMsg = `أهلاً بك في ${business.name}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة\n(يمكنك الاختيار من الخيارات أعلاه أو كتابة طلبك مباشرة في أي وقت)`;
-      const replyMarkup =
-        isTelegram && welcomeOffer
-          ? welcomeOfferKeyboard(welcomeOffer)
-          : undefined;
+      const choices = welcomeOffer
+        ? buildChannelChoices(welcomeOffer)
+        : undefined;
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
@@ -4437,7 +4379,7 @@ async function runInboundTurn(
         assistantMessage.id,
         business.id,
         outboundConnectionId,
-        replyMarkup,
+        choices,
       );
       return {
         ok: true,
@@ -5895,21 +5837,16 @@ async function runInboundTurn(
             turnSession.state ?? resolvedState ?? emptyConversationState();
           await turnSession.commit();
         }
-        let replyMarkup: Record<string, unknown> | undefined;
+        let choices: ChannelChoicePresentation | undefined;
         if (
-          isTelegram &&
           (mapped.reason === "MISSING_SERVICE" ||
             mapped.reason === "AMBIGUOUS_SERVICE") &&
           services.length > 0 &&
           serviceOffer
         ) {
-          replyMarkup = serviceOfferKeyboard(serviceOffer);
-        } else if (
-          isTelegram &&
-          mapped.reason === "MISSING_DATE" &&
-          dateOffer
-        ) {
-          replyMarkup = dateOfferKeyboard(dateOffer);
+          choices = buildChannelChoices(serviceOffer);
+        } else if (mapped.reason === "MISSING_DATE" && dateOffer) {
+          choices = buildChannelChoices(dateOffer);
         }
         const delivery = await deliverAssistantReply(
           deps,
@@ -5920,7 +5857,7 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          replyMarkup,
+          choices,
         );
         return {
           ok: true,
@@ -6280,9 +6217,7 @@ async function runInboundTurn(
         }
       }
 
-      const isTelegram = customer.phone.startsWith("tg:");
-      const replyMarkup =
-        isTelegram && slotOffer ? slotOfferKeyboard(slotOffer) : undefined;
+      const choices = slotOffer ? buildChannelChoices(slotOffer) : undefined;
 
       // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
       const optionsMsg = formatBookingOptionsMessage(
@@ -6306,7 +6241,7 @@ async function runInboundTurn(
         assistantMessage.id,
         business.id,
         outboundConnectionId,
-        replyMarkup,
+        choices,
       );
       return {
         ok: true,
@@ -6528,12 +6463,9 @@ async function runInboundTurn(
       });
     }
 
-    let replyMarkup: Record<string, unknown> | undefined;
-    const isTelegram =
-      customer.phone.startsWith("tg:") ||
-      deps.transport.providerName === "telegram";
+    let choices: ChannelChoicePresentation | undefined;
 
-    if (isTelegram && validated.action === "reply") {
+    if (validated.action === "reply") {
       const activeOffer = turnSession.state?.offer;
       const isOfferValid =
         activeOffer &&
@@ -6541,15 +6473,7 @@ async function runInboundTurn(
         new Date(activeOffer.expiresAt).getTime() > now.getTime();
 
       if (isOfferValid) {
-        if (activeOffer.kind === "SLOT") {
-          replyMarkup = slotOfferKeyboard(activeOffer);
-        } else if (activeOffer.kind === "DATE") {
-          replyMarkup = dateOfferKeyboard(activeOffer);
-        } else if (activeOffer.kind === "SERVICE") {
-          replyMarkup = serviceOfferKeyboard(activeOffer);
-        } else if (activeOffer.kind === "PROVIDER") {
-          replyMarkup = providerOfferKeyboard(activeOffer);
-        }
+        choices = buildChannelChoices(activeOffer);
       } else if (
         validated.intent === "GREETING" &&
         !turnSession.state?.activeTask
@@ -6566,7 +6490,7 @@ async function runInboundTurn(
               welcomeOffer,
             );
           }
-          replyMarkup = welcomeOfferKeyboard(welcomeOffer);
+          choices = buildChannelChoices(welcomeOffer);
         }
       }
     }
@@ -6582,7 +6506,7 @@ async function runInboundTurn(
         conversationId: conversation.id,
         content: finalContent,
         connectionId: outboundConnectionId ?? undefined,
-        ...(replyMarkup ? { replyMarkup } : {}),
+        ...(choices ? { choices } : {}),
       });
       delivery = {
         provider: sent.provider,

@@ -7,6 +7,7 @@
 import type { RequiredSemanticCapability } from "@/features/conversations/server/ai-contract";
 import type { ConversationEngineDeps } from "@/features/conversations/server/conversation-engine";
 import type { ConversationStateStore } from "@/features/conversations/server/conversation-state-store";
+import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
 import type {
   ConversationStateRow,
   ConversationStateSaveResult,
@@ -176,6 +177,7 @@ export type DeliveredOutbound = {
   to: string;
   body: string;
   channel: "WHATSAPP" | "TELEGRAM";
+  choices?: any;
   replyMarkup?: any;
   buttons?: Array<{ label: string; payload: string }>;
   sentAt: Date;
@@ -592,11 +594,17 @@ export function createPlaygroundHarness(
     transport: {
       providerName: "PLAYGROUND_TRANSPORT",
       send: async (out: any) => {
+        const replyMarkup =
+          out.replyMarkup ??
+          (channel === "TELEGRAM" && out.choices
+            ? renderTelegramInlineKeyboard(out.choices)
+            : null);
         deliveredOutbound.push({
           to: out.to,
           body: out.content ?? out.body ?? out.text ?? "",
           channel,
-          replyMarkup: out.replyMarkup ?? null,
+          replyMarkup,
+          choices: out.choices ?? null,
           buttons: out.buttons ?? [],
           sentAt: virtualNow,
         });
