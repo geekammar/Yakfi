@@ -166,7 +166,7 @@ export function createConversationControl(
       }
 
       const remainingBudgetMs = deadline - getNow();
-      if (remainingBudgetMs <= 0) {
+      if (attemptNumber > 1 && remainingBudgetMs <= 0) {
         skipReason = "INSUFFICIENT_DEADLINE";
         break;
       }
@@ -205,7 +205,7 @@ export function createConversationControl(
         maxAttempts,
         retryEnabled: config.retryEnabled,
         remainingBudgetMs: remainingAfterAttemptMs,
-        attemptTimeoutMs,
+        attemptTimeoutMs: options?.session ? null : attemptTimeoutMs,
         explicitHumanRequest: explicitHuman,
       });
 
