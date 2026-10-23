@@ -1319,6 +1319,656 @@ async function runSuite(): Promise<void> {
   }
 
   // -------------------------------------------------------------------------
+  // O. Post-AI Early Returns & Offer Conflict Evidence Preservation
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group O: Post-AI Early Returns & Offer Conflict Evidence Preservation ---",
+  );
+  {
+    // Test A: SERVICE offer conflict after AI
+    const emittedEvidenceA: TurnEvidence[] = [];
+    let wireCallsA = 0;
+    const scriptedA = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({
+            intent: "BOOKING",
+            action: "reply",
+            content: "أي خدمة تحب تحجزها؟",
+            extraction: {
+              service: null,
+              provider: null,
+              date: "2026-10-21",
+              timePreference: null,
+            },
+            safetyAssessment: "safe",
+            factUpdates: [
+              { key: "date", operation: "set", value: "2026-10-21" },
+            ],
+          }),
+        ),
+      },
+    ]);
+    const monitoredFetchA: typeof fetch = async (info, init) => {
+      wireCallsA++;
+      return scriptedA.fetchImpl(info, init);
+    };
+    const adapterA = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredFetchA,
+    });
+    const harnessA = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-10-20",
+    });
+    harnessA.deps.ai = createLlmConversationAi({
+      primary: adapterA,
+      fallbackEnabled: false,
+    });
+    harnessA.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceA.push(ev);
+      },
+    };
+    const origSaveA = harnessA.stateStore.save.bind(harnessA.stateStore);
+    harnessA.stateStore.save = async (bId, cId, expRev, st: any) => {
+      if (st?.offer?.kind === "SERVICE") {
+        return { status: "conflict" as const };
+      }
+      return origSaveA(bId, cId, expRev, st);
+    };
+
+    const fromHandleA = harnessA.customer.phone.replace(/^tg:/, "");
+    const resA = await receiveInboundMessage(harnessA.deps, {
+      to: harnessA.business.whatsappNumber ?? "+201000000000",
+      from: fromHandleA,
+      text: "عايز أحجز ميعاد مع دكتور بكرة",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-cas-service",
+    });
+
+    const lastOutboundA =
+      harnessA.deliveredOutbound[harnessA.deliveredOutbound.length - 1];
+
+    check(
+      "O1. SERVICE offer CAS conflict returns success status with safe retry message",
+      resA.ok === true &&
+        lastOutboundA?.body ===
+          "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+    );
+    check(
+      "O2. SERVICE offer CAS conflict suppressed Telegram replyMarkup",
+      lastOutboundA?.replyMarkup == null,
+    );
+    check(
+      "O3. SERVICE offer CAS conflict created zero appointments",
+      harnessA.appointments.length === 0,
+    );
+    check(
+      "O4. SERVICE offer CAS conflict matches physical HTTP calls (1 wire call)",
+      wireCallsA === 1,
+    );
+    check(
+      "O5. SERVICE offer CAS conflict preserves TurnEvidence providerAttempts === 1 and modelCallCount === 1",
+      emittedEvidenceA.length === 1 &&
+        emittedEvidenceA[0]?.providerAttempts === 1 &&
+        (resA as any).observability?.modelCallCount === 1,
+    );
+    check(
+      "O6. SERVICE offer CAS conflict TurnEvidence providerStatus is SUCCESS (not NOT_CALLED)",
+      emittedEvidenceA[0]?.providerStatus === "SUCCESS",
+    );
+    check(
+      "O7. SERVICE offer CAS conflict TurnEvidence preserves executionAttempts and costCompleteness",
+      emittedEvidenceA[0]?.executionAttempts?.length === 1 &&
+        emittedEvidenceA[0]?.costCompleteness !== undefined,
+    );
+
+    // Test B: DATE offer conflict after AI
+    const emittedEvidenceB: TurnEvidence[] = [];
+    let wireCallsB = 0;
+    const scriptedB = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({
+            intent: "BOOKING",
+            action: "reply",
+            content: "أي يوم يناسبك لحجز كشف أسنان؟",
+            extraction: {
+              service: "كشف أسنان",
+              provider: null,
+              date: null,
+              timePreference: null,
+            },
+            safetyAssessment: "safe",
+            factUpdates: [
+              { key: "service", operation: "set", value: "كشف أسنان" },
+            ],
+          }),
+        ),
+      },
+    ]);
+    const monitoredFetchB: typeof fetch = async (info, init) => {
+      wireCallsB++;
+      return scriptedB.fetchImpl(info, init);
+    };
+    const adapterB = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredFetchB,
+    });
+    const harnessB = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-10-20",
+    });
+    harnessB.deps.ai = createLlmConversationAi({
+      primary: adapterB,
+      fallbackEnabled: false,
+    });
+    harnessB.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceB.push(ev);
+      },
+    };
+    const origSaveB = harnessB.stateStore.save.bind(harnessB.stateStore);
+    harnessB.stateStore.save = async (bId, cId, expRev, st: any) => {
+      if (st?.offer?.kind === "DATE") {
+        return { status: "conflict" as const };
+      }
+      return origSaveB(bId, cId, expRev, st);
+    };
+
+    const fromHandleB = harnessB.customer.phone.replace(/^tg:/, "");
+    const resB = await receiveInboundMessage(harnessB.deps, {
+      to: harnessB.business.whatsappNumber ?? "+201000000000",
+      from: fromHandleB,
+      text: "عايز كشف أسنان",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-cas-date",
+    });
+
+    const lastOutboundB =
+      harnessB.deliveredOutbound[harnessB.deliveredOutbound.length - 1];
+
+    check(
+      "O8. DATE offer CAS conflict returns safe retry message",
+      resB.ok === true &&
+        lastOutboundB?.body ===
+          "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+    );
+    check(
+      "O9. DATE offer CAS conflict suppressed Telegram replyMarkup",
+      lastOutboundB?.replyMarkup == null,
+    );
+    check(
+      "O10. DATE offer CAS conflict created zero appointments",
+      harnessB.appointments.length === 0,
+    );
+    check(
+      "O11. DATE offer CAS conflict matches physical HTTP calls (1 wire call)",
+      wireCallsB === 1,
+    );
+    check(
+      "O12. DATE offer CAS conflict preserves TurnEvidence providerAttempts === 1 and modelCallCount === 1",
+      emittedEvidenceB.length === 1 &&
+        emittedEvidenceB[0]?.providerAttempts === 1 &&
+        (resB as any).observability?.modelCallCount === 1,
+    );
+    check(
+      "O13. DATE offer CAS conflict TurnEvidence providerStatus is SUCCESS (not NOT_CALLED)",
+      emittedEvidenceB[0]?.providerStatus === "SUCCESS",
+    );
+    check(
+      "O14. DATE offer CAS conflict TurnEvidence preserves executionAttempts and costCompleteness",
+      emittedEvidenceB[0]?.executionAttempts?.length === 1 &&
+        emittedEvidenceB[0]?.costCompleteness !== undefined,
+    );
+
+    // Test C: SLOT offer conflict after AI
+    const emittedEvidenceC: TurnEvidence[] = [];
+    let wireCallsC = 0;
+    const scriptedC = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({
+            intent: "BOOKING",
+            action: "reply",
+            content: "المواعيد المتاحة:",
+            extraction: {
+              service: "كشف أسنان",
+              provider: null,
+              date: "2026-10-21",
+              timePreference: null,
+            },
+            safetyAssessment: "safe",
+            factUpdates: [
+              { key: "service", operation: "set", value: "كشف أسنان" },
+              { key: "date", operation: "set", value: "2026-10-21" },
+            ],
+          }),
+        ),
+      },
+    ]);
+    const monitoredFetchC: typeof fetch = async (info, init) => {
+      wireCallsC++;
+      return scriptedC.fetchImpl(info, init);
+    };
+    const adapterC = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredFetchC,
+    });
+    const harnessC = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-10-20",
+    });
+    harnessC.deps.ai = createLlmConversationAi({
+      primary: adapterC,
+      fallbackEnabled: false,
+    });
+    harnessC.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceC.push(ev);
+      },
+    };
+    const origSaveC = harnessC.stateStore.save.bind(harnessC.stateStore);
+    harnessC.stateStore.save = async (bId, cId, expRev, st: any) => {
+      if (st?.offer?.kind === "SLOT") {
+        return { status: "conflict" as const };
+      }
+      return origSaveC(bId, cId, expRev, st);
+    };
+
+    const fromHandleC = harnessC.customer.phone.replace(/^tg:/, "");
+    const resC = await receiveInboundMessage(harnessC.deps, {
+      to: harnessC.business.whatsappNumber ?? "+201000000000",
+      from: fromHandleC,
+      text: "عايز كشف أسنان يوم الأربعاء",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-cas-slot",
+    });
+
+    const lastOutboundC =
+      harnessC.deliveredOutbound[harnessC.deliveredOutbound.length - 1];
+
+    check(
+      "O15. SLOT offer CAS conflict returns safe retry message",
+      resC.ok === true &&
+        lastOutboundC?.body ===
+          "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+    );
+    check(
+      "O16. SLOT offer CAS conflict suppressed Telegram replyMarkup",
+      lastOutboundC?.replyMarkup == null,
+    );
+    check(
+      "O17. SLOT offer CAS conflict created zero appointments",
+      harnessC.appointments.length === 0,
+    );
+    check(
+      "O18. SLOT offer CAS conflict matches physical HTTP calls (1 wire call)",
+      wireCallsC === 1,
+    );
+    check(
+      "O19. SLOT offer CAS conflict preserves TurnEvidence providerAttempts === 1 and modelCallCount === 1",
+      emittedEvidenceC.length === 1 &&
+        emittedEvidenceC[0]?.providerAttempts === 1 &&
+        (resC as any).observability?.modelCallCount === 1,
+    );
+    check(
+      "O20. SLOT offer CAS conflict TurnEvidence providerStatus is SUCCESS (not NOT_CALLED)",
+      emittedEvidenceC[0]?.providerStatus === "SUCCESS",
+    );
+    check(
+      "O21. SLOT offer CAS conflict TurnEvidence preserves executionAttempts and costCompleteness",
+      emittedEvidenceC[0]?.executionAttempts?.length === 1 &&
+        emittedEvidenceC[0]?.costCompleteness !== undefined,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // P. Multi-Turn Stale-Telemetry Isolation (Model Turn 1 -> Mechanical Turn 2)
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group P: Multi-Turn Stale-Telemetry Isolation (Model Turn 1 -> Mechanical Turn 2) ---",
+  );
+  {
+    const emittedEvidenceP: TurnEvidence[] = [];
+    let wireCallsP = 0;
+    const scriptedP = createScriptedFetch([
+      {
+        kind: "ok",
+        body: openAiEnvelope(
+          validAiResponseJson({ content: "نعم متوفر كشف أسنان" }),
+        ),
+      },
+    ]);
+    const monitoredFetchP: typeof fetch = async (info, init) => {
+      wireCallsP++;
+      return scriptedP.fetchImpl(info, init);
+    };
+    const adapterP = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredFetchP,
+    });
+    const testAiP = createLlmConversationAi({
+      primary: adapterP,
+      fallbackEnabled: false,
+    });
+    const harnessP = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+    });
+    harnessP.deps.ai = testAiP;
+    harnessP.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceP.push(ev);
+      },
+    };
+
+    // Turn 1: Model conversational turn
+    const turn1Res = await receiveInboundMessage(harnessP.deps, {
+      to: harnessP.business.whatsappNumber ?? "+201000000000",
+      from: harnessP.customer.phone,
+      text: "هل عندكم كشف أسنان؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-p-turn1",
+    });
+
+    check("P1. Model Turn 1 succeeds", turn1Res.ok === true);
+    check("P2. Model Turn 1 invoked 1 wire HTTP request", wireCallsP === 1);
+    check(
+      "P3. Model Turn 1 emitted TurnEvidence with providerAttempts === 1 and SUCCESS",
+      emittedEvidenceP.length === 1 &&
+        emittedEvidenceP[0]?.providerAttempts === 1 &&
+        emittedEvidenceP[0]?.providerStatus === "SUCCESS",
+    );
+
+    // Pre-seed an active offer in the same conversation state
+    const servicesP = await harnessP.deps.serviceRepository.listByBusiness(
+      harnessP.business.id,
+    );
+    const nowP = new Date();
+    const testOfferP = {
+      id: "off-p-1",
+      token: "off00002",
+      kind: "SLOT" as const,
+      businessId: harnessP.business.id,
+      conversationId: harnessP.conversation.id,
+      serviceId: servicesP[0]!.id,
+      serviceName: servicesP[0]!.name,
+      serviceSource: "CUSTOMER" as const,
+      date: "2026-10-25",
+      providerId: null,
+      followUpRequestId: null,
+      shownCount: 1,
+      options: [
+        {
+          index: 1,
+          providerId: "prov-1",
+          displayName: "د. سارة",
+          startAt: "2026-10-25T10:00",
+          endAt: "2026-10-25T10:30",
+        },
+      ],
+      issuedAt: nowP.toISOString(),
+      expiresAt: new Date(nowP.getTime() + 3600000).toISOString(),
+      status: "ACTIVE" as const,
+    };
+    const loadedStateP = await harnessP.stateStore.load(
+      harnessP.business.id,
+      harnessP.conversation.id,
+    );
+    await harnessP.stateStore.save(
+      harnessP.business.id,
+      harnessP.conversation.id,
+      loadedStateP?.revision ?? null,
+      dehydrateConversationState({
+        ...emptyConversationState(),
+        offer: testOfferP as any,
+      }),
+    );
+
+    // Turn 2: Mechanical selection "1" on the SAME harness
+    const turn2Res = await receiveInboundMessage(harnessP.deps, {
+      to: harnessP.business.whatsappNumber ?? "+201000000000",
+      from: harnessP.customer.phone,
+      text: "1",
+      receivedAt: new Date(nowP.getTime() + 5000).toISOString(),
+      externalId: "ext-msg-p-turn2",
+    });
+
+    check("P4. Mechanical Turn 2 succeeds", turn2Res.ok === true);
+    check(
+      "P5. Mechanical Turn 2 dispatched ZERO new wire calls (total wireCalls still 1)",
+      wireCallsP === 1,
+    );
+    check(
+      "P6. Mechanical Turn 2 emitted TurnEvidence with providerAttempts === 0 and NOT_CALLED",
+      emittedEvidenceP.length === 2 &&
+        emittedEvidenceP[1]?.providerAttempts === 0 &&
+        emittedEvidenceP[1]?.providerStatus === "NOT_CALLED",
+    );
+    check(
+      "P7. Mechanical Turn 2 routingDecision is DETERMINISTIC_BYPASS",
+      emittedEvidenceP[1]?.routingDecision === "DETERMINISTIC_BYPASS",
+    );
+    check(
+      "P8. Mechanical Turn 2 has modelCallCount === 0",
+      (turn2Res as any).observability?.modelCallCount === 0,
+    );
+    check(
+      "P9. Mechanical Turn 2 has zero contamination from Turn 1 (no executionAttempts from previous turn)",
+      emittedEvidenceP[1]?.executionAttempts == null ||
+        emittedEvidenceP[1]?.executionAttempts?.length === 0,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Q. Engine-Level Integration for JEV-Only & Unknown Physical Count
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group Q: Engine-Level Integration for JEV-Only & Unknown Physical Count ---",
+  );
+  {
+    // Q1-Q5: Real engine receiveInboundMessage with JEV decision:
+    // JEV API makes 1 call, LLM makes 0 calls -> emitted TurnEvidence providerAttempts === 1, modelCallCount === 1
+    const emittedEvidenceQ1: TurnEvidence[] = [];
+    let jevCallsQ = 0;
+    let llmCallsQ = 0;
+    const jevFetchQ = createScriptedFetch([
+      { kind: "ok", body: jevDecisionsEnvelope() },
+    ]);
+    const monitoredJevFetch: typeof fetch = async (info, init) => {
+      jevCallsQ++;
+      return jevFetchQ.fetchImpl(info, init);
+    };
+    const llmFetchQ = createScriptedFetch([
+      { kind: "ok", body: openAiEnvelope(validAiResponseJson()) },
+    ]);
+    const monitoredLlmFetch: typeof fetch = async (info, init) => {
+      llmCallsQ++;
+      return llmFetchQ.fetchImpl(info, init);
+    };
+
+    const jevProviderQ = createJevDecisionsProvider({
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredJevFetch,
+    });
+    const decisionStrategyQ = createSemanticJevStrategy({
+      provider: jevProviderQ,
+      enabled: true,
+    });
+    const llmAdapterQ = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: monitoredLlmFetch,
+    });
+
+    const harnessQ1 = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+      requiredSemanticCapability: null,
+    });
+    harnessQ1.deps.ai = createLlmConversationAi({
+      primary: llmAdapterQ,
+      decisionStrategy: decisionStrategyQ,
+      fallbackEnabled: false,
+    });
+    harnessQ1.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceQ1.push(ev);
+      },
+    };
+
+    const resQ1 = await receiveInboundMessage(harnessQ1.deps, {
+      to: harnessQ1.business.whatsappNumber ?? "+201000000000",
+      from: harnessQ1.customer.phone,
+      text: "عايز أحجز كشف أسنان",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-q1",
+    });
+
+    check("Q1. JEV-decision engine turn succeeds", resQ1.ok === true);
+    check(
+      "Q2. JEV Decisions API dispatched exactly 1 physical HTTP request",
+      jevCallsQ === 1,
+    );
+    check(
+      "Q3. Serving LLM dispatched strictly 0 requests after spent JEV",
+      llmCallsQ === 0,
+    );
+    check(
+      "Q4. Emitted TurnEvidence providerAttempts === 1 and modelCallCount === 1 (no double counting)",
+      emittedEvidenceQ1.length === 1 &&
+        emittedEvidenceQ1[0]?.providerAttempts === 1 &&
+        (resQ1 as any).observability?.modelCallCount === 1,
+    );
+    check(
+      "Q5. Emitted TurnEvidence provider is jev-deterministic",
+      emittedEvidenceQ1[0]?.provider === "jev-deterministic",
+    );
+
+    // Q6-Q8: Real engine receiveInboundMessage with custom adapter reporting null physical attempts
+    const emittedEvidenceQ2: TurnEvidence[] = [];
+    const customNullAdapter: AiProviderAdapter = {
+      providerId: "openrouter",
+      model: "legacy-model",
+      secretRef: "CUSTOM_KEY",
+      async call() {
+        return {
+          ok: true,
+          provider: "openrouter",
+          model: "legacy-model",
+          latencyMs: 20,
+          response: JSON.parse(validAiResponseJson()),
+        };
+      },
+    };
+    const harnessQ2 = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+    });
+    harnessQ2.deps.ai = createLlmConversationAi({
+      primary: customNullAdapter,
+      fallbackEnabled: false,
+    });
+    harnessQ2.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceQ2.push(ev);
+      },
+    };
+
+    const resQ2 = await receiveInboundMessage(harnessQ2.deps, {
+      to: harnessQ2.business.whatsappNumber ?? "+201000000000",
+      from: harnessQ2.customer.phone,
+      text: "ما هي مواعيد العمل؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-q2",
+    });
+
+    check(
+      "Q6. Unknown physical telemetry engine turn succeeds",
+      resQ2.ok === true,
+    );
+    check(
+      "Q7. Emitted TurnEvidence providerAttempts is strictly null (not 0 or 1)",
+      emittedEvidenceQ2.length === 1 &&
+        emittedEvidenceQ2[0]?.providerAttempts === null,
+    );
+    check(
+      "Q8. Emitted TurnEvidence modelCallCount derives honestly as 1",
+      (resQ2 as any).observability?.modelCallCount === 1,
+    );
+
+    // Q9-Q11: Real engine receiveInboundMessage with mixed known and unknown attempts
+    const emittedEvidenceQ3: TurnEvidence[] = [];
+    const pFailFetch = createScriptedFetch([
+      { kind: "status", status: 500, body: { error: "down" } },
+    ]);
+    const pFailAdapter = createOpenRouterAdapter({
+      model: "openrouter/fail",
+      getEnvVar: () => "k",
+      fetchImpl: pFailFetch.fetchImpl,
+    });
+    const sUnknownAdapter: AiProviderAdapter = {
+      providerId: "atria",
+      model: "custom-s",
+      secretRef: "CUSTOM_KEY",
+      async call() {
+        return {
+          ok: true,
+          provider: "atria",
+          model: "custom-s",
+          latencyMs: 15,
+          response: JSON.parse(validAiResponseJson()),
+        };
+      },
+    };
+    const harnessQ3 = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-20",
+    });
+    harnessQ3.deps.ai = createLlmConversationAi({
+      primary: pFailAdapter,
+      secondary: sUnknownAdapter,
+      fallbackEnabled: true,
+    });
+    harnessQ3.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => {
+        emittedEvidenceQ3.push(ev);
+      },
+    };
+
+    const resQ3 = await receiveInboundMessage(harnessQ3.deps, {
+      to: harnessQ3.business.whatsappNumber ?? "+201000000000",
+      from: harnessQ3.customer.phone,
+      text: "ما هي مواعيد العمل لديكم؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-q3",
+    });
+
+    check(
+      "Q9. Mixed known/unknown fallback engine turn succeeds",
+      resQ3.ok === true,
+    );
+    check(
+      "Q10. Emitted TurnEvidence providerAttempts aggregates strictly to null (no fabricated total)",
+      emittedEvidenceQ3.length === 1 &&
+        emittedEvidenceQ3[0]?.providerAttempts === null,
+    );
+    check(
+      "Q11. Emitted TurnEvidence modelCallCount derives honestly as 1",
+      (resQ3 as any).observability?.modelCallCount === 1,
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Summary
   // -------------------------------------------------------------------------
   const passed = results.filter((r) => r.pass).length;

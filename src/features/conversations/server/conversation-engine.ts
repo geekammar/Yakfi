@@ -1474,6 +1474,7 @@ async function selectionReply(
   status: "AI_ACTIVE" | "NEED_HUMAN" | "BOOKED",
   cause: HandoffCause | null = null,
   replyMarkup?: Record<string, unknown>,
+  observability?: TurnObservability,
 ): Promise<InboundSuccess> {
   const assistantMessage = await persistAssistantReply(
     deps,
@@ -1503,15 +1504,17 @@ async function selectionReply(
     intent: "BOOKING",
     conversationStatus: status,
     handoffCause: status === "NEED_HUMAN" ? cause : null,
-    assistantProvider: deps.ai.providerName,
+    assistantProvider: observability?.provider ?? deps.ai.providerName,
     delivery,
-    observability: buildTurnObservability({
-      routingDecision: "DETERMINISTIC_BYPASS",
-      provider: deps.ai.providerName,
-      providerAttempts: 0,
-      providerStatus: "NOT_CALLED",
-      modelCallCount: 0,
-    }),
+    observability:
+      observability ??
+      buildTurnObservability({
+        routingDecision: "DETERMINISTIC_BYPASS",
+        provider: deps.ai.providerName,
+        providerAttempts: 0,
+        providerStatus: "NOT_CALLED",
+        modelCallCount: 0,
+      }),
   };
 }
 
@@ -1696,6 +1699,9 @@ async function promptProviderClarificationReply(
           scope,
           "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
           "AI_ACTIVE",
+          null,
+          undefined,
+          input.observability,
         );
       }
     }
@@ -1746,6 +1752,7 @@ async function presentDateChoices(
     serviceName: string;
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
+    observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -1814,6 +1821,9 @@ async function presentDateChoices(
         scope,
         "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
         "AI_ACTIVE",
+        null,
+        undefined,
+        input.observability,
       );
     }
   }
@@ -1848,15 +1858,17 @@ async function presentDateChoices(
     intent: "AVAILABILITY",
     conversationStatus: "AI_ACTIVE",
     handoffCause: null,
-    assistantProvider: deps.ai.providerName,
+    assistantProvider: input.observability?.provider ?? deps.ai.providerName,
     delivery,
-    observability: buildTurnObservability({
-      routingDecision: "DETERMINISTIC_BYPASS",
-      provider: deps.ai.providerName,
-      providerAttempts: 0,
-      providerStatus: "NOT_CALLED",
-      modelCallCount: 0,
-    }),
+    observability:
+      input.observability ??
+      buildTurnObservability({
+        routingDecision: "DETERMINISTIC_BYPASS",
+        provider: deps.ai.providerName,
+        providerAttempts: 0,
+        providerStatus: "NOT_CALLED",
+        modelCallCount: 0,
+      }),
   };
 }
 
@@ -1869,6 +1881,7 @@ async function presentSlotChoices(
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
     date: string;
+    observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -2006,6 +2019,9 @@ async function presentSlotChoices(
               scope,
               "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
               "AI_ACTIVE",
+              null,
+              undefined,
+              input.observability,
             );
           }
         }
@@ -2045,8 +2061,18 @@ async function presentSlotChoices(
           intent: "AVAILABILITY",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider:
+            input.observability?.provider ?? deps.ai.providerName,
           delivery,
+          observability:
+            input.observability ??
+            buildTurnObservability({
+              routingDecision: "DETERMINISTIC_BYPASS",
+              provider: deps.ai.providerName,
+              providerAttempts: 0,
+              providerStatus: "NOT_CALLED",
+              modelCallCount: 0,
+            }),
         };
       }
     }
@@ -5776,6 +5802,9 @@ async function runInboundTurn(
                 selectionScope,
                 "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
                 "AI_ACTIVE",
+                null,
+                undefined,
+                clarifyObservability,
               );
             }
           }
@@ -5818,6 +5847,8 @@ async function runInboundTurn(
                     date: null,
                     eligibleProviders: provRes.eligibleProviders,
                     reason: provRes.reason,
+                    intent: validated.intent,
+                    observability: clarifyObservability,
                   },
                   turnSession,
                   now,
@@ -5850,6 +5881,9 @@ async function runInboundTurn(
                   selectionScope,
                   "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
                   "AI_ACTIVE",
+                  null,
+                  undefined,
+                  clarifyObservability,
                 );
               }
             }
@@ -6237,6 +6271,9 @@ async function runInboundTurn(
               selectionScope,
               "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
               "AI_ACTIVE",
+              null,
+              undefined,
+              turnObservability,
             );
           }
         }
