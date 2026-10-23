@@ -42,6 +42,14 @@ export function createLlmConversationAi(params: {
   shadowStrategy?: ShadowJevStrategy | null;
   /** The shadow join deadline (PROMPT-AI-JEV-03C §13.4). */
   shadowTimeoutMs?: number;
+  /** Injected environment getter for reading operational controls (CORE-04B). */
+  getEnvVar?: (name: string) => string | undefined;
+  /** Test clock seam; defaults to Date.now (CORE-04B). */
+  getNow?: () => number;
+  /** Operational serving timeout / deadline for the logical turn (CORE-04B). */
+  servingTimeoutMs?: number;
+  /** Operator-configured serving attempt ceiling (1-3; CORE-04B). */
+  maxServingAttempts?: number;
 }): LlmConversationAi {
   const orchestrator = createAiOrchestrator({
     primary: params.primary,
@@ -52,6 +60,10 @@ export function createLlmConversationAi(params: {
     ...(params.shadowTimeoutMs !== undefined
       ? { shadowTimeoutMs: params.shadowTimeoutMs }
       : {}),
+    getEnvVar: params.getEnvVar,
+    getNow: params.getNow,
+    servingTimeoutMs: params.servingTimeoutMs,
+    maxServingAttempts: params.maxServingAttempts,
   });
 
   let lastTelemetry: AiTelemetry | null = null;

@@ -6,7 +6,11 @@ import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
 import { AGENTROUTER_NORMALIZATION_POLICY } from "./response-normalizer";
-import type { AiProviderAdapter, AiProviderResult } from "./types";
+import type {
+  AiCallOptions,
+  AiProviderAdapter,
+  AiProviderResult,
+} from "./types";
 
 export const AGENTROUTER_ENDPOINT =
   "https://agentrouter.org/v1/chat/completions";
@@ -28,7 +32,10 @@ export function createAgentRouterAdapter(
     providerId: "agentrouter",
     model: deps.model,
     secretRef: AGENTROUTER_SECRET_REF,
-    async call(request: AiRequest): Promise<AiProviderResult> {
+    async call(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<AiProviderResult> {
       return callOpenAiCompatible({
         providerId: "agentrouter",
         model: deps.model,
@@ -38,9 +45,8 @@ export function createAgentRouterAdapter(
         fetchImpl: deps.fetchImpl,
         timeoutMs: deps.timeoutMs ?? AGENTROUTER_TIMEOUT_MS,
         request,
-        // Explicit EMPTY policy: AgentRouter stays on the strict parser +
-        // unchanged aiResponseSchema alone (byte-for-byte unchanged).
         policy: AGENTROUTER_NORMALIZATION_POLICY,
+        options,
       });
     },
   };

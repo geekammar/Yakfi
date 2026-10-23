@@ -20,7 +20,11 @@ import type { AiRequest } from "@/features/conversations/server/ai-contract";
 
 import { callOpenAiCompatible } from "./http";
 import { CODECRAFT_NORMALIZATION_POLICY } from "./response-normalizer";
-import type { AiProviderAdapter, AiProviderResult } from "./types";
+import type {
+  AiCallOptions,
+  AiProviderAdapter,
+  AiProviderResult,
+} from "./types";
 
 export const CODECRAFT_ENDPOINT =
   "https://codecraftapi.com/v1/chat/completions";
@@ -53,7 +57,10 @@ export function createCodeCraftAdapter(deps: CodeCraftDeps): AiProviderAdapter {
      * Control concern; this adapter only classifies the attempt's outcome
      * and returns it.
      */
-    async call(request: AiRequest): Promise<AiProviderResult> {
+    async call(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<AiProviderResult> {
       return callOpenAiCompatible({
         providerId: "codecraft",
         model: deps.model,
@@ -63,12 +70,8 @@ export function createCodeCraftAdapter(deps: CodeCraftDeps): AiProviderAdapter {
         fetchImpl: deps.fetchImpl,
         timeoutMs: deps.timeoutMs ?? CODECRAFT_TIMEOUT_MS,
         request,
-        // Explicit EMPTY policy: CodeCraft stays on the strict parser +
-        // unchanged aiResponseSchema alone (byte-for-byte the shared path).
-        // A bounded policy may be added here later ONLY if a proven,
-        // reproducible CodeCraft serialization defect is observed — never
-        // speculatively.
         policy: CODECRAFT_NORMALIZATION_POLICY,
+        options,
       });
     },
   };

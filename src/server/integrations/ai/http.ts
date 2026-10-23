@@ -11,6 +11,7 @@ import { buildPromptMessages, buildRequestBody } from "./prompt";
 import { normalizeResponse } from "./response-normalizer";
 import type { NormalizerPolicy } from "./response-normalizer";
 import type {
+  AiCallOptions,
   AiParseMode,
   AiProviderError,
   AiProviderId,
@@ -46,6 +47,8 @@ export type CallOpenAiCompatibleParams = {
    * the shared strict path is byte-for-byte unchanged.
    */
   policy?: NormalizerPolicy;
+  /** Optional per-call options (CORE-04B shared session, deadline, signal). */
+  options?: AiCallOptions;
 };
 
 function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
@@ -132,6 +135,7 @@ export async function callOpenAiCompatible(
     extraSystemInstructions,
     extraBody,
     policy,
+    options,
   } = params;
   const started = Date.now();
   const apiKey = getEnvVar(secretRef);
@@ -150,6 +154,46 @@ export async function callOpenAiCompatible(
     };
   }
 
+  // Pre-dispatch session checks (CORE-04B: Global Stop, Allowance, and Deadline)
+  if (options?.session) {
+    const check = options.session.canDispatch();
+    if (!check.allowed) {
+      return {
+        ok: false,
+        provider: providerId,
+        model,
+        latencyMs: Date.now() - started,
+        httpAttempts: 0,
+        error: {
+          code: "CONTROLLED_FAILURE",
+          message: check.reason ?? "execution stopped",
+          retryable: false,
+        },
+      };
+    }
+  }
+
+  // Bound request timeout by remaining serving deadline (CORE-04B)
+  const effectiveTimeoutMs =
+    options?.timeoutMs !== undefined
+      ? Math.min(timeoutMs, options.timeoutMs)
+      : timeoutMs;
+
+  if (effectiveTimeoutMs <= 0) {
+    return {
+      ok: false,
+      provider: providerId,
+      model,
+      latencyMs: Date.now() - started,
+      httpAttempts: 0,
+      error: {
+        code: "CONTROLLED_FAILURE",
+        message: "DEADLINE_EXHAUSTED",
+        retryable: false,
+      },
+    };
+  }
+
   const messages = buildPromptMessages(request, extraSystemInstructions);
   const body = buildRequestBody(model, messages) as Record<string, unknown>;
   // A provider extension (OpenRouter pin) is merged, never restructured —
@@ -157,7 +201,22 @@ export async function callOpenAiCompatible(
   const requestBody = extraBody ? { ...body, ...extraBody } : body;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
+  // Reserve/record physical HTTP dispatch immediately before wire call (CORE-04B)
+  if (options?.session) {
+    options.session.recordDispatch(1);
+  }
+
   let httpResponse: Response;
   try {
     httpResponse = await fetchImpl(endpoint, {

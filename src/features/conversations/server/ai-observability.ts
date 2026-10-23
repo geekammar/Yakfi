@@ -314,6 +314,8 @@ export type TurnObservability = {
   readonly knownCostSubtotalUsd?: number | null;
   /** Cost completeness status across all attempts. */
   readonly costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+  /** Machine-readable stop or prevention reason (CORE-04B). */
+  readonly stopReason?: string | null;
 };
 
 export type TurnExecutionAttempt = {
@@ -414,6 +416,8 @@ export type BuildTurnObservabilityInput = {
   knownCostSubtotalUsd?: number | null;
   /** Cost completeness status across all attempts. */
   costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE" | null;
+  /** Machine-readable stop or prevention reason (CORE-04B). */
+  stopReason?: string | null;
 };
 
 /**
@@ -516,6 +520,9 @@ export function buildTurnObservability(
       : {}),
     ...(input.costCompleteness !== undefined && input.costCompleteness !== null
       ? { costCompleteness: input.costCompleteness }
+      : {}),
+    ...(input.stopReason !== undefined && input.stopReason !== null
+      ? { stopReason: input.stopReason }
       : {}),
   };
 }

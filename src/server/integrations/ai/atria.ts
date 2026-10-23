@@ -21,7 +21,11 @@ import { callOpenAiCompatible } from "./http";
 import { getPromptBody } from "./prompt-registry";
 import { ATRIA_NORMALIZATION_POLICY } from "./response-normalizer";
 import type { NormalizerPolicy } from "./response-normalizer";
-import type { AiProviderAdapter, AiProviderResult } from "./types";
+import type {
+  AiCallOptions,
+  AiProviderAdapter,
+  AiProviderResult,
+} from "./types";
 
 export const ATRIA_ENDPOINT = "https://api.atria-asi.ai/v1/chat/completions";
 export const ATRIA_SECRET_REF = "ATRIA_API_KEY";
@@ -69,7 +73,10 @@ export function createAtriaAdapter(deps: AtriaDeps): AiProviderAdapter {
      * here is now a Conversation Control concern; this adapter only
      * classifies the attempt's outcome and returns it.
      */
-    async call(request: AiRequest): Promise<AiProviderResult> {
+    async call(
+      request: AiRequest,
+      options?: AiCallOptions,
+    ): Promise<AiProviderResult> {
       return callOpenAiCompatible({
         providerId: "atria",
         model: deps.model,
@@ -80,11 +87,8 @@ export function createAtriaAdapter(deps: AtriaDeps): AiProviderAdapter {
         timeoutMs: deps.timeoutMs ?? ATRIA_TIMEOUT_MS,
         request,
         extraSystemInstructions: ATRIA_JSON_INSTRUCTIONS,
-        // BOUNDED, purely-syntactic Atria rules (surplus leading brace +
-        // empty-key wrapper). The engine scope-gates them to provider
-        // "atria", and every candidate still passes strict JSON.parse() +
-        // the unchanged aiResponseSchema. See response-normalizer/.
         policy: deps.policy ?? ATRIA_NORMALIZATION_POLICY,
+        options,
       });
     },
   };
