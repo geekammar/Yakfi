@@ -11,10 +11,7 @@ import {
   telegramSetWebhook,
   type TelegramApiDeps,
 } from "@/server/integrations/telegram/telegram-client";
-import {
-  buildCustomerWebhookUrl,
-  generateWebhookSecret,
-} from "@/server/integrations/telegram/telegram-provisioning";
+import { generateWebhookSecret } from "@/server/integrations/telegram/telegram-provisioning";
 import { hashTelegramWebhookSecret } from "@/server/integrations/telegram/telegram-webhook";
 import type { TelegramConnectionRepository } from "@/server/repositories";
 import type { TelegramConnection } from "@/types/domain";
@@ -85,11 +82,20 @@ export type RepairTelegramWebhookOutcome =
       previousAllowedUpdates: string[];
       pendingUpdateCount: number;
       secretReconciled: boolean;
-      webhookSecretHashPersisted: boolean;
+      webhookSecretHashPersisted: true;
+      verifiedAt: string;
     }
   | {
       ok: false;
-      code: "PARTIAL_APPLICATION_RECOVERY_REQUIRED";
+      code:
+        | "PARTIAL_APPLICATION_RECOVERY_REQUIRED"
+        | "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED"
+        | "POST_APPLY_VERIFICATION_FAILED"
+        | "POST_APPLY_INSPECTION_FAILED"
+        | "POST_APPLY_REGISTRATION_MISMATCH"
+        | "CONCURRENT_MODIFICATION_CONFLICT"
+        | "POST_APPLY_CONNECTION_NOT_FOUND"
+        | "POST_APPLY_CONNECTION_INACTIVE";
       status: "PARTIAL_FAILURE";
       botExternalId: string;
       botUsername?: string | null;
@@ -97,10 +103,12 @@ export type RepairTelegramWebhookOutcome =
       targetAllowedUpdates: string[];
       pendingUpdateCount: number;
       reconciliationCommand: string;
+      remoteStateMayHaveChanged?: boolean;
       message: string;
     }
   | {
       ok: false;
+      status?: "REFUSED";
       code:
         | "CONNECTION_NOT_FOUND"
         | "CONNECTION_INACTIVE"
@@ -111,48 +119,116 @@ export type RepairTelegramWebhookOutcome =
         | "BOT_IDENTITY_MISMATCH"
         | "WEBHOOK_INFO_FAILED"
         | "MISSING_WEBHOOK_URL"
+        | "EXPECTED_WEBHOOK_URL_REQUIRED"
+        | "INVALID_EXPECTED_WEBHOOK_URL"
         | "WEBHOOK_URL_MISMATCH"
         | "INVALID_CUSTOMER_WEBHOOK_PATH"
+        | "NON_HTTPS_WEBHOOK_URL"
+        | "UNSUPPORTED_WEBHOOK_URL_COMPONENTS"
         | "MALFORMED_WEBHOOK_URL"
         | "SET_WEBHOOK_FAILED"
         | "DATABASE_UPDATE_FAILED"
-        | "CONCURRENT_MODIFICATION_CONFLICT"
         | "INVALID_REPAIR_PARAMETERS";
       message: string;
+      reconciliationCommand?: string;
     };
 
-/** Normalize URL for exact string comparison (stripping trailing slashes). */
-export function normalizeWebhookUrl(urlStr: string): string {
-  try {
-    const u = new URL(urlStr);
-    const pathname = u.pathname.replace(/\/+$/, "");
-    return `${u.protocol}//${u.host}${pathname}`;
-  } catch {
-    return urlStr.trim().replace(/\/+$/, "");
+/**
+ * Validates and normalizes an HTTPS customer webhook URL.
+ * Rejects unsupported components (query parameters, hash fragments, non-HTTPS protocols).
+ */
+export function validateCustomerWebhookUrl(
+  rawUrl: string,
+  label = "رابط الويبهوك",
+):
+  | { ok: true; normalizedUrl: string }
+  | {
+      ok: false;
+      code:
+        | "MALFORMED_WEBHOOK_URL"
+        | "NON_HTTPS_WEBHOOK_URL"
+        | "UNSUPPORTED_WEBHOOK_URL_COMPONENTS"
+        | "INVALID_CUSTOMER_WEBHOOK_PATH";
+      message: string;
+    } {
+  if (!rawUrl || rawUrl.trim().length === 0) {
+    return {
+      ok: false,
+      code: "MALFORMED_WEBHOOK_URL",
+      message: `${label} فارغ`,
+    };
   }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return {
+      ok: false,
+      code: "MALFORMED_WEBHOOK_URL",
+      message: `${label} غير صالح من حيث البنية`,
+    };
+  }
+  if (parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      code: "NON_HTTPS_WEBHOOK_URL",
+      message: `${label} (${rawUrl}) يجب أن يبدأ بـ https://`,
+    };
+  }
+  if (parsed.search || parsed.hash) {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_WEBHOOK_URL_COMPONENTS",
+      message: `${label} (${rawUrl}) لا يجوز أن يحتوي على معلمات استعلام (query) أو أجزاء (fragment)`,
+    };
+  }
+  const cleanPath = parsed.pathname.replace(/\/+$/, "");
+  if (cleanPath !== "/api/telegram/webhook") {
+    return {
+      ok: false,
+      code: "INVALID_CUSTOMER_WEBHOOK_PATH",
+      message: `${label} (${rawUrl}) يجب أن ينتهي بالمسار /api/telegram/webhook`,
+    };
+  }
+  return {
+    ok: true,
+    normalizedUrl: `https://${parsed.host}${cleanPath}`,
+  };
 }
 
-/** Resolve the expected customer webhook URL from params, deps, or environment. */
+/** Resolves raw expected customer webhook URL from params, deps, or environment. */
 export function resolveExpectedCustomerWebhookUrl(
   params: RepairTelegramWebhookParams,
   deps: RepairTelegramWebhookDeps,
 ): string | null {
-  if (params.expectedWebhookUrl?.trim()) {
-    return normalizeWebhookUrl(params.expectedWebhookUrl.trim());
+  const raw =
+    params.expectedWebhookUrl?.trim() ||
+    deps.expectedWebhookUrl?.trim() ||
+    (deps.getEnvVar
+      ? (deps.getEnvVar("NEXT_PUBLIC_APP_URL") ?? deps.getEnvVar("APP_URL"))
+      : typeof process !== "undefined"
+        ? process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL
+        : undefined
+    )?.trim();
+
+  if (!raw) return null;
+
+  const clean = raw.replace(/\/+$/, "");
+  if (clean.endsWith("/api/telegram/webhook")) {
+    return clean;
   }
-  if (deps.expectedWebhookUrl?.trim()) {
-    return normalizeWebhookUrl(deps.expectedWebhookUrl.trim());
+
+  try {
+    const u = new URL(clean);
+    if (!u.pathname || u.pathname === "" || u.pathname === "/") {
+      u.pathname = "/api/telegram/webhook";
+      return u.toString().replace(/\/+$/, "");
+    }
+  } catch {
+    // invalid URL format handled by validateCustomerWebhookUrl
   }
-  const envBase =
-    deps.getEnvVar?.("NEXT_PUBLIC_APP_URL") ??
-    deps.getEnvVar?.("APP_URL") ??
-    (typeof process !== "undefined"
-      ? process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL
-      : undefined);
-  if (envBase?.trim()) {
-    return normalizeWebhookUrl(buildCustomerWebhookUrl(envBase.trim()));
-  }
-  return null;
+
+  return clean;
 }
 
 /**
@@ -164,14 +240,16 @@ export function resolveExpectedCustomerWebhookUrl(
  * 3. Rejects manager bot targets.
  * 4. Confirms bot identity via `getMe`.
  * 5. Reads registered webhook info via `getWebhookInfo`.
- * 6. Validates registered webhook URL against expected customer endpoint.
+ * 6. Validates registered webhook URL against trusted expected HTTPS customer endpoint.
  * 7. If subscribing to message & callback_query and not reconciling:
  *    -> idempotent no-op reporting subscription correctness (does not claim auth proof).
  * 8. If callback_query missing (or if --reconcile-secret is requested):
  *    In check mode -> returns structured inspection showing needed repair.
  *    In apply mode -> executes controlled secret rotation with `setWebhook`,
- *    bounded DB persistence retries with tenant/concurrency guards, and
- *    explicit partial-failure recovery when DB write cannot be confirmed.
+ *    handles ambiguous transport outcomes with reconciliation guidance,
+ *    executes bounded DB persistence retries with tenant/concurrency guards,
+ *    and independently verifies both the database digest and live Telegram registration
+ *    before returning success.
  */
 export async function repairTelegramBotWebhook(
   deps: RepairTelegramWebhookDeps,
@@ -292,38 +370,38 @@ export async function repairTelegramBotWebhook(
     };
   }
 
-  let parsedActualUrl: URL;
-  try {
-    parsedActualUrl = new URL(info.url);
-  } catch {
+  // 7. Require trusted expected HTTPS customer webhook destination
+  const rawExpectedUrl = resolveExpectedCustomerWebhookUrl(params, deps);
+  if (!rawExpectedUrl) {
     return {
       ok: false,
-      code: "MALFORMED_WEBHOOK_URL",
-      message: "رابط الويبهوك المسجل في تيليجرام غير صالح",
-    };
-  }
-
-  if (
-    parsedActualUrl.pathname.replace(/\/+$/, "") !== "/api/telegram/webhook"
-  ) {
-    return {
-      ok: false,
-      code: "INVALID_CUSTOMER_WEBHOOK_PATH",
+      code: "EXPECTED_WEBHOOK_URL_REQUIRED",
       message:
-        "مسار الويبهوك المسجل في تيليجرام لا ينتهي بـ /api/telegram/webhook",
+        "لم يتم تحديد رابط الويبهوك المتوقع لبوت العملاء. يُرجى تمرير --expected-url أو ضبط متغير البيئة NEXT_PUBLIC_APP_URL/APP_URL.",
     };
   }
+  const expectedCheck = validateCustomerWebhookUrl(
+    rawExpectedUrl,
+    "الرابط المتوقع لبوت العملاء",
+  );
+  if (!expectedCheck.ok) {
+    return expectedCheck;
+  }
+  const expectedCustomerUrl = expectedCheck.normalizedUrl;
 
-  const expectedCustomerUrl = resolveExpectedCustomerWebhookUrl(params, deps);
-  if (expectedCustomerUrl) {
-    const actualNorm = normalizeWebhookUrl(info.url);
-    if (actualNorm !== expectedCustomerUrl) {
-      return {
-        ok: false,
-        code: "WEBHOOK_URL_MISMATCH",
-        message: `رابط الويبهوك المسجل لدى تيليجرام (${info.url}) لا يطابق الرابط المتوقع لبوت العملاء (${expectedCustomerUrl}). لا يجوز تغيير الرابط بصمت أثناء إصلاح الاشتراكات.`,
-      };
-    }
+  const actualCheck = validateCustomerWebhookUrl(
+    info.url,
+    "رابط الويبهوك المسجل لدى تيليجرام",
+  );
+  if (!actualCheck.ok) {
+    return actualCheck;
+  }
+  if (actualCheck.normalizedUrl !== expectedCustomerUrl) {
+    return {
+      ok: false,
+      code: "WEBHOOK_URL_MISMATCH",
+      message: `رابط الويبهوك المسجل لدى تيليجرام (${info.url}) لا يطابق الرابط المتوقع لبوت العملاء (${expectedCustomerUrl}). لا يجوز تغيير الرابط بصمت أثناء إصلاح الاشتراكات.`,
+    };
   }
 
   const currentUpdates = info.allowed_updates ?? [];
@@ -331,7 +409,7 @@ export async function repairTelegramBotWebhook(
   const hasCallbackQuery = currentUpdates.includes("callback_query");
   const subscriptionOk = hasMessage && hasCallbackQuery;
 
-  // 7. Check idempotency: already correct subscription is a no-op unless reconcileSecret is explicitly requested
+  // 8. Check idempotency: already correct subscription is a no-op unless reconcileSecret is explicitly requested
   if (subscriptionOk && !params.reconcileSecret) {
     return {
       ok: true,
@@ -339,7 +417,7 @@ export async function repairTelegramBotWebhook(
       checkOnly: !isApply,
       botExternalId: connection.botExternalId,
       botUsername: connection.botUsername,
-      webhookUrl: info.url,
+      webhookUrl: expectedCustomerUrl,
       allowedUpdates: currentUpdates,
       pendingUpdateCount: info.pending_update_count,
       lastErrorMessage: info.last_error_message,
@@ -352,7 +430,7 @@ export async function repairTelegramBotWebhook(
     new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
   );
 
-  // 8. Check mode: report needed repair without mutating
+  // 9. Check mode: report needed repair without mutating
   if (!isApply) {
     return {
       ok: true,
@@ -360,7 +438,7 @@ export async function repairTelegramBotWebhook(
       checkOnly: true,
       botExternalId: connection.botExternalId,
       botUsername: connection.botUsername,
-      webhookUrl: info.url,
+      webhookUrl: expectedCustomerUrl,
       currentAllowedUpdates: currentUpdates,
       targetAllowedUpdates: targetUpdates,
       pendingUpdateCount: info.pending_update_count,
@@ -369,29 +447,52 @@ export async function repairTelegramBotWebhook(
     };
   }
 
-  // 9. Apply mode: controlled secret rotation path
+  // 10. Apply mode: controlled secret rotation path
   const secretGen = deps.generateWebhookSecret ?? generateWebhookSecret;
   const secretHasher = deps.hashWebhookSecret ?? hashTelegramWebhookSecret;
   const candidateSecret = secretGen();
   const candidateHash = secretHasher(candidateSecret);
+  const targetAllowedUpdates = [...targetUpdates];
+  const reconciliationCmd = `pnpm telegram:repair-webhook --business-id ${connection.businessId} --connection-id ${connection.id} --apply --reconcile-secret --expected-url ${expectedCustomerUrl}`;
 
-  // 9A. Update Telegram webhook: preserve verified URL, set candidateSecret, add callback_query
+  // 10A. Update Telegram webhook: preserve verified expected URL, set candidateSecret, add callback_query
   // drop_pending_updates is never enabled.
   const setRes = await telegramSetWebhook(deps.api, botToken, {
-    url: info.url,
+    url: expectedCustomerUrl,
     secretToken: candidateSecret,
     allowedUpdates: targetUpdates,
   });
 
   if (!setRes.ok) {
+    const isTransportUncertainty =
+      setRes.error.code === "TRANSIENT_TRANSPORT_FAILURE" ||
+      setRes.error.code === "MALFORMED_PROVIDER_PAYLOAD";
+
+    if (isTransportUncertainty) {
+      return {
+        ok: false,
+        code: "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED",
+        status: "PARTIAL_FAILURE",
+        botExternalId: connection.botExternalId,
+        botUsername: connection.botUsername,
+        webhookUrl: expectedCustomerUrl,
+        targetAllowedUpdates,
+        pendingUpdateCount: info.pending_update_count,
+        reconciliationCommand: reconciliationCmd,
+        remoteStateMayHaveChanged: true,
+        message: `تعذر التأكد من استجابة تيليجرام عند تحديث الويبهوك (${setRes.error.message}). قد يكون تيليجرام طبق التغيير جزئياً دون تأكيد؛ يُرجى تشغيل أمر المصالحة.`,
+      };
+    }
+
     return {
       ok: false,
       code: "SET_WEBHOOK_FAILED",
       message: setRes.error.message,
+      reconciliationCommand: reconciliationCmd,
     };
   }
 
-  // 9B. Bounded database persistence retries with tenant & concurrency guards.
+  // 10B. Bounded database persistence retries with tenant & concurrency guards.
   // Note: Telegram HTTP and DB write are separate operations; cross-system atomicity does not exist.
   const MAX_DB_ATTEMPTS = 3;
   let persisted = false;
@@ -460,8 +561,6 @@ export async function repairTelegramBotWebhook(
     }
   }
 
-  const reconciliationCmd = `pnpm telegram:repair-webhook --business-id ${connection.businessId} --connection-id ${connection.id} --apply --reconcile-secret --expected-url ${info.url}`;
-
   if (!persisted) {
     return {
       ok: false,
@@ -469,8 +568,8 @@ export async function repairTelegramBotWebhook(
       status: "PARTIAL_FAILURE",
       botExternalId: connection.botExternalId,
       botUsername: connection.botUsername,
-      webhookUrl: info.url,
-      targetAllowedUpdates: targetUpdates,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
       pendingUpdateCount: info.pending_update_count,
       reconciliationCommand: reconciliationCmd,
       message:
@@ -478,12 +577,133 @@ export async function repairTelegramBotWebhook(
     };
   }
 
-  // 9C. Post-application verification: confirm intended digest is stored
-  const finalRow = await deps.connectionRepository.findByIdWithinBusiness(
-    connection.id,
-    connection.businessId,
+  // 10C. Final database verification: must confirm candidate digest and active connection
+  let finalRow: TelegramConnection | null = null;
+  try {
+    finalRow = await deps.connectionRepository.findByIdWithinBusiness(
+      connection.id,
+      connection.businessId,
+    );
+  } catch {
+    return {
+      ok: false,
+      code: "POST_APPLY_VERIFICATION_FAILED",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message:
+        "حدث خطأ أثناء القراءة النهائية للتحقق من حفظ سر الويبهوك في قاعدة البيانات. يُرجى تشغيل أمر المصالحة.",
+    };
+  }
+
+  if (!finalRow) {
+    return {
+      ok: false,
+      code: "POST_APPLY_CONNECTION_NOT_FOUND",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message:
+        "لم يتم العثور على اتصال تيليجرام أثناء التحقق النهائي بعد تطبيق التحديث.",
+    };
+  }
+
+  if (finalRow.status !== "CONNECTED" || !finalRow.isActive) {
+    return {
+      ok: false,
+      code: "POST_APPLY_CONNECTION_INACTIVE",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message: "تم فصل اتصال تيليجرام أثناء أو بعد تطبيق التحديث.",
+    };
+  }
+
+  if (finalRow.webhookSecretHash !== candidateHash) {
+    return {
+      ok: false,
+      code: "CONCURRENT_MODIFICATION_CONFLICT",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message:
+        "ملخص سر الويبهوك النهائي في قاعدة البيانات لا يطابق السر المطبق لدى تيليجرام (ربما حدث تعديل متزامن). يُرجى تشغيل أمر المصالحة.",
+    };
+  }
+
+  // 10D. Post-application Telegram registration inspection
+  const postInfoRes = await telegramGetWebhookInfo(deps.api, botToken);
+  if (!postInfoRes.ok) {
+    return {
+      ok: false,
+      code: "POST_APPLY_INSPECTION_FAILED",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: expectedCustomerUrl,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message: `تعذر قراءة تسجيل تيليجرام بعد التطبيق للتحقق من التحديث (${postInfoRes.error.message}).`,
+    };
+  }
+
+  const postInfo = postInfoRes.result;
+  const postActualValidation = validateCustomerWebhookUrl(
+    postInfo.url,
+    "رابط الويبهوك المسجل في تيليجرام بعد التطبيق",
   );
-  const hashPersisted = finalRow?.webhookSecretHash === candidateHash;
+  if (
+    !postActualValidation.ok ||
+    postActualValidation.normalizedUrl !== expectedCustomerUrl
+  ) {
+    return {
+      ok: false,
+      code: "POST_APPLY_REGISTRATION_MISMATCH",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: postInfo.url,
+      targetAllowedUpdates,
+      pendingUpdateCount: postInfo.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message: `رابط الويبهوك المسجل في تيليجرام بعد التطبيق (${postInfo.url}) لا يطابق الرابط المتوقع (${expectedCustomerUrl}).`,
+    };
+  }
+
+  const postUpdates = postInfo.allowed_updates ?? [];
+  const postHasMessage = postUpdates.includes("message");
+  const postHasCallbackQuery = postUpdates.includes("callback_query");
+  if (!postHasMessage || !postHasCallbackQuery) {
+    return {
+      ok: false,
+      code: "POST_APPLY_REGISTRATION_MISMATCH",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: postInfo.url,
+      targetAllowedUpdates,
+      pendingUpdateCount: postInfo.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      message: `تسجيل تيليجرام بعد التطبيق لا يتضمن أنواع التحديثات المطلوبة (${JSON.stringify(postUpdates)}).`,
+    };
+  }
 
   return {
     ok: true,
@@ -494,12 +714,13 @@ export async function repairTelegramBotWebhook(
     checkOnly: false,
     botExternalId: connection.botExternalId,
     botUsername: connection.botUsername,
-    webhookUrl: info.url,
-    allowedUpdates: targetUpdates,
+    webhookUrl: postInfo.url,
+    allowedUpdates: postUpdates,
     previousAllowedUpdates: currentUpdates,
-    pendingUpdateCount: info.pending_update_count,
+    pendingUpdateCount: postInfo.pending_update_count,
     secretReconciled: Boolean(params.reconcileSecret),
-    webhookSecretHashPersisted: hashPersisted,
+    webhookSecretHashPersisted: true,
+    verifiedAt: new Date().toISOString(),
   };
 }
 

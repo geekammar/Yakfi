@@ -162,25 +162,34 @@ async function main() {
     });
 
     if (!outcome.ok) {
-      if (outcome.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED") {
+      if (outcome.status === "PARTIAL_FAILURE") {
         console.error("\n⚠️  PARTIAL FAILURE / RECOVERY REQUIRED");
-        console.error(
-          "Telegram webhook registration was updated, but database secret digest persistence could not be confirmed.",
-        );
+        console.error(`[${outcome.code}] ${outcome.message}`);
+        if (outcome.remoteStateMayHaveChanged) {
+          console.error(
+            "Note: Telegram remote state may have changed while local database confirmation was not obtained.",
+          );
+        }
         console.error(
           "Incoming webhook requests may return 401 until reconciled.",
         );
         console.error(`Pending Updates: ${outcome.pendingUpdateCount}`);
-        console.error(
-          "\nRun the following command to complete reconciliation:",
-        );
-        console.error(`  ${outcome.reconciliationCommand}\n`);
+        if (outcome.reconciliationCommand) {
+          console.error(
+            "\nRun the following command to complete reconciliation:",
+          );
+          console.error(`  ${outcome.reconciliationCommand}\n`);
+        }
         process.exit(1);
       }
 
       console.error(
         `\n❌ Maintenance Refused / Failed: [${outcome.code}] ${outcome.message}`,
       );
+      if (outcome.reconciliationCommand) {
+        console.error("\nRun the following command to recover or reconcile:");
+        console.error(`  ${outcome.reconciliationCommand}\n`);
+      }
       process.exit(1);
     }
 
