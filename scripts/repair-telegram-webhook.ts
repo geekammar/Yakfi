@@ -1,5 +1,10 @@
 #!/usr/bin/env tsx
 
+// Provide safe offline defaults for Better Auth validation if unset
+process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
+process.env.BETTER_AUTH_URL ??= "https://flowpilot-prod.vercel.app";
+process.env.NEXT_PUBLIC_APP_URL ??= "https://flowpilot-prod.vercel.app";
+
 function printHelpAndExit(code = 0) {
   console.log(`
 FlowPilot Telegram Webhook Repair & Reconciliation CLI

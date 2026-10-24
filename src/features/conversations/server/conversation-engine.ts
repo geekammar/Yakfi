@@ -6430,34 +6430,17 @@ async function runInboundTurn(
       validated.action === "reply" &&
       resolvedTurn?.answerAndContinue === true &&
       resolvedTurn.pendingGoals.length > 0;
-    const finalContent = answerAndContinue
+    const computedContent = answerAndContinue
       ? `${content}\n\n${CONTINUE_DOMAIN_INVITE}`
       : content;
-
-    // 10. Persist the assistant reply through the single write path with
-    //     the workflow the turn decided.
-    const assistantMessage = await deps.conversationRepository.addMessage(
-      {
-        conversationId: conversation.id,
-        senderType: "AI",
-        content: finalContent,
-      },
-      {
-        status: validated.action === "reply" ? "AI_ACTIVE" : "NEED_HUMAN",
-      },
-    );
-
-    // Booking-related handoffs record a short staff-facing summary in
-    // the EXISTING aiSummary field — only when it is still empty (a
-    // staff-written summary is never clobbered).
-    if (validated.action === "booking_handoff" && !conversation.aiSummary) {
-      await deps.conversationRepository.update(conversation.id, {
-        aiSummary: validated.summary,
-      });
-    }
+    let finalContent = computedContent;
 
     let choices: ChannelChoicePresentation | undefined;
+    let greetingOfferCommitted = false;
+    let greetingOfferConflict = false;
 
+    // Persist-before-present invariant: Any actionable offer must be
+    // successfully persisted before its choices are presented to the transport.
     if (validated.action === "reply") {
       const activeOffer = turnSession.state?.offer;
       const isOfferValid =
@@ -6482,10 +6465,45 @@ async function runInboundTurn(
               turnSession.state ?? resolvedState ?? emptyConversationState(),
               welcomeOffer,
             );
+            const ok = await turnSession.commit();
+            if (ok) {
+              choices = buildChannelChoices(welcomeOffer);
+              greetingOfferCommitted = true;
+            } else {
+              // Commit conflict or persistence failure:
+              // Never send unconfirmed offer buttons. Return safe retry copy.
+              greetingOfferConflict = true;
+              choices = undefined;
+              finalContent =
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
+            }
+          } else {
+            choices = buildChannelChoices(welcomeOffer);
           }
-          choices = buildChannelChoices(welcomeOffer);
         }
       }
+    }
+
+    // 10. Persist the assistant reply through the single write path with
+    //     the workflow the turn decided.
+    const assistantMessage = await deps.conversationRepository.addMessage(
+      {
+        conversationId: conversation.id,
+        senderType: "AI",
+        content: finalContent,
+      },
+      {
+        status: validated.action === "reply" ? "AI_ACTIVE" : "NEED_HUMAN",
+      },
+    );
+
+    // Booking-related handoffs record a short staff-facing summary in
+    // the EXISTING aiSummary field — only when it is still empty (a
+    // staff-written summary is never clobbered).
+    if (validated.action === "booking_handoff" && !conversation.aiSummary) {
+      await deps.conversationRepository.update(conversation.id, {
+        aiSummary: validated.summary,
+      });
     }
 
     // 11. Deliver through the transport boundary — best-effort; the
@@ -6531,9 +6549,12 @@ async function runInboundTurn(
         validated.handoffReason
       ) {
         finalState = withOfferStatus(finalState, "INVALIDATED");
+        turnSession.state = finalState;
+        await turnSession.commit();
+      } else if (!greetingOfferCommitted && !greetingOfferConflict) {
+        turnSession.state = finalState;
+        await turnSession.commit();
       }
-      turnSession.state = finalState;
-      await turnSession.commit();
     }
 
     return {

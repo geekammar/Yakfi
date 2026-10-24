@@ -17,7 +17,10 @@ import {
   createTelegramMessageTransport,
   resolveTelegramConnectionForSend,
 } from "@/server/integrations/telegram/telegram-transport";
-import { handleTelegramWebhook } from "@/server/integrations/telegram/telegram-webhook-handler";
+import {
+  handleTelegramWebhook,
+  mapEngineResultToTelegramOutcome,
+} from "@/server/integrations/telegram/telegram-webhook-handler";
 import {
   telegramConnectionRepository,
   telegramProvisioningLedgerRepository,
@@ -93,13 +96,17 @@ export async function POST(request: Request): Promise<Response> {
     {
       connectionRepository: telegramConnectionRepository,
       async processInboundMessage({ engineInput, identity }) {
-        await receiveInboundMessage(telegramEngineDeps, engineInput, identity);
+        const result = await receiveInboundMessage(
+          telegramEngineDeps,
+          engineInput,
+          identity,
+        );
         // The operator surfaces (conversations inbox, dashboard, staff
         // workspace) refresh after the turn persists the inbound message.
         revalidatePath("/conversations");
         revalidatePath("/");
         revalidatePath("/staff");
-        return { ok: true };
+        return mapEngineResultToTelegramOutcome(result);
       },
       async completeManagedBotProvisioning({ event }) {
         try {
@@ -125,19 +132,28 @@ export async function POST(request: Request): Promise<Response> {
             { connectionRepository: telegramConnectionRepository },
             { connectionId, businessId },
           );
-          if (!resolution.ok) return;
+          if (!resolution.ok) {
+            return { ok: false, error: "CONNECTION_RESOLUTION_FAILED" };
+          }
           const tokenRes = await resolveTelegramBotToken(
             defaultTelegramApiDeps,
             resolution.credentialsRef,
           );
-          if (!tokenRes.ok) return;
+          if (!tokenRes.ok) {
+            return { ok: false, error: "BOT_TOKEN_RESOLUTION_FAILED" };
+          }
           await telegramAnswerCallbackQuery(
             defaultTelegramApiDeps,
             tokenRes.token,
             { callbackQueryId },
           );
-        } catch {
-          // Acknowledgment failure must not crash webhook
+          return { ok: true };
+        } catch (err) {
+          return {
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "ANSWER_CALLBACK_FAILED",
+          };
         }
       },
       // A customer `/start` is a DETERMINISTIC welcome, never an engine turn

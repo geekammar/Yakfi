@@ -1104,6 +1104,7 @@ async function main(): Promise<void> {
       schedule: (work: () => Promise<void> | void) => {
         scheduledWork.push(Promise.resolve(work()));
       },
+      now: () => SIMULATED_NOW,
     };
 
     h.deps.transport.send = async (input: any) => {
