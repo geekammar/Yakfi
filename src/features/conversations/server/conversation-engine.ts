@@ -1589,17 +1589,12 @@ async function resolveUpcomingBookingDates(
           ...(input.timePreference
             ? { timePreference: input.timePreference }
             : {}),
-          limit: 4,
+          limit: 50,
         },
       );
 
       if (bookingResult.success && bookingResult.data.options.length > 0) {
-        let validOptions = bookingResult.data.options;
-        if (i === 0) {
-          validOptions = validOptions.filter(
-            (o) => o.startAt.slice(11, 16) > currentTime,
-          );
-        }
+        const validOptions = bookingResult.data.options;
         if (validOptions.length > 0) {
           const label = formatArabicDate(iso, {
             todayIso,
@@ -2019,16 +2014,7 @@ async function presentSlotChoices(
     );
 
     if (bookingResult.success && bookingResult.data.options.length > 0) {
-      const tz = resolveValidTimeZone(scope.business.timezone);
-      const todayIso = todayIsoInTimeZone(now, tz);
-      const currentTime = nowTimeInTimeZone(now, tz);
-
       let bookableOptions = bookingResult.data.options;
-      if (input.date === todayIso) {
-        bookableOptions = bookableOptions.filter(
-          (o) => o.startAt.slice(11, 16) > currentTime,
-        );
-      }
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
@@ -6231,16 +6217,7 @@ async function runInboundTurn(
         };
       }
 
-      const tz = resolveValidTimeZone(business.timezone);
-      const slotDateTodayIso = todayIsoInTimeZone(now, tz);
-      const currentTime = nowTimeInTimeZone(now, tz);
-
       let bookableOptions = bookingResult.data.options;
-      if (mapped.date! === slotDateTodayIso) {
-        bookableOptions = bookableOptions.filter(
-          (o) => o.startAt.slice(11, 16) > currentTime,
-        );
-      }
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
