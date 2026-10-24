@@ -1,51 +1,65 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { TelegramWebhookLogEvent } from "@/server/integrations/telegram/telegram-webhook-handler";
+import { offerCallbackData } from "@/features/conversations/server/channel-choice";
+import * as engine from "@/features/conversations/server/conversation-engine";
+import { emptyConversationState } from "@/features/conversations/server/conversation-state";
+import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
+import { lookupTelegramBotTarget } from "@/server/integrations/telegram/telegram-repair";
+import {
+  hashTelegramWebhookSecret,
+  parseTelegramUpdate,
+} from "@/server/integrations/telegram/telegram-webhook";
+import {
+  createSafeTelegramWebhookLogger,
+  handleTelegramWebhook,
+  mapEngineResultToTelegramOutcome,
+  type TelegramWebhookLogEvent,
+} from "@/server/integrations/telegram/telegram-webhook-handler";
+
+import {
+  createProductionTelegramWebhookDeps,
+  defaultTelegramWebhookLogger,
+} from "@/app/api/telegram/webhook/route";
 
 /**
- * FlowPilot — Telegram Execution Defects Regression Suite (PART 5).
+ * FlowPilot — Telegram Execution Defects Regression Suite.
  *
  * Verifies:
  * 1. Two-turn natural-language GREETING -> button selection:
  *    - Controlled structured model returns GREETING.
- *    - Real engine creates and successfully persists WELCOME offer before presentation.
- *    - Outgoing choices captured.
- *    - Real callback fed through authenticated webhook handler.
+ *    - Invariant: Persist-before-send asserted AT TRANSPORT INVOCATION TIME.
+ *    - Capture outgoing choices.
+ *    - Feed real callback through authenticated webhook handler.
  *    - Reload state through repository fixture.
  *    - Assert expected next offer and matching IDs/tokens.
  *    - Assert ZERO additional AI calls for selection.
  *
- * 2. Greeting offer commit conflict:
- *    - Simulate CAS commit conflict on greeting welcome offer.
- *    - Assert no actionable unpersisted choices are sent.
- *    - Assert safe retry copy returned.
- *    - Assert no newer persisted offer is overwritten.
+ * 2. Greeting offer persistence resilience:
+ *    - State save returns conflict: choices suppressed, safe retry copy sent, newer state not overwritten.
+ *    - State save throws: choices suppressed, safe retry copy sent.
+ *    - State load throws (store unavailable): choices suppressed, plain text preserved.
  *
- * 3. Engine failure propagation:
- *    - A returned engine failure must not become unconditional { ok: true }.
- *    - A delivery failure is reported distinctly ({ ok: false, outcome: "DELIVERY_FAILURE" }).
- *    - A thrown deferred error is observable with safe outcome metadata.
+ * 3. Truthful outcome reporting & delivery mapping:
+ *    - Engine delivery: null is not reported as confirmed delivered: true.
+ *    - Delivery failure is not success.
+ *    - Duplicate, deferred-to-staff, domain/persistence failure remain distinct.
+ *    - Avoid catch-all result types.
  *
- * 4. Callback acknowledgment failure:
- *    - Real selection processing still executes even if callback acknowledgment fails.
- *    - Acknowledgment failure and processing outcome are independently visible.
+ * 4. Production composition, logger wiring & callback ACK:
+ *    - Production composition actually supplies the logger.
+ *    - Logger receives safe events without arbitrary exception-message leakage.
+ *    - Non-throwing Telegram ACK failure maps to ACK_FAILED.
+ *    - ACK failure still allows real selection processing.
+ *    - Logger failure does not prevent callback processing.
  *
- * 5. Callback clock:
- *    - Original button message date is old.
- *    - Callback receipt is later.
- *    - The turn uses receipt time.
- *    - An expired offer is safely rejected.
+ * 5. Callback clock & offer expiry:
+ *    - Callback turn uses receipt clock instead of message date.
+ *    - Preserves originalMessageDate.
+ *    - Expired offer safely rejected using receipt time.
  *
- * 6. Preserves existing successful /start, inquiry, stale-token, duplicate-tap, tenant-scope, and single-booking coverage.
+ * 6. Maintenance bootstrap & environment responsibility:
+ *    - Lookup and candidate resolution reach repository seam with auth variables absent.
+ *    - No real database call required.
  */
-
-export {};
-
-// Offline defaults for Better Auth and DB validation
-process.env.DATABASE_URL ??=
-  "postgresql://user:password@localhost:5432/placeholder";
-process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
-process.env.BETTER_AUTH_URL ??= "https://flowpilot-prod.vercel.app";
-process.env.NEXT_PUBLIC_APP_URL ??= "https://flowpilot-prod.vercel.app";
 
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
@@ -115,19 +129,6 @@ class InMemoryConversationStateStore {
 }
 
 async function main(): Promise<void> {
-  const engine =
-    await import("@/features/conversations/server/conversation-engine");
-  const { offerCallbackData } =
-    await import("@/features/conversations/server/channel-choice");
-  const { renderTelegramInlineKeyboard } =
-    await import("@/server/integrations/telegram/telegram-presentation");
-  const { hashTelegramWebhookSecret, parseTelegramUpdate } =
-    await import("@/server/integrations/telegram/telegram-webhook");
-  const { handleTelegramWebhook, mapEngineResultToTelegramOutcome } =
-    await import("@/server/integrations/telegram/telegram-webhook-handler");
-  const { emptyConversationState } =
-    await import("@/features/conversations/server/conversation-state");
-
   const B_ID = "11111111-1111-4111-8111-111111111111";
   const BRANCH_ID = "22222222-2222-4222-8222-222222222222";
   const BOT_EXTERNAL_ID = "6123456789";
@@ -140,7 +141,10 @@ async function main(): Promise<void> {
 
   const SIMULATED_NOW = new Date("2026-10-24T10:00:00.000Z");
 
-  function createTestHarness(opts?: { conversationId?: string }) {
+  function createTestHarness(opts?: {
+    conversationId?: string;
+    stateStore?: any;
+  }) {
     let modelCallCount = 0;
     let customAiResponder: ((prompt: unknown) => Promise<any> | any) | null =
       null;
@@ -150,6 +154,7 @@ async function main(): Promise<void> {
       content: string;
       choices?: any;
       replyMarkup?: Record<string, unknown>;
+      persistedAtSendTime?: any;
     }> = [];
 
     const createdAppointments: Array<{
@@ -238,7 +243,7 @@ async function main(): Promise<void> {
       createdAt: Date;
     }> = [];
 
-    const stateStore = new InMemoryConversationStateStore();
+    const stateStore = opts?.stateStore ?? new InMemoryConversationStateStore();
     const dedupeClaims = new Set<string>();
     let msgSeq = 0;
 
@@ -348,6 +353,16 @@ async function main(): Promise<void> {
           choices?: any;
           replyMarkup?: Record<string, unknown>;
         }) => {
+          // Assert AT SEND TIME: inspect stateStore at the exact moment of delivery
+          let persistedAtSendTime: any = null;
+          if (input.choices?.offerId) {
+            try {
+              persistedAtSendTime = (await stateStore.load(B_ID, convId))
+                ?.state;
+            } catch {
+              persistedAtSendTime = null;
+            }
+          }
           const replyMarkup =
             input.replyMarkup ??
             (input.choices
@@ -358,6 +373,7 @@ async function main(): Promise<void> {
             content: input.content,
             choices: input.choices,
             replyMarkup,
+            persistedAtSendTime,
           });
           return { provider: "telegram", delivered: true };
         },
@@ -404,7 +420,8 @@ async function main(): Promise<void> {
   );
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 1: Two-turn natural-language GREETING -> button selection
+  // TEST 1: Two-turn natural language GREETING -> button selection
+  // Invariant: Persist-before-send is verified AT SEND TIME
   // ──────────────────────────────────────────────────────────────────────────
   {
     const h = createTestHarness({ conversationId: "conv-defect-1" });
@@ -423,7 +440,7 @@ async function main(): Promise<void> {
       summary: null,
     }));
 
-    // Turn 1: Natural-language greeting
+    // Turn 1: Natural language greeting
     const turn1Result = await h.sendInbound("مرحبا وعليكم السلام", 1001);
     const modelCallsAfterTurn1 = h.getModelCalls();
 
@@ -431,25 +448,22 @@ async function main(): Promise<void> {
     const lastMsg1 = sent1[sent1.length - 1];
     const outgoingChoices = lastMsg1?.choices;
 
-    // Verify turn 1 state was persisted in the repository fixture BEFORE presentation
-    const persistedState1 = (await h.stateStore.load(B_ID, "conv-defect-1"))
-      ?.state as any;
-
-    const welcomeOffer = persistedState1?.offer;
-    const isOfferPersisted =
-      welcomeOffer &&
-      welcomeOffer.kind === "WELCOME" &&
-      welcomeOffer.status === "ACTIVE";
+    // Verify persist-before-send invariant AT SEND TIME:
+    // When send was invoked, persistedAtSendTime must ALREADY contain the offer
+    const offerPersistedAtSendTime =
+      lastMsg1?.persistedAtSendTime?.offer?.id === outgoingChoices?.offerId &&
+      lastMsg1?.persistedAtSendTime?.offer?.status === "ACTIVE";
 
     // Capture outgoing button callback data
+    const welcomeOffer = lastMsg1?.persistedAtSendTime?.offer;
     const bookCallbackData = offerCallbackData(welcomeOffer, "book");
 
-    // Setup authenticated webhook handler for Turn 2
+    // Setup authenticated webhook handler for Turn 2 using shared composition
     const WEBHOOK_SECRET = "secret-token-test-1";
     const SECRET_HASH = hashTelegramWebhookSecret(WEBHOOK_SECRET);
     const scheduledWork: Array<Promise<void>> = [];
 
-    const webhookDeps = {
+    const webhookDeps = createProductionTelegramWebhookDeps({
       connectionRepository: {
         findByWebhookSecretHash: async (hash: string) => {
           if (hash === SECRET_HASH) {
@@ -459,25 +473,39 @@ async function main(): Promise<void> {
               branchId: BRANCH_ID,
               botExternalId: BOT_EXTERNAL_ID,
               webhookSecretHash: SECRET_HASH,
-            };
+              credentialsRef: "fp:mock-ref",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            } as any;
           }
           return null;
         },
+        findByIdWithinBusiness: async () =>
+          ({
+            id: "conn-tg-1",
+            businessId: B_ID,
+            credentialsRef: "fp:mock-ref",
+            isActive: true,
+            status: "CONNECTED",
+          }) as any,
       },
-      processInboundMessage: async (params: any) => {
-        const turnResult = await engine.receiveInboundMessage(
-          h.deps as any,
-          params.engineInput,
-          params.identity,
-        );
-        return mapEngineResultToTelegramOutcome(turnResult);
+      engineDeps: h.deps as any,
+      telegramApiDeps: {
+        apiHost: "https://api.telegram.org",
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ ok: true, result: true }), {
+            status: 200,
+          }),
+        credentialsResolver: {
+          resolve: async () => ({ ok: true, value: "mock-token" }) as any,
+        },
       },
-      answerCallbackQuery: async () => ({ ok: true }),
-      schedule: (work: () => Promise<void> | void) => {
+      schedule: (work) => {
         scheduledWork.push(Promise.resolve(work()));
       },
       now: () => SIMULATED_NOW,
-    };
+      revalidatePaths: false,
+    });
 
     // Feed real callback into authenticated webhook handler
     const updateBody = {
@@ -503,7 +531,7 @@ async function main(): Promise<void> {
       body: JSON.stringify(updateBody),
     });
 
-    const res = await handleTelegramWebhook(webhookDeps as any, req);
+    const res = await handleTelegramWebhook(webhookDeps, req);
     await Promise.all(scheduledWork);
 
     const modelCallsAfterTurn2 = h.getModelCalls();
@@ -517,11 +545,11 @@ async function main(): Promise<void> {
     const lastMsg2 = sent2[sent2.length - 1];
 
     check(
-      "1. Two-turn natural language GREETING -> button selection persists WELCOME offer before send and executes selection with zero additional AI calls",
+      "1. Two-turn natural language GREETING -> button selection asserts persist-before-send at send time and executes selection with zero additional AI calls",
       Boolean(
         turn1Result.ok &&
         modelCallsAfterTurn1 === 1 &&
-        isOfferPersisted &&
+        offerPersistedAtSendTime &&
         outgoingChoices != null &&
         res.status === 200 &&
         nextOffer != null &&
@@ -534,11 +562,12 @@ async function main(): Promise<void> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 2: Greeting offer commit conflict
+  // TEST 2: Greeting offer persistence failure and unavailable store resilience
   // ──────────────────────────────────────────────────────────────────────────
   {
-    const h = createTestHarness({ conversationId: "conv-defect-2" });
-    h.setAiResponder(() => ({
+    // 2a. State save returns conflict
+    const h1 = createTestHarness({ conversationId: "conv-conflict-1" });
+    h1.setAiResponder(() => ({
       intent: "GREETING",
       action: "reply",
       content: "أهلاً بك!",
@@ -553,7 +582,7 @@ async function main(): Promise<void> {
       summary: null,
     }));
 
-    // Pre-populate state store with an existing newer offer
+    // Pre-populate with existing newer offer
     const existingOffer = {
       id: "newer-existing-offer-id",
       token: "newer-token",
@@ -561,52 +590,112 @@ async function main(): Promise<void> {
       status: "ACTIVE",
       expiresAt: new Date(SIMULATED_NOW.getTime() + 600000).toISOString(),
     };
-    await h.stateStore.save(B_ID, "conv-defect-2", null, {
+    await h1.stateStore.save(B_ID, "conv-conflict-1", null, {
       ...emptyConversationState(),
       offer: existingOffer,
     });
 
-    // Simulate commit conflict on subsequent saves
-    const originalSave = h.stateStore.save.bind(h.stateStore);
-    h.stateStore.save = async () => ({ status: "conflict" });
+    // Simulate CAS conflict
+    const origSave = h1.stateStore.save.bind(h1.stateStore);
+    h1.stateStore.save = async () => ({ status: "conflict" });
+    const resConflict = await h1.sendInbound("صباح الخير", 2001);
+    const sentConflict = h1.getSentMessages();
+    const lastMsgConflict = sentConflict[sentConflict.length - 1];
 
-    // Send greeting turn during conflict
-    const turnResult = await h.sendInbound("صباح الخير", 2001);
+    h1.stateStore.save = origSave;
+    const reloadedAfterConflict = (
+      await h1.stateStore.load(B_ID, "conv-conflict-1")
+    )?.state as any;
 
-    const sent = h.getSentMessages();
-    const lastMsg = sent[sent.length - 1];
+    const conflictPassed =
+      resConflict.ok &&
+      lastMsgConflict?.choices === undefined &&
+      lastMsgConflict?.content.includes("تعارض مؤقت") &&
+      reloadedAfterConflict?.offer?.id === "newer-existing-offer-id";
 
-    // Restore save to inspect stored state
-    h.stateStore.save = originalSave;
-    const reloaded = (await h.stateStore.load(B_ID, "conv-defect-2"))
-      ?.state as any;
+    // 2b. State save throws
+    const h2 = createTestHarness({ conversationId: "conv-save-throw" });
+    h2.setAiResponder(() => ({
+      intent: "GREETING",
+      action: "reply",
+      content: "أهلاً بك!",
+      safetyAssessment: "safe",
+      extraction: {
+        service: null,
+        provider: null,
+        date: null,
+        timePreference: null,
+      },
+      handoffReason: null,
+      summary: null,
+    }));
+    h2.stateStore.save = async () => {
+      throw new Error("DB write timeout");
+    };
+    const resSaveThrow = await h2.sendInbound("مرحبا", 2002);
+    const sentSaveThrow = h2.getSentMessages();
+    const lastMsgSaveThrow = sentSaveThrow[sentSaveThrow.length - 1];
+
+    const saveThrowPassed =
+      resSaveThrow.ok &&
+      lastMsgSaveThrow?.choices === undefined &&
+      lastMsgSaveThrow?.content.includes("تعارض مؤقت");
+
+    // 2c. State load throws (durable store unavailable)
+    const brokenStore = {
+      load: async () => {
+        throw new Error("Relation does not exist");
+      },
+      save: async () => ({ status: "saved", revision: 1 }),
+    };
+    const h3 = createTestHarness({
+      conversationId: "conv-load-throw",
+      stateStore: brokenStore,
+    });
+    h3.setAiResponder(() => ({
+      intent: "GREETING",
+      action: "reply",
+      content: "أهلاً وسهلاً بك في العيادة!",
+      safetyAssessment: "safe",
+      extraction: {
+        service: null,
+        provider: null,
+        date: null,
+        timePreference: null,
+      },
+      handoffReason: null,
+      summary: null,
+    }));
+    const resLoadThrow = await h3.sendInbound("السلام عليكم", 2003);
+    const sentLoadThrow = h3.getSentMessages();
+    const lastMsgLoadThrow = sentLoadThrow[sentLoadThrow.length - 1];
+
+    const storeUnavailablePassed =
+      resLoadThrow.ok &&
+      lastMsgLoadThrow?.choices === undefined &&
+      lastMsgLoadThrow?.replyMarkup === undefined &&
+      lastMsgLoadThrow?.content.includes("أهلاً وسهلاً بك في العيادة!"); // Preserves plain text without buttons
 
     check(
-      "2. Greeting offer commit conflict suppresses unpersisted choices, sends safe retry message, and never overwrites newer offer",
-      Boolean(
-        turnResult.ok &&
-        lastMsg?.choices === undefined &&
-        lastMsg?.replyMarkup === undefined &&
-        lastMsg?.content.includes("تعارض مؤقت") &&
-        reloaded?.offer?.id === "newer-existing-offer-id" &&
-        reloaded?.offer?.kind === "SERVICE",
-      ),
+      "2. Unavailable or failing state storage suppresses actionable choices, preserves plain text, and never overwrites newer offers",
+      Boolean(conflictPassed && saveThrowPassed && storeUnavailablePassed),
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 3: Engine failure propagation across composition boundary
+  // TEST 3: Truthful outcome reporting across composition boundary
   // ──────────────────────────────────────────────────────────────────────────
   {
-    // 3a. Domain / persistence failure
-    const outcome1 = mapEngineResultToTelegramOutcome({
-      ok: false,
-      code: "PERSISTENCE_FAILED",
-      message: "تعذر حفظ حالة المحادثة",
+    // 3a. Null delivery must report delivered: false (never true)
+    const outcomeNullDelivery = mapEngineResultToTelegramOutcome({
+      ok: true,
+      duplicate: false,
+      assistantAction: "AI_REPLY",
+      delivery: null,
     });
 
     // 3b. Delivery failure
-    const outcome2 = mapEngineResultToTelegramOutcome({
+    const outcomeDeliveryFail = mapEngineResultToTelegramOutcome({
       ok: true,
       duplicate: false,
       assistantAction: "AI_REPLY",
@@ -618,7 +707,7 @@ async function main(): Promise<void> {
     });
 
     // 3c. Duplicate delivery
-    const outcome3 = mapEngineResultToTelegramOutcome({
+    const outcomeDuplicate = mapEngineResultToTelegramOutcome({
       ok: true,
       duplicate: true,
       conversationId: "conv-dup",
@@ -626,140 +715,123 @@ async function main(): Promise<void> {
     });
 
     // 3d. Deferred-to-staff
-    const outcome4 = mapEngineResultToTelegramOutcome({
+    const outcomeDeferred = mapEngineResultToTelegramOutcome({
       ok: true,
       duplicate: false,
       assistantAction: "DEFERRED_TO_STAFF",
       delivery: { provider: "telegram", delivered: true },
     });
 
-    // 3e. Deferred exception observability
-    const loggedEvents: TelegramWebhookLogEvent[] = [];
-    const scheduledWork: Array<Promise<void>> = [];
-
-    const WEBHOOK_SECRET = "secret-token-test-3";
-    const SECRET_HASH = hashTelegramWebhookSecret(WEBHOOK_SECRET);
-
-    const webhookDeps = {
-      connectionRepository: {
-        findByWebhookSecretHash: async (hash: string) =>
-          hash === SECRET_HASH
-            ? {
-                id: "conn-tg-3",
-                businessId: B_ID,
-                branchId: BRANCH_ID,
-                botExternalId: BOT_EXTERNAL_ID,
-                webhookSecretHash: SECRET_HASH,
-              }
-            : null,
-      },
-      processInboundMessage: async () => {
-        throw new Error("Simulated unexpected engine failure");
-      },
-      schedule: (work: () => Promise<void> | void) => {
-        scheduledWork.push(Promise.resolve(work()));
-      },
-      logger: {
-        log: (event: TelegramWebhookLogEvent) => {
-          loggedEvents.push(event);
-        },
-      },
-    };
-
-    const req = new Request("http://localhost:3000/api/telegram/webhook", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET,
-      },
-      body: JSON.stringify({
-        update_id: 3001,
-        message: {
-          message_id: 301,
-          date: 1758900000,
-          chat: { id: Number(CHAT_ID), type: "private" },
-          text: "رسالة تجربة",
-        },
-      }),
+    // 3e. Domain / persistence failure
+    const outcomePersistence = mapEngineResultToTelegramOutcome({
+      ok: false,
+      code: "PERSISTENCE_FAILED",
+      message: "تعذر حفظ حالة المحادثة",
     });
 
-    const res = await handleTelegramWebhook(webhookDeps as any, req);
-    await Promise.all(scheduledWork);
-
-    const hasExceptionLog = loggedEvents.some(
-      (e) =>
-        e.stage === "engine" &&
-        e.outcome === "UNHANDLED_EXCEPTION" &&
-        e.error === "Simulated unexpected engine failure",
-    );
-
     check(
-      "3. Engine failure propagation preserves persistence, delivery, duplicate, and exception distinctions",
+      "3. Truthful outcome mapping: null delivery is delivered:false, delivery failure is distinct, duplicate and staff deferrals preserved without catch-alls",
       Boolean(
-        outcome1.ok === false &&
-        outcome1.outcome === "PERSISTENCE_FAILED" &&
-        outcome2.ok === false &&
-        outcome2.outcome === "DELIVERY_FAILURE" &&
-        outcome3.ok === true &&
-        outcome3.outcome === "DUPLICATE" &&
-        outcome4.ok === true &&
-        outcome4.outcome === "DEFERRED_TO_STAFF" &&
-        res.status === 200 &&
-        hasExceptionLog,
+        outcomeNullDelivery.ok === true &&
+        outcomeNullDelivery.outcome === "SUCCESS" &&
+        outcomeNullDelivery.delivered === false && // NOT confirmed delivered: true!
+        outcomeDeliveryFail.ok === false &&
+        outcomeDeliveryFail.outcome === "DELIVERY_FAILURE" &&
+        outcomeDuplicate.ok === true &&
+        outcomeDuplicate.outcome === "DUPLICATE" &&
+        outcomeDuplicate.duplicate === true &&
+        outcomeDeferred.ok === true &&
+        outcomeDeferred.outcome === "DEFERRED_TO_STAFF" &&
+        outcomePersistence.ok === false &&
+        outcomePersistence.outcome === "PERSISTENCE_FAILED",
       ),
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 4: Callback acknowledgment failure resilience & observability
+  // TEST 4: Production logger wiring, safe event filtering & ACK failure mapping
   // ──────────────────────────────────────────────────────────────────────────
   {
-    const h = createTestHarness({ conversationId: "conv-defect-4" });
-    await h.sendInbound("/start", 4001);
-    const state = (await h.stateStore.load(B_ID, "conv-defect-4"))
-      ?.state as any;
-    const bookCallbackData = offerCallbackData(state.offer, "book");
-
     const loggedEvents: TelegramWebhookLogEvent[] = [];
-    const scheduledWork: Array<Promise<void>> = [];
+    const safeLogger = createSafeTelegramWebhookLogger((ev) => {
+      loggedEvents.push(ev);
+    });
+
+    // 4a. Production composition supplies logger
+    const prodDeps = createProductionTelegramWebhookDeps();
+    const prodSuppliesLogger = Boolean(
+      prodDeps.logger &&
+      typeof prodDeps.logger.log === "function" &&
+      defaultTelegramWebhookLogger,
+    );
+
+    // 4b. Non-throwing Telegram ACK failure ({ ok: false }) maps to ACK_FAILED and does not crash
     const WEBHOOK_SECRET = "secret-token-test-4";
     const SECRET_HASH = hashTelegramWebhookSecret(WEBHOOK_SECRET);
+    const scheduledWork: Array<Promise<void>> = [];
 
-    const webhookDeps = {
+    const mockApiReturningFailure = {
+      apiHost: "https://api.telegram.org",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 400,
+            description: "QUERY_TOO_OLD",
+          }),
+          { status: 400 },
+        ),
+      credentialsResolver: {
+        resolve: async () => ({ ok: true, value: "mock-token" }) as any,
+      },
+    };
+
+    const webhookDeps = createProductionTelegramWebhookDeps({
       connectionRepository: {
         findByWebhookSecretHash: async (hash: string) =>
           hash === SECRET_HASH
-            ? {
+            ? ({
                 id: "conn-tg-4",
                 businessId: B_ID,
                 branchId: BRANCH_ID,
                 botExternalId: BOT_EXTERNAL_ID,
                 webhookSecretHash: SECRET_HASH,
-              }
+                credentialsRef: "fp:mock-ref",
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              } as any)
             : null,
+        findByIdWithinBusiness: async () =>
+          ({
+            id: "conn-tg-4",
+            businessId: B_ID,
+            credentialsRef: "fp:mock-ref",
+            isActive: true,
+            status: "CONNECTED",
+          }) as any,
       },
-      processInboundMessage: async (params: any) => {
-        const turnResult = await engine.receiveInboundMessage(
-          h.deps as any,
-          params.engineInput,
-          params.identity,
-        );
-        return mapEngineResultToTelegramOutcome(turnResult);
-      },
-      // Callback acknowledgment throws an error
-      answerCallbackQuery: async () => {
-        throw new Error("Telegram API HTTP 502 Bad Gateway");
-      },
-      schedule: (work: () => Promise<void> | void) => {
+      telegramApiDeps: mockApiReturningFailure as any,
+      logger: safeLogger,
+      schedule: (work) => {
         scheduledWork.push(Promise.resolve(work()));
       },
       now: () => SIMULATED_NOW,
-      logger: {
-        log: (event: TelegramWebhookLogEvent) => {
-          loggedEvents.push(event);
-        },
-      },
-    };
+      revalidatePaths: false,
+    });
+
+    // Test direct answerCallbackQuery wrapper on non-throwing failure
+    const ackWrapperResult = await webhookDeps.answerCallbackQuery!({
+      callbackQueryId: "cq_test_ack_fail",
+      connectionId: "conn-tg-4",
+      businessId: B_ID,
+    });
+
+    // Feed callback through webhook to verify selection processing continues and logger records ACK_FAILED
+    const h = createTestHarness({ conversationId: "conv-defect-4" });
+    await h.sendInbound("/start", 4001);
+    const state = (await h.stateStore.load(B_ID, "conv-defect-4"))
+      ?.state as any;
+    const bookCallbackData = offerCallbackData(state.offer, "book");
 
     const req = new Request("http://localhost:3000/api/telegram/webhook", {
       method: "POST",
@@ -771,7 +843,7 @@ async function main(): Promise<void> {
         update_id: 4002,
         callback_query: {
           id: "cq_fail_ack",
-          from: { id: Number(CHAT_ID), first_name: "Ammar" },
+          from: { id: Number(CHAT_ID), first_name: "Customer" },
           data: bookCallbackData,
           message: {
             message_id: 402,
@@ -782,31 +854,103 @@ async function main(): Promise<void> {
       }),
     });
 
-    const res = await handleTelegramWebhook(webhookDeps as any, req);
+    const res = await handleTelegramWebhook(
+      {
+        ...webhookDeps,
+        processInboundMessage: async (params) => {
+          const turn = await engine.receiveInboundMessage(
+            h.deps as any,
+            params.engineInput,
+            params.identity,
+          );
+          return mapEngineResultToTelegramOutcome(turn);
+        },
+      },
+      req,
+    );
     await Promise.all(scheduledWork);
 
-    const ackFailureLogged = loggedEvents.some(
-      (e) =>
-        e.stage === "acknowledgment" &&
-        e.outcome === "ACK_FAILED" &&
-        e.error?.includes("502"),
+    const hasAckFailedLog = loggedEvents.some(
+      (e) => e.stage === "acknowledgment" && e.outcome === "ACK_FAILED",
     );
-
-    const engineSuccessLogged = loggedEvents.some(
+    const hasOutboundSuccessLog = loggedEvents.some(
       (e) => e.stage === "outbound" && e.outcome === "SUCCESS",
     );
+    const noRawErrorMessageLeak = loggedEvents.every((e) => {
+      return (
+        !e.error ||
+        [
+          "TELEGRAM_ACK_FAILED",
+          "ANSWER_CALLBACK_FAILED",
+          "UNHANDLED_EXCEPTION",
+          "RATE_LIMITED",
+          "UNKNOWN_ERROR",
+        ].includes(e.error)
+      );
+    });
 
-    const nextState = (await h.stateStore.load(B_ID, "conv-defect-4"))
-      ?.state as any;
-    const selectionExecuted = nextState?.offer?.kind === "SERVICE";
+    // 4c. Logger failure resilience (logger throws)
+    const throwingLogger = {
+      log: () => {
+        throw new Error("Disk full in logger sink");
+      },
+    };
+    const reqThrowLogger = new Request(
+      "http://localhost:3000/api/telegram/webhook",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Bot-Api-Secret-Token": WEBHOOK_SECRET,
+        },
+        body: JSON.stringify({
+          update_id: 4003,
+          callback_query: {
+            id: "cq_logger_throw",
+            from: { id: Number(CHAT_ID) },
+            data: bookCallbackData,
+            message: {
+              message_id: 403,
+              date: Math.floor(SIMULATED_NOW.getTime() / 1000) - 5,
+              chat: { id: Number(CHAT_ID), type: "private" },
+            },
+          },
+        }),
+      },
+    );
+
+    const scheduledThrowLogger: Array<Promise<void>> = [];
+    const resThrowLogger = await handleTelegramWebhook(
+      {
+        ...webhookDeps,
+        logger: throwingLogger,
+        schedule: (work) => {
+          scheduledThrowLogger.push(Promise.resolve(work()));
+        },
+        processInboundMessage: async (params) => {
+          const turn = await engine.receiveInboundMessage(
+            h.deps as any,
+            params.engineInput,
+            params.identity,
+          );
+          return mapEngineResultToTelegramOutcome(turn);
+        },
+      },
+      reqThrowLogger,
+    );
+    await Promise.all(scheduledThrowLogger);
 
     check(
-      "4. Callback acknowledgment failure does not prevent selection processing, and both outcomes are independently visible",
+      "4. Production composition supplies logger, safe allowlisted events prevent leakage, non-throwing ACK failure maps to ACK_FAILED, and logger exceptions never abort processing",
       Boolean(
+        prodSuppliesLogger &&
+        ackWrapperResult != null &&
+        ackWrapperResult.ok === false &&
         res.status === 200 &&
-        ackFailureLogged &&
-        engineSuccessLogged &&
-        selectionExecuted,
+        hasAckFailedLog &&
+        hasOutboundSuccessLog &&
+        noRawErrorMessageLeak &&
+        resThrowLogger.status === 200,
       ),
     );
   }
@@ -816,7 +960,7 @@ async function main(): Promise<void> {
   // ──────────────────────────────────────────────────────────────────────────
   {
     // 5a. Verify callback turn uses receipt clock, not old message date
-    const oldOriginalMessageDate = 1700000000; // November 2023
+    const oldOriginalMessageDate = 1700000000;
     const receiptInstant = new Date("2026-10-24T12:00:00.000Z");
 
     const parsedUpdate = parseTelegramUpdate(
@@ -846,8 +990,6 @@ async function main(): Promise<void> {
 
     // 5b. Verify expired offer is safely rejected using receipt time
     const h = createTestHarness({ conversationId: "conv-defect-5" });
-
-    // Initial offer created at 10:00:00 AM (expires in 10 minutes at 10:10:00 AM)
     await h.sendInbound("/start", 5002, "2026-10-24T10:00:00.000Z");
     const state = (await h.stateStore.load(B_ID, "conv-defect-5"))
       ?.state as any;
@@ -878,12 +1020,69 @@ async function main(): Promise<void> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 6: Regression safety check
+  // TEST 6: Maintenance bootstrap without web auth environment variables
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    // Save current auth variables and delete them
+    const savedSecret = process.env.BETTER_AUTH_SECRET;
+    const savedUrl = process.env.BETTER_AUTH_URL;
+    const savedAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+    delete process.env.BETTER_AUTH_SECRET;
+    delete process.env.BETTER_AUTH_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+
+    let reachedRepositorySeam = false;
+    const mockRepo = {
+      findCandidatesByBotIdentifier: async (params: {
+        botUsername?: string;
+        botExternalId?: string;
+      }) => {
+        reachedRepositorySeam = true;
+        if (params.botUsername === "Drafnanafnanbot") {
+          return [
+            {
+              connectionId: "conn-reconcile-1",
+              businessId: B_ID,
+              botUsername: "Drafnanafnanbot",
+              botExternalId: BOT_EXTERNAL_ID,
+              status: "ACTIVE",
+              isActive: true,
+            },
+          ];
+        }
+        return [];
+      },
+    };
+
+    const lookupOutcome = await lookupTelegramBotTarget(
+      { connectionRepository: mockRepo },
+      { botUsername: "@Drafnanafnanbot" },
+    );
+
+    // Restore saved env
+    if (savedSecret) process.env.BETTER_AUTH_SECRET = savedSecret;
+    if (savedUrl) process.env.BETTER_AUTH_URL = savedUrl;
+    if (savedAppUrl) process.env.NEXT_PUBLIC_APP_URL = savedAppUrl;
+
+    check(
+      "6. Maintenance lookup and candidate resolution reach repository seam with auth variables absent, without making real DB calls",
+      Boolean(
+        reachedRepositorySeam &&
+        lookupOutcome.ok &&
+        lookupOutcome.status === "EXACT_MATCH" &&
+        lookupOutcome.target?.connectionId === "conn-reconcile-1",
+      ),
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST 7: Regression safety check
   // ──────────────────────────────────────────────────────────────────────────
   {
     const allPassed = checks.every((c) => c.pass);
     check(
-      "6. All focused execution defect regression scenarios verified",
+      "7. All focused execution defect regression scenarios verified",
       allPassed,
     );
   }

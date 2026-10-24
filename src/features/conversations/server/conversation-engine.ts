@@ -6478,7 +6478,10 @@ async function runInboundTurn(
                 "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
             }
           } else {
-            choices = buildChannelChoices(welcomeOffer);
+            // Durable state storage is unavailable: do not send actionable
+            // welcome choices whose callbacks cannot be resolved or matched
+            // against persisted state. Preserve plain-text greeting response.
+            choices = undefined;
           }
         }
       }

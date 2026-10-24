@@ -2,12 +2,12 @@ import {
   defaultConversationEngineDeps,
   receiveInboundMessage,
 } from "@/features/conversations/server/conversation-engine";
-import { env } from "@/lib/env";
 import { defaultRuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
 import {
   defaultTelegramApiDeps,
   resolveTelegramBotToken,
   telegramAnswerCallbackQuery,
+  type TelegramApiDeps,
 } from "@/server/integrations/telegram/telegram-client";
 import {
   completeManagedBotProvisioning,
@@ -18,12 +18,17 @@ import {
   resolveTelegramConnectionForSend,
 } from "@/server/integrations/telegram/telegram-transport";
 import {
+  createSafeTelegramWebhookLogger,
   handleTelegramWebhook,
   mapEngineResultToTelegramOutcome,
+  sanitizeErrorCode,
+  type TelegramWebhookHandlerDeps,
+  type TelegramWebhookLogger,
 } from "@/server/integrations/telegram/telegram-webhook-handler";
 import {
   telegramConnectionRepository,
   telegramProvisioningLedgerRepository,
+  type TelegramConnectionRepository,
 } from "@/server/repositories";
 
 import { revalidatePath } from "next/cache";
@@ -41,146 +46,152 @@ export const dynamic = "force-dynamic";
  * delegates the whole POST logic to `handleTelegramWebhook` in the
  * adapter — so the security path is assertable offline with injected
  * dependencies and no route logic is duplicated in tests.
- *
- * Security + routing model (see `telegram-webhook-handler.ts`):
- * - The `X-Telegram-Bot-Api-Secret-Token` header IS the proof of
- *   authenticity (no Meta-style GET handshake). Its SHA-256 digest resolves
- *   EXACTLY ONE Business-owned connection server-side, and the digest
- *   comparison is constant-time. An invalid or unknown secret gets 401
- *   BEFORE any parsing or processing.
- * - Tenant selection NEVER comes from the payload: the Business is the
- *   resolved connection row's `businessId` (server-derived), and the
- *   classified update carries no identity keys at all (`strict()` envelope).
- * - `update_id` is the inbound external key, so the EXISTING durable dedupe
- *   ledger makes redeliveries idempotent with zero change.
- * - Webhook delivery, never polling (incompatible with the Vercel-only
- *   infrastructure constraint).
- *
- * MVP scope (approved): private chats, text only. Non-private chats are
- * routed away; non-text messages follow the EXISTING approved unsupported
- * contract (dropped). No behavior is invented for either — the
- * drop-vs-persist-and-defer decision for non-text stays an open, flagged
- * decision (DECISIONS #63 (F)).
- *
- * The provider adapter owns its outbound transport (exactly like the Meta
- * route): the Telegram route supplies the Telegram-backed `MessageTransport`
- * (live `sendMessage`) to the canonical engine. The engine's own default
- * stays offline, so no non-Telegram entry point gains a live Telegram
- * sender.
  */
-const telegramTransport = createTelegramMessageTransport();
+export const telegramTransport = createTelegramMessageTransport();
 
-const telegramEngineDeps = {
+export const telegramEngineDeps = {
   ...defaultConversationEngineDeps,
   transport: telegramTransport,
 };
 
-/**
- * The provisioning boundary deps for this endpoint — every one of them an
- * app singleton; none is a Telegram HTTP concern.
- * `TELEGRAM_MANAGER_BOT_TOKEN` is an env secret read ONLY for the
- * manager-bot `getManagedBotToken` call.
- */
-const provisioningDeps: TelegramProvisioningDeps = {
+export const defaultTelegramWebhookLogger = createSafeTelegramWebhookLogger();
+
+export const defaultProvisioningDeps: TelegramProvisioningDeps = {
   api: defaultTelegramApiDeps,
   ledgerRepository: telegramProvisioningLedgerRepository,
   connectionRepository: telegramConnectionRepository,
   credentialStore: defaultRuntimeCredentialStore,
   getEnvVar: (name: string) => process.env[name],
-  webhookBaseUrl: env.NEXT_PUBLIC_APP_URL,
+  webhookBaseUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
   now: () => new Date(),
 };
 
-export async function POST(request: Request): Promise<Response> {
-  return handleTelegramWebhook(
-    {
-      connectionRepository: telegramConnectionRepository,
-      async processInboundMessage({ engineInput, identity }) {
-        const result = await receiveInboundMessage(
-          telegramEngineDeps,
-          engineInput,
-          identity,
-        );
-        // The operator surfaces (conversations inbox, dashboard, staff
-        // workspace) refresh after the turn persists the inbound message.
-        revalidatePath("/conversations");
-        revalidatePath("/");
-        revalidatePath("/staff");
-        return mapEngineResultToTelegramOutcome(result);
-      },
-      async completeManagedBotProvisioning({ event }) {
+export type ProductionTelegramWebhookConfig = {
+  engineDeps?: typeof telegramEngineDeps;
+  connectionRepository?: Pick<
+    TelegramConnectionRepository,
+    "findByWebhookSecretHash" | "findByIdWithinBusiness"
+  >;
+  telegramApiDeps?: TelegramApiDeps;
+  provisioningDeps?: TelegramProvisioningDeps;
+  logger?: TelegramWebhookLogger;
+  now?: () => Date;
+  schedule?: (work: () => Promise<void> | void) => void;
+  revalidatePaths?: boolean;
+};
+
+export function createProductionTelegramWebhookDeps(
+  config?: ProductionTelegramWebhookConfig,
+): TelegramWebhookHandlerDeps {
+  const connectionRepo =
+    config?.connectionRepository ?? telegramConnectionRepository;
+  const engineDeps = config?.engineDeps ?? telegramEngineDeps;
+  const apiDeps = config?.telegramApiDeps ?? defaultTelegramApiDeps;
+  const provDeps = config?.provisioningDeps ?? defaultProvisioningDeps;
+  const logger = config?.logger ?? defaultTelegramWebhookLogger;
+  const shouldRevalidate = config?.revalidatePaths ?? true;
+
+  return {
+    connectionRepository: connectionRepo,
+    logger,
+    now: config?.now,
+    async processInboundMessage({ engineInput, identity }) {
+      const result = await receiveInboundMessage(
+        engineDeps,
+        engineInput,
+        identity,
+      );
+      if (shouldRevalidate) {
         try {
-          const result = await completeManagedBotProvisioning(
-            provisioningDeps,
-            event,
-          );
-          if (result.ok) {
-            revalidatePath("/settings/telegram");
-            revalidatePath("/settings");
-            return { ok: true };
-          }
-          return { ok: false, code: result.code };
+          revalidatePath("/conversations");
+          revalidatePath("/");
+          revalidatePath("/staff");
         } catch {
-          // A provisioning failure must never crash the webhook; the
-          // event is acknowledged and the ledger carries the outcome.
-          return { ok: false, code: "PROVISIONING_FAILED" };
+          // Revalidation is best-effort in background worker/offline tests
         }
-      },
-      async answerCallbackQuery({ callbackQueryId, connectionId, businessId }) {
-        try {
-          const resolution = await resolveTelegramConnectionForSend(
-            { connectionRepository: telegramConnectionRepository },
-            { connectionId, businessId },
-          );
-          if (!resolution.ok) {
-            return { ok: false, error: "CONNECTION_RESOLUTION_FAILED" };
+      }
+      return mapEngineResultToTelegramOutcome(result);
+    },
+    async completeManagedBotProvisioning({ event }) {
+      try {
+        const result = await completeManagedBotProvisioning(provDeps, event);
+        if (result.ok) {
+          if (shouldRevalidate) {
+            try {
+              revalidatePath("/settings/telegram");
+              revalidatePath("/settings");
+            } catch {
+              // Best-effort
+            }
           }
-          const tokenRes = await resolveTelegramBotToken(
-            defaultTelegramApiDeps,
-            resolution.credentialsRef,
-          );
-          if (!tokenRes.ok) {
-            return { ok: false, error: "BOT_TOKEN_RESOLUTION_FAILED" };
-          }
-          await telegramAnswerCallbackQuery(
-            defaultTelegramApiDeps,
-            tokenRes.token,
-            { callbackQueryId },
-          );
           return { ok: true };
-        } catch (err) {
+        }
+        return { ok: false, code: result.code };
+      } catch {
+        return { ok: false, code: "PROVISIONING_FAILED" };
+      }
+    },
+    async answerCallbackQuery({ callbackQueryId, connectionId, businessId }) {
+      try {
+        const resolution = await resolveTelegramConnectionForSend(
+          { connectionRepository: connectionRepo },
+          { connectionId, businessId },
+        );
+        if (!resolution.ok) {
+          return { ok: false, error: "CONNECTION_RESOLUTION_FAILED" };
+        }
+        const tokenRes = await resolveTelegramBotToken(
+          apiDeps,
+          resolution.credentialsRef,
+        );
+        if (!tokenRes.ok) {
+          return { ok: false, error: "BOT_TOKEN_RESOLUTION_FAILED" };
+        }
+        const ackRes = await telegramAnswerCallbackQuery(
+          apiDeps,
+          tokenRes.token,
+          { callbackQueryId },
+        );
+        if (!ackRes.ok) {
+          const code = ackRes.error.code;
           return {
             ok: false,
-            error:
-              err instanceof Error ? err.message : "ANSWER_CALLBACK_FAILED",
+            error: sanitizeErrorCode(code) ?? "TELEGRAM_ACK_FAILED",
           };
         }
-      },
-      // A customer `/start` is a DETERMINISTIC welcome, never an engine turn
-      // (DECISIONS #73): reply through the SAME Telegram `MessageTransport`
-      // the engine already uses (no second messaging abstraction, no AI, no
-      // conversation created, no handoff). The handler supplies the fixed
-      // welcome `text`; this closure only delivers it. `businessName` /
-      // `conversationId` are unused by the Telegram transport send path.
-      async sendStartWelcome({ chatId, businessId, connectionId, text }) {
-        await telegramTransport.send({
-          to: chatId,
-          businessId,
-          businessName: "",
-          conversationId: "",
-          content: text,
-          connectionId,
-          kind: "TEXT",
-        });
-      },
-      schedule: (work) => {
-        // Next 16 `after` — the turn runs after the 200 is flushed, backed
-        // by `waitUntil` on Vercel (Telegram retries on non-2xx then
-        // gives up; the durable dedupe ledger keeps a redelivery
-        // idempotent).
-        after(() => work());
-      },
+        if (
+          (ackRes.result as unknown) === false ||
+          (typeof ackRes.result === "object" &&
+            ackRes.result !== null &&
+            (ackRes.result as { ok?: boolean }).ok === false)
+        ) {
+          return { ok: false, error: "TELEGRAM_ACK_FAILED" };
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "ANSWER_CALLBACK_FAILED" };
+      }
     },
-    request,
-  );
+    async sendStartWelcome({ chatId, businessId, connectionId, text }) {
+      await engineDeps.transport.send({
+        to: chatId,
+        businessId,
+        businessName: "",
+        conversationId: "",
+        content: text,
+        connectionId,
+        kind: "TEXT",
+      });
+    },
+    schedule:
+      config?.schedule ??
+      ((work) => {
+        after(() => work());
+      }),
+  };
+}
+
+export async function POST(request: Request): Promise<Response> {
+  const deps = createProductionTelegramWebhookDeps();
+  return handleTelegramWebhook(deps, request);
 }
