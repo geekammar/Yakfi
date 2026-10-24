@@ -741,3 +741,153 @@ export async function repairTelegramBotWebhookDefault(
     params,
   );
 }
+
+export type TelegramBotTargetMatch = {
+  businessId: string;
+  connectionId: string;
+  botExternalId: string;
+  botUsername: string | null;
+  status: string;
+  isActive: boolean;
+};
+
+export type LookupTelegramBotTargetParams = {
+  botUsername?: string | null;
+  botExternalId?: string | null;
+  limit?: number;
+};
+
+export type LookupTelegramBotTargetDeps = {
+  connectionRepository: {
+    findCandidatesByBotIdentifier(params: {
+      botUsername?: string;
+      botExternalId?: string;
+      limit?: number;
+    }): Promise<TelegramBotTargetMatch[]>;
+  };
+};
+
+export type LookupTelegramBotTargetOutcome =
+  | {
+      ok: true;
+      status: "EXACT_MATCH";
+      query: { botUsername?: string; botExternalId?: string };
+      target: TelegramBotTargetMatch;
+      matches: TelegramBotTargetMatch[];
+      message: string;
+    }
+  | {
+      ok: true;
+      status: "NO_MATCH";
+      query: { botUsername?: string; botExternalId?: string };
+      matches: [];
+      message: string;
+    }
+  | {
+      ok: true;
+      status: "AMBIGUOUS_MATCH";
+      query: { botUsername?: string; botExternalId?: string };
+      matches: TelegramBotTargetMatch[];
+      message: string;
+    }
+  | {
+      ok: false;
+      code: "INVALID_SELECTOR";
+      message: string;
+    };
+
+const BOT_USERNAME_REGEX = /^[A-Za-z0-9_]{3,32}$/;
+const BOT_EXTERNAL_ID_REGEX = /^[0-9]{5,20}$/;
+
+export function normalizeBotUsername(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+}
+
+export async function lookupTelegramBotTarget(
+  deps: LookupTelegramBotTargetDeps,
+  params: LookupTelegramBotTargetParams,
+): Promise<LookupTelegramBotTargetOutcome> {
+  const normalizedUsername = normalizeBotUsername(params.botUsername);
+  const trimmedExternalId = params.botExternalId?.trim() || null;
+
+  if (!normalizedUsername && !trimmedExternalId) {
+    return {
+      ok: false,
+      code: "INVALID_SELECTOR",
+      message:
+        "يجب تحديد اسم مستخدم البوت (botUsername) أو معرّف البوت الخارجي (botExternalId) للبحث",
+    };
+  }
+
+  if (normalizedUsername && !BOT_USERNAME_REGEX.test(normalizedUsername)) {
+    return {
+      ok: false,
+      code: "INVALID_SELECTOR",
+      message:
+        "اسم مستخدم البوت غير صالح. يجب أن يتكون من 3 إلى 32 حرفاً أو رقماً أو شرطة سفلية (مثال: @Drafnanafnanbot)",
+    };
+  }
+
+  if (trimmedExternalId && !BOT_EXTERNAL_ID_REGEX.test(trimmedExternalId)) {
+    return {
+      ok: false,
+      code: "INVALID_SELECTOR",
+      message: "معرّف البوت الخارجي غير صالح. يجب أن يتكون من 5 إلى 20 رقماً",
+    };
+  }
+
+  const query = {
+    ...(normalizedUsername ? { botUsername: normalizedUsername } : {}),
+    ...(trimmedExternalId ? { botExternalId: trimmedExternalId } : {}),
+  };
+
+  const matches = await deps.connectionRepository.findCandidatesByBotIdentifier(
+    {
+      ...query,
+      limit: params.limit,
+    },
+  );
+
+  if (matches.length === 0) {
+    return {
+      ok: true,
+      status: "NO_MATCH",
+      query,
+      matches: [],
+      message: "لم يتم العثور على أي اتصال تيليجرام مطابق للبيانات المحددة",
+    };
+  }
+
+  if (matches.length === 1) {
+    return {
+      ok: true,
+      status: "EXACT_MATCH",
+      query,
+      target: matches[0]!,
+      matches,
+      message: "تم العثور على اتصال تيليجرام واحد مطابق بدقة",
+    };
+  }
+
+  return {
+    ok: true,
+    status: "AMBIGUOUS_MATCH",
+    query,
+    matches,
+    message: `تم العثور على ${matches.length} اتصالات مطابقة. يلزم تحديد businessId و connectionId يدوياً لمنع أي التباس`,
+  };
+}
+
+export async function lookupTelegramBotTargetDefault(
+  params: LookupTelegramBotTargetParams,
+): Promise<LookupTelegramBotTargetOutcome> {
+  const { telegramConnectionRepository } =
+    await import("@/server/repositories");
+  return lookupTelegramBotTarget(
+    { connectionRepository: telegramConnectionRepository },
+    params,
+  );
+}

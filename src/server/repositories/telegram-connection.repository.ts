@@ -27,6 +27,15 @@ import type { TelegramConnection } from "@/types/domain";
  */
 const notDeleted = { deletedAt: null } as const;
 
+export type TelegramConnectionLookupRow = {
+  businessId: string;
+  connectionId: string;
+  botExternalId: string;
+  botUsername: string | null;
+  status: string;
+  isActive: boolean;
+};
+
 export class TelegramConnectionRepository {
   async findByIdWithinBusiness(
     id: string,
@@ -84,6 +93,59 @@ export class TelegramConnectionRepository {
     return db.telegramConnection.findFirst({
       where: { botExternalId, ...notDeleted },
     });
+  }
+
+  /**
+   * Safe, bounded read-only lookup of candidate connections by bot username
+   * or external bot ID. Returns a limited projection (never credentialsRef,
+   * webhookSecretHash, or customer content) and excludes soft-deleted rows.
+   */
+  async findCandidatesByBotIdentifier(params: {
+    botUsername?: string;
+    botExternalId?: string;
+    limit?: number;
+  }): Promise<TelegramConnectionLookupRow[]> {
+    const { botUsername, botExternalId, limit = 10 } = params;
+    const boundedLimit = Math.max(1, Math.min(limit, 50));
+
+    if (!botUsername && !botExternalId) {
+      return [];
+    }
+
+    const where: Record<string, unknown> = { ...notDeleted };
+    if (botUsername && botExternalId) {
+      where.AND = [
+        { botUsername: { equals: botUsername, mode: "insensitive" } },
+        { botExternalId },
+      ];
+    } else if (botUsername) {
+      where.botUsername = { equals: botUsername, mode: "insensitive" };
+    } else if (botExternalId) {
+      where.botExternalId = botExternalId;
+    }
+
+    const rows = await db.telegramConnection.findMany({
+      where,
+      select: {
+        id: true,
+        businessId: true,
+        botExternalId: true,
+        botUsername: true,
+        status: true,
+        isActive: true,
+      },
+      orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
+      take: boundedLimit,
+    });
+
+    return rows.map((r) => ({
+      connectionId: r.id,
+      businessId: r.businessId,
+      botExternalId: r.botExternalId,
+      botUsername: r.botUsername,
+      status: r.status,
+      isActive: r.isActive,
+    }));
   }
 
   /**
