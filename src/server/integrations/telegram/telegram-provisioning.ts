@@ -203,6 +203,14 @@ export function buildManagerWebhookUrl(webhookBaseUrl: string): string {
 }
 
 /**
+ * Customer bot webhook URL (`/api/telegram/webhook`).
+ * Authenticated via per-connection secret token digest.
+ */
+export function buildCustomerWebhookUrl(webhookBaseUrl: string): string {
+  return `${webhookBaseUrl.replace(/\/$/, "")}/api/telegram/webhook`;
+}
+
+/**
  * Ensure the Manager Bot's webhook points here with the derived secret
  * (idempotent — `setWebhook` is a configuration SET, so re-applying the
  * same value is a no-op at Telegram). Called at provisioning LAUNCH, so

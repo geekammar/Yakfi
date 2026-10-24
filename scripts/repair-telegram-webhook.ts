@@ -1,60 +1,183 @@
 #!/usr/bin/env tsx
-import { repairTelegramBotWebhookDefault } from "../src/server/integrations/telegram/telegram-repair";
+
+function printHelpAndExit(code = 0) {
+  console.log(`
+FlowPilot Telegram Webhook Repair & Reconciliation CLI
+
+Usage:
+  pnpm telegram:repair-webhook --business-id <UUID> --connection-id <UUID> [options]
+
+Required Options:
+  --business-id, -b <UUID>     Business UUID owning the bot connection
+  --connection-id, -c <UUID>   Telegram Connection UUID
+
+Execution Modes:
+  (default)                    Read-only check mode (inspects allowed_updates and URL)
+  --apply                      Apply subscription repair (adds callback_query and rotates secret)
+  --apply --reconcile-secret   Force secret rotation and DB reconciliation even if subscription is OK
+
+Additional Options:
+  --expected-url <URL>         Verify registered webhook URL matches this expected URL exactly
+  --help, -h                   Show this help message
+
+Examples:
+  # 1. Read-only check:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222
+
+  # 2. Targeted apply:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --apply
+
+  # 3. Targeted reconciliation after partial failure:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --apply --reconcile-secret
+`);
+  process.exit(code);
+}
 
 function parseArgs(args: string[]): {
   businessId?: string;
   connectionId?: string;
   apply: boolean;
+  reconcileSecret: boolean;
+  expectedWebhookUrl?: string;
 } {
   let businessId: string | undefined;
   let connectionId: string | undefined;
   let apply = false;
+  let reconcileSecret = false;
+  let expectedWebhookUrl: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (!arg) continue;
-    if (arg === "--business-id" || arg === "-b") {
-      businessId = args[++i];
+
+    if (arg === "--help" || arg === "-h") {
+      printHelpAndExit(0);
+    } else if (arg === "--business-id" || arg === "-b") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --business-id");
+        process.exit(1);
+      }
+      businessId = next;
     } else if (arg.startsWith("--business-id=")) {
-      businessId = arg.split("=")[1];
+      businessId = arg.slice("--business-id=".length);
+      if (!businessId) {
+        console.error("❌ Error: Empty value for --business-id");
+        process.exit(1);
+      }
     } else if (arg === "--connection-id" || arg === "-c") {
-      connectionId = args[++i];
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --connection-id");
+        process.exit(1);
+      }
+      connectionId = next;
     } else if (arg.startsWith("--connection-id=")) {
-      connectionId = arg.split("=")[1];
+      connectionId = arg.slice("--connection-id=".length);
+      if (!connectionId) {
+        console.error("❌ Error: Empty value for --connection-id");
+        process.exit(1);
+      }
     } else if (arg === "--apply") {
       apply = true;
+    } else if (arg === "--reconcile-secret") {
+      reconcileSecret = true;
+    } else if (arg === "--expected-url") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --expected-url");
+        process.exit(1);
+      }
+      expectedWebhookUrl = next;
+    } else if (arg.startsWith("--expected-url=")) {
+      expectedWebhookUrl = arg.slice("--expected-url=".length);
+      if (!expectedWebhookUrl) {
+        console.error("❌ Error: Empty value for --expected-url");
+        process.exit(1);
+      }
+    } else {
+      console.error(
+        `❌ Error: Unknown argument '${arg}'. Use --help to view valid options.`,
+      );
+      process.exit(1);
     }
   }
 
-  return { businessId, connectionId, apply };
+  return {
+    businessId,
+    connectionId,
+    apply,
+    reconcileSecret,
+    expectedWebhookUrl,
+  };
 }
 
 async function main() {
-  const { businessId, connectionId, apply } = parseArgs(process.argv.slice(2));
+  const {
+    businessId,
+    connectionId,
+    apply,
+    reconcileSecret,
+    expectedWebhookUrl,
+  } = parseArgs(process.argv.slice(2));
 
   if (!businessId || !connectionId) {
     console.error(
-      "Usage: tsx scripts/repair-telegram-webhook.ts --business-id <UUID> --connection-id <UUID> [--apply]",
+      "❌ Error: Both --business-id and --connection-id are required.",
     );
     console.error(
-      "Note: Without --apply, the command runs in read-only check mode.",
+      "Usage: pnpm telegram:repair-webhook --business-id <UUID> --connection-id <UUID> [--apply] [--reconcile-secret]",
     );
     process.exit(1);
   }
 
-  console.log(
-    `[FlowPilot] Telegram Webhook Maintenance: mode=${apply ? "APPLY" : "CHECK (read-only)"}`,
-  );
+  if (reconcileSecret && !apply) {
+    console.error(
+      "❌ Error: --reconcile-secret requires --apply to be specified.",
+    );
+    process.exit(1);
+  }
+
+  const modeLabel = reconcileSecret
+    ? "APPLY (secret reconciliation)"
+    : apply
+      ? "APPLY"
+      : "CHECK (read-only)";
+
+  console.log(`[FlowPilot] Telegram Webhook Maintenance: mode=${modeLabel}`);
   console.log(`Target: businessId=${businessId}, connectionId=${connectionId}`);
+  if (expectedWebhookUrl) {
+    console.log(`Expected URL: ${expectedWebhookUrl}`);
+  }
 
   try {
+    const { repairTelegramBotWebhookDefault } =
+      await import("../src/server/integrations/telegram/telegram-repair");
     const outcome = await repairTelegramBotWebhookDefault({
       businessId,
       connectionId,
       apply,
+      reconcileSecret,
+      expectedWebhookUrl,
     });
 
     if (!outcome.ok) {
+      if (outcome.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED") {
+        console.error("\n⚠️  PARTIAL FAILURE / RECOVERY REQUIRED");
+        console.error(
+          "Telegram webhook registration was updated, but database secret digest persistence could not be confirmed.",
+        );
+        console.error(
+          "Incoming webhook requests may return 401 until reconciled.",
+        );
+        console.error(`Pending Updates: ${outcome.pendingUpdateCount}`);
+        console.error(
+          "\nRun the following command to complete reconciliation:",
+        );
+        console.error(`  ${outcome.reconciliationCommand}\n`);
+        process.exit(1);
+      }
+
       console.error(
         `\n❌ Maintenance Refused / Failed: [${outcome.code}] ${outcome.message}`,
       );
@@ -75,8 +198,11 @@ async function main() {
         `Allowed Updates:     ${JSON.stringify(outcome.allowedUpdates)}`,
       );
       console.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
+      if (outcome.note) {
+        console.log(`Note:                ${outcome.note}`);
+      }
       console.log(
-        "Verdict:             No repair needed. Registration is already valid and includes callback_query.",
+        "Verdict:             Subscription includes message & callback_query. No subscription change needed.",
       );
     } else if (outcome.status === "REPAIR_REQUIRED") {
       console.log(
@@ -89,10 +215,16 @@ async function main() {
       if (outcome.lastErrorMessage) {
         console.log(`Last Telegram Error: ${outcome.lastErrorMessage}`);
       }
+      if (outcome.note) {
+        console.log(`Note:                ${outcome.note}`);
+      }
       console.log(
-        "Verdict:             Missing callback_query! Re-run with --apply to execute controlled rotation.",
+        "Verdict:             Missing callback_query! Re-run with --apply to subscribe and rotate secret.",
       );
-    } else if (outcome.status === "REPAIRED") {
+    } else if (
+      outcome.status === "REPAIRED" ||
+      outcome.status === "SECRET_RECONCILED"
+    ) {
       console.log(
         `Previous Updates:    ${JSON.stringify(outcome.previousAllowedUpdates)}`,
       );
@@ -101,7 +233,13 @@ async function main() {
       );
       console.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
       console.log(
-        "Verdict:             Successfully updated Telegram webhook subscription with callback_query!",
+        `Secret Reconciled:   ${outcome.secretReconciled ? "YES" : "NO"}`,
+      );
+      console.log(
+        `Digest Persisted:    ${outcome.webhookSecretHashPersisted ? "CONFIRMED" : "UNCONFIRMED"}`,
+      );
+      console.log(
+        "Verdict:             Successfully updated Telegram webhook subscription with callback_query and confirmed secret digest!",
       );
     }
     console.log("====================================================\n");
