@@ -222,7 +222,11 @@ export type OfferReply =
   /** Not a reply to an offer — the normal AI turn owns it. */
   | { kind: "none" }
   /** A selection-shaped reply to an offer that is no longer selectable. */
-  | { kind: "stale"; reason: "EXPIRED" | "CLOSED" | "UNKNOWN_TOKEN" }
+  | {
+      kind: "stale";
+      reason: "EXPIRED" | "CLOSED" | "UNKNOWN_TOKEN";
+      offer?: BookingOffer | null;
+    }
   /** A slot-offer selection (re-verified against fresh CORE-02 by the engine). */
   | {
       kind: "slot";
@@ -252,6 +256,7 @@ export type OfferReply =
       serviceId: string;
       serviceName: string;
       providerId: string | null;
+      timePreference?: CanonicalTimePreference | null;
     }
   /** Customer requested to type another date. */
   | {
@@ -259,6 +264,7 @@ export type OfferReply =
       serviceId: string;
       serviceName: string;
       providerId: string | null;
+      timePreference?: CanonicalTimePreference | null;
     }
   /** An index outside the offered date list. */
   | { kind: "date_invalid_index"; max: number }
@@ -315,6 +321,7 @@ export function interpretOfferReply(
       return {
         kind: "stale",
         reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+        offer,
       };
     }
 
@@ -395,6 +402,7 @@ export function interpretOfferReply(
           serviceId: offer.serviceId,
           serviceName: offer.serviceName,
           providerId: offer.providerId,
+          timePreference: offer.timePreference ?? null,
         };
       }
       if (callback.action.kind === "index") {
@@ -410,6 +418,7 @@ export function interpretOfferReply(
           serviceId: offer.serviceId,
           serviceName: offer.serviceName,
           providerId: offer.providerId,
+          timePreference: offer.timePreference ?? null,
         };
       }
       return { kind: "stale", reason: "UNKNOWN_TOKEN" };
@@ -478,6 +487,7 @@ export function interpretOfferReply(
     return {
       kind: "stale",
       reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+      offer,
     };
   }
 
@@ -543,6 +553,7 @@ export function interpretOfferReply(
         serviceId: offer.serviceId,
         serviceName: offer.serviceName,
         providerId: offer.providerId,
+        timePreference: offer.timePreference ?? null,
       };
     }
     return { kind: "none" };

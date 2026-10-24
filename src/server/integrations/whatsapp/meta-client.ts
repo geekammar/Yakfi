@@ -2,6 +2,7 @@ import {
   defaultCredentialsResolver,
   type CredentialsResolver,
 } from "@/server/credentials/credentials-resolver";
+import { renderMetaInteractivePayload } from "@/server/integrations/whatsapp/meta-presentation";
 import {
   TransportError,
   defaultConnectionResolutionDeps,
@@ -279,9 +280,30 @@ export function createMetaWhatsAppTransport(
         config.apiVersion,
         phoneNumberId,
       );
-      const body = message.template
-        ? buildMetaTemplatePayload(message.to, message.template)
-        : buildMetaTextPayload(message.to, message.content);
+      let body: unknown;
+      if (message.template) {
+        body = buildMetaTemplatePayload(message.to, message.template);
+      } else if (message.choices) {
+        try {
+          body = renderMetaInteractivePayload(
+            message.to,
+            message.content,
+            message.choices,
+          );
+        } catch (err) {
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : "فشل إنشاء رسالة تفاعلية لواتساب",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
+        }
+      } else {
+        body = buildMetaTextPayload(message.to, message.content);
+      }
 
       let response: Response;
       try {
@@ -303,19 +325,36 @@ export function createMetaWhatsAppTransport(
       }
 
       if (response.ok) {
-        let providerMessageId: string | undefined;
+        let json: { messages?: Array<{ id?: string }> } | null = null;
         try {
-          const json = (await response.json()) as {
+          json = (await response.json()) as {
             messages?: Array<{ id?: string }>;
           };
-          providerMessageId = json.messages?.[0]?.id;
         } catch {
-          // no-op: delivery already succeeded
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error: "استجابة مزود واتساب غير صالحة",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
+        }
+        const providerMessageId = json?.messages?.[0]?.id;
+        if (
+          !providerMessageId ||
+          typeof providerMessageId !== "string" ||
+          !providerMessageId.trim()
+        ) {
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error: "معرّف الرسالة مفقود في استجابة واتساب",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
         }
         return {
           provider: "meta-whatsapp",
           delivered: true,
-          ...(providerMessageId ? { providerMessageId } : {}),
+          providerMessageId: providerMessageId.trim(),
         };
       }
 

@@ -11,6 +11,10 @@
  * - Compact grouping (rows of options and navigation actions).
  */
 import type { BookingOffer } from "./booking-offer";
+import {
+  areSlotsSingleProvider,
+  formatSlotChoiceLabel,
+} from "./presentation-formatters";
 
 export type ChannelChoiceItem = {
   /** Stable action or index key within the offer (e.g. "1", "book", "more"). */
@@ -179,24 +183,27 @@ export function buildChannelChoices(
       };
 
     case "SLOT": {
-      const slotRow: ChannelChoiceItem[] = offer.options
-        .slice(0, 3)
-        .map((option) => {
-          const time = option.startAt.slice(11, 16);
-          const provider = option.displayName ? ` (${option.displayName})` : "";
-          return {
-            id: String(option.index),
-            label: `${option.index}️⃣ ${time}${provider}`,
-            value: option.startAt,
-            role: "option" as const,
-          };
-        });
+      const isSingleProvider = areSlotsSingleProvider(offer.options);
+      const slotItems: ChannelChoiceItem[] = offer.options
+        .slice(0, 4)
+        .map((option) => ({
+          id: String(option.index),
+          label: formatSlotChoiceLabel(option, isSingleProvider),
+          value: option.startAt,
+          role: "option" as const,
+        }));
+
+      const slotRows: ChannelChoiceItem[][] = [];
+      for (let i = 0; i < slotItems.length; i += 2) {
+        slotRows.push(slotItems.slice(i, i + 2));
+      }
+
       return {
         offerToken: offer.token,
         offerId: offer.id,
         offerKind: offer.kind,
         groups: [
-          slotRow,
+          ...slotRows,
           [
             {
               id: "more",

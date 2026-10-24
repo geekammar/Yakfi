@@ -243,7 +243,8 @@ export const COPY_REGISTRY = [
     key: "clarify.date",
     category: "clarification",
     humanLabel: "سؤال تحديد التاريخ",
-    defaultText: "يرجى تحديد التاريخ المطلوب — مثال: 2026-09-14.",
+    defaultText:
+      "يرجى تحديد التاريخ المطلوب (مثال: غداً، أو اذكر يوماً وتاريخاً محدداً).",
     classification: "EDITABLE_COPY",
     placeholders: [],
     requiredPlaceholders: [],

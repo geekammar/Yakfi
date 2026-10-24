@@ -382,7 +382,8 @@ export function mapAiResponseToBookingInput(
   if (!date) {
     return {
       kind: "needs_clarification",
-      message: "يرجى تحديد التاريخ المطلوب — مثال: 2026-09-14.",
+      message:
+        "يرجى تحديد التاريخ المطلوب (مثال: غداً، أو اذكر يوماً وتاريخاً محدداً).",
       reason: "MISSING_DATE",
       serviceId: serviceMatch.serviceId,
       serviceName: serviceMatch.serviceName,

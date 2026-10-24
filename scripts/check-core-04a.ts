@@ -1585,7 +1585,7 @@ async function runSuite(): Promise<void> {
       to: harnessC.business.whatsappNumber ?? "+201000000000",
       from: fromHandleC,
       text: "عايز كشف أسنان يوم الأربعاء",
-      receivedAt: new Date().toISOString(),
+      receivedAt: new Date("2026-10-20T08:00:00.000Z").toISOString(),
       externalId: "ext-cas-slot",
     });
 

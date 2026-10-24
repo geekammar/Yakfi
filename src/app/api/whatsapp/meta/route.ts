@@ -54,15 +54,38 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
+export type MetaPostConfig = {
+  appSecret?: string;
+  resolutionDeps?: {
+    businessRepository: typeof businessRepository;
+    whatsappConnectionRepository: typeof whatsAppConnectionRepository;
+    branchRepository: typeof branchRepository;
+  };
+  engineDeps?: Parameters<typeof receiveInboundMessage>[0];
+  revalidateFn?: (path: string) => void;
+};
+
+export async function handleMetaPost(
+  request: Request,
+  config?: MetaPostConfig,
+): Promise<Response> {
+  const appSecret = config?.appSecret ?? env.WHATSAPP_META_APP_SECRET;
+  if (!appSecret) {
+    return Response.json(
+      {
+        success: false,
+        error: { code: "UNAUTHENTICATED", message: "توقيع الويبهوك غير صالح" },
+      },
+      { status: 403 },
+    );
+  }
+
   const rawBody = await request.text();
   const signatureHeader =
     request.headers.get("x-hub-signature-256") ??
     request.headers.get("X-Hub-Signature-256");
 
-  if (
-    !verifyMetaSignature(rawBody, signatureHeader, env.WHATSAPP_META_APP_SECRET)
-  ) {
+  if (!verifyMetaSignature(rawBody, signatureHeader, appSecret)) {
     return Response.json(
       {
         success: false,
@@ -115,7 +138,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const resolutionDeps = {
+  const resolutionDeps = config?.resolutionDeps ?? {
     businessRepository,
     whatsappConnectionRepository: whatsAppConnectionRepository,
     branchRepository,
@@ -173,7 +196,7 @@ export async function POST(request: Request) {
     }
 
     const engineResult = await receiveInboundMessage(
-      metaEngineDeps,
+      config?.engineDeps ?? metaEngineDeps,
       engineInput,
       {
         businessId: resolution.businessId,
@@ -205,9 +228,14 @@ export async function POST(request: Request) {
     }
   }
 
-  revalidatePath("/conversations");
-  revalidatePath("/");
-  revalidatePath("/staff");
+  const revalidate = config?.revalidateFn ?? revalidatePath;
+  try {
+    revalidate("/conversations");
+    revalidate("/");
+    revalidate("/staff");
+  } catch {
+    // Next.js revalidatePath may throw in standalone test harness environments
+  }
 
   const hasFailure = results.some((r) => !r.ok);
   return Response.json({
@@ -216,4 +244,8 @@ export async function POST(request: Request) {
     statuses: parsed.statusCount,
     results,
   });
+}
+
+export async function POST(request: Request) {
+  return handleMetaPost(request);
 }

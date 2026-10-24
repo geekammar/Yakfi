@@ -57,6 +57,7 @@ import {
   type ConversationEngineDeps,
 } from "../src/features/conversations/server/conversation-engine";
 import {
+  dehydrateConversationState,
   emptyConversationState,
   projectConversationState,
   withPresentedOffer,
@@ -920,7 +921,12 @@ async function runSuite(): Promise<void> {
     new Date("2026-10-21T22:30:00.000Z"),
   );
   const activeOfferState = withPresentedOffer(baseState, slotOffer!);
-  await stateStore.save(BUSINESS_ID, CONVERSATION_ID, 1, activeOfferState);
+  await stateStore.save(
+    BUSINESS_ID,
+    CONVERSATION_ID,
+    1,
+    dehydrateConversationState(activeOfferState),
+  );
 
   const initialHttpCount = interceptedHttpCalls.length;
   // Send Arabic digit '١'

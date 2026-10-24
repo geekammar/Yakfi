@@ -125,7 +125,7 @@ export const INTERRUPTION_ACK_QUESTION =
 
 /** The fixed CLARIFY_DATE question (the pending-date template). */
 export const CLARIFY_DATE_QUESTION =
-  "يرجى تحديد التاريخ المطلوب — مثال: 2026-09-14.";
+  "يرجى تحديد التاريخ المطلوب (مثال: غداً، أو اذكر يوماً وتاريخاً محدداً).";
 
 /**
  * The ANSWER-AND-CONTINUE invitation (PROMPT-AI-ARCH-09 — Slice 5). A fixed,

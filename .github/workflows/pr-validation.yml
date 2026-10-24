@@ -105,6 +105,7 @@ jobs:
           pnpm check:telegram-execution-defects
           pnpm check:telegram-acceptance
           pnpm check:channel-neutral-choices
+          pnpm check:unified-booking-choices
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

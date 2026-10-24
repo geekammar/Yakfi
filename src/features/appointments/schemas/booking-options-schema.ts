@@ -25,6 +25,10 @@ export const resolveBookingOptionsInputSchema = z.object({
   providerId: uuidSchema.optional(),
   date: appointmentDateSchema,
   timePreference: canonicalTimePreferenceSchema.optional(),
+  minStartTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
   limit: z.number().int().min(1).max(100).optional(),
 });
 
