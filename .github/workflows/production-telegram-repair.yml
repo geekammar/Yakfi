@@ -1,0 +1,219 @@
+name: Production Telegram Webhook Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Operation mode (lookup, check, apply, apply-reconcile)"
+        required: true
+        default: "lookup"
+        type: choice
+        options:
+          - "lookup"
+          - "check"
+          - "apply"
+          - "apply-reconcile"
+      bot_username:
+        description: "Bot username for lookup mode (e.g. @Drafnanafnanbot)"
+        required: false
+        type: string
+        default: ""
+      bot_external_id:
+        description: "Stable bot external ID for lookup mode (numeric ID)"
+        required: false
+        type: string
+        default: ""
+      business_id:
+        description: "Business UUID owning the bot connection (required for check/apply/apply-reconcile)"
+        required: false
+        type: string
+        default: ""
+      connection_id:
+        description: "Telegram Connection UUID (required for check/apply/apply-reconcile)"
+        required: false
+        type: string
+        default: ""
+      expected_url:
+        description: "Expected customer webhook URL (for check/apply/apply-reconcile)"
+        required: false
+        default: "https://flowpilot-prod.vercel.app/api/telegram/webhook"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-telegram-repair
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    name: Run Telegram maintenance operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    environment: Production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Validate inputs, record safe metadata, and execute maintenance operation
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_BOT_USERNAME: ${{ inputs.bot_username }}
+          INPUT_BOT_EXTERNAL_ID: ${{ inputs.bot_external_id }}
+          INPUT_BUSINESS_ID: ${{ inputs.business_id }}
+          INPUT_CONNECTION_ID: ${{ inputs.connection_id }}
+          INPUT_EXPECTED_URL: ${{ inputs.expected_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 1. Enforce main branch protection (defense-in-depth)
+          if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+            echo "::error::Production maintenance is strictly restricted to refs/heads/main (attempted on '${GITHUB_REF:-}')."
+            exit 1
+          fi
+
+          # 2. Preflight database access capability
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::PRODUCTION_DATABASE_URL secret is not configured or unavailable in the Production environment."
+            exit 1
+          fi
+
+          # 3. Mode validation
+          case "${INPUT_MODE:-}" in
+            "lookup"|"check"|"apply"|"apply-reconcile")
+              ;;
+            *)
+              echo "::error::Invalid operation mode '${INPUT_MODE:-}'. Allowed modes: lookup, check, apply, apply-reconcile."
+              exit 1
+              ;;
+          esac
+
+          # 4. Mode-specific input validation and capability preflight
+          CLEAN_BOT_USERNAME=""
+          CLEAN_BOT_EXTERNAL_ID=""
+
+          if [ "$INPUT_MODE" = "lookup" ]; then
+            if [ -z "${INPUT_BOT_USERNAME:-}" ] && [ -z "${INPUT_BOT_EXTERNAL_ID:-}" ]; then
+              echo "::error::Lookup mode requires either bot_username or bot_external_id to be specified."
+              exit 1
+            fi
+
+            if [ -n "${INPUT_BOT_USERNAME:-}" ]; then
+              RAW_USERNAME="${INPUT_BOT_USERNAME#@}"
+              USERNAME_REGEX="^[A-Za-z0-9_]{3,32}$"
+              if [[ ! "$RAW_USERNAME" =~ $USERNAME_REGEX ]]; then
+                echo "::error::Invalid bot_username format. Must be 3-32 alphanumeric characters or underscores (e.g. @Drafnanafnanbot)."
+                exit 1
+              fi
+              CLEAN_BOT_USERNAME="$RAW_USERNAME"
+            fi
+
+            if [ -n "${INPUT_BOT_EXTERNAL_ID:-}" ]; then
+              EXT_ID_REGEX="^[0-9]{5,20}$"
+              if [[ ! "$INPUT_BOT_EXTERNAL_ID" =~ $EXT_ID_REGEX ]]; then
+                echo "::error::Invalid bot_external_id format. Must be 5-20 digits."
+                exit 1
+              fi
+              CLEAN_BOT_EXTERNAL_ID="$INPUT_BOT_EXTERNAL_ID"
+            fi
+          else
+            # check, apply, apply-reconcile require CREDENTIAL_MASTER_KEY for managed bot token decryption
+            if [ -z "${CREDENTIAL_MASTER_KEY:-}" ]; then
+              echo "::error::CREDENTIAL_MASTER_KEY secret is not configured in repository/environment secrets. Managed bot check/apply operations require CREDENTIAL_MASTER_KEY to resolve runtime credentials. Configure this secret in Repository Settings -> Secrets and variables -> Actions."
+              exit 1
+            fi
+
+            UUID_REGEX="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            if [[ ! "${INPUT_BUSINESS_ID:-}" =~ $UUID_REGEX ]]; then
+              echo "::error::Invalid business_id format. Must be a valid UUID."
+              exit 1
+            fi
+
+            if [[ ! "${INPUT_CONNECTION_ID:-}" =~ $UUID_REGEX ]]; then
+              echo "::error::Invalid connection_id format. Must be a valid UUID."
+              exit 1
+            fi
+
+            if [[ ! "${INPUT_EXPECTED_URL:-}" =~ ^https:// ]]; then
+              echo "::error::Invalid expected_url. Must be a valid HTTPS URL."
+              exit 1
+            fi
+          fi
+
+          # 5. Record validated metadata safely using printf (no shell code injection)
+          {
+            printf '## Production Telegram Webhook Maintenance\n\n'
+            printf -- '- **Mode:** `%s`\n' "$INPUT_MODE"
+            printf -- '- **Branch:** `%s`\n' "$GITHUB_REF"
+            printf -- '- **Commit:** `%s`\n' "$(git rev-parse HEAD)"
+            printf -- '- **Started:** `%s`\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            if [ "$INPUT_MODE" = "lookup" ]; then
+              if [ -n "$CLEAN_BOT_USERNAME" ]; then
+                printf -- '- **Target Bot Username:** `@%s`\n' "$CLEAN_BOT_USERNAME"
+              fi
+              if [ -n "$CLEAN_BOT_EXTERNAL_ID" ]; then
+                printf -- '- **Target Bot External ID:** `%s`\n' "$CLEAN_BOT_EXTERNAL_ID"
+              fi
+            else
+              printf -- '- **Business ID:** `%s`\n' "$INPUT_BUSINESS_ID"
+              printf -- '- **Connection ID:** `%s`\n' "$INPUT_CONNECTION_ID"
+              printf -- '- **Expected URL:** `%s`\n' "$INPUT_EXPECTED_URL"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # 6. Build and execute quoted argument array
+          CLI_ARGS=()
+          if [ "$INPUT_MODE" = "lookup" ]; then
+            CLI_ARGS+=("--lookup")
+            if [ -n "$CLEAN_BOT_USERNAME" ]; then
+              CLI_ARGS+=("--bot-username" "$CLEAN_BOT_USERNAME")
+            fi
+            if [ -n "$CLEAN_BOT_EXTERNAL_ID" ]; then
+              CLI_ARGS+=("--bot-external-id" "$CLEAN_BOT_EXTERNAL_ID")
+            fi
+          else
+            CLI_ARGS+=(
+              "--business-id" "$INPUT_BUSINESS_ID"
+              "--connection-id" "$INPUT_CONNECTION_ID"
+              "--expected-url" "$INPUT_EXPECTED_URL"
+            )
+            case "$INPUT_MODE" in
+              "check")
+                echo "Executing in read-only check mode..."
+                ;;
+              "apply")
+                echo "Executing in apply mode (subscribes to callback_query and rotates secret)..."
+                CLI_ARGS+=("--apply")
+                ;;
+              "apply-reconcile")
+                echo "Executing in apply + reconcile mode..."
+                CLI_ARGS+=("--apply" "--reconcile-secret")
+                ;;
+            esac
+          fi
+
+          pnpm telegram:repair-webhook "${CLI_ARGS[@]}"

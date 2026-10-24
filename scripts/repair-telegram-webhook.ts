@@ -5,33 +5,46 @@ function printHelpAndExit(code = 0) {
 FlowPilot Telegram Webhook Repair & Reconciliation CLI
 
 Usage:
+  # Candidate Lookup (read-only):
+  pnpm telegram:repair-webhook --lookup [--bot-username <username>] [--bot-external-id <id>]
+
+  # Inspection and Repair (requires explicit UUIDs):
   pnpm telegram:repair-webhook --business-id <UUID> --connection-id <UUID> [options]
 
-Required Options:
-  --business-id, -b <UUID>     Business UUID owning the bot connection
-  --connection-id, -c <UUID>   Telegram Connection UUID
-
-Execution Modes:
+Modes:
+  --lookup                     Read-only candidate lookup (queries database by bot username or external ID)
   (default)                    Read-only check mode (inspects allowed_updates and URL)
   --apply                      Apply subscription repair (adds callback_query and rotates secret)
   --apply --reconcile-secret   Force secret rotation and DB reconciliation even if subscription is OK
 
-Additional Options:
+Lookup Options:
+  --bot-username, -u <str>     Bot @username to look up (e.g. @Drafnanafnanbot)
+  --bot-external-id, -e <str>  Stable bot numeric external ID to look up
+
+Repair Options:
+  --business-id, -b <UUID>     Business UUID owning the bot connection
+  --connection-id, -c <UUID>   Telegram Connection UUID
   --expected-url <URL>         Verify registered webhook URL matches this expected URL exactly
   --help, -h                   Show this help message
 
 Examples:
-  # 1. Read-only check:
-  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222
+  # 1. Candidate lookup:
+  pnpm telegram:repair-webhook --lookup --bot-username @Drafnanafnanbot
 
-  # 2. Targeted apply:
-  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --apply
+  # 2. Read-only check:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-url https://flowpilot-prod.vercel.app/api/telegram/webhook
 
-  # 3. Targeted reconciliation after partial failure:
-  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --apply --reconcile-secret
+  # 3. Targeted apply:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-url https://flowpilot-prod.vercel.app/api/telegram/webhook --apply
+
+  # 4. Targeted reconciliation after partial failure:
+  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-url https://flowpilot-prod.vercel.app/api/telegram/webhook --apply --reconcile-secret
 `);
   process.exit(code);
 }
+
+const UUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function parseArgs(args: string[]): {
   businessId?: string;
@@ -39,12 +52,18 @@ function parseArgs(args: string[]): {
   apply: boolean;
   reconcileSecret: boolean;
   expectedWebhookUrl?: string;
+  lookup: boolean;
+  botUsername?: string;
+  botExternalId?: string;
 } {
   let businessId: string | undefined;
   let connectionId: string | undefined;
   let apply = false;
   let reconcileSecret = false;
   let expectedWebhookUrl: string | undefined;
+  let lookup = false;
+  let botUsername: string | undefined;
+  let botExternalId: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -52,6 +71,34 @@ function parseArgs(args: string[]): {
 
     if (arg === "--help" || arg === "-h") {
       printHelpAndExit(0);
+    } else if (arg === "--lookup") {
+      lookup = true;
+    } else if (arg === "--bot-username" || arg === "-u") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --bot-username");
+        process.exit(1);
+      }
+      botUsername = next;
+    } else if (arg.startsWith("--bot-username=")) {
+      botUsername = arg.slice("--bot-username=".length);
+      if (!botUsername) {
+        console.error("❌ Error: Empty value for --bot-username");
+        process.exit(1);
+      }
+    } else if (arg === "--bot-external-id" || arg === "-e") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --bot-external-id");
+        process.exit(1);
+      }
+      botExternalId = next;
+    } else if (arg.startsWith("--bot-external-id=")) {
+      botExternalId = arg.slice("--bot-external-id=".length);
+      if (!botExternalId) {
+        console.error("❌ Error: Empty value for --bot-external-id");
+        process.exit(1);
+      }
     } else if (arg === "--business-id" || arg === "-b") {
       const next = args[++i];
       if (!next || next.startsWith("-")) {
@@ -109,7 +156,76 @@ function parseArgs(args: string[]): {
     apply,
     reconcileSecret,
     expectedWebhookUrl,
+    lookup,
+    botUsername,
+    botExternalId,
   };
+}
+
+async function handleLookup(params: {
+  botUsername?: string;
+  botExternalId?: string;
+}) {
+  const { lookupTelegramBotTargetDefault } =
+    await import("../src/server/integrations/telegram/telegram-repair");
+
+  const outcome = await lookupTelegramBotTargetDefault(params);
+
+  if (!outcome.ok) {
+    console.error(`\n❌ Lookup Refused: [${outcome.code}] ${outcome.message}`);
+    process.exit(1);
+  }
+
+  console.log("\n================ Target Lookup Result ================");
+  console.log(`Status:              ${outcome.status}`);
+  console.log(`Query:               ${JSON.stringify(outcome.query)}`);
+
+  if (outcome.status === "NO_MATCH") {
+    console.log(`Message:             ${outcome.message}`);
+    console.log(
+      "Verdict:             No matching Telegram bot connection was found in the database.",
+    );
+    console.log("====================================================\n");
+    process.exit(0);
+  }
+
+  if (outcome.status === "AMBIGUOUS_MATCH") {
+    console.log(`Message:             ${outcome.message}`);
+    console.log(`Found Matches:       ${outcome.matches.length}`);
+    console.log("Candidates:");
+    for (let i = 0; i < outcome.matches.length; i++) {
+      const m = outcome.matches[i]!;
+      console.log(
+        `  [${i + 1}] businessId: ${m.businessId} | connectionId: ${m.connectionId} | botExternalId: ${m.botExternalId} | botUsername: @${m.botUsername ?? "unknown"} | status: ${m.status} | isActive: ${m.isActive}`,
+      );
+    }
+    console.log(
+      "Verdict:             Multiple candidate connections matched. Choose explicit IDs before running check or apply.",
+    );
+    console.log("====================================================\n");
+    process.exit(1);
+  }
+
+  // EXACT_MATCH
+  console.log(`Business ID:         ${outcome.target.businessId}`);
+  console.log(`Connection ID:       ${outcome.target.connectionId}`);
+  console.log(`Bot External ID:     ${outcome.target.botExternalId}`);
+  console.log(
+    `Bot Username:        @${outcome.target.botUsername ?? "unknown"}`,
+  );
+  console.log(`Status:              ${outcome.target.status}`);
+  console.log(`Is Active:           ${outcome.target.isActive}`);
+  console.log("====================================================\n");
+
+  console.log("Next Step (Read-Only Check):");
+  console.log(
+    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL>\n`,
+  );
+  console.log("Targeted Repair (when callback_query missing):");
+  console.log(
+    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
+  );
+  process.exit(0);
 }
 
 async function main() {
@@ -119,7 +235,33 @@ async function main() {
     apply,
     reconcileSecret,
     expectedWebhookUrl,
+    lookup,
+    botUsername,
+    botExternalId,
   } = parseArgs(process.argv.slice(2));
+
+  if (lookup) {
+    if (apply || reconcileSecret) {
+      console.error(
+        "❌ Error: --lookup is read-only and cannot be combined with --apply or --reconcile-secret.",
+      );
+      process.exit(1);
+    }
+    if (expectedWebhookUrl) {
+      console.error(
+        "❌ Error: --lookup is read-only and does not accept --expected-url.",
+      );
+      process.exit(1);
+    }
+    if (!botUsername && !botExternalId) {
+      console.error(
+        "❌ Error: --lookup requires --bot-username or --bot-external-id to be specified.",
+      );
+      process.exit(1);
+    }
+    await handleLookup({ botUsername, botExternalId });
+    return;
+  }
 
   if (!businessId || !connectionId) {
     console.error(
@@ -134,6 +276,13 @@ async function main() {
   if (reconcileSecret && !apply) {
     console.error(
       "❌ Error: --reconcile-secret requires --apply to be specified.",
+    );
+    process.exit(1);
+  }
+
+  if (!UUID_REGEX.test(businessId) || !UUID_REGEX.test(connectionId)) {
+    console.error(
+      "❌ Error: Both --business-id and --connection-id must be valid UUIDs.",
     );
     process.exit(1);
   }

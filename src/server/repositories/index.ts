@@ -27,7 +27,10 @@ import { PlatformInvitationRepository } from "./platform-invitation.repository";
 import { ProviderRepository } from "./provider.repository";
 import { RuntimeCredentialRepository } from "./runtime-credential.repository";
 import { ServiceRepository } from "./service.repository";
-import { TelegramConnectionRepository } from "./telegram-connection.repository";
+import {
+  TelegramConnectionRepository,
+  type TelegramConnectionLookupRow,
+} from "./telegram-connection.repository";
 import { TelegramProvisioningLedgerRepository } from "./telegram-provisioning-ledger.repository";
 import { UsageRepository } from "./usage.repository";
 import { UserRepository } from "./user.repository";
@@ -82,6 +85,7 @@ export {
   RuntimeCredentialRepository,
   ServiceRepository,
   TelegramConnectionRepository,
+  type TelegramConnectionLookupRow,
   TelegramProvisioningLedgerRepository,
   UsageRepository,
   UserRepository,
