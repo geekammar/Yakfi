@@ -130,6 +130,7 @@ import {
 } from "@/features/conversations/server/booking-selection";
 import {
   buildChannelChoices,
+  parseOfferCallback,
   type ChannelChoicePresentation,
 } from "@/features/conversations/server/channel-choice";
 import {
@@ -4401,6 +4402,10 @@ async function runInboundTurn(
         delivery,
       };
     } else if (offerReply.kind === "stale") {
+      const parsedCb = inbound.text.startsWith("fp:")
+        ? parseOfferCallback(inbound.text)
+        : null;
+      const callbackToken = parsedCb?.token ?? null;
       const staleOffer = offerReply.offer ?? turnSession.state?.offer ?? null;
       const currentOffer = turnSession.state?.offer ?? null;
       const isCurrentOfferLive = currentOffer
@@ -4408,12 +4413,18 @@ async function runInboundTurn(
         : false;
 
       // 1. Preserve newer active offers:
-      // If the currently persisted offer is live,
-      // prompt customer to pick from the active offer rather than overwriting it.
-      if (isCurrentOfferLive && currentOffer) {
-        const choices = buildChannelChoices(currentOffer);
+      // If customer clicked an older button while a newer offer is currently live,
+      // preserve the active offer and direct them to it without adding duplicate markup here.
+      const isClickOnOlderThanCurrent = Boolean(
+        callbackToken &&
+        currentOffer &&
+        callbackToken !== currentOffer.token &&
+        isCurrentOfferLive,
+      );
+
+      if (isClickOnOlderThanCurrent) {
         const msg =
-          "هذا الاختيار يتبع عرضاً سابقاً لم يعد متاحاً. يرجى الاختيار من العرض الحالي المعروض أدناه:";
+          "هذا الاختيار يتبع عرضاً سابقاً لم يعد متاحاً. يرجى الاختيار من العرض الحالي المعروض.";
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -4429,7 +4440,6 @@ async function runInboundTurn(
           assistantMessage.id,
           business.id,
           outboundConnectionId,
-          choices,
         );
         return {
           ok: true,
@@ -4447,84 +4457,97 @@ async function runInboundTurn(
         };
       }
 
-      // 2. Resolve trusted context for mechanical recovery
-      const serviceId =
-        turnSession.state?.serviceId ??
-        (staleOffer && "serviceId" in staleOffer ? staleOffer.serviceId : null);
-      const serviceName =
-        turnSession.state?.selectedService ??
-        (staleOffer && "serviceName" in staleOffer
-          ? staleOffer.serviceName
-          : null) ??
-        services.find((s) => s.id === serviceId)?.name ??
-        null;
-      const serviceSource = turnSession.state?.serviceSource ?? "CUSTOMER";
-      const candidateDate =
-        turnSession.state?.selectedDate ??
-        turnSession.state?.knownFacts.date ??
-        (staleOffer && "date" in staleOffer ? staleOffer.date : null);
-      const tz = resolveValidTimeZone(business.timezone);
-      const todayIso = todayIsoInTimeZone(now, tz);
-      const isFutureDate = candidateDate ? candidateDate >= todayIso : false;
-      const resolvedDate = isFutureDate ? candidateDate : null;
+      // Check if this interaction was on an already completed/consumed booking or unknown/malformed callback
+      const wasAlreadyBooked =
+        wasBooked ||
+        turnSession.state?.bookingStage === "COMPLETED" ||
+        staleOffer?.status === "CONSUMED";
 
-      const providerId =
-        turnSession.state?.providerPreference ??
-        (staleOffer && "providerId" in staleOffer
-          ? staleOffer.providerId
-          : null);
-      const timePref = isCanonicalTimePreference(
-        turnSession.state?.selectedTimePref,
-      )
-        ? turnSession.state.selectedTimePref
-        : isCanonicalTimePreference(
-              turnSession.state?.knownFacts.timePreference,
-            )
-          ? turnSession.state.knownFacts.timePreference
-          : staleOffer &&
-              "timePreference" in staleOffer &&
-              isCanonicalTimePreference(staleOffer.timePreference)
-            ? staleOffer.timePreference
-            : null;
+      const isUnknownCallback =
+        offerReply.reason === "UNKNOWN_TOKEN" || !parsedCb;
 
-      // 3. Sufficient context for SLOTS: serviceId + serviceName + future date
-      if (serviceId && serviceName && resolvedDate) {
-        return presentSlotChoices(
-          deps,
-          selectionScope,
-          {
-            serviceId,
-            serviceName,
-            serviceSource,
-            providerId,
-            date: resolvedDate,
-            timePreference: timePref,
-          },
-          turnSession,
-          now,
-        );
+      if (!wasAlreadyBooked && !isUnknownCallback) {
+        // 2. Resolve trusted context for mechanical recovery
+        const serviceId =
+          turnSession.state?.serviceId ??
+          (staleOffer && "serviceId" in staleOffer
+            ? staleOffer.serviceId
+            : null);
+        const serviceName =
+          turnSession.state?.selectedService ??
+          (staleOffer && "serviceName" in staleOffer
+            ? staleOffer.serviceName
+            : null) ??
+          services.find((s) => s.id === serviceId)?.name ??
+          null;
+        const serviceSource = turnSession.state?.serviceSource ?? "CUSTOMER";
+        const candidateDate =
+          turnSession.state?.selectedDate ??
+          turnSession.state?.knownFacts.date ??
+          (staleOffer && "date" in staleOffer ? staleOffer.date : null);
+        const tz = resolveValidTimeZone(business.timezone);
+        const todayIso = todayIsoInTimeZone(now, tz);
+        const isFutureDate = candidateDate ? candidateDate >= todayIso : false;
+        const resolvedDate = isFutureDate ? candidateDate : null;
+
+        const providerId =
+          turnSession.state?.providerPreference ??
+          (staleOffer && "providerId" in staleOffer
+            ? staleOffer.providerId
+            : null);
+        const timePref = isCanonicalTimePreference(
+          turnSession.state?.selectedTimePref,
+        )
+          ? turnSession.state.selectedTimePref
+          : isCanonicalTimePreference(
+                turnSession.state?.knownFacts.timePreference,
+              )
+            ? turnSession.state.knownFacts.timePreference
+            : staleOffer &&
+                "timePreference" in staleOffer &&
+                isCanonicalTimePreference(staleOffer.timePreference)
+              ? staleOffer.timePreference
+              : null;
+
+        // 3. Sufficient context for SLOTS: serviceId + serviceName + future date
+        if (serviceId && serviceName && resolvedDate) {
+          return presentSlotChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId,
+              serviceName,
+              serviceSource,
+              providerId,
+              date: resolvedDate,
+              timePreference: timePref,
+            },
+            turnSession,
+            now,
+          );
+        }
+
+        // 4. Sufficient context for DATES: serviceId + serviceName
+        if (serviceId && serviceName) {
+          return presentDateChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId,
+              serviceName,
+              serviceSource,
+              providerId,
+              timePreference: timePref,
+            },
+            turnSession,
+            now,
+          );
+        }
       }
 
-      // 4. Sufficient context for DATES: serviceId + serviceName
-      if (serviceId && serviceName) {
-        return presentDateChoices(
-          deps,
-          selectionScope,
-          {
-            serviceId,
-            serviceName,
-            serviceSource,
-            providerId,
-            timePreference: timePref,
-          },
-          turnSession,
-          now,
-        );
-      }
-
-      // 5. Insufficient context: ask ONLY for the missing facts
+      // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
       const staleMsg =
-        offerReply.reason === "CLOSED"
+        offerReply.reason === "CLOSED" || wasAlreadyBooked
           ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
           : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
       const assistantMessage = await persistAssistantReply(
