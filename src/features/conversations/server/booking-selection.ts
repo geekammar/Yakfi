@@ -222,7 +222,11 @@ export type OfferReply =
   /** Not a reply to an offer — the normal AI turn owns it. */
   | { kind: "none" }
   /** A selection-shaped reply to an offer that is no longer selectable. */
-  | { kind: "stale"; reason: "EXPIRED" | "CLOSED" | "UNKNOWN_TOKEN" }
+  | {
+      kind: "stale";
+      reason: "EXPIRED" | "CLOSED" | "UNKNOWN_TOKEN";
+      offer?: BookingOffer | null;
+    }
   /** A slot-offer selection (re-verified against fresh CORE-02 by the engine). */
   | {
       kind: "slot";
@@ -317,6 +321,7 @@ export function interpretOfferReply(
       return {
         kind: "stale",
         reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+        offer,
       };
     }
 
@@ -482,6 +487,7 @@ export function interpretOfferReply(
     return {
       kind: "stale",
       reason: offer.status === "ACTIVE" ? "EXPIRED" : "CLOSED",
+      offer,
     };
   }
 

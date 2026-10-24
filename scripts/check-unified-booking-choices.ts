@@ -18,7 +18,11 @@ import "./setup-test-env";
 import { createHmac } from "node:crypto";
 
 import { handleMetaPost } from "../src/app/api/whatsapp/meta/route";
-import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
+import { resolveBookingOptions } from "../src/features/appointments/server/booking-options-service";
+import {
+  PLAYGROUND_IDS,
+  createPlaygroundHarness,
+} from "../src/features/conversations/playground/harness";
 import {
   buildDateOffer,
   buildProviderOffer,
@@ -36,6 +40,11 @@ import {
   resolveUpcomingBookingDates,
 } from "../src/features/conversations/server/conversation-engine";
 import {
+  dehydrateConversationState,
+  emptyConversationState,
+  type ConversationState,
+} from "../src/features/conversations/server/conversation-state";
+import {
   areSlotsSingleProvider,
   filterElapsedSlots,
   formatArabicDate,
@@ -46,6 +55,7 @@ import {
 } from "../src/features/conversations/server/presentation-formatters";
 import { EnvCredentialsResolver } from "../src/server/credentials/credentials-resolver";
 import { renderTelegramInlineKeyboard } from "../src/server/integrations/telegram/telegram-presentation";
+import { createTelegramMessageTransport } from "../src/server/integrations/telegram/telegram-transport";
 import { hashTelegramWebhookSecret } from "../src/server/integrations/telegram/telegram-webhook";
 import { handleTelegramWebhook } from "../src/server/integrations/telegram/telegram-webhook-handler";
 import {
@@ -1253,6 +1263,171 @@ async function run(): Promise<void> {
     `received: ${JSON.stringify(domainErrRes)}`,
   );
 
+  // ─── F.3: Availability Filtering BEFORE Truncation (Defect Regression) ───────
+  // Confirmed scenario: 3 providers, 25 slots each (09:00 - 17:00, 75 total slots)
+  // Local time 15:00. Out of 75 slots, 57 are elapsed (<= 15:00), 18 are future (> 15:00).
+  const BIZ_F3_ID = "11111111-1111-4111-8111-111111111111";
+  const SRV_F3_ID = "22222222-2222-4222-8222-222222222222";
+  const PRV_F3_1 = "33333333-3333-4333-8333-333333333331";
+  const PRV_F3_2 = "33333333-3333-4333-8333-333333333332";
+  const PRV_F3_3 = "33333333-3333-4333-8333-333333333333";
+  const f3Providers = [
+    { id: PRV_F3_1, displayName: "د. سارة عادل", user: { name: "سارة" } },
+    { id: PRV_F3_2, displayName: "د. أحمد محمود", user: { name: "أحمد" } },
+    { id: PRV_F3_3, displayName: "د. منى خالد", user: { name: "منى" } },
+  ];
+  const f3Seams = [
+    {
+      providerId: PRV_F3_1,
+      userId: "44444444-4444-4444-8444-444444444441",
+      assignedUserId: "44444444-4444-4444-8444-444444444441",
+    },
+    {
+      providerId: PRV_F3_2,
+      userId: "44444444-4444-4444-8444-444444444442",
+      assignedUserId: "44444444-4444-4444-8444-444444444442",
+    },
+    {
+      providerId: PRV_F3_3,
+      userId: "44444444-4444-4444-8444-444444444443",
+      assignedUserId: "44444444-4444-4444-8444-444444444443",
+    },
+  ];
+
+  const mockDepsF3: any = {
+    eligibility: {
+      businessRepository: {
+        findById: async () => ({
+          id: BIZ_F3_ID,
+          timezone: "Africa/Cairo",
+          slotDurationMinutes: 20,
+          workingHours: {
+            sun: { open: "09:00", close: "17:20", closed: false },
+          },
+        }),
+      },
+      serviceRepository: {
+        findById: async () => ({
+          id: SRV_F3_ID,
+          businessId: BIZ_F3_ID,
+          durationMinutes: 20,
+          isActive: true,
+        }),
+      },
+      providerRepository: {
+        listEligibleForService: async () => f3Providers,
+        listAssignmentSeams: async () => f3Seams,
+      },
+      branchRepository: {
+        findDefaultByBusiness: async () => null,
+        findByIdWithinBusiness: async () => null,
+      },
+    },
+    businessRepository: {
+      findById: async () => ({
+        id: BIZ_F3_ID,
+        timezone: "Africa/Cairo",
+        slotDurationMinutes: 20,
+        workingHours: {
+          sun: { open: "09:00", close: "17:20", closed: false },
+        },
+      }),
+    },
+    serviceRepository: {
+      findById: async () => ({
+        id: SRV_F3_ID,
+        businessId: BIZ_F3_ID,
+        durationMinutes: 20,
+        isActive: true,
+      }),
+    },
+    providerRepository: {
+      listEligibleForService: async () => f3Providers,
+      listAssignmentSeams: async () => f3Seams,
+    },
+    branchRepository: {
+      findByIdWithinBusiness: async () => null,
+      findDefaultByBusiness: async () => null,
+    },
+    appointmentRepository: {
+      listBlockingByAssignees: async () => [],
+    },
+  };
+
+  // F.3a: With minStartTime: "15:00", candidate pairs are filtered BEFORE ranking/truncation.
+  // Exactly 18 future slots are retained (6 per provider), totalEligibleCount is 18, isCapped is false.
+  const f3aResult = await resolveBookingOptions(
+    mockDepsF3,
+    { userId: "55555555-5555-4555-8555-555555555555", businessId: BIZ_F3_ID },
+    {
+      serviceId: SRV_F3_ID,
+      date: "2026-10-25", // Sunday
+      minStartTime: "15:00",
+      limit: 50,
+    },
+  );
+  check(
+    "F.3a resolveBookingOptions with minStartTime filters before truncation: returns all 18 future slots",
+    f3aResult.success === true &&
+      f3aResult.data.options.length === 18 &&
+      f3aResult.data.totalEligibleCount === 18 &&
+      f3aResult.data.isCapped === false &&
+      f3aResult.data.options.every(
+        (opt) => opt.startAt.slice(11, 16) > "15:00",
+      ),
+    `received: length=${f3aResult.success ? f3aResult.data.options.length : 0}, totalEligible=${f3aResult.success ? f3aResult.data.totalEligibleCount : 0}, isCapped=${f3aResult.success ? f3aResult.data.isCapped : false}`,
+  );
+
+  // F.3b: Without minStartTime (defect reproduction), ranking limit: 50 caps at the first 50 morning slots,
+  // starving the 18 afternoon slots so post-filtering leaves 0 slots.
+  const f3bResult = await resolveBookingOptions(
+    mockDepsF3,
+    { userId: "55555555-5555-4555-8555-555555555555", businessId: BIZ_F3_ID },
+    {
+      serviceId: SRV_F3_ID,
+      date: "2026-10-25",
+      limit: 50,
+    },
+  );
+  const f3bPostFiltered = f3bResult.success
+    ? f3bResult.data.options.filter(
+        (opt) => opt.startAt.slice(11, 16) > "15:00",
+      )
+    : [];
+  check(
+    "F.3b Truncation before filtering regression: without minStartTime, limit: 50 starves afternoon slots",
+    f3bResult.success === true &&
+      f3bResult.data.options.length === 50 &&
+      f3bResult.data.totalEligibleCount === 75 &&
+      f3bResult.data.isCapped === true &&
+      f3bPostFiltered.length === 0, // Proves old ordering returned ZERO future slots!
+    `received: options.length=${f3bResult.success ? f3bResult.data.options.length : 0}, postFiltered=${f3bPostFiltered.length}`,
+  );
+
+  // F.3c: Date suggestions (resolveUpcomingBookingDates) correctly evaluates today's future availability
+  const f3cPastClock = new Date("2026-10-25T16:00:00.000Z"); // 19:00 Cairo time, past closing 17:20
+  const f3cResPast = await resolveUpcomingBookingDates(
+    mockDepsF3,
+    {
+      business: {
+        id: BIZ_F3_ID,
+        timezone: "Africa/Cairo",
+        slotDurationMinutes: 20,
+        workingHours: {
+          sun: { open: "09:00", close: "17:20", closed: false },
+        },
+      },
+    },
+    { serviceId: SRV_F3_ID },
+    f3cPastClock,
+  );
+  check(
+    "F.3c resolveUpcomingBookingDates excludes today when all slots have elapsed",
+    f3cResPast.status === "success" &&
+      !f3cResPast.dates.some((d) => d.date === "2026-10-25"),
+    `received dates: ${JSON.stringify(f3cResPast)}`,
+  );
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Area G: Provider Identity & Date Navigation Context Preservation
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1527,48 +1702,94 @@ async function run(): Promise<void> {
   // ═══════════════════════════════════════════════════════════════════════════
   console.log("\nArea I: Real Route Composition Round-Trips");
 
-  // I.1 Telegram webhook handler composition round-trip
-  // Simulates Telegram callback_query via handleTelegramWebhook
-  const harnessTg = createPlaygroundHarness();
-  const welcomeOfferTg = buildWelcomeOffer(
-    {
-      businessId: harnessTg.business.id,
-      conversationId: harnessTg.conversation.id,
+  // ───────────────────────────────────────────────────────────────────────────
+  // I.1 Telegram Connected Round-Trip:
+  // Turn 1 (createTelegramMessageTransport) -> captures wire callback_data
+  // Turn 2 (handleTelegramWebhook) -> processes selection, creates 1 appointment, 0 model calls
+  // ───────────────────────────────────────────────────────────────────────────
+  let capturedTgPayload: any = null;
+  const offerPersistedAtSendTg = { value: false };
+  const tgHarness = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+
+  const tgTransportDeps: any = {
+    api: {
+      fetchImpl: async (_url: string, init: any) => {
+        // Assert matching offer is ALREADY durably persisted in stateStore BEFORE outbound wire dispatch!
+        const stateInStore = tgHarness.stateStore.rows.get(
+          tgHarness.conversation.id,
+        )?.state as any;
+        if (stateInStore?.offer?.token) {
+          offerPersistedAtSendTg.value = true;
+        }
+        capturedTgPayload = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { message_id: 888123 },
+          }),
+        };
+      },
+      apiHost: "https://api.telegram.org",
+      credentialsResolver: {
+        resolve: async () => ({ ok: true, value: "bot123456:tg-test-token" }),
+      },
     },
-    "offer_tg_roundtrip",
-    new Date("2026-10-25T08:00:00.000Z"),
-  );
-  await harnessTg.stateStore.save(
-    harnessTg.business.id,
-    harnessTg.conversation.id,
-    null,
+    connectionRepository: {
+      findByIdWithinBusiness: async () => ({
+        id: "conn_tg_1",
+        businessId: tgHarness.business.id,
+        branchId: null,
+        status: "CONNECTED",
+        isActive: true,
+        credentialsRef: "fp:tg:test",
+      }),
+    },
+    credentialsResolver: {
+      resolve: async () => ({ ok: true, value: "bot123456:tg-test-token" }),
+    },
+  };
+
+  const realTgTransport = createTelegramMessageTransport(tgTransportDeps);
+  tgHarness.deps.transport = realTgTransport;
+
+  // Turn 1: Inbound message via engine
+  const tgTurn1 = await receiveInboundMessage(
+    tgHarness.deps,
     {
-      offer: welcomeOfferTg,
-      bookingStage: "AVAILABILITY_RESOLVED",
-      knownFacts: {},
-      missingFacts: [],
+      to: "6123456789",
+      from: "123456789",
+      text: "عايز أحجز تنظيف أسنان يوم 2026-10-25",
+      receivedAt: "2026-10-24T12:00:00Z",
+    },
+    {
+      businessId: tgHarness.business.id,
+      branchId: tgHarness.business.defaultBranchId,
+      connectionId: "conn_tg_1",
     },
   );
 
-  const tgCallbackToken = offerCallbackData(welcomeOfferTg!, "book");
-  const tgWebhookUpdate = {
-    update_id: 99901,
-    callback_query: {
-      id: "cbq_tg_1",
-      from: { id: 123456789, is_bot: false, first_name: "Ammar" },
-      data: tgCallbackToken,
-      message: {
-        message_id: 501,
-        chat: { id: 123456789, type: "private" },
-        date: 1700000000,
-        text: "مرحبا بك",
-      },
-    },
-  };
-  const tgScheduledWork: Promise<void>[] = [];
-  const tgAcknowledged: string[] = [];
-  const tgWebhookSecret = "test-tg-webhook-secret-token";
+  const tgInlineKeyboard = capturedTgPayload?.reply_markup?.inline_keyboard;
+  const capturedTgCallbackData = tgInlineKeyboard?.[0]?.[0]?.callback_data;
+
+  check(
+    "I.1a Telegram Turn 1: outbound transport intercepts inline keyboard and confirms offer persisted at send time",
+    tgTurn1.ok === true &&
+      offerPersistedAtSendTg.value === true &&
+      typeof capturedTgCallbackData === "string" &&
+      capturedTgCallbackData.startsWith("fp:"),
+    `capturedCallbackData: ${capturedTgCallbackData}, offerPersistedAtSend: ${offerPersistedAtSendTg.value}`,
+  );
+
+  // Turn 2: Real handleTelegramWebhook with captured callback_data
+  const tgWebhookSecret = "tg-secret-production-roundtrip";
   const tgSecretHash = hashTelegramWebhookSecret(tgWebhookSecret);
+  const tgAcknowledgedQueries: string[] = [];
+  const tgScheduledWork: Promise<void>[] = [];
 
   const tgWebhookDeps: any = {
     connectionRepository: {
@@ -1576,7 +1797,7 @@ async function run(): Promise<void> {
         if (hash === tgSecretHash) {
           return {
             id: "conn_tg_1",
-            businessId: harnessTg.business.id,
+            businessId: tgHarness.business.id,
             branchId: null,
             botTokenRef: "tok_ref_1",
             botExternalId: "6123456789",
@@ -1590,65 +1811,208 @@ async function run(): Promise<void> {
     },
     processInboundMessage: async (params: any) => {
       const turnResult = await receiveInboundMessage(
-        harnessTg.deps as any,
+        tgHarness.deps as any,
         params.engineInput,
         params.identity,
       );
       return { ok: turnResult.ok };
     },
     answerCallbackQuery: async (params: { callbackQueryId: string }) => {
-      tgAcknowledged.push(params.callbackQueryId);
+      tgAcknowledgedQueries.push(params.callbackQueryId);
     },
     schedule: (work: () => Promise<void> | void) => {
       tgScheduledWork.push(Promise.resolve(work()));
     },
-    now: () => new Date("2026-10-25T08:00:00.000Z"),
+    now: () => new Date("2026-10-24T12:05:00.000Z"),
   };
 
-  const tgReq = new Request("http://localhost:3000/api/telegram/webhook", {
+  const tgUpdatePayload = {
+    update_id: 55501,
+    callback_query: {
+      id: "cbq_prod_tg_1",
+      from: { id: 123456789, is_bot: false, first_name: "Ammar" },
+      data: capturedTgCallbackData,
+      message: {
+        message_id: 888123,
+        chat: { id: 123456789, type: "private" },
+        date: 1729857900,
+        text: "المواعيد المتاحة",
+      },
+    },
+  };
+
+  const callsBeforeTgTurn2 = tgHarness.llmStats.callCount;
+  const aptsBeforeTgTurn2 = tgHarness.appointments.length;
+
+  const tgReqTurn2 = new Request("http://localhost:3000/api/telegram/webhook", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Telegram-Bot-Api-Secret-Token": tgWebhookSecret,
     },
-    body: JSON.stringify(tgWebhookUpdate),
+    body: JSON.stringify(tgUpdatePayload),
   });
 
-  const tgResponse = await handleTelegramWebhook(tgWebhookDeps, tgReq);
+  const tgResTurn2 = await handleTelegramWebhook(tgWebhookDeps, tgReqTurn2);
   await Promise.all(tgScheduledWork);
+
+  const tgCreatedApts = tgHarness.appointments.length - aptsBeforeTgTurn2;
+  const tgExtraModelCalls = tgHarness.llmStats.callCount - callsBeforeTgTurn2;
+
   check(
-    "I.1 Telegram handleTelegramWebhook successfully routes callback token through engine and acknowledges query",
-    tgResponse.status === 200 && tgAcknowledged.includes("cbq_tg_1"),
-    `tgResponse: status ${tgResponse.status}, acknowledged: ${tgAcknowledged.join(",")}`,
+    "I.1b Telegram Turn 2: handleTelegramWebhook processes captured wire callback, books 1 appointment, 0 model calls",
+    tgResTurn2.status === 200 &&
+      tgAcknowledgedQueries.includes("cbq_prod_tg_1") &&
+      tgCreatedApts === 1 &&
+      tgExtraModelCalls === 0,
+    `tgStatus: ${tgResTurn2.status}, createdApts: ${tgCreatedApts}, extraCalls: ${tgExtraModelCalls}`,
   );
 
-  // I.2 WhatsApp handleMetaPost composition round-trip
-  // Turn 1 produces slot offer via engine; Turn 2 submits interactive list_reply POST via handleMetaPost
-  const harnessWaRoundTrip = createPlaygroundHarness({
+  // I.1c Telegram ACK failure resilience: processing continues even if answerCallbackQuery fails
+  const tgFailingAckDeps = {
+    ...tgWebhookDeps,
+    answerCallbackQuery: async () => {
+      throw new Error("Telegram API Network Timeout on answerCallbackQuery");
+    },
+  };
+  const tgReqAckFail = new Request(
+    "http://localhost:3000/api/telegram/webhook",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": tgWebhookSecret,
+      },
+      body: JSON.stringify({
+        ...tgUpdatePayload,
+        update_id: 55502,
+        callback_query: {
+          ...tgUpdatePayload.callback_query,
+          id: "cbq_prod_tg_failing",
+        },
+      }),
+    },
+  );
+  const tgResAckFail = await handleTelegramWebhook(
+    tgFailingAckDeps,
+    tgReqAckFail,
+  );
+  check(
+    "I.1c Telegram ACK failure resilience: webhook returns 200 and does not crash when answerCallbackQuery rejects",
+    tgResAckFail.status === 200,
+    `status: ${tgResAckFail.status}`,
+  );
+
+  // I.1d Telegram Replay deduplication: re-submitting same update creates NO additional appointments
+  const tgAptsBeforeReplay = tgHarness.appointments.length;
+  const tgReqReplay = new Request(
+    "http://localhost:3000/api/telegram/webhook",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": tgWebhookSecret,
+      },
+      body: JSON.stringify(tgUpdatePayload),
+    },
+  );
+  await handleTelegramWebhook(tgWebhookDeps, tgReqReplay);
+  const tgAptsAfterReplay = tgHarness.appointments.length;
+  check(
+    "I.1d Telegram Replay: re-delivering update does not create duplicate appointments",
+    tgAptsAfterReplay === tgAptsBeforeReplay,
+    `before: ${tgAptsBeforeReplay}, after: ${tgAptsAfterReplay}`,
+  );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // I.2 WhatsApp Connected Round-Trip:
+  // Turn 1 (createMetaWhatsAppTransport) -> captures wire interactive row ID
+  // Turn 2 (handleMetaPost) -> processes selection, creates 1 appointment, 0 model calls
+  // ───────────────────────────────────────────────────────────────────────────
+  let capturedWaPayload: any = null;
+  const offerPersistedAtSendWa = { value: false };
+  const waHarness = createPlaygroundHarness({
     businessConfig: { name: "عيادة د. سارة" } as any,
     customAi: createTestAi() as any,
   });
-  const turn1WaRoundTrip = await receiveInboundMessage(
-    harnessWaRoundTrip.deps,
+
+  const waTransportDeps: any = {
+    connectionDeps: {
+      whatsappConnectionRepository: {
+        findByIdWithinBusiness: async () => ({
+          id: "conn_wa_1",
+          businessId: waHarness.business.id,
+          branchId: null,
+          externalId: "phone_wa_1",
+          status: "CONNECTED",
+          isActive: true,
+          credentialsRef: "fp:wa:test",
+        }),
+        findByPhone: async () => null,
+        findByExternalId: async () => null,
+      },
+      branchRepository: {
+        findDefaultByBusiness: async () => null,
+        findByIdWithinBusiness: async () => null,
+      },
+    },
+    getEnvVar: () => "secret-wa-token",
+    credentialsResolver: {
+      resolve: async () => ({ ok: true, value: "meta-access-token" }),
+    },
+    fetchImpl: async (_url: string, init: any) => {
+      // Assert matching offer is ALREADY durably persisted in stateStore BEFORE outbound wire dispatch!
+      const stateInStore = waHarness.stateStore.rows.get(
+        waHarness.conversation.id,
+      )?.state as any;
+      if (stateInStore?.offer?.token) {
+        offerPersistedAtSendWa.value = true;
+      }
+      capturedWaPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          messages: [{ id: "wamid.outbound.wire.888" }],
+        }),
+      };
+    },
+    graphHost: META_GRAPH_HOST,
+    defaultApiVersion: META_DEFAULT_API_VERSION,
+  };
+
+  const realWaTransport = createMetaWhatsAppTransport(waTransportDeps);
+  waHarness.deps.transport = realWaTransport;
+
+  // Turn 1: Inbound message via engine
+  const waTurn1 = await receiveInboundMessage(
+    waHarness.deps,
     {
-      to: harnessWaRoundTrip.business.whatsappNumber ?? "+201001111111",
-      from: harnessWaRoundTrip.customer.phone,
+      to: waHarness.business.whatsappNumber ?? "+201001111111",
+      from: waHarness.customer.phone,
       text: "عايز أحجز تنظيف أسنان يوم 2026-10-25",
       receivedAt: "2026-10-24T12:00:00Z",
     },
     {
-      businessId: harnessWaRoundTrip.business.id,
-      branchId: harnessWaRoundTrip.business.defaultBranchId,
+      businessId: waHarness.business.id,
+      branchId: waHarness.business.defaultBranchId,
+      connectionId: "conn_wa_1",
     },
   );
-  const convIdWaRoundTrip =
-    (turn1WaRoundTrip as any).conversationId ??
-    harnessWaRoundTrip.conversation.id;
-  const waOfferRoundTrip = (
-    harnessWaRoundTrip.stateStore.rows.get(convIdWaRoundTrip)?.state as any
-  )?.offer;
-  const slotTokenWa = offerCallbackData({ token: waOfferRoundTrip.token }, "1");
 
+  const capturedWaRowId =
+    capturedWaPayload?.interactive?.action?.sections?.[0]?.rows?.[0]?.id;
+
+  check(
+    "I.2a WhatsApp Turn 1: outbound transport intercepts interactive list and confirms offer persisted at send time",
+    waTurn1.ok === true &&
+      offerPersistedAtSendWa.value === true &&
+      typeof capturedWaRowId === "string" &&
+      capturedWaRowId.startsWith("fp:"),
+    `capturedRowId: ${capturedWaRowId}, offerPersistedAtSend: ${offerPersistedAtSendWa.value}`,
+  );
+
+  // Turn 2: Real handleMetaPost with captured wire row ID
   const testSecretWa = "secret-whatsapp-test-hmac-key-256";
   const waWebhookPayload = {
     object: "whatsapp_business_account",
@@ -1666,14 +2030,14 @@ async function run(): Promise<void> {
               },
               messages: [
                 {
-                  from: harnessWaRoundTrip.customer.phone,
-                  id: "wamid.roundtrip.1",
+                  from: waHarness.customer.phone,
+                  id: "wamid.roundtrip.connected.1",
                   timestamp: "1729857600",
                   type: "interactive",
                   interactive: {
                     type: "list_reply",
                     list_reply: {
-                      id: slotTokenWa,
+                      id: capturedWaRowId,
                       title: "10:00 ص",
                     },
                   },
@@ -1699,19 +2063,20 @@ async function run(): Promise<void> {
     body: waRawBody,
   });
 
-  const callsBeforeWa = harnessWaRoundTrip.llmStats.callCount;
-  const aptsBeforeWa = harnessWaRoundTrip.appointments.length;
+  const callsBeforeWa = waHarness.llmStats.callCount;
+  const aptsBeforeWa = waHarness.appointments.length;
+
   const waResponse = await handleMetaPost(waRequest, {
     appSecret: testSecretWa,
     resolutionDeps: {
       businessRepository: {
-        findById: async () => harnessWaRoundTrip.business,
-        findByWhatsappNumber: async () => harnessWaRoundTrip.business,
+        findById: async () => waHarness.business,
+        findByWhatsappNumber: async () => waHarness.business,
       } as any,
       whatsappConnectionRepository: {
         findByExternalId: async () => ({
           id: "conn_wa_1",
-          businessId: harnessWaRoundTrip.business.id,
+          businessId: waHarness.business.id,
           branchId: null,
           externalId: "phone_wa_1",
         }),
@@ -1721,29 +2086,400 @@ async function run(): Promise<void> {
       branchRepository: {
         findByIdWithinBusiness: async () => null,
         findDefaultByBusiness: async () => null,
-      } as any,
-    },
-    engineDeps: {
-      ...harnessWaRoundTrip.deps,
-      transport: {
-        providerName: "meta-whatsapp",
-        send: async () => ({ delivered: true, provider: "meta-whatsapp" }),
+        listByBusiness: async () => [],
       },
-    } as any,
+    },
+    engineDeps: waHarness.deps as any,
     revalidateFn: () => undefined,
   });
 
   const waResponseBody = (await waResponse.json()) as any;
-  const createdAptsWa = harnessWaRoundTrip.appointments.length - aptsBeforeWa;
-  const extraModelCalls = harnessWaRoundTrip.llmStats.callCount - callsBeforeWa;
+  const createdAptsWa = waHarness.appointments.length - aptsBeforeWa;
+  const extraModelCallsWa = waHarness.llmStats.callCount - callsBeforeWa;
+
   check(
-    "I.2 WhatsApp handleMetaPost processes signed list_reply, matches slot token, and books exactly 1 appointment",
+    "I.2b WhatsApp Turn 2: handleMetaPost processes signed wire row ID, books 1 appointment, 0 model calls",
     waResponse.status === 200 &&
       waResponseBody.success === true &&
       waResponseBody.results?.[0]?.ok === true &&
       createdAptsWa === 1 &&
-      extraModelCalls === 0,
-    `waResponse: status ${waResponse.status}, body: ${JSON.stringify(waResponseBody)}, createdApts: ${createdAptsWa}, extraModelCalls: ${extraModelCalls}`,
+      extraModelCallsWa === 0,
+    `waResponse: status ${waResponse.status}, createdApts: ${createdAptsWa}, extraModelCalls: ${extraModelCallsWa}`,
+  );
+
+  // I.2c WhatsApp Replay deduplication: re-submitting same wamid creates NO additional appointments
+  const aptsBeforeWaReplay = waHarness.appointments.length;
+  const waRequestReplay = new Request(
+    "https://flowpilot.test/api/whatsapp/meta",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-hub-signature-256": `sha256=${waHmac}`,
+      },
+      body: waRawBody,
+    },
+  );
+  await handleMetaPost(waRequestReplay, {
+    appSecret: testSecretWa,
+    resolutionDeps: {
+      businessRepository: {
+        findById: async () => waHarness.business,
+        findByWhatsappNumber: async () => waHarness.business,
+      } as any,
+      whatsappConnectionRepository: {
+        findByExternalId: async () => ({
+          id: "conn_wa_1",
+          businessId: waHarness.business.id,
+          branchId: null,
+          externalId: "phone_wa_1",
+        }),
+        findByPhone: async () => null,
+        findByIdWithinBusiness: async () => null,
+      } as any,
+      branchRepository: {
+        findByIdWithinBusiness: async () => null,
+        findDefaultByBusiness: async () => null,
+        listByBusiness: async () => [],
+      },
+    },
+    engineDeps: waHarness.deps as any,
+    revalidateFn: () => undefined,
+  });
+  const aptsAfterWaReplay = waHarness.appointments.length;
+  check(
+    "I.2c WhatsApp Replay: re-delivering message does not create duplicate appointments",
+    aptsAfterWaReplay === aptsBeforeWaReplay,
+    `before: ${aptsBeforeWaReplay}, after: ${aptsAfterWaReplay}`,
+  );
+
+  // I.3 Negative control: replacing the engine with a no-op makes the round-trip assertions fail
+  const noopAptsBefore = waHarness.appointments.length;
+  const mockNoopProcessInbound = async () => ({ ok: true, duplicate: false });
+  const noopWebhookDeps = {
+    ...tgWebhookDeps,
+    processInboundMessage: mockNoopProcessInbound,
+  };
+  const noopTgReq = new Request("http://localhost:3000/api/telegram/webhook", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": tgWebhookSecret,
+    },
+    body: JSON.stringify({
+      ...tgUpdatePayload,
+      update_id: 55509,
+    }),
+  });
+  await handleTelegramWebhook(noopWebhookDeps, noopTgReq);
+  const noopAptsAfter = waHarness.appointments.length;
+  check(
+    "I.3 Negative control: replacing engine with a no-op creates 0 appointments (proves test validity)",
+    noopAptsAfter === noopAptsBefore,
+    `expected no appointments created by no-op`,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Area J: Contextual Stale-Offer Recovery (Deterministic & Model-Free)
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("\nArea J: Contextual Stale-Offer Recovery");
+
+  // J.1 Stale slot selection with known service + date:
+  // Re-checks availability, returns fresh slot choices, saves new offer, 0 appointments, 0 model calls.
+  const harnessJ1 = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+  const expiredSlotOffer = buildSlotOffer(
+    {
+      businessId: harnessJ1.business.id,
+      conversationId: harnessJ1.conversation.id,
+    },
+    "tok_expired_slot",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+      serviceName: "تنظيف أسنان",
+      serviceSource: "CUSTOMER",
+      date: "2026-10-25",
+      options: [
+        {
+          providerId: PLAYGROUND_IDS.PROV_1,
+          displayName: "د. سارة عادل",
+          startAt: "2026-10-25T10:00",
+          endAt: "2026-10-25T10:30",
+        },
+      ],
+    },
+    // Created 24 hours ago (exceeds TTL)
+    new Date("2026-10-23T10:00:00.000Z"),
+  );
+  const initialJ1State: ConversationState = {
+    ...emptyConversationState(),
+    offer: expiredSlotOffer,
+    serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+    selectedService: "تنظيف أسنان",
+    selectedDate: "2026-10-25",
+    bookingStage: "AVAILABILITY_RESOLVED",
+    knownFacts: {
+      service: "تنظيف أسنان",
+      date: "2026-10-25",
+    },
+    missingFacts: [],
+  };
+  await harnessJ1.stateStore.save(
+    harnessJ1.business.id,
+    harnessJ1.conversation.id,
+    null,
+    dehydrateConversationState(initialJ1State),
+  );
+  harnessJ1.stateStore.rows.get(harnessJ1.conversation.id)!.updatedAt =
+    new Date("2026-10-24T11:00:00.000Z");
+
+  const j1CallsBefore = harnessJ1.llmStats.callCount;
+  const j1AptsBefore = harnessJ1.appointments.length;
+  const j1Turn = await receiveInboundMessage(
+    harnessJ1.deps,
+    {
+      to: harnessJ1.business.whatsappNumber ?? "+201001111111",
+      from: harnessJ1.customer.phone,
+      text: offerCallbackData(expiredSlotOffer!, "1"),
+      receivedAt: "2026-10-24T12:00:00Z",
+    },
+    {
+      businessId: harnessJ1.business.id,
+      branchId: harnessJ1.business.defaultBranchId,
+    },
+  );
+
+  const j1StateAfter = harnessJ1.stateStore.rows.get(
+    (j1Turn as any).conversationId ?? harnessJ1.conversation.id,
+  )?.state as any;
+  const j1CallsAfter = harnessJ1.llmStats.callCount - j1CallsBefore;
+  const j1AptsAfter = harnessJ1.appointments.length - j1AptsBefore;
+
+  check(
+    "J.1 Stale slot selection with known service + date: presents fresh slot choices, saves new offer, 0 model calls, 0 appointments",
+    j1Turn.ok === true &&
+      j1AptsAfter === 0 &&
+      j1CallsAfter === 0 &&
+      j1StateAfter?.offer?.token !== expiredSlotOffer?.token &&
+      j1StateAfter?.offer?.kind === "SLOT",
+    `aptsAfter: ${j1AptsAfter}, callsAfter: ${j1CallsAfter}, newOfferKind: ${j1StateAfter?.offer?.kind}, tokenChanged: ${j1StateAfter?.offer?.token !== expiredSlotOffer?.token}`,
+  );
+
+  // J.2 Stale date selection with known service:
+  // Re-checks upcoming dates, presents fresh date choices, saves new date offer, 0 appointments, 0 model calls.
+  const harnessJ2 = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+  const expiredDateOffer = buildDateOffer(
+    {
+      businessId: harnessJ2.business.id,
+      conversationId: harnessJ2.conversation.id,
+    },
+    "tok_expired_date",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+      serviceName: "تنظيف أسنان",
+      providerId: null,
+      dates: [
+        {
+          date: "2026-10-25",
+          label: "الأحد 25 أكتوبر",
+        },
+      ],
+    },
+    new Date("2026-10-23T10:00:00.000Z"),
+  );
+  const initialJ2State: ConversationState = {
+    ...emptyConversationState(),
+    offer: expiredDateOffer,
+    serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+    selectedService: "تنظيف أسنان",
+    bookingStage: "AVAILABILITY_RESOLVED",
+    knownFacts: {
+      service: "تنظيف أسنان",
+    },
+    missingFacts: ["date"],
+  };
+  await harnessJ2.stateStore.save(
+    harnessJ2.business.id,
+    harnessJ2.conversation.id,
+    null,
+    dehydrateConversationState(initialJ2State),
+  );
+  harnessJ2.stateStore.rows.get(harnessJ2.conversation.id)!.updatedAt =
+    new Date("2026-10-24T11:00:00.000Z");
+
+  const j2CallsBefore = harnessJ2.llmStats.callCount;
+  const j2AptsBefore = harnessJ2.appointments.length;
+  const j2Turn = await receiveInboundMessage(
+    harnessJ2.deps,
+    {
+      to: harnessJ2.business.whatsappNumber ?? "+201001111111",
+      from: harnessJ2.customer.phone,
+      text: offerCallbackData(expiredDateOffer!, "1"),
+      receivedAt: "2026-10-24T12:00:00Z",
+    },
+    {
+      businessId: harnessJ2.business.id,
+      branchId: harnessJ2.business.defaultBranchId,
+    },
+  );
+
+  const j2StateAfter = harnessJ2.stateStore.rows.get(
+    (j2Turn as any).conversationId ?? harnessJ2.conversation.id,
+  )?.state as any;
+  const j2CallsAfter = harnessJ2.llmStats.callCount - j2CallsBefore;
+  const j2AptsAfter = harnessJ2.appointments.length - j2AptsBefore;
+
+  check(
+    "J.2 Stale date selection with known service: presents fresh date choices, saves new offer, 0 model calls, 0 appointments",
+    j2Turn.ok === true &&
+      j2AptsAfter === 0 &&
+      j2CallsAfter === 0 &&
+      j2StateAfter?.offer?.token !== expiredDateOffer?.token &&
+      j2StateAfter?.offer?.kind === "DATE",
+    `aptsAfter: ${j2AptsAfter}, callsAfter: ${j2CallsAfter}, newOfferKind: ${j2StateAfter?.offer?.kind}`,
+  );
+
+  // J.3 Preserve newer active offer when customer clicks a previous/stale offer button:
+  const harnessJ3 = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+  const olderStaleOffer = buildSlotOffer(
+    {
+      businessId: harnessJ3.business.id,
+      conversationId: harnessJ3.conversation.id,
+    },
+    "tok_older_offer",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+      serviceName: "تنظيف أسنان",
+      serviceSource: "CUSTOMER",
+      date: "2026-10-25",
+      options: [
+        {
+          providerId: PLAYGROUND_IDS.PROV_1,
+          displayName: "د. سارة عادل",
+          startAt: "2026-10-25T10:00",
+          endAt: "2026-10-25T10:30",
+        },
+      ],
+    },
+    new Date("2026-10-24T10:00:00.000Z"),
+  );
+  const activeNewerOffer = buildSlotOffer(
+    {
+      businessId: harnessJ3.business.id,
+      conversationId: harnessJ3.conversation.id,
+    },
+    "tok_newer_active_offer",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+      serviceName: "تنظيف أسنان",
+      serviceSource: "CUSTOMER",
+      date: "2026-10-25",
+      options: [
+        {
+          providerId: PLAYGROUND_IDS.PROV_1,
+          displayName: "د. سارة عادل",
+          startAt: "2026-10-25T12:00",
+          endAt: "2026-10-25T12:30",
+        },
+      ],
+    },
+    new Date("2026-10-24T12:00:00.000Z"),
+  );
+  const initialJ3State: ConversationState = {
+    ...emptyConversationState(),
+    offer: activeNewerOffer,
+    serviceId: PLAYGROUND_IDS.SERV_CLEAN,
+    selectedService: "تنظيف أسنان",
+    selectedDate: "2026-10-25",
+    bookingStage: "AVAILABILITY_RESOLVED",
+    knownFacts: {
+      service: "تنظيف أسنان",
+      date: "2026-10-25",
+    },
+    missingFacts: [],
+  };
+  await harnessJ3.stateStore.save(
+    harnessJ3.business.id,
+    harnessJ3.conversation.id,
+    null,
+    dehydrateConversationState(initialJ3State),
+  );
+  harnessJ3.stateStore.rows.get(harnessJ3.conversation.id)!.updatedAt =
+    new Date("2026-10-24T12:00:00.000Z");
+
+  const j3CallsBefore = harnessJ3.llmStats.callCount;
+  const j3Turn = await receiveInboundMessage(
+    harnessJ3.deps,
+    {
+      to: harnessJ3.business.whatsappNumber ?? "+201001111111",
+      from: harnessJ3.customer.phone,
+      text: offerCallbackData(olderStaleOffer!, "1"), // Customer clicked old button!
+      receivedAt: "2026-10-24T12:05:00Z",
+    },
+    {
+      businessId: harnessJ3.business.id,
+      branchId: harnessJ3.business.defaultBranchId,
+    },
+  );
+
+  const j3StateAfter = harnessJ3.stateStore.rows.get(
+    (j3Turn as any).conversationId ?? harnessJ3.conversation.id,
+  )?.state as any;
+  const j3CallsAfter = harnessJ3.llmStats.callCount - j3CallsBefore;
+
+  check(
+    "J.3 Newer active offer is preserved when stale button is clicked, 0 model calls",
+    j3Turn.ok === true &&
+      j3CallsAfter === 0 &&
+      j3StateAfter?.offer?.token === activeNewerOffer?.token,
+    `retainedToken: ${j3StateAfter?.offer?.token}, expected: ${activeNewerOffer?.token}`,
+  );
+
+  // J.4 Context insufficient (missing service): asks for missing facts without model call or crash
+  const harnessJ4 = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+  const initialJ4State: ConversationState = {
+    ...emptyConversationState(),
+    offer: null,
+    bookingStage: "NOT_APPLICABLE",
+    knownFacts: {},
+    missingFacts: ["service"],
+  };
+  await harnessJ4.stateStore.save(
+    harnessJ4.business.id,
+    harnessJ4.conversation.id,
+    null,
+    dehydrateConversationState(initialJ4State),
+  );
+  const j4CallsBefore = harnessJ4.llmStats.callCount;
+  const j4Turn = await receiveInboundMessage(
+    harnessJ4.deps,
+    {
+      to: harnessJ4.business.whatsappNumber ?? "+201001111111",
+      from: harnessJ4.customer.phone,
+      text: "offer:tok_completely_unknown:1",
+      receivedAt: "2026-10-24T12:00:00Z",
+    },
+    {
+      businessId: harnessJ4.business.id,
+      branchId: harnessJ4.business.defaultBranchId,
+    },
+  );
+  const j4CallsAfter = harnessJ4.llmStats.callCount - j4CallsBefore;
+  check(
+    "J.4 Context insufficient: asks for service fact without model calls or crash",
+    j4Turn.ok === true && j4CallsAfter === 0,
+    `callsAfter: ${j4CallsAfter}`,
   );
 
   // ═══════════════════════════════════════════════════════════════════════════

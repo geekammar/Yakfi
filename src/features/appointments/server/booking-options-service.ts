@@ -203,8 +203,15 @@ export async function resolveBookingOptions(
     };
   }
 
-  const { serviceId, branchId, providerId, date, timePreference, limit } =
-    parsed.data;
+  const {
+    serviceId,
+    branchId,
+    providerId,
+    date,
+    timePreference,
+    minStartTime,
+    limit,
+  } = parsed.data;
   const preference: BookingOptionsData["preference"] = providerId
     ? "PROVIDER"
     : "ANY";
@@ -254,6 +261,8 @@ export async function resolveBookingOptions(
       timezone: business.timezone,
       preference,
       options: [],
+      totalEligibleCount: 0,
+      isCapped: false,
     },
     reason,
   });
@@ -362,7 +371,13 @@ export async function resolveBookingOptions(
     });
   }
 
+  if (minStartTime) {
+    candidatePairs = candidatePairs.filter((p) => p.startTime > minStartTime);
+  }
+
+  const totalEligibleCount = candidatePairs.length;
   const maxOptions = limit ?? MAX_BOOKING_OPTIONS;
+  const isCapped = totalEligibleCount > maxOptions;
   const ranked = rankBookingOptions(candidatePairs, maxOptions);
   const options: BookingOption[] = ranked.map((pair) => ({
     providerId: pair.providerId,
@@ -375,7 +390,9 @@ export async function resolveBookingOptions(
     options.length > 0
       ? null
       : pairs.length > 0 && candidatePairs.length === 0
-        ? "NO_PERIOD_SLOTS"
+        ? timePreference
+          ? "NO_PERIOD_SLOTS"
+          : "FULLY_BOOKED"
         : "FULLY_BOOKED";
 
   return {
@@ -387,6 +404,8 @@ export async function resolveBookingOptions(
       timezone: business.timezone,
       preference,
       options,
+      totalEligibleCount,
+      isCapped,
     },
     reason,
   };

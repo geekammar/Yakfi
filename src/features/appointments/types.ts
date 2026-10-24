@@ -453,6 +453,10 @@ export type BookingOptionsData = {
   preference: BookingOptionsPreference;
   /** Ranked useful options, ascending by start time. */
   options: BookingOption[];
+  /** Total count of eligible options prior to max/limit truncation. */
+  totalEligibleCount?: number;
+  /** Whether the returned options were capped by the requested limit. */
+  isCapped?: boolean;
 };
 
 export type BookingOptionsErrorCode =
