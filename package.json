@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.70.2",
+  "version": "0.70.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -33,6 +33,7 @@
     "check:telegram-onboarding": "tsx scripts/check-telegram-onboarding.ts",
     "check:telegram-ux001": "tsx scripts/check-telegram-ux001.ts",
     "check:telegram-acceptance": "tsx scripts/check-telegram-acceptance-matrix.ts",
+    "telegram:repair-webhook": "tsx scripts/repair-telegram-webhook.ts",
     "check:channel-neutral-choices": "tsx scripts/check-channel-neutral-choices.ts",
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
     "check:meta-embedded-signup": "tsx scripts/check-meta-embedded-signup.ts",
