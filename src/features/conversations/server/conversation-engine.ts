@@ -1955,7 +1955,6 @@ async function presentDateChoices(
         ...(input.timePreference
           ? { timePreference: input.timePreference }
           : {}),
-        ...(input.providerId ? { provider: input.providerId } : {}),
       },
       serviceId: input.serviceId,
       selectedService: input.serviceName,
@@ -2194,7 +2193,6 @@ async function presentSlotChoices(
               date: input.date,
               service: input.serviceName,
               ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
-              ...(input.providerId ? { provider: input.providerId } : {}),
             },
           };
           const ok = await turnSession.commit();
@@ -4183,9 +4181,6 @@ async function runInboundTurn(
             service: offerReply.serviceName,
             ...(offerReply.timePreference
               ? { timePreference: offerReply.timePreference }
-              : {}),
-            ...(offerReply.providerId
-              ? { provider: offerReply.providerId }
               : {}),
           },
           serviceId: offerReply.serviceId,
