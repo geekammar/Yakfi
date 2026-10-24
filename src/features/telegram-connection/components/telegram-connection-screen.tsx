@@ -217,7 +217,7 @@ export function TelegramConnectionScreen({
             hasCallbackSubscription: true,
             allowedUpdates: res.allowedUpdates,
             safeSummary:
-              "الاتصال سليم واشتراك استقبال الأزرار مفعل ومطابق للمواصفات.",
+              "إعداد اشتراك الأزرار صحيح؛ يلزم اختبار ضغطة فعلية للتأكد من وصولها.",
           });
         }
         await refresh();
@@ -392,7 +392,7 @@ export function TelegramConnectionScreen({
             )}
             <h3 className="font-semibold">
               {diagnostic.status === "ALREADY_CORRECT"
-                ? "نتيجة الفحص: الاتصال واستقبال الأزرار سليم"
+                ? "نتيجة الفحص: إعداد اشتراك الأزرار صحيح"
                 : "نتيجة الفحص: استقبال الأزرار غير مفعل"}
             </h3>
           </div>

@@ -99,6 +99,7 @@ jobs:
           pnpm check:core-04a
           pnpm check:core-04b
           pnpm check:telegram
+          pnpm check:telegram-onboarding
           pnpm check:telegram-repair-workflow
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects

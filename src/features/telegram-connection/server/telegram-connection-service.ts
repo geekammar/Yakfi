@@ -553,7 +553,7 @@ export async function checkTelegramConnection(
         pendingUpdateCount: outcome.pendingUpdateCount,
         checkedAt: deps.now().toISOString(),
         safeSummary:
-          "الاتصال سليم واشتراك استقبال الأزرار مفعل ومطابق للمواصفات.",
+          "إعداد اشتراك الأزرار صحيح؛ يلزم اختبار ضغطة فعلية للتأكد من وصولها.",
       },
     };
   }
@@ -688,7 +688,8 @@ export async function repairTelegramConnection(
       botUsername: outcome.botUsername ?? null,
       webhookUrl: outcome.webhookUrl,
       allowedUpdates: outcome.allowedUpdates,
-      message: "اشتراك استقبال الأزرار سليم بالفعل ومطابق للمواصفات.",
+      message:
+        "إعداد اشتراك الأزرار صحيح؛ يلزم اختبار ضغطة فعلية للتأكد من وصولها.",
     };
   }
 
