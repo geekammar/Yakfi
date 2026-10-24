@@ -133,11 +133,6 @@ import {
   type ChannelChoicePresentation,
 } from "@/features/conversations/server/channel-choice";
 import {
-  formatArabicDate,
-  formatBookingOptionsCopy,
-  sampleRepresentativeSlots,
-} from "@/features/conversations/server/presentation-formatters";
-import {
   CONTINUE_DOMAIN_INVITE,
   clarificationForBookingReason,
   clarificationForInterruption,
@@ -178,6 +173,11 @@ import {
   type HandoffCause,
 } from "@/features/conversations/server/handoff-cause";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
+import {
+  formatArabicDate,
+  formatBookingOptionsCopy,
+  sampleRepresentativeSlots,
+} from "@/features/conversations/server/presentation-formatters";
 import {
   extractProviderPreferenceDetailed,
   extractTimeOfDayPreference,
@@ -1586,7 +1586,9 @@ async function resolveUpcomingBookingDates(
           ...(scope.branchId ? { branchId: scope.branchId } : {}),
           date: iso,
           ...(input.providerId ? { providerId: input.providerId } : {}),
-          ...(input.timePreference ? { timePreference: input.timePreference } : {}),
+          ...(input.timePreference
+            ? { timePreference: input.timePreference }
+            : {}),
           limit: 4,
         },
       );
@@ -2042,7 +2044,10 @@ async function presentSlotChoices(
       }
 
       if (bookableOptions.length > 0) {
-        const representativeOptions = sampleRepresentativeSlots(bookableOptions, 4);
+        const representativeOptions = sampleRepresentativeSlots(
+          bookableOptions,
+          4,
+        );
         const slotOffer: SlotOffer | null = buildSlotOffer(
           {
             businessId: scope.business.id,
@@ -6337,7 +6342,10 @@ async function runInboundTurn(
         };
       }
 
-      const representativeOptions = sampleRepresentativeSlots(bookableOptions, 4);
+      const representativeOptions = sampleRepresentativeSlots(
+        bookableOptions,
+        4,
+      );
 
       let slotOffer: SlotOffer | null = null;
       if (turnSession.enabled) {

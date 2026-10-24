@@ -105,8 +105,7 @@ export type MetaInteractiveListPayload = {
 };
 
 export type MetaInteractivePayload =
-  | MetaInteractiveReplyButtonPayload
-  | MetaInteractiveListPayload;
+  MetaInteractiveReplyButtonPayload | MetaInteractiveListPayload;
 
 /**
  * Build an offer-bound Meta interactive payload from a ChannelChoicePresentation.
@@ -148,10 +147,7 @@ export function renderMetaInteractivePayload(
 
   if (canUseButtons) {
     const buttons = allItems.map((item) => {
-      const id = offerCallbackData(
-        { token: presentation.offerToken },
-        item.id,
-      );
+      const id = offerCallbackData({ token: presentation.offerToken }, item.id);
       if (
         Array.from(id).length >
         META_INTERACTIVE_LIMITS.REPLY_BUTTON_ID_MAX_LENGTH
@@ -199,7 +195,9 @@ export function renderMetaInteractivePayload(
 
   function mapToRow(item: ChannelChoiceItem) {
     const id = offerCallbackData({ token: presentation.offerToken }, item.id);
-    if (Array.from(id).length > META_INTERACTIVE_LIMITS.LIST_ROW_ID_MAX_LENGTH) {
+    if (
+      Array.from(id).length > META_INTERACTIVE_LIMITS.LIST_ROW_ID_MAX_LENGTH
+    ) {
       throw new TransportError(
         "MALFORMED_PROVIDER_PAYLOAD",
         `معرّف الخيار يتجاوز الحد الأقصى لقوائم واتساب (${META_INTERACTIVE_LIMITS.LIST_ROW_ID_MAX_LENGTH})`,
@@ -210,7 +208,9 @@ export function renderMetaInteractivePayload(
     let title: string;
     let description: string | undefined;
 
-    if (labelChars.length <= META_INTERACTIVE_LIMITS.LIST_ROW_TITLE_MAX_LENGTH) {
+    if (
+      labelChars.length <= META_INTERACTIVE_LIMITS.LIST_ROW_TITLE_MAX_LENGTH
+    ) {
       title = item.label.trim();
     } else {
       title = safeTruncateGraphemes(

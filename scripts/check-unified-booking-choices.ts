@@ -38,9 +38,10 @@ import {
   sampleRepresentativeSlots,
 } from "../src/features/conversations/server/presentation-formatters";
 import { EnvCredentialsResolver } from "../src/server/credentials/credentials-resolver";
+import { renderTelegramInlineKeyboard } from "../src/server/integrations/telegram/telegram-presentation";
 import {
-  META_GRAPH_HOST,
   META_DEFAULT_API_VERSION,
+  META_GRAPH_HOST,
   createMetaWhatsAppTransport,
 } from "../src/server/integrations/whatsapp/meta-client";
 import {
@@ -48,7 +49,6 @@ import {
   safeTruncateGraphemes,
 } from "../src/server/integrations/whatsapp/meta-presentation";
 import { parseMetaWebhookPayload } from "../src/server/integrations/whatsapp/meta-webhook";
-import { renderTelegramInlineKeyboard } from "../src/server/integrations/telegram/telegram-presentation";
 
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
@@ -505,7 +505,8 @@ async function run(): Promise<void> {
   const truncated = safeTruncateGraphemes(veryLongTitle, 24);
   check(
     "B.7a safeTruncateGraphemes truncates string to max 24 chars without breaking Arabic characters",
-    Array.from(truncated).length === 24 && truncated.startsWith("جلسة ليزر كربوني"),
+    Array.from(truncated).length === 24 &&
+      truncated.startsWith("جلسة ليزر كربوني"),
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -520,10 +521,13 @@ async function run(): Promise<void> {
       headers: init?.headers,
       body: init?.body ? JSON.parse(String(init.body)) : null,
     });
-    return new Response(JSON.stringify({ messages: [{ id: "wamid.TEST-001" }] }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ messages: [{ id: "wamid.TEST-001" }] }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   };
 
   const fakeConnectionRepo = {
@@ -545,7 +549,11 @@ async function run(): Promise<void> {
     connectionDeps: {
       whatsappConnectionRepository: fakeConnectionRepo as any,
       businessRepository: {
-        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findById: async () => ({
+          id: "biz_1",
+          name: "منشأة تجريبية",
+          isActive: true,
+        }),
         findByWhatsappNumber: async () => null,
       } as any,
       branchRepository: {
@@ -582,11 +590,13 @@ async function run(): Promise<void> {
   check(
     "C.1b Outbound Graph API URL matches expected version and phone_number_id",
     sentRequests.length === 1 &&
-      sentRequests[0]!.url === "https://graph.facebook.com/v21.0/10987654321/messages",
+      sentRequests[0]!.url ===
+        "https://graph.facebook.com/v21.0/10987654321/messages",
   );
   check(
     "C.1c Outbound Graph API headers carry Bearer token from credentialsResolver",
-    sentRequests[0]!.headers["Authorization"] === "Bearer secret-meta-access-token",
+    sentRequests[0]!.headers["Authorization"] ===
+      "Bearer secret-meta-access-token",
   );
   check(
     "C.1d Outbound Graph API payload is interactive list containing exact slot IDs",
@@ -604,9 +614,8 @@ async function run(): Promise<void> {
   const createTestAi = () => ({
     providerName: "PLAYGROUND_AI",
     respond: async (req: any) => {
-      const { deterministicConversationAi } = await import(
-        "../src/features/conversations/server/conversation-ai"
-      );
+      const { deterministicConversationAi } =
+        await import("../src/features/conversations/server/conversation-ai");
       const res = await deterministicConversationAi.respond(req);
       return {
         ...res,
@@ -656,13 +665,14 @@ async function run(): Promise<void> {
   );
 
   const convId = (turn1Result as any).conversationId ?? harness.conversation.id;
-  const activeOffer = (
-    harness.stateStore.rows.get(convId)?.state as any
-  )?.offer;
+  const activeOffer = (harness.stateStore.rows.get(convId)?.state as any)
+    ?.offer;
 
   check(
     "D.1b Active offer is persisted before choices are returned",
-    activeOffer && activeOffer.status === "ACTIVE" && activeOffer.kind === "SLOT",
+    activeOffer &&
+      activeOffer.status === "ACTIVE" &&
+      activeOffer.kind === "SLOT",
   );
 
   const slot1CallbackId = offerCallbackData({ token: activeOffer.token }, "1");
@@ -718,9 +728,8 @@ async function run(): Promise<void> {
     },
   );
   const convIdWa = (turn1Wa as any).conversationId ?? harnessWa.conversation.id;
-  const waOffer = (
-    harnessWa.stateStore.rows.get(convIdWa)?.state as any
-  )?.offer;
+  const waOffer = (harnessWa.stateStore.rows.get(convIdWa)?.state as any)
+    ?.offer;
 
   const waInteractivePayload = {
     object: "whatsapp_business_account",
@@ -952,7 +961,11 @@ async function run(): Promise<void> {
     connectionDeps: {
       whatsappConnectionRepository: fakeConnectionRepo as any,
       businessRepository: {
-        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findById: async () => ({
+          id: "biz_1",
+          name: "منشأة تجريبية",
+          isActive: true,
+        }),
         findByWhatsappNumber: async () => null,
       } as any,
       branchRepository: {

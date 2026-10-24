@@ -50,7 +50,9 @@ export const ARABIC_MONTHS = [
  */
 export function formatArabicTime12h(timeStr: string): string {
   if (!timeStr) return "";
-  const rawTime = timeStr.includes("T") ? timeStr.slice(11, 16) : timeStr.slice(0, 5);
+  const rawTime = timeStr.includes("T")
+    ? timeStr.slice(11, 16)
+    : timeStr.slice(0, 5);
   const parts = rawTime.split(":");
   if (parts.length < 2) return rawTime;
 
@@ -206,7 +208,9 @@ export function formatBookingOptionsCopy(params: {
   const { serviceName, date, options, followUpRequestId, isMoreTimes } = params;
   const singleProvider = areSlotsSingleProvider(options);
   const providerName =
-    singleProvider && options[0]?.displayName ? options[0].displayName.trim() : null;
+    singleProvider && options[0]?.displayName
+      ? options[0].displayName.trim()
+      : null;
 
   const displayDate = params.formattedDate ?? date;
   const providerMention = providerName ? ` مع ${providerName}` : "";
@@ -231,7 +235,9 @@ export function formatBookingOptionsCopy(params: {
     return `${opt.index}. ${opt.displayName} — ${timeSpan}`;
   });
 
-  const followUpTag = followUpRequestId ? `\n[متابعة: ${followUpRequestId}]` : "";
+  const followUpTag = followUpRequestId
+    ? `\n[متابعة: ${followUpRequestId}]`
+    : "";
   const instructions = "يرجى اختيار الموعد المناسب لإتمام الحجز.";
 
   return `${header}\n${lines.join("\n")}${followUpTag}\n${instructions}`;
