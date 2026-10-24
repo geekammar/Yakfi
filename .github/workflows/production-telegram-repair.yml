@@ -1,0 +1,137 @@
+name: Production Telegram Webhook Maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      business_id:
+        description: "Business UUID owning the bot connection"
+        required: true
+        type: string
+      connection_id:
+        description: "Telegram Connection UUID"
+        required: true
+        type: string
+      expected_url:
+        description: "Expected customer webhook URL"
+        required: false
+        default: "https://flowpilot-prod.vercel.app/api/telegram/webhook"
+        type: string
+      mode:
+        description: "Execution mode"
+        required: true
+        default: "check"
+        type: choice
+        options:
+          - "check"
+          - "apply"
+          - "apply-reconcile"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-telegram-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Run Telegram webhook repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: Production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Record invocation metadata
+        shell: bash
+        run: |
+          {
+            echo "## Production Telegram Webhook Maintenance"
+            echo ""
+            echo "- **Business ID:** \`${{ inputs.business_id }}\`"
+            echo "- **Connection ID:** \`${{ inputs.connection_id }}\`"
+            echo "- **Expected URL:** \`${{ inputs.expected_url }}\`"
+            echo "- **Mode:** \`${{ inputs.mode }}\`"
+            echo "- **Commit:** \`$(git rev-parse HEAD)\`"
+            echo "- **Started:** $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Validate inputs and execute repair CLI
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          BUSINESS_ID: ${{ inputs.business_id }}
+          CONNECTION_ID: ${{ inputs.connection_id }}
+          EXPECTED_URL: ${{ inputs.expected_url }}
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::PRODUCTION_DATABASE_URL secret is not configured or unavailable."
+            exit 1
+          fi
+
+          if [ -z "${CREDENTIAL_MASTER_KEY:-}" ]; then
+            echo "::warning::CREDENTIAL_MASTER_KEY secret is not configured in repository/environment secrets. If this connection uses RUNTIME credentials, key resolution will fail closed."
+          fi
+
+          # Safe input format validation
+          UUID_REGEX="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          if [[ ! "$BUSINESS_ID" =~ $UUID_REGEX ]]; then
+            echo "::error::Invalid business_id format. Must be a valid UUID."
+            exit 1
+          fi
+          if [[ ! "$CONNECTION_ID" =~ $UUID_REGEX ]]; then
+            echo "::error::Invalid connection_id format. Must be a valid UUID."
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_URL" =~ ^https:// ]]; then
+            echo "::error::Invalid expected_url. Must be a valid HTTPS URL."
+            exit 1
+          fi
+
+          CLI_ARGS=(
+            "--business-id" "$BUSINESS_ID"
+            "--connection-id" "$CONNECTION_ID"
+            "--expected-url" "$EXPECTED_URL"
+          )
+
+          case "$MODE" in
+            "check")
+              echo "Executing in read-only check mode..."
+              ;;
+            "apply")
+              echo "Executing in apply mode (subscribes to callback_query and rotates secret)..."
+              CLI_ARGS+=("--apply")
+              ;;
+            "apply-reconcile")
+              echo "Executing in apply + reconcile mode..."
+              CLI_ARGS+=("--apply" "--reconcile-secret")
+              ;;
+            *)
+              echo "::error::Unsupported mode: $MODE"
+              exit 1
+              ;;
+          esac
+
+          pnpm telegram:repair-webhook "${CLI_ARGS[@]}"
