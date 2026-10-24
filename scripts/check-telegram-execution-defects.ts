@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { spawnSync } from "node:child_process";
+
 import { offerCallbackData } from "@/features/conversations/server/channel-choice";
 import * as engine from "@/features/conversations/server/conversation-engine";
 import { emptyConversationState } from "@/features/conversations/server/conversation-state";
+import { createPrismaProxy } from "@/server/db";
 import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
-import { lookupTelegramBotTarget } from "@/server/integrations/telegram/telegram-repair";
 import {
   hashTelegramWebhookSecret,
   parseTelegramUpdate,
@@ -56,9 +58,15 @@ import {
  *    - Preserves originalMessageDate.
  *    - Expired offer safely rejected using receipt time.
  *
- * 6. Maintenance bootstrap & environment responsibility:
- *    - Lookup and candidate resolution reach repository seam with auth variables absent.
- *    - No real database call required.
+ * 6. Database client lifetime & development reuse:
+ *    - Production database-client proxy preserves lazy singleton lifetime.
+ *    - Delegates, $disconnect, and $transaction address that same instance.
+ *    - Retains development hot-reload convention without making real DB connections.
+ *
+ * 7. Fresh child-process maintenance bootstrap & CLI invocation:
+ *    - Removes auth environment variables before loading maintenance paths.
+ *    - Clean child process executes CLI entry point with zero auth variables.
+ *    - Controlled repository seam resolves exact match without network or DB calls.
  */
 
 type Check = { label: string; pass: boolean; details?: string };
@@ -1020,69 +1028,286 @@ async function main(): Promise<void> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 6: Maintenance bootstrap without web auth environment variables
+  // TEST 6: Production database-client lifetime and development reuse
   // ──────────────────────────────────────────────────────────────────────────
   {
-    // Save current auth variables and delete them
-    const savedSecret = process.env.BETTER_AUTH_SECRET;
-    const savedUrl = process.env.BETTER_AUTH_URL;
-    const savedAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+    const savedNodeEnv = process.env.NODE_ENV;
+    try {
+      // 6a. Production mode: singleton client across accesses and method bindings
+      (process.env as any).NODE_ENV = "production";
 
-    delete process.env.BETTER_AUTH_SECRET;
-    delete process.env.BETTER_AUTH_URL;
-    delete process.env.NEXT_PUBLIC_APP_URL;
+      let prodFactoryCalls = 0;
+      const createdProdInstances: any[] = [];
+      const prodFactory = () => {
+        prodFactoryCalls++;
+        const id = `prod-prisma-instance-${prodFactoryCalls}`;
+        const instance = {
+          id,
+          user: { name: "user-delegate" },
+          appointment: { name: "appointment-delegate" },
+          $disconnect: async function (this: any) {
+            return { ok: true, instanceId: this?.id };
+          },
+          $transaction: async function (this: any, callback: any) {
+            return callback(this);
+          },
+        };
+        createdProdInstances.push(instance);
+        return instance as any;
+      };
 
-    let reachedRepositorySeam = false;
-    const mockRepo = {
-      findCandidatesByBotIdentifier: async (params: {
-        botUsername?: string;
-        botExternalId?: string;
-      }) => {
-        reachedRepositorySeam = true;
-        if (params.botUsername === "Drafnanafnanbot") {
-          return [
-            {
-              connectionId: "conn-reconcile-1",
-              businessId: B_ID,
-              botUsername: "Drafnanafnanbot",
-              botExternalId: BOT_EXTERNAL_ID,
-              status: "ACTIVE",
-              isActive: true,
-            },
-          ];
-        }
-        return [];
+      const prodDb = createPrismaProxy(prodFactory);
+
+      // Invariant 1: Proxy creation / import alone creates no client
+      const zeroCallsAtInit = prodFactoryCalls === 0;
+
+      // Invariant 2: Repeated accesses to different delegates create exactly one client
+      const userDelegate1 = prodDb.user;
+      const oneCallAfterFirstAccess = prodFactoryCalls === 1;
+
+      const apptDelegate = prodDb.appointment;
+      const stillOneCallAfterSecondAccess =
+        prodFactoryCalls === 1 && apptDelegate != null;
+
+      const userDelegate2 = prodDb.user;
+      const stillOneCallAfterThirdAccess = prodFactoryCalls === 1;
+      const delegatesIdentical = userDelegate1 === userDelegate2;
+
+      // Invariant 3: Repeated method access / calls reuse the same client
+      const disconnectFn = prodDb.$disconnect;
+      const disconnectResult: any = await prodDb.$disconnect();
+      const stillOneCallAfterDisconnect =
+        prodFactoryCalls === 1 && typeof disconnectFn === "function";
+      const disconnectAddressedSameInstance =
+        disconnectResult?.instanceId === createdProdInstances[0]?.id;
+
+      // Invariant 4: $transaction addresses the same instance
+      let txInstanceId = "";
+      await prodDb.$transaction(async (tx: any) => {
+        txInstanceId = tx?.id;
+      });
+      const stillOneCallAfterTransaction = prodFactoryCalls === 1;
+      const transactionAddressedSameInstance =
+        txInstanceId === createdProdInstances[0]?.id;
+
+      const prodModePassed =
+        zeroCallsAtInit &&
+        oneCallAfterFirstAccess &&
+        stillOneCallAfterSecondAccess &&
+        stillOneCallAfterThirdAccess &&
+        delegatesIdentical &&
+        stillOneCallAfterDisconnect &&
+        disconnectAddressedSameInstance &&
+        stillOneCallAfterTransaction &&
+        transactionAddressedSameInstance;
+
+      // 6b. Development mode: global convention reuse across hot-reload / new proxy instances
+      (process.env as any).NODE_ENV = "development";
+      (globalThis as any).prisma = undefined;
+
+      let devFactoryCalls = 0;
+      const createdDevInstances: any[] = [];
+      const devFactory = () => {
+        devFactoryCalls++;
+        const id = `dev-prisma-instance-${devFactoryCalls}`;
+        const instance = {
+          id,
+          user: { name: "dev-user-delegate" },
+          appointment: { name: "dev-appointment-delegate" },
+          $disconnect: async function (this: any) {
+            return { ok: true, instanceId: this?.id };
+          },
+        };
+        createdDevInstances.push(instance);
+        return instance as any;
+      };
+
+      const devDb1 = createPrismaProxy(devFactory);
+      const devZeroAtInit = devFactoryCalls === 0;
+
+      const devUser1 = devDb1.user;
+      const devOneCall = devFactoryCalls === 1 && devUser1 != null;
+      const devAppt1 = devDb1.appointment;
+      const devStillOneCall = devFactoryCalls === 1 && devAppt1 != null;
+
+      // Emulate hot-reload: a second proxy created in development reuses global client
+      const devDb2 = createPrismaProxy(devFactory);
+      const devUser2 = devDb2.user;
+      const devReusedGlobal = devFactoryCalls === 1 && devUser2 != null;
+      const devCachedOnGlobal =
+        (globalThis as any).prisma === createdDevInstances[0];
+
+      const devModePassed =
+        devZeroAtInit &&
+        devOneCall &&
+        devStillOneCall &&
+        devReusedGlobal &&
+        devCachedOnGlobal;
+
+      check(
+        "6. Production database-client proxy preserves lazy singleton lifetime, binds $disconnect/$transaction to same instance, and retains development hot-reload reuse",
+        Boolean(prodModePassed && devModePassed),
+      );
+    } finally {
+      (process.env as any).NODE_ENV = savedNodeEnv;
+      delete (globalThis as any).prisma;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TEST 7: Fresh child-process maintenance bootstrap and CLI invocation
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    // Prepare a stripped environment completely lacking Better Auth and public app variables
+    const cleanEnv: NodeJS.ProcessEnv = { ...process.env };
+    delete cleanEnv.BETTER_AUTH_SECRET;
+    delete cleanEnv.BETTER_AUTH_URL;
+    delete cleanEnv.NEXT_PUBLIC_APP_URL;
+
+    // Supply only the minimal database configuration required by the schema validator
+    cleanEnv.DATABASE_URL =
+      "postgresql://user:password@localhost:5432/flowpilot_test";
+    (cleanEnv as any).NODE_ENV = "production";
+
+    // 7a. Verify CLI entry point execution path without auth variables
+    // Command path: pnpm exec tsx scripts/repair-telegram-webhook.ts --help
+    const cliResult = spawnSync(
+      "pnpm",
+      ["exec", "tsx", "scripts/repair-telegram-webhook.ts", "--help"],
+      {
+        env: cleanEnv,
+        encoding: "utf8",
       },
-    };
-
-    const lookupOutcome = await lookupTelegramBotTarget(
-      { connectionRepository: mockRepo },
-      { botUsername: "@Drafnanafnanbot" },
     );
 
-    // Restore saved env
-    if (savedSecret) process.env.BETTER_AUTH_SECRET = savedSecret;
-    if (savedUrl) process.env.BETTER_AUTH_URL = savedUrl;
-    if (savedAppUrl) process.env.NEXT_PUBLIC_APP_URL = savedAppUrl;
+    const cliCleanExit = cliResult.status === 0;
+    const cliOutputValid =
+      typeof cliResult.stdout === "string" &&
+      cliResult.stdout.includes(
+        "FlowPilot Telegram Webhook Repair & Reconciliation CLI",
+      );
+
+    // 7b. Verify candidate lookup module pipeline in fresh child process
+    // Command path: pnpm exec tsx -e "<script>" importing telegram-repair and repositories
+    const childInspectionScript = `
+import { lookupTelegramBotTarget, lookupTelegramBotTargetDefault } from "./src/server/integrations/telegram/telegram-repair.ts";
+import { telegramConnectionRepository } from "./src/server/repositories/index.ts";
+
+async function verifyFreshProcess() {
+  // Ensure missing auth environment variables were not quietly loaded by .env or modules
+  if (
+    process.env.BETTER_AUTH_SECRET ||
+    process.env.BETTER_AUTH_URL ||
+    process.env.NEXT_PUBLIC_APP_URL
+  ) {
+    console.error("LEAK: Auth environment variables are present in fresh process");
+    process.exit(2);
+  }
+
+  // 1. Controlled repository seam invocation
+  let reachedRepositorySeam = false;
+  const mockRepo = {
+    findCandidatesByBotIdentifier: async (params: any) => {
+      reachedRepositorySeam = true;
+      if (params.botUsername === "Drafnanafnanbot") {
+        return [
+          {
+            connectionId: "conn-reconcile-child-1",
+            businessId: "11111111-1111-1111-1111-111111111111",
+            botUsername: "Drafnanafnanbot",
+            botExternalId: "987654321",
+            status: "ACTIVE",
+            isActive: true,
+          },
+        ];
+      }
+      return [];
+    },
+  };
+
+  const seamOutcome = await lookupTelegramBotTarget(
+    { connectionRepository: mockRepo },
+    { botUsername: "@Drafnanafnanbot" },
+  );
+
+  // 2. Default lookup pipeline through telegramConnectionRepository seam
+  let reachedDefaultSeam = false;
+  telegramConnectionRepository.findCandidatesByBotIdentifier = async (params: any) => {
+    reachedDefaultSeam = true;
+    if (params.botUsername === "Drafnanafnanbot") {
+      return [
+        {
+          connectionId: "conn-default-child-2",
+          businessId: "11111111-1111-1111-1111-111111111111",
+          botUsername: "Drafnanafnanbot",
+          botExternalId: "987654321",
+          status: "ACTIVE",
+          isActive: true,
+        },
+      ];
+    }
+    return [];
+  };
+
+  const defaultOutcome = await lookupTelegramBotTargetDefault({
+    botUsername: "@Drafnanafnanbot",
+  });
+
+  const passed =
+    reachedRepositorySeam &&
+    seamOutcome.ok &&
+    seamOutcome.status === "EXACT_MATCH" &&
+    seamOutcome.target?.connectionId === "conn-reconcile-child-1" &&
+    reachedDefaultSeam &&
+    defaultOutcome.ok &&
+    defaultOutcome.status === "EXACT_MATCH" &&
+    defaultOutcome.target?.connectionId === "conn-default-child-2";
+
+  if (!passed) {
+    console.error("FAIL: Candidate lookup outcomes did not match expected invariants");
+    process.exit(3);
+  }
+
+  console.log(JSON.stringify({ ok: true }));
+}
+
+verifyFreshProcess().catch((err) => {
+  console.error("UNCAUGHT_CHILD_ERROR:", err);
+  process.exit(1);
+});
+`;
+
+    const lookupChildResult = spawnSync(
+      "pnpm",
+      ["exec", "tsx", "-e", childInspectionScript],
+      {
+        env: cleanEnv,
+        encoding: "utf8",
+      },
+    );
+
+    const lookupCleanExit = lookupChildResult.status === 0;
+    let childJsonOk = false;
+    try {
+      const parsed = JSON.parse(lookupChildResult.stdout?.trim() ?? "{}");
+      childJsonOk = parsed.ok === true;
+    } catch {
+      childJsonOk = false;
+    }
 
     check(
-      "6. Maintenance lookup and candidate resolution reach repository seam with auth variables absent, without making real DB calls",
-      Boolean(
-        reachedRepositorySeam &&
-        lookupOutcome.ok &&
-        lookupOutcome.status === "EXACT_MATCH" &&
-        lookupOutcome.target?.connectionId === "conn-reconcile-1",
-      ),
+      "7. Fresh child-process maintenance bootstrap and CLI invocation verify clean startup and candidate lookup without web auth environment variables",
+      Boolean(cliCleanExit && cliOutputValid && lookupCleanExit && childJsonOk),
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TEST 7: Regression safety check
+  // TEST 8: Regression safety check
   // ──────────────────────────────────────────────────────────────────────────
   {
     const allPassed = checks.every((c) => c.pass);
     check(
-      "7. All focused execution defect regression scenarios verified",
+      "8. All focused execution defect regression scenarios verified",
       allPassed,
     );
   }

@@ -23,28 +23,45 @@ function getDatabaseUrl(): string {
   return parsed.data.DATABASE_URL;
 }
 
-const createPrismaClient = () => {
+const defaultCreatePrismaClient = () => {
   const adapter = new PrismaPg({ connectionString: getDatabaseUrl() });
   return new PrismaClient({ adapter });
 };
 
 const globalForPrisma = globalThis as unknown as {
-  prisma: ReturnType<typeof createPrismaClient> | undefined;
+  prisma: ReturnType<typeof defaultCreatePrismaClient> | undefined;
 };
 
-function getPrisma(): PrismaClient {
-  if (globalForPrisma.prisma) return globalForPrisma.prisma;
-  const client = createPrismaClient();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
+export type PrismaClientFactory = () => PrismaClient;
+
+export function createPrismaProxy(
+  factory: PrismaClientFactory = defaultCreatePrismaClient,
+): PrismaClient {
+  let productionPrisma: PrismaClient | undefined;
+
+  function getPrisma(): PrismaClient {
+    if (process.env.NODE_ENV === "production") {
+      if (!productionPrisma) {
+        productionPrisma = factory();
+      }
+      return productionPrisma;
+    }
+    if (!globalForPrisma.prisma) {
+      globalForPrisma.prisma = factory();
+    }
+    return globalForPrisma.prisma;
   }
-  return client;
+
+  return new Proxy({} as PrismaClient, {
+    get(_target, prop, receiver) {
+      if (prop === "then") {
+        return undefined;
+      }
+      const client = getPrisma();
+      const value = Reflect.get(client, prop, receiver);
+      return typeof value === "function" ? value.bind(client) : value;
+    },
+  });
 }
 
-export const db = new Proxy({} as PrismaClient, {
-  get(_target, prop, receiver) {
-    const client = getPrisma();
-    const value = Reflect.get(client, prop, receiver);
-    return typeof value === "function" ? value.bind(client) : value;
-  },
-});
+export const db = createPrismaProxy();
