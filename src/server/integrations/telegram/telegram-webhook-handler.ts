@@ -101,7 +101,7 @@ export function sanitizeErrorCode(raw?: string | null): string | undefined {
 
 export function createSafeTelegramWebhookLogger(
   sink: (event: TelegramWebhookLogEvent) => void = (ev) => {
-    console.log(JSON.stringify(ev));
+    console.warn(JSON.stringify(ev));
   },
 ): TelegramWebhookLogger {
   return {
