@@ -136,6 +136,7 @@ export type ParsedTelegramUpdate =
       callbackQueryId: string;
       chatId: string;
       data: string;
+      originalMessageDate?: number;
       message: NormalizedInboundTransportMessage;
     }
   | {
@@ -191,9 +192,15 @@ function toIsoTimestamp(epochSeconds: number): string | null {
  * → `TelegramConnection`); it becomes the normalized envelope's
  * recipient identity, exactly like the Meta `phone_number_id` path.
  */
+export type ParseTelegramUpdateOptions = {
+  botExternalId: string;
+  /** Injectable receipt clock for inbound updates (defaults to new Date()). */
+  now?: () => Date;
+};
+
 export function parseTelegramUpdate(
   raw: unknown,
-  options: { botExternalId: string },
+  options: ParseTelegramUpdateOptions,
 ): ParsedTelegramUpdate {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {
@@ -252,11 +259,10 @@ export function parseTelegramUpdate(
       };
     }
 
-    const epochSec = cb.message?.date ?? Math.floor(Date.now() / 1000);
-    const timestamp = toIsoTimestamp(epochSec);
-    if (!timestamp) {
-      return { status: "malformed", error: malformed("زمن الرسالة غير صالح") };
-    }
+    // Customer callback queries must use receipt time (when customer tapped),
+    // NOT cb.message.date (which is when the bot originally sent the message).
+    const clock = options.now ?? (() => new Date());
+    const timestamp = clock().toISOString();
 
     const result = normalizeInboundTransportMessage({
       externalMessageId: `tg:${options.botExternalId}:${updateId}`,
@@ -277,6 +283,7 @@ export function parseTelegramUpdate(
       callbackQueryId,
       chatId: String(chatId),
       data,
+      originalMessageDate: cb.message?.date,
       message: result.message,
     };
   }

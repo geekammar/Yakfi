@@ -53,12 +53,236 @@ import {
  *   stays intact and the engine stays free of Telegram HTTP logic.
  */
 
-/** The minimal view of the engine turn result this orchestrator needs. */
-export type TelegramInboundTurnResult = {
-  ok: boolean;
-  duplicate?: boolean;
+/** Safe structured outcome log event across the Telegram composition boundary. */
+export type TelegramWebhookLogEvent = {
+  stage:
+    "ingress" | "classification" | "acknowledgment" | "engine" | "outbound";
+  outcome: string;
+  updateId?: string;
+  connectionId?: string;
+  businessId?: string;
+  chatId?: string;
   code?: string;
+  error?: string;
 };
+
+export type TelegramWebhookLogger = {
+  log: (event: TelegramWebhookLogEvent) => void;
+};
+
+const ALLOWED_ERROR_CODES = new Set([
+  "PERSISTENCE_FAILED",
+  "DOMAIN_FAILURE",
+  "DELIVERY_FAILURE",
+  "CONNECTION_RESOLUTION_FAILED",
+  "BOT_TOKEN_RESOLUTION_FAILED",
+  "TELEGRAM_ACK_FAILED",
+  "ANSWER_CALLBACK_FAILED",
+  "UNHANDLED_EXCEPTION",
+  "MALFORMED_PAYLOAD",
+  "MALFORMED_JSON",
+  "MISSING_SECRET",
+  "UNKNOWN_SECRET_HASH",
+  "INVALID_SECRET_HASH",
+  "TRANSIENT_TRANSPORT_FAILURE",
+  "UNAUTHORIZED_CREDENTIALS",
+  "RATE_LIMITED",
+  "UNKNOWN_ERROR",
+]);
+
+export function sanitizeErrorCode(raw?: string | null): string | undefined {
+  if (!raw) return undefined;
+  const upper = raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_");
+  return ALLOWED_ERROR_CODES.has(upper) ? upper : "UNKNOWN_ERROR";
+}
+
+export function createSafeTelegramWebhookLogger(
+  sink: (event: TelegramWebhookLogEvent) => void = (ev) => {
+    console.warn(JSON.stringify(ev));
+  },
+): TelegramWebhookLogger {
+  return {
+    log(event: TelegramWebhookLogEvent) {
+      try {
+        const sanitized: TelegramWebhookLogEvent = {
+          stage: event.stage,
+          outcome: event.outcome,
+          ...(event.updateId ? { updateId: String(event.updateId) } : {}),
+          ...(event.connectionId
+            ? { connectionId: String(event.connectionId) }
+            : {}),
+          ...(event.businessId ? { businessId: String(event.businessId) } : {}),
+          ...(event.chatId ? { chatId: String(event.chatId) } : {}),
+          ...(event.code
+            ? { code: sanitizeErrorCode(String(event.code)) }
+            : {}),
+          ...(event.error
+            ? { error: sanitizeErrorCode(String(event.error)) }
+            : {}),
+        };
+        sink(sanitized);
+      } catch {
+        // Prevent sink failures from bubbling
+      }
+    },
+  };
+}
+
+function safeLog(
+  logger: TelegramWebhookLogger | undefined,
+  event: TelegramWebhookLogEvent,
+) {
+  if (!logger) return;
+  try {
+    logger.log(event);
+  } catch {
+    // Logger failure must never prevent callback or turn processing
+  }
+}
+
+/**
+ * Structural shape of the engine inbound turn result, avoiding direct
+ * imports from feature layer into server adapter.
+ */
+export type EngineInboundTurnResultLike =
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    }
+  | {
+      ok: true;
+      duplicate: true;
+      conversationId: string;
+      customerMessageId: string;
+    }
+  | {
+      ok: true;
+      duplicate: false;
+      assistantAction: string;
+      delivery: { provider: string; delivered: boolean; error?: string } | null;
+      [key: string]: unknown;
+    };
+
+/**
+ * The typed processing outcome mapped across the Telegram composition boundary.
+ * Preserves duplicate, deferred-to-staff, domain/persistence failure, and delivery failure distinctions.
+ */
+export type TelegramInboundTurnResult =
+  | {
+      ok: true;
+      outcome: "SUCCESS";
+      assistantAction: string;
+      delivered: boolean;
+      deliveryError?: string;
+      duplicate: false;
+      code?: undefined;
+    }
+  | {
+      ok: true;
+      outcome: "DUPLICATE";
+      duplicate: true;
+      delivered: false;
+      code?: undefined;
+    }
+  | {
+      ok: true;
+      outcome: "DEFERRED_TO_STAFF";
+      assistantAction: "DEFERRED_TO_STAFF";
+      delivered: boolean;
+      deliveryError?: string;
+      duplicate: false;
+      code?: undefined;
+    }
+  | {
+      ok: false;
+      outcome: "DELIVERY_FAILURE";
+      error: string;
+      duplicate: false;
+      code?: undefined;
+    }
+  | {
+      ok: false;
+      outcome: "DOMAIN_FAILURE" | "PERSISTENCE_FAILED";
+      code: string;
+      error: string;
+      duplicate: false;
+    }
+  | {
+      ok: false;
+      outcome: "UNHANDLED_EXCEPTION";
+      error: string;
+      duplicate: false;
+      code?: string;
+    };
+
+/**
+ * Maps the engine result into a typed processing outcome without losing failure distinctions.
+ */
+export function mapEngineResultToTelegramOutcome(
+  result: EngineInboundTurnResultLike,
+): TelegramInboundTurnResult {
+  if (!result.ok) {
+    return {
+      ok: false,
+      outcome:
+        result.code === "PERSISTENCE_FAILED"
+          ? "PERSISTENCE_FAILED"
+          : "DOMAIN_FAILURE",
+      code: result.code,
+      error: sanitizeErrorCode(result.code) ?? "PROCESSING_FAILED",
+      duplicate: false,
+    };
+  }
+
+  if (result.duplicate) {
+    return {
+      ok: true,
+      outcome: "DUPLICATE",
+      duplicate: true,
+      delivered: false,
+    };
+  }
+
+  const isDelivered =
+    result.delivery !== null && result.delivery.delivered === true;
+
+  if (result.assistantAction === "DEFERRED_TO_STAFF") {
+    return {
+      ok: true,
+      outcome: "DEFERRED_TO_STAFF",
+      assistantAction: "DEFERRED_TO_STAFF",
+      delivered: isDelivered,
+      deliveryError: result.delivery?.error
+        ? sanitizeErrorCode(result.delivery.error)
+        : undefined,
+      duplicate: false,
+    };
+  }
+
+  if (result.delivery && !result.delivery.delivered) {
+    return {
+      ok: false,
+      outcome: "DELIVERY_FAILURE",
+      error: sanitizeErrorCode(result.delivery.error) ?? "DELIVERY_FAILED",
+      duplicate: false,
+    };
+  }
+
+  return {
+    ok: true,
+    outcome: "SUCCESS",
+    assistantAction: result.assistantAction,
+    delivered: isDelivered,
+    deliveryError: result.delivery?.error
+      ? sanitizeErrorCode(result.delivery.error)
+      : undefined,
+    duplicate: false,
+  };
+}
 
 /**
  * The webhook handler's injectable dependencies — every one of them is an
@@ -79,7 +303,9 @@ export type TelegramWebhookHandlerDeps = {
   processInboundMessage: (params: {
     engineInput: EngineInboundMessage;
     identity: ResolvedInboundIdentity;
-  }) => Promise<TelegramInboundTurnResult>;
+  }) => Promise<
+    TelegramInboundTurnResult | { ok: boolean; [key: string]: unknown }
+  >;
   /**
    * Complete a `managed_bot` provisioning event server-side
    * (DECISIONS #66): the managed bot token is fetched via the MANAGER
@@ -97,12 +323,13 @@ export type TelegramWebhookHandlerDeps = {
   /**
    * Acknowledge a customer inline keyboard callback query (UX001).
    * Tells Telegram client to dismiss the button loading spinner.
+   * Acknowledgment failure is observable separately from processing failure.
    */
   answerCallbackQuery?: (params: {
     callbackQueryId: string;
     businessId: string;
     connectionId: string;
-  }) => Promise<void>;
+  }) => Promise<{ ok: boolean; error?: string } | void>;
   /**
    * Send the deterministic customer `/start` welcome through the EXISTING
    * Telegram `MessageTransport` (DECISIONS #73). Supplied by the route (the
@@ -129,6 +356,10 @@ export type TelegramWebhookHandlerDeps = {
    * offline harness can run the turn synchronously and observe its effects.
    */
   schedule: (work: () => Promise<void> | void) => void;
+  /** Injectable receipt clock for testing callback query timing. */
+  now?: () => Date;
+  /** Optional structured outcome logger. */
+  logger?: TelegramWebhookLogger;
 };
 
 /** The outcome the handler needs from a managed-bot completion. */
@@ -161,6 +392,64 @@ function unauthorized(message: string): Response {
 export const CUSTOMER_START_WELCOME =
   "أهلاً بك 👋\nمرحبًا بك! كيف يمكنني مساعدتك؟";
 
+function scheduleInboundTurn(
+  deps: TelegramWebhookHandlerDeps,
+  logger: TelegramWebhookLogger | undefined,
+  connection: { id: string; businessId: string },
+  updateId: string,
+  dispatch: DispatchParams,
+) {
+  deps.schedule(async () => {
+    try {
+      safeLog(logger, {
+        stage: "engine",
+        outcome: "DISPATCHED",
+        updateId,
+        connectionId: connection.id,
+        businessId: connection.businessId,
+      });
+      const turnResult = await deps.processInboundMessage(dispatch);
+      const outcomeCode =
+        "outcome" in turnResult && typeof turnResult.outcome === "string"
+          ? turnResult.outcome
+          : turnResult.ok
+            ? "SUCCESS"
+            : "FAILURE";
+      const codeStr =
+        "code" in turnResult && typeof turnResult.code === "string"
+          ? turnResult.code
+          : undefined;
+      const errorStr =
+        "error" in turnResult && typeof turnResult.error === "string"
+          ? turnResult.error
+          : undefined;
+
+      safeLog(logger, {
+        stage: "outbound",
+        outcome: outcomeCode,
+        updateId,
+        connectionId: connection.id,
+        businessId: connection.businessId,
+        ...(turnResult.ok
+          ? {}
+          : {
+              code: sanitizeErrorCode(codeStr),
+              error: sanitizeErrorCode(errorStr),
+            }),
+      });
+    } catch {
+      safeLog(logger, {
+        stage: "engine",
+        outcome: "UNHANDLED_EXCEPTION",
+        updateId,
+        connectionId: connection.id,
+        businessId: connection.businessId,
+        error: "UNHANDLED_EXCEPTION",
+      });
+    }
+  });
+}
+
 /**
  * The webhook POST. Pure orchestration over injected deps — the route's only
  * job is to supply them, so the whole security path is assertable offline.
@@ -169,6 +458,8 @@ export async function handleTelegramWebhook(
   deps: TelegramWebhookHandlerDeps,
   request: Request,
 ): Promise<Response> {
+  const logger = deps.logger;
+
   // 1. AUTHENTICATE + resolve the connection server-side. Only the
   //    NON-REVERSIBLE digest of the header is used; the plaintext secret is
   //    not stored anywhere, and the constant-time compare runs over two
@@ -177,12 +468,14 @@ export async function handleTelegramWebhook(
     request.headers.get("x-telegram-bot-api-secret-token") ??
     request.headers.get("X-Telegram-Bot-Api-Secret-Token");
   if (!secretHeader) {
+    safeLog(logger, { stage: "ingress", outcome: "MISSING_SECRET" });
     return unauthorized("سر الويبهوك مفقود");
   }
   const digest = hashTelegramWebhookSecret(secretHeader);
   const connection =
     await deps.connectionRepository.findByWebhookSecretHash(digest);
   if (!connection || !connection.webhookSecretHash) {
+    safeLog(logger, { stage: "ingress", outcome: "UNKNOWN_SECRET_HASH" });
     return unauthorized("سر الويبهوك غير صالح");
   }
   if (
@@ -191,8 +484,21 @@ export async function handleTelegramWebhook(
       connection.webhookSecretHash,
     )
   ) {
+    safeLog(logger, {
+      stage: "ingress",
+      outcome: "INVALID_SECRET_HASH",
+      connectionId: connection.id,
+      businessId: connection.businessId,
+    });
     return unauthorized("سر الويبهوك غير صالح");
   }
+
+  safeLog(logger, {
+    stage: "ingress",
+    outcome: "AUTHENTICATED",
+    connectionId: connection.id,
+    businessId: connection.businessId,
+  });
 
   // 2. Parse + classify the raw body against the approved MVP scope. The
   //    connection's own bot identity (server-resolved) is the recipient.
@@ -200,6 +506,12 @@ export async function handleTelegramWebhook(
   try {
     json = await request.json();
   } catch {
+    safeLog(logger, {
+      stage: "classification",
+      outcome: "MALFORMED_JSON",
+      connectionId: connection.id,
+      businessId: connection.businessId,
+    });
     return Response.json(
       {
         success: false,
@@ -211,9 +523,17 @@ export async function handleTelegramWebhook(
 
   const parsed = parseTelegramUpdate(json, {
     botExternalId: connection.botExternalId,
+    now: deps.now,
   });
 
   if (parsed.status === "malformed") {
+    safeLog(logger, {
+      stage: "classification",
+      outcome: "MALFORMED_PAYLOAD",
+      code: parsed.error.code,
+      connectionId: connection.id,
+      businessId: connection.businessId,
+    });
     return Response.json(
       {
         success: false,
@@ -222,6 +542,14 @@ export async function handleTelegramWebhook(
       { status: 400 },
     );
   }
+
+  safeLog(logger, {
+    stage: "classification",
+    outcome: parsed.status,
+    updateId: parsed.updateId,
+    connectionId: connection.id,
+    businessId: connection.businessId,
+  });
 
   // The `managed_bot` provisioning event is classified by the parser. On
   // THIS endpoint it is an unusual delivery (Telegram routes the event to
@@ -282,13 +610,7 @@ export async function handleTelegramWebhook(
       },
     };
 
-    deps.schedule(async () => {
-      try {
-        await deps.processInboundMessage(dispatch);
-      } catch {
-        // A deferred turn must never crash the process after the 200.
-      }
-    });
+    scheduleInboundTurn(deps, logger, connection, parsed.updateId, dispatch);
 
     return Response.json({
       success: true,
@@ -300,21 +622,39 @@ export async function handleTelegramWebhook(
 
   // A customer interactive callback query (UX001): acknowledge promptly to
   // dismiss the Telegram button spinner, then dispatch the selection to the engine.
-  if (parsed.status === "callback_query") {
-    if (parsed.callbackQueryId && deps.answerCallbackQuery) {
-      const cbId = parsed.callbackQueryId;
-      deps.schedule(async () => {
-        try {
-          await deps.answerCallbackQuery!({
-            callbackQueryId: cbId,
-            businessId: connection.businessId,
-            connectionId: connection.id,
-          });
-        } catch {
-          // Acknowledgment failure must not crash the handler
+  // Acknowledgment failure must not prevent selection processing.
+  if (
+    parsed.status === "callback_query" &&
+    parsed.callbackQueryId &&
+    deps.answerCallbackQuery
+  ) {
+    const cbId = parsed.callbackQueryId;
+    deps.schedule(async () => {
+      let ackOutcome: "ACK_SUCCESS" | "ACK_FAILED" = "ACK_SUCCESS";
+      let ackError: string | undefined;
+      try {
+        const res = await deps.answerCallbackQuery!({
+          callbackQueryId: cbId,
+          businessId: connection.businessId,
+          connectionId: connection.id,
+        });
+        if (!res || !res.ok) {
+          ackOutcome = "ACK_FAILED";
+          ackError = sanitizeErrorCode(res?.error) ?? "TELEGRAM_ACK_FAILED";
         }
+      } catch {
+        ackOutcome = "ACK_FAILED";
+        ackError = "ANSWER_CALLBACK_FAILED";
+      }
+      safeLog(logger, {
+        stage: "acknowledgment",
+        outcome: ackOutcome,
+        updateId: parsed.updateId,
+        connectionId: connection.id,
+        businessId: connection.businessId,
+        ...(ackError ? { error: ackError } : {}),
       });
-    }
+    });
   }
 
   // 3. A supported private TEXT message: the SAME envelope → engine mapping
@@ -336,16 +676,8 @@ export async function handleTelegramWebhook(
   };
 
   // Return 200 PROMPTLY and run the turn afterwards (DECISIONS #63 (E)).
-  // The durable dedupe ledger (keyed on the namespaced `update_id`) makes a
-  // redelivery idempotent, so deferring is safe.
-  deps.schedule(async () => {
-    try {
-      await deps.processInboundMessage(dispatch);
-    } catch {
-      // A deferred turn must never crash the process after we answered 200.
-      // The redelivery path (idempotent) covers a lost attempt.
-    }
-  });
+  // Deferring execution keeps response latency low.
+  scheduleInboundTurn(deps, logger, connection, parsed.updateId, dispatch);
 
   return Response.json({
     success: true,
