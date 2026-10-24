@@ -2,6 +2,7 @@ import {
   defaultCredentialsResolver,
   type CredentialsResolver,
 } from "@/server/credentials/credentials-resolver";
+import { renderMetaInteractivePayload } from "@/server/integrations/whatsapp/meta-presentation";
 import {
   TransportError,
   defaultConnectionResolutionDeps,
@@ -279,9 +280,30 @@ export function createMetaWhatsAppTransport(
         config.apiVersion,
         phoneNumberId,
       );
-      const body = message.template
-        ? buildMetaTemplatePayload(message.to, message.template)
-        : buildMetaTextPayload(message.to, message.content);
+      let body: unknown;
+      if (message.template) {
+        body = buildMetaTemplatePayload(message.to, message.template);
+      } else if (message.choices) {
+        try {
+          body = renderMetaInteractivePayload(
+            message.to,
+            message.content,
+            message.choices,
+          );
+        } catch (err) {
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : "فشل إنشاء رسالة تفاعلية لواتساب",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
+        }
+      } else {
+        body = buildMetaTextPayload(message.to, message.content);
+      }
 
       let response: Response;
       try {

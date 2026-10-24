@@ -208,18 +208,27 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
         if (kind === "TEXT") {
           let body: string | undefined;
           if (meta.type === "interactive") {
-            const rawId =
-              meta.interactive?.button_reply?.id ??
-              meta.interactive?.list_reply?.id;
-            const rawTitle =
-              meta.interactive?.button_reply?.title ??
-              meta.interactive?.list_reply?.title;
-            // Prioritize normalized option index from id if present (e.g. "1", "opt_1", "opt:1")
-            if (rawId && /^(?:opt[:_]?)?[1-9]\d?$/i.test(rawId.trim())) {
-              body = rawId.trim().replace(/^opt[:_]?/i, "");
+            // Interactive reply: the ID is authoritative and must be preserved exactly.
+            // Never substitute title for ID, and never strip opaque offer callback tokens.
+            const subtype = meta.interactive?.type;
+            let rawId: string | undefined;
+            if (subtype === "button_reply") {
+              rawId = meta.interactive?.button_reply?.id?.trim();
+            } else if (subtype === "list_reply") {
+              rawId = meta.interactive?.list_reply?.id?.trim();
             } else {
-              body = rawTitle || rawId;
+              rawId =
+                meta.interactive?.button_reply?.id?.trim() ??
+                meta.interactive?.list_reply?.id?.trim();
             }
+
+            if (!rawId) {
+              throw new TransportError(
+                "MALFORMED_PROVIDER_PAYLOAD",
+                "معرّف الخيار التفاعلي مفقود في حمولة واتساب",
+              );
+            }
+            body = rawId;
           } else {
             body = meta.text?.body;
           }

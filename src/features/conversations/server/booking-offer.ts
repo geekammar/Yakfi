@@ -147,6 +147,8 @@ export const slotOfferSchema = z.object({
   followUpRequestId: shortText.nullable(),
   /** How many fresh options were presented across "more times" batches. */
   shownCount: z.number().int().min(0).max(500),
+  /** Stable slot keys (providerId:startAt) already presented to the customer. */
+  shownSlotKeys: z.array(z.string()).optional(),
   options: z.array(slotOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
 });
 
@@ -329,6 +331,7 @@ export function buildSlotOffer(
     date: string;
     followUpRequestId: string | null;
     shownCount: number;
+    shownSlotKeys?: string[];
     options: ReadonlyArray<{
       providerId: string;
       displayName: string;
@@ -349,6 +352,7 @@ export function buildSlotOffer(
     date: input.date,
     followUpRequestId: input.followUpRequestId,
     shownCount: input.shownCount,
+    shownSlotKeys: input.shownSlotKeys ?? [],
     options: input.options.slice(0, MAX_OFFER_OPTIONS).map((option, i) => ({
       index: i + 1,
       providerId: option.providerId,

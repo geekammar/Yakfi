@@ -133,6 +133,11 @@ import {
   type ChannelChoicePresentation,
 } from "@/features/conversations/server/channel-choice";
 import {
+  formatArabicDate,
+  formatBookingOptionsCopy,
+  sampleRepresentativeSlots,
+} from "@/features/conversations/server/presentation-formatters";
+import {
   CONTINUE_DOMAIN_INVITE,
   clarificationForBookingReason,
   clarificationForInterruption,
@@ -634,23 +639,26 @@ export function formatBookingOptionsMessage(
     index?: number;
   }>,
   followUpRequestId?: string | null,
+  isMoreTimes?: boolean,
 ): string {
-  const lines = options.map((opt, idx) => {
-    const start = opt.startAt
-      ? opt.startAt.slice(11, 16)
-      : (opt.start ?? opt.startTime ?? "");
-    const end = opt.endAt
-      ? opt.endAt.slice(11, 16)
-      : (opt.end ?? opt.endTime ?? "");
-    return `${idx + 1}. ${opt.displayName} — ${start} إلى ${end}`;
+  const normalizedOptions = options.map((opt, idx) => ({
+    index: opt.index ?? idx + 1,
+    providerId: opt.providerId,
+    displayName: opt.displayName,
+    startAt: opt.startAt ?? opt.start ?? opt.startTime ?? "",
+    endAt: opt.endAt ?? opt.end ?? opt.endTime ?? null,
+  }));
+
+  const formattedDate = formatArabicDate(date);
+
+  return formatBookingOptionsCopy({
+    serviceName,
+    date,
+    formattedDate,
+    options: normalizedOptions,
+    followUpRequestId,
+    isMoreTimes,
   });
-  const followUpTag = followUpRequestId
-    ? `\n[متابعة: ${followUpRequestId}]`
-    : "";
-  const header = followUpRequestId
-    ? `تتوفر المواعيد التالية لمتابعة "${serviceName}" يوم ${date}:`
-    : `تتوفر المواعيد التالية لخدمة "${serviceName}" يوم ${date}:`;
-  return `${header}\n${lines.join("\n")}${followUpTag}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.`;
 }
 
 /** Canonical phone form for the number-mapping lookup (digits + leading +). */
@@ -1520,55 +1528,90 @@ async function selectionReply(
   };
 }
 
-const WEEKDAY_ARABIC_NAMES: Record<string, string> = {
-  sat: "السبت",
-  sun: "الأحد",
-  mon: "الإثنين",
-  tue: "الثلاثاء",
-  wed: "الأربعاء",
-  thu: "الخميس",
-  fri: "الجمعة",
-};
-
-function resolveUpcomingBookingDates(
-  business: { timezone?: string | null; workingHours?: unknown },
+async function resolveUpcomingBookingDates(
+  deps: ConversationEngineDeps,
+  scope: {
+    business: {
+      id: string;
+      timezone?: string | null;
+      workingHours?: unknown;
+      slotDurationMinutes?: number;
+    };
+    branchId?: string | null;
+    customerId?: string;
+  },
+  input: {
+    serviceId: string;
+    providerId?: string | null;
+    timePreference?: CanonicalTimePreference | null;
+  },
   now: Date,
   count = 4,
-): Array<{ date: string; label: string }> {
-  const tz = resolveValidTimeZone(business.timezone);
+): Promise<Array<{ date: string; label: string }>> {
+  const tz = resolveValidTimeZone(scope.business.timezone);
   const todayIso = todayIsoInTimeZone(now, tz);
+  const currentTime = nowTimeInTimeZone(now, tz);
   const [y, m, d] = todayIso.split("-").map(Number);
+  const tomorrowCandidate = new Date(Date.UTC(y!, m! - 1, d! + 1));
+  const tomorrowIso = tomorrowCandidate.toISOString().slice(0, 10);
   const results: Array<{ date: string; label: string }> = [];
+
+  const eligibilityDeps = buildEligibilityDeps(deps);
+  const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
 
   for (let i = 0; i < 14 && results.length < count; i++) {
     const candidate = new Date(Date.UTC(y!, m! - 1, d! + i));
     const iso = candidate.toISOString().slice(0, 10);
     const weekday = weekdayOf(iso);
     const workingDay = resolveWorkingDay(
-      business as unknown as Parameters<typeof resolveWorkingDay>[0],
+      scope.business as unknown as Parameters<typeof resolveWorkingDay>[0],
       weekday,
     );
-    if (workingDay) {
-      if (i === 0) {
-        const timeStr = nowTimeInTimeZone(now, tz);
-        const [hh, mm] = timeStr.split(":").map(Number);
-        const currentMins = (hh ?? 0) * 60 + (mm ?? 0);
-        if (currentMins >= workingDay.closeMinutes) {
-          continue; // Today's business hours have closed
+    if (!workingDay) continue;
+
+    if (i === 0) {
+      const [hh, mm] = currentTime.split(":").map(Number);
+      const currentMins = (hh ?? 0) * 60 + (mm ?? 0);
+      if (currentMins >= workingDay.closeMinutes) {
+        continue; // Today's business hours have closed
+      }
+    }
+
+    try {
+      const bookingResult = await resolveBookingOptions(
+        bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
+        { userId: scope.customerId ?? "guest", businessId: scope.business.id },
+        {
+          serviceId: input.serviceId,
+          ...(scope.branchId ? { branchId: scope.branchId } : {}),
+          date: iso,
+          ...(input.providerId ? { providerId: input.providerId } : {}),
+          ...(input.timePreference ? { timePreference: input.timePreference } : {}),
+          limit: 4,
+        },
+      );
+
+      if (bookingResult.success && bookingResult.data.options.length > 0) {
+        let validOptions = bookingResult.data.options;
+        if (i === 0) {
+          validOptions = validOptions.filter(
+            (o) => o.startAt.slice(11, 16) > currentTime,
+          );
+        }
+        if (validOptions.length > 0) {
+          const label = formatArabicDate(iso, {
+            todayIso,
+            tomorrowIso,
+            withRelativePrefix: true,
+          });
+          results.push({ date: iso, label });
         }
       }
-      let label: string;
-      if (i === 0) {
-        label = `اليوم (${iso})`;
-      } else if (i === 1) {
-        label = `غداً (${iso})`;
-      } else {
-        const dayName = WEEKDAY_ARABIC_NAMES[weekday] ?? weekday;
-        label = `${dayName} (${iso})`;
-      }
-      results.push({ date: iso, label });
+    } catch {
+      continue;
     }
   }
+
   return results;
 }
 
@@ -1750,12 +1793,26 @@ async function presentDateChoices(
     serviceName: string;
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
+    timePreference?: CanonicalTimePreference | null;
     observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
   now: Date,
 ): Promise<InboundSuccess> {
-  const upcomingDates = resolveUpcomingBookingDates(scope.business, now);
+  const upcomingDates = await resolveUpcomingBookingDates(
+    deps,
+    {
+      business: scope.business,
+      branchId: scope.conversation.branchId,
+      customerId: scope.customer.id,
+    },
+    {
+      serviceId: input.serviceId,
+      providerId: input.providerId,
+      timePreference: input.timePreference,
+    },
+    now,
+  );
   let dateOffer: DateOffer | null = null;
   if (upcomingDates.length > 0) {
     dateOffer = buildDateOffer(
@@ -1780,7 +1837,9 @@ async function presentDateChoices(
     }
     lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
   } else {
-    lines.push("(مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):");
+    lines.push(
+      "لا تتوفر مواعيد متاحة لهذه الخدمة خلال الـ 14 يوماً القادمة. يمكنك تجربة تحديد تاريخ آخر أو تغيير تفضيل الوقت:",
+    );
   }
   const dateMsg = lines.join("\n");
 
@@ -1953,11 +2012,21 @@ async function presentSlotChoices(
         date: input.date,
         ...(input.providerId ? { providerId: input.providerId } : {}),
         ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+        limit: 50,
       },
     );
 
     if (bookingResult.success && bookingResult.data.options.length > 0) {
+      const tz = resolveValidTimeZone(scope.business.timezone);
+      const todayIso = todayIsoInTimeZone(now, tz);
+      const currentTime = nowTimeInTimeZone(now, tz);
+
       let bookableOptions = bookingResult.data.options;
+      if (input.date === todayIso) {
+        bookableOptions = bookableOptions.filter(
+          (o) => o.startAt.slice(11, 16) > currentTime,
+        );
+      }
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
@@ -1973,6 +2042,7 @@ async function presentSlotChoices(
       }
 
       if (bookableOptions.length > 0) {
+        const representativeOptions = sampleRepresentativeSlots(bookableOptions, 4);
         const slotOffer: SlotOffer | null = buildSlotOffer(
           {
             businessId: scope.business.id,
@@ -1987,8 +2057,11 @@ async function presentSlotChoices(
             timePreference: timeOfDayPref ?? null,
             date: input.date,
             followUpRequestId: null,
-            shownCount: bookableOptions.length,
-            options: bookableOptions.map((o) => ({
+            shownCount: representativeOptions.length,
+            shownSlotKeys: representativeOptions.map(
+              (o) => `${o.providerId}:${o.startAt}`,
+            ),
+            options: representativeOptions.map((o) => ({
               providerId: o.providerId,
               displayName: o.displayName,
               startAt: o.startAt,
@@ -2020,7 +2093,7 @@ async function presentSlotChoices(
         const optionsMsg = formatBookingOptionsMessage(
           input.serviceName,
           input.date,
-          bookableOptions,
+          representativeOptions,
         );
         const assistantMessage = await persistAssistantReply(
           deps,
@@ -2156,6 +2229,7 @@ async function completeBookingSelection(
   context: BookingSelectionContext,
   selection: BookingSelection,
   turnSession?: TurnStateSession,
+  now: Date = new Date(),
 ): Promise<InboundSuccess | null> {
   const reply = (
     content: string,
@@ -2314,13 +2388,43 @@ async function completeBookingSelection(
 
   // 4b. Deterministic navigation: more times / change date
   if (selection.kind === "more_times") {
-    const maxPresentedIndex = context.options.reduce(
-      (max, opt) => Math.max(max, opt.index),
-      0,
-    );
-    const unpresented = freshOptions.slice(maxPresentedIndex);
+    const tz = resolveValidTimeZone(scope.business.timezone);
+    const todayIso = todayIsoInTimeZone(now, tz);
+    const currentTime = nowTimeInTimeZone(now, tz);
+
+    let candidates = freshOptions;
+    if (date === todayIso) {
+      candidates = candidates.filter(
+        (o) => o.startAt.slice(11, 16) > currentTime,
+      );
+    }
+
+    const previouslyShownKeys = new Set<string>();
+    if (turnSession?.state?.offer?.kind === "SLOT") {
+      for (const k of turnSession.state.offer.shownSlotKeys ?? []) {
+        previouslyShownKeys.add(k);
+      }
+    }
+    for (const opt of context.options) {
+      if (opt.providerId) {
+        previouslyShownKeys.add(`${opt.providerId}:${opt.startTime}`);
+      }
+    }
+
+    const unpresented = candidates.filter((o) => {
+      const shortKey = `${o.providerId}:${o.startAt.slice(11, 16)}`;
+      const fullKey = `${o.providerId}:${o.startAt}`;
+      return (
+        !previouslyShownKeys.has(shortKey) && !previouslyShownKeys.has(fullKey)
+      );
+    });
+
     if (unpresented.length > 0) {
-      const nextBatch = unpresented.slice(0, 5);
+      const nextBatch = sampleRepresentativeSlots(unpresented, 4);
+      const newShownKeys = [
+        ...previouslyShownKeys,
+        ...nextBatch.map((o) => `${o.providerId}:${o.startAt}`),
+      ];
       let nextOffer: SlotOffer | null = null;
       if (turnSession?.enabled) {
         nextOffer = buildSlotOffer(
@@ -2334,9 +2438,11 @@ async function completeBookingSelection(
             serviceName,
             serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
             providerId: providerId ?? null,
+            timePreference: canonicalTimePref,
             date,
             followUpRequestId: context.followUpRequestId ?? null,
-            shownCount: maxPresentedIndex + nextBatch.length,
+            shownCount: newShownKeys.length,
+            shownSlotKeys: newShownKeys,
             options: nextBatch.map((o) => ({
               providerId: o.providerId,
               displayName: o.displayName,
@@ -2344,7 +2450,7 @@ async function completeBookingSelection(
               endAt: o.endAt,
             })),
           },
-          new Date(),
+          now,
         );
         if (nextOffer) {
           turnSession.state = withPresentedOffer(
@@ -2358,29 +2464,55 @@ async function completeBookingSelection(
         }
       }
       const choices = nextOffer ? buildChannelChoices(nextOffer) : undefined;
-      return reply(
-        `إليك أوقاتاً أخرى متاحة لخدمة "${serviceName}" يوم ${date}:\n${formatBookingOptionsMessage(serviceName, date, nextBatch, context.followUpRequestId)}`,
-        "AI_ACTIVE",
-        null,
-        undefined,
-        choices,
+      const optionsMsg = formatBookingOptionsMessage(
+        serviceName,
+        date,
+        nextBatch,
+        context.followUpRequestId,
+        true,
       );
+      return reply(optionsMsg, "AI_ACTIVE", null, undefined, choices);
     }
     if (turnSession?.enabled) {
       await turnSession.releaseClaim();
     }
     return reply(
-      `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${date}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`,
+      `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${formatArabicDate(date)}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`,
       "AI_ACTIVE",
     );
   }
 
   if (selection.kind === "change_date") {
     if (turnSession?.enabled) {
+      if (turnSession.state) {
+        turnSession.state = {
+          ...turnSession.state,
+          selectedDate: null,
+          selectedTimePref: null,
+          knownFacts: {
+            ...turnSession.state.knownFacts,
+            date: undefined,
+            timePreference: undefined,
+          },
+        };
+      }
       await turnSession.invalidateOffer();
+      return presentDateChoices(
+        deps,
+        scope,
+        {
+          serviceId,
+          serviceName,
+          serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
+          providerId: providerId ?? null,
+          timePreference: canonicalTimePref,
+        },
+        turnSession,
+        now,
+      );
     }
     return reply(
-      `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}" (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):`,
+      `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}":`,
       "AI_ACTIVE",
     );
   }
@@ -5706,12 +5838,6 @@ async function runInboundTurn(
             missingFacts: [...bookingClarification.missingFacts],
           },
         };
-        const assistantMessage = await persistAssistantReply(
-          deps,
-          conversation.id,
-          mapped.message,
-          "AI_ACTIVE",
-        );
         let serviceOffer: ServiceOffer | null = null;
         let dateOffer: DateOffer | null = null;
         if (
@@ -5750,15 +5876,30 @@ async function runInboundTurn(
           mapped.reason === "MISSING_DATE" &&
           turnSession.state?.offer?.status !== "INVALIDATED"
         ) {
-          const upcomingDates = resolveUpcomingBookingDates(business, now);
+          const targetServiceId =
+            mapped.serviceId ?? turnSession.state?.serviceId ?? "";
+          const candidateProvider =
+            mapped.providerText ??
+            turnSession.state?.knownFacts.provider ??
+            null;
+          const timePref = isCanonicalTimePreference(
+            turnSession.state?.knownFacts.timePreference,
+          )
+            ? turnSession.state.knownFacts.timePreference
+            : null;
+
+          const upcomingDates = await resolveUpcomingBookingDates(
+            deps,
+            { business, branchId, customerId: customer.id },
+            {
+              serviceId: targetServiceId,
+              providerId: candidateProvider,
+              timePreference: timePref,
+            },
+            now,
+          );
           if (upcomingDates.length > 0) {
             let matchedProviderId: string | null = null;
-            const targetServiceId =
-              mapped.serviceId ?? turnSession.state?.serviceId ?? "";
-            const candidateProvider =
-              mapped.providerText ??
-              turnSession.state?.knownFacts.provider ??
-              null;
             if (targetServiceId && candidateProvider) {
               const provRes = await resolveProviderCandidate(
                 deps,
@@ -5831,6 +5972,7 @@ async function runInboundTurn(
           await turnSession.commit();
         }
         let choices: ChannelChoicePresentation | undefined;
+        let clarifyMsgToSend = mapped.message;
         if (
           (mapped.reason === "MISSING_SERVICE" ||
             mapped.reason === "AMBIGUOUS_SERVICE") &&
@@ -5840,13 +5982,31 @@ async function runInboundTurn(
           choices = buildChannelChoices(serviceOffer);
         } else if (mapped.reason === "MISSING_DATE" && dateOffer) {
           choices = buildChannelChoices(dateOffer);
+          const serviceName =
+            mapped.serviceName ??
+            turnSession.state?.selectedService ??
+            "المطلوبة";
+          const lines = [
+            `يرجى تحديد اليوم أو التاريخ المناسب لك لحجز خدمة "${serviceName}":`,
+          ];
+          for (const opt of dateOffer.options) {
+            lines.push(`${opt.index}️⃣ ${opt.label}`);
+          }
+          lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+          clarifyMsgToSend = lines.join("\n");
         }
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          clarifyMsgToSend,
+          "AI_ACTIVE",
+        );
         const delivery = await deliverAssistantReply(
           deps,
           customer.phone,
           business.name,
           conversation.id,
-          mapped.message,
+          clarifyMsgToSend,
           assistantMessage.id,
           business.id,
           outboundConnectionId,
@@ -6022,6 +6182,7 @@ async function runInboundTurn(
           ...(providerId ? { providerId } : {}),
           date: mapped.date!,
           ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+          limit: 50,
         },
       );
       if (!bookingResult.success) {
@@ -6065,7 +6226,16 @@ async function runInboundTurn(
         };
       }
 
+      const tz = resolveValidTimeZone(business.timezone);
+      const slotDateTodayIso = todayIsoInTimeZone(now, tz);
+      const currentTime = nowTimeInTimeZone(now, tz);
+
       let bookableOptions = bookingResult.data.options;
+      if (mapped.date! === slotDateTodayIso) {
+        bookableOptions = bookableOptions.filter(
+          (o) => o.startAt.slice(11, 16) > currentTime,
+        );
+      }
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
@@ -6167,6 +6337,8 @@ async function runInboundTurn(
         };
       }
 
+      const representativeOptions = sampleRepresentativeSlots(bookableOptions, 4);
+
       let slotOffer: SlotOffer | null = null;
       if (turnSession.enabled) {
         slotOffer = buildSlotOffer(
@@ -6180,8 +6352,11 @@ async function runInboundTurn(
             timePreference: timeOfDayPref ?? null,
             date: mapped.date!,
             followUpRequestId: activeFollowUpId,
-            shownCount: bookableOptions.length,
-            options: bookableOptions.map((o) => ({
+            shownCount: representativeOptions.length,
+            shownSlotKeys: representativeOptions.map(
+              (o) => `${o.providerId}:${o.startAt}`,
+            ),
+            options: representativeOptions.map((o) => ({
               providerId: o.providerId,
               displayName: o.displayName,
               startAt: o.startAt,
@@ -6216,7 +6391,7 @@ async function runInboundTurn(
       const optionsMsg = formatBookingOptionsMessage(
         mapped.serviceName,
         mapped.date!,
-        bookableOptions,
+        representativeOptions,
         activeFollowUpId,
       );
       const assistantMessage = await persistAssistantReply(
