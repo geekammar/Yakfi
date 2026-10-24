@@ -70,8 +70,10 @@ async function main(): Promise<void> {
 
   const {
     beginTelegramProvisioning,
+    checkTelegramConnection,
     getTelegramConnectionStatus,
     PROVISIONING_OUTCOME_LABELS,
+    repairTelegramConnection,
     resolveTelegramConnectionView,
   } =
     await import("@/features/telegram-connection/server/telegram-connection-service");
@@ -114,7 +116,15 @@ async function main(): Promise<void> {
 
   // A controllable Bot API fixture: `getManagedBotToken` fails on demand
   // (the typed-failure leg of the journey). Everything else stays healthy.
-  const scenario = { failManagedBotToken: false };
+  const scenario = {
+    failManagedBotToken: false,
+    currentWebhookUrl: `${WEBHOOK_BASE}/api/telegram/webhook`,
+    currentAllowedUpdates: ["message"] as string[],
+    failSetWebhook: false,
+    failDbUpdate: false,
+    pendingUpdateCount: 0,
+    setWebhookCallCount: 0,
+  };
 
   const api = {
     fetchImpl: (async (url: string, init?: RequestInit) => {
@@ -150,7 +160,35 @@ async function main(): Promise<void> {
           { status: 200 },
         );
       }
+      if (method === "getWebhookInfo") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: scenario.currentWebhookUrl,
+              has_custom_certificate: false,
+              pending_update_count: scenario.pendingUpdateCount,
+              allowed_updates: scenario.currentAllowedUpdates,
+            },
+          }),
+          { status: 200 },
+        );
+      }
       if (method === "setWebhook") {
+        scenario.setWebhookCallCount++;
+        if (scenario.failSetWebhook) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error_code: 500,
+              description: "Telegram API unreachable",
+            }),
+            { status: 500 },
+          );
+        }
+        if (Array.isArray(body.allowed_updates)) {
+          scenario.currentAllowedUpdates = body.allowed_updates as string[];
+        }
         return new Response(JSON.stringify({ ok: true, result: true }), {
           status: 200,
         });
@@ -304,6 +342,21 @@ async function main(): Promise<void> {
         });
         return row;
       },
+      updateWebhookSecretHash: async (
+        id: string,
+        businessId: string,
+        webhookSecretHash: string,
+      ) => {
+        if (scenario.failDbUpdate) return null;
+        const row = connections.find(
+          (candidate) =>
+            candidate.id === id && candidate.businessId === businessId,
+        );
+        if (!row) return null;
+        row.webhookSecretHash = webhookSecretHash;
+        row.updatedAt = new Date();
+        return row;
+      },
       disconnect: async () => null,
       findByExternalId: async (botExternalId: string) =>
         connections.find((row) => row.botExternalId === botExternalId) ?? null,
@@ -388,6 +441,7 @@ async function main(): Promise<void> {
     webhookBaseUrl: WEBHOOK_BASE,
     managerBotId: MANAGER_BOT_ID,
     managerBotUsername: MANAGER_USERNAME,
+    credentialsResolver: api.credentialsResolver,
     now: () => new Date(),
   };
 
@@ -847,6 +901,187 @@ async function main(): Promise<void> {
   check(
     "32. أندرويد وحده يفعّل المُنتقي",
     isAndroidUserAgent(ANDROID_UA) === true,
+  );
+
+  // ── F: Settings Telegram Diagnostics & Button Repair Surface ───────────
+
+  // F1. Unauthenticated/STAFF requests cannot call Telegram or mutate state
+  const staffCheck = await checkTelegramConnection(deps, {
+    userId: "staff-1",
+    role: "STAFF",
+    businessId: BUSINESS_A,
+  });
+  const staffRepair = await repairTelegramConnection(deps, {
+    userId: "staff-1",
+    role: "STAFF",
+    businessId: BUSINESS_A,
+  });
+  const noBusinessCheck = await checkTelegramConnection(deps, {
+    userId: "admin-1",
+    role: "ADMIN",
+    businessId: null,
+  });
+  check(
+    "33. طلبات STAFF وبلا منشأة مرفوضة (UNAUTHORIZED) دون أي استدعاء لتيليجرام أو تعديل حالة",
+    staffCheck.success === false &&
+      staffCheck.code === "UNAUTHORIZED" &&
+      staffRepair.success === false &&
+      staffRepair.code === "UNAUTHORIZED" &&
+      noBusinessCheck.success === false &&
+      noBusinessCheck.code === "UNAUTHORIZED",
+  );
+
+  // F2. A client cannot target another business/connection
+  const otherBusinessCheck = await checkTelegramConnection(deps, {
+    userId: "admin-1",
+    role: "ADMIN",
+    businessId: "99999999-9999-4999-8999-999999999999",
+  });
+  check(
+    "34. لا يمكن استهداف منشأة أو اتصال آخر (الخادم يشتق النطاق من المستخدم ويرفض المنشأة غير الموجودة)",
+    otherBusinessCheck.success === false &&
+      otherBusinessCheck.code === "CONNECTION_NOT_FOUND",
+  );
+
+  // F3. Inactive or Manager-bot connection refuses check/repair
+  const inactiveConn: ConnectionRow = {
+    ...connections[0]!,
+    id: "conn-inactive",
+    businessId: BUSINESS_B,
+    status: "DISCONNECTED",
+    isActive: false,
+  };
+  connections.push(inactiveConn);
+  const inactiveCheck = await checkTelegramConnection(deps, {
+    userId: "admin-b",
+    role: "ADMIN",
+    businessId: BUSINESS_B,
+  });
+  const managerConn: ConnectionRow = {
+    ...connections[0]!,
+    id: "conn-manager",
+    businessId: "33333333-3333-4333-8333-333333333333",
+    botExternalId: MANAGER_BOT_ID,
+    managerBotId: MANAGER_BOT_ID,
+    status: "CONNECTED",
+    isActive: true,
+  };
+  connections.push(managerConn);
+  const managerCheck = await checkTelegramConnection(deps, {
+    userId: "admin-m",
+    role: "ADMIN",
+    businessId: "33333333-3333-4333-8333-333333333333",
+  });
+  check(
+    "35. الاتصال غير النشط وبوت الإدارة مرفوضان بحراس الأمان (CONNECTION_INACTIVE / MANAGER_BOT_TARGET_REJECTED)",
+    inactiveCheck.success === false &&
+      inactiveCheck.code === "CONNECTION_INACTIVE" &&
+      managerCheck.success === false &&
+      managerCheck.code === "MANAGER_BOT_TARGET_REJECTED",
+  );
+
+  // F4. Check is read-only and missing callback_query maps to REPAIR_REQUIRED
+  scenario.currentAllowedUpdates = ["message"];
+  const setWebhookCallsBeforeCheck = scenario.setWebhookCallCount;
+  const primaryConn = connections.find((c) => c.businessId === BUSINESS_A)!;
+  const hashBeforeCheck = primaryConn.webhookSecretHash;
+
+  const checkResult = await checkTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  check(
+    "36. فحص الاتصال للقراءة فقط ويشخص غياب callback_query كـ REPAIR_REQUIRED دون استدعاء setWebhook أو تغيير DB",
+    checkResult.success === true &&
+      checkResult.diagnostic.status === "REPAIR_REQUIRED" &&
+      checkResult.diagnostic.hasCallbackSubscription === false &&
+      checkResult.diagnostic.botExternalId === BOT_ID &&
+      scenario.setWebhookCallCount === setWebhookCallsBeforeCheck &&
+      primaryConn.webhookSecretHash === hashBeforeCheck,
+  );
+
+  // F5. Repair delegates to existing verified repair behavior (adds callback_query and rotates secret)
+  const repairResult = await repairTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  check(
+    "37. إصلاح استقبال الأزرار يفعّل اشتراك callback_query في تيليجرام ويحدّث تجزئة السر في قاعدة البيانات",
+    repairResult.success === true &&
+      repairResult.status === "REPAIRED" &&
+      repairResult.allowedUpdates.includes("callback_query") &&
+      scenario.currentAllowedUpdates.includes("callback_query") &&
+      primaryConn.webhookSecretHash !== hashBeforeCheck,
+  );
+
+  // F6. Subsequent check confirms ALREADY_CORRECT
+  const reCheckResult = await checkTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  const idempotentRepairResult = await repairTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  check(
+    "38. بعد الإصلاح: الفحص يؤكد ALREADY_CORRECT والإصلاح التكراري no-op معتمد",
+    reCheckResult.success === true &&
+      reCheckResult.diagnostic.status === "ALREADY_CORRECT" &&
+      reCheckResult.diagnostic.hasCallbackSubscription === true &&
+      idempotentRepairResult.success === true &&
+      idempotentRepairResult.status === "ALREADY_CORRECT",
+  );
+
+  // F7. Credential failure remains honest failure
+  const savedSecretRef = primaryConn.credentialsRef;
+  const savedSecretVal = storedSecrets.get(savedSecretRef!);
+  storedSecrets.delete(savedSecretRef!);
+  const credFailCheck = await checkTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  storedSecrets.set(savedSecretRef!, savedSecretVal!);
+  check(
+    "39. فشل فك بيانات الاعتماد يعيد فشلاً صريحاً وآمناً (CREDENTIALS_UNAVAILABLE)",
+    credFailCheck.success === false &&
+      credFailCheck.code === "CREDENTIALS_UNAVAILABLE",
+  );
+
+  // F8. Partial failure remains honest failure and never claims success
+  scenario.currentAllowedUpdates = ["message"];
+  scenario.failDbUpdate = true;
+  const partialFailRepair = await repairTelegramConnection(deps, {
+    userId: "admin-a",
+    role: "ADMIN",
+    businessId: BUSINESS_A,
+  });
+  scenario.failDbUpdate = false;
+  check(
+    "40. الفشل الجزئي (تحديث تيليجرام مع تعثر DB) يعيد PARTIAL_APPLICATION_RECOVERY_REQUIRED ولا يدعي النجاح أبداً",
+    partialFailRepair.success === false &&
+      partialFailRepair.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED" &&
+      partialFailRepair.requiresReconciliation === true,
+  );
+
+  // F9. Secret safety: no secret or raw internal result crosses the browser boundary
+  const diag = (checkResult.success ? checkResult.diagnostic : {}) as Record<
+    string,
+    unknown
+  >;
+  const hasSecretLeak =
+    "credentialsRef" in diag ||
+    "webhookSecretHash" in diag ||
+    "token" in diag ||
+    "masterKey" in diag ||
+    "cipherBlob" in diag;
+  check(
+    "41. أمان الأسرار: نتيجة الفحص لا تحوي credentialsRef أو webhookSecretHash أو توكنات أو مفاتيح",
+    hasSecretLeak === false,
   );
 
   // ── Report ─────────────────────────────────────────────────────────────────

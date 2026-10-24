@@ -28,6 +28,10 @@
  *   by the adapter boundary only, as an opaque `fp:<id>` RUNTIME reference.
  */
 
+import {
+  defaultCredentialsResolver,
+  type CredentialsResolver,
+} from "@/server/credentials/credentials-resolver";
 import type { RuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
 import {
   getManagerBotToken,
@@ -37,9 +41,16 @@ import {
   buildManagedBotDeepLink,
   disconnectManagedBotConnection,
   ensureManagerWebhook,
+  generateWebhookSecret,
   mintTelegramStartToken,
   type TelegramProvisioningDeps,
 } from "@/server/integrations/telegram/telegram-provisioning";
+import {
+  repairTelegramBotWebhook,
+  validateCustomerWebhookUrl,
+  type RepairTelegramWebhookDeps,
+} from "@/server/integrations/telegram/telegram-repair";
+import { hashTelegramWebhookSecret } from "@/server/integrations/telegram/telegram-webhook";
 import type {
   BusinessRepository,
   TelegramConnectionRepository,
@@ -53,7 +64,9 @@ import type { TelegramConnection } from "@/types/domain";
 
 import type {
   BeginTelegramProvisioningResult,
+  TelegramConnectionDiagnosticResult,
   TelegramConnectionReadResult,
+  TelegramConnectionRepairActionResult,
   TelegramConnectionView,
   TelegramDisconnectionResult,
 } from "../types";
@@ -95,11 +108,20 @@ export type TelegramConnectionServiceDeps = Omit<
     | "update"
     | "disconnect"
     | "markOnboardingReady"
-  >;
+  > & {
+    updateWebhookSecretHash?: (
+      id: string,
+      businessId: string,
+      webhookSecretHash: string,
+      options?: { expectedPreviousHash?: string | null },
+    ) => Promise<TelegramConnection | null>;
+  };
   credentialStore: Pick<RuntimeCredentialStore, "store" | "delete">;
   businessRepository: Pick<BusinessRepository, "findById">;
   /** The Manager Bot's @username — a non-secret operator config value. */
   managerBotUsername: string | null;
+  credentialsResolver?: Pick<CredentialsResolver, "resolve">;
+  repairWebhookFn?: typeof repairTelegramBotWebhook;
 };
 
 const FORBIDDEN_MESSAGE = "إعداد تيليجرام متاح للمدير فقط";
@@ -428,4 +450,263 @@ export function isManagerBotConfigured(
   getEnvVar: (name: string) => string | undefined,
 ): boolean {
   return Boolean(getManagerBotToken(getEnvVar));
+}
+
+// ─── Diagnostics & Repair (DECISIONS #66 — Settings Surface) ──────────────
+
+/**
+ * Run an explicit, read-only diagnostic check on the actor's connected bot (ADMIN only).
+ * Performs real getMe and getWebhookInfo without mutating Telegram or the database.
+ * Returns only a safe, secret-free projection.
+ */
+export async function checkTelegramConnection(
+  deps: TelegramConnectionServiceDeps,
+  actor: TelegramConnectionActor,
+): Promise<TelegramConnectionDiagnosticResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) {
+    return { success: false, code: "UNAUTHORIZED", message: scope.message };
+  }
+
+  const connection = await deps.connectionRepository.findPrimaryByBusiness(
+    scope.businessId,
+  );
+  if (!connection) {
+    return {
+      success: false,
+      code: "CONNECTION_NOT_FOUND",
+      message: "لا يوجد اتصال تيليجرام مسجل للمنشأة",
+    };
+  }
+
+  if (!isOperationallyConnected(connection)) {
+    return {
+      success: false,
+      code: "CONNECTION_INACTIVE",
+      message: "اتصال تيليجرام غير نشط حالياً — أعد ربط البوت أولاً",
+    };
+  }
+
+  if (
+    connection.managerBotId &&
+    connection.botExternalId === connection.managerBotId
+  ) {
+    return {
+      success: false,
+      code: "MANAGER_BOT_TARGET_REJECTED",
+      message: "لا يمكن تطبيق الفحص على بوت إدارة المنصة",
+    };
+  }
+
+  const rawExpectedUrl = `${(deps.webhookBaseUrl ?? "").replace(/\/+$/, "")}/api/telegram/webhook`;
+  const validatedUrl = validateCustomerWebhookUrl(
+    rawExpectedUrl,
+    "رابط الويبهوك المتوقع",
+  );
+  if (!validatedUrl.ok) {
+    return {
+      success: false,
+      code: validatedUrl.code,
+      message: "رابط ويبهوك المنشأة غير صالح أو غير مدعوم (يجب أن يكون HTTPS)",
+    };
+  }
+  const expectedWebhookUrl = validatedUrl.normalizedUrl;
+
+  const repairFn = deps.repairWebhookFn ?? repairTelegramBotWebhook;
+  const repairDeps: RepairTelegramWebhookDeps = {
+    api: deps.api,
+    connectionRepository: deps.connectionRepository,
+    credentialsResolver: deps.credentialsResolver ?? defaultCredentialsResolver,
+    generateWebhookSecret,
+    hashWebhookSecret: hashTelegramWebhookSecret,
+    expectedWebhookUrl,
+    getEnvVar: deps.getEnvVar,
+  };
+
+  const outcome = await repairFn(repairDeps, {
+    businessId: scope.businessId,
+    connectionId: connection.id,
+    expectedWebhookUrl,
+    apply: false,
+  });
+
+  if (!outcome.ok) {
+    return {
+      success: false,
+      code: outcome.code,
+      message: outcome.message,
+    };
+  }
+
+  if (outcome.status === "ALREADY_CORRECT") {
+    const hasCallback = outcome.allowedUpdates.includes("callback_query");
+    return {
+      success: true,
+      diagnostic: {
+        status: "ALREADY_CORRECT",
+        botExternalId: outcome.botExternalId,
+        botUsername: outcome.botUsername ?? null,
+        webhookUrl: outcome.webhookUrl,
+        urlMatchesExpected: outcome.webhookUrl === expectedWebhookUrl,
+        hasCallbackSubscription: hasCallback,
+        allowedUpdates: outcome.allowedUpdates,
+        pendingUpdateCount: outcome.pendingUpdateCount,
+        checkedAt: deps.now().toISOString(),
+        safeSummary:
+          "الاتصال سليم واشتراك استقبال الأزرار مفعل ومطابق للمواصفات.",
+      },
+    };
+  }
+
+  if (outcome.status === "REPAIR_REQUIRED") {
+    return {
+      success: true,
+      diagnostic: {
+        status: "REPAIR_REQUIRED",
+        botExternalId: outcome.botExternalId,
+        botUsername: outcome.botUsername ?? null,
+        webhookUrl: outcome.webhookUrl,
+        urlMatchesExpected: outcome.webhookUrl === expectedWebhookUrl,
+        hasCallbackSubscription: false,
+        allowedUpdates: outcome.currentAllowedUpdates,
+        pendingUpdateCount: outcome.pendingUpdateCount,
+        checkedAt: deps.now().toISOString(),
+        safeSummary:
+          "البوت متصل ولكن استقبال الأزرار (callback_query) غير مفعل في تيليجرام. اضغط زر «إصلاح استقبال الأزرار» لتفعيله.",
+      },
+    };
+  }
+
+  return {
+    success: false,
+    code: "UNEXPECTED_STATUS",
+    message: "حالة فحص غير متوقعة",
+  };
+}
+
+/**
+ * Run an explicit repair of button reception for the actor's connected bot (ADMIN only).
+ * Rechecks conditions server-side, updates Telegram allowed_updates, and verifies DB persistence.
+ * Never labels partial application as success.
+ */
+export async function repairTelegramConnection(
+  deps: TelegramConnectionServiceDeps,
+  actor: TelegramConnectionActor,
+): Promise<TelegramConnectionRepairActionResult> {
+  const scope = resolveScope(actor);
+  if (!scope.ok) {
+    return { success: false, code: "UNAUTHORIZED", message: scope.message };
+  }
+
+  // Recheck current conditions server-side; do not trust browser cache
+  const connection = await deps.connectionRepository.findPrimaryByBusiness(
+    scope.businessId,
+  );
+  if (!connection) {
+    return {
+      success: false,
+      code: "CONNECTION_NOT_FOUND",
+      message: "لا يوجد اتصال تيليجرام مسجل للمنشأة",
+    };
+  }
+
+  if (!isOperationallyConnected(connection)) {
+    return {
+      success: false,
+      code: "CONNECTION_INACTIVE",
+      message: "اتصال تيليجرام غير نشط حالياً — أعد ربط البوت أولاً",
+    };
+  }
+
+  if (
+    connection.managerBotId &&
+    connection.botExternalId === connection.managerBotId
+  ) {
+    return {
+      success: false,
+      code: "MANAGER_BOT_TARGET_REJECTED",
+      message: "لا يمكن تطبيق الإصلاح على بوت إدارة المنصة",
+    };
+  }
+
+  const rawExpectedUrl = `${(deps.webhookBaseUrl ?? "").replace(/\/+$/, "")}/api/telegram/webhook`;
+  const validatedUrl = validateCustomerWebhookUrl(
+    rawExpectedUrl,
+    "رابط الويبهوك المتوقع",
+  );
+  if (!validatedUrl.ok) {
+    return {
+      success: false,
+      code: validatedUrl.code,
+      message: "رابط ويبهوك المنشأة غير صالح أو غير مدعوم (يجب أن يكون HTTPS)",
+    };
+  }
+  const expectedWebhookUrl = validatedUrl.normalizedUrl;
+
+  const repairFn = deps.repairWebhookFn ?? repairTelegramBotWebhook;
+  const repairDeps: RepairTelegramWebhookDeps = {
+    api: deps.api,
+    connectionRepository: deps.connectionRepository,
+    credentialsResolver: deps.credentialsResolver ?? defaultCredentialsResolver,
+    generateWebhookSecret,
+    hashWebhookSecret: hashTelegramWebhookSecret,
+    expectedWebhookUrl,
+    getEnvVar: deps.getEnvVar,
+  };
+
+  const outcome = await repairFn(repairDeps, {
+    businessId: scope.businessId,
+    connectionId: connection.id,
+    expectedWebhookUrl,
+    apply: true,
+    reconcileSecret: false,
+  });
+
+  if (!outcome.ok) {
+    if (outcome.status === "PARTIAL_FAILURE") {
+      return {
+        success: false,
+        code: outcome.code,
+        message:
+          outcome.message ||
+          "حدث خطأ جزئي أثناء تحديث الإعدادات يلزم مراجعته من المشغّل",
+        requiresReconciliation: true,
+      };
+    }
+    return {
+      success: false,
+      code: outcome.code,
+      message: outcome.message,
+    };
+  }
+
+  if (outcome.status === "ALREADY_CORRECT") {
+    return {
+      success: true,
+      status: "ALREADY_CORRECT",
+      botExternalId: outcome.botExternalId,
+      botUsername: outcome.botUsername ?? null,
+      webhookUrl: outcome.webhookUrl,
+      allowedUpdates: outcome.allowedUpdates,
+      message: "اشتراك استقبال الأزرار سليم بالفعل ومطابق للمواصفات.",
+    };
+  }
+
+  if (outcome.status === "REPAIRED" || outcome.status === "SECRET_RECONCILED") {
+    return {
+      success: true,
+      status: outcome.status,
+      botExternalId: outcome.botExternalId,
+      botUsername: outcome.botUsername ?? null,
+      webhookUrl: outcome.webhookUrl,
+      allowedUpdates: outcome.allowedUpdates,
+      message: "تم إصلاح استقبال الأزرار بنجاح وتحديث إعدادات تيليجرام.",
+    };
+  }
+
+  return {
+    success: false,
+    code: "UNEXPECTED_OUTCOME",
+    message: "نتيجة غير متوقعة أثناء إصلاح استقبال الأزرار",
+  };
 }
