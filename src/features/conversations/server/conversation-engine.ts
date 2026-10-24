@@ -1575,7 +1575,6 @@ export async function resolveUpcomingBookingDates(
   const eligibilityDeps = buildEligibilityDeps(deps);
   const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
 
-  let checkedWorkingDays = 0;
   let succeededDays = 0;
   let exceptionsCount = 0;
   const domainErrors: Array<{ code: string; message: string }> = [];
@@ -1598,7 +1597,6 @@ export async function resolveUpcomingBookingDates(
       }
     }
 
-    checkedWorkingDays++;
     try {
       const bookingResult = await resolveBookingOptions(
         bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
