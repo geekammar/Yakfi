@@ -4,6 +4,8 @@ import { TELEGRAM_PROVIDER, telegramStartTokenSchema } from "@/lib/validation";
 import { mintRuntimeCredentialReference } from "@/server/credentials/credentials-resolver";
 import type { RuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
 import {
+  TELEGRAM_CUSTOMER_ALLOWED_UPDATES,
+  TELEGRAM_MANAGER_ALLOWED_UPDATES,
   getManagerBotToken,
   resolveTelegramBotToken,
   telegramDeleteWebhook,
@@ -201,6 +203,14 @@ export function buildManagerWebhookUrl(webhookBaseUrl: string): string {
 }
 
 /**
+ * Customer bot webhook URL (`/api/telegram/webhook`).
+ * Authenticated via per-connection secret token digest.
+ */
+export function buildCustomerWebhookUrl(webhookBaseUrl: string): string {
+  return `${webhookBaseUrl.replace(/\/$/, "")}/api/telegram/webhook`;
+}
+
+/**
  * Ensure the Manager Bot's webhook points here with the derived secret
  * (idempotent — `setWebhook` is a configuration SET, so re-applying the
  * same value is a no-op at Telegram). Called at provisioning LAUNCH, so
@@ -220,7 +230,7 @@ export async function ensureManagerWebhook(
   const result = await telegramSetWebhook(deps.api, managerToken, {
     url: buildManagerWebhookUrl(deps.webhookBaseUrl),
     secretToken: deriveManagerWebhookSecret(managerToken),
-    allowedUpdates: ["message", "managed_bot"],
+    allowedUpdates: [...TELEGRAM_MANAGER_ALLOWED_UPDATES],
   });
   if (!result.ok) {
     return {
@@ -263,7 +273,7 @@ export function suggestBotUsername(
  * to Telegram exactly once via `setWebhook`; only its non-reversible
  * SHA-256 digest is persisted (as the connection's routing index).
  */
-function generateWebhookSecret(): string {
+export function generateWebhookSecret(): string {
   return (
     crypto.randomUUID().replace(/-/g, "") +
     crypto.randomUUID().replace(/-/g, "")
@@ -457,14 +467,13 @@ export async function completeManagedBotProvisioning(
   const botToken = tokenResult.result;
 
   // 4. Set the webhook with a FRESH per-connection secret (webhook, never
-  //    polling — DECISIONS #63 (E)); private-chats text scope per the
-  //    approved MVP.
+  //    polling — DECISIONS #63 (E)); private-chats text and inline button callback scope.
   const webhookSecret = generateWebhookSecret();
   const webhookUrl = `${deps.webhookBaseUrl.replace(/\/$/, "")}/api/telegram/webhook`;
   const webhookResult = await telegramSetWebhook(deps.api, botToken, {
     url: webhookUrl,
     secretToken: webhookSecret,
-    allowedUpdates: ["message"],
+    allowedUpdates: [...TELEGRAM_CUSTOMER_ALLOWED_UPDATES],
   });
   if (!webhookResult.ok) {
     return await terminate(

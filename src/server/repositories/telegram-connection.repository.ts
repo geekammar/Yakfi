@@ -129,6 +129,42 @@ export class TelegramConnectionRepository {
   }
 
   /**
+   * Controlled update of webhook secret hash guarded by tenant, active status,
+   * and optional expected previous hash to prevent overwriting disconnected
+   * or concurrently changed connections.
+   */
+  async updateWebhookSecretHash(
+    id: string,
+    businessId: string,
+    webhookSecretHash: string,
+    options?: { expectedPreviousHash?: string | null },
+  ): Promise<TelegramConnection | null> {
+    const where: {
+      id: string;
+      businessId: string;
+      deletedAt: null;
+      status: "CONNECTED";
+      isActive: true;
+      webhookSecretHash?: string | null;
+    } = {
+      id,
+      businessId,
+      deletedAt: null,
+      status: "CONNECTED",
+      isActive: true,
+      ...(options && "expectedPreviousHash" in options
+        ? { webhookSecretHash: options.expectedPreviousHash }
+        : {}),
+    };
+    const result = await db.telegramConnection.updateMany({
+      where,
+      data: { webhookSecretHash },
+    });
+    if (result.count === 0) return null;
+    return this.findByIdWithinBusiness(id, businessId);
+  }
+
+  /**
    * DISCONNECT an operationally connected connection (DECISIONS #66 —
    * the supported lifecycle: `deleteWebhook` → disconnect → remove the
    * runtime credential reference). A conditional atomic update guarded by

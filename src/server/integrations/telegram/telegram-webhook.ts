@@ -30,8 +30,8 @@ import {
  *    more than one bot), so the EXISTING dedupe ledger makes redeliveries
  *    idempotent with zero change.
  *
- * MVP scope (DECISIONS #63 (F), approved): private chats only, text only.
- * Non-private chats are routed away (ignored, 200 — no group support);
+ * Customer scope (DECISIONS #63 (F), UX001): private chats text and
+ * interactive callback queries. Non-private chats are routed away (ignored, 200);
  * non-text messages hit the EXISTING approved contract (unsupported →
  * dropped, no invented behavior; the drop-vs-persist-and-defer decision
  * for stickers/voice stays an open, flagged decision, NOT guessed here).

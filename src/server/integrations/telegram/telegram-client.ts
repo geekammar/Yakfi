@@ -249,11 +249,47 @@ export async function telegramSendMessage(
   });
 }
 
+export const TELEGRAM_CUSTOMER_ALLOWED_UPDATES = [
+  "message",
+  "callback_query",
+] as const;
+
+export const TELEGRAM_MANAGER_ALLOWED_UPDATES = [
+  "message",
+  "managed_bot",
+] as const;
+
+export type TelegramWebhookInfo = {
+  url: string;
+  has_custom_certificate?: boolean;
+  pending_update_count: number;
+  ip_address?: string;
+  last_error_date?: number;
+  last_error_message?: string;
+  last_synchronization_error_date?: number;
+  max_connections?: number;
+  allowed_updates?: string[];
+};
+
+/**
+ * `getWebhookInfo` — returns current webhook status for the bot.
+ * Read-only check for URL, allowed_updates, pending updates, and errors.
+ */
+export async function telegramGetWebhookInfo(
+  deps: TelegramApiDeps,
+  token: string,
+): Promise<TelegramApiResult<TelegramWebhookInfo>> {
+  return callTelegramApi<TelegramWebhookInfo>(deps, {
+    token,
+    method: "getWebhookInfo",
+  });
+}
+
 /**
  * `setWebhook` — webhook (NOT `getUpdates` polling; polling is
  * incompatible with the Vercel-only infrastructure constraint,
- * DECISIONS #63 (E)). `allowed_updates: ["message"]` enforces the
- * approved MVP scope (private-chats text; DECISIONS #63 (F)(2)).
+ * DECISIONS #63 (E)). Defaults to `TELEGRAM_CUSTOMER_ALLOWED_UPDATES`
+ * (["message", "callback_query"]) for customer conversation bots.
  */
 export async function telegramSetWebhook(
   deps: TelegramApiDeps,
@@ -270,7 +306,9 @@ export async function telegramSetWebhook(
     body: {
       url: params.url,
       secret_token: params.secretToken,
-      allowed_updates: params.allowedUpdates ?? ["message"],
+      allowed_updates: params.allowedUpdates ?? [
+        ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES,
+      ],
     },
   });
 }

@@ -416,6 +416,8 @@ async function main(): Promise<void> {
     await import("@/server/integrations/telegram/telegram-transport");
 
   type FakeConnection = import("@/types/domain").TelegramConnection;
+  type TelegramApiDeps =
+    import("@/server/integrations/telegram/telegram-client").TelegramApiDeps;
   function fakeConnection(input: {
     id: string;
     businessId: string;
@@ -3094,6 +3096,1475 @@ async function main(): Promise<void> {
       qEmptyRecorded.find((r) => r.method === "setWebhook") === undefined,
   );
 
+  // ════════════════════════════════════════════════════════════════════════
+  // R. Telegram Button Callback Delivery & Hotfix Regression
+  //    (DECISIONS #63/#73 / UX001 hotfix)
+  // ════════════════════════════════════════════════════════════════════════
+
+  // R1. Customer provisioning sends both message and callback_query
+  check(
+    "R1. Customer provisioning sends both message and callback_query in allowed_updates",
+    qWebhookCall !== undefined &&
+      Array.isArray(qWebhookCall.body.allowed_updates) &&
+      qWebhookCall.body.allowed_updates.includes("message") &&
+      qWebhookCall.body.allowed_updates.includes("callback_query"),
+  );
+
+  // R2. Manager provisioning retains separate message, managed_bot
+  check(
+    "R2. Manager provisioning retains separate message, managed_bot in allowed_updates",
+    setWebhookCall !== undefined &&
+      JSON.stringify(setWebhookCall.body.allowed_updates) ===
+        JSON.stringify(["message", "managed_bot"]),
+  );
+
+  // Setup existing-bot repair testing
+  const { repairTelegramBotWebhook } =
+    await import("@/server/integrations/telegram/telegram-repair");
+
+  const repairBotId = "6888888888";
+  const repairConnectionId = "conn-repair-test-id";
+  const repairCredentialsRef = "fp:repair-token-ref";
+  const repairBotToken = "6888888888:repair-bot-token-secret";
+  const repairWebhookUrl = "https://flowpilot.example.com/api/telegram/webhook";
+  let repairSecretHash = hashTelegramWebhookSecret("original-repair-secret");
+
+  const repairConnection: FakeConnection = fakeConnection({
+    id: repairConnectionId,
+    businessId: BUSINESS_A,
+    branchId: null,
+    botExternalId: repairBotId,
+    status: "CONNECTED",
+    isActive: true,
+    credentialsRef: repairCredentialsRef,
+  });
+  repairConnection.botUsername = "repair_test_bot";
+  repairConnection.webhookSecretHash = repairSecretHash;
+
+  const repairDbCalls: Array<{ method: string; args: unknown }> = [];
+  const repairFakeRepo = {
+    async findByIdWithinBusiness(id: string, businessId: string) {
+      if (id === repairConnectionId && businessId === BUSINESS_A) {
+        return repairConnection;
+      }
+      return null;
+    },
+    async update(
+      id: string,
+      businessId: string,
+      input: { webhookSecretHash?: string | null },
+    ) {
+      repairDbCalls.push({ method: "update", args: { id, businessId, input } });
+      if (id === repairConnectionId && businessId === BUSINESS_A) {
+        if (input.webhookSecretHash !== undefined) {
+          repairConnection.webhookSecretHash = input.webhookSecretHash;
+          repairSecretHash = input.webhookSecretHash ?? "";
+        }
+        return repairConnection;
+      }
+      return null;
+    },
+  };
+
+  const repairResolver = {
+    async resolve(ref: string) {
+      if (ref === repairCredentialsRef) {
+        return {
+          ok: true as const,
+          kind: "RUNTIME" as const,
+          reference: ref,
+          value: repairBotToken,
+        };
+      }
+      return {
+        ok: false as const,
+        code: "UNRESOLVED_REFERENCE" as const,
+        message: "unknown reference",
+      };
+    },
+  };
+
+  let repairTelegramAllowedUpdates = ["message"];
+  const repairTelegramPendingCount = 5;
+  const repairTelegramCalls: Array<{
+    method: string;
+    body: {
+      url?: string;
+      allowed_updates?: string[];
+      drop_pending_updates?: boolean;
+      secret_token?: string;
+      [key: string]: unknown;
+    };
+  }> = [];
+
+  const repairApiDeps: TelegramApiDeps = {
+    fetchImpl: async (_url, init) => {
+      const method = String(_url).split("/").pop();
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      repairTelegramCalls.push({ method: method ?? "", body });
+
+      if (method === "getMe") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(repairBotId),
+              is_bot: true,
+              first_name: "Repair Bot",
+              username: "repair_test_bot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (method === "getWebhookInfo") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: repairWebhookUrl,
+              has_custom_certificate: false,
+              pending_update_count: repairTelegramPendingCount,
+              allowed_updates: repairTelegramAllowedUpdates,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (method === "setWebhook") {
+        repairTelegramAllowedUpdates = body.allowed_updates ?? [];
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 400 });
+    },
+    apiHost: "https://api.telegram.org",
+    credentialsResolver: repairResolver,
+  };
+
+  const repairDeps = {
+    api: repairApiDeps,
+    connectionRepository: repairFakeRepo,
+    credentialsResolver: repairResolver,
+    expectedWebhookUrl: repairWebhookUrl,
+  };
+
+  // R3. Existing-bot repair detects missing callbacks in check mode without mutating
+  const checkOnlyOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    apply: false,
+  });
+  check(
+    "R3. Existing-bot repair detects missing callbacks in check mode without mutating",
+    checkOnlyOutcome.ok === true &&
+      checkOnlyOutcome.status === "REPAIR_REQUIRED" &&
+      checkOnlyOutcome.checkOnly === true &&
+      JSON.stringify(checkOnlyOutcome.currentAllowedUpdates) ===
+        JSON.stringify(["message"]) &&
+      checkOnlyOutcome.targetAllowedUpdates.includes("callback_query") &&
+      checkOnlyOutcome.targetAllowedUpdates.includes("message") &&
+      repairDbCalls.length === 0 &&
+      repairTelegramCalls.filter((c) => c.method === "setWebhook").length === 0,
+  );
+
+  // R4. Existing-bot repair in apply mode updates Telegram, rotates secret in DB, and preserves pending updates
+  const applyOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    apply: true,
+  });
+  const setWebhookCallInRepair = repairTelegramCalls.find(
+    (c) => c.method === "setWebhook",
+  );
+  check(
+    "R4. Existing-bot repair in apply mode updates Telegram, rotates secret in DB, and preserves pending updates",
+    applyOutcome.ok === true &&
+      applyOutcome.status === "REPAIRED" &&
+      applyOutcome.checkOnly === false &&
+      applyOutcome.allowedUpdates.includes("callback_query") &&
+      applyOutcome.allowedUpdates.includes("message") &&
+      setWebhookCallInRepair !== undefined &&
+      setWebhookCallInRepair.body.url === repairWebhookUrl &&
+      setWebhookCallInRepair.body.allowed_updates?.includes(
+        "callback_query",
+      ) === true &&
+      !(
+        "drop_pending_updates" in setWebhookCallInRepair.body &&
+        setWebhookCallInRepair.body.drop_pending_updates
+      ) &&
+      repairDbCalls.length === 1 &&
+      repairConnection.webhookSecretHash !== undefined &&
+      repairConnection.webhookSecretHash.length === 64,
+  );
+
+  // R5. Already-correct registration is an idempotent verified no-op
+  const callsBeforeIdempotent = repairTelegramCalls.length;
+  const dbCallsBeforeIdempotent = repairDbCalls.length;
+  const idempotentOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    apply: true,
+  });
+  check(
+    "R5. Already-correct registration is an idempotent verified no-op",
+    idempotentOutcome.ok === true &&
+      idempotentOutcome.status === "ALREADY_CORRECT" &&
+      repairTelegramCalls
+        .slice(callsBeforeIdempotent)
+        .filter((c) => c.method === "setWebhook").length === 0 &&
+      repairDbCalls.length === dbCallsBeforeIdempotent,
+  );
+
+  // R6. Refusal guards: wrong-business, wrong-bot, Manager targets, and inactive targets are refused
+  const wrongBusinessOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_B,
+    connectionId: repairConnectionId,
+  });
+  const wrongBotApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: { id: 9999999999, is_bot: true, username: "swapped_bot" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+  const wrongBotOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: wrongBotApiDeps },
+    { businessId: BUSINESS_A, connectionId: repairConnectionId },
+  );
+
+  const managerBotApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(repairBotId),
+              is_bot: true,
+              username: "manager_bot",
+              can_manage_bots: true,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+  const managerBotOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: managerBotApiDeps },
+    { businessId: BUSINESS_A, connectionId: repairConnectionId },
+  );
+
+  const inactiveConnection: FakeConnection = fakeConnection({
+    id: "conn-inactive-test-id",
+    businessId: BUSINESS_A,
+    branchId: null,
+    botExternalId: repairBotId,
+    status: "DISCONNECTED",
+    isActive: false,
+    credentialsRef: repairCredentialsRef,
+  });
+  const inactiveOutcome = await repairTelegramBotWebhook(
+    {
+      ...repairDeps,
+      connectionRepository: {
+        ...repairFakeRepo,
+        findByIdWithinBusiness: async (id: string, bId: string) => {
+          if (id === "conn-inactive-test-id" && bId === BUSINESS_A) {
+            return inactiveConnection;
+          }
+          return repairFakeRepo.findByIdWithinBusiness(id, bId);
+        },
+      },
+    },
+    { businessId: BUSINESS_A, connectionId: "conn-inactive-test-id" },
+  );
+
+  check(
+    "R6. Refusal guards: wrong-business, wrong-bot, Manager targets, and inactive targets are refused",
+    wrongBusinessOutcome.ok === false &&
+      wrongBusinessOutcome.code === "CONNECTION_NOT_FOUND" &&
+      wrongBotOutcome.ok === false &&
+      wrongBotOutcome.code === "BOT_IDENTITY_MISMATCH" &&
+      managerBotOutcome.ok === false &&
+      managerBotOutcome.code === "MANAGER_BOT_TARGET_REJECTED" &&
+      inactiveOutcome.ok === false &&
+      inactiveOutcome.code === "CONNECTION_INACTIVE",
+  );
+
+  // R7. Header authentication remains intact
+  const R_SECRET = "webhook-secret-r-suite-secret-val";
+  const R_SECRET_HASH = hashTelegramWebhookSecret(R_SECRET);
+  const rConnection = fakeConnection({
+    id: "conn-r-test",
+    businessId: BUSINESS_A,
+    branchId: BRANCH_A,
+    botExternalId: BOT_ID,
+    status: "CONNECTED",
+    isActive: true,
+    credentialsRef: "fp:r-test-ref",
+  });
+  rConnection.webhookSecretHash = R_SECRET_HASH;
+
+  const authRouteHandler = async (secret: string | null) => {
+    return handleTelegramWebhook(
+      {
+        connectionRepository: {
+          findByWebhookSecretHash: async (h: string) =>
+            h === R_SECRET_HASH ? rConnection : null,
+        },
+        processInboundMessage: async () => ({ ok: true }),
+        schedule: (work) => {
+          work();
+        },
+      },
+      new Request("https://flowpilot.example.com/api/telegram/webhook", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(secret ? { "X-Telegram-Bot-Api-Secret-Token": secret } : {}),
+        },
+        body: JSON.stringify({
+          update_id: 888001,
+          message: {
+            message_id: 1,
+            date: 1700000000,
+            chat: { id: Number(CHAT_ID), type: "private" },
+            text: "hi",
+          },
+        }),
+      }),
+    );
+  };
+
+  const validAuthRes = await authRouteHandler(R_SECRET);
+  const invalidAuthRes = await authRouteHandler("wrong-secret-token");
+  const missingAuthRes = await authRouteHandler(null);
+
+  check(
+    "R7. Webhook secret authentication: valid -> 200, wrong/missing -> 401",
+    validAuthRes.status === 200 &&
+      invalidAuthRes.status === 401 &&
+      missingAuthRes.status === 401,
+  );
+
+  // R8. Ingress-to-response callback test with real webhook handler:
+  const { buildWelcomeOffer } =
+    await import("@/features/conversations/server/booking-offer");
+  const { offerCallbackData } =
+    await import("@/features/conversations/server/channel-choice");
+  const {
+    emptyConversationState,
+    withPresentedOffer,
+    dehydrateConversationState,
+  } = await import("@/features/conversations/server/conversation-state");
+
+  const rConvId = "conv-tg-r-suite";
+  const rNow = new Date();
+  const rWelcomeOffer = buildWelcomeOffer(
+    { businessId: BUSINESS_A, conversationId: rConvId },
+    "off-welcome-test-01",
+    rNow,
+  )!;
+  const rBookCallbackData = offerCallbackData(rWelcomeOffer, "book");
+
+  let rModelCalls = 0;
+  let rAppointmentsCreated = 0;
+  const rOutboundDeliveries: Array<{
+    to: string;
+    content: string;
+    choices?: unknown;
+  }> = [];
+  const rAcknowledgedCallbacks: string[] = [];
+  const rScheduledWork: Array<Promise<void>> = [];
+
+  let rConvState = withPresentedOffer(emptyConversationState(), rWelcomeOffer);
+
+  const rEngineDeps = {
+    ...engineDeps,
+    conversationRepository: {
+      findLatestByCustomer: async () => ({ id: rConvId }),
+      findById: async () => ({
+        id: rConvId,
+        businessId: BUSINESS_A,
+        customerId: "cust-tg",
+        status: "AI_ACTIVE",
+        assignedUserId: null,
+        branchId: BRANCH_A,
+      }),
+      create: async () => ({
+        id: rConvId,
+        businessId: BUSINESS_A,
+        customerId: "cust-tg",
+        status: "AI_ACTIVE",
+        assignedUserId: null,
+        branchId: BRANCH_A,
+      }),
+      addMessage: async () => ({ id: "msg-test" }),
+      getMessages: async () => [],
+      update: async () => ({ id: rConvId }),
+      updateWorkflow: async () => ({ id: rConvId }),
+    },
+    serviceRepository: {
+      listByBusiness: async () => [
+        {
+          id: "srv-1",
+          businessId: BUSINESS_A,
+          name: "كشف أسنان",
+          durationMinutes: 30,
+          isActive: true,
+          price: 150,
+        },
+        {
+          id: "srv-2",
+          businessId: BUSINESS_A,
+          name: "تنظيف أسنان",
+          durationMinutes: 45,
+          isActive: true,
+          price: 200,
+        },
+      ],
+      findById: async (id: string) => ({
+        id,
+        businessId: BUSINESS_A,
+        name: id === "srv-1" ? "كشف أسنان" : "تنظيف أسنان",
+        durationMinutes: 30,
+        isActive: true,
+        price: 150,
+      }),
+    },
+    conversationStateRepository: {
+      load: async (_bId: string, _cId: string) => ({
+        conversationId: rConvId,
+        businessId: BUSINESS_A,
+        revision: 1,
+        state: dehydrateConversationState(rConvState),
+        updatedAt: new Date(),
+      }),
+      save: async (_bId: string, _cId: string, rev: number, state: unknown) => {
+        rConvState = state as unknown as typeof rConvState;
+        return { status: "saved" as const, revision: rev + 1 };
+      },
+    },
+    appointmentRepository: {
+      create: async () => {
+        rAppointmentsCreated += 1;
+        return { id: "apt-should-not-exist" };
+      },
+      countOverlapping: async () => 0,
+    },
+    ai: {
+      providerName: "test-never-called",
+      respond: async () => {
+        rModelCalls += 1;
+        throw new Error(
+          "AI should not be called for mechanical welcome selection",
+        );
+      },
+    },
+    transport: {
+      providerName: "telegram-test",
+      send: async (input: {
+        to: string;
+        content?: string;
+        choices?: unknown;
+      }) => {
+        rOutboundDeliveries.push({
+          to: input.to,
+          content: input.content ?? "",
+          choices: input.choices,
+        });
+        return { provider: "telegram-test", delivered: true };
+      },
+    },
+  } as unknown as Parameters<typeof engine.receiveInboundMessage>[0];
+
+  const rWebhookDeps: Parameters<typeof handleTelegramWebhook>[0] = {
+    connectionRepository: {
+      findByWebhookSecretHash: async (h: string) =>
+        h === R_SECRET_HASH ? rConnection : null,
+    },
+    processInboundMessage: async (params) => {
+      const res = await engine.receiveInboundMessage(
+        rEngineDeps,
+        params.engineInput,
+        params.identity,
+      );
+      return { ok: res.ok };
+    },
+    answerCallbackQuery: async (params) => {
+      rAcknowledgedCallbacks.push(params.callbackQueryId);
+    },
+    schedule: (work: () => Promise<void> | void) => {
+      rScheduledWork.push(Promise.resolve(work()));
+    },
+  };
+
+  const rCallbackUpdate = {
+    update_id: 888200,
+    callback_query: {
+      id: "cq_welcome_selection_001",
+      from: { id: Number(CHAT_ID), first_name: "Customer" },
+      data: rBookCallbackData,
+      message: {
+        message_id: 301,
+        date: 1700000000,
+        chat: { id: Number(CHAT_ID), type: "private" },
+      },
+    },
+  };
+
+  const rWebhookReq = new Request(
+    "https://flowpilot.example.com/api/telegram/webhook",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": R_SECRET,
+      },
+      body: JSON.stringify(rCallbackUpdate),
+    },
+  );
+
+  const rWebhookRes = await handleTelegramWebhook(rWebhookDeps, rWebhookReq);
+  const rWebhookResJson = await rWebhookRes.json();
+  await Promise.all(rScheduledWork);
+
+  const rNextReply = rOutboundDeliveries[rOutboundDeliveries.length - 1];
+  const rAckOk = rAcknowledgedCallbacks.includes("cq_welcome_selection_001");
+  const rChoices = rNextReply?.choices as
+    | {
+        offerToken: string;
+        offerId: string;
+        offerKind: string;
+        groups: Array<
+          Array<{ id: string; label: string; value?: string; role?: string }>
+        >;
+      }
+    | undefined;
+  const rFirstOption = rChoices?.groups?.[0]?.[0];
+
+  // Verify acknowledgment failure does not prevent selection processing:
+  // Use a fresh equivalent fixture and execute the REAL conversation engine (not a boolean stub).
+  const rFailConvId = "conv-tg-rfail-suite";
+  const rFailWelcomeOffer = buildWelcomeOffer(
+    { businessId: BUSINESS_A, conversationId: rFailConvId },
+    "off-welcome-fail-02",
+    rNow,
+  )!;
+  let rFailConvState = withPresentedOffer(
+    emptyConversationState(),
+    rFailWelcomeOffer,
+  );
+  const rFailBookCallbackData = offerCallbackData(rFailWelcomeOffer, "book");
+  let rFailModelCalls = 0;
+  let rFailAppointmentsCreated = 0;
+  const rFailOutboundDeliveries: Array<{
+    to: string;
+    content: string;
+    choices?: unknown;
+  }> = [];
+
+  const rFailEngineDeps = {
+    ...rEngineDeps,
+    conversationRepository: {
+      ...rEngineDeps.conversationRepository,
+      findLatestByCustomer: async () => ({ id: rFailConvId }),
+      findById: async () => ({
+        id: rFailConvId,
+        businessId: BUSINESS_A,
+        customerId: "cust-tg-fail",
+        status: "AI_ACTIVE",
+        assignedUserId: null,
+        branchId: BRANCH_A,
+      }),
+    },
+    conversationStateRepository: {
+      load: async () => ({
+        conversationId: rFailConvId,
+        businessId: BUSINESS_A,
+        revision: 1,
+        state: dehydrateConversationState(rFailConvState),
+        updatedAt: new Date(),
+      }),
+      save: async (_bId: string, _cId: string, rev: number, state: unknown) => {
+        rFailConvState = state as unknown as typeof rFailConvState;
+        return { status: "saved" as const, revision: rev + 1 };
+      },
+    },
+    appointmentRepository: {
+      create: async () => {
+        rFailAppointmentsCreated += 1;
+        return { id: "apt-should-not-exist" };
+      },
+      countOverlapping: async () => 0,
+    },
+    ai: {
+      providerName: "test-never-called",
+      respond: async () => {
+        rFailModelCalls += 1;
+        throw new Error(
+          "AI should not be called for mechanical welcome selection",
+        );
+      },
+    },
+    transport: {
+      providerName: "telegram-test",
+      send: async (input: {
+        to: string;
+        content?: string;
+        choices?: unknown;
+      }) => {
+        rFailOutboundDeliveries.push({
+          to: input.to,
+          content: input.content ?? "",
+          choices: input.choices,
+        });
+        return { provider: "telegram-test", delivered: true };
+      },
+    },
+  } as unknown as Parameters<typeof engine.receiveInboundMessage>[0];
+
+  const rFailingAckScheduledWork: Array<Promise<void>> = [];
+  const rFailingAckDeps: Parameters<typeof handleTelegramWebhook>[0] = {
+    ...rWebhookDeps,
+    answerCallbackQuery: async () => {
+      throw new Error("Simulated Telegram answerCallbackQuery network error");
+    },
+    processInboundMessage: async (params) => {
+      const res = await engine.receiveInboundMessage(
+        rFailEngineDeps,
+        params.engineInput,
+        params.identity,
+      );
+      return { ok: res.ok };
+    },
+    schedule: (work: () => Promise<void> | void) => {
+      rFailingAckScheduledWork.push(Promise.resolve(work()));
+    },
+  };
+
+  const rFailingAckReq = new Request(
+    "https://flowpilot.example.com/api/telegram/webhook",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": R_SECRET,
+      },
+      body: JSON.stringify({
+        update_id: 888201,
+        callback_query: {
+          id: "cq_failing_ack_002",
+          from: { id: Number(CHAT_ID), first_name: "Customer" },
+          data: rFailBookCallbackData,
+          message: {
+            message_id: 302,
+            date: 1700000000,
+            chat: { id: Number(CHAT_ID), type: "private" },
+          },
+        },
+      }),
+    },
+  );
+
+  const rFailingAckRes = await handleTelegramWebhook(
+    rFailingAckDeps,
+    rFailingAckReq,
+  );
+  await Promise.all(rFailingAckScheduledWork);
+
+  const rFailNextReply =
+    rFailOutboundDeliveries[rFailOutboundDeliveries.length - 1];
+  const rFailChoices = rFailNextReply?.choices as
+    | {
+        offerToken: string;
+        offerId: string;
+        offerKind: string;
+        groups: Array<
+          Array<{ id: string; label: string; value?: string; role?: string }>
+        >;
+      }
+    | undefined;
+  const rFailFirstOption = rFailChoices?.groups?.[0]?.[0];
+
+  check(
+    "R8. Ingress-to-response: callback acknowledged + engine processed + expected service choices + 0 model calls + 0 appointments + ack failure resilient with real engine",
+    rWebhookRes.status === 200 &&
+      rWebhookResJson.success === true &&
+      rAckOk &&
+      rOutboundDeliveries.length > 0 &&
+      rNextReply !== undefined &&
+      rChoices?.offerKind === "SERVICE" &&
+      rChoices?.offerId === rConvState.offer?.id &&
+      rChoices?.offerToken === rConvState.offer?.token &&
+      Boolean(rChoices?.offerId) &&
+      rFirstOption?.value === "srv-1" &&
+      rFirstOption?.label?.includes("كشف أسنان") === true &&
+      rFirstOption?.role === "option" &&
+      rConvState.offer?.kind === "SERVICE" &&
+      rModelCalls === 0 &&
+      rAppointmentsCreated === 0 &&
+      rFailingAckRes.status === 200 &&
+      rFailOutboundDeliveries.length > 0 &&
+      rFailChoices?.offerKind === "SERVICE" &&
+      rFailChoices?.offerId === rFailConvState.offer?.id &&
+      rFailChoices?.offerToken === rFailConvState.offer?.token &&
+      Boolean(rFailChoices?.offerId) &&
+      rFailFirstOption?.value === "srv-1" &&
+      rFailFirstOption?.label?.includes("كشف أسنان") === true &&
+      rFailFirstOption?.role === "option" &&
+      rFailConvState.offer?.kind === "SERVICE" &&
+      rFailModelCalls === 0 &&
+      rFailAppointmentsCreated === 0,
+  );
+
+  // R9. Partial-failure reproduction & handling
+  // Scenario: setWebhook succeeds at Telegram, but database persistence fails (returns null or throws).
+  let partialDbThrow = false;
+  let partialDbNull = false;
+  let partialTelegramAllowedUpdates = ["message"];
+  let partialTelegramSecret = "";
+
+  const partialConnId = "conn-partial-fail-id";
+  const partialConn = fakeConnection({
+    id: partialConnId,
+    businessId: BUSINESS_A,
+    branchId: null,
+    botExternalId: repairBotId,
+    status: "CONNECTED",
+    isActive: true,
+    credentialsRef: repairCredentialsRef,
+  });
+  const initialPartialSecretHash = hashTelegramWebhookSecret(
+    "initial-partial-secret",
+  );
+  partialConn.webhookSecretHash = initialPartialSecretHash;
+
+  const partialApiDeps: TelegramApiDeps = {
+    fetchImpl: async (url, init) => {
+      const method = String(url).split("/").pop();
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (method === "getMe") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(repairBotId),
+              is_bot: true,
+              username: "partial_bot",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (method === "getWebhookInfo") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: repairWebhookUrl,
+              pending_update_count: 3,
+              allowed_updates: partialTelegramAllowedUpdates,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (method === "setWebhook") {
+        partialTelegramAllowedUpdates = body.allowed_updates ?? [];
+        partialTelegramSecret = body.secret_token ?? "";
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 400 });
+    },
+    apiHost: "https://api.telegram.org",
+    credentialsResolver: repairResolver,
+  };
+
+  const partialRepo = {
+    async findByIdWithinBusiness(id: string, bId: string) {
+      if (id === partialConnId && bId === BUSINESS_A) return partialConn;
+      return null;
+    },
+    async update() {
+      if (partialDbThrow)
+        throw new Error("Simulated database connection drop during write");
+      if (partialDbNull) return null;
+      return partialConn;
+    },
+    async updateWebhookSecretHash() {
+      if (partialDbThrow)
+        throw new Error("Simulated database connection drop during write");
+      if (partialDbNull) return null;
+      return partialConn;
+    },
+  };
+
+  const partialDeps = {
+    api: partialApiDeps,
+    connectionRepository: partialRepo,
+    credentialsResolver: repairResolver,
+    expectedWebhookUrl: repairWebhookUrl,
+  };
+
+  // Test DB null failure:
+  partialDbNull = true;
+  const partialNullOutcome = await repairTelegramBotWebhook(partialDeps, {
+    businessId: BUSINESS_A,
+    connectionId: partialConnId,
+    apply: true,
+  });
+
+  // Test DB throw failure:
+  partialDbNull = false;
+  partialDbThrow = true;
+  partialTelegramAllowedUpdates = ["message"];
+  const partialThrowOutcome = await repairTelegramBotWebhook(partialDeps, {
+    businessId: BUSINESS_A,
+    connectionId: partialConnId,
+    apply: true,
+  });
+
+  check(
+    "R9. Partial-failure reproduction: Telegram updated but DB failure returns PARTIAL_APPLICATION_RECOVERY_REQUIRED with exact reconciliation command",
+    partialNullOutcome.ok === false &&
+      partialNullOutcome.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED" &&
+      partialNullOutcome.status === "PARTIAL_FAILURE" &&
+      partialNullOutcome.reconciliationCommand.includes("--reconcile-secret") &&
+      partialThrowOutcome.ok === false &&
+      partialThrowOutcome.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED" &&
+      partialThrowOutcome.status === "PARTIAL_FAILURE" &&
+      partialThrowOutcome.reconciliationCommand.includes(
+        "--reconcile-secret",
+      ) &&
+      partialConn.webhookSecretHash === initialPartialSecretHash, // DB state not corrupted
+  );
+
+  // R10. Secret reconciliation recovery
+  // Bot now has allowed_updates: ["message", "callback_query"] in Telegram, but DB still has initial secret hash!
+  partialDbThrow = false;
+  partialDbNull = false;
+
+  // Verify normal apply is an idempotent no-op:
+  const noopApplyOutcome = await repairTelegramBotWebhook(partialDeps, {
+    businessId: BUSINESS_A,
+    connectionId: partialConnId,
+    apply: true,
+  });
+
+  // Now run explicit reconciliation:
+  let savedReconciledHash = "";
+  const reconcilingRepo = {
+    ...partialRepo,
+    async updateWebhookSecretHash(id: string, bId: string, hash: string) {
+      if (id === partialConnId && bId === BUSINESS_A) {
+        partialConn.webhookSecretHash = hash;
+        savedReconciledHash = hash;
+        return partialConn;
+      }
+      return null;
+    },
+  };
+
+  const reconcileOutcome = await repairTelegramBotWebhook(
+    {
+      api: partialApiDeps,
+      connectionRepository: reconcilingRepo,
+      credentialsResolver: repairResolver,
+    },
+    {
+      businessId: BUSINESS_A,
+      connectionId: partialConnId,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  // Verify the new reconciled secret authenticates through the real webhook handler:
+  const reconciledWebhookReq = new Request(
+    "https://flowpilot.example.com/api/telegram/webhook",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Bot-Api-Secret-Token": partialTelegramSecret,
+      },
+      body: JSON.stringify({
+        update_id: 888999,
+        message: {
+          message_id: 999,
+          date: 1700000000,
+          chat: { id: Number(CHAT_ID), type: "private" },
+          text: "ping",
+        },
+      }),
+    },
+  );
+  const reconciledAuthRes = await handleTelegramWebhook(
+    {
+      connectionRepository: {
+        findByWebhookSecretHash: async (h: string) =>
+          h === savedReconciledHash ? partialConn : null,
+      },
+      processInboundMessage: async () => ({ ok: true }),
+      schedule: (w) => w(),
+    },
+    reconciledWebhookReq,
+  );
+
+  check(
+    "R10. Secret reconciliation recovery: normal apply no-ops, reconcile-secret restores Telegram/DB alignment, and webhook authenticates (200)",
+    noopApplyOutcome.ok === true &&
+      noopApplyOutcome.status === "ALREADY_CORRECT" &&
+      reconcileOutcome.ok === true &&
+      reconcileOutcome.status === "SECRET_RECONCILED" &&
+      reconcileOutcome.secretReconciled === true &&
+      reconcileOutcome.webhookSecretHashPersisted === true &&
+      savedReconciledHash.length === 64 &&
+      reconciledAuthRes.status === 200,
+  );
+
+  // R11. Webhook URL verification guards:
+  // Reject wrong path and mismatched expected URL; accept matching URL.
+  const wrongPathApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/getWebhookInfo")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: "https://flowpilot.example.com/api/telegram/other-handler",
+              allowed_updates: ["message"],
+              pending_update_count: 0,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+  const wrongPathOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: wrongPathApiDeps },
+    { businessId: BUSINESS_A, connectionId: repairConnectionId },
+  );
+
+  const mismatchedHostOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    expectedWebhookUrl: "https://different-host.com/api/telegram/webhook",
+  });
+
+  const matchingExpectedOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    expectedWebhookUrl: repairWebhookUrl,
+  });
+
+  check(
+    "R11. Webhook URL verification guards: wrong path and mismatched expected URL rejected, matching URL accepted",
+    wrongPathOutcome.ok === false &&
+      wrongPathOutcome.code === "INVALID_CUSTOMER_WEBHOOK_PATH" &&
+      mismatchedHostOutcome.ok === false &&
+      mismatchedHostOutcome.code === "WEBHOOK_URL_MISMATCH" &&
+      matchingExpectedOutcome.ok === true,
+  );
+
+  // R12. Concurrency and parameter guards:
+  const reconcileWithoutApplyOutcome = await repairTelegramBotWebhook(
+    repairDeps,
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+      apply: false,
+      reconcileSecret: true,
+    },
+  );
+
+  check(
+    "R12. Concurrency and parameter guards: inactive target and reconcile without apply rejected safely",
+    inactiveOutcome.ok === false &&
+      inactiveOutcome.code === "CONNECTION_INACTIVE" &&
+      reconcileWithoutApplyOutcome.ok === false &&
+      reconcileWithoutApplyOutcome.code === "INVALID_REPAIR_PARAMETERS",
+  );
+
+  // R13. Missing and invalid expected customer webhook URL guards
+  const noExpectedUrlDeps = {
+    ...repairDeps,
+    expectedWebhookUrl: undefined,
+    getEnvVar: () => undefined,
+  };
+  const missingExpectedUrlOutcome = await repairTelegramBotWebhook(
+    noExpectedUrlDeps,
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+    },
+  );
+
+  const nonHttpsOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    expectedWebhookUrl: "http://flowpilot.example.com/api/telegram/webhook",
+  });
+
+  const queryParamsOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    expectedWebhookUrl:
+      "https://flowpilot.example.com/api/telegram/webhook?ref=123",
+  });
+
+  const fragmentOutcome = await repairTelegramBotWebhook(repairDeps, {
+    businessId: BUSINESS_A,
+    connectionId: repairConnectionId,
+    expectedWebhookUrl:
+      "https://flowpilot.example.com/api/telegram/webhook#section",
+  });
+
+  check(
+    "R13. Expected webhook URL guards: missing URL, HTTP protocol, query params, and fragments rejected",
+    missingExpectedUrlOutcome.ok === false &&
+      missingExpectedUrlOutcome.code === "EXPECTED_WEBHOOK_URL_REQUIRED" &&
+      nonHttpsOutcome.ok === false &&
+      nonHttpsOutcome.code === "NON_HTTPS_WEBHOOK_URL" &&
+      queryParamsOutcome.ok === false &&
+      queryParamsOutcome.code === "UNSUPPORTED_WEBHOOK_URL_COMPONENTS" &&
+      fragmentOutcome.ok === false &&
+      fragmentOutcome.code === "UNSUPPORTED_WEBHOOK_URL_COMPONENTS",
+  );
+
+  // R14. Ambiguous Telegram setWebhook transport uncertainty
+  const uncertainApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/setWebhook")) {
+        throw new TypeError("Simulated fetch network reset / socket drop");
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+
+  const initialUncertainHash = repairConnection.webhookSecretHash;
+  const uncertainOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: uncertainApiDeps },
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  check(
+    "R14. Ambiguous Telegram setWebhook transport uncertainty: reports SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED with reconciliation command and preserves DB state",
+    uncertainOutcome.ok === false &&
+      uncertainOutcome.code === "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" &&
+      uncertainOutcome.status === "PARTIAL_FAILURE" &&
+      uncertainOutcome.remoteStateMayHaveChanged === true &&
+      uncertainOutcome.reconciliationCommand.includes("--apply") &&
+      uncertainOutcome.reconciliationCommand.includes("--reconcile-secret") &&
+      repairConnection.webhookSecretHash === initialUncertainHash,
+  );
+
+  // R15. Post-apply DB verification concurrent modification conflict
+  const conflictConn: FakeConnection = {
+    ...repairConnection,
+    id: "conn-conflict-id",
+    webhookSecretHash: hashTelegramWebhookSecret("pre-conflict-secret"),
+  };
+  let conflictPass = 0;
+  const conflictRepo = {
+    findByIdWithinBusiness: async (id: string, bId: string) => {
+      if (id === conflictConn.id && bId === BUSINESS_A) {
+        conflictPass += 1;
+        // On the final read (pass > 1), return a concurrently modified secret hash
+        if (conflictPass > 1) {
+          return {
+            ...conflictConn,
+            webhookSecretHash: hashTelegramWebhookSecret("concurrent-modifier"),
+          };
+        }
+        return conflictConn;
+      }
+      return null;
+    },
+    updateWebhookSecretHash: async (id: string, bId: string, hash: string) => {
+      if (id === conflictConn.id && bId === BUSINESS_A) {
+        conflictConn.webhookSecretHash = hash;
+        return conflictConn;
+      }
+      return null;
+    },
+    update: async () => null,
+  };
+
+  const conflictOutcome = await repairTelegramBotWebhook(
+    {
+      ...repairDeps,
+      connectionRepository: conflictRepo,
+    },
+    {
+      businessId: BUSINESS_A,
+      connectionId: conflictConn.id,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  check(
+    "R15. Post-apply DB verification conflict: concurrent secret change returns CONCURRENT_MODIFICATION_CONFLICT with reconciliation command",
+    conflictOutcome.ok === false &&
+      conflictOutcome.code === "CONCURRENT_MODIFICATION_CONFLICT" &&
+      conflictOutcome.status === "PARTIAL_FAILURE" &&
+      conflictOutcome.reconciliationCommand.includes("--reconcile-secret"),
+  );
+
+  // R16. Post-apply DB verification error or missing connection
+  let postDbThrow = false;
+  let postDbNull = false;
+  let postDbInactive = false;
+  let postCheckPass = 0;
+
+  const postVerifyConn: FakeConnection = {
+    ...repairConnection,
+    id: "conn-post-verify-id",
+    webhookSecretHash: hashTelegramWebhookSecret("pre-post-verify-secret"),
+  };
+
+  const postVerifyRepo = {
+    findByIdWithinBusiness: async (id: string, bId: string) => {
+      if (id === postVerifyConn.id && bId === BUSINESS_A) {
+        postCheckPass += 1;
+        // Check 1: pre-apply lookup. Check 2+: post-apply verification
+        if (postCheckPass > 1) {
+          if (postDbThrow)
+            throw new Error("Simulated DB connection terminated on final read");
+          if (postDbNull) return null;
+          if (postDbInactive)
+            return {
+              ...postVerifyConn,
+              status: "DISCONNECTED",
+              isActive: false,
+            };
+        }
+        return postVerifyConn;
+      }
+      return null;
+    },
+    updateWebhookSecretHash: async (id: string, bId: string, hash: string) => {
+      if (id === postVerifyConn.id && bId === BUSINESS_A) {
+        postVerifyConn.webhookSecretHash = hash;
+        return postVerifyConn;
+      }
+      return null;
+    },
+    update: async () => null,
+  };
+
+  // 1. DB read throws
+  postCheckPass = 0;
+  postDbThrow = true;
+  postDbNull = false;
+  postDbInactive = false;
+  const postThrowOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, connectionRepository: postVerifyRepo },
+    {
+      businessId: BUSINESS_A,
+      connectionId: postVerifyConn.id,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  // 2. DB row missing
+  postCheckPass = 0;
+  postDbThrow = false;
+  postDbNull = true;
+  postDbInactive = false;
+  const postNullOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, connectionRepository: postVerifyRepo },
+    {
+      businessId: BUSINESS_A,
+      connectionId: postVerifyConn.id,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  // 3. DB row inactive
+  postCheckPass = 0;
+  postDbThrow = false;
+  postDbNull = false;
+  postDbInactive = true;
+  const postInactiveOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, connectionRepository: postVerifyRepo },
+    {
+      businessId: BUSINESS_A,
+      connectionId: postVerifyConn.id,
+      apply: true,
+      reconcileSecret: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  check(
+    "R16. Post-apply DB verification failures: DB read throw, missing row, and disconnected row return structured recovery-required outcomes",
+    postThrowOutcome.ok === false &&
+      postThrowOutcome.code === "POST_APPLY_VERIFICATION_FAILED" &&
+      postThrowOutcome.status === "PARTIAL_FAILURE" &&
+      postThrowOutcome.reconciliationCommand.includes("--reconcile-secret") &&
+      postNullOutcome.ok === false &&
+      postNullOutcome.code === "POST_APPLY_CONNECTION_NOT_FOUND" &&
+      postNullOutcome.status === "PARTIAL_FAILURE" &&
+      postNullOutcome.reconciliationCommand.includes("--reconcile-secret") &&
+      postInactiveOutcome.ok === false &&
+      postInactiveOutcome.code === "POST_APPLY_CONNECTION_INACTIVE" &&
+      postInactiveOutcome.status === "PARTIAL_FAILURE" &&
+      postInactiveOutcome.reconciliationCommand.includes("--reconcile-secret"),
+  );
+
+  // R17. Post-apply Telegram inspection failure
+  let getWebhookInfoCount = 0;
+  const postInspectFailApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/getWebhookInfo")) {
+        getWebhookInfoCount += 1;
+        // First getWebhookInfo succeeds (pre-apply); second fails (post-apply)
+        if (getWebhookInfoCount > 1) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              description:
+                "Telegram Bot API 502 Bad Gateway during post-apply check",
+            }),
+            { status: 502, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: repairWebhookUrl,
+              allowed_updates: ["message"],
+              pending_update_count: 0,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+
+  const postInspectFailOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: postInspectFailApiDeps },
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+      apply: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  check(
+    "R17. Post-apply Telegram inspection failure: returns POST_APPLY_INSPECTION_FAILED with reconciliation command",
+    postInspectFailOutcome.ok === false &&
+      postInspectFailOutcome.code === "POST_APPLY_INSPECTION_FAILED" &&
+      postInspectFailOutcome.status === "PARTIAL_FAILURE" &&
+      postInspectFailOutcome.reconciliationCommand.includes(
+        "--reconcile-secret",
+      ),
+  );
+
+  // R18. Post-apply Telegram registration mismatch
+  let mismatchCount = 0;
+  let postReturnMismatchUpdates = false;
+  let postReturnMismatchUrl = false;
+
+  const postMismatchApiDeps: TelegramApiDeps = {
+    ...repairApiDeps,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/getWebhookInfo")) {
+        mismatchCount += 1;
+        if (mismatchCount > 1) {
+          if (postReturnMismatchUpdates) {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                result: {
+                  url: repairWebhookUrl,
+                  allowed_updates: ["message"], // missing callback_query!
+                  pending_update_count: 0,
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (postReturnMismatchUrl) {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                result: {
+                  url: "https://tampered-host.com/api/telegram/webhook",
+                  allowed_updates: ["message", "callback_query"],
+                  pending_update_count: 0,
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: repairWebhookUrl,
+              allowed_updates: ["message"],
+              pending_update_count: 0,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return repairApiDeps.fetchImpl(url, init);
+    },
+  };
+
+  mismatchCount = 0;
+  postReturnMismatchUpdates = true;
+  postReturnMismatchUrl = false;
+  const postMismatchUpdatesOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: postMismatchApiDeps },
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+      apply: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  mismatchCount = 0;
+  postReturnMismatchUpdates = false;
+  postReturnMismatchUrl = true;
+  const postMismatchUrlOutcome = await repairTelegramBotWebhook(
+    { ...repairDeps, api: postMismatchApiDeps },
+    {
+      businessId: BUSINESS_A,
+      connectionId: repairConnectionId,
+      apply: true,
+      expectedWebhookUrl: repairWebhookUrl,
+    },
+  );
+
+  check(
+    "R18. Post-apply Telegram registration mismatch: mismatched allowed_updates or URL returns POST_APPLY_REGISTRATION_MISMATCH with reconciliation command",
+    postMismatchUpdatesOutcome.ok === false &&
+      postMismatchUpdatesOutcome.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+      postMismatchUpdatesOutcome.status === "PARTIAL_FAILURE" &&
+      postMismatchUpdatesOutcome.reconciliationCommand.includes(
+        "--reconcile-secret",
+      ) &&
+      postMismatchUrlOutcome.ok === false &&
+      postMismatchUrlOutcome.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+      postMismatchUrlOutcome.status === "PARTIAL_FAILURE" &&
+      postMismatchUrlOutcome.reconciliationCommand.includes(
+        "--reconcile-secret",
+      ),
+  );
+
+  // R19. CLI argument validation and safe exit behavior
+  const { execFileSync } = await import("node:child_process");
+
+  function runCli(args: string[]): {
+    status: number;
+    stdout: string;
+    stderr: string;
+  } {
+    try {
+      const stdout = execFileSync(
+        "node",
+        ["--import", "tsx", "scripts/repair-telegram-webhook.ts", ...args],
+        {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      return { status: 0, stdout, stderr: "" };
+    } catch (err: unknown) {
+      const e = err as { status?: number; stdout?: string; stderr?: string };
+      return {
+        status: e.status ?? 1,
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+      };
+    }
+  }
+
+  const cliHelp = runCli(["--help"]);
+  const cliUnknownFlag = runCli(["--invalid-argument"]);
+  const cliMissingExpectedUrl = runCli([
+    "-b",
+    "b-uuid",
+    "-c",
+    "c-uuid",
+    "--expected-url",
+  ]);
+  const cliReconcileWithoutApply = runCli([
+    "-b",
+    "b-uuid",
+    "-c",
+    "c-uuid",
+    "--reconcile-secret",
+  ]);
+  const cliMissingIds = runCli([]);
+
+  check(
+    "R19. CLI argument validation: --help succeeds (0), unknown flags exit 1, missing values exit 1, invalid combinations exit 1",
+    cliHelp.status === 0 &&
+      cliHelp.stdout.includes("Usage:") &&
+      cliUnknownFlag.status === 1 &&
+      cliUnknownFlag.stderr.includes("Unknown argument '--invalid-argument'") &&
+      cliMissingExpectedUrl.status === 1 &&
+      cliMissingExpectedUrl.stderr.includes(
+        "Missing value for --expected-url",
+      ) &&
+      cliReconcileWithoutApply.status === 1 &&
+      cliReconcileWithoutApply.stderr.includes(
+        "--reconcile-secret requires --apply",
+      ) &&
+      cliMissingIds.status === 1 &&
+      cliMissingIds.stderr.includes(
+        "Both --business-id and --connection-id are required",
+      ),
+  );
+
   let failed = 0;
   for (const { label, pass } of checks) {
     if (pass) console.log(`✔ ${label}`);
@@ -3112,6 +4583,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: Error) => {
-  console.error(`فشل غير متوقع: ${error.message}`);
+  console.error(`فشل غير متوقع: ${error.stack ?? error.message}`);
   process.exit(1);
 });
