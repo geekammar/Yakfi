@@ -174,6 +174,7 @@ import {
 } from "@/features/conversations/server/handoff-cause";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
+  filterElapsedSlots,
   formatArabicDate,
   formatBookingOptionsCopy,
   sampleRepresentativeSlots,
@@ -1528,7 +1529,22 @@ async function selectionReply(
   };
 }
 
-async function resolveUpcomingBookingDates(
+export type UpcomingBookingDatesResult =
+  | {
+      readonly status: "success";
+      readonly dates: Array<{ date: string; label: string }>;
+    }
+  | {
+      readonly status: "error";
+      readonly code:
+        | "INFRASTRUCTURE_FAILURE"
+        | "DOMAIN_ERROR"
+        | "PARTIAL_FAILURE";
+      readonly error?: { code: string; message: string };
+      readonly dates?: Array<{ date: string; label: string }>;
+    };
+
+export async function resolveUpcomingBookingDates(
   deps: ConversationEngineDeps,
   scope: {
     business: {
@@ -1547,7 +1563,7 @@ async function resolveUpcomingBookingDates(
   },
   now: Date,
   count = 4,
-): Promise<Array<{ date: string; label: string }>> {
+): Promise<UpcomingBookingDatesResult> {
   const tz = resolveValidTimeZone(scope.business.timezone);
   const todayIso = todayIsoInTimeZone(now, tz);
   const currentTime = nowTimeInTimeZone(now, tz);
@@ -1558,6 +1574,11 @@ async function resolveUpcomingBookingDates(
 
   const eligibilityDeps = buildEligibilityDeps(deps);
   const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+
+  let checkedWorkingDays = 0;
+  let succeededDays = 0;
+  let exceptionsCount = 0;
+  const domainErrors: Array<{ code: string; message: string }> = [];
 
   for (let i = 0; i < 14 && results.length < count; i++) {
     const candidate = new Date(Date.UTC(y!, m! - 1, d! + i));
@@ -1577,6 +1598,7 @@ async function resolveUpcomingBookingDates(
       }
     }
 
+    checkedWorkingDays++;
     try {
       const bookingResult = await resolveBookingOptions(
         bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
@@ -1593,8 +1615,16 @@ async function resolveUpcomingBookingDates(
         },
       );
 
-      if (bookingResult.success && bookingResult.data.options.length > 0) {
-        const validOptions = bookingResult.data.options;
+      if (!bookingResult.success) {
+        domainErrors.push(bookingResult.error);
+      } else {
+        succeededDays++;
+        const validOptions = filterElapsedSlots(
+          bookingResult.data.options,
+          iso,
+          now,
+          tz,
+        );
         if (validOptions.length > 0) {
           const label = formatArabicDate(iso, {
             todayIso,
@@ -1605,11 +1635,66 @@ async function resolveUpcomingBookingDates(
         }
       }
     } catch {
-      continue;
+      exceptionsCount++;
     }
   }
 
-  return results;
+  if (exceptionsCount === 0 && domainErrors.length === 0) {
+    return { status: "success", dates: results };
+  }
+
+  if (results.length > 0) {
+    return {
+      status: "error",
+      code: "PARTIAL_FAILURE",
+      dates: results,
+      error: domainErrors[0] ?? {
+        code: "PARTIAL_FAILURE",
+        message: "حدث تعذر جزئي أثناء التحقق من المواعيد",
+      },
+    };
+  }
+
+  // results.length === 0 and there were failures
+  if (succeededDays > 0) {
+    return {
+      status: "error",
+      code: "PARTIAL_FAILURE",
+      dates: [],
+      error: domainErrors[0] ?? {
+        code: "PARTIAL_FAILURE",
+        message: "حدث تعذر جزئي أثناء التحقق من المواعيد",
+      },
+    };
+  }
+
+  if (exceptionsCount > 0 && domainErrors.length === 0) {
+    return {
+      status: "error",
+      code: "INFRASTRUCTURE_FAILURE",
+      error: {
+        code: "DATABASE_ERROR",
+        message: "تعذر الاتصال بقاعدة البيانات",
+      },
+    };
+  }
+
+  if (domainErrors.length > 0 && exceptionsCount === 0) {
+    return {
+      status: "error",
+      code: "DOMAIN_ERROR",
+      error: domainErrors[0],
+    };
+  }
+
+  return {
+    status: "error",
+    code: "INFRASTRUCTURE_FAILURE",
+    error: {
+      code: "INFRASTRUCTURE_FAILURE",
+      message: "تعذر التحقق من المواعيد المتاحة",
+    },
+  };
 }
 
 type ProviderResolutionResult =
@@ -1796,7 +1881,7 @@ async function presentDateChoices(
   turnSession: TurnStateSession,
   now: Date,
 ): Promise<InboundSuccess> {
-  const upcomingDates = await resolveUpcomingBookingDates(
+  const datesResult = await resolveUpcomingBookingDates(
     deps,
     {
       business: scope.business,
@@ -1810,6 +1895,23 @@ async function presentDateChoices(
     },
     now,
   );
+
+  if (
+    datesResult.status === "error" &&
+    (!datesResult.dates || datesResult.dates.length === 0)
+  ) {
+    return selectionReply(
+      deps,
+      scope,
+      "تعذر التحقق من المواعيد المتاحة حالياً بسبب مشكلة تقنية مؤقتة. يرجى المحاولة بعد قليل.",
+      "AI_ACTIVE",
+      null,
+      undefined,
+      input.observability,
+    );
+  }
+
+  const upcomingDates = datesResult.dates ?? [];
   let dateOffer: DateOffer | null = null;
   if (upcomingDates.length > 0) {
     dateOffer = buildDateOffer(
@@ -1819,6 +1921,7 @@ async function presentDateChoices(
         serviceId: input.serviceId,
         serviceName: input.serviceName,
         providerId: input.providerId,
+        timePreference: input.timePreference,
         dates: upcomingDates,
       },
       now,
@@ -1853,10 +1956,18 @@ async function presentDateChoices(
       knownFacts: {
         ...existingFacts,
         service: input.serviceName,
+        ...(input.timePreference
+          ? { timePreference: input.timePreference }
+          : {}),
+        ...(input.providerId ? { provider: input.providerId } : {}),
       },
       serviceId: input.serviceId,
       selectedService: input.serviceName,
       serviceSource: input.serviceSource,
+      providerPreference:
+        input.providerId ?? turnSession.state?.providerPreference ?? null,
+      selectedTimePref:
+        input.timePreference ?? turnSession.state?.selectedTimePref ?? null,
       missingFacts: ["date"],
       lastClarification: { type: "date" },
       bookingStage: "SERVICE_SUPPLIED",
@@ -1931,6 +2042,7 @@ async function presentSlotChoices(
     serviceSource: "CUSTOMER" | "DEFAULT";
     providerId: string | null;
     date: string;
+    timePreference?: CanonicalTimePreference | null;
     observability?: InboundSuccess["observability"];
   },
   turnSession: TurnStateSession,
@@ -1980,6 +2092,14 @@ async function presentSlotChoices(
   }
 
   const branchId = (scope.conversation.branchId as string | null) ?? null;
+  const timeOfDayPref =
+    input.timePreference !== undefined
+      ? input.timePreference
+      : isCanonicalTimePreference(
+          turnSession.state?.knownFacts.timePreference,
+        )
+        ? turnSession.state.knownFacts.timePreference
+        : null;
   const eligibilityDeps = buildEligibilityDeps(deps);
   const eligibility = await resolveEligibleProviders(
     eligibilityDeps as unknown as Parameters<
@@ -1995,11 +2115,6 @@ async function presentSlotChoices(
 
   if (eligibility.success) {
     const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
-    const timeOfDayPref = isCanonicalTimePreference(
-      turnSession.state?.knownFacts.timePreference,
-    )
-      ? turnSession.state.knownFacts.timePreference
-      : null;
     const bookingResult = await resolveBookingOptions(
       bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
       { userId: scope.customer.id, businessId: scope.business.id },
@@ -2014,7 +2129,13 @@ async function presentSlotChoices(
     );
 
     if (bookingResult.success && bookingResult.data.options.length > 0) {
-      let bookableOptions = bookingResult.data.options;
+      const tz = resolveValidTimeZone(scope.business.timezone);
+      let bookableOptions = filterElapsedSlots(
+        bookingResult.data.options,
+        input.date,
+        now,
+        tz,
+      );
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);
@@ -2062,10 +2183,26 @@ async function presentSlotChoices(
           now,
         );
         if (slotOffer && turnSession.enabled) {
-          turnSession.state = withPresentedOffer(
-            turnSession.state ?? emptyConversationState(),
-            slotOffer,
-          );
+          turnSession.state = {
+            ...withPresentedOffer(
+              turnSession.state ?? emptyConversationState(),
+              slotOffer,
+            ),
+            selectedDate: input.date,
+            selectedService: input.serviceName,
+            serviceId: input.serviceId,
+            serviceSource: input.serviceSource,
+            providerPreference:
+              input.providerId ?? turnSession.state?.providerPreference ?? null,
+            selectedTimePref: timeOfDayPref ?? null,
+            knownFacts: {
+              ...(turnSession.state?.knownFacts ?? {}),
+              date: input.date,
+              service: input.serviceName,
+              ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+              ...(input.providerId ? { provider: input.providerId } : {}),
+            },
+          };
           const ok = await turnSession.commit();
           if (!ok) {
             return selectionReply(
@@ -2178,6 +2315,7 @@ async function presentSlotChoices(
       serviceName: input.serviceName,
       serviceSource: input.serviceSource,
       providerId: input.providerId,
+      timePreference: timeOfDayPref,
     },
     turnSession,
     now,
@@ -2334,6 +2472,41 @@ async function completeBookingSelection(
     providerId = providerMatch.providerId;
   }
 
+  if (selection.kind === "change_date") {
+    if (turnSession?.enabled) {
+      if (turnSession.state) {
+        turnSession.state = {
+          ...turnSession.state,
+          selectedDate: null,
+          knownFacts: {
+            ...turnSession.state.knownFacts,
+            date: undefined,
+            ...(canonicalTimePref ? { timePreference: canonicalTimePref } : {}),
+          },
+          ...(canonicalTimePref ? { selectedTimePref: canonicalTimePref } : {}),
+        };
+      }
+      await turnSession.invalidateOffer();
+      return presentDateChoices(
+        deps,
+        scope,
+        {
+          serviceId,
+          serviceName,
+          serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
+          providerId: providerId ?? null,
+          timePreference: canonicalTimePref,
+        },
+        turnSession,
+        now,
+      );
+    }
+    return reply(
+      `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}":`,
+      "AI_ACTIVE",
+    );
+  }
+
   // 4. CORE-02 — fresh options (reuses CORE-01 + the availability layer).
   const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
   const bookingResult = await resolveBookingOptions(
@@ -2377,18 +2550,10 @@ async function completeBookingSelection(
     );
   }
 
-  // 4b. Deterministic navigation: more times / change date
+  // 4b. Deterministic navigation: more times
   if (selection.kind === "more_times") {
     const tz = resolveValidTimeZone(scope.business.timezone);
-    const todayIso = todayIsoInTimeZone(now, tz);
-    const currentTime = nowTimeInTimeZone(now, tz);
-
-    let candidates = freshOptions;
-    if (date === todayIso) {
-      candidates = candidates.filter(
-        (o) => o.startAt.slice(11, 16) > currentTime,
-      );
-    }
+    const candidates = filterElapsedSlots(freshOptions, date, now, tz);
 
     const previouslyShownKeys = new Set<string>();
     if (turnSession?.state?.offer?.kind === "SLOT") {
@@ -2467,45 +2632,11 @@ async function completeBookingSelection(
     if (turnSession?.enabled) {
       await turnSession.releaseClaim();
     }
-    return reply(
-      `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${formatArabicDate(date)}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`,
-      "AI_ACTIVE",
-    );
-  }
-
-  if (selection.kind === "change_date") {
-    if (turnSession?.enabled) {
-      if (turnSession.state) {
-        turnSession.state = {
-          ...turnSession.state,
-          selectedDate: null,
-          selectedTimePref: null,
-          knownFacts: {
-            ...turnSession.state.knownFacts,
-            date: undefined,
-            timePreference: undefined,
-          },
-        };
-      }
-      await turnSession.invalidateOffer();
-      return presentDateChoices(
-        deps,
-        scope,
-        {
-          serviceId,
-          serviceName,
-          serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
-          providerId: providerId ?? null,
-          timePreference: canonicalTimePref,
-        },
-        turnSession,
-        now,
-      );
-    }
-    return reply(
-      `يرجى تحديد اليوم أو التاريخ الجديد المناسب لك لحجز خدمة "${serviceName}":`,
-      "AI_ACTIVE",
-    );
+    const searchCapped = freshOptions.length >= 50;
+    const allMsg = searchCapped
+      ? `هذه هي المواعيد المعروضة حالياً لخدمة "${serviceName}" يوم ${formatArabicDate(date)}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`
+      : `هذه هي كل المواعيد المتاحة لخدمة "${serviceName}" يوم ${formatArabicDate(date)}. يمكنك اختيار أحدها، أو طلب "يوم آخر".`;
+    return reply(allMsg, "AI_ACTIVE");
   }
 
   // 5. Verify the selected option STILL exists and is bookable.
@@ -4041,6 +4172,7 @@ async function runInboundTurn(
           serviceSource,
           providerId: provRes.providerId,
           date: offerReply.date,
+          timePreference: offerReply.timePreference,
         },
         turnSession,
         now,
@@ -4049,10 +4181,29 @@ async function runInboundTurn(
       const askMsg =
         "يرجى كتابة التاريخ أو اليوم الذي يناسبك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):";
       if (turnSession.enabled) {
+        const existingFacts = turnSession.state?.knownFacts ?? {};
         turnSession.state = {
           ...(turnSession.state ?? emptyConversationState()),
+          knownFacts: {
+            ...existingFacts,
+            service: offerReply.serviceName,
+            ...(offerReply.timePreference
+              ? { timePreference: offerReply.timePreference }
+              : {}),
+            ...(offerReply.providerId
+              ? { provider: offerReply.providerId }
+              : {}),
+          },
           serviceId: offerReply.serviceId,
           selectedService: offerReply.serviceName,
+          providerPreference:
+            offerReply.providerId ??
+            turnSession.state?.providerPreference ??
+            null,
+          selectedTimePref:
+            offerReply.timePreference ??
+            turnSession.state?.selectedTimePref ??
+            null,
           serviceSource: turnSession.state?.serviceSource ?? "CUSTOMER",
           missingFacts: ["date"],
           lastClarification: { type: "date" },
@@ -5879,50 +6030,69 @@ async function runInboundTurn(
             ? turnSession.state.knownFacts.timePreference
             : null;
 
-          const upcomingDates = await resolveUpcomingBookingDates(
+          let matchedProviderId: string | null = null;
+          if (targetServiceId && candidateProvider) {
+            const provRes = await resolveProviderCandidate(
+              deps,
+              business.id,
+              branchId,
+              targetServiceId,
+              candidateProvider,
+              isStructuredSemanticTurn ? "catalog_strict" : "legacy",
+            );
+            if (provRes.kind === "resolved") {
+              matchedProviderId = provRes.providerId;
+            } else {
+              return promptProviderClarificationReply(
+                deps,
+                selectionScope,
+                {
+                  serviceId: targetServiceId,
+                  serviceName:
+                    mapped.serviceName ??
+                    turnSession.state?.selectedService ??
+                    "",
+                  date: null,
+                  eligibleProviders: provRes.eligibleProviders,
+                  reason: provRes.reason,
+                  intent: validated.intent,
+                  observability: clarifyObservability,
+                },
+                turnSession,
+                now,
+              );
+            }
+          }
+
+          const upcomingDatesResult = await resolveUpcomingBookingDates(
             deps,
             { business, branchId, customerId: customer.id },
             {
               serviceId: targetServiceId,
-              providerId: candidateProvider,
+              providerId: matchedProviderId,
               timePreference: timePref,
             },
             now,
           );
+
+          if (
+            upcomingDatesResult.status === "error" &&
+            (!upcomingDatesResult.dates ||
+              upcomingDatesResult.dates.length === 0)
+          ) {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "تعذر التحقق من المواعيد المتاحة حالياً بسبب مشكلة تقنية مؤقتة. يرجى المحاولة بعد قليل.",
+              "AI_ACTIVE",
+              null,
+              undefined,
+              clarifyObservability,
+            );
+          }
+
+          const upcomingDates = upcomingDatesResult.dates ?? [];
           if (upcomingDates.length > 0) {
-            let matchedProviderId: string | null = null;
-            if (targetServiceId && candidateProvider) {
-              const provRes = await resolveProviderCandidate(
-                deps,
-                business.id,
-                branchId,
-                targetServiceId,
-                candidateProvider,
-                isStructuredSemanticTurn ? "catalog_strict" : "legacy",
-              );
-              if (provRes.kind === "resolved") {
-                matchedProviderId = provRes.providerId;
-              } else {
-                return promptProviderClarificationReply(
-                  deps,
-                  selectionScope,
-                  {
-                    serviceId: targetServiceId,
-                    serviceName:
-                      mapped.serviceName ??
-                      turnSession.state?.selectedService ??
-                      "",
-                    date: null,
-                    eligibleProviders: provRes.eligibleProviders,
-                    reason: provRes.reason,
-                    intent: validated.intent,
-                    observability: clarifyObservability,
-                  },
-                  turnSession,
-                  now,
-                );
-              }
-            }
             dateOffer = buildDateOffer(
               { businessId: business.id, conversationId: conversation.id },
               crypto.randomUUID(),
@@ -5933,6 +6103,7 @@ async function runInboundTurn(
                   turnSession.state?.selectedService ??
                   "",
                 providerId: matchedProviderId,
+                timePreference: timePref,
                 dates: upcomingDates,
               },
               now,
@@ -6217,7 +6388,13 @@ async function runInboundTurn(
         };
       }
 
-      let bookableOptions = bookingResult.data.options;
+      const businessTz = resolveValidTimeZone(business.timezone);
+      let bookableOptions = filterElapsedSlots(
+        bookingResult.data.options,
+        mapped.date!,
+        now,
+        businessTz,
+      );
       if (timeOfDayPref) {
         const matchesPref = (startTime: string) => {
           const hour = parseInt(startTime.slice(0, 2), 10);

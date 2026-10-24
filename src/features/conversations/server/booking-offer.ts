@@ -123,6 +123,7 @@ export const dateOfferSchema = z.object({
   serviceId: shortText,
   serviceName: shortText,
   providerId: shortText.nullable(),
+  timePreference: canonicalTimePreferenceSchema.nullable().optional(),
   options: z.array(dateOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
 });
 
@@ -270,6 +271,7 @@ export function buildDateOffer(
     serviceId: string;
     serviceName: string;
     providerId: string | null;
+    timePreference?: CanonicalTimePreference | null;
     dates: ReadonlyArray<{ date: string; label: string }>;
   },
   now: Date,
@@ -280,6 +282,7 @@ export function buildDateOffer(
     serviceId: input.serviceId,
     serviceName: input.serviceName,
     providerId: input.providerId,
+    timePreference: input.timePreference ?? null,
     options: input.dates.slice(0, MAX_OFFER_OPTIONS).map((d, i) => ({
       index: i + 1,
       date: d.date,
@@ -325,12 +328,12 @@ export function buildSlotOffer(
   input: {
     serviceId: string;
     serviceName: string;
-    serviceSource: "CUSTOMER" | "DEFAULT";
-    providerId: string | null;
+    serviceSource?: "CUSTOMER" | "DEFAULT";
+    providerId?: string | null;
     timePreference?: CanonicalTimePreference | null;
     date: string;
-    followUpRequestId: string | null;
-    shownCount: number;
+    followUpRequestId?: string | null;
+    shownCount?: number;
     shownSlotKeys?: string[];
     options: ReadonlyArray<{
       providerId: string;
@@ -346,12 +349,12 @@ export function buildSlotOffer(
     kind: "SLOT" as const,
     serviceId: input.serviceId,
     serviceName: input.serviceName,
-    serviceSource: input.serviceSource,
-    providerId: input.providerId,
+    serviceSource: input.serviceSource ?? "CUSTOMER",
+    providerId: input.providerId ?? null,
     timePreference: input.timePreference ?? null,
     date: input.date,
-    followUpRequestId: input.followUpRequestId,
-    shownCount: input.shownCount,
+    followUpRequestId: input.followUpRequestId ?? null,
+    shownCount: input.shownCount ?? input.options.length,
     shownSlotKeys: input.shownSlotKeys ?? [],
     options: input.options.slice(0, MAX_OFFER_OPTIONS).map((option, i) => ({
       index: i + 1,

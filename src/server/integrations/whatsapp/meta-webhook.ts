@@ -52,7 +52,7 @@ export function verifyMetaSignature(
   signatureHeader: string | null,
   appSecret: string | undefined,
 ): boolean {
-  if (!appSecret) return true;
+  if (!appSecret) return false;
   if (!signatureHeader) return false;
   const prefix = "sha256=";
   if (!signatureHeader.startsWith(prefix)) return false;
@@ -217,9 +217,10 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
             } else if (subtype === "list_reply") {
               rawId = meta.interactive?.list_reply?.id?.trim();
             } else {
-              rawId =
-                meta.interactive?.button_reply?.id?.trim() ??
-                meta.interactive?.list_reply?.id?.trim();
+              throw new TransportError(
+                "MALFORMED_PROVIDER_PAYLOAD",
+                "نوع الخيار التفاعلي غير مدعوم في حمولة واتساب",
+              );
             }
 
             if (!rawId) {

@@ -133,7 +133,7 @@ async function main(): Promise<void> {
   const PRV_1 = "44444444-4444-4444-8444-444444444441";
   const PRV_2 = "44444444-4444-4444-8444-444444444442";
 
-  const SIMULATED_NOW = new Date("2026-10-22T10:00:00.000Z"); // Thursday morning
+  const SIMULATED_NOW = new Date("2026-10-22T05:00:00.000Z"); // Thursday morning (08:00 AM Cairo, before 09:00 open)
 
   function createTestHarness(opts?: {
     conversationId?: string;

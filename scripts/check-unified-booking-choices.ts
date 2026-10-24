@@ -15,7 +15,12 @@
 
 import "./setup-test-env";
 
-import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
+import { createHmac } from "node:crypto";
+
+import { handleMetaPost } from "../src/app/api/whatsapp/meta/route";
+import {
+  createPlaygroundHarness,
+} from "../src/features/conversations/playground/harness";
 import {
   buildDateOffer,
   buildProviderOffer,
@@ -28,9 +33,13 @@ import {
   buildChannelChoices,
   offerCallbackData,
 } from "../src/features/conversations/server/channel-choice";
-import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+import {
+  receiveInboundMessage,
+  resolveUpcomingBookingDates,
+} from "../src/features/conversations/server/conversation-engine";
 import {
   areSlotsSingleProvider,
+  filterElapsedSlots,
   formatArabicDate,
   formatArabicTime12h,
   formatBookingOptionsCopy,
@@ -39,6 +48,8 @@ import {
 } from "../src/features/conversations/server/presentation-formatters";
 import { EnvCredentialsResolver } from "../src/server/credentials/credentials-resolver";
 import { renderTelegramInlineKeyboard } from "../src/server/integrations/telegram/telegram-presentation";
+import { hashTelegramWebhookSecret } from "../src/server/integrations/telegram/telegram-webhook";
+import { handleTelegramWebhook } from "../src/server/integrations/telegram/telegram-webhook-handler";
 import {
   META_DEFAULT_API_VERSION,
   META_GRAPH_HOST,
@@ -48,7 +59,10 @@ import {
   renderMetaInteractivePayload,
   safeTruncateGraphemes,
 } from "../src/server/integrations/whatsapp/meta-presentation";
-import { parseMetaWebhookPayload } from "../src/server/integrations/whatsapp/meta-webhook";
+import {
+  parseMetaWebhookPayload,
+  verifyMetaSignature,
+} from "../src/server/integrations/whatsapp/meta-webhook";
 
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
@@ -993,6 +1007,661 @@ async function run(): Promise<void> {
     "E.5 Meta API rejection does not claim success (delivered: false, errorCode: PERMANENT_TRANSPORT_FAILURE)",
     rejectedDelivery.delivered === false &&
       rejectedDelivery.errorCode === "PERMANENT_TRANSPORT_FAILURE",
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Area F: Time & Availability Precision (Genuinely Bookable Future Times)
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("\nArea F: Time & Availability Precision");
+
+  // F.1a filterElapsedSlots: Today with only elapsed slots returns empty array
+  // Cairo time: 15:00 (12:00 or 13:00 UTC depending on DST)
+  const nowAt1500Cairo = new Date("2026-10-25T13:00:00.000Z"); // 15:00 or 16:00 local
+  const pastSlotsToday = [
+    { providerId: "prv_1", startAt: "2026-10-25T09:00:00.000Z", startTime: "09:00" },
+    { providerId: "prv_1", startAt: "2026-10-25T11:00:00.000Z", startTime: "11:00" },
+    { providerId: "prv_2", startAt: "2026-10-25T14:30:00.000Z", startTime: "14:30" },
+  ];
+  const filteredPast = filterElapsedSlots(pastSlotsToday, "2026-10-25", nowAt1500Cairo, "Africa/Cairo");
+  check(
+    "F.1a filterElapsedSlots with only elapsed slots for today returns empty list",
+    filteredPast.length === 0,
+    `received length: ${filteredPast.length}`,
+  );
+
+  // F.1b filterElapsedSlots: Today with both elapsed and future slots
+  const mixedSlotsToday = [
+    { providerId: "prv_1", startTime: "10:00" },
+    { providerId: "prv_1", startTime: "16:30" },
+    { providerId: "prv_2", startTime: "17:00" },
+  ];
+  const filteredMixed = filterElapsedSlots(mixedSlotsToday, "2026-10-25", nowAt1500Cairo, "Africa/Cairo");
+  check(
+    "F.1b filterElapsedSlots retains only strictly future slots for today",
+    filteredMixed.length === 2 &&
+      filteredMixed[0]?.startTime === "16:30" &&
+      filteredMixed[1]?.startTime === "17:00",
+    `received: ${JSON.stringify(filteredMixed)}`,
+  );
+
+  // F.1c filterElapsedSlots: Business-local day differing from UTC
+  // 2026-10-25 at 23:30 UTC is 2026-10-26 at 01:30 or 02:30 in Cairo
+  const nowUtcPrevDay = new Date("2026-10-25T23:30:00.000Z");
+  const slotsOnOct25 = [{ providerId: "prv_1", startTime: "12:00" }];
+  const filteredCrossDay = filterElapsedSlots(slotsOnOct25, "2026-10-25", nowUtcPrevDay, "Africa/Cairo");
+  check(
+    "F.1c filterElapsedSlots treats calendar day as past when Cairo local day has rolled forward",
+    filteredCrossDay.length === 0,
+    `received: ${JSON.stringify(filteredCrossDay)}`,
+  );
+
+  // F.1d filterElapsedSlots: Future dates remaining unaffected
+  const futureDateSlots = [
+    { providerId: "prv_1", startTime: "09:00" },
+    { providerId: "prv_2", startTime: "10:00" },
+  ];
+  const filteredFutureSlots = filterElapsedSlots(futureDateSlots, "2026-10-28", nowAt1500Cairo, "Africa/Cairo");
+  check(
+    "F.1d filterElapsedSlots leaves future date slots completely unaffected",
+    filteredFutureSlots.length === 2,
+    `received: ${filteredFutureSlots.length}`,
+  );
+
+  // F.1e filterElapsedSlots: Past date returns empty
+  const pastDateSlots = [{ providerId: "prv_1", startTime: "09:00" }];
+  const filteredPastDate = filterElapsedSlots(pastDateSlots, "2026-10-20", nowAt1500Cairo, "Africa/Cairo");
+  check(
+    "F.1e filterElapsedSlots returns empty for any past date",
+    filteredPastDate.length === 0,
+  );
+
+  // F.2 Bounded availability service distinction
+  const BIZ_UUID = "11111111-1111-4111-8111-111111111111";
+  const SRV_UUID = "33333333-3333-4333-8333-333333333331";
+
+  // F.2a Successful search with no eligible dates returns { status: "success", dates: [] }
+  const mockDepsNoDates: any = {
+    businessRepository: {
+      findById: async () => ({
+        id: BIZ_UUID,
+        timezone: "Africa/Cairo",
+        workingHours: {
+          sat: { open: "09:00", close: "18:00", closed: false },
+          sun: { open: "09:00", close: "18:00", closed: false },
+        },
+      }),
+    },
+    serviceRepository: {
+      findById: async () => ({
+        id: SRV_UUID,
+        businessId: BIZ_UUID,
+        isActive: true,
+      }),
+      listByBusiness: async () => [],
+    },
+    providerRepository: {
+      listEligibleForService: async () => [],
+      listAssignmentSeams: async () => [],
+    },
+    appointmentRepository: {
+      listBlockingByAssignees: async () => [],
+    },
+  };
+  const emptyDatesRes = await resolveUpcomingBookingDates(
+    mockDepsNoDates,
+    {
+      business: {
+        id: BIZ_UUID,
+        timezone: "Africa/Cairo",
+        workingHours: {
+          sat: { open: "09:00", close: "18:00", closed: false },
+          sun: { open: "09:00", close: "18:00", closed: false },
+        },
+      },
+    },
+    { serviceId: SRV_UUID },
+    new Date("2026-10-25T08:00:00.000Z"),
+  );
+  check(
+    "F.2a resolveUpcomingBookingDates: successful search with no eligible dates returns status 'success' with empty dates",
+    emptyDatesRes.status === "success" && emptyDatesRes.dates.length === 0,
+    `received: ${JSON.stringify(emptyDatesRes)}`,
+  );
+
+  // F.2b Database exception returns { status: "error", code: "INFRASTRUCTURE_FAILURE" }
+  const mockDepsDbError: any = {
+    businessRepository: {
+      findById: async () => {
+        throw new Error("Connection lost to Postgres database");
+      },
+    },
+    serviceRepository: {
+      findById: async () => {
+        throw new Error("Connection lost to Postgres database");
+      },
+    },
+    providerRepository: {
+      listEligibleForService: async () => {
+        throw new Error("Connection lost to Postgres database");
+      },
+    },
+    appointmentRepository: {
+      listBlockingByAssignees: async () => {
+        throw new Error("Connection lost to Postgres database");
+      },
+    },
+  };
+  const dbErrorRes = await resolveUpcomingBookingDates(
+    mockDepsDbError,
+    {
+      business: {
+        id: BIZ_UUID,
+        timezone: "Africa/Cairo",
+        workingHours: {
+          sun: { open: "09:00", close: "18:00", closed: false },
+        },
+      },
+    },
+    { serviceId: SRV_UUID },
+    new Date("2026-10-25T08:00:00.000Z"),
+  );
+  check(
+    "F.2b resolveUpcomingBookingDates: database exception returns INFRASTRUCTURE_FAILURE without claiming fully booked",
+    dbErrorRes.status === "error" && dbErrorRes.code === "INFRASTRUCTURE_FAILURE",
+    `received: ${JSON.stringify(dbErrorRes)}`,
+  );
+
+  // F.2c Typed domain failure returns { status: "error", code: "DOMAIN_ERROR" }
+  const mockDepsDomainErr: any = {
+    businessRepository: {
+      findById: async () => ({
+        id: BIZ_UUID,
+        timezone: "Africa/Cairo",
+        workingHours: {
+          sun: { open: "09:00", close: "18:00", closed: false },
+        },
+      }),
+    },
+    serviceRepository: {
+      findById: async () => null, // SERVICE_NOT_FOUND domain failure
+    },
+    providerRepository: {
+      listEligibleForService: async () => [
+        { id: "prv_1", displayName: "د. سارة", user: { name: "سارة" } },
+      ],
+      listAssignmentSeams: async () => [
+        { providerId: "prv_1", userId: "u-1", assignedUserId: "u-1" },
+      ],
+    },
+    appointmentRepository: {
+      listBlockingByAssignees: async () => [],
+    },
+  };
+  const domainErrRes = await resolveUpcomingBookingDates(
+    mockDepsDomainErr,
+    {
+      business: {
+        id: BIZ_UUID,
+        timezone: "Africa/Cairo",
+        workingHours: {
+          sun: { open: "09:00", close: "18:00", closed: false },
+        },
+      },
+    },
+    { serviceId: SRV_UUID },
+    new Date("2026-10-25T08:00:00.000Z"),
+  );
+  check(
+    "F.2c resolveUpcomingBookingDates: typed domain failure preserves error code and returns DOMAIN_ERROR",
+    domainErrRes.status === "error" && domainErrRes.code === "DOMAIN_ERROR",
+    `received: ${JSON.stringify(domainErrRes)}`,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Area G: Provider Identity & Date Navigation Context Preservation
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("\nArea G: Provider Identity & Date Navigation");
+
+  // G.1 Chronological representative slot sampling with mixed providers in non-chronological order
+  const nonChronologicalCandidates = [
+    { providerId: "prv_A", startAt: "2026-10-25T17:00:00.000Z", startTime: "17:00" },
+    { providerId: "prv_B", startAt: "2026-10-25T09:00:00.000Z", startTime: "09:00" },
+    { providerId: "prv_A", startAt: "2026-10-25T12:00:00.000Z", startTime: "12:00" },
+    { providerId: "prv_B", startAt: "2026-10-25T15:00:00.000Z", startTime: "15:00" },
+    { providerId: "prv_A", startAt: "2026-10-25T10:00:00.000Z", startTime: "10:00" },
+  ];
+  const sortedSampled = sampleRepresentativeSlots(nonChronologicalCandidates, 4);
+  const sampledTimes = sortedSampled.map((s) => s.startTime);
+  const isChronological = sampledTimes.every((t, i) => i === 0 || t >= sampledTimes[i - 1]!);
+  check(
+    "G.1 sampleRepresentativeSlots with mixed providers in scrambled order outputs strictly chronological slots",
+    isChronological && sortedSampled.length === 4,
+    `received times: ${sampledTimes.join(", ")}`,
+  );
+
+  // G.2 Date navigation preserves canonical timePreference
+  const baseSlotOfferWithPref = buildSlotOffer(
+    { businessId: "biz_1", conversationId: "conv_nav_1" },
+    "offer_nav_1",
+    {
+      serviceId: "srv_consult",
+      serviceName: "كشف استشاري",
+      date: "2026-10-25",
+      timePreference: "morning",
+      options: [
+        {
+          providerId: "prv_1",
+          displayName: "د. سارة",
+          startAt: "2026-10-25T09:00",
+          endAt: "2026-10-25T09:30",
+        },
+      ],
+    },
+    new Date("2026-10-25T07:00:00.000Z"),
+  );
+  const dateOfferBuiltWithPref = buildDateOffer(
+    { businessId: "biz_1", conversationId: "conv_nav_1" },
+    "offer_date_nav",
+    {
+      serviceId: "srv_consult",
+      serviceName: "كشف استشاري",
+      providerId: null,
+      timePreference: "morning",
+      dates: [{ date: "2026-10-26", label: "غدًا الإثنين" }],
+    },
+    new Date("2026-10-25T07:00:00.000Z"),
+  );
+  check(
+    "G.2 DateOffer schema and builder persist timePreference correctly across date navigation",
+    dateOfferBuiltWithPref?.timePreference === "morning" &&
+      baseSlotOfferWithPref?.timePreference === "morning",
+    `received date: ${dateOfferBuiltWithPref?.timePreference}, slot: ${baseSlotOfferWithPref?.timePreference}`,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Area H: WhatsApp Security Boundary & Truthful Transport Reporting
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("\nArea H: WhatsApp Security Boundary & Truthful Transport Reporting");
+
+  // H.1a verifyMetaSignature fails closed when appSecret is absent or undefined
+  const rawBodyTest = JSON.stringify({ test: "body" });
+  check(
+    "H.1a verifyMetaSignature returns false when appSecret is undefined (fail closed)",
+    verifyMetaSignature(rawBodyTest, "sha256=123456", undefined) === false,
+  );
+  check(
+    "H.1b verifyMetaSignature returns false when signature header is null",
+    verifyMetaSignature(rawBodyTest, null, "test-secret") === false,
+  );
+
+  // H.1c verifyMetaSignature returns true with correct HMAC-SHA256 signature
+  const validSecret = "super-secret-key-32-chars-length!";
+  const validHmac = createHmac("sha256", validSecret).update(rawBodyTest).digest("hex");
+  const validHeader = `sha256=${validHmac}`;
+  check(
+    "H.1c verifyMetaSignature returns true when signature matches exactly",
+    verifyMetaSignature(rawBodyTest, validHeader, validSecret) === true,
+  );
+
+  // H.1d handleMetaPost returns 403 when WHATSAPP_META_APP_SECRET is unset
+  const dummyRequest = new Request("https://flowpilot.test/api/whatsapp/meta", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: rawBodyTest,
+  });
+  const noSecretResponse = await handleMetaPost(dummyRequest, { appSecret: "" });
+  check(
+    "H.1d handleMetaPost rejects requests with 403 when appSecret is empty/unset",
+    noSecretResponse.status === 403,
+    `received status: ${noSecretResponse.status}`,
+  );
+
+  // H.1e parseMetaWebhookPayload strictly rejects unsupported interactive subtypes
+  const unsupportedInteractivePayload = {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              metadata: { phone_number_id: "phone_1" },
+              messages: [
+                {
+                  from: "201234567890",
+                  id: "wamid.test.1",
+                  timestamp: "1700000000",
+                  type: "interactive",
+                  interactive: {
+                    type: "flow_reply", // unsupported subtype
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+  let threwMalformedSubtype = false;
+  try {
+    parseMetaWebhookPayload(unsupportedInteractivePayload);
+  } catch (err: any) {
+    if (err.code === "MALFORMED_PROVIDER_PAYLOAD") {
+      threwMalformedSubtype = true;
+    }
+  }
+  check(
+    "H.1e parseMetaWebhookPayload throws MALFORMED_PROVIDER_PAYLOAD on unsupported interactive subtype",
+    threwMalformedSubtype === true,
+  );
+
+  // H.2 Truthful transport reporting on 200 OK
+  // H.2a 200 OK with missing messages[0].id returns delivered: false, MALFORMED_PROVIDER_PAYLOAD
+  const mockFetchMissingId: typeof fetch = async () =>
+    new Response(JSON.stringify({ messaging_product: "whatsapp", contacts: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  const transportMissingId = createMetaWhatsAppTransport({
+    connectionDeps: {
+      whatsappConnectionRepository: fakeConnectionRepo as any,
+      businessRepository: {
+        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findByWhatsappNumber: async () => null,
+      } as any,
+      branchRepository: {
+        findByIdWithinBusiness: async () => null,
+        findDefaultByBusiness: async () => null,
+      } as any,
+    },
+    getEnvVar: () => undefined,
+    fetchImpl: mockFetchMissingId,
+    graphHost: META_GRAPH_HOST,
+    defaultApiVersion: META_DEFAULT_API_VERSION,
+    credentialsResolver: new EnvCredentialsResolver({
+      getEnvVar: () => "secret-meta-access-token",
+    }),
+  });
+  const missingIdResult = await transportMissingId.send({
+    to: "+201234567890",
+    businessId: "biz_1",
+    businessName: "عيادة النور",
+    conversationId: "conv_1",
+    connectionId: "conn_1",
+    content: "مرحبا",
+  });
+  check(
+    "H.2a createMetaWhatsAppTransport reports delivered: false with MALFORMED_PROVIDER_PAYLOAD if messages[0].id is absent",
+    missingIdResult.delivered === false &&
+      missingIdResult.errorCode === "MALFORMED_PROVIDER_PAYLOAD",
+    `received: ${JSON.stringify(missingIdResult)}`,
+  );
+
+  // H.2b 200 OK with valid messages[0].id returns delivered: true and providerMessageId
+  const mockFetchValidId: typeof fetch = async () =>
+    new Response(
+      JSON.stringify({
+        messaging_product: "whatsapp",
+        messages: [{ id: "wamid.HBgLMjAxMjM0NTY3ODkwFQIAERgSRjU1QkQxRDE5N0YxN0Y0OUIA" }],
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  const transportValidId = createMetaWhatsAppTransport({
+    connectionDeps: {
+      whatsappConnectionRepository: fakeConnectionRepo as any,
+      businessRepository: {
+        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findByWhatsappNumber: async () => null,
+      } as any,
+      branchRepository: {
+        findByIdWithinBusiness: async () => null,
+        findDefaultByBusiness: async () => null,
+      } as any,
+    },
+    getEnvVar: () => undefined,
+    fetchImpl: mockFetchValidId,
+    graphHost: META_GRAPH_HOST,
+    defaultApiVersion: META_DEFAULT_API_VERSION,
+    credentialsResolver: new EnvCredentialsResolver({
+      getEnvVar: () => "secret-meta-access-token",
+    }),
+  });
+  const validIdResult = await transportValidId.send({
+    to: "+201234567890",
+    businessId: "biz_1",
+    businessName: "عيادة النور",
+    conversationId: "conv_1",
+    connectionId: "conn_1",
+    content: "مرحبا",
+  });
+  check(
+    "H.2b createMetaWhatsAppTransport reports delivered: true with providerMessageId on valid 200 OK",
+    validIdResult.delivered === true &&
+      validIdResult.providerMessageId ===
+        "wamid.HBgLMjAxMjM0NTY3ODkwFQIAERgSRjU1QkQxRDE5N0YxN0Y0OUIA",
+    `received: ${JSON.stringify(validIdResult)}`,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Area I: Real Route Composition Round-Trips for Both Channels
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log("\nArea I: Real Route Composition Round-Trips");
+
+  // I.1 Telegram webhook handler composition round-trip
+  // Simulates Telegram callback_query via handleTelegramWebhook
+  const harnessTg = createPlaygroundHarness();
+  const welcomeOfferTg = buildWelcomeOffer(
+    { businessId: harnessTg.business.id, conversationId: harnessTg.conversation.id },
+    "offer_tg_roundtrip",
+    new Date("2026-10-25T08:00:00.000Z"),
+  );
+  await harnessTg.stateStore.save(
+    harnessTg.business.id,
+    harnessTg.conversation.id,
+    null,
+    {
+      offer: welcomeOfferTg,
+      bookingStage: "AVAILABILITY_RESOLVED",
+      knownFacts: {},
+      missingFacts: [],
+    },
+  );
+
+  const tgCallbackToken = offerCallbackData(welcomeOfferTg!, "book");
+  const tgWebhookUpdate = {
+    update_id: 99901,
+    callback_query: {
+      id: "cbq_tg_1",
+      from: { id: 123456789, is_bot: false, first_name: "Ammar" },
+      data: tgCallbackToken,
+      message: {
+        message_id: 501,
+        chat: { id: 123456789, type: "private" },
+        date: 1700000000,
+        text: "مرحبا بك",
+      },
+    },
+  };
+  const tgScheduledWork: Promise<void>[] = [];
+  const tgAcknowledged: string[] = [];
+  const tgWebhookSecret = "test-tg-webhook-secret-token";
+  const tgSecretHash = hashTelegramWebhookSecret(tgWebhookSecret);
+
+  const tgWebhookDeps: any = {
+    connectionRepository: {
+      findByWebhookSecretHash: async (hash: string) => {
+        if (hash === tgSecretHash) {
+          return {
+            id: "conn_tg_1",
+            businessId: harnessTg.business.id,
+            branchId: null,
+            botTokenRef: "tok_ref_1",
+            botExternalId: "6123456789",
+            externalId: "6123456789",
+            webhookSecretHash: tgSecretHash,
+            status: "active",
+          };
+        }
+        return null;
+      },
+    },
+    processInboundMessage: async (params: any) => {
+      const turnResult = await receiveInboundMessage(
+        harnessTg.deps as any,
+        params.engineInput,
+        params.identity,
+      );
+      return { ok: turnResult.ok };
+    },
+    answerCallbackQuery: async (params: { callbackQueryId: string }) => {
+      tgAcknowledged.push(params.callbackQueryId);
+    },
+    schedule: (work: () => Promise<void> | void) => {
+      tgScheduledWork.push(Promise.resolve(work()));
+    },
+    now: () => new Date("2026-10-25T08:00:00.000Z"),
+  };
+
+  const tgReq = new Request("http://localhost:3000/api/telegram/webhook", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": tgWebhookSecret,
+    },
+    body: JSON.stringify(tgWebhookUpdate),
+  });
+
+  const tgResponse = await handleTelegramWebhook(tgWebhookDeps, tgReq);
+  await Promise.all(tgScheduledWork);
+  check(
+    "I.1 Telegram handleTelegramWebhook successfully routes callback token through engine and acknowledges query",
+    tgResponse.status === 200 && tgAcknowledged.includes("cbq_tg_1"),
+    `tgResponse: status ${tgResponse.status}, acknowledged: ${tgAcknowledged.join(",")}`,
+  );
+
+  // I.2 WhatsApp handleMetaPost composition round-trip
+  // Turn 1 produces slot offer via engine; Turn 2 submits interactive list_reply POST via handleMetaPost
+  const harnessWaRoundTrip = createPlaygroundHarness({
+    businessConfig: { name: "عيادة د. سارة" } as any,
+    customAi: createTestAi() as any,
+  });
+  const turn1WaRoundTrip = await receiveInboundMessage(
+    harnessWaRoundTrip.deps,
+    {
+      to: harnessWaRoundTrip.business.whatsappNumber ?? "+201001111111",
+      from: harnessWaRoundTrip.customer.phone,
+      text: "عايز أحجز تنظيف أسنان يوم 2026-10-25",
+      receivedAt: "2026-10-24T12:00:00Z",
+    },
+    {
+      businessId: harnessWaRoundTrip.business.id,
+      branchId: harnessWaRoundTrip.business.defaultBranchId,
+    },
+  );
+  const convIdWaRoundTrip =
+    (turn1WaRoundTrip as any).conversationId ??
+    harnessWaRoundTrip.conversation.id;
+  const waOfferRoundTrip = (
+    harnessWaRoundTrip.stateStore.rows.get(convIdWaRoundTrip)?.state as any
+  )?.offer;
+  const slotTokenWa = offerCallbackData(
+    { token: waOfferRoundTrip.token },
+    "1",
+  );
+
+  const testSecretWa = "secret-whatsapp-test-hmac-key-256";
+  const waWebhookPayload = {
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: "entry_1",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              messaging_product: "whatsapp",
+              metadata: {
+                display_phone_number: "+201234567890",
+                phone_number_id: "phone_wa_1",
+              },
+              messages: [
+                {
+                  from: harnessWaRoundTrip.customer.phone,
+                  id: "wamid.roundtrip.1",
+                  timestamp: "1729857600",
+                  type: "interactive",
+                  interactive: {
+                    type: "list_reply",
+                    list_reply: {
+                      id: slotTokenWa,
+                      title: "10:00 ص",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const waRawBody = JSON.stringify(waWebhookPayload);
+  const waHmac = createHmac("sha256", testSecretWa).update(waRawBody).digest("hex");
+  const waRequest = new Request("https://flowpilot.test/api/whatsapp/meta", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-hub-signature-256": `sha256=${waHmac}`,
+    },
+    body: waRawBody,
+  });
+
+  const callsBeforeWa = harnessWaRoundTrip.llmStats.callCount;
+  const aptsBeforeWa = harnessWaRoundTrip.appointments.length;
+  const waResponse = await handleMetaPost(waRequest, {
+    appSecret: testSecretWa,
+    resolutionDeps: {
+      businessRepository: {
+        findById: async () => harnessWaRoundTrip.business,
+        findByWhatsappNumber: async () => harnessWaRoundTrip.business,
+      } as any,
+      whatsappConnectionRepository: {
+        findByExternalId: async () => ({
+          id: "conn_wa_1",
+          businessId: harnessWaRoundTrip.business.id,
+          branchId: null,
+          externalId: "phone_wa_1",
+        }),
+        findByPhone: async () => null,
+        findByIdWithinBusiness: async () => null,
+      } as any,
+      branchRepository: {
+        findByIdWithinBusiness: async () => null,
+        findDefaultByBusiness: async () => null,
+      } as any,
+    },
+    engineDeps: {
+      ...harnessWaRoundTrip.deps,
+      transport: {
+        providerName: "meta-whatsapp",
+        send: async () => ({ delivered: true, provider: "meta-whatsapp" }),
+      },
+    } as any,
+    revalidateFn: () => undefined,
+  });
+
+  const waResponseBody = (await waResponse.json()) as any;
+  const createdAptsWa = harnessWaRoundTrip.appointments.length - aptsBeforeWa;
+  const extraModelCalls = harnessWaRoundTrip.llmStats.callCount - callsBeforeWa;
+  check(
+    "I.2 WhatsApp handleMetaPost processes signed list_reply, matches slot token, and books exactly 1 appointment",
+    waResponse.status === 200 &&
+      waResponseBody.success === true &&
+      waResponseBody.results?.[0]?.ok === true &&
+      createdAptsWa === 1 &&
+      extraModelCalls === 0,
+    `waResponse: status ${waResponse.status}, body: ${JSON.stringify(waResponseBody)}, createdApts: ${createdAptsWa}, extraModelCalls: ${extraModelCalls}`,
   );
 
   // ═══════════════════════════════════════════════════════════════════════════

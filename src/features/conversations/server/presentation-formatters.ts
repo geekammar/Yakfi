@@ -18,6 +18,11 @@
  */
 
 import { weekdayOf } from "@/features/appointments/server/availability-service";
+import {
+  resolveValidTimeZone,
+  todayIsoInTimeZone,
+} from "@/features/conversations/server/temporal-context";
+import { nowTimeInTimeZone } from "@/lib/scheduling/slot-grid";
 
 export const ARABIC_WEEKDAYS: Record<string, string> = {
   sat: "السبت",
@@ -150,26 +155,97 @@ export function formatSlotChoiceLabel(
   return `${slot.index}️⃣ ${time} (${slot.displayName})`;
 }
 
+function extractNormalizedSlotTime(item: unknown): string {
+  const obj = item as Record<string, unknown> | null | undefined;
+  const raw =
+    (typeof obj?.startAt === "string" && obj.startAt) ||
+    (typeof obj?.startTime === "string" && obj.startTime) ||
+    (typeof obj?.time === "string" && obj.time) ||
+    "";
+  if (!raw) return "";
+  const t = raw.includes("T") ? raw.slice(11, 16) : raw.trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(t);
+  if (match) {
+    return `${match[1]!.padStart(2, "0")}:${match[2]!}`;
+  }
+  return t;
+}
+
+/**
+ * Exclude past/elapsed slots for today based on business-local wall-clock time.
+ * Future dates remain unaffected. Past dates return empty.
+ */
+export function filterElapsedSlots<
+  T extends { startAt?: string; startTime?: string; time?: string },
+>(
+  slots: ReadonlyArray<T>,
+  date: string,
+  now: Date,
+  timeZone: string,
+): T[] {
+  const tz = resolveValidTimeZone(timeZone);
+  const todayIso = todayIsoInTimeZone(now, tz);
+  if (date !== todayIso) {
+    if (date < todayIso) return [];
+    return [...slots];
+  }
+  const currentTime = nowTimeInTimeZone(now, tz);
+  return slots.filter((slot) => {
+    const slotTime = extractNormalizedSlotTime(slot);
+    return slotTime > currentTime;
+  });
+}
+
 /**
  * Deterministically select up to `max` representative slots spread across the
  * available eligible set rather than adjacent early times.
  *
- * For example: picks chronological positions near 0%, 33%, 67%, and 100%,
- * deduplicates them, and displays them chronologically.
+ * Normalizes candidates into stable chronological order before sampling,
+ * deduplicates candidates by stable slot identity, and displays selected
+ * items chronologically.
  *
  * If `nearestFirst` is explicitly requested, preserves nearest-first order.
  */
-export function sampleRepresentativeSlots<T>(
+export function sampleRepresentativeSlots<
+  T extends {
+    startAt?: string;
+    startTime?: string;
+    time?: string;
+    providerId?: string | null;
+  },
+>(
   candidates: ReadonlyArray<T>,
   max = 4,
   options?: { nearestFirst?: boolean },
 ): T[] {
-  if (candidates.length <= max) return [...candidates];
-  if (options?.nearestFirst) {
-    return candidates.slice(0, max);
+  if (candidates.length === 0) return [];
+
+  // Deduplicate by stable slot key (providerId + normalized start time)
+  const seen = new Set<string>();
+  const deduplicated: T[] = [];
+  for (const c of candidates) {
+    const slotTime = extractNormalizedSlotTime(c);
+    const key = `${c.providerId ?? ""}:${slotTime}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduplicated.push(c);
+    }
   }
 
-  const N = candidates.length;
+  // Normalize into stable chronological order (chronological by time, tie-break by providerId)
+  const sorted = [...deduplicated].sort((a, b) => {
+    const timeA = extractNormalizedSlotTime(a);
+    const timeB = extractNormalizedSlotTime(b);
+    if (timeA !== timeB) return timeA.localeCompare(timeB);
+    return (a.providerId ?? "").localeCompare(b.providerId ?? "");
+  });
+
+  if (sorted.length <= max) return sorted;
+  if (options?.nearestFirst) {
+    return sorted.slice(0, max);
+  }
+
+  const N = sorted.length;
   const indices = [
     0,
     Math.floor((N - 1) * 0.33),
@@ -177,21 +253,26 @@ export function sampleRepresentativeSlots<T>(
     N - 1,
   ];
   const uniqueIndices = Array.from(new Set(indices)).sort((a, b) => a - b);
-  const picked = uniqueIndices.map((i) => candidates[i]!);
+  const picked = uniqueIndices.map((i) => sorted[i]!);
 
   if (picked.length < max) {
     const pickedSet = new Set(uniqueIndices);
     for (let i = 0; i < N && picked.length < max; i++) {
       if (!pickedSet.has(i)) {
-        picked.push(candidates[i]!);
+        picked.push(sorted[i]!);
         pickedSet.add(i);
       }
     }
-    // Restore chronological ordering according to candidate array
-    picked.sort((a, b) => candidates.indexOf(a) - candidates.indexOf(b));
+    // Re-sort chronologically
+    picked.sort((a, b) => {
+      const timeA = extractNormalizedSlotTime(a);
+      const timeB = extractNormalizedSlotTime(b);
+      if (timeA !== timeB) return timeA.localeCompare(timeB);
+      return (a.providerId ?? "").localeCompare(b.providerId ?? "");
+    });
   }
 
-  return picked;
+  return picked.slice(0, max);
 }
 
 /**

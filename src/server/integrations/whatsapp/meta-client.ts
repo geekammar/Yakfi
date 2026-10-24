@@ -325,19 +325,36 @@ export function createMetaWhatsAppTransport(
       }
 
       if (response.ok) {
-        let providerMessageId: string | undefined;
+        let json: { messages?: Array<{ id?: string }> } | null = null;
         try {
-          const json = (await response.json()) as {
+          json = (await response.json()) as {
             messages?: Array<{ id?: string }>;
           };
-          providerMessageId = json.messages?.[0]?.id;
         } catch {
-          // no-op: delivery already succeeded
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error: "استجابة مزود واتساب غير صالحة",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
+        }
+        const providerMessageId = json?.messages?.[0]?.id;
+        if (
+          !providerMessageId ||
+          typeof providerMessageId !== "string" ||
+          !providerMessageId.trim()
+        ) {
+          return {
+            provider: "meta-whatsapp",
+            delivered: false,
+            error: "معرّف الرسالة مفقود في استجابة واتساب",
+            errorCode: "MALFORMED_PROVIDER_PAYLOAD",
+          };
         }
         return {
           provider: "meta-whatsapp",
           delivered: true,
-          ...(providerMessageId ? { providerMessageId } : {}),
+          providerMessageId: providerMessageId.trim(),
         };
       }
 

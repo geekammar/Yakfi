@@ -252,6 +252,7 @@ export type OfferReply =
       serviceId: string;
       serviceName: string;
       providerId: string | null;
+      timePreference?: CanonicalTimePreference | null;
     }
   /** Customer requested to type another date. */
   | {
@@ -259,6 +260,7 @@ export type OfferReply =
       serviceId: string;
       serviceName: string;
       providerId: string | null;
+      timePreference?: CanonicalTimePreference | null;
     }
   /** An index outside the offered date list. */
   | { kind: "date_invalid_index"; max: number }
@@ -395,6 +397,7 @@ export function interpretOfferReply(
           serviceId: offer.serviceId,
           serviceName: offer.serviceName,
           providerId: offer.providerId,
+          timePreference: offer.timePreference ?? null,
         };
       }
       if (callback.action.kind === "index") {
@@ -410,6 +413,7 @@ export function interpretOfferReply(
           serviceId: offer.serviceId,
           serviceName: offer.serviceName,
           providerId: offer.providerId,
+          timePreference: offer.timePreference ?? null,
         };
       }
       return { kind: "stale", reason: "UNKNOWN_TOKEN" };
@@ -543,6 +547,7 @@ export function interpretOfferReply(
         serviceId: offer.serviceId,
         serviceName: offer.serviceName,
         providerId: offer.providerId,
+        timePreference: offer.timePreference ?? null,
       };
     }
     return { kind: "none" };
