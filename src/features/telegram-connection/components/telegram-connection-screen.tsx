@@ -2,14 +2,17 @@
 
 import {
   beginTelegramProvisioningAction,
+  checkTelegramConnectionAction,
   disconnectTelegramConnectionAction,
   getTelegramConnectionStatusAction,
+  repairTelegramConnectionAction,
 } from "@/features/telegram-connection/actions/telegram-connection-actions";
 import {
   buildAndroidTelegramLaunchTargets,
   isAndroidUserAgent,
 } from "@/features/telegram-connection/telegram-app-launcher";
 import type {
+  TelegramConnectionDiagnosticView,
   TelegramConnectionUiState,
   TelegramConnectionView,
 } from "@/features/telegram-connection/types";
@@ -17,11 +20,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 import {
+  ActivityIcon,
   CheckCircleIcon,
   LinkIcon,
   LoaderCircleIcon,
   SendIcon,
   TriangleAlertIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState, useTransition } from "react";
 
@@ -79,6 +84,10 @@ export function TelegramConnectionScreen({
   const [view, setView] = useState<TelegramConnectionView>(initialView);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [diagnostic, setDiagnostic] =
+    useState<TelegramConnectionDiagnosticView | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
   // On Android, a successful launch opens an in-app chooser instead of
   // navigating unconditionally (DECISIONS #72/#74): the OS default handler
   // may route the HTTPS t.me link to Telegram X, but the flow only completes
@@ -168,6 +177,58 @@ export function TelegramConnectionScreen({
       if (result.cleanupWarning) setNotice(result.cleanupWarning);
       await refresh();
     });
+  };
+
+  const handleCheck = async () => {
+    if (isChecking || isRepairing || isPending) return;
+    setIsChecking(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await checkTelegramConnectionAction();
+      if (res.success) {
+        setDiagnostic(res.diagnostic);
+        if (res.diagnostic.status === "ALREADY_CORRECT") {
+          setNotice(res.diagnostic.safeSummary);
+        }
+      } else {
+        setError(res.message);
+      }
+    } catch {
+      setError("تعذر إكمال فحص الاتصال حالياً");
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  const handleRepair = async () => {
+    if (isChecking || isRepairing || isPending) return;
+    setIsRepairing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await repairTelegramConnectionAction();
+      if (res.success) {
+        setNotice(res.message);
+        if (diagnostic) {
+          setDiagnostic({
+            ...diagnostic,
+            status: "ALREADY_CORRECT",
+            hasCallbackSubscription: true,
+            allowedUpdates: res.allowedUpdates,
+            safeSummary:
+              "إعداد اشتراك الأزرار صحيح؛ يلزم اختبار ضغطة فعلية للتأكد من وصولها.",
+          });
+        }
+        await refresh();
+      } else {
+        setError(res.message);
+      }
+    } catch {
+      setError("تعذر إكمال عملية الإصلاح حالياً");
+    } finally {
+      setIsRepairing(false);
+    }
   };
 
   const canLaunch =
@@ -274,20 +335,107 @@ export function TelegramConnectionScreen({
           </Button>
         ) : null}
         {view.uiState === "CONNECTED" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={disconnect}
-            disabled={isPending}
-            className="min-h-11 sm:min-h-9"
-          >
-            {isPending ? (
-              <LoaderCircleIcon aria-hidden className="animate-spin" />
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCheck}
+              disabled={isPending || isChecking || isRepairing}
+              className="min-h-11 sm:min-h-9"
+            >
+              {isChecking ? (
+                <LoaderCircleIcon aria-hidden className="animate-spin" />
+              ) : (
+                <ActivityIcon aria-hidden />
+              )}
+              فحص الاتصال
+            </Button>
+            {diagnostic?.status === "REPAIR_REQUIRED" ? (
+              <Button
+                type="button"
+                variant="default"
+                onClick={handleRepair}
+                disabled={isPending || isChecking || isRepairing}
+                className="min-h-11 sm:min-h-9"
+              >
+                {isRepairing ? (
+                  <LoaderCircleIcon aria-hidden className="animate-spin" />
+                ) : (
+                  <WrenchIcon aria-hidden />
+                )}
+                إصلاح استقبال الأزرار
+              </Button>
             ) : null}
-            فصل تيليجرام
-          </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={disconnect}
+              disabled={isPending || isChecking || isRepairing}
+              className="min-h-11 sm:min-h-9"
+            >
+              {isPending ? (
+                <LoaderCircleIcon aria-hidden className="animate-spin" />
+              ) : null}
+              فصل تيليجرام
+            </Button>
+          </>
         ) : null}
       </div>
+
+      {diagnostic ? (
+        <div className="bg-muted/40 mt-4 space-y-3 rounded-lg border p-4 text-sm">
+          <div className="flex items-center gap-2">
+            {diagnostic.status === "ALREADY_CORRECT" ? (
+              <CheckCircleIcon className="text-success size-5 shrink-0" />
+            ) : (
+              <TriangleAlertIcon className="text-warning size-5 shrink-0" />
+            )}
+            <h3 className="font-semibold">
+              {diagnostic.status === "ALREADY_CORRECT"
+                ? "نتيجة الفحص: إعداد اشتراك الأزرار صحيح"
+                : "نتيجة الفحص: استقبال الأزرار غير مفعل"}
+            </h3>
+          </div>
+          <p className="text-muted-foreground text-xs leading-5">
+            {diagnostic.safeSummary}
+          </p>
+          <div className="text-muted-foreground grid grid-cols-1 gap-2 pt-1 font-mono text-xs sm:grid-cols-2">
+            <div>
+              <span className="font-sans font-medium text-foreground">
+                معرّف البوت:{" "}
+              </span>
+              <span dir="ltr">{diagnostic.botExternalId}</span>
+              {diagnostic.botUsername
+                ? ` (@${diagnostic.botUsername.replace(/^@/, "")})`
+                : ""}
+            </div>
+            <div>
+              <span className="font-sans font-medium text-foreground">
+                اشتراك الأزرار:{" "}
+              </span>
+              <span
+                className={
+                  diagnostic.hasCallbackSubscription
+                    ? "text-success font-sans font-medium"
+                    : "text-warning font-sans font-medium"
+                }
+              >
+                {diagnostic.hasCallbackSubscription
+                  ? "مفعل (callback_query)"
+                  : "غير مفعل"}
+              </span>
+            </div>
+            <div className="col-span-full">
+              <span className="font-sans font-medium text-foreground">
+                رابط الويبهوك:{" "}
+              </span>
+              <span dir="ltr" className="break-all">
+                {diagnostic.webhookUrl}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {androidLaunchUrl ? (
         <AndroidTelegramChooser url={androidLaunchUrl} />
@@ -295,8 +443,16 @@ export function TelegramConnectionScreen({
 
       {notice ? (
         <Alert className="mt-4">
-          <TriangleAlertIcon aria-hidden className="size-4" />
-          <AlertTitle>تم الفصل مع تحذير</AlertTitle>
+          {view.uiState === "CONNECTED" ? (
+            <CheckCircleIcon aria-hidden className="text-success size-4" />
+          ) : (
+            <TriangleAlertIcon aria-hidden className="size-4" />
+          )}
+          <AlertTitle>
+            {view.uiState === "CONNECTED"
+              ? "معلومات الاتصال"
+              : "تم الفصل مع تحذير"}
+          </AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       ) : null}

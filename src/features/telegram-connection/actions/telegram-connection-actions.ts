@@ -2,19 +2,24 @@
 
 import {
   beginTelegramProvisioning,
+  checkTelegramConnection,
   disconnectTelegramConnection,
   getTelegramConnectionStatus,
+  repairTelegramConnection,
   resolveManagerBotUsername,
   type TelegramConnectionActor,
   type TelegramConnectionServiceDeps,
 } from "@/features/telegram-connection/server/telegram-connection-service";
 import type {
   BeginTelegramProvisioningResult,
+  TelegramConnectionDiagnosticResult,
   TelegramConnectionReadResult,
+  TelegramConnectionRepairActionResult,
   TelegramDisconnectionResult,
 } from "@/features/telegram-connection/types";
 import { env } from "@/lib/env";
 import { requireUser } from "@/server/auth/guards";
+import { defaultCredentialsResolver } from "@/server/credentials/credentials-resolver";
 import { defaultRuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
 import { defaultTelegramApiDeps } from "@/server/integrations/telegram/telegram-client";
 import {
@@ -56,6 +61,7 @@ function deps(): TelegramConnectionServiceDeps {
     ledgerRepository: telegramProvisioningLedgerRepository,
     connectionRepository: telegramConnectionRepository,
     credentialStore: defaultRuntimeCredentialStore,
+    credentialsResolver: defaultCredentialsResolver,
     businessRepository,
     getEnvVar: (name: string) => process.env[name],
     webhookBaseUrl: env.NEXT_PUBLIC_APP_URL,
@@ -98,5 +104,26 @@ export async function disconnectTelegramConnectionAction(): Promise<TelegramDisc
     await currentActor(),
   );
   revalidateTelegramSurfaces();
+  return result;
+}
+
+/**
+ * Run read-only diagnostic check on the actor's connected Telegram bot (ADMIN only).
+ * Performs real getMe and getWebhookInfo without mutating Telegram or DB.
+ * Returns only safe projection.
+ */
+export async function checkTelegramConnectionAction(): Promise<TelegramConnectionDiagnosticResult> {
+  return checkTelegramConnection(deps(), await currentActor());
+}
+
+/**
+ * Explicit repair of button reception (callback_query) for the actor's connected Telegram bot (ADMIN only).
+ * Rechecks conditions server-side, applies callback_query subscription, and verifies outcome.
+ */
+export async function repairTelegramConnectionAction(): Promise<TelegramConnectionRepairActionResult> {
+  const result = await repairTelegramConnection(deps(), await currentActor());
+  if (result.success) {
+    revalidateTelegramSurfaces();
+  }
   return result;
 }

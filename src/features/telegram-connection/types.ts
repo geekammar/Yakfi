@@ -86,3 +86,46 @@ export type TelegramDisconnectionResult =
 export type TelegramConnectionReadResult =
   | { success: true; view: TelegramConnectionView }
   | { success: false; message: string };
+
+/** Safe read-only diagnostic view (SECRET-FREE). */
+export type TelegramConnectionDiagnosticView = {
+  status: "ALREADY_CORRECT" | "REPAIR_REQUIRED";
+  botExternalId: string;
+  botUsername: string | null;
+  webhookUrl: string;
+  urlMatchesExpected: boolean;
+  hasCallbackSubscription: boolean;
+  allowedUpdates: string[];
+  pendingUpdateCount: number;
+  checkedAt: string;
+  safeSummary: string;
+};
+
+export type TelegramConnectionDiagnosticResult =
+  | {
+      success: true;
+      diagnostic: TelegramConnectionDiagnosticView;
+    }
+  | {
+      success: false;
+      code: string;
+      message: string;
+    };
+
+/** Safe repair action result (SECRET-FREE). */
+export type TelegramConnectionRepairActionResult =
+  | {
+      success: true;
+      status: "REPAIRED" | "SECRET_RECONCILED" | "ALREADY_CORRECT";
+      botExternalId: string;
+      botUsername: string | null;
+      webhookUrl: string;
+      allowedUpdates: string[];
+      message: string;
+    }
+  | {
+      success: false;
+      code: string;
+      message: string;
+      requiresReconciliation?: boolean;
+    };
