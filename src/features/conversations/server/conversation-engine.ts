@@ -4401,10 +4401,7 @@ async function runInboundTurn(
         delivery,
       };
     } else if (offerReply.kind === "stale") {
-      const staleOffer =
-        ("offer" in offerReply ? (offerReply as any).offer : null) ??
-        turnSession.state?.offer ??
-        null;
+      const staleOffer = offerReply.offer ?? turnSession.state?.offer ?? null;
       const currentOffer = turnSession.state?.offer ?? null;
       const isCurrentOfferLive = currentOffer
         ? isOfferLive(currentOffer, now)
