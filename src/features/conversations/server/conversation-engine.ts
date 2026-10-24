@@ -1537,9 +1537,7 @@ export type UpcomingBookingDatesResult =
   | {
       readonly status: "error";
       readonly code:
-        | "INFRASTRUCTURE_FAILURE"
-        | "DOMAIN_ERROR"
-        | "PARTIAL_FAILURE";
+        "INFRASTRUCTURE_FAILURE" | "DOMAIN_ERROR" | "PARTIAL_FAILURE";
       readonly error?: { code: string; message: string };
       readonly dates?: Array<{ date: string; label: string }>;
     };
@@ -2093,9 +2091,7 @@ async function presentSlotChoices(
   const timeOfDayPref =
     input.timePreference !== undefined
       ? input.timePreference
-      : isCanonicalTimePreference(
-          turnSession.state?.knownFacts.timePreference,
-        )
+      : isCanonicalTimePreference(turnSession.state?.knownFacts.timePreference)
         ? turnSession.state.knownFacts.timePreference
         : null;
   const eligibilityDeps = buildEligibilityDeps(deps);

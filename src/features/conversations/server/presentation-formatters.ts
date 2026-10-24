@@ -177,12 +177,7 @@ function extractNormalizedSlotTime(item: unknown): string {
  */
 export function filterElapsedSlots<
   T extends { startAt?: string; startTime?: string; time?: string },
->(
-  slots: ReadonlyArray<T>,
-  date: string,
-  now: Date,
-  timeZone: string,
-): T[] {
+>(slots: ReadonlyArray<T>, date: string, now: Date, timeZone: string): T[] {
   const tz = resolveValidTimeZone(timeZone);
   const todayIso = todayIsoInTimeZone(now, tz);
   if (date !== todayIso) {

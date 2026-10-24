@@ -18,9 +18,7 @@ import "./setup-test-env";
 import { createHmac } from "node:crypto";
 
 import { handleMetaPost } from "../src/app/api/whatsapp/meta/route";
-import {
-  createPlaygroundHarness,
-} from "../src/features/conversations/playground/harness";
+import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
 import {
   buildDateOffer,
   buildProviderOffer,
@@ -1018,11 +1016,28 @@ async function run(): Promise<void> {
   // Cairo time: 15:00 (12:00 or 13:00 UTC depending on DST)
   const nowAt1500Cairo = new Date("2026-10-25T13:00:00.000Z"); // 15:00 or 16:00 local
   const pastSlotsToday = [
-    { providerId: "prv_1", startAt: "2026-10-25T09:00:00.000Z", startTime: "09:00" },
-    { providerId: "prv_1", startAt: "2026-10-25T11:00:00.000Z", startTime: "11:00" },
-    { providerId: "prv_2", startAt: "2026-10-25T14:30:00.000Z", startTime: "14:30" },
+    {
+      providerId: "prv_1",
+      startAt: "2026-10-25T09:00:00.000Z",
+      startTime: "09:00",
+    },
+    {
+      providerId: "prv_1",
+      startAt: "2026-10-25T11:00:00.000Z",
+      startTime: "11:00",
+    },
+    {
+      providerId: "prv_2",
+      startAt: "2026-10-25T14:30:00.000Z",
+      startTime: "14:30",
+    },
   ];
-  const filteredPast = filterElapsedSlots(pastSlotsToday, "2026-10-25", nowAt1500Cairo, "Africa/Cairo");
+  const filteredPast = filterElapsedSlots(
+    pastSlotsToday,
+    "2026-10-25",
+    nowAt1500Cairo,
+    "Africa/Cairo",
+  );
   check(
     "F.1a filterElapsedSlots with only elapsed slots for today returns empty list",
     filteredPast.length === 0,
@@ -1035,7 +1050,12 @@ async function run(): Promise<void> {
     { providerId: "prv_1", startTime: "16:30" },
     { providerId: "prv_2", startTime: "17:00" },
   ];
-  const filteredMixed = filterElapsedSlots(mixedSlotsToday, "2026-10-25", nowAt1500Cairo, "Africa/Cairo");
+  const filteredMixed = filterElapsedSlots(
+    mixedSlotsToday,
+    "2026-10-25",
+    nowAt1500Cairo,
+    "Africa/Cairo",
+  );
   check(
     "F.1b filterElapsedSlots retains only strictly future slots for today",
     filteredMixed.length === 2 &&
@@ -1048,7 +1068,12 @@ async function run(): Promise<void> {
   // 2026-10-25 at 23:30 UTC is 2026-10-26 at 01:30 or 02:30 in Cairo
   const nowUtcPrevDay = new Date("2026-10-25T23:30:00.000Z");
   const slotsOnOct25 = [{ providerId: "prv_1", startTime: "12:00" }];
-  const filteredCrossDay = filterElapsedSlots(slotsOnOct25, "2026-10-25", nowUtcPrevDay, "Africa/Cairo");
+  const filteredCrossDay = filterElapsedSlots(
+    slotsOnOct25,
+    "2026-10-25",
+    nowUtcPrevDay,
+    "Africa/Cairo",
+  );
   check(
     "F.1c filterElapsedSlots treats calendar day as past when Cairo local day has rolled forward",
     filteredCrossDay.length === 0,
@@ -1060,7 +1085,12 @@ async function run(): Promise<void> {
     { providerId: "prv_1", startTime: "09:00" },
     { providerId: "prv_2", startTime: "10:00" },
   ];
-  const filteredFutureSlots = filterElapsedSlots(futureDateSlots, "2026-10-28", nowAt1500Cairo, "Africa/Cairo");
+  const filteredFutureSlots = filterElapsedSlots(
+    futureDateSlots,
+    "2026-10-28",
+    nowAt1500Cairo,
+    "Africa/Cairo",
+  );
   check(
     "F.1d filterElapsedSlots leaves future date slots completely unaffected",
     filteredFutureSlots.length === 2,
@@ -1069,7 +1099,12 @@ async function run(): Promise<void> {
 
   // F.1e filterElapsedSlots: Past date returns empty
   const pastDateSlots = [{ providerId: "prv_1", startTime: "09:00" }];
-  const filteredPastDate = filterElapsedSlots(pastDateSlots, "2026-10-20", nowAt1500Cairo, "Africa/Cairo");
+  const filteredPastDate = filterElapsedSlots(
+    pastDateSlots,
+    "2026-10-20",
+    nowAt1500Cairo,
+    "Africa/Cairo",
+  );
   check(
     "F.1e filterElapsedSlots returns empty for any past date",
     filteredPastDate.length === 0,
@@ -1167,7 +1202,8 @@ async function run(): Promise<void> {
   );
   check(
     "F.2b resolveUpcomingBookingDates: database exception returns INFRASTRUCTURE_FAILURE without claiming fully booked",
-    dbErrorRes.status === "error" && dbErrorRes.code === "INFRASTRUCTURE_FAILURE",
+    dbErrorRes.status === "error" &&
+      dbErrorRes.code === "INFRASTRUCTURE_FAILURE",
     `received: ${JSON.stringify(dbErrorRes)}`,
   );
 
@@ -1224,15 +1260,40 @@ async function run(): Promise<void> {
 
   // G.1 Chronological representative slot sampling with mixed providers in non-chronological order
   const nonChronologicalCandidates = [
-    { providerId: "prv_A", startAt: "2026-10-25T17:00:00.000Z", startTime: "17:00" },
-    { providerId: "prv_B", startAt: "2026-10-25T09:00:00.000Z", startTime: "09:00" },
-    { providerId: "prv_A", startAt: "2026-10-25T12:00:00.000Z", startTime: "12:00" },
-    { providerId: "prv_B", startAt: "2026-10-25T15:00:00.000Z", startTime: "15:00" },
-    { providerId: "prv_A", startAt: "2026-10-25T10:00:00.000Z", startTime: "10:00" },
+    {
+      providerId: "prv_A",
+      startAt: "2026-10-25T17:00:00.000Z",
+      startTime: "17:00",
+    },
+    {
+      providerId: "prv_B",
+      startAt: "2026-10-25T09:00:00.000Z",
+      startTime: "09:00",
+    },
+    {
+      providerId: "prv_A",
+      startAt: "2026-10-25T12:00:00.000Z",
+      startTime: "12:00",
+    },
+    {
+      providerId: "prv_B",
+      startAt: "2026-10-25T15:00:00.000Z",
+      startTime: "15:00",
+    },
+    {
+      providerId: "prv_A",
+      startAt: "2026-10-25T10:00:00.000Z",
+      startTime: "10:00",
+    },
   ];
-  const sortedSampled = sampleRepresentativeSlots(nonChronologicalCandidates, 4);
+  const sortedSampled = sampleRepresentativeSlots(
+    nonChronologicalCandidates,
+    4,
+  );
   const sampledTimes = sortedSampled.map((s) => s.startTime);
-  const isChronological = sampledTimes.every((t, i) => i === 0 || t >= sampledTimes[i - 1]!);
+  const isChronological = sampledTimes.every(
+    (t, i) => i === 0 || t >= sampledTimes[i - 1]!,
+  );
   check(
     "G.1 sampleRepresentativeSlots with mixed providers in scrambled order outputs strictly chronological slots",
     isChronological && sortedSampled.length === 4,
@@ -1281,7 +1342,9 @@ async function run(): Promise<void> {
   // ═══════════════════════════════════════════════════════════════════════════
   // Area H: WhatsApp Security Boundary & Truthful Transport Reporting
   // ═══════════════════════════════════════════════════════════════════════════
-  console.log("\nArea H: WhatsApp Security Boundary & Truthful Transport Reporting");
+  console.log(
+    "\nArea H: WhatsApp Security Boundary & Truthful Transport Reporting",
+  );
 
   // H.1a verifyMetaSignature fails closed when appSecret is absent or undefined
   const rawBodyTest = JSON.stringify({ test: "body" });
@@ -1296,7 +1359,9 @@ async function run(): Promise<void> {
 
   // H.1c verifyMetaSignature returns true with correct HMAC-SHA256 signature
   const validSecret = "super-secret-key-32-chars-length!";
-  const validHmac = createHmac("sha256", validSecret).update(rawBodyTest).digest("hex");
+  const validHmac = createHmac("sha256", validSecret)
+    .update(rawBodyTest)
+    .digest("hex");
   const validHeader = `sha256=${validHmac}`;
   check(
     "H.1c verifyMetaSignature returns true when signature matches exactly",
@@ -1309,7 +1374,9 @@ async function run(): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: rawBodyTest,
   });
-  const noSecretResponse = await handleMetaPost(dummyRequest, { appSecret: "" });
+  const noSecretResponse = await handleMetaPost(dummyRequest, {
+    appSecret: "",
+  });
   check(
     "H.1d handleMetaPost rejects requests with 403 when appSecret is empty/unset",
     noSecretResponse.status === 403,
@@ -1358,15 +1425,22 @@ async function run(): Promise<void> {
   // H.2 Truthful transport reporting on 200 OK
   // H.2a 200 OK with missing messages[0].id returns delivered: false, MALFORMED_PROVIDER_PAYLOAD
   const mockFetchMissingId: typeof fetch = async () =>
-    new Response(JSON.stringify({ messaging_product: "whatsapp", contacts: [] }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    new Response(
+      JSON.stringify({ messaging_product: "whatsapp", contacts: [] }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   const transportMissingId = createMetaWhatsAppTransport({
     connectionDeps: {
       whatsappConnectionRepository: fakeConnectionRepo as any,
       businessRepository: {
-        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findById: async () => ({
+          id: "biz_1",
+          name: "منشأة تجريبية",
+          isActive: true,
+        }),
         findByWhatsappNumber: async () => null,
       } as any,
       branchRepository: {
@@ -1402,7 +1476,9 @@ async function run(): Promise<void> {
     new Response(
       JSON.stringify({
         messaging_product: "whatsapp",
-        messages: [{ id: "wamid.HBgLMjAxMjM0NTY3ODkwFQIAERgSRjU1QkQxRDE5N0YxN0Y0OUIA" }],
+        messages: [
+          { id: "wamid.HBgLMjAxMjM0NTY3ODkwFQIAERgSRjU1QkQxRDE5N0YxN0Y0OUIA" },
+        ],
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -1410,7 +1486,11 @@ async function run(): Promise<void> {
     connectionDeps: {
       whatsappConnectionRepository: fakeConnectionRepo as any,
       businessRepository: {
-        findById: async () => ({ id: "biz_1", name: "منشأة تجريبية", isActive: true }),
+        findById: async () => ({
+          id: "biz_1",
+          name: "منشأة تجريبية",
+          isActive: true,
+        }),
         findByWhatsappNumber: async () => null,
       } as any,
       branchRepository: {
@@ -1451,7 +1531,10 @@ async function run(): Promise<void> {
   // Simulates Telegram callback_query via handleTelegramWebhook
   const harnessTg = createPlaygroundHarness();
   const welcomeOfferTg = buildWelcomeOffer(
-    { businessId: harnessTg.business.id, conversationId: harnessTg.conversation.id },
+    {
+      businessId: harnessTg.business.id,
+      conversationId: harnessTg.conversation.id,
+    },
     "offer_tg_roundtrip",
     new Date("2026-10-25T08:00:00.000Z"),
   );
@@ -1564,10 +1647,7 @@ async function run(): Promise<void> {
   const waOfferRoundTrip = (
     harnessWaRoundTrip.stateStore.rows.get(convIdWaRoundTrip)?.state as any
   )?.offer;
-  const slotTokenWa = offerCallbackData(
-    { token: waOfferRoundTrip.token },
-    "1",
-  );
+  const slotTokenWa = offerCallbackData({ token: waOfferRoundTrip.token }, "1");
 
   const testSecretWa = "secret-whatsapp-test-hmac-key-256";
   const waWebhookPayload = {
@@ -1607,7 +1687,9 @@ async function run(): Promise<void> {
   };
 
   const waRawBody = JSON.stringify(waWebhookPayload);
-  const waHmac = createHmac("sha256", testSecretWa).update(waRawBody).digest("hex");
+  const waHmac = createHmac("sha256", testSecretWa)
+    .update(waRawBody)
+    .digest("hex");
   const waRequest = new Request("https://flowpilot.test/api/whatsapp/meta", {
     method: "POST",
     headers: {
