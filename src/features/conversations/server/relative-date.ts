@@ -34,6 +34,8 @@ import {
   type Weekday,
 } from "@/lib/scheduling/slot-grid";
 
+import type { ServerTemporalInput } from "./temporal-context";
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -216,8 +218,6 @@ function isNegatedAt(tokens: string[], idx: number): boolean {
   }
   return false;
 }
-
-import type { ServerTemporalInput } from "./temporal-context";
 
 export type RelativeDateResolution = {
   positiveDate: string | null;

@@ -56,9 +56,7 @@ import {
   type DateOffer,
   type SlotOffer,
 } from "../src/features/conversations/server/booking-offer";
-import {
-  interpretOfferReply,
-} from "../src/features/conversations/server/booking-selection";
+import { interpretOfferReply } from "../src/features/conversations/server/booking-selection";
 import {
   buildChannelChoices,
   offerCallbackData,
@@ -74,12 +72,8 @@ import {
   mergeConversationState,
   type ConversationState,
 } from "../src/features/conversations/server/conversation-state";
-import {
-  formatArabicDateRange,
-} from "../src/features/conversations/server/presentation-formatters";
-import {
-  resolveEgyptianRelativeDateDetailed,
-} from "../src/features/conversations/server/relative-date";
+import { formatArabicDateRange } from "../src/features/conversations/server/presentation-formatters";
+import { resolveEgyptianRelativeDateDetailed } from "../src/features/conversations/server/relative-date";
 import {
   deriveLocalDate,
   endOfSaturdayWeek,
@@ -111,7 +105,9 @@ async function runSuite() {
   // ══════════════════════════════════════════════════════════════════════════
   // AREA 1: Temporal Context & Server-Authoritative Date Resolution
   // ══════════════════════════════════════════════════════════════════════════
-  console.log("Area 1: Temporal Context & Server-Authoritative Date Resolution");
+  console.log(
+    "Area 1: Temporal Context & Server-Authoritative Date Resolution",
+  );
 
   // Reference clock: Wednesday, 2026-10-21 10:00:00 UTC (13:00 Cairo)
   const refDate = new Date("2026-10-21T10:00:00.000Z");
@@ -415,15 +411,15 @@ async function runSuite() {
       page2Result.hasMore === false,
       "2.2c Page 2 hasMore is false (all eligible dates exhausted)",
     );
-    assert(
-      page2Result.pageOffset === 4,
-      "2.2d Page 2 records pageOffset = 4",
-    );
+    assert(page2Result.pageOffset === 4, "2.2d Page 2 records pageOffset = 4");
     // Ensure no overlap between page 1 and page 2
     if (rangeResult.status === "success") {
       const page1Dates = new Set(rangeResult.dates.map((d) => d.date));
       const hasOverlap = page2Result.dates.some((d) => page1Dates.has(d.date));
-      assert(!hasOverlap, "2.2e No overlapping dates between page 1 and page 2");
+      assert(
+        !hasOverlap,
+        "2.2e No overlapping dates between page 1 and page 2",
+      );
     }
   }
 
@@ -439,7 +435,8 @@ async function runSuite() {
     4,
   );
   assert(
-    tooBroadResult.status === "too_broad" && tooBroadResult.requestedDays === 23,
+    tooBroadResult.status === "too_broad" &&
+      tooBroadResult.requestedDays === 23,
     "2.3a Range > 14 days returns status 'too_broad' at the availability search pipeline",
   );
 
@@ -486,9 +483,7 @@ async function runSuite() {
 
   // An explicit date correction clears dateRange
   const stateCorrectedDate = mergeConversationState(stateWithRange.state, {
-    factUpdates: [
-      { key: "date", operation: "set", value: "2026-10-26" },
-    ],
+    factUpdates: [{ key: "date", operation: "set", value: "2026-10-26" }],
   });
   assert(
     stateCorrectedDate.state.knownFacts.date === "2026-10-26" &&
@@ -503,8 +498,8 @@ async function runSuite() {
     ],
   });
   assert(
-    stateCorrectedRange.state.knownFacts.dateRange?.startDate === "2026-10-31" &&
-      stateCorrectedRange.state.knownFacts.date === undefined,
+    stateCorrectedRange.state.knownFacts.dateRange?.startDate ===
+      "2026-10-31" && stateCorrectedRange.state.knownFacts.date === undefined,
     "3.1c Setting a dateRange clears obsolete single date",
   );
 
@@ -605,7 +600,10 @@ async function runSuite() {
     refDate,
   );
 
-  assert(dateOfferWithRange !== null, "4.1a buildDateOffer with range succeeds");
+  assert(
+    dateOfferWithRange !== null,
+    "4.1a buildDateOffer with range succeeds",
+  );
   if (dateOfferWithRange) {
     assert(
       dateOfferWithRange.range?.startDate === "2026-10-24" &&
@@ -613,7 +611,8 @@ async function runSuite() {
       "4.1b DateOffer serializes range metadata accurately",
     );
     assert(
-      dateOfferWithRange.hasMore === true && dateOfferWithRange.pageOffset === 0,
+      dateOfferWithRange.hasMore === true &&
+        dateOfferWithRange.pageOffset === 0,
       "4.1c DateOffer carries hasMore: true and pageOffset: 0",
     );
 
@@ -654,11 +653,15 @@ async function runSuite() {
       .flat()
       .map((b) => b.callback_data);
     assert(
-      telegramCallbacks.includes(offerCallbackData(dateOfferWithRange, "more_dates")),
+      telegramCallbacks.includes(
+        offerCallbackData(dateOfferWithRange, "more_dates"),
+      ),
       "4.3b Telegram keyboard contains stable more_dates callback token",
     );
     assert(
-      telegramCallbacks.includes(offerCallbackData(dateOfferWithRange, "other_date")),
+      telegramCallbacks.includes(
+        offerCallbackData(dateOfferWithRange, "other_date"),
+      ),
       "4.3c Telegram keyboard contains stable other_date callback token",
     );
 
@@ -696,7 +699,8 @@ async function runSuite() {
   // 4.6 Format Arabic date range copy
   const rangeStr = formatArabicDateRange("2026-10-24", "2026-10-30");
   assert(
-    rangeStr.includes("السبت، 24 أكتوبر") && rangeStr.includes("الجمعة، 30 أكتوبر"),
+    rangeStr.includes("السبت، 24 أكتوبر") &&
+      rangeStr.includes("الجمعة، 30 أكتوبر"),
     `4.6a formatArabicDateRange outputs formatted range string (${rangeStr})`,
   );
 
@@ -705,7 +709,9 @@ async function runSuite() {
   // ══════════════════════════════════════════════════════════════════════════
   // AREA 5: End-to-End Multi-Turn Orchestration & Booking Execution
   // ══════════════════════════════════════════════════════════════════════════
-  console.log("Area 5: End-to-End Multi-Turn Orchestration & Booking Execution");
+  console.log(
+    "Area 5: End-to-End Multi-Turn Orchestration & Booking Execution",
+  );
 
   // Test setup: customer requests dental checkup next week in the morning
   // Turn 1: Customer sends "أنا عايز أحجز كشف أسنان الأسبوع الجاي صباحاً"
@@ -735,8 +741,16 @@ async function runSuite() {
           },
         },
         factUpdates: [
-          { key: "service" as const, operation: "set" as const, value: "كشف أسنان" },
-          { key: "timePreference" as const, operation: "set" as const, value: "morning" },
+          {
+            key: "service" as const,
+            operation: "set" as const,
+            value: "كشف أسنان",
+          },
+          {
+            key: "timePreference" as const,
+            operation: "set" as const,
+            value: "morning",
+          },
         ],
         goals: [
           {
@@ -771,7 +785,10 @@ async function runSuite() {
     },
   );
 
-  assert(t1Res.ok === true && !t1Res.duplicate, "5.1a Turn 1 processes successfully");
+  assert(
+    t1Res.ok === true && !t1Res.duplicate,
+    "5.1a Turn 1 processes successfully",
+  );
   if (!t1Res.ok || t1Res.duplicate) throw new Error("Turn 1 failed");
   const convId = t1Res.conversationId;
   const row1 = await initialHarness.stateStore.load(
@@ -796,7 +813,10 @@ async function runSuite() {
     conv1?.offer?.kind === "DATE",
     "5.1e Turn 1 presents an active DATE offer",
   );
-  const out1 = initialHarness.deliveredOutbound[initialHarness.deliveredOutbound.length - 1];
+  const out1 =
+    initialHarness.deliveredOutbound[
+      initialHarness.deliveredOutbound.length - 1
+    ];
   assert(
     out1?.choices?.offerKind === "DATE",
     "5.1f Turn 1 delivers interactive choices for the available dates in that range",
@@ -821,7 +841,10 @@ async function runSuite() {
     },
   );
 
-  assert(t2MoreRes.ok === true, "5.2a Turn 2 (more_dates) processes successfully");
+  assert(
+    t2MoreRes.ok === true,
+    "5.2a Turn 2 (more_dates) processes successfully",
+  );
   assert(
     aiCallCount === aiCallsBeforeT2,
     "5.2b Turn 2 makes strictly ZERO AI model calls for mechanical date browsing",
@@ -859,7 +882,10 @@ async function runSuite() {
     },
   );
 
-  assert(t3DateRes.ok === true, "5.3a Turn 3 (date selection) processes successfully");
+  assert(
+    t3DateRes.ok === true,
+    "5.3a Turn 3 (date selection) processes successfully",
+  );
   assert(
     aiCallCount === aiCallsBeforeT3,
     "5.3b Turn 3 makes strictly ZERO AI model calls for button date selection",
@@ -901,7 +927,10 @@ async function runSuite() {
     },
   );
 
-  assert(t4ChangeRes.ok === true, "5.4a Turn 4 (change_date) processes successfully");
+  assert(
+    t4ChangeRes.ok === true,
+    "5.4a Turn 4 (change_date) processes successfully",
+  );
   assert(
     aiCallCount === aiCallsBeforeT4,
     "5.4b Turn 4 makes strictly ZERO AI model calls for 'change_date'",
@@ -962,7 +991,10 @@ async function runSuite() {
     },
   );
 
-  assert(t5SlotRes.ok === true, "5.5b Final slot selection processes successfully");
+  assert(
+    t5SlotRes.ok === true,
+    "5.5b Final slot selection processes successfully",
+  );
   assert(
     initialHarness.appointments.length === 1 &&
       initialHarness.appointments[0].status === "CONFIRMED",
@@ -989,14 +1021,19 @@ async function runSuite() {
     },
   );
 
-  assert(t6ReplayRes.ok === true, "5.6a Replay of stale slot callback handled safely");
+  assert(
+    t6ReplayRes.ok === true,
+    "5.6a Replay of stale slot callback handled safely",
+  );
   assert(
     initialHarness.appointments.length === 1,
     "5.6b Replay creates ZERO duplicate appointments",
   );
 
   console.log("");
-  console.log(`── Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests.length} ──`);
+  console.log(
+    `── Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests.length} ──`,
+  );
 
   if (failedTests.length > 0) {
     console.error("\nFailed checks:");

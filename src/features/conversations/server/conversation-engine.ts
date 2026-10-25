@@ -2021,8 +2021,7 @@ async function presentDateChoices(
           datesResult.status === "success"
             ? datesResult.pageOffset
             : pageOffset,
-        hasMore:
-          datesResult.status === "success" ? datesResult.hasMore : false,
+        hasMore: datesResult.status === "success" ? datesResult.hasMore : false,
         totalEligibleCount:
           datesResult.status === "success"
             ? datesResult.totalEligibleCount
@@ -2304,7 +2303,8 @@ async function presentSlotChoices(
             providerId: input.providerId,
             timePreference: timeOfDayPref ?? null,
             date: input.date,
-            range: input.range ?? turnSession.state?.knownFacts.dateRange ?? null,
+            range:
+              input.range ?? turnSession.state?.knownFacts.dateRange ?? null,
             followUpRequestId: null,
             shownCount: representativeOptions.length,
             shownSlotKeys: representativeOptions.map(
@@ -4345,7 +4345,9 @@ async function runInboundTurn(
       );
       const nextOffset = (offerReply.offer.pageOffset ?? 0) + 4;
       const targetRange =
-        offerReply.offer.range ?? turnSession.state?.knownFacts.dateRange ?? null;
+        offerReply.offer.range ??
+        turnSession.state?.knownFacts.dateRange ??
+        null;
       return presentDateChoices(
         deps,
         selectionScope,
