@@ -117,6 +117,27 @@ export function formatArabicDate(
   return standardDate;
 }
 
+/**
+ * Format an ISO calendar date range ("YYYY-MM-DD" .. "YYYY-MM-DD") into unambiguous Arabic display.
+ *
+ * Example:
+ * - "2026-10-31", "2026-11-06" -> "من السبت، 31 أكتوبر إلى الجمعة، 6 نوفمبر"
+ * - "2026-10-31", "2026-10-31" -> "السبت، 31 أكتوبر"
+ */
+export function formatArabicDateRange(
+  startDateIso: string,
+  endDateIso: string,
+): string {
+  const start = startDateIso.trim().slice(0, 10);
+  const end = endDateIso.trim().slice(0, 10);
+  if (start === end) {
+    return formatArabicDate(start, { withRelativePrefix: false });
+  }
+  const startLabel = formatArabicDate(start, { withRelativePrefix: false });
+  const endLabel = formatArabicDate(end, { withRelativePrefix: false });
+  return `من ${startLabel} إلى ${endLabel}`;
+}
+
 export type SlotOptionPresentation = {
   index: number;
   providerId?: string | null;

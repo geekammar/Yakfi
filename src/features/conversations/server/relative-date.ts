@@ -34,6 +34,8 @@ import {
   type Weekday,
 } from "@/lib/scheduling/slot-grid";
 
+import type { ServerTemporalInput } from "./temporal-context";
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -113,27 +115,35 @@ const THREE_WEEKS_PHRASES: ReadonlyArray<string> = [
   "ثلاثة أسابيع",
 ].map(normalizeArabicText);
 
-const TWO_WEEKS_PHRASES: ReadonlyArray<string> = [
+export const AFTER_TWO_WEEKS_PHRASES: ReadonlyArray<string> = [
   "بعد اسبوعين",
   "بعد أسبوعين",
+].map(normalizeArabicText);
+
+export const CALENDAR_WEEK_AFTER_NEXT_PHRASES: ReadonlyArray<string> = [
   "الاسبوع بعد القادم",
   "الأسبوع بعد القادم",
   "الاسبوع اللي بعد الجاي",
   "الأسبوع اللي بعد الجاي",
+  "الاسبوع اللي بعده",
+  "الأسبوع اللي بعده",
 ].map(normalizeArabicText);
 
-const NEXT_WEEK_PHRASES: ReadonlyArray<string> = [
+export const AFTER_ONE_WEEK_PHRASES: ReadonlyArray<string> = [
+  "بعد اسبوع",
+  "بعد أسبوع",
+].map(normalizeArabicText);
+
+export const CALENDAR_NEXT_WEEK_PHRASES: ReadonlyArray<string> = [
   "الاسبوع القادم",
   "الأسبوع القادم",
   "الاسبوع الجاي",
   "الأسبوع الجاي",
   "الاسبوع المقبل",
   "الأسبوع المقبل",
-  "بعد اسبوع",
-  "بعد أسبوع",
 ].map(normalizeArabicText);
 
-const THIS_WEEK_PHRASES: ReadonlyArray<string> = [
+export const CALENDAR_THIS_WEEK_PHRASES: ReadonlyArray<string> = [
   "هذا الاسبوع",
   "هذا الأسبوع",
   "الاسبوع ده",
@@ -141,6 +151,11 @@ const THIS_WEEK_PHRASES: ReadonlyArray<string> = [
   "الاسبوع الحالي",
   "الأسبوع الحالي",
 ].map(normalizeArabicText);
+
+const TWO_WEEKS_PHRASES: ReadonlyArray<string> = [
+  ...AFTER_TWO_WEEKS_PHRASES,
+  ...CALENDAR_WEEK_AFTER_NEXT_PHRASES,
+];
 
 /** Add `days` to an ISO `YYYY-MM-DD`, returning the ISO date (UTC-anchored). */
 function addDays(iso: string, days: number): string {
@@ -207,6 +222,8 @@ function isNegatedAt(tokens: string[], idx: number): boolean {
 export type RelativeDateResolution = {
   positiveDate: string | null;
   negatedDates: string[];
+  positiveTemporal?: ServerTemporalInput | null;
+  negatedTemporals?: ServerTemporalInput[];
 };
 
 /**
@@ -220,21 +237,51 @@ export function resolveEgyptianRelativeDateDetailed(
   message: string,
   today: string,
 ): RelativeDateResolution {
-  if (!ISO_DATE.test(today)) return { positiveDate: null, negatedDates: [] };
+  if (!ISO_DATE.test(today)) {
+    return {
+      positiveDate: null,
+      negatedDates: [],
+      positiveTemporal: null,
+      negatedTemporals: [],
+    };
+  }
   const trimmed = message.trim();
-  if (trimmed.length === 0) return { positiveDate: null, negatedDates: [] };
+  if (trimmed.length === 0) {
+    return {
+      positiveDate: null,
+      negatedDates: [],
+      positiveTemporal: null,
+      negatedTemporals: [],
+    };
+  }
 
   // An explicit ISO date supplied verbatim is already the DOMAIN form.
   if (ISO_DATE.test(trimmed)) {
-    return { positiveDate: trimmed, negatedDates: [] };
+    return {
+      positiveDate: trimmed,
+      negatedDates: [],
+      positiveTemporal: { type: "exact_date", date: trimmed },
+      negatedTemporals: [],
+    };
   }
 
   const normalized = normalizeArabicText(message);
-  if (normalized.length === 0) return { positiveDate: null, negatedDates: [] };
+  if (normalized.length === 0) {
+    return {
+      positiveDate: null,
+      negatedDates: [],
+      positiveTemporal: null,
+      negatedTemporals: [],
+    };
+  }
 
   const tokens = normalized.split(/\s+/).filter(Boolean);
   const consumed = new Set<number>();
-  type Candidate = { date: string; negated: boolean };
+  type Candidate = {
+    date: string;
+    temporal: ServerTemporalInput;
+    negated: boolean;
+  };
   const candidates: Candidate[] = [];
 
   // 1. Day-after-tomorrow phrases (exact sequential token matches, checked before single words)
@@ -244,7 +291,11 @@ export function resolveEgyptianRelativeDateDetailed(
       if (consumed.has(i)) continue;
       if (matchSequenceAt(tokens, i, pTokens)) {
         const negated = isNegatedAt(tokens, i);
-        candidates.push({ date: addDays(today, 2), negated });
+        candidates.push({
+          date: addDays(today, 2),
+          temporal: { type: "relative_day", offsetDays: 2 },
+          negated,
+        });
         for (let k = 0; k < pTokens.length; k++) consumed.add(i + k);
       }
     }
@@ -263,32 +314,68 @@ export function resolveEgyptianRelativeDateDetailed(
       const negated = isNegatedAt(tokens, i);
       consumed.add(i);
       if (isTodayMentioned && weekdayOfDate(today) === day) {
-        candidates.push({ date: addDays(today, 0), negated });
+        const d = addDays(today, 0);
+        candidates.push({
+          date: d,
+          temporal: { type: "exact_date", date: d },
+          negated,
+        });
       } else {
         const base = nextWeekday(today, day);
+        let d = base;
         if (THREE_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
-          candidates.push({ date: addDays(base, 14), negated });
+          d = addDays(base, 14);
         } else if (TWO_WEEKS_PHRASES.some((p) => normalized.includes(p))) {
-          candidates.push({ date: addDays(base, 7), negated });
-        } else {
-          candidates.push({ date: base, negated });
+          d = addDays(base, 7);
         }
+        candidates.push({
+          date: d,
+          temporal: { type: "exact_date", date: d },
+          negated,
+        });
       }
     }
   }
 
-  // 3. Multi-week phrases alone
+  // 3. Multi-week and relative week phrases alone
   const multiWeekPatterns: Array<{
     phrases: ReadonlyArray<string>;
     offsetDays: number;
+    temporal: ServerTemporalInput;
   }> = [
-    { phrases: THREE_WEEKS_PHRASES, offsetDays: 21 },
-    { phrases: TWO_WEEKS_PHRASES, offsetDays: 14 },
-    { phrases: NEXT_WEEK_PHRASES, offsetDays: 7 },
-    { phrases: THIS_WEEK_PHRASES, offsetDays: 0 },
+    {
+      phrases: THREE_WEEKS_PHRASES,
+      offsetDays: 21,
+      temporal: { type: "relative_day", offsetDays: 21 },
+    },
+    {
+      phrases: AFTER_TWO_WEEKS_PHRASES,
+      offsetDays: 14,
+      temporal: { type: "relative_day", offsetDays: 14 },
+    },
+    {
+      phrases: CALENDAR_WEEK_AFTER_NEXT_PHRASES,
+      offsetDays: 14,
+      temporal: { type: "calendar_week", weekOffset: 2 },
+    },
+    {
+      phrases: AFTER_ONE_WEEK_PHRASES,
+      offsetDays: 7,
+      temporal: { type: "relative_day", offsetDays: 7 },
+    },
+    {
+      phrases: CALENDAR_NEXT_WEEK_PHRASES,
+      offsetDays: 7,
+      temporal: { type: "calendar_week", weekOffset: 1 },
+    },
+    {
+      phrases: CALENDAR_THIS_WEEK_PHRASES,
+      offsetDays: 0,
+      temporal: { type: "calendar_week", weekOffset: 0 },
+    },
   ];
 
-  for (const { phrases, offsetDays } of multiWeekPatterns) {
+  for (const { phrases, offsetDays, temporal } of multiWeekPatterns) {
     for (const phrase of phrases) {
       const pTokens = phrase.split(/\s+/).filter(Boolean);
       for (let i = 0; i <= tokens.length - pTokens.length; i++) {
@@ -302,7 +389,11 @@ export function resolveEgyptianRelativeDateDetailed(
         if (anyConsumed) continue;
         if (matchSequenceAt(tokens, i, pTokens)) {
           const negated = isNegatedAt(tokens, i);
-          candidates.push({ date: addDays(today, offsetDays), negated });
+          candidates.push({
+            date: addDays(today, offsetDays),
+            temporal,
+            negated,
+          });
           for (let k = 0; k < pTokens.length; k++) consumed.add(i + k);
         }
       }
@@ -316,7 +407,11 @@ export function resolveEgyptianRelativeDateDetailed(
     const offset = OFFSET_BY_WORD.get(token);
     if (offset !== undefined) {
       const negated = isNegatedAt(tokens, i);
-      candidates.push({ date: addDays(today, offset), negated });
+      candidates.push({
+        date: addDays(today, offset),
+        temporal: { type: "relative_day", offsetDays: offset },
+        negated,
+      });
       consumed.add(i);
     }
   }
@@ -329,9 +424,23 @@ export function resolveEgyptianRelativeDateDetailed(
   // If there are contradictory positive dates, prefer safe clarification (return null)
   const positiveDate = uniquePositive.length === 1 ? uniquePositive[0]! : null;
 
+  const positiveTemporals = positive.map((c) => c.temporal);
+  const negatedTemporals = negated.map((c) => c.temporal);
+
+  // Check unique positive temporal representation by JSON serialization
+  const uniquePositiveTemporalJson = Array.from(
+    new Set(positiveTemporals.map((t) => JSON.stringify(t))),
+  );
+  const positiveTemporal: ServerTemporalInput | null =
+    uniquePositiveTemporalJson.length === 1
+      ? (JSON.parse(uniquePositiveTemporalJson[0]!) as ServerTemporalInput)
+      : null;
+
   return {
     positiveDate,
     negatedDates: uniqueNegated,
+    positiveTemporal,
+    negatedTemporals,
   };
 }
 
