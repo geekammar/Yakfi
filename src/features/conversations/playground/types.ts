@@ -160,7 +160,7 @@ export type CurrentEngineTurnTraceDetails = {
   semantic: {
     intent: string | null;
     /** Captured directly from parsed AiResponse.extraction, NOT saved state */
-    modelExtraction: Record<string, string | null> | null;
+    modelExtraction: Record<string, unknown> | null;
     /** Captured directly from parsed AiResponse.factUpdates */
     modelFactUpdates: Array<{
       key: string;
@@ -168,9 +168,9 @@ export type CurrentEngineTurnTraceDetails = {
       value?: string;
     }> | null;
     /** Reconciled durable facts after turn from state store knownFacts */
-    reconciledKnownFacts: Record<string, string | null> | null;
+    reconciledKnownFacts: Record<string, unknown> | null;
     /** Compatibility alias for legacy access */
-    extraction?: Record<string, string | null> | null;
+    extraction?: Record<string, unknown> | null;
     factUpdates?: Array<{
       key: string;
       operation?: string;

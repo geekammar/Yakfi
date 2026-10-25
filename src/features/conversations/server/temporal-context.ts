@@ -133,3 +133,310 @@ export function buildAiTemporalContext(
     localDate,
   };
 }
+
+/**
+ * Add positive or negative days to an ISO YYYY-MM-DD date. Pure and UTC-anchored.
+ */
+export function addDaysToIso(iso: string, days: number): string {
+  const ms = Date.parse(`${iso}T00:00:00.000Z`) + days * 86_400_000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Number of days between iso1 and iso2 (iso2 - iso1). Pure and UTC-anchored.
+ */
+export function daysBetweenIso(iso1: string, iso2: string): number {
+  const ms1 = Date.parse(`${iso1}T00:00:00.000Z`);
+  const ms2 = Date.parse(`${iso2}T00:00:00.000Z`);
+  return Math.round((ms2 - ms1) / 86_400_000);
+}
+
+/**
+ * The Saturday starting the Sat–Fri business week containing isoDate.
+ * 1970-01-03 (epoch day 2) was a Saturday.
+ */
+export function startOfSaturdayWeek(isoDate: string): string {
+  const daysSinceEpoch = Math.floor(
+    Date.parse(`${isoDate}T00:00:00.000Z`) / 86_400_000,
+  );
+  const offset = (((daysSinceEpoch - 2) % 7) + 7) % 7; // 0 = Saturday
+  return addDaysToIso(isoDate, -offset);
+}
+
+/**
+ * The Friday ending the Sat–Fri business week containing isoDate.
+ */
+export function endOfSaturdayWeek(isoDate: string): string {
+  const sat = startOfSaturdayWeek(isoDate);
+  return addDaysToIso(sat, 6);
+}
+
+export type ServerTemporalInput =
+  | { type: "exact_date"; date: string }
+  | { type: "relative_day"; offsetDays: number }
+  | { type: "calendar_week"; weekOffset: number }
+  | { type: "date_range"; startDate: string; endDate: string };
+
+export type ResolvedServerTemporal =
+  | {
+      kind: "single_date";
+      date: string;
+      source: "exact_date" | "relative_day" | "legacy_date";
+    }
+  | {
+      kind: "date_range";
+      startDate: string;
+      endDate: string;
+      source: "calendar_week" | "date_range";
+      weekOffset?: number;
+    }
+  | {
+      kind: "range_too_broad";
+      requestedDays: number;
+      maxDays: number;
+      startDate: string;
+      endDate: string;
+    }
+  | {
+      kind: "invalid";
+      reason:
+        | "CONTRADICTION"
+        | "PAST_DATE"
+        | "OUT_OF_BOUNDS"
+        | "INVALID_ORDER"
+        | "INVALID_FORMAT";
+      error: string;
+    }
+  | {
+      kind: "none";
+    };
+
+/**
+ * Server-authoritative resolution of a model-proposed temporal request against
+ * the trusted turn clock and business timezone.
+ *
+ * Enforces:
+ * - Real calendar dates (ISO YYYY-MM-DD).
+ * - Temporal bounds (not in past, max 60-day booking horizon).
+ * - Range scan ceiling (maximum 14 days per search; flags range_too_broad if larger).
+ * - Precedence: valid temporalRequest takes semantic precedence; legacy date acts as fallback.
+ * - Safe fail-closed rejection on contradiction between legacy date and temporalRequest.
+ */
+export function resolveServerTemporalRequest(
+  temporalRequest: ServerTemporalInput | null | undefined,
+  legacyDate: string | null | undefined,
+  referenceInstant: Date | string,
+  timeZoneInput?: string | null,
+  maxBookingHorizonDays = 60,
+): ResolvedServerTemporal {
+  const timeZone = resolveValidTimeZone(timeZoneInput);
+  const todayIso = deriveLocalDate(referenceInstant, timeZone);
+
+  const cleanLegacyDate =
+    typeof legacyDate === "string" && legacyDate.trim().length > 0
+      ? legacyDate.trim()
+      : null;
+
+  if (temporalRequest) {
+    if (temporalRequest.type === "exact_date") {
+      const date = temporalRequest.date.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return {
+          kind: "invalid",
+          reason: "INVALID_FORMAT",
+          error: "صيغة التاريخ غير صالحة",
+        };
+      }
+      if (date < todayIso) {
+        return {
+          kind: "invalid",
+          reason: "PAST_DATE",
+          error: "التاريخ المطلوب في الماضي",
+        };
+      }
+      if (daysBetweenIso(todayIso, date) > maxBookingHorizonDays) {
+        return {
+          kind: "invalid",
+          reason: "OUT_OF_BOUNDS",
+          error: "التاريخ يتجاوز أفق الحجز المتاح",
+        };
+      }
+      if (cleanLegacyDate !== null && cleanLegacyDate !== date) {
+        return {
+          kind: "invalid",
+          reason: "CONTRADICTION",
+          error: "تعارض بين التاريخ المحدد والطلب الزمني",
+        };
+      }
+      return { kind: "single_date", date, source: "exact_date" };
+    }
+
+    if (temporalRequest.type === "relative_day") {
+      const offset = temporalRequest.offsetDays;
+      if (offset < 0) {
+        return {
+          kind: "invalid",
+          reason: "PAST_DATE",
+          error: "الإزاحة النسبية تشير إلى تاريخ ماضٍ",
+        };
+      }
+      const targetDate = addDaysToIso(todayIso, offset);
+      if (daysBetweenIso(todayIso, targetDate) > maxBookingHorizonDays) {
+        return {
+          kind: "invalid",
+          reason: "OUT_OF_BOUNDS",
+          error: "التاريخ النسبي يتجاوز أفق الحجز المتاح",
+        };
+      }
+      if (cleanLegacyDate !== null && cleanLegacyDate !== targetDate) {
+        return {
+          kind: "invalid",
+          reason: "CONTRADICTION",
+          error: "تعارض بين التاريخ واليوم النسبي",
+        };
+      }
+      return { kind: "single_date", date: targetDate, source: "relative_day" };
+    }
+
+    if (temporalRequest.type === "calendar_week") {
+      const weekOffset = temporalRequest.weekOffset;
+      if (weekOffset < 0) {
+        return {
+          kind: "invalid",
+          reason: "PAST_DATE",
+          error: "الأسبوع المطلوب في الماضي",
+        };
+      }
+      const weekStartSat = addDaysToIso(
+        startOfSaturdayWeek(todayIso),
+        weekOffset * 7,
+      );
+      const weekEndFri = addDaysToIso(weekStartSat, 6);
+
+      if (weekEndFri < todayIso) {
+        return {
+          kind: "invalid",
+          reason: "PAST_DATE",
+          error: "الأسبوع المطلوب قد انتهى بالكامل",
+        };
+      }
+      if (daysBetweenIso(todayIso, weekStartSat) > maxBookingHorizonDays) {
+        return {
+          kind: "invalid",
+          reason: "OUT_OF_BOUNDS",
+          error: "الأسبوع المطلوب يتجاوز أفق الحجز المتاح",
+        };
+      }
+      if (
+        cleanLegacyDate !== null &&
+        (cleanLegacyDate < weekStartSat || cleanLegacyDate > weekEndFri)
+      ) {
+        return {
+          kind: "invalid",
+          reason: "CONTRADICTION",
+          error: "تعارض: التاريخ المحدد يقع خارج الأسبوع المطلوب",
+        };
+      }
+      return {
+        kind: "date_range",
+        startDate: weekStartSat,
+        endDate: weekEndFri,
+        source: "calendar_week",
+        weekOffset,
+      };
+    }
+
+    if (temporalRequest.type === "date_range") {
+      const { startDate, endDate } = temporalRequest;
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
+      ) {
+        return {
+          kind: "invalid",
+          reason: "INVALID_FORMAT",
+          error: "صيغة التواريخ في الفترة غير صالحة",
+        };
+      }
+      if (startDate > endDate) {
+        return {
+          kind: "invalid",
+          reason: "INVALID_ORDER",
+          error: "تاريخ بداية الفترة يجب أن يكون قبل أو يطابق تاريخ النهاية",
+        };
+      }
+      if (endDate < todayIso) {
+        return {
+          kind: "invalid",
+          reason: "PAST_DATE",
+          error: "الفترة المطلوبة قد انتهت بالكامل",
+        };
+      }
+      const spanDays = daysBetweenIso(startDate, endDate) + 1;
+      if (spanDays > 14) {
+        return {
+          kind: "range_too_broad",
+          requestedDays: spanDays,
+          maxDays: 14,
+          startDate,
+          endDate,
+        };
+      }
+      if (daysBetweenIso(todayIso, startDate) > maxBookingHorizonDays) {
+        return {
+          kind: "invalid",
+          reason: "OUT_OF_BOUNDS",
+          error: "الفترة المطلوبة تتجاوز أفق الحجز المتاح",
+        };
+      }
+      if (
+        cleanLegacyDate !== null &&
+        (cleanLegacyDate < startDate || cleanLegacyDate > endDate)
+      ) {
+        return {
+          kind: "invalid",
+          reason: "CONTRADICTION",
+          error: "تعارض: التاريخ المحدد يقع خارج الفترة المطلوبة",
+        };
+      }
+      return {
+        kind: "date_range",
+        startDate,
+        endDate,
+        source: "date_range",
+      };
+    }
+  }
+
+  // Fallback to legacy date when temporalRequest is absent
+  if (cleanLegacyDate !== null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanLegacyDate)) {
+      return {
+        kind: "invalid",
+        reason: "INVALID_FORMAT",
+        error: "صيغة التاريخ غير صالحة",
+      };
+    }
+    if (cleanLegacyDate < todayIso) {
+      return {
+        kind: "invalid",
+        reason: "PAST_DATE",
+        error: "التاريخ المطلوب في الماضي",
+      };
+    }
+    if (daysBetweenIso(todayIso, cleanLegacyDate) > maxBookingHorizonDays) {
+      return {
+        kind: "invalid",
+        reason: "OUT_OF_BOUNDS",
+        error: "التاريخ يتجاوز أفق الحجز المتاح",
+      };
+    }
+    return {
+      kind: "single_date",
+      date: cleanLegacyDate,
+      source: "legacy_date",
+    };
+  }
+
+  return { kind: "none" };
+}

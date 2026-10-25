@@ -125,6 +125,16 @@ export const dateOfferSchema = z.object({
   providerId: shortText.nullable(),
   timePreference: canonicalTimePreferenceSchema.nullable().optional(),
   options: z.array(dateOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+  range: z
+    .object({
+      startDate: isoDate,
+      endDate: isoDate,
+    })
+    .nullable()
+    .optional(),
+  pageOffset: z.number().int().min(0).optional(),
+  hasMore: z.boolean().optional(),
+  totalEligibleCount: z.number().int().min(0).optional(),
 });
 
 export const providerOfferSchema = z.object({
@@ -145,6 +155,13 @@ export const slotOfferSchema = z.object({
   providerId: shortText.nullable(),
   timePreference: canonicalTimePreferenceSchema.nullable().optional(),
   date: isoDate,
+  range: z
+    .object({
+      startDate: isoDate,
+      endDate: isoDate,
+    })
+    .nullable()
+    .optional(),
   followUpRequestId: shortText.nullable(),
   /** How many fresh options were presented across "more times" batches. */
   shownCount: z.number().int().min(0).max(500),
@@ -273,6 +290,10 @@ export function buildDateOffer(
     providerId: string | null;
     timePreference?: CanonicalTimePreference | null;
     dates: ReadonlyArray<{ date: string; label: string }>;
+    range?: { startDate: string; endDate: string } | null;
+    pageOffset?: number;
+    hasMore?: boolean;
+    totalEligibleCount?: number;
   },
   now: Date,
 ): DateOffer | null {
@@ -283,8 +304,12 @@ export function buildDateOffer(
     serviceName: input.serviceName,
     providerId: input.providerId,
     timePreference: input.timePreference ?? null,
+    range: input.range ?? null,
+    pageOffset: input.pageOffset ?? 0,
+    hasMore: input.hasMore ?? false,
+    totalEligibleCount: input.totalEligibleCount,
     options: input.dates.slice(0, MAX_OFFER_OPTIONS).map((d, i) => ({
-      index: i + 1,
+      index: (input.pageOffset ?? 0) + i + 1,
       date: d.date,
       label: d.label,
     })),
@@ -332,6 +357,7 @@ export function buildSlotOffer(
     providerId?: string | null;
     timePreference?: CanonicalTimePreference | null;
     date: string;
+    range?: { startDate: string; endDate: string } | null;
     followUpRequestId?: string | null;
     shownCount?: number;
     shownSlotKeys?: string[];
@@ -353,6 +379,7 @@ export function buildSlotOffer(
     providerId: input.providerId ?? null,
     timePreference: input.timePreference ?? null,
     date: input.date,
+    range: input.range ?? null,
     followUpRequestId: input.followUpRequestId ?? null,
     shownCount: input.shownCount ?? input.options.length,
     shownSlotKeys: input.shownSlotKeys ?? [],

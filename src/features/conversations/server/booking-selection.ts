@@ -56,6 +56,7 @@ export type BookingSelectionContext = {
   providerId?: string | null;
   timePreference?: CanonicalTimePreference | null;
   shownCount?: number;
+  range?: { startDate: string; endDate: string } | null;
 };
 
 /** Arabic and Eastern Arabic indic digits → ascii. */
@@ -210,6 +211,7 @@ export function selectionContextFromSlotOffer(
     providerId: offer.providerId,
     timePreference: offer.timePreference ?? null,
     shownCount: offer.shownCount,
+    range: offer.range ?? null,
   };
 }
 
@@ -257,8 +259,18 @@ export type OfferReply =
       serviceName: string;
       providerId: string | null;
       timePreference?: CanonicalTimePreference | null;
+      range?: { startDate: string; endDate: string } | null;
     }
-  /** Customer requested to type another date. */
+  /** Customer requested more dates within the requested range. */
+  | {
+      kind: "date_more";
+      serviceId: string;
+      serviceName: string;
+      providerId: string | null;
+      timePreference?: CanonicalTimePreference | null;
+      offer: Extract<BookingOffer, { kind: "DATE" }>;
+    }
+  /** Customer requested to type another date or range. */
   | {
       kind: "date_other";
       serviceId: string;
@@ -405,6 +417,19 @@ export function interpretOfferReply(
           timePreference: offer.timePreference ?? null,
         };
       }
+      if (
+        callback.action.kind === "action" &&
+        callback.action.name === "more_dates"
+      ) {
+        return {
+          kind: "date_more",
+          serviceId: offer.serviceId,
+          serviceName: offer.serviceName,
+          providerId: offer.providerId,
+          timePreference: offer.timePreference ?? null,
+          offer,
+        };
+      }
       if (callback.action.kind === "index") {
         const actionIndex = callback.action.index;
         const option = offer.options.find((o) => o.index === actionIndex);
@@ -419,6 +444,7 @@ export function interpretOfferReply(
           serviceName: offer.serviceName,
           providerId: offer.providerId,
           timePreference: offer.timePreference ?? null,
+          range: offer.range ?? null,
         };
       }
       return { kind: "stale", reason: "UNKNOWN_TOKEN" };
@@ -540,6 +566,28 @@ export function interpretOfferReply(
   }
 
   if (offer.kind === "DATE") {
+    if (
+      offer.hasMore &&
+      /^(المزيد|مواعيد أخرى|المزيد من الأيام|more)$/i.test(trimmedText)
+    ) {
+      return {
+        kind: "date_more",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+        providerId: offer.providerId,
+        timePreference: offer.timePreference ?? null,
+        offer,
+      };
+    }
+    if (/^(تاريخ آخر|فترة أخرى|يوم آخر)$/.test(trimmedText)) {
+      return {
+        kind: "date_other",
+        serviceId: offer.serviceId,
+        serviceName: offer.serviceName,
+        providerId: offer.providerId,
+        timePreference: offer.timePreference ?? null,
+      };
+    }
     const sel = parseBookingSelection(trimmedText);
     if (sel?.kind === "index") {
       const option = offer.options.find((o) => o.index === sel.index);
@@ -554,6 +602,7 @@ export function interpretOfferReply(
         serviceName: offer.serviceName,
         providerId: offer.providerId,
         timePreference: offer.timePreference ?? null,
+        range: offer.range ?? null,
       };
     }
     return { kind: "none" };

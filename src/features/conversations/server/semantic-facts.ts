@@ -154,6 +154,7 @@ export function reconcileTurnSemanticFacts(
     provider: removedKeys.has("provider")
       ? null
       : (setFacts.get("provider")?.value ?? extraction?.provider ?? null),
+    temporalRequest: extraction?.temporalRequest ?? null,
   };
 
   return {

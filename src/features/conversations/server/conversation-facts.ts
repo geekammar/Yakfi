@@ -28,6 +28,7 @@ export {
 export const conversationFactKeys = [
   "service",
   "date",
+  "dateRange",
   "timePreference",
   "provider",
   "customerName",
@@ -40,10 +41,11 @@ export const conversationFactKeySchema = z.enum(conversationFactKeys);
 
 /**
  * The bounded subset of fact keys that can be explicitly REMOVED in this slice (CORE-03A).
- * REMOVE outside date, timePreference, and provider is rejected.
+ * REMOVE outside date, dateRange, timePreference, and provider is rejected.
  */
 export const removableFactKeys = [
   "date",
+  "dateRange",
   "timePreference",
   "provider",
 ] as const;

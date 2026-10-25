@@ -177,6 +177,7 @@ import { deriveKnowledgeGapObservation } from "@/features/conversations/server/k
 import {
   filterElapsedSlots,
   formatArabicDate,
+  formatArabicDateRange,
   formatBookingOptionsCopy,
   sampleRepresentativeSlots,
 } from "@/features/conversations/server/presentation-formatters";
@@ -192,7 +193,12 @@ import {
   reconcileTurnSemanticFacts,
   type ReconciledTurnFacts,
 } from "@/features/conversations/server/semantic-facts";
-import { resolveValidTimeZone } from "@/features/conversations/server/temporal-context";
+import {
+  addDaysToIso,
+  daysBetweenIso,
+  resolveServerTemporalRequest,
+  resolveValidTimeZone,
+} from "@/features/conversations/server/temporal-context";
 import {
   armedRelevance,
   buildTurnEvidence,
@@ -1534,6 +1540,17 @@ export type UpcomingBookingDatesResult =
   | {
       readonly status: "success";
       readonly dates: Array<{ date: string; label: string }>;
+      readonly hasMore: boolean;
+      readonly pageOffset: number;
+      readonly totalEligibleCount: number;
+      readonly range?: { startDate: string; endDate: string } | null;
+    }
+  | {
+      readonly status: "too_broad";
+      readonly requestedDays: number;
+      readonly maxDays: number;
+      readonly startDate: string;
+      readonly endDate: string;
     }
   | {
       readonly status: "error";
@@ -1541,6 +1558,10 @@ export type UpcomingBookingDatesResult =
         "INFRASTRUCTURE_FAILURE" | "DOMAIN_ERROR" | "PARTIAL_FAILURE";
       readonly error?: { code: string; message: string };
       readonly dates?: Array<{ date: string; label: string }>;
+      readonly hasMore?: boolean;
+      readonly pageOffset?: number;
+      readonly totalEligibleCount?: number;
+      readonly range?: { startDate: string; endDate: string } | null;
     };
 
 export async function resolveUpcomingBookingDates(
@@ -1559,6 +1580,8 @@ export async function resolveUpcomingBookingDates(
     serviceId: string;
     providerId?: string | null;
     timePreference?: CanonicalTimePreference | null;
+    range?: { startDate: string; endDate: string } | null;
+    offsetIndex?: number;
   },
   now: Date,
   count = 4,
@@ -1566,10 +1589,44 @@ export async function resolveUpcomingBookingDates(
   const tz = resolveValidTimeZone(scope.business.timezone);
   const todayIso = todayIsoInTimeZone(now, tz);
   const currentTime = nowTimeInTimeZone(now, tz);
+
+  if (input.range) {
+    const spanDays =
+      daysBetweenIso(input.range.startDate, input.range.endDate) + 1;
+    if (spanDays > 14) {
+      return {
+        status: "too_broad",
+        requestedDays: spanDays,
+        maxDays: 14,
+        startDate: input.range.startDate,
+        endDate: input.range.endDate,
+      };
+    }
+    if (input.range.endDate < todayIso) {
+      return {
+        status: "success",
+        dates: [],
+        hasMore: false,
+        pageOffset: 0,
+        totalEligibleCount: 0,
+        range: input.range,
+      };
+    }
+  }
+
+  const scanStartIso = input.range
+    ? input.range.startDate < todayIso
+      ? todayIso
+      : input.range.startDate
+    : todayIso;
+  const daysToScan = input.range
+    ? Math.max(0, daysBetweenIso(scanStartIso, input.range.endDate) + 1)
+    : 14;
+
   const [y, m, d] = todayIso.split("-").map(Number);
   const tomorrowCandidate = new Date(Date.UTC(y!, m! - 1, d! + 1));
   const tomorrowIso = tomorrowCandidate.toISOString().slice(0, 10);
-  const results: Array<{ date: string; label: string }> = [];
+  const allEligibleDates: Array<{ date: string; label: string }> = [];
 
   const eligibilityDeps = buildEligibilityDeps(deps);
   const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
@@ -1578,9 +1635,8 @@ export async function resolveUpcomingBookingDates(
   let exceptionsCount = 0;
   const domainErrors: Array<{ code: string; message: string }> = [];
 
-  for (let i = 0; i < 14 && results.length < count; i++) {
-    const candidate = new Date(Date.UTC(y!, m! - 1, d! + i));
-    const iso = candidate.toISOString().slice(0, 10);
+  for (let i = 0; i < daysToScan; i++) {
+    const iso = addDaysToIso(scanStartIso, i);
     const weekday = weekdayOf(iso);
     const workingDay = resolveWorkingDay(
       scope.business as unknown as Parameters<typeof resolveWorkingDay>[0],
@@ -1588,7 +1644,7 @@ export async function resolveUpcomingBookingDates(
     );
     if (!workingDay) continue;
 
-    if (i === 0) {
+    if (iso === todayIso) {
       const [hh, mm] = currentTime.split(":").map(Number);
       const currentMins = (hh ?? 0) * 60 + (mm ?? 0);
       if (currentMins >= workingDay.closeMinutes) {
@@ -1629,7 +1685,7 @@ export async function resolveUpcomingBookingDates(
             tomorrowIso,
             withRelativePrefix: true,
           });
-          results.push({ date: iso, label });
+          allEligibleDates.push({ date: iso, label });
         }
       }
     } catch {
@@ -1637,15 +1693,31 @@ export async function resolveUpcomingBookingDates(
     }
   }
 
+  const pageOffset = input.offsetIndex ?? 0;
+  const totalEligibleCount = allEligibleDates.length;
+  const pagedDates = allEligibleDates.slice(pageOffset, pageOffset + count);
+  const hasMore = pageOffset + count < totalEligibleCount;
+
   if (exceptionsCount === 0 && domainErrors.length === 0) {
-    return { status: "success", dates: results };
+    return {
+      status: "success",
+      dates: pagedDates,
+      hasMore,
+      pageOffset,
+      totalEligibleCount,
+      range: input.range ?? null,
+    };
   }
 
-  if (results.length > 0) {
+  if (pagedDates.length > 0) {
     return {
       status: "error",
       code: "PARTIAL_FAILURE",
-      dates: results,
+      dates: pagedDates,
+      hasMore,
+      pageOffset,
+      totalEligibleCount,
+      range: input.range ?? null,
       error: domainErrors[0] ?? {
         code: "PARTIAL_FAILURE",
         message: "حدث تعذر جزئي أثناء التحقق من المواعيد",
@@ -1659,6 +1731,10 @@ export async function resolveUpcomingBookingDates(
       status: "error",
       code: "PARTIAL_FAILURE",
       dates: [],
+      hasMore: false,
+      pageOffset,
+      totalEligibleCount: 0,
+      range: input.range ?? null,
       error: domainErrors[0] ?? {
         code: "PARTIAL_FAILURE",
         message: "حدث تعذر جزئي أثناء التحقق من المواعيد",
@@ -1875,10 +1951,15 @@ async function presentDateChoices(
     providerId: string | null;
     timePreference?: CanonicalTimePreference | null;
     observability?: InboundSuccess["observability"];
+    range?: { startDate: string; endDate: string } | null;
+    pageOffset?: number;
   },
   turnSession: TurnStateSession,
   now: Date,
 ): Promise<InboundSuccess> {
+  const range = input.range ?? turnSession.state?.knownFacts.dateRange ?? null;
+  const pageOffset = input.pageOffset ?? 0;
+
   const datesResult = await resolveUpcomingBookingDates(
     deps,
     {
@@ -1890,9 +1971,23 @@ async function presentDateChoices(
       serviceId: input.serviceId,
       providerId: input.providerId,
       timePreference: input.timePreference,
+      range,
+      offsetIndex: pageOffset,
     },
     now,
   );
+
+  if (datesResult.status === "too_broad") {
+    return selectionReply(
+      deps,
+      scope,
+      "نطاق البحث المطلوب يتجاوز 14 يوماً. يرجى اختيار أسبوع محدد أو تحديد فترة أقصر (حتى 14 يوماً) لعرض المواعيد المتاحة.",
+      "AI_ACTIVE",
+      null,
+      undefined,
+      input.observability,
+    );
+  }
 
   if (
     datesResult.status === "error" &&
@@ -1921,23 +2016,60 @@ async function presentDateChoices(
         providerId: input.providerId,
         timePreference: input.timePreference,
         dates: upcomingDates,
+        range,
+        pageOffset:
+          datesResult.status === "success"
+            ? datesResult.pageOffset
+            : pageOffset,
+        hasMore:
+          datesResult.status === "success" ? datesResult.hasMore : false,
+        totalEligibleCount:
+          datesResult.status === "success"
+            ? datesResult.totalEligibleCount
+            : upcomingDates.length,
       },
       now,
     );
   }
 
-  const lines = [
-    `تم اختيار خدمة "${input.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك:`,
-  ];
-  if (upcomingDates.length > 0) {
-    for (let i = 0; i < upcomingDates.length; i++) {
-      lines.push(`${i + 1}️⃣ ${upcomingDates[i]!.label}`);
-    }
-    lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+  const lines = [];
+  if (range) {
+    const rangeLabel = formatArabicDateRange(range.startDate, range.endDate);
+    lines.push(
+      `تم اختيار خدمة "${input.serviceName}". المواعيد المتاحة للفترة (${rangeLabel}):`,
+    );
   } else {
     lines.push(
-      "لا تتوفر مواعيد متاحة لهذه الخدمة خلال الـ 14 يوماً القادمة. يمكنك تجربة تحديد تاريخ آخر أو تغيير تفضيل الوقت:",
+      `تم اختيار خدمة "${input.serviceName}". يرجى تحديد اليوم أو التاريخ المناسب لك:`,
     );
+  }
+
+  if (upcomingDates.length > 0) {
+    for (let i = 0; i < upcomingDates.length; i++) {
+      const displayIndex = (pageOffset ?? 0) + i + 1;
+      lines.push(`${displayIndex}️⃣ ${upcomingDates[i]!.label}`);
+    }
+    if (datesResult.status === "success" && datesResult.hasMore) {
+      lines.push("(اضغط على «مواعيد أخرى» لعرض المزيد من الأيام)");
+    }
+    if (range) {
+      lines.push(
+        "(أو يمكنك اختيار «فترة أخرى» لتغيير نطاق البحث أو كتابة تاريخ مباشرة)",
+      );
+    } else {
+      lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+    }
+  } else {
+    if (range) {
+      const rangeLabel = formatArabicDateRange(range.startDate, range.endDate);
+      lines.push(
+        `لا تتوفر مواعيد متاحة لهذه الخدمة خلال الفترة (${rangeLabel}). يمكنك اختيار فترة أخرى أو تجربة تاريخ مختلف:`,
+      );
+    } else {
+      lines.push(
+        "لا تتوفر مواعيد متاحة لهذه الخدمة خلال الـ 14 يوماً القادمة. يمكنك تجربة تحديد تاريخ آخر أو تغيير تفضيل الوقت:",
+      );
+    }
   }
   const dateMsg = lines.join("\n");
 
@@ -1957,6 +2089,7 @@ async function presentDateChoices(
         ...(input.timePreference
           ? { timePreference: input.timePreference }
           : {}),
+        ...(range ? { dateRange: range } : {}),
       },
       serviceId: input.serviceId,
       selectedService: input.serviceName,
@@ -1965,6 +2098,7 @@ async function presentDateChoices(
         input.providerId ?? turnSession.state?.providerPreference ?? null,
       selectedTimePref:
         input.timePreference ?? turnSession.state?.selectedTimePref ?? null,
+      dateRange: range ?? turnSession.state?.dateRange ?? null,
       missingFacts: ["date"],
       lastClarification: { type: "date" },
       bookingStage: "SERVICE_SUPPLIED",
@@ -2041,6 +2175,7 @@ async function presentSlotChoices(
     date: string;
     timePreference?: CanonicalTimePreference | null;
     observability?: InboundSuccess["observability"];
+    range?: { startDate: string; endDate: string } | null;
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -2169,6 +2304,7 @@ async function presentSlotChoices(
             providerId: input.providerId,
             timePreference: timeOfDayPref ?? null,
             date: input.date,
+            range: input.range ?? turnSession.state?.knownFacts.dateRange ?? null,
             followUpRequestId: null,
             shownCount: representativeOptions.length,
             shownSlotKeys: representativeOptions.map(
@@ -2184,6 +2320,8 @@ async function presentSlotChoices(
           now,
         );
         if (slotOffer && turnSession.enabled) {
+          const currentRange =
+            input.range ?? turnSession.state?.knownFacts.dateRange ?? null;
           turnSession.state = {
             ...withPresentedOffer(
               turnSession.state ?? emptyConversationState(),
@@ -2196,11 +2334,13 @@ async function presentSlotChoices(
             providerPreference:
               input.providerId ?? turnSession.state?.providerPreference ?? null,
             selectedTimePref: timeOfDayPref ?? null,
+            dateRange: currentRange,
             knownFacts: {
               ...(turnSession.state?.knownFacts ?? {}),
               date: input.date,
               service: input.serviceName,
               ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+              ...(currentRange ? { dateRange: currentRange } : {}),
             },
           };
           const ok = await turnSession.commit();
@@ -2474,6 +2614,8 @@ async function completeBookingSelection(
 
   if (selection.kind === "change_date") {
     if (turnSession?.enabled) {
+      const activeRange =
+        context.range ?? turnSession.state?.knownFacts.dateRange ?? null;
       if (turnSession.state) {
         turnSession.state = {
           ...turnSession.state,
@@ -2481,8 +2623,10 @@ async function completeBookingSelection(
           knownFacts: {
             ...turnSession.state.knownFacts,
             date: undefined,
+            ...(activeRange ? { dateRange: activeRange } : {}),
             ...(canonicalTimePref ? { timePreference: canonicalTimePref } : {}),
           },
+          dateRange: activeRange,
           ...(canonicalTimePref ? { selectedTimePref: canonicalTimePref } : {}),
         };
       }
@@ -2496,6 +2640,7 @@ async function completeBookingSelection(
           serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
           providerId: providerId ?? null,
           timePreference: canonicalTimePref,
+          range: activeRange,
         },
         turnSession,
         now,
@@ -4181,6 +4326,37 @@ async function runInboundTurn(
           providerId: provRes.providerId,
           date: offerReply.date,
           timePreference: offerReply.timePreference,
+          range:
+            offerReply.range ?? turnSession.state?.knownFacts.dateRange ?? null,
+        },
+        turnSession,
+        now,
+      );
+    } else if (offerReply.kind === "date_more") {
+      const serviceSource = turnSession.state?.serviceSource ?? "CUSTOMER";
+      const candidateProvider =
+        offerReply.providerId ?? turnSession.state?.knownFacts.provider ?? null;
+      const provRes = await resolveProviderCandidate(
+        deps,
+        business.id,
+        conversation.branchId as string | null,
+        offerReply.serviceId,
+        candidateProvider,
+      );
+      const nextOffset = (offerReply.offer.pageOffset ?? 0) + 4;
+      const targetRange =
+        offerReply.offer.range ?? turnSession.state?.knownFacts.dateRange ?? null;
+      return presentDateChoices(
+        deps,
+        selectionScope,
+        {
+          serviceId: offerReply.serviceId,
+          serviceName: offerReply.serviceName,
+          serviceSource,
+          providerId: provRes.kind === "resolved" ? provRes.providerId : null,
+          timePreference: offerReply.timePreference,
+          range: targetRange,
+          pageOffset: nextOffset,
         },
         turnSession,
         now,
@@ -4189,7 +4365,9 @@ async function runInboundTurn(
       const askMsg =
         "يرجى كتابة التاريخ أو اليوم الذي يناسبك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):";
       if (turnSession.enabled) {
-        const existingFacts = turnSession.state?.knownFacts ?? {};
+        const existingFacts = { ...(turnSession.state?.knownFacts ?? {}) };
+        delete (existingFacts as any).date;
+        delete (existingFacts as any).dateRange;
         turnSession.state = {
           ...(turnSession.state ?? emptyConversationState()),
           knownFacts: {
@@ -4201,6 +4379,8 @@ async function runInboundTurn(
           },
           serviceId: offerReply.serviceId,
           selectedService: offerReply.serviceName,
+          selectedDate: null,
+          dateRange: null,
           providerPreference:
             offerReply.providerId ??
             turnSession.state?.providerPreference ??
@@ -5366,50 +5546,182 @@ async function runInboundTurn(
         // durable state are the sole sources of date, timePreference, and provider facts.
         // Customer prose must not be reinterpreted to invent, replace, remove, or restore those facts.
 
-        // Date handling: authoritative state / explicit turn proposals only
-        if (turnReconciled.isTouched("date")) {
-          if (turnReconciled.isRemoved("date")) {
+        // Date / Temporal handling: validated AI proposals and authoritative durable state
+        if (
+          turnReconciled.isRemoved("date") ||
+          turnReconciled.isRemoved("dateRange")
+        ) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              date: null,
+              temporalRequest: null,
+            },
+          };
+          if (resolvedState) {
+            const nextFacts = { ...resolvedState.knownFacts };
+            delete nextFacts.date;
+            delete nextFacts.dateRange;
+            resolvedState = {
+              ...resolvedState,
+              knownFacts: nextFacts,
+              selectedDate: null,
+              dateRange: null,
+            };
+            if (turnSession.enabled) {
+              turnSession.state = resolvedState;
+            }
+          }
+        } else {
+          const explicitDate =
+            turnReconciled.setFacts.get("date")?.value ??
+            bookingAiResponse.extraction.date ??
+            null;
+          const serverTemporal = resolveServerTemporalRequest(
+            bookingAiResponse.extraction.temporalRequest ?? null,
+            explicitDate,
+            now,
+            business.timezone ?? "UTC",
+          );
+
+          if (serverTemporal.kind === "range_too_broad") {
+            const broadMsg =
+              "نطاق البحث المطلوب يتجاوز 14 يوماً. يرجى اختيار أسبوع محدد أو تحديد فترة أقصر (حتى 14 يوماً) لعرض المواعيد المتاحة.";
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              broadMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              broadMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
+          if (serverTemporal.kind === "invalid") {
+            let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
+            if (serverTemporal.reason === "PAST_DATE") {
+              invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
+              invalidMsg =
+                "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
+            } else if (serverTemporal.reason === "CONTRADICTION") {
+              invalidMsg =
+                "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
+            }
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              invalidMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              invalidMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
+          if (serverTemporal.kind === "single_date") {
             bookingAiResponse = {
               ...bookingAiResponse,
               extraction: {
                 ...bookingAiResponse.extraction,
-                date: null,
+                date: serverTemporal.date,
+                temporalRequest: {
+                  type: "exact_date",
+                  date: serverTemporal.date,
+                },
               },
             };
             if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
-              delete nextFacts.date;
+              const nextFacts = {
+                ...resolvedState.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
-                selectedDate: null,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
               }
             }
-          } else {
-            const explicitDate =
-              turnReconciled.setFacts.get("date")?.value ??
-              bookingAiResponse.extraction.date ??
-              null;
+          } else if (serverTemporal.kind === "date_range") {
+            const rangeObj = {
+              startDate: serverTemporal.startDate,
+              endDate: serverTemporal.endDate,
+            };
             bookingAiResponse = {
               ...bookingAiResponse,
               extraction: {
                 ...bookingAiResponse.extraction,
-                date: explicitDate,
+                date: null,
+                temporalRequest: {
+                  type: "date_range",
+                  startDate: rangeObj.startDate,
+                  endDate: rangeObj.endDate,
+                },
               },
             };
-            if (resolvedState && explicitDate) {
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              nextFacts.dateRange = rangeObj;
               resolvedState = {
                 ...resolvedState,
-                knownFacts: {
-                  ...resolvedState.knownFacts,
-                  date: explicitDate,
-                },
-                selectedDate: explicitDate,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
               };
               if (turnSession.enabled) {
+                if (turnSession.state?.offer?.kind === "SLOT") {
+                  await turnSession.invalidateOffer();
+                }
                 turnSession.state = resolvedState;
               }
             }
@@ -5524,59 +5836,47 @@ async function runInboundTurn(
           inbound.text,
           todayIso,
         );
-        if (turnReconciled.isTouched("date")) {
-          if (turnReconciled.isRemoved("date")) {
-            bookingAiResponse = {
-              ...bookingAiResponse,
-              extraction: {
-                ...bookingAiResponse.extraction,
-                date: null,
-              },
+        if (
+          turnReconciled.isRemoved("date") ||
+          turnReconciled.isRemoved("dateRange")
+        ) {
+          bookingAiResponse = {
+            ...bookingAiResponse,
+            extraction: {
+              ...bookingAiResponse.extraction,
+              date: null,
+              temporalRequest: null,
+            },
+          };
+          if (resolvedState) {
+            const nextFacts = { ...resolvedState.knownFacts };
+            delete nextFacts.date;
+            delete nextFacts.dateRange;
+            resolvedState = {
+              ...resolvedState,
+              knownFacts: nextFacts,
+              selectedDate: null,
+              dateRange: null,
             };
-            if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
-              delete nextFacts.date;
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: nextFacts,
-                selectedDate: null,
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-              }
-            }
-          } else {
-            const explicitDate =
-              turnReconciled.setFacts.get("date")?.value ??
-              bookingAiResponse.extraction.date ??
-              null;
-            bookingAiResponse = {
-              ...bookingAiResponse,
-              extraction: {
-                ...bookingAiResponse.extraction,
-                date: explicitDate,
-              },
-            };
-            if (resolvedState && explicitDate) {
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: {
-                  ...resolvedState.knownFacts,
-                  date: explicitDate,
-                },
-                selectedDate: explicitDate,
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-              }
+            if (turnSession.enabled) {
+              turnSession.state = resolvedState;
             }
           }
-        } else if (!bookingAiResponse.extraction.date) {
-          let relDate = turnDateRes.positiveDate;
-          // Legacy fallback only: if durable state is not active, scan older customer messages
+        } else {
+          let explicitDate =
+            turnReconciled.setFacts.get("date")?.value ??
+            bookingAiResponse.extraction.date ??
+            turnDateRes.positiveDate ??
+            null;
+          const candidateTemporal =
+            bookingAiResponse.extraction.temporalRequest ??
+            turnDateRes.positiveTemporal ??
+            null;
+
           const isLegacyUnmanaged = !resolvedState && !turnSession.enabled;
           if (
-            !relDate &&
+            !explicitDate &&
+            !candidateTemporal &&
             isLegacyUnmanaged &&
             recentChronological &&
             turnDateRes.negatedDates.length === 0
@@ -5598,20 +5898,160 @@ async function runInboundTurn(
                   detailed.positiveDate &&
                   !historyNegatedDates.includes(detailed.positiveDate)
                 ) {
-                  relDate = detailed.positiveDate;
+                  explicitDate = detailed.positiveDate;
                   break;
                 }
               }
             }
           }
-          if (relDate) {
+
+          const serverTemporal = resolveServerTemporalRequest(
+            candidateTemporal,
+            explicitDate,
+            now,
+            business.timezone ?? "UTC",
+          );
+
+          if (serverTemporal.kind === "range_too_broad") {
+            const broadMsg =
+              "نطاق البحث المطلوب يتجاوز 14 يوماً. يرجى اختيار أسبوع محدد أو تحديد فترة أقصر (حتى 14 يوماً) لعرض المواعيد المتاحة.";
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              broadMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              broadMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
+          if (serverTemporal.kind === "invalid") {
+            let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
+            if (serverTemporal.reason === "PAST_DATE") {
+              invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
+              invalidMsg =
+                "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
+            } else if (serverTemporal.reason === "CONTRADICTION") {
+              invalidMsg =
+                "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
+            }
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              invalidMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              invalidMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
+          if (serverTemporal.kind === "single_date") {
             bookingAiResponse = {
               ...bookingAiResponse,
               extraction: {
                 ...bookingAiResponse.extraction,
-                date: relDate,
+                date: serverTemporal.date,
+                temporalRequest: {
+                  type: "exact_date",
+                  date: serverTemporal.date,
+                },
               },
             };
+            if (resolvedState) {
+              const nextFacts = {
+                ...resolvedState.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          } else if (serverTemporal.kind === "date_range") {
+            const rangeObj = {
+              startDate: serverTemporal.startDate,
+              endDate: serverTemporal.endDate,
+            };
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                date: null,
+                temporalRequest: {
+                  type: "date_range",
+                  startDate: rangeObj.startDate,
+                  endDate: rangeObj.endDate,
+                },
+              },
+            };
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              nextFacts.dateRange = rangeObj;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
+              };
+              if (turnSession.enabled) {
+                if (turnSession.state?.offer?.kind === "SLOT") {
+                  await turnSession.invalidateOffer();
+                }
+                turnSession.state = resolvedState;
+              }
+            }
           }
         }
 
@@ -6220,9 +6660,22 @@ async function runInboundTurn(
               serviceId: targetServiceId,
               providerId: matchedProviderId,
               timePreference: timePref,
+              range: turnSession.state?.knownFacts.dateRange ?? null,
             },
             now,
           );
+
+          if (upcomingDatesResult.status === "too_broad") {
+            return selectionReply(
+              deps,
+              selectionScope,
+              "نطاق البحث المطلوب يتجاوز 14 يوماً. يرجى اختيار أسبوع محدد أو تحديد فترة أقصر (حتى 14 يوماً) لعرض المواعيد المتاحة.",
+              "AI_ACTIVE",
+              null,
+              undefined,
+              clarifyObservability,
+            );
+          }
 
           if (
             upcomingDatesResult.status === "error" &&
@@ -6254,6 +6707,19 @@ async function runInboundTurn(
                 providerId: matchedProviderId,
                 timePreference: timePref,
                 dates: upcomingDates,
+                range: turnSession.state?.knownFacts.dateRange ?? null,
+                pageOffset:
+                  upcomingDatesResult.status === "success"
+                    ? upcomingDatesResult.pageOffset
+                    : 0,
+                hasMore:
+                  upcomingDatesResult.status === "success"
+                    ? upcomingDatesResult.hasMore
+                    : false,
+                totalEligibleCount:
+                  upcomingDatesResult.status === "success"
+                    ? upcomingDatesResult.totalEligibleCount
+                    : upcomingDates.length,
               },
               now,
             );
@@ -6297,14 +6763,50 @@ async function runInboundTurn(
             mapped.serviceName ??
             turnSession.state?.selectedService ??
             "المطلوبة";
-          const lines = [
-            `يرجى تحديد اليوم أو التاريخ المناسب لك لحجز خدمة "${serviceName}":`,
-          ];
+          const currentRange = turnSession.state?.knownFacts.dateRange;
+          const lines = [];
+          if (currentRange) {
+            const rangeStr = formatArabicDateRange(
+              currentRange.startDate,
+              currentRange.endDate,
+            );
+            lines.push(
+              `تم تحديد الفترة (${rangeStr}) لحجز خدمة "${serviceName}". يرجى اختيار اليوم المناسب:`,
+            );
+          } else {
+            lines.push(
+              `يرجى تحديد اليوم أو التاريخ المناسب لك لحجز خدمة "${serviceName}":`,
+            );
+          }
           for (const opt of dateOffer.options) {
             lines.push(`${opt.index}️⃣ ${opt.label}`);
           }
-          lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+          if (dateOffer.hasMore) {
+            lines.push("(اضغط على «مواعيد أخرى» لعرض المزيد من الأيام)");
+          }
+          if (currentRange) {
+            lines.push(
+              "(أو يمكنك اختيار «فترة أخرى» لتغيير نطاق البحث أو كتابة تاريخ مباشرة)",
+            );
+          } else {
+            lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+          }
           clarifyMsgToSend = lines.join("\n");
+        } else if (
+          mapped.reason === "MISSING_DATE" &&
+          !dateOffer &&
+          turnSession.state?.knownFacts.dateRange
+        ) {
+          const serviceName =
+            mapped.serviceName ??
+            turnSession.state?.selectedService ??
+            "المطلوبة";
+          const currentRange = turnSession.state.knownFacts.dateRange;
+          const rangeStr = formatArabicDateRange(
+            currentRange.startDate,
+            currentRange.endDate,
+          );
+          clarifyMsgToSend = `لا تتوفر مواعيد متاحة لخدمة "${serviceName}" خلال الفترة (${rangeStr}). يمكنك اختيار فترة أخرى أو كتابة تاريخ محدد:`;
         }
         const assistantMessage = await persistAssistantReply(
           deps,

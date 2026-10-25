@@ -149,13 +149,20 @@ export function buildChannelChoices(
             role: "option" as const,
           },
         ]);
-      rows.push([
-        {
-          id: "other_date",
-          label: "✏️ تاريخ آخر",
+      const actionRow: ChannelChoiceItem[] = [];
+      if (offer.hasMore) {
+        actionRow.push({
+          id: "more_dates",
+          label: "➡️ مواعيد أخرى",
           role: "action",
-        },
-      ]);
+        });
+      }
+      actionRow.push({
+        id: "other_date",
+        label: offer.range ? "✏️ فترة أخرى" : "✏️ تاريخ آخر",
+        role: "action",
+      });
+      rows.push(actionRow);
       return {
         offerToken: offer.token,
         offerId: offer.id,

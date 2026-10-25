@@ -117,6 +117,33 @@ const isoDateSchema = z
   );
 
 /**
+ * Structured temporal request schema for semantic date and range extraction.
+ * Distinguishes an exact calendar date, a relative day offset, a calendar week range,
+ * and an explicit bounded date range.
+ */
+export const aiTemporalRequestSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("exact_date"),
+    date: isoDateSchema,
+  }),
+  z.object({
+    type: z.literal("relative_day"),
+    offsetDays: z.number().int().min(0).max(60),
+  }),
+  z.object({
+    type: z.literal("calendar_week"),
+    weekOffset: z.number().int().min(0).max(8),
+  }),
+  z.object({
+    type: z.literal("date_range"),
+    startDate: isoDateSchema,
+    endDate: isoDateSchema,
+  }),
+]);
+
+export type AiTemporalRequest = z.infer<typeof aiTemporalRequestSchema>;
+
+/**
  * Bounded facts extracted from the customer message — FACTS ONLY, never
  * reasoning. `timePreference` must strictly use canonical machine values
  * ("morning" | "afternoon" | "evening"); exact times (e.g. "10:30") are not
@@ -132,6 +159,8 @@ export const aiExtractionSchema = z.object({
   date: isoDateSchema.nullable().default(null),
   /** Requested time-of-day preference, when stated. Canonical values only. */
   timePreference: canonicalTimePreferenceSchema.nullable().default(null),
+  /** Structured temporal request (exact, relative day, calendar week, or explicit range). */
+  temporalRequest: aiTemporalRequestSchema.nullable().optional(),
 });
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;
@@ -141,6 +170,7 @@ export const emptyAiExtraction: AiExtraction = {
   provider: null,
   date: null,
   timePreference: null,
+  temporalRequest: null,
 };
 
 // ─── Request (minimal context) ───────────────────────────────────────────────
@@ -228,6 +258,13 @@ export const conversationContextProjectionSchema = z.object({
   knownService: z.string().max(200).nullable().optional(),
   resolvedServiceId: z.string().max(200).nullable().optional(),
   knownDate: z.string().max(40).nullable().optional(),
+  knownDateRange: z
+    .object({
+      startDate: z.string().max(40),
+      endDate: z.string().max(40),
+    })
+    .nullable()
+    .optional(),
   timePreference: z.string().max(80).nullable().optional(),
   providerPreference: z.string().max(200).nullable().optional(),
   pendingClarification: z

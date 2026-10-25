@@ -120,6 +120,10 @@ export function isTaskGoal(goal: string | null | undefined): boolean {
 export type ConversationKnownFacts = {
   readonly service?: string;
   readonly date?: string;
+  readonly dateRange?: {
+    readonly startDate: string;
+    readonly endDate: string;
+  };
   readonly timePreference?: string;
   readonly provider?: string;
   readonly customerName?: string;
@@ -195,6 +199,10 @@ export type ConversationState = {
   /** Mirrors of `knownFacts` for the fields the target names explicitly. */
   readonly selectedService: string | null;
   readonly selectedDate: string | null;
+  readonly dateRange?: {
+    readonly startDate: string;
+    readonly endDate: string;
+  } | null;
   readonly selectedTimePref: string | null;
   readonly providerPreference: string | null;
   /** The bounded topic/interruption stack (topic switch + return). */
@@ -270,6 +278,7 @@ export function emptyConversationState(): ConversationState {
     bookingStage: "NOT_APPLICABLE",
     selectedService: null,
     selectedDate: null,
+    dateRange: null,
     selectedTimePref: null,
     providerPreference: null,
     topics: [],
@@ -341,7 +350,7 @@ function deriveBookingStage(
   if (!hasTaskGoal) return "NOT_APPLICABLE";
   if (pendingOffer) return "AVAILABILITY_RESOLVED";
   if (facts.timePreference) return "TIME_SUPPLIED";
-  if (facts.date) return "DATE_SUPPLIED";
+  if (facts.date || facts.dateRange) return "DATE_SUPPLIED";
   if (facts.service) return "SERVICE_SUPPLIED";
   return "GOAL_STATED";
 }
@@ -429,12 +438,19 @@ export function mergeConversationState(
     if (!isFactKey(update.key)) continue; // ignore unknown keys (no 2nd model)
     const key = update.key;
 
+    const rawPrev = knownFacts[key] ?? null;
+    const prevStr =
+      typeof rawPrev === "string"
+        ? rawPrev
+        : rawPrev
+          ? `${rawPrev.startDate}..${rawPrev.endDate}`
+          : null;
+
     if (update.operation === "remove") {
-      const prevValue = knownFacts[key] ?? null;
-      if (prevValue !== null) {
+      if (rawPrev !== null) {
         revisions.push({
           key,
-          from: prevValue,
+          from: prevStr,
           to: null,
           isRevision: true,
           ...(input.turnId ? { turnId: input.turnId } : {}),
@@ -447,21 +463,44 @@ export function mergeConversationState(
     }
 
     const nextValue = update.value;
-    const prevValue = knownFacts[key] ?? null;
 
-    if (prevValue === nextValue) continue; // unchanged → no-op
+    if (prevStr === nextValue) continue; // unchanged → no-op
 
-    if (prevValue !== null) {
+    if (rawPrev !== null) {
       // Corrected or conflicting: the latest value wins, but we log WHY.
       revisions.push({
         key,
-        from: prevValue,
+        from: prevStr,
         to: nextValue,
         isRevision: update.isRevision === true,
         ...(input.turnId ? { turnId: input.turnId } : {}),
       });
     }
-    knownFacts = { ...knownFacts, [key]: nextValue };
+    if (key === "date") {
+      const { dateRange: _droppedRange, ...rest } = knownFacts;
+      void _droppedRange;
+      knownFacts = { ...rest, [key]: nextValue };
+    } else if (key === "dateRange") {
+      const { date: _droppedDate, ...rest } = knownFacts;
+      void _droppedDate;
+      let parsedRange: { startDate: string; endDate: string } | null = null;
+      if (typeof nextValue === "string" && nextValue.includes("..")) {
+        const [s, e] = nextValue.split("..");
+        if (s && e) parsedRange = { startDate: s, endDate: e };
+      } else {
+        try {
+          parsedRange = JSON.parse(nextValue);
+        } catch {
+          parsedRange = null;
+        }
+      }
+      knownFacts = {
+        ...rest,
+        ...(parsedRange ? { dateRange: parsedRange } : {}),
+      };
+    } else {
+      knownFacts = { ...knownFacts, [key]: nextValue };
+    }
   }
 
   if (input.droppedFacts && input.droppedFacts.length > 0) {
@@ -520,6 +559,7 @@ export function mergeConversationState(
   const slotDependencyChanged =
     serviceIdentityChanged ||
     changed("date") ||
+    changed("dateRange") ||
     changed("provider") ||
     changed("timePreference");
   let offer: BookingOffer | null = state.offer;
@@ -666,6 +706,7 @@ export function mergeConversationState(
     activeTask != null ||
     knownFacts.service != null ||
     knownFacts.date != null ||
+    knownFacts.dateRange != null ||
     knownFacts.timePreference != null;
 
   let bookingStage: ConversationBookingStage;
@@ -715,6 +756,7 @@ export function mergeConversationState(
     bookingStage,
     selectedService: knownFacts.service ?? null,
     selectedDate: knownFacts.date ?? null,
+    dateRange: knownFacts.dateRange ?? null,
     selectedTimePref: knownFacts.timePreference ?? null,
     providerPreference: knownFacts.provider ?? null,
     topics,
@@ -942,6 +984,7 @@ export function completeBookingTask(
       : {},
     selectedService: null,
     selectedDate: null,
+    dateRange: null,
     selectedTimePref: null,
     providerPreference: null,
     serviceId: null,
@@ -979,6 +1022,12 @@ const factsSchema = z
   .object({
     service: z.string().max(200).optional(),
     date: z.string().max(40).optional(),
+    dateRange: z
+      .object({
+        startDate: z.string().max(40),
+        endDate: z.string().max(40),
+      })
+      .optional(),
     timePreference: z.string().max(80).optional(),
     provider: z.string().max(200).optional(),
     customerName: z.string().max(200).optional(),
@@ -1085,6 +1134,7 @@ export function hydrateConversationState(
     bookingStage: p.bookingStage,
     selectedService: facts.service ?? null,
     selectedDate: facts.date ?? null,
+    dateRange: facts.dateRange ?? null,
     selectedTimePref: facts.timePreference ?? null,
     providerPreference: facts.provider ?? null,
     topics: p.activeTask
@@ -1192,6 +1242,7 @@ export function projectConversationState(
     knownService: state.knownFacts.service ?? state.selectedService ?? null,
     resolvedServiceId: state.serviceId ?? null,
     knownDate: state.knownFacts.date ?? state.selectedDate ?? null,
+    knownDateRange: state.knownFacts.dateRange ?? state.dateRange ?? null,
     timePreference:
       state.knownFacts.timePreference ?? state.selectedTimePref ?? null,
     providerPreference:
