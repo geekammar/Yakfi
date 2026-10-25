@@ -1382,7 +1382,7 @@ async function runSuite(): Promise<void> {
       to: harnessA.business.whatsappNumber ?? "+201000000000",
       from: fromHandleA,
       text: "عايز أحجز ميعاد مع دكتور بكرة",
-      receivedAt: new Date().toISOString(),
+      receivedAt: new Date("2026-10-20T08:00:00.000Z").toISOString(),
       externalId: "ext-cas-service",
     });
 
