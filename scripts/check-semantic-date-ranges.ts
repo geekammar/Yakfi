@@ -75,12 +75,15 @@ import {
 import { formatArabicDateRange } from "../src/features/conversations/server/presentation-formatters";
 import { resolveEgyptianRelativeDateDetailed } from "../src/features/conversations/server/relative-date";
 import {
+  dateRangeSchema,
   deriveLocalDate,
   endOfSaturdayWeek,
+  isValidIsoCalendarDate,
   resolveServerTemporalRequest,
   startOfSaturdayWeek,
 } from "../src/features/conversations/server/temporal-context";
 import { renderTelegramInlineKeyboard } from "../src/server/integrations/telegram/telegram-presentation";
+import { renderMetaInteractivePayload } from "../src/server/integrations/whatsapp/meta-presentation";
 
 // ─── Assertion Utilities ───────────────────────────────────────────────────
 
@@ -272,6 +275,98 @@ async function runSuite() {
     "1.6d Contradictory legacy date and date_range fails closed as CONTRADICTION",
   );
 
+  // 1.6e Impossible calendar date (e.g. November 31st) rejected as INVALID_FORMAT
+  const impossibleDateRes = resolveServerTemporalRequest(
+    { type: "date_range", startDate: "2026-11-30", endDate: "2026-11-31" },
+    null,
+    refDate,
+    cairoTz,
+  );
+  assert(
+    impossibleDateRes.kind === "invalid" &&
+      impossibleDateRes.reason === "INVALID_FORMAT",
+    "1.6e Impossible calendar date (2026-11-31) is rejected as INVALID_FORMAT",
+  );
+
+  // 1.6f Leap day in non-leap year (2025-02-29) rejected as INVALID_FORMAT
+  const leapDayNonLeapRes = resolveServerTemporalRequest(
+    { type: "exact_date", date: "2025-02-29" },
+    null,
+    new Date("2025-02-01T10:00:00.000Z"),
+    cairoTz,
+  );
+  assert(
+    leapDayNonLeapRes.kind === "invalid" &&
+      leapDayNonLeapRes.reason === "INVALID_FORMAT",
+    "1.6f Leap day in non-leap year (2025-02-29) is rejected as INVALID_FORMAT",
+  );
+
+  // 1.6g Leap day in valid leap year (2024-02-29) is accepted
+  const leapDayValidRes = resolveServerTemporalRequest(
+    { type: "exact_date", date: "2024-02-29" },
+    null,
+    new Date("2024-02-01T10:00:00.000Z"),
+    cairoTz,
+  );
+  assert(
+    leapDayValidRes.kind === "single_date" &&
+      leapDayValidRes.date === "2024-02-29",
+    "1.6g Leap day in leap year (2024-02-29) is accepted as valid single_date",
+  );
+
+  // 1.6h Range with end beyond 60-day horizon (startDate day 60, endDate day 66) rejected
+  // Reference date: 2026-10-25
+  const refOct25 = new Date("2026-10-25T10:00:00.000Z");
+  const horizonEndBeyondRes = resolveServerTemporalRequest(
+    { type: "date_range", startDate: "2026-12-24", endDate: "2026-12-30" },
+    null,
+    refOct25,
+    cairoTz,
+    60,
+  );
+  assert(
+    horizonEndBeyondRes.kind === "invalid" &&
+      horizonEndBeyondRes.reason === "OUT_OF_BOUNDS",
+    "1.6h Range with end beyond 60-day horizon (2026-12-24..2026-12-30) is rejected as OUT_OF_BOUNDS",
+  );
+
+  // 1.6i Range ending exactly on 60-day horizon (2026-12-20..2026-12-24 = 60 days from 2026-10-25)
+  const horizonExactBoundaryRes = resolveServerTemporalRequest(
+    { type: "date_range", startDate: "2026-12-20", endDate: "2026-12-24" },
+    null,
+    refOct25,
+    cairoTz,
+    60,
+  );
+  assert(
+    horizonExactBoundaryRes.kind === "date_range" &&
+      horizonExactBoundaryRes.endDate === "2026-12-24",
+    "1.6i Range ending on exact 60-day boundary (2026-12-20..2026-12-24) is accepted",
+  );
+
+  // 1.6j Single date at exact boundary (day 60) vs beyond boundary (day 61)
+  const exactDay60Res = resolveServerTemporalRequest(
+    { type: "exact_date", date: "2026-12-24" },
+    null,
+    refOct25,
+    cairoTz,
+    60,
+  );
+  const beyondDay61Res = resolveServerTemporalRequest(
+    { type: "exact_date", date: "2026-12-25" },
+    null,
+    refOct25,
+    cairoTz,
+    60,
+  );
+  assert(
+    exactDay60Res.kind === "single_date" &&
+      exactDay60Res.date === "2026-12-24" &&
+      beyondDay61Res.kind === "invalid" &&
+      beyondDay61Res.reason === "OUT_OF_BOUNDS",
+    "1.6j Single date at day 60 is accepted while day 61 is rejected as OUT_OF_BOUNDS",
+  );
+
   // 1.7 Month and year boundary rollover & Cairo local midnight
   // Near end of year: 2026-12-30 (Wednesday)
   const yearEndClock = new Date("2026-12-30T10:00:00.000Z");
@@ -315,6 +410,30 @@ async function runSuite() {
     detailedOffset.positiveTemporal?.type === "relative_day" &&
       (detailedOffset.positiveTemporal as any).offsetDays === 7,
     "1.8b Egyptian relative date detailed resolves 'بعد أسبوع' to relative_day offsetDays 7",
+  );
+
+  // 1.9 Calendar date and range schema unit validation
+  assert(
+    isValidIsoCalendarDate("2026-10-25") === true,
+    "1.9a Valid calendar date passes",
+  );
+  assert(
+    isValidIsoCalendarDate("2026-11-31") === false,
+    "1.9b Impossible date fails",
+  );
+  assert(
+    dateRangeSchema.safeParse({
+      startDate: "2026-10-24",
+      endDate: "2026-10-30",
+    }).success,
+    "1.9c Valid range schema passes",
+  );
+  assert(
+    !dateRangeSchema.safeParse({
+      startDate: "2026-10-30",
+      endDate: "2026-10-24",
+    }).success,
+    "1.9d Reversed range schema fails",
   );
 
   console.log("");
@@ -458,6 +577,64 @@ async function runSuite() {
     "2.4a Past range returns status 'success' with empty dates without crashing",
   );
 
+  // 2.5 Stable cursor pagination when earlier availability changes
+  // Reproduction: Range 2026-10-24 .. 2026-10-29. Page 1 showed 24, 25, 26, 27.
+  // Before page 2, 2026-10-24 becomes full/closed.
+  const businessWithSatFull = {
+    ...testBusiness,
+    workingHours: {
+      ...testBusiness.workingHours,
+      sat: { open: "00:00", close: "00:00", closed: true }, // Saturday becomes unavailable
+    },
+  };
+  const cursorPage2Result = await resolveUpcomingBookingDates(
+    harness.deps,
+    { business: businessWithSatFull, customerId: PLAYGROUND_IDS.CUST_ID },
+    {
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      range: { startDate: "2026-10-24", endDate: "2026-10-29" },
+      offsetIndex: 4,
+      cursorDate: "2026-10-27", // Cursor from page 1
+    },
+    refDate,
+    4,
+  );
+  assert(
+    cursorPage2Result.status === "success" &&
+      cursorPage2Result.dates.length === 2 &&
+      cursorPage2Result.dates[0]?.date === "2026-10-28" &&
+      cursorPage2Result.dates[1]?.date === "2026-10-29",
+    "2.5a Cursor pagination returns 2026-10-28 and 2026-10-29 without skipping 2026-10-28 when 2026-10-24 becomes unavailable",
+  );
+  assert(
+    cursorPage2Result.status === "success" &&
+      cursorPage2Result.hasMore === false,
+    "2.5b Cursor pagination correctly exhausts remaining dates (hasMore = false)",
+  );
+
+  // 2.5c When a date opens behind the cursor, it is not repeated
+  const cursorNoRepeatResult = await resolveUpcomingBookingDates(
+    harness.deps,
+    { business: testBusiness, customerId: PLAYGROUND_IDS.CUST_ID },
+    {
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      range: { startDate: "2026-10-24", endDate: "2026-10-29" },
+      offsetIndex: 4,
+      cursorDate: "2026-10-27",
+    },
+    refDate,
+    4,
+  );
+  if (cursorNoRepeatResult.status === "success") {
+    const dates = cursorNoRepeatResult.dates.map((d) => d.date);
+    const hasOldDate =
+      dates.includes("2026-10-24") || dates.includes("2026-10-25");
+    assert(
+      !hasOldDate && dates.every((d) => d > "2026-10-27"),
+      "2.5c Cursor pagination strictly excludes dates behind the cursor (no repetition)",
+    );
+  }
+
   console.log("");
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -532,6 +709,54 @@ async function runSuite() {
   assert(
     hydrated !== null && hydrated.dateRange === null,
     "3.3a hydrateConversationState safely handles legacy stored state without dateRange",
+  );
+
+  // 3.3b Corrupted dateRange in stored state is safely refused during hydration without failing valid state
+  const corruptedSerialized = dehydrateConversationState(baseState);
+  (corruptedSerialized.knownFacts as any).service = "كشف أسنان";
+  (corruptedSerialized.knownFacts as any).dateRange = {
+    startDate: "2026-11-30",
+    endDate: "2026-11-31", // Impossible calendar date
+  };
+  const hydratedCorrupted = hydrateConversationState(corruptedSerialized, {
+    businessId: PLAYGROUND_IDS.BIZ_ID,
+    conversationId: "conv-corrupted",
+  });
+  assert(
+    hydratedCorrupted !== null &&
+      hydratedCorrupted.knownFacts.service === "كشف أسنان" &&
+      hydratedCorrupted.dateRange === null,
+    "3.3b hydrateConversationState safely refuses invalid dateRange without failing hydration of valid state",
+  );
+
+  // 3.3c Malformed dateRange factUpdates (impossible date, reversed, malformed JSON) do not clear prior date
+  const stateWithValidDate = mergeConversationState(baseState, {
+    factUpdates: [
+      { key: "service", operation: "set", value: "كشف أسنان" },
+      { key: "date", operation: "set", value: "2026-10-25" },
+    ],
+  });
+  assert(
+    stateWithValidDate.state.knownFacts.date === "2026-10-25",
+    "3.3c-1 Valid date set initially",
+  );
+  // Apply malformed dateRange
+  const stateAfterMalformedRange = mergeConversationState(
+    stateWithValidDate.state,
+    {
+      factUpdates: [
+        {
+          key: "dateRange",
+          operation: "set",
+          value: "2026-11-30..2026-11-31", // Impossible date
+        },
+      ],
+    },
+  );
+  assert(
+    stateAfterMalformedRange.state.knownFacts.date === "2026-10-25" &&
+      stateAfterMalformedRange.state.knownFacts.dateRange === undefined,
+    "3.3c-2 Malformed dateRange factUpdate is rejected without clearing prior valid date or corrupting state",
   );
 
   // 3.4 Invalidation of obsolete slot offer on range change
@@ -703,6 +928,105 @@ async function runSuite() {
       rangeStr.includes("الجمعة، 30 أكتوبر"),
     `4.6a formatArabicDateRange outputs formatted range string (${rangeStr})`,
   );
+
+  // 4.7 Action-only DATE presentation when checked range has 0 availability
+  const emptyDateOffer = buildDateOffer(
+    { businessId: PLAYGROUND_IDS.BIZ_ID, conversationId: "conv-empty-001" },
+    "date-offer-empty-001",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      serviceName: "كشف أسنان",
+      providerId: null,
+      timePreference: "morning",
+      dates: [], // Zero available dates in range!
+      range: { startDate: "2026-10-24", endDate: "2026-10-30" },
+      pageOffset: 0,
+      hasMore: false,
+    },
+    refDate,
+  );
+  assert(
+    emptyDateOffer !== null && emptyDateOffer.options.length === 0,
+    "4.7a Action-only DateOffer with 0 dates builds successfully with min(0) options",
+  );
+  if (emptyDateOffer) {
+    const emptyChoices = buildChannelChoices(emptyDateOffer);
+    const emptyItems = emptyChoices.groups.flat();
+    assert(
+      emptyItems.length === 1 &&
+        emptyItems[0]?.id === "other_date" &&
+        emptyItems[0]?.label === "✏️ فترة أخرى",
+      "4.7b Action-only DateOffer produces ChannelChoicePresentation with '✏️ فترة أخرى'",
+    );
+
+    // Telegram rendering
+    const tgKeyboard = renderTelegramInlineKeyboard(emptyChoices);
+    assert(
+      tgKeyboard.inline_keyboard.length === 1 &&
+        tgKeyboard.inline_keyboard[0]?.[0]?.text === "✏️ فترة أخرى",
+      "4.7c renderTelegramInlineKeyboard renders action-only DATE offer with 1 button ('✏️ فترة أخرى')",
+    );
+
+    // WhatsApp rendering
+    const waPayload = renderMetaInteractivePayload(
+      "201000000000",
+      "لا تتوفر مواعيد متاحة لهذه الخدمة خلال الفترة المحددة.",
+      emptyChoices,
+    );
+    assert(
+      waPayload.type === "interactive" &&
+        waPayload.interactive.type === "button" &&
+        waPayload.interactive.action.buttons.length === 1 &&
+        waPayload.interactive.action.buttons[0]?.reply.title === "✏️ فترة أخرى",
+      "4.7d renderMetaInteractivePayload renders action-only DATE offer as reply button with '✏️ فترة أخرى'",
+    );
+
+    // Callback resolution
+    const emptyOtherReply = interpretOfferReply(
+      offerCallbackData(emptyDateOffer, "other_date"),
+      emptyDateOffer,
+      refDate,
+    );
+    assert(
+      emptyOtherReply.kind === "date_other" &&
+        emptyOtherReply.serviceId === PLAYGROUND_IDS.SERV_DENTAL,
+      "4.7e Clicking action-only 'other_date' is interpreted as kind: 'date_other'",
+    );
+  }
+
+  // 4.8 Numeric text selection on paged date offer (relative index support)
+  const pagedOffer = buildDateOffer(
+    { businessId: PLAYGROUND_IDS.BIZ_ID, conversationId: "conv-paged-001" },
+    "date-offer-paged-001",
+    {
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      serviceName: "كشف أسنان",
+      providerId: null,
+      timePreference: "morning",
+      dates: [
+        { date: "2026-10-28", label: "الأربعاء، 28 أكتوبر" },
+        { date: "2026-10-29", label: "الخميس، 29 أكتوبر" },
+      ],
+      range: { startDate: "2026-10-24", endDate: "2026-10-30" },
+      pageOffset: 4,
+      hasMore: false,
+    },
+    refDate,
+  );
+  if (pagedOffer) {
+    // Global index 5
+    const selGlobal5 = interpretOfferReply("5", pagedOffer, refDate);
+    assert(
+      selGlobal5.kind === "date" && selGlobal5.date === "2026-10-28",
+      "4.8a Numeric text '5' selects date with global index 5 (2026-10-28)",
+    );
+    // Relative index 1 on page 2 (index 1 on page 2 maps to global index 5)
+    const selRel1 = interpretOfferReply("1", pagedOffer, refDate);
+    assert(
+      selRel1.kind === "date" && selRel1.date === "2026-10-28",
+      "4.8b Numeric text '1' on page 2 selects first item on page (2026-10-28)",
+    );
+  }
 
   console.log("");
 
@@ -1028,6 +1352,689 @@ async function runSuite() {
   assert(
     initialHarness.appointments.length === 1,
     "5.6b Replay creates ZERO duplicate appointments",
+  );
+
+  console.log("");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // AREA 6: Multi-Turn Engine Defect Regressions & Precedence Verification
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log(
+    "Area 6: Multi-Turn Engine Defect Regressions & Precedence Verification",
+  );
+
+  // 6.1 Multi-turn temporal precedence vs inherited state:
+  // Turn A: Customer selects a date / slot offer (2026-10-26)
+  let multiTurnAiResponse: any = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، موعد يوم 2026-10-26 متاح",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: "2026-10-26",
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "exact_date" as const,
+        date: "2026-10-26",
+      },
+    },
+    factUpdates: [
+      {
+        key: "service" as const,
+        operation: "set" as const,
+        value: "كشف أسنان",
+      },
+      { key: "date" as const, operation: "set" as const, value: "2026-10-26" },
+      {
+        key: "timePreference" as const,
+        operation: "set" as const,
+        value: "morning",
+      },
+    ],
+  };
+
+  const multiTurnHarness = createPlaygroundHarness({
+    channel: "TELEGRAM",
+    todayRef: "2026-10-21",
+    customAi: {
+      providerName: "PLAYGROUND_AI",
+      respond: async () => multiTurnAiResponse,
+    } as any,
+  });
+  multiTurnHarness.customer.phone = "9988773344";
+
+  // Turn A: Inbound booking request with exact date
+  const turnARes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "عايز كشف أسنان يوم 26 أكتوبر الصبح",
+      receivedAt: refDate.toISOString(),
+      externalId: "tg:bot:mt-1",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(turnARes.ok === true, "6.1a-1 Turn A processes successfully");
+  if (!turnARes.ok) throw new Error("Turn A failed");
+  const mtConvId = turnARes.conversationId;
+  const mtRowA = await multiTurnHarness.stateStore.load(
+    multiTurnHarness.business.id,
+    mtConvId,
+  );
+  const mtStateA = mtRowA?.state as ConversationState;
+  assert(
+    mtStateA.knownFacts.date === "2026-10-26" &&
+      mtStateA.offer?.kind === "SLOT",
+    "6.1a-2 Turn A establishes date 2026-10-26 and active SLOT offer",
+  );
+
+  // Turn B: Customer requests next week ("الأسبوع القادم")
+  // In previous version: resumeBookingExtraction injected 2026-10-26 from state,
+  // causing resolveServerTemporalRequest to fail with CONTRADICTION!
+  // With our fix: the new turn has a temporalRequest, so state date is NOT injected,
+  // the calendar week range supersedes the obsolete date, and slot offer is invalidated.
+  multiTurnAiResponse = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، هعرضلك المواعيد المتاحة الأسبوع القادم",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: null, // Model correctly returns date: null for a range
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "calendar_week" as const,
+        weekOffset: 1, // Sat 2026-10-24 .. Fri 2026-10-30
+      },
+    },
+    factUpdates: [
+      {
+        key: "dateRange" as const,
+        operation: "set" as const,
+        value: "2026-10-24..2026-10-30",
+      },
+    ],
+  };
+
+  const turnBRes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "لا بلاش، عايز الأسبوع الجاي أحسن",
+      receivedAt: new Date(refDate.getTime() + 1000).toISOString(),
+      externalId: "tg:bot:mt-2",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    turnBRes.ok === true,
+    "6.1b-1 Turn B (range correction after selected date/slot) processes successfully",
+  );
+
+  const mtRowB = await multiTurnHarness.stateStore.load(
+    multiTurnHarness.business.id,
+    mtConvId,
+  );
+  const mtStateB = mtRowB?.state as ConversationState;
+  assert(
+    mtStateB.knownFacts.dateRange?.startDate === "2026-10-24" &&
+      mtStateB.knownFacts.date === undefined,
+    "6.1b-2 Turn B supersedes obsolete inherited date and saves new dateRange",
+  );
+  assert(
+    mtStateB.offer?.kind === "DATE",
+    "6.1b-3 Turn B invalidates obsolete SLOT offer and presents fresh DATE offer",
+  );
+  const lastOutboundB =
+    multiTurnHarness.deliveredOutbound[
+      multiTurnHarness.deliveredOutbound.length - 1
+    ];
+  assert(
+    lastOutboundB !== undefined &&
+      !lastOutboundB.body.includes("حدث تعارض في تحديد التاريخ"),
+    "6.1b-4 Turn B was NOT rejected as false CONTRADICTION",
+  );
+
+  // Turn C: Customer supplies an exact date ("يوم الأربعاء 28 أكتوبر")
+  multiTurnAiResponse = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، هعرضلك مواعيد يوم الأربعاء 28 أكتوبر",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: "2026-10-28",
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "exact_date" as const,
+        date: "2026-10-28",
+      },
+    },
+    factUpdates: [
+      { key: "date" as const, operation: "set" as const, value: "2026-10-28" },
+    ],
+  };
+
+  const turnCRes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "عايز يوم الأربعاء 28 أكتوبر",
+      receivedAt: new Date(refDate.getTime() + 2000).toISOString(),
+      externalId: "tg:bot:mt-3",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    turnCRes.ok === true,
+    "6.1c-1 Turn C (exact date after range) processes successfully",
+  );
+  const mtRowC = await multiTurnHarness.stateStore.load(
+    multiTurnHarness.business.id,
+    mtConvId,
+  );
+  const mtStateC = mtRowC?.state as ConversationState;
+  assert(
+    mtStateC.knownFacts.date === "2026-10-28" &&
+      mtStateC.knownFacts.dateRange === undefined,
+    "6.1c-2 Turn C exact date clears obsolete dateRange and sets date 2026-10-28",
+  );
+  assert(
+    mtStateC.offer?.kind === "SLOT" &&
+      (mtStateC.offer as SlotOffer).date === "2026-10-28",
+    "6.1c-3 Turn C presents SLOT offer for chosen date 2026-10-28",
+  );
+
+  // Turn D: Customer replaces date with another range ("الأسبوع اللي بعده")
+  multiTurnAiResponse = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، هعرضلك المواعيد لأسبوع بعد القادم",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: null,
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "calendar_week" as const,
+        weekOffset: 2, // Sat 2026-10-31 .. Fri 2026-11-06
+      },
+    },
+    factUpdates: [
+      {
+        key: "dateRange" as const,
+        operation: "set" as const,
+        value: "2026-10-31..2026-11-06",
+      },
+    ],
+  };
+
+  const turnDRes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "خليني الأسبوع اللي بعده أحسن",
+      receivedAt: new Date(refDate.getTime() + 3000).toISOString(),
+      externalId: "tg:bot:mt-4",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    turnDRes.ok === true,
+    "6.1d-1 Turn D (replace range with another) processes successfully",
+  );
+  const mtRowD = await multiTurnHarness.stateStore.load(
+    multiTurnHarness.business.id,
+    mtConvId,
+  );
+  const mtStateD = mtRowD?.state as ConversationState;
+  assert(
+    mtStateD.knownFacts.dateRange?.startDate === "2026-10-31" &&
+      mtStateD.knownFacts.date === undefined,
+    "6.1d-2 Turn D updates dateRange to weekOffset 2 (2026-10-31..2026-11-06)",
+  );
+
+  // Turn E: Omitted temporal fields preserve context
+  // Customer chooses provider without mentioning date or range
+  multiTurnAiResponse = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، مع دكتور أحمد",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: null,
+      timePreference: "morning" as const,
+      provider: "أحمد",
+      temporalRequest: null,
+    },
+    factUpdates: [
+      { key: "provider" as const, operation: "set" as const, value: "أحمد" },
+    ],
+  };
+
+  const turnERes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "مع دكتور أحمد لو سمحت",
+      receivedAt: new Date(refDate.getTime() + 4000).toISOString(),
+      externalId: "tg:bot:mt-5",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    turnERes.ok === true,
+    "6.1e-1 Turn E (omitted temporal fields) processes successfully",
+  );
+  const mtRowE = await multiTurnHarness.stateStore.load(
+    multiTurnHarness.business.id,
+    mtConvId,
+  );
+  const mtStateE = mtRowE?.state as ConversationState;
+  assert(
+    mtStateE.knownFacts.provider === "أحمد" &&
+      mtStateE.knownFacts.service === "كشف أسنان" &&
+      mtStateE.knownFacts.timePreference === "morning" &&
+      mtStateE.knownFacts.dateRange?.startDate === "2026-10-31",
+    "6.1e-2 Turn E strictly preserves dateRange, service, and timePreference when temporal fields are omitted",
+  );
+
+  // Turn F: Same-turn conflicting exact date and range asks for clarification
+  multiTurnAiResponse = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "برجاء توضيح التاريخ",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: "2026-10-25", // Outside the next week (2026-10-31..2026-11-06)
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "calendar_week" as const,
+        weekOffset: 2, // 2026-10-31..2026-11-06
+      },
+    },
+    factUpdates: [],
+  };
+
+  const turnFRes = await receiveInboundMessage(
+    multiTurnHarness.deps,
+    {
+      from: "9988773344",
+      to: "6000000000",
+      text: "عايز يوم 25 بس في الأسبوع اللي بعده",
+      receivedAt: new Date(refDate.getTime() + 5000).toISOString(),
+      externalId: "tg:bot:mt-6",
+    },
+    {
+      businessId: multiTurnHarness.business.id,
+      branchId: multiTurnHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    turnFRes.ok === true,
+    "6.1f-1 Turn F conflicting turn processes safely",
+  );
+  const lastOutboundF =
+    multiTurnHarness.deliveredOutbound[
+      multiTurnHarness.deliveredOutbound.length - 1
+    ];
+  assert(
+    lastOutboundF !== undefined &&
+      lastOutboundF.body.includes("حدث تعارض في تحديد التاريخ"),
+    "6.1f-2 Same-turn conflicting date and range asks for clarification",
+  );
+
+  // Verify zero appointments were created by temporal corrections
+  assert(
+    multiTurnHarness.appointments.length === 0,
+    "6.1g No appointments created during temporal corrections",
+  );
+
+  // 6.2 Counterexample test: Changing customer wording while keeping identical validated semantic output
+  // does not change the structured booking decision
+  const wordingA = "ممكن الأسبوع الجاي لو سمحت";
+  const wordingB = "محتاج مواعيد الأسبوع القادم إن أمكن";
+  const semanticOutput = {
+    intent: "BOOKING" as const,
+    action: "reply" as const,
+    content: "تمام، هعرضلك المواعيد",
+    handoffReason: null,
+    summary: null,
+    safetyAssessment: "safe" as const,
+    extraction: {
+      service: "كشف أسنان",
+      date: null,
+      timePreference: "morning" as const,
+      provider: null,
+      temporalRequest: {
+        type: "calendar_week" as const,
+        weekOffset: 1,
+      },
+    },
+    factUpdates: [
+      {
+        key: "service" as const,
+        operation: "set" as const,
+        value: "كشف أسنان",
+      },
+      {
+        key: "dateRange" as const,
+        operation: "set" as const,
+        value: "2026-10-24..2026-10-30",
+      },
+    ],
+  };
+
+  const harnessA = createPlaygroundHarness({
+    channel: "TELEGRAM",
+    todayRef: "2026-10-21",
+    customAi: {
+      providerName: "AI",
+      respond: async () => semanticOutput,
+    } as any,
+  });
+  harnessA.customer.phone = "9988770001";
+
+  const harnessB = createPlaygroundHarness({
+    channel: "TELEGRAM",
+    todayRef: "2026-10-21",
+    customAi: {
+      providerName: "AI",
+      respond: async () => semanticOutput,
+    } as any,
+  });
+  harnessB.customer.phone = "9988770002";
+
+  const resA = await receiveInboundMessage(
+    harnessA.deps,
+    {
+      from: "9988770001",
+      to: "6000000000",
+      text: wordingA,
+      receivedAt: refDate.toISOString(),
+      externalId: "tg:bot:ce-a",
+    },
+    {
+      businessId: harnessA.business.id,
+      branchId: harnessA.business.defaultBranchId,
+    },
+  );
+  const resB = await receiveInboundMessage(
+    harnessB.deps,
+    {
+      from: "9988770002",
+      to: "6000000000",
+      text: wordingB,
+      receivedAt: refDate.toISOString(),
+      externalId: "tg:bot:ce-b",
+    },
+    {
+      businessId: harnessB.business.id,
+      branchId: harnessB.business.defaultBranchId,
+    },
+  );
+
+  if (!resA.ok || !resB.ok) throw new Error("Turn CE failed");
+  const stateA = (
+    await harnessA.stateStore.load(harnessA.business.id, resA.conversationId)
+  )?.state as ConversationState;
+  const stateB = (
+    await harnessB.stateStore.load(harnessB.business.id, resB.conversationId)
+  )?.state as ConversationState;
+
+  assert(
+    stateA.knownFacts.dateRange?.startDate ===
+      stateB.knownFacts.dateRange?.startDate &&
+      stateA.knownFacts.dateRange?.endDate ===
+        stateB.knownFacts.dateRange?.endDate &&
+      stateA.offer?.kind === stateB.offer?.kind &&
+      (stateA.offer as DateOffer).options.length ===
+        (stateB.offer as DateOffer).options.length,
+    "6.2a Counterexample test: Different customer wording with identical semantic output yields identical structured booking decision",
+  );
+
+  // 6.3 Empty range action-only verification in actual engine turn
+  // A service with no availability in requested range produces persisted action-only DATE offer with 'فترة أخرى'
+  const closedHarness = createPlaygroundHarness({
+    channel: "TELEGRAM",
+    todayRef: "2026-10-21",
+    customAi: {
+      providerName: "AI",
+      respond: async () => ({
+        intent: "BOOKING" as const,
+        action: "reply" as const,
+        content: "تمام",
+        handoffReason: null,
+        summary: null,
+        safetyAssessment: "safe" as const,
+        extraction: {
+          service: "كشف أسنان",
+          date: null,
+          timePreference: null,
+          provider: null,
+          temporalRequest: {
+            type: "calendar_week" as const,
+            weekOffset: 1,
+          },
+        },
+        factUpdates: [
+          {
+            key: "service" as const,
+            operation: "set" as const,
+            value: "كشف أسنان",
+          },
+          {
+            key: "dateRange" as const,
+            operation: "set" as const,
+            value: "2026-10-24..2026-10-30",
+          },
+        ],
+      }),
+    } as any,
+  });
+  closedHarness.customer.phone = "9988770003";
+  // Close all days in that week
+  closedHarness.business.workingHours = {
+    sat: { open: "00:00", close: "00:00", closed: true },
+    sun: { open: "00:00", close: "00:00", closed: true },
+    mon: { open: "00:00", close: "00:00", closed: true },
+    tue: { open: "00:00", close: "00:00", closed: true },
+    wed: { open: "00:00", close: "00:00", closed: true },
+    thu: { open: "00:00", close: "00:00", closed: true },
+    fri: { open: "00:00", close: "00:00", closed: true },
+  };
+
+  const closedRes = await receiveInboundMessage(
+    closedHarness.deps,
+    {
+      from: "9988770003",
+      to: "6000000000",
+      text: "عايز كشف أسنان الأسبوع الجاي",
+      receivedAt: refDate.toISOString(),
+      externalId: "tg:bot:closed-1",
+    },
+    {
+      businessId: closedHarness.business.id,
+      branchId: closedHarness.business.defaultBranchId,
+    },
+  );
+  assert(closedRes.ok === true, "6.3a Empty range turn processes successfully");
+  if (!closedRes.ok) throw new Error("Closed turn failed");
+  const closedState = (
+    await closedHarness.stateStore.load(
+      closedHarness.business.id,
+      closedRes.conversationId,
+    )
+  )?.state as ConversationState;
+  assert(
+    closedState.offer?.kind === "DATE" &&
+      (closedState.offer as DateOffer).options.length === 0,
+    "6.3b Engine persists action-only DATE offer when checked range has no availability",
+  );
+  const closedOutbound =
+    closedHarness.deliveredOutbound[closedHarness.deliveredOutbound.length - 1];
+  assert(
+    closedOutbound !== undefined &&
+      closedOutbound.choices !== undefined &&
+      closedOutbound.choices.groups
+        .flat()
+        .some(
+          (it: any) =>
+            it.id.includes("other_date") && it.label === "✏️ فترة أخرى",
+        ),
+    "6.3c Outbound message contains persisted '✏️ فترة أخرى' action button",
+  );
+
+  // 6.4 Provider restriction preservation during date browsing (date_more)
+  const provHarness = createPlaygroundHarness({
+    channel: "TELEGRAM",
+    todayRef: "2026-10-21",
+    customAi: {
+      providerName: "AI",
+      respond: async () => ({
+        intent: "BOOKING" as const,
+        action: "reply" as const,
+        content: "تمام، مع د. أحمد سامي الأسبوع القادم",
+        handoffReason: null,
+        summary: null,
+        safetyAssessment: "safe" as const,
+        extraction: {
+          service: "كشف أسنان",
+          date: null,
+          timePreference: null,
+          provider: "د. أحمد سامي",
+          temporalRequest: {
+            type: "calendar_week" as const,
+            weekOffset: 1,
+          },
+        },
+        factUpdates: [
+          {
+            key: "service" as const,
+            operation: "set" as const,
+            value: "كشف أسنان",
+          },
+          {
+            key: "provider" as const,
+            operation: "set" as const,
+            value: PLAYGROUND_IDS.PROV_1,
+          },
+          {
+            key: "dateRange" as const,
+            operation: "set" as const,
+            value: "2026-10-24..2026-10-30",
+          },
+        ],
+      }),
+    } as any,
+  });
+  provHarness.customer.phone = "9988770004";
+
+  const provRes1 = await receiveInboundMessage(
+    provHarness.deps,
+    {
+      from: "9988770004",
+      to: "6000000000",
+      text: "عايز كشف مع د. أحمد سامي الأسبوع القادم",
+      receivedAt: refDate.toISOString(),
+      externalId: "tg:bot:p-1",
+    },
+    {
+      businessId: provHarness.business.id,
+      branchId: provHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    provRes1.ok === true,
+    "6.4a Provider-bound turn 1 processes successfully",
+  );
+  if (!provRes1.ok) throw new Error("Prov 1 failed");
+  const provState1 = (
+    await provHarness.stateStore.load(
+      provHarness.business.id,
+      provRes1.conversationId,
+    )
+  )?.state as ConversationState;
+  assert(
+    provState1.knownFacts.provider === PLAYGROUND_IDS.PROV_1 &&
+      (provState1.offer as DateOffer)?.providerId === PLAYGROUND_IDS.PROV_1,
+    "6.4b Provider fact and DateOffer retain explicit providerId PLAYGROUND_IDS.PROV_1",
+  );
+
+  // Turn 2: date_more via callback
+  const moreTokenProv = offerCallbackData(
+    provState1.offer as DateOffer,
+    "more_dates",
+  );
+  const provRes2 = await receiveInboundMessage(
+    provHarness.deps,
+    {
+      from: "9988770004",
+      to: "6000000000",
+      text: moreTokenProv,
+      receivedAt: new Date(refDate.getTime() + 1000).toISOString(),
+      externalId: "tg:bot:p-2",
+      channelData: { callbackQueryId: "cb-p-2" },
+    },
+    {
+      businessId: provHarness.business.id,
+      branchId: provHarness.business.defaultBranchId,
+    },
+  );
+  assert(
+    provRes2.ok === true,
+    "6.4c Provider-bound date_more turn processes successfully",
+  );
+  if (!provRes2.ok) throw new Error("Prov 2 failed");
+  const provState2 = (
+    await provHarness.stateStore.load(
+      provHarness.business.id,
+      provRes2.conversationId,
+    )
+  )?.state as ConversationState;
+  assert(
+    (provState2.offer as DateOffer)?.providerId === PLAYGROUND_IDS.PROV_1,
+    "6.4d Page 2 DateOffer preserves explicit provider restriction (not silently changed to null/any)",
   );
 
   console.log("");

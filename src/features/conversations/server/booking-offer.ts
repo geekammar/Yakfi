@@ -124,7 +124,7 @@ export const dateOfferSchema = z.object({
   serviceName: shortText,
   providerId: shortText.nullable(),
   timePreference: canonicalTimePreferenceSchema.nullable().optional(),
-  options: z.array(dateOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+  options: z.array(dateOfferOptionSchema).min(0).max(MAX_OFFER_OPTIONS),
   range: z
     .object({
       startDate: isoDate,
@@ -133,6 +133,8 @@ export const dateOfferSchema = z.object({
     .nullable()
     .optional(),
   pageOffset: z.number().int().min(0).optional(),
+  cursorDate: isoDate.nullable().optional(),
+  shownDates: z.array(isoDate).max(30).optional(),
   hasMore: z.boolean().optional(),
   totalEligibleCount: z.number().int().min(0).optional(),
 });
@@ -292,6 +294,8 @@ export function buildDateOffer(
     dates: ReadonlyArray<{ date: string; label: string }>;
     range?: { startDate: string; endDate: string } | null;
     pageOffset?: number;
+    cursorDate?: string | null;
+    shownDates?: string[];
     hasMore?: boolean;
     totalEligibleCount?: number;
   },
@@ -306,6 +310,16 @@ export function buildDateOffer(
     timePreference: input.timePreference ?? null,
     range: input.range ?? null,
     pageOffset: input.pageOffset ?? 0,
+    cursorDate:
+      input.cursorDate !== undefined
+        ? input.cursorDate
+        : input.dates.length > 0
+          ? input.dates[input.dates.length - 1]!.date
+          : null,
+    shownDates:
+      input.shownDates !== undefined
+        ? input.shownDates
+        : input.dates.map((d) => d.date),
     hasMore: input.hasMore ?? false,
     totalEligibleCount: input.totalEligibleCount,
     options: input.dates.slice(0, MAX_OFFER_OPTIONS).map((d, i) => ({

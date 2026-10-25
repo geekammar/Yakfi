@@ -1188,7 +1188,21 @@ function resumeBookingExtraction(
   const timePreference: CanonicalTimePreference | null =
     isCanonicalTimePreference(rawTimePreference) ? rawTimePreference : null;
 
-  const stateDate = serviceChanged ? null : (state.knownFacts.date ?? null);
+  // Distinguish temporal proposals made in THIS turn from facts inherited from previous turns.
+  // When the current turn explicitly proposes or modifies temporal context (a new temporalRequest,
+  // date in extraction/setFacts, or an explicit date/dateRange remove), inherited date must not
+  // be injected to falsely contradict the current proposal.
+  const hasTurnTemporalProposal =
+    rec.isTouched("date") ||
+    rec.isTouched("dateRange") ||
+    Boolean(e.date) ||
+    Boolean(e.temporalRequest) ||
+    Boolean(response.extraction.temporalRequest);
+
+  const stateDate =
+    serviceChanged || hasTurnTemporalProposal
+      ? null
+      : (state.knownFacts.date ?? null);
   const date = rec.isRemoved("date")
     ? null
     : (rec.setFacts.get("date")?.value ??
@@ -1544,6 +1558,8 @@ export type UpcomingBookingDatesResult =
       readonly pageOffset: number;
       readonly totalEligibleCount: number;
       readonly range?: { startDate: string; endDate: string } | null;
+      readonly cursorDate?: string | null;
+      readonly shownDates?: string[];
     }
   | {
       readonly status: "too_broad";
@@ -1562,6 +1578,8 @@ export type UpcomingBookingDatesResult =
       readonly pageOffset?: number;
       readonly totalEligibleCount?: number;
       readonly range?: { startDate: string; endDate: string } | null;
+      readonly cursorDate?: string | null;
+      readonly shownDates?: string[];
     };
 
 export async function resolveUpcomingBookingDates(
@@ -1582,6 +1600,8 @@ export async function resolveUpcomingBookingDates(
     timePreference?: CanonicalTimePreference | null;
     range?: { startDate: string; endDate: string } | null;
     offsetIndex?: number;
+    cursorDate?: string | null;
+    shownDates?: string[];
   },
   now: Date,
   count = 4,
@@ -1610,6 +1630,8 @@ export async function resolveUpcomingBookingDates(
         pageOffset: 0,
         totalEligibleCount: 0,
         range: input.range,
+        cursorDate: null,
+        shownDates: [],
       };
     }
   }
@@ -1695,8 +1717,28 @@ export async function resolveUpcomingBookingDates(
 
   const pageOffset = input.offsetIndex ?? 0;
   const totalEligibleCount = allEligibleDates.length;
-  const pagedDates = allEligibleDates.slice(pageOffset, pageOffset + count);
-  const hasMore = pageOffset + count < totalEligibleCount;
+
+  let pagedDates: Array<{ date: string; label: string }>;
+  let hasMore: boolean;
+
+  if (input.cursorDate) {
+    const datesAfterCursor = allEligibleDates.filter(
+      (d) => d.date > input.cursorDate!,
+    );
+    pagedDates = datesAfterCursor.slice(0, count);
+    hasMore = datesAfterCursor.length > count;
+  } else {
+    pagedDates = allEligibleDates.slice(pageOffset, pageOffset + count);
+    hasMore = pageOffset + count < totalEligibleCount;
+  }
+
+  const cursorDate =
+    pagedDates.length > 0
+      ? pagedDates[pagedDates.length - 1]!.date
+      : (input.cursorDate ?? null);
+  const shownDates = Array.from(
+    new Set([...(input.shownDates ?? []), ...pagedDates.map((d) => d.date)]),
+  );
 
   if (exceptionsCount === 0 && domainErrors.length === 0) {
     return {
@@ -1706,6 +1748,8 @@ export async function resolveUpcomingBookingDates(
       pageOffset,
       totalEligibleCount,
       range: input.range ?? null,
+      cursorDate,
+      shownDates,
     };
   }
 
@@ -1718,6 +1762,8 @@ export async function resolveUpcomingBookingDates(
       pageOffset,
       totalEligibleCount,
       range: input.range ?? null,
+      cursorDate,
+      shownDates,
       error: domainErrors[0] ?? {
         code: "PARTIAL_FAILURE",
         message: "حدث تعذر جزئي أثناء التحقق من المواعيد",
@@ -1953,6 +1999,8 @@ async function presentDateChoices(
     observability?: InboundSuccess["observability"];
     range?: { startDate: string; endDate: string } | null;
     pageOffset?: number;
+    cursorDate?: string | null;
+    shownDates?: string[];
   },
   turnSession: TurnStateSession,
   now: Date,
@@ -1973,6 +2021,8 @@ async function presentDateChoices(
       timePreference: input.timePreference,
       range,
       offsetIndex: pageOffset,
+      cursorDate: input.cursorDate,
+      shownDates: input.shownDates,
     },
     now,
   );
@@ -2006,7 +2056,7 @@ async function presentDateChoices(
 
   const upcomingDates = datesResult.dates ?? [];
   let dateOffer: DateOffer | null = null;
-  if (upcomingDates.length > 0) {
+  if (datesResult.status === "success") {
     dateOffer = buildDateOffer(
       { businessId: scope.business.id, conversationId: scope.conversation.id },
       crypto.randomUUID(),
@@ -2021,6 +2071,8 @@ async function presentDateChoices(
           datesResult.status === "success"
             ? datesResult.pageOffset
             : pageOffset,
+        cursorDate: datesResult.cursorDate,
+        shownDates: datesResult.shownDates,
         hasMore: datesResult.status === "success" ? datesResult.hasMore : false,
         totalEligibleCount:
           datesResult.status === "success"
@@ -3568,6 +3620,7 @@ async function runInboundTurn(
           offerReply.context,
           offerReply.selection,
           turnSession,
+          now,
         );
         if (selectionResult) return selectionResult;
       } catch (err) {
@@ -4343,11 +4396,38 @@ async function runInboundTurn(
         offerReply.serviceId,
         candidateProvider,
       );
-      const nextOffset = (offerReply.offer.pageOffset ?? 0) + 4;
+      if (provRes.kind === "clarification") {
+        return promptProviderClarificationReply(
+          deps,
+          selectionScope,
+          {
+            serviceId: offerReply.serviceId,
+            serviceName: offerReply.serviceName,
+            date: null,
+            eligibleProviders: provRes.eligibleProviders,
+            reason: provRes.reason,
+          },
+          turnSession,
+          now,
+        );
+      }
+      const nextOffset =
+        (offerReply.offer.pageOffset ?? 0) +
+        (offerReply.offer.options.length || 4);
       const targetRange =
         offerReply.offer.range ??
         turnSession.state?.knownFacts.dateRange ??
         null;
+      const lastOptionDate =
+        offerReply.offer.options.length > 0
+          ? offerReply.offer.options[offerReply.offer.options.length - 1]!.date
+          : null;
+      const cursorDate = offerReply.offer.cursorDate ?? lastOptionDate;
+      const shownDates = [
+        ...(offerReply.offer.shownDates ??
+          offerReply.offer.options.map((o) => o.date)),
+      ];
+
       return presentDateChoices(
         deps,
         selectionScope,
@@ -4355,10 +4435,12 @@ async function runInboundTurn(
           serviceId: offerReply.serviceId,
           serviceName: offerReply.serviceName,
           serviceSource,
-          providerId: provRes.kind === "resolved" ? provRes.providerId : null,
+          providerId: provRes.providerId,
           timePreference: offerReply.timePreference,
           range: targetRange,
           pageOffset: nextOffset,
+          cursorDate,
+          shownDates,
         },
         turnSession,
         now,
@@ -4779,6 +4861,7 @@ async function runInboundTurn(
           selectionAttempt.context,
           selectionAttempt.selection,
           turnSession,
+          now,
         );
         if (selectionResult) return selectionResult;
       }
@@ -5718,11 +5801,15 @@ async function runInboundTurn(
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
               nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state?.offer?.kind === "SLOT" ||
+                resolvedState.offer?.kind === "SLOT";
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: null,
                 dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -6045,11 +6132,15 @@ async function runInboundTurn(
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
               nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state?.offer?.kind === "SLOT" ||
+                resolvedState.offer?.kind === "SLOT";
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: null,
                 dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -6700,7 +6791,7 @@ async function runInboundTurn(
           }
 
           const upcomingDates = upcomingDatesResult.dates ?? [];
-          if (upcomingDates.length > 0) {
+          if (upcomingDatesResult.status === "success") {
             dateOffer = buildDateOffer(
               { businessId: business.id, conversationId: conversation.id },
               crypto.randomUUID(),
@@ -6714,18 +6805,11 @@ async function runInboundTurn(
                 timePreference: timePref,
                 dates: upcomingDates,
                 range: turnSession.state?.knownFacts.dateRange ?? null,
-                pageOffset:
-                  upcomingDatesResult.status === "success"
-                    ? upcomingDatesResult.pageOffset
-                    : 0,
-                hasMore:
-                  upcomingDatesResult.status === "success"
-                    ? upcomingDatesResult.hasMore
-                    : false,
-                totalEligibleCount:
-                  upcomingDatesResult.status === "success"
-                    ? upcomingDatesResult.totalEligibleCount
-                    : upcomingDates.length,
+                pageOffset: upcomingDatesResult.pageOffset,
+                cursorDate: upcomingDatesResult.cursorDate,
+                shownDates: upcomingDatesResult.shownDates,
+                hasMore: upcomingDatesResult.hasMore,
+                totalEligibleCount: upcomingDatesResult.totalEligibleCount,
               },
               now,
             );
@@ -6771,31 +6855,47 @@ async function runInboundTurn(
             "المطلوبة";
           const currentRange = turnSession.state?.knownFacts.dateRange;
           const lines = [];
-          if (currentRange) {
-            const rangeStr = formatArabicDateRange(
-              currentRange.startDate,
-              currentRange.endDate,
-            );
-            lines.push(
-              `تم تحديد الفترة (${rangeStr}) لحجز خدمة "${serviceName}". يرجى اختيار اليوم المناسب:`,
-            );
+          if (dateOffer.options.length > 0) {
+            if (currentRange) {
+              const rangeStr = formatArabicDateRange(
+                currentRange.startDate,
+                currentRange.endDate,
+              );
+              lines.push(
+                `تم تحديد الفترة (${rangeStr}) لحجز خدمة "${serviceName}". يرجى اختيار اليوم المناسب:`,
+              );
+            } else {
+              lines.push(
+                `يرجى تحديد اليوم أو التاريخ المناسب لك لحجز خدمة "${serviceName}":`,
+              );
+            }
+            for (const opt of dateOffer.options) {
+              lines.push(`${opt.index}️⃣ ${opt.label}`);
+            }
+            if (dateOffer.hasMore) {
+              lines.push("(اضغط على «مواعيد أخرى» لعرض المزيد من الأيام)");
+            }
+            if (currentRange) {
+              lines.push(
+                "(أو يمكنك اختيار «فترة أخرى» لتغيير نطاق البحث أو كتابة تاريخ مباشرة)",
+              );
+            } else {
+              lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+            }
           } else {
-            lines.push(
-              `يرجى تحديد اليوم أو التاريخ المناسب لك لحجز خدمة "${serviceName}":`,
-            );
-          }
-          for (const opt of dateOffer.options) {
-            lines.push(`${opt.index}️⃣ ${opt.label}`);
-          }
-          if (dateOffer.hasMore) {
-            lines.push("(اضغط على «مواعيد أخرى» لعرض المزيد من الأيام)");
-          }
-          if (currentRange) {
-            lines.push(
-              "(أو يمكنك اختيار «فترة أخرى» لتغيير نطاق البحث أو كتابة تاريخ مباشرة)",
-            );
-          } else {
-            lines.push("(أو يمكنك كتابة أي تاريخ آخر مباشرة في أي وقت)");
+            if (currentRange) {
+              const rangeStr = formatArabicDateRange(
+                currentRange.startDate,
+                currentRange.endDate,
+              );
+              lines.push(
+                `لا تتوفر مواعيد متاحة لخدمة "${serviceName}" خلال الفترة (${rangeStr}). يمكنك اختيار فترة أخرى أو كتابة تاريخ محدد:`,
+              );
+            } else {
+              lines.push(
+                `لا تتوفر مواعيد متاحة لخدمة "${serviceName}" خلال الفترة المحددة. يمكنك اختيار تاريخ آخر:`,
+              );
+            }
           }
           clarifyMsgToSend = lines.join("\n");
         } else if (

@@ -9,17 +9,43 @@
 import { z } from "zod";
 
 /**
- * Validates a "YYYY-MM-DD" calendar date.
+ * Validates whether an unknown value is a real calendar ISO date ("YYYY-MM-DD").
+ * Rejects non-strings, incorrect formats, impossible dates (e.g. 2026-11-31, 2026-02-30),
+ * and non-leap day dates (e.g. 2025-02-29).
  */
-const isoDateSchema = z
+export function isValidIsoCalendarDate(val: unknown): val is string {
+  if (typeof val !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+    return false;
+  }
+  const d = new Date(`${val}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === val;
+}
+
+/**
+ * Validates a "YYYY-MM-DD" real calendar date.
+ */
+export const isoDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "التاريخ غير صالح")
-  .refine(
-    (value) =>
-      !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime()) &&
-      new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value,
-    { error: "التاريخ غير صالح" },
-  );
+  .refine(isValidIsoCalendarDate, { error: "التاريخ غير صالح" });
+
+/**
+ * Validates a real calendar date range with start <= end.
+ */
+export const dateRangeSchema = z
+  .object({
+    startDate: z.string().refine(isValidIsoCalendarDate, {
+      message: "تاريخ بداية الفترة غير صالح",
+    }),
+    endDate: z.string().refine(isValidIsoCalendarDate, {
+      message: "تاريخ نهاية الفترة غير صالح",
+    }),
+  })
+  .refine((r) => r.startDate <= r.endDate, {
+    message: "تاريخ بداية الفترة يجب أن يكون قبل أو يطابق تاريخ النهاية",
+  });
+
+export type DateRange = z.infer<typeof dateRangeSchema>;
 
 /**
  * Checks whether an IANA timezone string is recognized by the runtime Intl engine.
@@ -240,7 +266,7 @@ export function resolveServerTemporalRequest(
   if (temporalRequest) {
     if (temporalRequest.type === "exact_date") {
       const date = temporalRequest.date.trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      if (!isValidIsoCalendarDate(date)) {
         return {
           kind: "invalid",
           reason: "INVALID_FORMAT",
@@ -281,6 +307,13 @@ export function resolveServerTemporalRequest(
         };
       }
       const targetDate = addDaysToIso(todayIso, offset);
+      if (!isValidIsoCalendarDate(targetDate)) {
+        return {
+          kind: "invalid",
+          reason: "INVALID_FORMAT",
+          error: "التاريخ المحسوب غير صالح",
+        };
+      }
       if (daysBetweenIso(todayIso, targetDate) > maxBookingHorizonDays) {
         return {
           kind: "invalid",
@@ -313,6 +346,16 @@ export function resolveServerTemporalRequest(
       );
       const weekEndFri = addDaysToIso(weekStartSat, 6);
 
+      if (
+        !isValidIsoCalendarDate(weekStartSat) ||
+        !isValidIsoCalendarDate(weekEndFri)
+      ) {
+        return {
+          kind: "invalid",
+          reason: "INVALID_FORMAT",
+          error: "تواريخ الأسبوع المحسوب غير صالحة",
+        };
+      }
       if (weekEndFri < todayIso) {
         return {
           kind: "invalid",
@@ -320,7 +363,7 @@ export function resolveServerTemporalRequest(
           error: "الأسبوع المطلوب قد انتهى بالكامل",
         };
       }
-      if (daysBetweenIso(todayIso, weekStartSat) > maxBookingHorizonDays) {
+      if (daysBetweenIso(todayIso, weekEndFri) > maxBookingHorizonDays) {
         return {
           kind: "invalid",
           reason: "OUT_OF_BOUNDS",
@@ -349,8 +392,8 @@ export function resolveServerTemporalRequest(
     if (temporalRequest.type === "date_range") {
       const { startDate, endDate } = temporalRequest;
       if (
-        !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(endDate)
+        !isValidIsoCalendarDate(startDate) ||
+        !isValidIsoCalendarDate(endDate)
       ) {
         return {
           kind: "invalid",
@@ -382,7 +425,7 @@ export function resolveServerTemporalRequest(
           endDate,
         };
       }
-      if (daysBetweenIso(todayIso, startDate) > maxBookingHorizonDays) {
+      if (daysBetweenIso(todayIso, endDate) > maxBookingHorizonDays) {
         return {
           kind: "invalid",
           reason: "OUT_OF_BOUNDS",
@@ -410,7 +453,7 @@ export function resolveServerTemporalRequest(
 
   // Fallback to legacy date when temporalRequest is absent
   if (cleanLegacyDate !== null) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanLegacyDate)) {
+    if (!isValidIsoCalendarDate(cleanLegacyDate)) {
       return {
         kind: "invalid",
         reason: "INVALID_FORMAT",

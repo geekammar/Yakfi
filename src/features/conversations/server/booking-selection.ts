@@ -590,7 +590,11 @@ export function interpretOfferReply(
     }
     const sel = parseBookingSelection(trimmedText);
     if (sel?.kind === "index") {
-      const option = offer.options.find((o) => o.index === sel.index);
+      let option = offer.options.find((o) => o.index === sel.index);
+      if (!option && offer.pageOffset && offer.pageOffset > 0) {
+        const relativeIndex = (offer.pageOffset ?? 0) + sel.index;
+        option = offer.options.find((o) => o.index === relativeIndex);
+      }
       if (!option) {
         return { kind: "date_invalid_index", max: offer.options.length };
       }

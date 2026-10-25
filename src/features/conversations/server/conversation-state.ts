@@ -54,6 +54,10 @@ import {
   type ConversationFactKey,
   type RemovableFactKey,
 } from "@/features/conversations/server/conversation-facts";
+import {
+  dateRangeSchema,
+  isValidIsoCalendarDate,
+} from "@/features/conversations/server/temporal-context";
 
 import { z } from "zod";
 
@@ -466,39 +470,67 @@ export function mergeConversationState(
 
     if (prevStr === nextValue) continue; // unchanged → no-op
 
-    if (rawPrev !== null) {
-      // Corrected or conflicting: the latest value wins, but we log WHY.
-      revisions.push({
-        key,
-        from: prevStr,
-        to: nextValue,
-        isRevision: update.isRevision === true,
-        ...(input.turnId ? { turnId: input.turnId } : {}),
-      });
-    }
     if (key === "date") {
+      if (!isValidIsoCalendarDate(nextValue)) {
+        // Reject malformed date factUpdates without corrupting state or clearing a valid prior selection
+        continue;
+      }
+      if (rawPrev !== null) {
+        revisions.push({
+          key,
+          from: prevStr,
+          to: nextValue,
+          isRevision: update.isRevision === true,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+        });
+      }
       const { dateRange: _droppedRange, ...rest } = knownFacts;
       void _droppedRange;
       knownFacts = { ...rest, [key]: nextValue };
     } else if (key === "dateRange") {
-      const { date: _droppedDate, ...rest } = knownFacts;
-      void _droppedDate;
-      let parsedRange: { startDate: string; endDate: string } | null = null;
+      let candidate: unknown = null;
       if (typeof nextValue === "string" && nextValue.includes("..")) {
         const [s, e] = nextValue.split("..");
-        if (s && e) parsedRange = { startDate: s, endDate: e };
-      } else {
+        if (s && e) candidate = { startDate: s.trim(), endDate: e.trim() };
+      } else if (typeof nextValue === "string") {
         try {
-          parsedRange = JSON.parse(nextValue);
+          candidate = JSON.parse(nextValue);
         } catch {
-          parsedRange = null;
+          candidate = null;
         }
+      } else if (typeof nextValue === "object" && nextValue !== null) {
+        candidate = nextValue;
       }
+      const parsedRange = dateRangeSchema.safeParse(candidate);
+      if (!parsedRange.success) {
+        // Reject malformed dateRange factUpdates without corrupting state or clearing a valid prior selection
+        continue;
+      }
+      if (rawPrev !== null) {
+        revisions.push({
+          key,
+          from: prevStr,
+          to: `${parsedRange.data.startDate}..${parsedRange.data.endDate}`,
+          isRevision: update.isRevision === true,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+        });
+      }
+      const { date: _droppedDate, ...rest } = knownFacts;
+      void _droppedDate;
       knownFacts = {
         ...rest,
-        ...(parsedRange ? { dateRange: parsedRange } : {}),
+        dateRange: parsedRange.data,
       };
     } else {
+      if (rawPrev !== null) {
+        revisions.push({
+          key,
+          from: prevStr,
+          to: nextValue,
+          isRevision: update.isRevision === true,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+        });
+      }
       knownFacts = { ...knownFacts, [key]: nextValue };
     }
   }
@@ -1022,12 +1054,7 @@ const factsSchema = z
   .object({
     service: z.string().max(200).optional(),
     date: z.string().max(40).optional(),
-    dateRange: z
-      .object({
-        startDate: z.string().max(40),
-        endDate: z.string().max(40),
-      })
-      .optional(),
+    dateRange: dateRangeSchema.optional(),
     timePreference: z.string().max(80).optional(),
     provider: z.string().max(200).optional(),
     customerName: z.string().max(200).optional(),
@@ -1107,7 +1134,31 @@ export function hydrateConversationState(
   raw: unknown,
   scope: { readonly businessId: string; readonly conversationId: string },
 ): ConversationState | null {
-  const parsed = persistedStateSchema.safeParse(raw);
+  if (typeof raw !== "object" || raw === null) return null;
+
+  // Hydration must preserve old-state compatibility while refusing invalid new range fields safely
+  let candidateRaw = raw;
+  const rawObj = raw as Record<string, unknown>;
+  if (
+    rawObj.knownFacts &&
+    typeof rawObj.knownFacts === "object" &&
+    rawObj.knownFacts !== null
+  ) {
+    const rawFacts = rawObj.knownFacts as Record<string, unknown>;
+    if (rawFacts.dateRange !== undefined) {
+      const rangeRes = dateRangeSchema.safeParse(rawFacts.dateRange);
+      if (!rangeRes.success) {
+        const { dateRange: _invalidRange, ...sanitizedFacts } = rawFacts;
+        void _invalidRange;
+        candidateRaw = {
+          ...rawObj,
+          knownFacts: sanitizedFacts,
+        };
+      }
+    }
+  }
+
+  const parsed = persistedStateSchema.safeParse(candidateRaw);
   if (!parsed.success) return null;
   const p = parsed.data;
   if (
