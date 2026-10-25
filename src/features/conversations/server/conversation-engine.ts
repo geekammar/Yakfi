@@ -4365,13 +4365,17 @@ async function runInboundTurn(
       const askMsg =
         "يرجى كتابة التاريخ أو اليوم الذي يناسبك (مثال: بكرة، الأسبوع القادم، أو اذكر يوماً محدداً):";
       if (turnSession.enabled) {
-        const existingFacts = { ...(turnSession.state?.knownFacts ?? {}) };
-        delete (existingFacts as any).date;
-        delete (existingFacts as any).dateRange;
+        const {
+          date: _droppedDate,
+          dateRange: _droppedRange,
+          ...remainingFacts
+        } = turnSession.state?.knownFacts ?? {};
+        void _droppedDate;
+        void _droppedRange;
         turnSession.state = {
           ...(turnSession.state ?? emptyConversationState()),
           knownFacts: {
-            ...existingFacts,
+            ...remainingFacts,
             service: offerReply.serviceName,
             ...(offerReply.timePreference
               ? { timePreference: offerReply.timePreference }
