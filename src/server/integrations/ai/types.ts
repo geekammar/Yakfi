@@ -135,6 +135,8 @@ export type AiTelemetryAttempt = {
   status: "SUCCESS" | "FAILURE";
   errorCode?: AiProviderErrorCode;
   httpAttempts?: number;
+  /** Validated HTTP status code when actually observed (300-599). Never 0 or 200. */
+  httpStatus?: number;
 };
 
 // ─── Bounded retry trace (owned by the Conversation Control Layer) ────────
@@ -158,6 +160,8 @@ export type AiRetryAttemptRecord = {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
+  /** Validated HTTP status code when actually observed (300-599). Never 0 or 200. */
+  httpStatus?: number;
 };
 
 /**

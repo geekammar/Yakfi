@@ -102,6 +102,10 @@ export type TurnEvidence = {
   readonly outboundSendDelivered: boolean | null;
   /** Bounded per-attempt execution and usage records across retries and fallback. */
   readonly executionAttempts: readonly TurnExecutionAttempt[] | null;
+  /** Optional sanitized provider error classification for failed turn (CONFIG_ERROR, RETRYABLE, etc.). */
+  readonly errorCode?: string | null;
+  /** Optional validated HTTP status code for failed provider call (300-599). Never 0 or 200. */
+  readonly httpStatus?: number | null;
   /** Total provider-reported cost in USD if all attempts have known cost. Null if incomplete or unavailable. */
   readonly totalCostUsd: number | null;
   /** Subtotal of known attempt costs in USD. Null if no attempt has cost. */
@@ -288,6 +292,22 @@ export function buildTurnEvidence(
       input.delivery !== null && input.delivery !== undefined,
     outboundSendDelivered: input.delivery ? input.delivery.delivered : null,
     executionAttempts: observability?.executionAttempts ?? null,
+    errorCode:
+      observability?.errorCode ??
+      (observability?.executionAttempts
+        ? [...observability.executionAttempts]
+            .reverse()
+            .find((a) => a.status === "FAILURE")?.errorCode
+        : null) ??
+      null,
+    httpStatus:
+      observability?.httpStatus ??
+      (observability?.executionAttempts
+        ? [...observability.executionAttempts]
+            .reverse()
+            .find((a) => a.status === "FAILURE")?.httpStatus
+        : null) ??
+      null,
     totalCostUsd: observability?.totalCostUsd ?? null,
     knownCostSubtotalUsd: observability?.knownCostSubtotalUsd ?? null,
     costCompleteness: observability?.costCompleteness ?? null,
@@ -355,6 +375,7 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "status",
   "costSource",
   "costCompleteness",
+  "errorCode",
   // CORE-04B: Operational exposure control closed stop reasons
   "stopReason",
   // PROMPT-AI-JEV-03D — the disjoint shadow slot's CLOSED string keys. Each

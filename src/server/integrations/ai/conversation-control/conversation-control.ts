@@ -182,6 +182,15 @@ export function createConversationControl(
         timeoutMs: attemptTimeout,
       });
       last = result;
+      const rawStatus = result.ok ? undefined : result.error.httpStatus;
+      const validStatus =
+        typeof rawStatus === "number" &&
+        Number.isInteger(rawStatus) &&
+        rawStatus >= 300 &&
+        rawStatus <= 599
+          ? rawStatus
+          : undefined;
+
       attemptRecords.push({
         attempt: attemptNumber,
         outcome: result.ok ? "SUCCESS" : "FAILURE",
@@ -193,6 +202,7 @@ export function createConversationControl(
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         costUsd: result.costUsd,
+        ...(validStatus !== undefined ? { httpStatus: validStatus } : {}),
       });
 
       if (result.ok) break;

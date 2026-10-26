@@ -57,12 +57,20 @@ function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
     error?: { message?: string; code?: string | number; type?: string };
   } | null;
   const msg = b?.error?.message ?? `HTTP ${status}`;
-  if (status === 401 || status === 403) {
+  const validStatus =
+    typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 300 &&
+    status <= 599
+      ? status
+      : undefined;
+
+  if (status === 401 || status === 402 || status === 403) {
     return {
       code: "CONFIG_ERROR",
       message: msg,
       retryable: false,
-      httpStatus: status,
+      httpStatus: validStatus,
     };
   }
   if (status === 408 || status === 429) {
@@ -70,7 +78,7 @@ function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
       code: "RETRYABLE",
       message: msg,
       retryable: true,
-      httpStatus: status,
+      httpStatus: validStatus,
     };
   }
   if (status >= 500 && status < 600) {
@@ -78,7 +86,7 @@ function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
       code: "RETRYABLE",
       message: msg,
       retryable: true,
-      httpStatus: status,
+      httpStatus: validStatus,
     };
   }
   if (status === 400) {
@@ -88,21 +96,21 @@ function mapHttpStatusToError(status: number, body: unknown): AiProviderError {
         code: "RETRYABLE",
         message: msg,
         retryable: true,
-        httpStatus: status,
+        httpStatus: validStatus,
       };
     }
     return {
       code: "PERMANENT",
       message: msg,
       retryable: false,
-      httpStatus: status,
+      httpStatus: validStatus,
     };
   }
   return {
     code: "PERMANENT",
     message: msg,
     retryable: false,
-    httpStatus: status,
+    httpStatus: validStatus,
   };
 }
 
@@ -319,7 +327,13 @@ export async function callOpenAiCompatible(
         code: "INVALID_RESPONSE",
         message: "invalid JSON from provider",
         retryable: false,
-        httpStatus: httpResponse.status,
+        httpStatus:
+          typeof httpResponse.status === "number" &&
+          Number.isInteger(httpResponse.status) &&
+          httpResponse.status >= 300 &&
+          httpResponse.status <= 599
+            ? httpResponse.status
+            : undefined,
       },
     };
   }

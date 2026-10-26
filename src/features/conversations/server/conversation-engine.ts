@@ -5318,6 +5318,13 @@ async function runInboundTurn(
             ...(a.costUsd !== undefined
               ? { costSource: "PROVIDER_REPORTED" as const }
               : {}),
+            ...(a.errorCode ? { errorCode: a.errorCode } : {}),
+            ...(typeof a.httpStatus === "number" &&
+            Number.isInteger(a.httpStatus) &&
+            a.httpStatus >= 300 &&
+            a.httpStatus <= 599
+              ? { httpStatus: a.httpStatus }
+              : {}),
           }))
         : turnTelemetry?.attempts && turnTelemetry.attempts.length > 0
           ? turnTelemetry.attempts.map((a, idx) => ({
@@ -5338,8 +5345,21 @@ async function runInboundTurn(
               ...(a.costUsd !== undefined
                 ? { costSource: "PROVIDER_REPORTED" as const }
                 : {}),
+              ...(a.errorCode ? { errorCode: a.errorCode } : {}),
+              ...(typeof a.httpStatus === "number" &&
+              Number.isInteger(a.httpStatus) &&
+              a.httpStatus >= 300 &&
+              a.httpStatus <= 599
+                ? { httpStatus: a.httpStatus }
+                : {}),
             }))
           : [];
+
+    const lastFailedAttempt = [...executionAttempts]
+      .reverse()
+      .find((a) => a.status === "FAILURE");
+    const turnErrorCode = lastFailedAttempt?.errorCode ?? null;
+    const turnHttpStatus = lastFailedAttempt?.httpStatus ?? null;
 
     const totalCostUsd =
       turnTelemetry?.totalCostUsd ??
@@ -5432,6 +5452,8 @@ async function runInboundTurn(
       knownCostSubtotalUsd,
       costCompleteness,
       stopReason: turnTelemetry?.stopReason ?? null,
+      errorCode: turnErrorCode,
+      httpStatus: turnHttpStatus,
       // PROMPT-AI-JEV-03B §12 — clarification anti-repeat / resume state: true
       // when the ONE resolver PRESERVED a pending task by re-asking its bounded
       // question instead of escalating (precedence rule 6).

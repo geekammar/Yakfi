@@ -183,6 +183,22 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
           },
         ]
       : []),
+    ...(record.errorCode !== null && record.errorCode !== undefined
+      ? [
+          {
+            key: "flowpilot.error_code",
+            value: { stringValue: record.errorCode },
+          },
+        ]
+      : []),
+    ...(record.httpStatus !== null && record.httpStatus !== undefined
+      ? [
+          {
+            key: "flowpilot.http_status",
+            value: { intValue: String(record.httpStatus) },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.parse_success",
       value: { boolValue: record.parseSuccess ?? false },

@@ -104,12 +104,28 @@ function toAttempt(result: AiProviderResult): AiTelemetryAttempt {
       ...(httpAttempts !== undefined ? { httpAttempts } : {}),
     };
   }
+  const rawStatus =
+    result.error.httpStatus ??
+    (result.retryTrace?.attempts
+      ? [...result.retryTrace.attempts]
+          .reverse()
+          .find((a) => a.httpStatus !== undefined)?.httpStatus
+      : undefined);
+  const validStatus =
+    typeof rawStatus === "number" &&
+    Number.isInteger(rawStatus) &&
+    rawStatus >= 300 &&
+    rawStatus <= 599
+      ? rawStatus
+      : undefined;
+
   return {
     provider: result.provider,
     model: result.model,
     latencyMs: logicalLatency,
     status: "FAILURE",
     errorCode: result.error.code,
+    ...(validStatus !== undefined ? { httpStatus: validStatus } : {}),
     ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
     ...(result.inputTokens !== undefined
       ? { inputTokens: result.inputTokens }
@@ -125,6 +141,14 @@ function extractAttemptsFrom(result: AiProviderResult): AiRetryAttemptRecord[] {
   if (result.retryTrace?.attempts && result.retryTrace.attempts.length > 0) {
     return result.retryTrace.attempts;
   }
+  const rawStatus = result.ok ? undefined : result.error.httpStatus;
+  const validStatus =
+    typeof rawStatus === "number" &&
+    Number.isInteger(rawStatus) &&
+    rawStatus >= 300 &&
+    rawStatus <= 599
+      ? rawStatus
+      : undefined;
   return [
     {
       attempt: 1,
@@ -137,6 +161,7 @@ function extractAttemptsFrom(result: AiProviderResult): AiRetryAttemptRecord[] {
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       costUsd: result.costUsd,
+      ...(validStatus !== undefined ? { httpStatus: validStatus } : {}),
     },
   ];
 }

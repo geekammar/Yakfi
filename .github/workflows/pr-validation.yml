@@ -107,6 +107,9 @@ jobs:
           pnpm check:channel-neutral-choices
           pnpm check:unified-booking-choices
           pnpm check:semantic-date-ranges
+          pnpm check:ai-provider
+          pnpm check:conversation-control
+          pnpm check:provider-failure-diagnostics
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

@@ -1893,9 +1893,39 @@ async function main(): Promise<void> {
     });
     const res = await orch.callWithFallback(baseRequest);
     check(
-      "CONFIG_ERROR (401) لا يُعاد المحاولة حتى مع fallback مفعّل",
+      "CONFIG_ERROR (401) لا يُعاد المحاولة حتى مع fallback مفعّل ويحفظ httpStatus=401",
       res.response === null &&
         res.telemetry.attempts[0]?.errorCode === "CONFIG_ERROR" &&
+        res.telemetry.attempts[0]?.httpStatus === 401 &&
+        res.telemetry.fallbackUsed === false,
+    );
+  }
+
+  // ── CONFIG_ERROR (402 Payment Required) is not retried and preserves httpStatus ──────────
+  {
+    const primary = openrouter.createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(402, {
+        error: { message: "insufficient credits" },
+      }),
+    });
+    const secondary = agentrouter.createAgentRouterAdapter({
+      model: "auto",
+      getEnvVar,
+      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+    });
+    const orch = orchestrator.createAiOrchestrator({
+      primary,
+      secondary,
+      fallbackEnabled: true,
+    });
+    const res = await orch.callWithFallback(baseRequest);
+    check(
+      "CONFIG_ERROR (402) لا يُعاد المحاولة حتى مع fallback مفعّل ويحفظ httpStatus=402",
+      res.response === null &&
+        res.telemetry.attempts[0]?.errorCode === "CONFIG_ERROR" &&
+        res.telemetry.attempts[0]?.httpStatus === 402 &&
         res.telemetry.fallbackUsed === false,
     );
   }
