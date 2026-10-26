@@ -9,6 +9,7 @@
 import { execSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  cpSync,
   existsSync,
   mkdtempSync,
   rmSync,
@@ -145,8 +146,8 @@ async function main() {
 
     const sourceGenerated = join(root, "src/generated");
     const targetGenerated = join(tempDir, "src/generated");
-    if (existsSync(sourceGenerated) && !existsSync(targetGenerated)) {
-      symlinkSync(sourceGenerated, targetGenerated, "junction");
+    if (existsSync(sourceGenerated)) {
+      cpSync(sourceGenerated, targetGenerated, { recursive: true });
     }
 
     baseResult = runCheckInDir(tempDir);
