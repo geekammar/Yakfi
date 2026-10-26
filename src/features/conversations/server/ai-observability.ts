@@ -38,6 +38,7 @@ import {
   synthesizeTurnPlan,
 } from "@/features/conversations/server/ai-contract";
 import type { JevSemanticEvidence } from "@/server/integrations/ai/jev-semantic-strategy";
+import type { AiProviderErrorCode } from "@/server/integrations/ai/types";
 
 /** Where the turn's decision came from (target §14 `routingDecision`). */
 export const aiRoutingDecisionValues = [
@@ -316,6 +317,10 @@ export type TurnObservability = {
   readonly costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
   /** Machine-readable stop or prevention reason (CORE-04B). */
   readonly stopReason?: string | null;
+  /** Optional sanitized provider error classification for failed provider execution. */
+  readonly errorCode?: AiProviderErrorCode | null;
+  /** Optional validated HTTP status code for failed provider attempt (300-599). Never 0 or 200. */
+  readonly httpStatus?: number | null;
 };
 
 export type TurnExecutionAttempt = {
@@ -328,6 +333,10 @@ export type TurnExecutionAttempt = {
   readonly outputTokens?: number;
   readonly costUsd?: number;
   readonly costSource?: "PROVIDER_REPORTED";
+  /** Optional sanitized error classification for failed attempt. */
+  readonly errorCode?: AiProviderErrorCode;
+  /** Optional validated HTTP status code for failed attempt (300-599). Never 0 or 200. */
+  readonly httpStatus?: number;
 };
 
 export type BuildTurnObservabilityInput = {
@@ -418,6 +427,10 @@ export type BuildTurnObservabilityInput = {
   costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE" | null;
   /** Machine-readable stop or prevention reason (CORE-04B). */
   stopReason?: string | null;
+  /** Optional sanitized provider error classification for failed provider execution. */
+  errorCode?: AiProviderErrorCode | null;
+  /** Optional validated HTTP status code for failed provider attempt (300-599). Never 0 or 200. */
+  httpStatus?: number | null;
 };
 
 /**
@@ -523,6 +536,12 @@ export function buildTurnObservability(
       : {}),
     ...(input.stopReason !== undefined && input.stopReason !== null
       ? { stopReason: input.stopReason }
+      : {}),
+    ...(input.errorCode !== undefined && input.errorCode !== null
+      ? { errorCode: input.errorCode }
+      : {}),
+    ...(input.httpStatus !== undefined && input.httpStatus !== null
+      ? { httpStatus: input.httpStatus }
       : {}),
   };
 }
