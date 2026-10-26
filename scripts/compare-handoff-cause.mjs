@@ -162,7 +162,6 @@ async function main() {
   const baseFailedSet = new Set(baseResult.parsed.failedChecks);
   const newFailures = headResult.parsed.failedChecks.filter((f) => !baseFailedSet.has(f));
 
-  const knownFailures = ["E10", "E12b"];
   const headFailsE10 = headResult.parsed.failedChecks.some((f) => f.includes("E10"));
   const headFailsE12b = headResult.parsed.failedChecks.some((f) => f.includes("E12b"));
   const baseFailsE10 = baseResult.parsed.failedChecks.some((f) => f.includes("E10"));

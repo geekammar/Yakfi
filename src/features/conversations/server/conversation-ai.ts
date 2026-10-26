@@ -33,7 +33,7 @@ import {
   parseAiRequest,
 } from "@/features/conversations/server/ai-contract";
 import type { AiRoutingDecision } from "@/features/conversations/server/ai-observability";
-import type { HandoffCause } from "@/server/integrations/ai/conversation-control/handoff-cause";
+import type { HandoffCause } from "@/features/conversations/server/handoff-cause";
 import type { HandoffReason as ControlHandoffReason } from "@/server/integrations/ai/conversation-control/types";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 
