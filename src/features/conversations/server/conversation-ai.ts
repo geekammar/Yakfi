@@ -1095,6 +1095,52 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
 
 // ─── Reply / summary templates (assistant voice, vertical-agnostic) ─────────
 
+/**
+ * Safe, deterministic handoff & failure reply constants (Arabic-first).
+ * Sourced byte-for-byte from canonical product voice (REPLIES / HANDOFF_MESSAGES / COPY_REGISTRY).
+ * Runtime seam: used on structured turns to replace lexical re-classification
+ * of customer text when choosing a safe fallback message.
+ */
+export const SAFE_HANDOFF_REPLIES = {
+  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+  PROVIDER_FAILURE:
+    "واجهت صعوبة مؤقتة في الرد — سيتواصل معك أحد أعضاء الفريق الآن.",
+  INVALID_OUTPUT:
+    "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+  DISCLOSURE_REFUSED: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
+} as const;
+
+export type SafeFailureReplyInput = {
+  controlHandoffReason?: string | null;
+  failureCause?: string | null;
+};
+
+/**
+ * Pure resolver mapping typed execution failure outcomes to safe canonical replies.
+ * Never inspects or re-interprets customer prose with regex or keyword dictionaries.
+ */
+export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
+  const reason = input.controlHandoffReason;
+  if (reason === "CUSTOMER_REQUESTED_HUMAN") {
+    return SAFE_HANDOFF_REPLIES.HUMAN_REQUEST;
+  }
+  if (reason === "SENSITIVE_OR_RESTRICTED_REQUEST") {
+    return SAFE_HANDOFF_REPLIES.SENSITIVE;
+  }
+  if (
+    reason === "PROVIDER_UNAVAILABLE" ||
+    reason === "RETRY_EXHAUSTED" ||
+    reason === "QUOTA_EXHAUSTED" ||
+    reason === "AUTH_OR_CONFIGURATION_FAILURE" ||
+    input.failureCause === "PROVIDER_FAILURE" ||
+    input.failureCause === "RETRY_EXHAUSTED"
+  ) {
+    return SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE;
+  }
+  return SAFE_HANDOFF_REPLIES.INVALID_OUTPUT;
+}
+
 const REPLIES = {
   BOOKING:
     "يسعدنا خدمتك! سيتواصل معك أحد أعضاء الفريق لإتمام الحجز وتحديد الوقت المناسب.",

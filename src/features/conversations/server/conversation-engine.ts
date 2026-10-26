@@ -142,9 +142,10 @@ import {
 } from "@/features/conversations/server/clarification";
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import {
+  SAFE_HANDOFF_REPLIES,
   bypassDeterministicAi,
-  classifyCustomerMessage,
   normalizeArabicText,
+  resolveSafeFailureReply,
   resolveTurnControlSignals,
 } from "@/features/conversations/server/conversation-ai";
 import {
@@ -5212,10 +5213,8 @@ async function runInboundTurn(
     // 9. Validate the assistant output BEFORE persisting (AI is never
     //    the source of truth — invalid/absent output fails safe to a
     //    handoff). The customer is NOT left in silence: the turn delivers
-    //    the SAME safe, deterministic handoff acknowledgment the #58
-    //    disclosure-refusal path produces (`classifyCustomerMessage`
-    //    never invents business data — no FAQ match means a typed handoff
-    //    reply), then takes the existing NEED_HUMAN + operator-attention
+    //    the safe, deterministic failure acknowledgment via resolveSafeFailureReply,
+    //    then takes the existing NEED_HUMAN + operator-attention
     //    handoff path. This keeps the E2E WhatsApp reply path alive when
     //    the provider fails, times out, or returns an invalid response —
     //    without weakening parseAiResponse or bypassing Conversation
@@ -5462,10 +5461,6 @@ async function runInboundTurn(
         : {}),
     });
     if (!validated) {
-      const safeHandoff = classifyCustomerMessage(
-        inbound.text,
-        builtContext.request.faqs,
-      );
       // PROMPT-AI-ARCH-16 (Slice 7) — type WHY the turn failed safe. The
       // provider-neutral Conversation Control outcome already classified the
       // failure (retry exhausted / provider unavailable / quota / auth /
@@ -5476,10 +5471,15 @@ async function runInboundTurn(
         controlHandoffReasonToCause(
           turnTelemetry?.conversationControl?.handoffReason ?? null,
         ) ?? "AI_FAILURE";
+      const failureReply = resolveSafeFailureReply({
+        controlHandoffReason:
+          turnTelemetry?.conversationControl?.handoffReason ?? null,
+        failureCause,
+      });
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
-        safeHandoff.content,
+        failureReply,
         "NEED_HUMAN",
       );
       const delivery = await deliverAssistantReply(
@@ -5487,7 +5487,7 @@ async function runInboundTurn(
         customer.phone,
         business.name,
         conversation.id,
-        safeHandoff.content,
+        failureReply,
         assistantMessage.id,
         business.id,
         outboundConnectionId,
@@ -5527,14 +5527,14 @@ async function runInboundTurn(
       (resolvedTurn.precedenceRule === "SAFETY_RESTRICTED" ||
         resolvedTurn.precedenceRule === "EXPLICIT_HUMAN_REQUEST")
     ) {
-      const safeHandoff = classifyCustomerMessage(
-        inbound.text,
-        builtContext.request.faqs,
-      );
+      const handoffReply =
+        resolvedTurn.precedenceRule === "EXPLICIT_HUMAN_REQUEST"
+          ? SAFE_HANDOFF_REPLIES.HUMAN_REQUEST
+          : SAFE_HANDOFF_REPLIES.SENSITIVE;
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
-        safeHandoff.content,
+        handoffReply,
         "NEED_HUMAN",
       );
       const delivery = await deliverAssistantReply(
@@ -5542,7 +5542,7 @@ async function runInboundTurn(
         customer.phone,
         business.name,
         conversation.id,
-        safeHandoff.content,
+        handoffReply,
         assistantMessage.id,
         business.id,
         outboundConnectionId,
@@ -7475,24 +7475,19 @@ async function runInboundTurn(
       }
       // The refused self-authored reply is dropped — B-03 never persists or
       // sends a reply it cannot justify from the disclosure ledger. But the
-      // customer is NOT left in silence: the turn delivers the SAME safe,
-      // deterministic handoff acknowledgment the deterministic assistant
-      // produces for this message (`classifyCustomerMessage` never invents
-      // business data — no FAQ match means a typed handoff reply), then
-      // takes the existing NEED_HUMAN + operator-attention handoff path.
+      // customer is NOT left in silence: the turn delivers the safe, deterministic
+      // handoff acknowledgment for unbacked knowledge turns (SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED),
+      // then takes the existing NEED_HUMAN + operator-attention handoff path.
       // This keeps the E2E WhatsApp reply path alive for conversational
       // turns a business has no knowledge store for (a greeting, a question
       // with no stored FAQ) without ever emitting an unbacked reply. The
       // refusal reason stays an operator-side diagnostic (never customer-
       // visible): the customer sees only the safe acknowledgment.
-      const safeHandoff = classifyCustomerMessage(
-        inbound.text,
-        builtContext.request.faqs,
-      );
+      const refusalReply = SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED;
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
-        safeHandoff.content,
+        refusalReply,
         "NEED_HUMAN",
       );
       const delivery = await deliverAssistantReply(
@@ -7500,7 +7495,7 @@ async function runInboundTurn(
         customer.phone,
         business.name,
         conversation.id,
-        safeHandoff.content,
+        refusalReply,
         assistantMessage.id,
         business.id,
         outboundConnectionId,

@@ -112,6 +112,7 @@ jobs:
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics
+          pnpm check:semantic-authority-repair
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

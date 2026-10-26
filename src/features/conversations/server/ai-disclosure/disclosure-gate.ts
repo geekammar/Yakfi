@@ -410,6 +410,18 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
       continue;
     }
+    // The business.identity aggregate family (PROMPT-AI-UX-02) licenses disclosing
+    // the canonical business identity/name. It cannot back an unbacked reply that
+    // does not disclose or mention the authoritative business name.
+    if (
+      candidate.family === "business.identity" &&
+      typeof context.request.businessName === "string" &&
+      context.request.businessName.trim().length > 0 &&
+      !response.content.includes(context.request.businessName.trim())
+    ) {
+      if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
+      continue;
+    }
     return {
       kind: "disclosed",
       response,
