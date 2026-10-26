@@ -183,7 +183,8 @@ export function CustomerDetailScreen({
         </div>
         {customer.conversations.length === 0 ? (
           <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-            لا توجد محادثات مع هذا العميل — تبدأ المحادثات تلقائياً من واتساب.
+            لا توجد محادثات مع هذا العميل — تبدأ المحادثات تلقائياً عند تواصل
+            العميل.
           </p>
         ) : (
           <ul className="divide-y overflow-hidden rounded-lg border">
@@ -239,7 +240,7 @@ function ConversationRowContent({
   return (
     <>
       <div className="min-w-0">
-        <p className="text-sm font-medium">محادثة واتساب</p>
+        <p className="text-sm font-medium">محادثة</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           آخر نشاط{" "}
           <time dateTime={conversation.lastActivityAt} className="tabular-nums">

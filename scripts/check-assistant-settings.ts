@@ -281,6 +281,50 @@ async function persistenceSection(): Promise<void> {
       resolveAssistantName("   ") === ASSISTANT_NAME_FALLBACK &&
       resolveAssistantName("مساعد عيادة أفنان") === "مساعد عيادة أفنان",
   );
+
+  // F01 — Assistant response detail: inherited default vs explicit override & unchanged initial dirty/save semantics.
+  const freshDetailBiz = makeDeps(makeBusiness());
+  const freshDetailView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const freshStored = (
+    await freshDetailBiz.businessRepository.findById("business-1")
+  )?.assistantStyle;
+  const freshRuntime = resolveAssistantStyle(freshStored);
+  const initialFormDetail = freshDetailView?.detail ?? undefined;
+
+  // 1. Unset detail in storage yields null view, inherits runtime default "short", and form initialization is undefined (isDirty = false)
+  const unsetPreserved =
+    freshDetailView !== null &&
+    freshDetailView.detail === null &&
+    freshRuntime.detail === "short" &&
+    initialFormDetail === undefined;
+
+  // 2. Partial save of another field never silently persists detail (preserves unset semantics)
+  await updateAssistantSettings(freshDetailBiz, ADMIN, { name: "اسم جديد" });
+  const postSaveView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const unsetAfterSave = postSaveView !== null && postSaveView.detail === null;
+
+  // 3. Explicit override is saved and distinguished from inherited default
+  await updateAssistantSettings(freshDetailBiz, ADMIN, { detail: "balanced" });
+  const overrideView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const overrideStored = (
+    await freshDetailBiz.businessRepository.findById("business-1")
+  )?.assistantStyle;
+  const overrideRuntime = resolveAssistantStyle(overrideStored);
+  const explicitDistinguished =
+    overrideView !== null &&
+    overrideView.detail === "balanced" &&
+    overrideRuntime.detail === "balanced";
+
+  record(
+    "F01 تتبع بُعد طول الردود: التمييز بين الافتراضي الموروث والتخصيص الصريح وثبات سلوك الحفظ بدون تخزين صامت",
+    unsetPreserved && unsetAfterSave && explicitDistinguished,
+  );
 }
 
 // ─── B: bounded choices ──────────────────────────────────────────────────────

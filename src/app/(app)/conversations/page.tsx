@@ -20,7 +20,7 @@ export default async function ConversationsPage() {
     <div className="animate-fade-in-up space-y-6">
       <PageHeader
         title="صندوق المحادثات"
-        description="تابع رسائل واتساب وساعد العملاء في الوقت المناسب."
+        description="تابع محادثات العملاء وساعدهم في الوقت المناسب."
       />
       <InboxList conversations={items} team={team} />
     </div>
