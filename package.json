@@ -53,6 +53,7 @@
     "check:conversation-ops-25": "tsx scripts/check-conversation-ops-25.ts",
     "check:conversation-handoff": "tsx scripts/check-conversation-handoff.ts",
     "check:handoff-cause": "tsx scripts/check-handoff-cause.ts",
+    "check:compare-handoff-cause": "node scripts/compare-handoff-cause.mjs",
     "check:semantic-authority-repair": "tsx scripts/check-semantic-authority-repair.ts",
     "check:knowledge-gap": "tsx scripts/check-knowledge-gap.ts",
     "check:turn-evidence": "tsx scripts/check-turn-evidence.ts",

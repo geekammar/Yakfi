@@ -343,6 +343,23 @@ function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
   return [primary];
 }
 
+/**
+ * Determine whether a response explicitly declares an identity answer via structured goals.
+ * Used under structured turns to prevent business.identity from acting as a wildcard license
+ * for arbitrary unbacked prose (e.g. fabricated prices or procedure claims).
+ */
+export function isExplicitIdentityResponse(response: AiResponse): boolean {
+  return Boolean(
+    response.goals?.some(
+      (g) =>
+        g.kind === "ANSWER" &&
+        (g.requiredKnowledge === "business.identity" ||
+          g.requiredKnowledge === "BUSINESS_IDENTITY" ||
+          g.intent === "BUSINESS_IDENTITY"),
+    ),
+  );
+}
+
 // ─── The gate ────────────────────────────────────────────────────────────────
 
 /**
@@ -411,13 +428,15 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       continue;
     }
     // The business.identity aggregate family (PROMPT-AI-UX-02) licenses disclosing
-    // the canonical business identity/name. It cannot back an unbacked reply that
-    // does not disclose or mention the authoritative business name.
+    // the canonical business identity/name. Under structured turns, business.identity
+    // is available in context without lexical gating. To prevent a business display name
+    // from becoming a wildcard license for arbitrary unbacked prose (such as unsupported
+    // price or procedure claims), business.identity only backs a reply that is explicitly
+    // typed as an identity answer via structured goals.
     if (
       candidate.family === "business.identity" &&
-      typeof context.request.businessName === "string" &&
-      context.request.businessName.trim().length > 0 &&
-      !response.content.includes(context.request.businessName.trim())
+      context.request.requiredSemanticCapability === "structured_turn" &&
+      !isExplicitIdentityResponse(response)
     ) {
       if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
       continue;

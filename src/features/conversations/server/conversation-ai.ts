@@ -33,6 +33,8 @@ import {
   parseAiRequest,
 } from "@/features/conversations/server/ai-contract";
 import type { AiRoutingDecision } from "@/features/conversations/server/ai-observability";
+import type { HandoffCause } from "@/server/integrations/ai/conversation-control/handoff-cause";
+import type { HandoffReason as ControlHandoffReason } from "@/server/integrations/ai/conversation-control/types";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 
 export type {
@@ -1105,15 +1107,16 @@ export const SAFE_HANDOFF_REPLIES = {
   HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
   SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
   PROVIDER_FAILURE:
-    "واجهت صعوبة مؤقتة في الرد — سيتواصل معك أحد أعضاء الفريق الآن.",
+    "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
   INVALID_OUTPUT:
-    "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
-  DISCLOSURE_REFUSED: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
+    "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+  DISCLOSURE_REFUSED:
+    "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
 } as const;
 
 export type SafeFailureReplyInput = {
-  controlHandoffReason?: string | null;
-  failureCause?: string | null;
+  controlHandoffReason?: ControlHandoffReason | null;
+  failureCause?: HandoffCause | null;
 };
 
 /**
@@ -1349,7 +1352,7 @@ function greetingResponse(message: string): AiResponse {
 const IDENTITY_INVITE = "تحب نساعدك إزاي؟";
 
 /** The complete deterministic identity copy for one authoritative name. */
-function buildBusinessIdentityContent(businessName: string): string {
+export function buildBusinessIdentityContent(businessName: string): string {
   return `أيوه، ${businessName} معاك. ${IDENTITY_INVITE}`;
 }
 

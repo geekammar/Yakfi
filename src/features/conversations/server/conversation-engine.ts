@@ -143,6 +143,7 @@ import {
 import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
 import {
   SAFE_HANDOFF_REPLIES,
+  buildBusinessIdentityContent,
   bypassDeterministicAi,
   normalizeArabicText,
   resolveSafeFailureReply,
@@ -7526,7 +7527,13 @@ async function runInboundTurn(
         delivery,
       };
     }
-    const content = disclosure.response.content;
+    // Bounded domain rendering for business identity (PROMPT-AI-UX-02 / Semantic Authority Repair):
+    // An identity reply is backed by the authoritative business.name fact. To ensure that an
+    // explicit identity goal never licenses arbitrary prose or unsupported claims in the reply,
+    // the domain renders the canonical, bounded Arabic identity acknowledgement.
+    const content = disclosure.support.includes("business.identity")
+      ? buildBusinessIdentityContent(business.name)
+      : disclosure.response.content;
 
     // ANSWER-AND-CONTINUE (PROMPT-AI-ARCH-09 — Slice 5). When the SAME customer
     // turn expressed a KNOWLEDGE goal AND a DOMAIN/booking goal, the resolver

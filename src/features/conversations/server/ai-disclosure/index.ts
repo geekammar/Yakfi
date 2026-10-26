@@ -17,6 +17,7 @@ export {
   KNOWLEDGE_FREE_REPLY_INTENTS,
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
+  isExplicitIdentityResponse,
   type DisclosureDecision,
   type DisclosureInput,
   type DisclosureRefusalReason,

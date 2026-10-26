@@ -1,19 +1,24 @@
 /**
  * FlowPilot — Focused Semantic Authority Repair Verification Suite
  *
- * Verifies the two repaired semantic authority flows:
- *   Part 1: Structured Context Identity Enrollment (Repair A)
- *   Part 2: Safe Failure / Handoff Reply Resolution (Repair B)
- *   Part 3: End-to-End Engine Invariants & Delivery (Real Engine + In-Memory Harness)
+ * Verifies the repaired semantic authority flows:
+ *   Part 1: Structured Context Identity Enrollment & Boundary Gating (Repair A)
+ *   Part 1b: Reviewer Counterexample & Grounding Regressions (Section 3)
+ *   Part 2: Safe Failure / Handoff Reply Resolution (Repair B & Section 5)
+ *   Part 3: End-to-End Engine Invariants, Bounded Domain Rendering & Delivery (Part 4)
  *
  * Offline, resource-safe test suite with zero live paid model calls.
  */
 
 import { buildAiContext } from "@/features/conversations/server/ai-context-builder";
 import type { AiResponse } from "@/features/conversations/server/ai-contract";
-import { enforceDisclosure } from "@/features/conversations/server/ai-disclosure";
+import {
+  enforceDisclosure,
+  isExplicitIdentityResponse,
+} from "@/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
+  buildBusinessIdentityContent,
   resolveSafeFailureReply,
 } from "@/features/conversations/server/conversation-ai";
 import type {
@@ -98,117 +103,124 @@ const baseSources = (overrides?: Record<string, unknown>) => ({
       { senderType: "AI", content: "أهلاً بك!" },
     ],
   },
+  message: "مين أنتم؟",
   requiredSemanticCapability: "structured_turn" as const,
-  message: "عايز أسأل عن حاجة",
   ...overrides,
 });
 
+/**
+ * Creates an in-memory harness for the full receiveInboundMessage execution pipeline.
+ */
 function createEngineHarness(opts: {
-  responders: Array<(req: unknown) => Promise<AiResponse> | Promise<never>>;
-  telemetry?: Array<{
-    finalProvider: string;
-    finalModel?: string | null;
-    finalStatus?: string;
-    fallbackUsed?: boolean;
-    attempts?: unknown[];
-    conversationControl?: { handoffReason: string } | null;
-  }>;
   faqs?: Array<{ question: string; answer: string }>;
-  about?: string | null;
-  address?: string | null;
-}) {
-  const business = {
-    id: TENANT_A,
-    name: "مركز رعاية الأسنان التخصصي",
-    about: opts.about !== undefined ? opts.about : "عيادة أسنان",
-    whatsappNumber: WHATSAPP,
-    address: opts.address !== undefined ? opts.address : "الجيزة",
-    cancellationPolicy: "24h",
-    slotDurationMinutes: 30,
-    confirmationMode: "manual",
-    timezone: "Africa/Cairo",
-    vertical: "dental",
-    city: "الجيزة",
-    status: "ACTIVE",
-    isActive: true,
-    faqs: opts.faqs ?? [],
-  };
-
-  const branch = {
-    id: BRANCH_A,
-    businessId: TENANT_A,
-    name: "الفرع الرئيسي",
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-
-  const customer = {
-    id: CUST_A,
-    businessId: TENANT_A,
-    name: "أحمد حسن",
-    phone: "+201234567890",
-    notes: null,
-    lastConversationAt: null,
-    lastAppointmentAt: null,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-
-  let conversation: {
+  services?: Array<{
     id: string;
     businessId: string;
-    status: string;
-    assignedUserId: string | null;
-    aiSummary: string | null;
-  } | null = null;
-
+    name: string;
+    description: string | null;
+    durationMinutes: number;
+    priceType?: string | null;
+    priceAmount?: number | null;
+    priceMaxAmount?: number | null;
+    priceCurrency?: string | null;
+    priceNote?: string | null;
+    isActive?: boolean;
+  }>;
+  about?: string | null;
+  address?: string | null;
+  responders: Array<(req: unknown) => Promise<AiResponse>>;
+  telemetry?: Array<Record<string, unknown>>;
+}) {
+  const sent: string[] = [];
   const messages: Array<{
     id: string;
     senderType: string;
     content: string;
     createdAt: Date;
   }> = [];
-
-  const sent: string[] = [];
+  let conversation: {
+    id: string;
+    businessId: string;
+    customerId: string;
+    status: string;
+    assignedUserId: string | null;
+    aiSummary?: string | null;
+  } = {
+    id: "conv-101",
+    businessId: TENANT_A,
+    customerId: CUST_A,
+    status: "AI_ACTIVE",
+    assignedUserId: null,
+  };
   const attention = new Map<string, AttentionRow>();
+  let providerInvocations = 0;
+  let appointmentCreationAttempts = 0;
   let turnIndex = 0;
-  let providerCalls = 0;
+
+  const businessRecord = {
+    id: TENANT_A,
+    name: "مركز رعاية الأسنان التخصصي",
+    isActive: true,
+    about: opts.about !== undefined ? opts.about : "عيادة أسنان تخصصية",
+    whatsappNumber: WHATSAPP,
+    address: opts.address !== undefined ? opts.address : "شارع التحرير",
+    cancellationPolicy: "24h",
+    slotDurationMinutes: 30,
+    confirmationMode: "manual",
+    timezone: "Africa/Cairo",
+    vertical: "dental",
+    city: "الجيزة",
+    faqs: opts.faqs ?? [],
+  };
+
+  const services = opts.services ?? [
+    {
+      id: "svc-1",
+      businessId: TENANT_A,
+      name: "كشف أسنان",
+      description: "فحص وتشخيص",
+      durationMinutes: 30,
+      priceType: null,
+      priceAmount: null,
+      priceMaxAmount: null,
+      priceCurrency: null,
+      priceNote: null,
+      isActive: true,
+    },
+  ];
 
   const deps = {
     businessRepository: {
-      findByWhatsappNumber: async () => business,
-      findById: async (id: string) => (id === TENANT_A ? business : null),
+      findById: async () => businessRecord,
+      findUnique: async () => businessRecord,
     },
     branchRepository: {
-      findDefaultByBusiness: async () => branch,
-      findByIdWithinBusiness: async () => branch,
+      findDefaultByBusiness: async () => ({
+        id: BRANCH_A,
+        businessId: TENANT_A,
+        name: "الفرع الرئيسي",
+      }),
+      findByIdWithinBusiness: async () => null,
     },
     customerRepository: {
-      upsertByPhone: async () => customer,
-      touchConversation: async () => customer,
-      findByIdWithinBusiness: async () => customer,
+      upsertByPhone: async () => ({
+        id: CUST_A,
+        businessId: TENANT_A,
+        phone: "+201234567890",
+        name: "أحمد",
+      }),
+      touchConversation: async () => undefined,
+      findById: async () => ({
+        id: CUST_A,
+        businessId: TENANT_A,
+        phone: "+201234567890",
+        name: "أحمد",
+      }),
     },
     conversationRepository: {
-      findLatestByCustomer: async () =>
-        conversation ? { id: conversation.id } : null,
       findById: async () => conversation,
-      create: async (input: {
-        businessId: string;
-        customerId: string;
-        branchId: string | null;
-      }) => {
-        conversation = {
-          id: "conv-1",
-          businessId: input.businessId,
-          status: "AI_ACTIVE",
-          assignedUserId: null,
-          aiSummary: null,
-        };
-        return conversation;
-      },
+      findLatestByCustomer: async () => conversation,
+      create: async () => conversation,
       addMessage: async (
         input: {
           conversationId: string;
@@ -219,16 +231,15 @@ function createEngineHarness(opts: {
       ) => {
         const message = {
           id: `msg-${messages.length + 1}`,
-          conversationId: input.conversationId,
           senderType: input.senderType,
           content: input.content,
           createdAt: now,
         };
         messages.push(message);
-        if (workflow?.status && conversation) {
+        if (workflow?.status) {
           conversation = { ...conversation, status: workflow.status };
         }
-        if (workflow && "assignedUserId" in workflow && conversation) {
+        if (workflow && "assignedUserId" in workflow) {
           conversation = {
             ...conversation,
             assignedUserId: workflow.assignedUserId ?? null,
@@ -239,7 +250,7 @@ function createEngineHarness(opts: {
       getMessages: async () =>
         [...messages].reverse().map((message) => ({
           id: message.id,
-          conversationId: conversation!.id,
+          conversationId: conversation.id,
           senderType: message.senderType,
           content: message.content,
           createdAt: message.createdAt.toISOString(),
@@ -269,16 +280,21 @@ function createEngineHarness(opts: {
     },
     appointmentRepository: {
       countOverlapping: async () => 0,
-      create: async () => ({}) as never,
+      create: async () => {
+        appointmentCreationAttempts += 1;
+        return {} as never;
+      },
       listUpcomingForCustomer: async () => [],
       listForBusinessDay: async () => [],
     },
     serviceRepository: {
-      listByBusiness: async () => [],
-      listActiveByBusiness: async () => [],
-      findById: async () => null,
-      findByIdWithinBusiness: async () => null,
-      findByNameWithinBusiness: async () => null,
+      listByBusiness: async () => services,
+      listActiveByBusiness: async () => services.filter((s) => s.isActive !== false),
+      findById: async (id: string) => services.find((s) => s.id === id) ?? null,
+      findByIdWithinBusiness: async (id: string) =>
+        services.find((s) => s.id === id) ?? null,
+      findByNameWithinBusiness: async (name: string) =>
+        services.find((s) => s.name === name) ?? null,
     },
     usageRepository: { record: async () => undefined },
     providerRepository: {
@@ -306,7 +322,7 @@ function createEngineHarness(opts: {
     ai: {
       providerName: "mock-engine-provider",
       respond: async (req: unknown) => {
-        providerCalls += 1;
+        providerInvocations += 1;
         const currentResponder = opts.responders[turnIndex];
         const currentTelemetry = opts.telemetry?.[turnIndex];
         turnIndex += 1;
@@ -351,7 +367,8 @@ function createEngineHarness(opts: {
     getSent: () => sent,
     getMessages: () => messages,
     getAttention: () => attention,
-    getProviderCalls: () => providerCalls,
+    getProviderInvocations: () => providerInvocations,
+    getAppointmentAttempts: () => appointmentCreationAttempts,
     getConversation: () => conversation,
   };
 }
@@ -376,9 +393,9 @@ async function runSuite(): Promise<void> {
       "A1. Structured mode enrolls business.identity without keyword triggers",
       Boolean(
         identityFact &&
-        identityFact.included &&
-        identityFact.disclosable &&
-        built.request.businessName === "مركز رعاية الأسنان التخصصي",
+          identityFact.included &&
+          identityFact.disclosable &&
+          built.request.businessName === "مركز رعاية الأسنان التخصصي",
       ),
       identityFact,
     );
@@ -413,7 +430,7 @@ async function runSuite(): Promise<void> {
     );
   }
 
-  // A3: INTERNAL and FORBIDDEN fields remain strictly excluded from being included/disclosable
+  // A3a: FORBIDDEN fields are strictly excluded from ledger facts and request context
   {
     const built = buildAiContext({
       scope: { businessId: TENANT_A },
@@ -422,23 +439,47 @@ async function runSuite(): Promise<void> {
           ...baseSources().business,
           id: TENANT_A,
           defaultBranchId: "branch-uuid-999",
-          timezone: "Africa/Cairo",
-          slotDurationMinutes: 30,
         },
       }),
     });
 
-    const forbiddenIncluded = built.facts.some(
-      (f) => f.visibility === "FORBIDDEN" && f.included,
-    );
-    const internalDisclosable = built.facts.some(
-      (f) => f.visibility === "INTERNAL" && f.included && f.disclosable,
-    );
+    const forbiddenLedger = built.facts.filter((f) => f.visibility === "FORBIDDEN");
+    const forbiddenIncluded = forbiddenLedger.some((f) => f.included);
+    const requestContainsForbiddenId =
+      JSON.stringify(built.request).includes("branch-uuid-999") ||
+      ("id" in built.request && (built.request as Record<string, unknown>).id === TENANT_A);
 
     check(
-      "A3. INTERNAL and FORBIDDEN business fields are never included or disclosable",
-      !forbiddenIncluded && !internalDisclosable,
-      { forbiddenIncluded, internalDisclosable },
+      "A3a. FORBIDDEN fields (id, defaultBranchId) are excluded from ledger facts and request context",
+      forbiddenLedger.length > 0 && !forbiddenIncluded && !requestContainsForbiddenId,
+      { forbiddenLedger, requestContainsForbiddenId },
+    );
+  }
+
+  // A3b: INTERNAL operational metadata is strictly excluded from being disclosable
+  {
+    const built = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          slotDurationMinutes: 45,
+          timezone: "Africa/Cairo",
+        },
+      }),
+    });
+
+    const internalLedger = built.facts.filter((f) => f.visibility === "INTERNAL");
+    const internalDisclosable = internalLedger.some((f) => f.disclosable);
+    const requestContainsDuration =
+      "slotDurationMinutes" in built.request ||
+      ("durationMinutes" in built.request &&
+        (built.request as Record<string, unknown>).durationMinutes === 45);
+
+    check(
+      "A3b. INTERNAL operational metadata (slotDurationMinutes) is never disclosable nor leaked into request",
+      internalLedger.length > 0 && !internalDisclosable && !requestContainsDuration,
+      { internalLedger, requestContainsDuration },
     );
   }
 
@@ -457,7 +498,6 @@ async function runSuite(): Promise<void> {
       }),
     });
 
-    // Enforce disclosure gate against an identity claim with missing business name
     const gateResult = enforceDisclosure({
       context: built,
       response: {
@@ -500,13 +540,392 @@ async function runSuite(): Promise<void> {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // PART 2: Safe Failure / Handoff Reply Resolution (Repair B)
+  // PART 1b: Reviewer Counterexample & Grounding Regressions (Section 3)
   // ════════════════════════════════════════════════════════════════════════════
   console.log(
-    "\n── Part 2: Safe Failure / Handoff Reply Resolution (Repair B) ──",
+    "\n── Part 1b: Disclosure Boundary Grounding Regressions (Section 3) ──",
   );
 
-  // B1: Pure resolver maps provider outage / retry exhaustion to PROVIDER_FAILURE copy
+  // D1: Supported identity-only answer succeeds without customer keyword triggers
+  {
+    const built = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          about: "",
+          address: "",
+        },
+        services: [],
+        message: "مرحبا ممكن استفسار بسيط؟",
+      }),
+    });
+
+    const response: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "أيوه، مركز رعاية الأسنان التخصصي معاك. تحب نساعدك إزاي؟",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      goals: [
+        {
+          kind: "ANSWER",
+          intent: "FAQ",
+          requiredKnowledge: "business.identity",
+        },
+      ],
+    };
+
+    const gateResult = enforceDisclosure({ context: built, response });
+
+    check(
+      "D1. Supported identity-only answer succeeds without customer keyword triggers",
+      gateResult.kind === "disclosed" &&
+        eq(gateResult.support[0], "business.identity") &&
+        isExplicitIdentityResponse(response),
+      gateResult,
+    );
+  }
+
+  // D2: Unsupported price without business name is refused
+  {
+    const built = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          name: "مركز رعاية الأسنان التخصصي",
+          faqs: [],
+          about: "",
+          address: "",
+        },
+        services: [],
+      }),
+    });
+
+    const response: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "سعر الكشف 300 جنيه للجلسة.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+
+    const gateResult = enforceDisclosure({ context: built, response });
+
+    check(
+      "D2. Unsupported price without business name is refused",
+      gateResult.kind === "requires-human",
+      gateResult,
+    );
+  }
+
+  // D3: Unsupported price WITH the authoritative business name is ALSO refused (Reviewer Counterexample)
+  {
+    const built = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          name: "مركز أفنان",
+          faqs: [],
+          about: "",
+          address: "",
+        },
+        services: [],
+      }),
+    });
+
+    // Replay of the reviewer's counterexample:
+    // FAQ reply mentioning the exact true business name, but asserting an unsupported price
+    const reviewerCounterexample: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "في مركز أفنان سعر الكشف 999 جنيه.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+
+    const gateResult = enforceDisclosure({
+      context: built,
+      response: reviewerCounterexample,
+    });
+
+    check(
+      "D3. Unsupported price with authoritative business name is strictly refused (Reviewer Counterexample)",
+      gateResult.kind === "requires-human",
+      gateResult,
+    );
+  }
+
+  // D4: Unsupported procedure/detail with the business name is refused
+  {
+    const built = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          name: "مركز أفنان",
+          faqs: [],
+          about: "",
+          address: "",
+        },
+        services: [],
+      }),
+    });
+
+    const procedureClaim: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content:
+        "في مركز أفنان نقوم بزراعة الأسنان في 10 دقائق فقط بدون أي جراحة وبأحدث أجهزة الليزر.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+
+    const gateResult = enforceDisclosure({
+      context: built,
+      response: procedureClaim,
+    });
+
+    check(
+      "D4. Unsupported procedure/detail with business name is strictly refused",
+      gateResult.kind === "requires-human",
+      gateResult,
+    );
+  }
+
+  // D5: Missing or foreign-tenant identity cannot authorize a reply
+  {
+    const missingNameBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          name: "",
+          about: "",
+          address: "",
+        },
+        services: [],
+      }),
+    });
+
+    const identityResponse: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "أهلاً بك",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      goals: [
+        {
+          kind: "ANSWER",
+          intent: "FAQ",
+          requiredKnowledge: "business.identity",
+        },
+      ],
+    };
+
+    const missingResult = enforceDisclosure({
+      context: missingNameBuilt,
+      response: identityResponse,
+    });
+
+    const foreignTenantBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          businessId: TENANT_B,
+          name: "مركز أجنبي",
+          about: "",
+          address: "",
+        },
+        services: [],
+      }),
+    });
+
+    const foreignResult = enforceDisclosure({
+      context: foreignTenantBuilt,
+      response: identityResponse,
+    });
+
+    check(
+      "D5. Missing or foreign-tenant identity cannot authorize a reply",
+      missingResult.kind === "requires-human" && foreignResult.kind === "requires-human",
+      { missingResult, foreignResult },
+    );
+  }
+
+  // D6: Existing legitimately supported price/catalog/address behavior remains valid under its own contracts
+  {
+    // D6a. Legitimate price channel
+    const priceBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          about: "",
+          address: "",
+        },
+        services: [
+          {
+            id: "s1",
+            businessId: TENANT_A,
+            name: "تنظيف جير",
+            description: null,
+            durationMinutes: 30,
+            priceType: "FIXED",
+            priceAmount: 400,
+            priceCurrency: "EGP",
+          },
+        ],
+        message: "بكام تنظيف الجير؟",
+      }),
+    });
+
+    const priceReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "سعر تنظيف الجير 400 EGP.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+    const priceResult = enforceDisclosure({ context: priceBuilt, response: priceReply });
+
+    // D6b. Legitimate address channel
+    const addressBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          address: "شارع مصطفى كامل 15",
+          about: "",
+        },
+        services: [],
+        message: "عنوانكم فين؟",
+      }),
+    });
+
+    const addressReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "عنواننا في شارع مصطفى كامل 15.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+    const addressResult = enforceDisclosure({
+      context: addressBuilt,
+      response: addressReply,
+    });
+
+    // D6c. Legitimate catalog channel
+    const catalogBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: baseSources({
+        business: {
+          ...baseSources().business,
+          about: "",
+          address: "",
+        },
+        services: [
+          {
+            id: "s1",
+            businessId: TENANT_A,
+            name: "تنظيف جير",
+            description: null,
+            durationMinutes: 30,
+          },
+        ],
+        message: "ايه الخدمات اللي عندكم؟",
+      }),
+    });
+
+    const catalogReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "الخدمة المتاحة لدينا هي تنظيف جير.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+    };
+    const catalogResult = enforceDisclosure({
+      context: catalogBuilt,
+      response: catalogReply,
+    });
+
+    check(
+      "D6. Legitimate price, address, and catalog replies remain valid under their respective channels",
+      priceResult.kind === "disclosed" &&
+        priceResult.support.includes("service.price") &&
+        addressResult.kind === "disclosed" &&
+        addressResult.support.includes("business.address") &&
+        catalogResult.kind === "disclosed" &&
+        catalogResult.support.includes("service.name"),
+      { priceResult, addressResult, catalogResult },
+    );
+  }
+
+  // D7: Bounded domain rendering ensures model prose never overrides authoritative identity
+  {
+    const h = createEngineHarness({
+      about: null,
+      address: null,
+      services: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          // Model attempts to include arbitrary prose / price alongside identity
+          content: "نحن مركز رعاية الأسنان وسعر الكشف 888 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              requiredKnowledge: "business.identity",
+            },
+          ],
+        }),
+      ],
+    });
+
+    const res = await h.runInbound("أنتم مين بالضبط؟", "d7-identity");
+
+    const sentMessages = h.getSent();
+    const expectedBounded = buildBusinessIdentityContent(
+      "مركز رعاية الأسنان التخصصي",
+    );
+
+    check(
+      "D7. Bounded domain rendering supersedes model prose with authoritative identity copy",
+      isSuccess(res) &&
+        res.conversationStatus === "AI_ACTIVE" &&
+        res.assistantAction === "AI_REPLY" &&
+        sentMessages.length === 1 &&
+        sentMessages[0] === expectedBounded &&
+        !sentMessages[0].includes("888"),
+      { sentMessages, expectedBounded },
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PART 2: Safe Failure / Handoff Reply Resolution (Repair B & Section 5)
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log(
+    "\n── Part 2: Safe Failure / Handoff Reply Resolution (Repair B & Section 5) ──",
+  );
+
+  // B1: Pure resolver maps provider outage / retry exhaustion to honest PROVIDER_FAILURE copy
   {
     const replyTimeout = resolveSafeFailureReply({
       controlHandoffReason: "RETRY_EXHAUSTED",
@@ -522,16 +941,17 @@ async function runSuite(): Promise<void> {
     });
 
     check(
-      "B1. Provider outage & retry exhaustion map to safe provider difficulty copy",
+      "B1. Provider outage & retry exhaustion map to honest, non-promissory failure copy",
       eq(replyTimeout, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyUnavailable, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyQuota, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         replyTimeout ===
-          "واجهت صعوبة مؤقتة في الرد — سيتواصل معك أحد أعضاء الفريق الآن.",
+          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+      { replyTimeout },
     );
   }
 
-  // B2: Pure resolver maps malformed/unparseable output to INVALID_OUTPUT copy
+  // B2: Pure resolver maps malformed/unparseable output to neutral INVALID_OUTPUT copy (no customer blame)
   {
     const replyInvalid = resolveSafeFailureReply({
       controlHandoffReason: null,
@@ -541,13 +961,15 @@ async function runSuite(): Promise<void> {
       controlHandoffReason: "UNSUPPORTED_REQUEST",
       failureCause: "AI_FAILURE",
     });
+    const replyDefault = resolveSafeFailureReply({});
 
     check(
-      "B2. Invalid or absent structured output maps to safe generic handoff copy",
+      "B2. Invalid or absent structured output maps to neutral safe handoff copy without customer blame",
       eq(replyInvalid, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyUnsupported, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
-        replyInvalid ===
-          "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+        eq(replyDefault, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
+        replyInvalid === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+      { replyInvalid },
     );
   }
 
@@ -580,12 +1002,12 @@ async function runSuite(): Promise<void> {
     );
   }
 
-  // B5: Disclosure refusal constant matches canonical knowledge-gap reply
+  // B5: Disclosure refusal constant matches canonical neutral handoff copy
   {
     check(
-      "B5. Disclosure refusal constant matches canonical knowledge-gap copy byte-for-byte",
+      "B5. Disclosure refusal constant matches canonical neutral assistance copy",
       SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED ===
-        "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
+        "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
     );
   }
 
@@ -614,7 +1036,6 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    // Test with customer text that previously would have matched "BOOKING" keyword
     const res1 = await h1.runInbound("عايز أحجز كشف أسنان بكرة", "t1-fail");
 
     check(
@@ -625,11 +1046,10 @@ async function runSuite(): Promise<void> {
         res1.handoffCause === "RETRY_EXHAUSTED" &&
         h1.getSent().length === 1 &&
         h1.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — سيتواصل معك أحد أعضاء الفريق الآن.",
+          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
       { res1, sent: h1.getSent() },
     );
 
-    // Assert lexical independence: completely different customer text gets identical typed failure reply
     const h2 = createEngineHarness({
       responders: [
         async () => {
@@ -654,30 +1074,54 @@ async function runSuite(): Promise<void> {
         res2.conversationStatus === "NEED_HUMAN" &&
         res2.handoffCause === "PROVIDER_FAILURE" &&
         h2.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — سيتواصل معك أحد أعضاء الفريق الآن.",
+          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
     );
   }
 
-  // C3: Malformed structured output produces INVALID_OUTPUT copy and AI_FAILURE cause
+  // C3a: Genuinely invalid structured output exercises response validation failure
   {
     const h = createEngineHarness({
       responders: [
-        async () => {
-          throw new Error("Malformed JSON: unexpected token");
-        },
+        async () =>
+          ({
+            notAValidAiResponse: true,
+            bogusIntent: "UNKNOWN_123",
+          }) as unknown as AiResponse,
       ],
     });
 
-    const res = await h.runInbound("أنا مستفسر عن مواعيد العمل", "t3-invalid");
+    const res = await h.runInbound("أنا مستفسر عن مواعيد العمل", "t3-invalid-schema");
 
     check(
-      "C3. Malformed structured output produces safe invalid-output reply and AI_FAILURE cause",
+      "C3a. Genuinely invalid structured output fails validation and produces safe failure reply",
       isSuccess(res) &&
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] ===
-          "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+        h.getSent()[0] === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+      { res, sent: h.getSent() },
+    );
+  }
+
+  // C3b: Thrown runtime adapter error is covered independently
+  {
+    const h = createEngineHarness({
+      responders: [
+        async () => {
+          throw new Error("Unexpected network abort from provider");
+        },
+      ],
+    });
+
+    const res = await h.runInbound("عندي استفسار", "t3-thrown-err");
+
+    check(
+      "C3b. Thrown adapter error produces safe failure reply and AI_FAILURE cause",
+      isSuccess(res) &&
+        res.conversationStatus === "NEED_HUMAN" &&
+        res.assistantAction === "AI_HANDOFF" &&
+        res.handoffCause === "AI_FAILURE" &&
+        h.getSent()[0] === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
       { res, sent: h.getSent() },
     );
   }
@@ -698,7 +1142,6 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    // Customer text with booking keyword: structured HUMAN_REQUEST must NOT be hijacked by lexical booking
     const res = await h.runInbound(
       "لو سمحت عايز موظف يساعدني في الحجز",
       "t4-human",
@@ -730,7 +1173,6 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    // Customer text with greeting word: safety precedence must deliver sensitive reply directly
     const res = await h.runInbound("أهلاً، ألم شديد ونزيف حاد", "t5-sensitive");
 
     check(
@@ -747,14 +1189,15 @@ async function runSuite(): Promise<void> {
   // C6: Disclosure Refusal (B-03) drops unbacked reply and sends safe refusal acknowledgment
   {
     const h = createEngineHarness({
-      faqs: [], // Empty FAQ store
-      about: null, // No about description
-      address: null, // No address line
+      faqs: [],
+      about: null,
+      address: null,
+      services: [],
       responders: [
         async () => ({
           intent: "FAQ",
           action: "reply",
-          content: "سعر الكشف 300 جنيه شامل الأشعة.", // Unbacked self-authored price claim
+          content: "سعر الكشف 300 جنيه شامل الأشعة.",
           extraction: emptyExtraction,
           handoffReason: null,
           summary: null,
@@ -771,26 +1214,140 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "POLICY_REFUSED" &&
         !h.getSent().some((s) => s.includes("300")) &&
-        h.getSent()[0] === "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
+        h.getSent()[0] === "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
       { res, sent: h.getSent() },
     );
   }
 
-  // C7: Zero appointments created and single-model-call guarantee across all failure/handoff branches
+  // C7: Repository-seam appointment creation attempts are strictly zero across all failure/handoff branches
   {
-    const h = createEngineHarness({
+    // Test 5 distinct failure & handoff paths:
+    // 1. Provider outage
+    const hProvider = createEngineHarness({
       responders: [
         async () => {
-          throw new Error("Provider failure");
+          throw new Error("Provider down");
+        },
+      ],
+      telemetry: [
+        {
+          finalProvider: "atria",
+          finalStatus: "FAILURE",
+          attempts: [],
+          conversationControl: { handoffReason: "PROVIDER_UNAVAILABLE" },
         },
       ],
     });
+    const resProvider = await hProvider.runInbound("عايز أحجز ميعاد الساعة 5", "t7-branch1");
 
-    await h.runInbound("عايز أحجز ميعاد الساعة 5", "t7-zero-appts");
+    // 2. Invalid AI response
+    const hInvalid = createEngineHarness({
+      responders: [
+        async () =>
+          ({
+            notValid: true,
+          }) as unknown as AiResponse,
+      ],
+    });
+    const resInvalid = await hInvalid.runInbound("عايز أحجز كشف", "t7-branch2");
+
+    // 3. Explicit human request
+    const hHuman = createEngineHarness({
+      responders: [
+        async () => ({
+          intent: "HUMAN_REQUEST",
+          action: "handoff",
+          content: "حاضر",
+          extraction: emptyExtraction,
+          handoffReason: "HUMAN_REQUEST",
+          summary: "طلب موظف",
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+    const resHuman = await hHuman.runInbound("وصلني بموظف الحجز", "t7-branch3");
+
+    // 4. Sensitive emergency
+    const hSensitive = createEngineHarness({
+      responders: [
+        async () => ({
+          intent: "AMBIGUOUS",
+          action: "handoff",
+          content: "حالة طارئة",
+          extraction: emptyExtraction,
+          handoffReason: "SENSITIVE",
+          summary: "نزيف حاد",
+          safetyAssessment: "sensitive",
+        }),
+      ],
+    });
+    const resSensitive = await hSensitive.runInbound("نزيف شديد بعد خلع الضرس", "t7-branch4");
+
+    // 5. Disclosure refusal
+    const hDisclosure = createEngineHarness({
+      faqs: [],
+      about: null,
+      address: null,
+      services: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الزراعة 15000 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+    const resDisclosure = await hDisclosure.runInbound("بكام الزراعة؟", "t7-branch5");
+
+    const zeroAppointmentsAll =
+      hProvider.getAppointmentAttempts() === 0 &&
+      hInvalid.getAppointmentAttempts() === 0 &&
+      hHuman.getAppointmentAttempts() === 0 &&
+      hSensitive.getAppointmentAttempts() === 0 &&
+      hDisclosure.getAppointmentAttempts() === 0;
+
+    const singleAiBoundaryInvocationAll =
+      hProvider.getProviderInvocations() === 1 &&
+      hInvalid.getProviderInvocations() === 1 &&
+      hHuman.getProviderInvocations() === 1 &&
+      hSensitive.getProviderInvocations() === 1 &&
+      hDisclosure.getProviderInvocations() === 1;
+
+    const deliveryCompletedAll =
+      hProvider.getSent().length === 1 &&
+      hInvalid.getSent().length === 1 &&
+      hHuman.getSent().length === 1 &&
+      hSensitive.getSent().length === 1 &&
+      hDisclosure.getSent().length === 1;
+
+    const statusNeedHumanAll =
+      isSuccess(resProvider) &&
+      resProvider.conversationStatus === "NEED_HUMAN" &&
+      isSuccess(resInvalid) &&
+      resInvalid.conversationStatus === "NEED_HUMAN" &&
+      isSuccess(resHuman) &&
+      resHuman.conversationStatus === "NEED_HUMAN" &&
+      isSuccess(resSensitive) &&
+      resSensitive.conversationStatus === "NEED_HUMAN" &&
+      isSuccess(resDisclosure) &&
+      resDisclosure.conversationStatus === "NEED_HUMAN";
 
     check(
-      "C7. Failure/handoff paths spend strictly at most 1 model call and create zero appointments",
-      h.getProviderCalls() === 1,
+      "C7. Domain seam verifies strictly zero appointment creation attempts across all failure/handoff branches",
+      zeroAppointmentsAll &&
+        singleAiBoundaryInvocationAll &&
+        deliveryCompletedAll &&
+        statusNeedHumanAll,
+      {
+        zeroAppointmentsAll,
+        singleAiBoundaryInvocationAll,
+        deliveryCompletedAll,
+        statusNeedHumanAll,
+      },
     );
   }
 

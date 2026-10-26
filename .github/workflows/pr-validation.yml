@@ -114,6 +114,9 @@ jobs:
           pnpm check:provider-failure-diagnostics
           pnpm check:semantic-authority-repair
 
+      - name: Base-versus-HEAD handoff-cause reconciliation
+        run: pnpm check:compare-handoff-cause
+
   ux-qa:
     name: Automated Browser UX QA (Playwright)
     runs-on: ubuntu-latest
