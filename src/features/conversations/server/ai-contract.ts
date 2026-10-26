@@ -562,6 +562,8 @@ const aiResponseBase = {
   // ── Additive target-architecture fields (OPTIONAL; unused by producers today)
   /** Structured goals when a producer can express more than one intent. */
   goals: z.array(aiGoalSchema).max(8).optional(),
+  /** Optional top-level requiredKnowledge label for single-intent responses. */
+  requiredKnowledge: z.string().trim().min(1).max(64).optional(),
   /** A proposed clarification (the engine decides; later slice). */
   clarification: aiClarificationSchema.optional(),
   /** An explicit typed handoff cause (the engine maps it; later slice). */
@@ -635,7 +637,15 @@ function goalKindForDecision(response: AiResponse): AiGoalKind {
  */
 export function synthesizeDecisionGoals(response: AiResponse): AiGoal[] {
   if (response.goals && response.goals.length > 0) return [...response.goals];
-  return [{ kind: goalKindForDecision(response), intent: response.intent }];
+  return [
+    {
+      kind: goalKindForDecision(response),
+      intent: response.intent,
+      ...(response.requiredKnowledge
+        ? { requiredKnowledge: response.requiredKnowledge }
+        : {}),
+    },
+  ];
 }
 
 /** The single-step TurnPlan a no-goals decision implies (Slice 0 observation). */

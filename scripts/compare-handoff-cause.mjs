@@ -2,9 +2,9 @@
 /**
  * FlowPilot — CI Base-versus-HEAD Handoff-Cause Comparison
  *
- * Runs scripts/check-handoff-cause.ts in isolated checkouts on both BASE and HEAD,
- * preserving exit codes, capturing outputs, explicitly checking for pre-existing
- * failures E10 & E12b, and preventing any new regressions.
+ * Runs scripts/check-handoff-cause.ts in isolated checkouts on both BASE and HEAD.
+ * Validates execution integrity, parses and validates check counts, ensures fail-closed
+ * behavior on crashes, spawn errors, or missing cases, and reports E10/E12b explicitly.
  */
 import { execSync, spawnSync } from "node:child_process";
 import {
@@ -21,7 +21,9 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-function getBaseCommit() {
+export const KNOWN_PERMISSIBLE_FAILURES = ["E10", "E12b"];
+
+export function getBaseCommit() {
   const candidates = [
     process.env.BASE_COMMIT,
     process.env.GITHUB_BASE_REF
@@ -44,7 +46,7 @@ function getBaseCommit() {
   return "22e64f9c40e93bb11c48d0efe55fc9cd6e1ad205";
 }
 
-function getHeadCommit() {
+export function getHeadCommit() {
   try {
     return execSync("git rev-parse HEAD", {
       cwd: root,
@@ -55,8 +57,46 @@ function getHeadCommit() {
   }
 }
 
-function parseOutput(rawOutput, exitCode) {
-  const lines = rawOutput.split("\n");
+export function extractCheckCode(label) {
+  const match = label.match(/^([A-Za-z0-9_-]+)\./);
+  return match ? match[1] : label.split(" ")[0];
+}
+
+export function validateRunExecution(name, run) {
+  if (run.error) {
+    return {
+      ok: false,
+      error: `${name} process execution error: ${run.error.message || String(run.error)}`,
+    };
+  }
+  if (run.signal) {
+    return {
+      ok: false,
+      error: `${name} process terminated abnormally by signal: ${run.signal}`,
+    };
+  }
+
+  const raw = run.rawOutput || "";
+  const summaryMatch = raw.match(
+    /(PASS|FAIL)\s*—\s*(\d+)\/(\d+)\s*checks passed/,
+  );
+  if (!summaryMatch) {
+    return {
+      ok: false,
+      error: `${name} missing canonical test summary line in output (possible early exit, syntax error, or unhandled exception)`,
+    };
+  }
+
+  const passed = Number(summaryMatch[2]);
+  const total = Number(summaryMatch[3]);
+  if (!Number.isInteger(total) || total <= 0) {
+    return {
+      ok: false,
+      error: `${name} reported invalid or zero total checks: ${total}`,
+    };
+  }
+
+  const lines = raw.split("\n");
   const failedChecks = [];
   const passedChecks = [];
   for (const line of lines) {
@@ -67,23 +107,143 @@ function parseOutput(rawOutput, exitCode) {
       passedChecks.push(trimmed.slice(2).trim());
     }
   }
-  const summaryMatch = rawOutput.match(
-    /(PASS|FAIL)\s*—\s*(\d+)\/(\d+)\s*checks passed/,
-  );
-  const passed = summaryMatch ? Number(summaryMatch[2]) : passedChecks.length;
-  const total = summaryMatch
-    ? Number(summaryMatch[3])
-    : passedChecks.length + failedChecks.length;
+
+  if (passedChecks.length !== passed) {
+    return {
+      ok: false,
+      error: `${name} output passed checks line count (${passedChecks.length}) does not match summary count (${passed})`,
+    };
+  }
+
+  const expectedFailed = total - passed;
+  if (failedChecks.length !== expectedFailed) {
+    return {
+      ok: false,
+      error: `${name} output failed checks line count (${failedChecks.length}) does not match summary failed count (${expectedFailed})`,
+    };
+  }
+
+  const exitCode = run.exitCode ?? (run.error ? 1 : 0);
+  if (failedChecks.length === 0 && exitCode !== 0) {
+    return {
+      ok: false,
+      error: `${name} process exited with code ${exitCode} but zero checks failed`,
+    };
+  }
+  if (failedChecks.length > 0 && exitCode !== 1) {
+    return {
+      ok: false,
+      error: `${name} process exited with code ${exitCode} but ${failedChecks.length} checks failed (expected exit 1)`,
+    };
+  }
+
   return {
-    exitCode,
-    passed,
-    total,
-    failedChecks,
-    passedChecks,
+    ok: true,
+    parsed: {
+      exitCode,
+      passed,
+      total,
+      failedChecks,
+      passedChecks,
+      summaryFound: true,
+    },
   };
 }
 
-function runCheckInDir(dir) {
+export function evaluateHandoffComparison(baseRun, headRun) {
+  const baseVal = validateRunExecution("BASE", baseRun);
+  if (!baseVal.ok) {
+    return { pass: false, error: baseVal.error, baseVal, headVal: null };
+  }
+
+  const headVal = validateRunExecution("HEAD", headRun);
+  if (!headVal.ok) {
+    return { pass: false, error: headVal.error, baseVal, headVal };
+  }
+
+  const base = baseVal.parsed;
+  const head = headVal.parsed;
+
+  // 1. Suite completeness: HEAD must execute at least as many checks as BASE
+  if (head.total < base.total) {
+    return {
+      pass: false,
+      error: `Incomplete check set: HEAD executed ${head.total} checks, fewer than BASE (${base.total})`,
+      baseVal,
+      headVal,
+    };
+  }
+
+  // 2. Missing executed cases: Every check code executed on BASE must exist on HEAD
+  const headExecutedCodes = new Set([
+    ...head.passedChecks.map(extractCheckCode),
+    ...head.failedChecks.map(extractCheckCode),
+  ]);
+  const baseExecutedCodes = [
+    ...base.passedChecks.map(extractCheckCode),
+    ...base.failedChecks.map(extractCheckCode),
+  ];
+  const missingCases = baseExecutedCodes.filter(
+    (code) => !headExecutedCodes.has(code),
+  );
+  if (missingCases.length > 0) {
+    return {
+      pass: false,
+      error: `Missing executed cases on HEAD that existed on BASE: ${missingCases.join(", ")}`,
+      baseVal,
+      headVal,
+    };
+  }
+
+  // 3. Regressions: Failures on HEAD that did not exist on BASE
+  const baseFailedCodes = new Set(base.failedChecks.map(extractCheckCode));
+  const newFailures = head.failedChecks.filter(
+    (f) => !baseFailedCodes.has(extractCheckCode(f)),
+  );
+  if (newFailures.length > 0) {
+    return {
+      pass: false,
+      error: `New regressions introduced on HEAD: ${newFailures.join(", ")}`,
+      baseVal,
+      headVal,
+    };
+  }
+
+  // 4. Permissible known failures check: Failures on HEAD must strictly belong to reviewed permissible list
+  const unknownFailures = head.failedChecks.filter((f) => {
+    const code = extractCheckCode(f);
+    return !KNOWN_PERMISSIBLE_FAILURES.includes(code);
+  });
+  if (unknownFailures.length > 0) {
+    return {
+      pass: false,
+      error: `Unreviewed failure(s) on HEAD not in permissible known-failures set: ${unknownFailures.join(", ")}`,
+      baseVal,
+      headVal,
+    };
+  }
+
+  // 5. Success classification: improvement vs identical known failures
+  if (head.failedChecks.length < base.failedChecks.length) {
+    return {
+      pass: true,
+      classification: "VERIFIED_IMPROVEMENT",
+      message: `Verified improvement: HEAD passed ${head.passed}/${head.total} (BASE passed ${base.passed}/${base.total}) with 0 regressions`,
+      baseVal,
+      headVal,
+    };
+  }
+
+  return {
+    pass: true,
+    classification: "IDENTICAL_KNOWN_FAILURES",
+    message: `Reconciliation verified: Both BASE and HEAD exhibit identical pre-existing failures (${head.failedChecks.map(extractCheckCode).join(", ")}), 0 regressions`,
+    baseVal,
+    headVal,
+  };
+}
+
+export function runCheckInDir(dir) {
   const scriptPath = join(dir, "scripts/check-handoff-cause.ts");
   if (!existsSync(scriptPath)) {
     throw new Error(`scripts/check-handoff-cause.ts not found in ${dir}`);
@@ -104,7 +264,8 @@ function runCheckInDir(dir) {
   return {
     exitCode,
     rawOutput,
-    parsed: parseOutput(rawOutput, exitCode),
+    error: res.error ?? null,
+    signal: res.signal ?? null,
   };
 }
 
@@ -137,7 +298,6 @@ async function main() {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Symlink root node_modules and generated files into tempDir so tsx and prisma client resolve without install
     const sourceNodeModules = join(root, "node_modules");
     const targetNodeModules = join(tempDir, "node_modules");
     if (existsSync(sourceNodeModules) && !existsSync(targetNodeModules)) {
@@ -176,90 +336,71 @@ async function main() {
   console.log("  COMPARISON RECONCILIATION SUMMARY                     ");
   console.log("========================================================");
 
-  console.log(
-    `BASE (${baseCommit.slice(0, 8)}): exit=${baseResult.exitCode}, passed=${baseResult.parsed.passed}/${baseResult.parsed.total}`,
-  );
-  console.log(
-    `HEAD (${headCommit.slice(0, 8)}): exit=${headResult.exitCode}, passed=${headResult.parsed.passed}/${headResult.parsed.total}`,
-  );
+  const evalResult = evaluateHandoffComparison(baseResult, headResult);
 
-  console.log("\nBASE Failed Checks:");
-  for (const f of baseResult.parsed.failedChecks) {
-    console.log(`  - ${f}`);
-  }
+  if (evalResult.baseVal?.parsed && evalResult.headVal?.parsed) {
+    const b = evalResult.baseVal.parsed;
+    const h = evalResult.headVal.parsed;
+    console.log(
+      `BASE (${baseCommit.slice(0, 8)}): exit=${b.exitCode}, passed=${b.passed}/${b.total}`,
+    );
+    console.log(
+      `HEAD (${headCommit.slice(0, 8)}): exit=${h.exitCode}, passed=${h.passed}/${h.total}`,
+    );
 
-  console.log("\nHEAD Failed Checks:");
-  for (const f of headResult.parsed.failedChecks) {
-    console.log(`  - ${f}`);
-  }
+    console.log("\nBASE Failed Checks:");
+    for (const f of b.failedChecks) {
+      console.log(`  - ${f}`);
+    }
 
-  // Check for regressions
-  const baseFailedSet = new Set(baseResult.parsed.failedChecks);
-  const newFailures = headResult.parsed.failedChecks.filter(
-    (f) => !baseFailedSet.has(f),
-  );
+    console.log("\nHEAD Failed Checks:");
+    for (const f of h.failedChecks) {
+      console.log(`  - ${f}`);
+    }
 
-  const headFailsE10 = headResult.parsed.failedChecks.some((f) =>
-    f.includes("E10"),
-  );
-  const headFailsE12b = headResult.parsed.failedChecks.some((f) =>
-    f.includes("E12b"),
-  );
-  const baseFailsE10 = baseResult.parsed.failedChecks.some((f) =>
-    f.includes("E10"),
-  );
-  const baseFailsE12b = baseResult.parsed.failedChecks.some((f) =>
-    f.includes("E12b"),
-  );
-
-  console.log("\n--- Invariant Analysis ---");
-  console.log(
-    `BASE fails E10: ${baseFailsE10} | BASE fails E12b: ${baseFailsE12b}`,
-  );
-  console.log(
-    `HEAD fails E10: ${headFailsE10} | HEAD fails E12b: ${headFailsE12b}`,
-  );
-  console.log(`New failures introduced by HEAD: ${newFailures.length}`);
-
-  // Write step summary if running in GitHub Actions
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    try {
-      const summaryMd = `
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      try {
+        const summaryMd = `
 ### 🔍 Base-versus-HEAD Handoff-Cause Reconciliation
 
 | Revision | Commit SHA | Exit Code | Checks Passed | Failed Checks |
 |---|---|---|---|---|
-| **BASE** | \`${baseCommit.slice(0, 10)}\` | \`${baseResult.exitCode}\` | ${baseResult.parsed.passed}/${baseResult.parsed.total} | ${baseResult.parsed.failedChecks.map((c) => `\`${c.split(" ")[0]}\``).join(", ") || "None"} |
-| **HEAD** | \`${headCommit.slice(0, 10)}\` | \`${headResult.exitCode}\` | ${headResult.parsed.passed}/${headResult.parsed.total} | ${headResult.parsed.failedChecks.map((c) => `\`${c.split(" ")[0]}\``).join(", ") || "None"} |
+| **BASE** | \`${baseCommit.slice(0, 10)}\` | \`${b.exitCode}\` | ${b.passed}/${b.total} | ${b.failedChecks.map((c) => `\`${extractCheckCode(c)}\``).join(", ") || "None"} |
+| **HEAD** | \`${headCommit.slice(0, 10)}\` | \`${h.exitCode}\` | ${h.passed}/${h.total} | ${h.failedChecks.map((c) => `\`${extractCheckCode(c)}\``).join(", ") || "None"} |
 
-**Explicit Known-Failure Classification**:
-- Pre-existing on main: \`E10\` (tenant misconfiguration fallback to clarification in mock), \`E12b\` (HUMAN_REQUEST intent resolved as CUSTOMER_REQUESTED_HUMAN rather than SENSITIVE_OR_RESTRICTED).
-- Both revisions demonstrate identical exit status (\`${baseResult.exitCode}\` vs \`${headResult.exitCode}\`) and pass rates (${headResult.parsed.passed}/${headResult.parsed.total}).
-- Net regressions introduced by HEAD: **${newFailures.length}**.
+**Reconciliation Verdict**: \`${evalResult.classification ?? (evalResult.pass ? "PASS" : "FAIL")}\`
+${evalResult.message || evalResult.error}
+
+**Contract Observation (Unresolved Upstream Items)**:
+- \`E10\` (Tenant configuration): Inactive service triggers clarification inquiry in mock rather than direct tenant misconfiguration handoff.
+- \`E12b\` (Safety precedence): Model \`HUMAN_REQUEST\` intent resolved as \`CUSTOMER_REQUESTED_HUMAN\` rather than \`SENSITIVE_OR_RESTRICTED\`.
 `;
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, "utf8");
-    } catch (e) {
-      console.warn("Could not write GITHUB_STEP_SUMMARY:", e);
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, "utf8");
+      } catch (e) {
+        console.warn("Could not write GITHUB_STEP_SUMMARY:", e);
+      }
     }
   }
 
-  if (newFailures.length > 0) {
-    console.error(
-      "\n❌ REGRESSION DETECTED: HEAD introduced new failures not present on BASE:",
-    );
-    for (const nf of newFailures) {
-      console.error(`  - ${nf}`);
-    }
+  if (!evalResult.pass) {
+    console.error(`\n❌ COMPARISON FAILED: ${evalResult.error}`);
     process.exit(1);
   }
 
-  console.log("\n✅ RECONCILIATION RESULT: PASS");
   console.log(
-    "No new regressions introduced. Both revisions fail identically on pre-existing E10 and E12b.",
+    `\n✅ RECONCILIATION RESULT: PASS (${evalResult.classification})`,
   );
+  console.log(evalResult.message);
 }
 
-main().catch((err) => {
-  console.error("Comparison execution error:", err);
-  process.exit(1);
-});
+// When executed directly as CLI script
+if (
+  process.argv[1] &&
+  (process.argv[1].endsWith("compare-handoff-cause.mjs") ||
+    process.argv[1].endsWith("compare-handoff-cause"))
+) {
+  main().catch((err) => {
+    console.error("Comparison execution error:", err);
+    process.exit(1);
+  });
+}

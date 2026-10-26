@@ -886,18 +886,31 @@ async function runSuite(): Promise<void> {
     );
   }
 
-  // D7: Bounded domain rendering ensures model prose never overrides authoritative identity
+  // D7a: Populated context with about/address/catalog present: Identity with unbacked prose
+  // cannot bypass bounded domain rendering via unrelated business.about
   {
     const h = createEngineHarness({
-      about: null,
-      address: null,
-      services: [],
+      about: "عيادة تخصصية لطب وجراحة الفم والأسنان بأحدث التقنيات",
+      address: "15 شارع النصر، المعادي، القاهرة",
+      services: [
+        {
+          id: "s1",
+          businessId: TENANT_A,
+          name: "كشف أسنان",
+          description: "فحص شامل وتشخيص كامل",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+          priceType: "FIXED",
+          durationMinutes: 20,
+        },
+      ],
       responders: [
         async () => ({
           intent: "FAQ",
           action: "reply",
-          // Model attempts to include arbitrary prose / price alongside identity
-          content: "نحن مركز رعاية الأسنان وسعر الكشف 888 جنيه.",
+          // Model authored unbacked prose with fabricated price alongside identity goal
+          content:
+            "في مركز رعاية الأسنان التخصصي سعر الكشف 999 جنيه ومواعيدنا يومياً.",
           extraction: emptyExtraction,
           handoffReason: null,
           summary: null,
@@ -913,22 +926,241 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const res = await h.runInbound("أنتم مين بالضبط؟", "d7-identity");
-
+    const res = await h.runInbound("أنتم مين؟", "d7a-pop-identity");
     const sentMessages = h.getSent();
     const expectedBounded = buildBusinessIdentityContent(
       "مركز رعاية الأسنان التخصصي",
     );
 
     check(
-      "D7. Bounded domain rendering supersedes model prose with authoritative identity copy",
+      "D7a. Populated context (about/address/services present) does NOT bypass bounded identity rendering",
       isSuccess(res) &&
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
         sentMessages[0] === expectedBounded &&
-        !sentMessages[0].includes("888"),
+        !sentMessages[0].includes("999") &&
+        !sentMessages[0].includes("عيادة تخصصية"),
       { sentMessages, expectedBounded },
+    );
+  }
+
+  // D7b: Populated context: Supported non-identity price answer remains correct
+  {
+    const h = createEngineHarness({
+      about: "عيادة تخصصية لطب وجراحة الفم والأسنان",
+      address: "15 شارع النصر، المعادي",
+      services: [
+        {
+          id: "s1",
+          businessId: TENANT_A,
+          name: "كشف أسنان",
+          description: null,
+          priceAmount: 300,
+          priceCurrency: "EGP",
+          priceType: "FIXED",
+          durationMinutes: 20,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر كشف الأسنان 300 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+
+    const res = await h.runInbound("سعر الكشف كام؟", "d7b-pop-price");
+    const sentMessages = h.getSent();
+
+    check(
+      "D7b. Supported non-identity price answer is preserved and NOT replaced by identity rendering",
+      isSuccess(res) &&
+        res.conversationStatus === "AI_ACTIVE" &&
+        res.assistantAction === "AI_REPLY" &&
+        sentMessages.length === 1 &&
+        sentMessages[0] === "سعر كشف الأسنان 300 جنيه.",
+      { sentMessages },
+    );
+  }
+
+  // D7c: Populated context: Supported non-identity address answer remains correct
+  {
+    const h = createEngineHarness({
+      about: "عيادة تخصصية لطب وجراحة الفم والأسنان",
+      address: "15 شارع النصر، المعادي",
+      services: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "عنوان العيادة في 15 شارع النصر، المعادي.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+
+    const res = await h.runInbound("عنوانكم فين؟", "d7c-pop-address");
+    const sentMessages = h.getSent();
+
+    check(
+      "D7c. Supported non-identity address answer is preserved and NOT replaced by identity rendering",
+      isSuccess(res) &&
+        res.conversationStatus === "AI_ACTIVE" &&
+        res.assistantAction === "AI_REPLY" &&
+        sentMessages.length === 1 &&
+        sentMessages[0] === "عنوان العيادة في 15 شارع النصر، المعادي.",
+      { sentMessages },
+    );
+  }
+
+  // D7d: Populated context: Mixed goals (Identity Answer + Booking Action) preserves both
+  {
+    const h = createEngineHarness({
+      about: "عيادة تخصصية لطب وجراحة الفم والأسنان",
+      address: "15 شارع النصر، المعادي",
+      services: [
+        {
+          id: "s1",
+          businessId: TENANT_A,
+          name: "كشف أسنان",
+          description: null,
+          priceAmount: 300,
+          priceCurrency: "EGP",
+          priceType: "FIXED",
+          durationMinutes: 20,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نحن المركز التخصصي",
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              requiredKnowledge: "business.identity",
+              priority: 10,
+            },
+            {
+              kind: "DOMAIN_ACTION",
+              intent: "BOOKING",
+              priority: 20,
+              continueAfter: true,
+            },
+          ],
+        }),
+      ],
+    });
+
+    const res = await h.runInbound(
+      "أنتم مين وعايز أحجز كشف أسنان؟",
+      "d7d-mixed-goals",
+    );
+    const sentMessages = h.getSent();
+    const expectedBounded = buildBusinessIdentityContent(
+      "مركز رعاية الأسنان التخصصي",
+    );
+
+    check(
+      "D7d. Mixed goals preserve bounded identity answer AND append continuation invite for domain goal",
+      isSuccess(res) &&
+        res.conversationStatus === "AI_ACTIVE" &&
+        res.assistantAction === "AI_REPLY" &&
+        sentMessages.length === 1 &&
+        sentMessages[0].startsWith(expectedBounded) &&
+        sentMessages[0].includes("تحب نحدد ميعاد مناسب لحجزك؟"),
+      { sentMessages },
+    );
+  }
+
+  // D7e: Populated context: Single-intent identity using top-level canonical signal
+  {
+    const h = createEngineHarness({
+      about: "عيادة تخصصية لطب وجراحة الفم والأسنان",
+      address: "15 شارع النصر، المعادي",
+      services: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          requiredKnowledge: "business.identity",
+          content: "أيوه إحنا المركز",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+
+    const res = await h.runInbound("اسم المركز ايه؟", "d7e-single-signal");
+    const sentMessages = h.getSent();
+    const expectedBounded = buildBusinessIdentityContent(
+      "مركز رعاية الأسنان التخصصي",
+    );
+
+    check(
+      "D7e. Single-intent identity using top-level signal delivers canonical bounded identity copy",
+      isSuccess(res) &&
+        res.conversationStatus === "AI_ACTIVE" &&
+        res.assistantAction === "AI_REPLY" &&
+        sentMessages.length === 1 &&
+        sentMessages[0] === expectedBounded,
+      { sentMessages },
+    );
+  }
+
+  // D7f: Missing or invalid signal fails safe closed to policy refused without guessing
+  {
+    const h = createEngineHarness({
+      about: null,
+      address: null,
+      services: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          // Missing requiredKnowledge: "business.identity" and missing goals
+          content: "نحن المركز التخصصي",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+
+    const res = await h.runInbound("أنتم مين؟", "d7f-missing-signal");
+    const sentMessages = h.getSent();
+
+    check(
+      "D7f. Missing identity machine signal fails closed to AI_HANDOFF with POLICY_REFUSED",
+      isSuccess(res) &&
+        res.conversationStatus === "NEED_HUMAN" &&
+        res.assistantAction === "AI_HANDOFF" &&
+        res.handoffCause === "POLICY_REFUSED" &&
+        sentMessages.length === 1 &&
+        sentMessages[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED,
+      { res, sentMessages },
     );
   }
 

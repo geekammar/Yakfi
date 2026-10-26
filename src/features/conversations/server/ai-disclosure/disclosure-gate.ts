@@ -56,10 +56,12 @@
  */
 
 import type { ContextFactRecord } from "@/features/conversations/server/ai-context-builder";
-import type {
-  AiIntent,
-  AiRequest,
-  AiResponse,
+import {
+  synthesizeDecisionGoals,
+  type AiGoal,
+  type AiIntent,
+  type AiRequest,
+  type AiResponse,
 } from "@/features/conversations/server/ai-contract";
 
 // ─── Decisions (typed, never free text) ─────────────────────────────────────
@@ -344,20 +346,25 @@ function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
 }
 
 /**
- * Determine whether a response explicitly declares an identity answer via structured goals.
- * Used under structured turns to prevent business.identity from acting as a wildcard license
- * for arbitrary unbacked prose (e.g. fabricated prices or procedure claims).
+ * Determine whether a goal explicitly targets business identity via the canonical machine signal.
+ */
+export function isExplicitIdentityGoal(
+  goal: AiGoal | null | undefined,
+): boolean {
+  return (
+    goal?.kind === "ANSWER" && goal.requiredKnowledge === "business.identity"
+  );
+}
+
+/**
+ * Determine whether a response explicitly declares an identity answer.
+ * Uses the canonical synthesizeDecisionGoals bridge to check explicit goals or top-level signal.
  */
 export function isExplicitIdentityResponse(response: AiResponse): boolean {
-  return Boolean(
-    response.goals?.some(
-      (g) =>
-        g.kind === "ANSWER" &&
-        (g.requiredKnowledge === "business.identity" ||
-          g.requiredKnowledge === "BUSINESS_IDENTITY" ||
-          g.intent === "BUSINESS_IDENTITY"),
-    ),
-  );
+  const goals = synthesizeDecisionGoals(response);
+  const primaryAnswerGoal =
+    goals.find((g) => g.kind === "ANSWER") ?? goals[0] ?? null;
+  return isExplicitIdentityGoal(primaryAnswerGoal);
 }
 
 // ─── The gate ────────────────────────────────────────────────────────────────
@@ -404,13 +411,46 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
   }
 
-  // Try each candidate support family in order (FAQ may be backed by the FAQ
-  // store OR the task-gated service-price channel — PROMPT-AI-ARCH-13). The
-  // reply is disclosed as soon as ONE candidate is included + disclosable +
-  // carried. If none qualifies, the PRIMARY family's refusal reason is
-  // returned, preserving the existing single-family behavior for every intent
-  // other than a price-backed FAQ.
-  const candidates = candidateSupportFamilies(response.intent);
+  // Determine the active answer goal for this turn
+  const goals = synthesizeDecisionGoals(response);
+  const currentAnswerGoal =
+    goals.find((g) => g.kind === "ANSWER") ?? goals[0] ?? null;
+  const isIdentity = isExplicitIdentityGoal(currentAnswerGoal);
+
+  // If the current answer goal explicitly targets business.identity:
+  // Its ONLY permissible support family is business.identity.
+  // Unrelated channels (businessAbout, servicePrice, businessAddress, etc.) cannot authorize an identity answer.
+  if (isIdentity) {
+    const candidate = {
+      family: "business.identity" as const,
+      channel: "businessName",
+    };
+    const record = ledger.find((fact) => fact.key === candidate.family);
+    if (!record || !record.included) {
+      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+    }
+    if (!record.disclosable) {
+      return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+    }
+    if (!channelCarried(context.request, candidate.channel)) {
+      return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+    }
+    return {
+      kind: "disclosed",
+      response,
+      support: [candidate.family],
+    };
+  }
+
+  // For non-identity goals:
+  // On structured turns, business.identity is NOT a candidate for general FAQ/non-identity answers.
+  // Candidates are evaluated in order (faq, price, about, address, description, name).
+  const isStructured =
+    context.request.requiredSemanticCapability === "structured_turn";
+  const candidates = candidateSupportFamilies(response.intent).filter(
+    (c) => !(isStructured && c.family === "business.identity"),
+  );
+
   let primaryRefusal: DisclosureRefusalReason | null = null;
   for (const candidate of candidates) {
     if (!candidate.family) continue;
@@ -424,20 +464,6 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       continue;
     }
     if (!channelCarried(context.request, candidate.channel)) {
-      if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
-      continue;
-    }
-    // The business.identity aggregate family (PROMPT-AI-UX-02) licenses disclosing
-    // the canonical business identity/name. Under structured turns, business.identity
-    // is available in context without lexical gating. To prevent a business display name
-    // from becoming a wildcard license for arbitrary unbacked prose (such as unsupported
-    // price or procedure claims), business.identity only backs a reply that is explicitly
-    // typed as an identity answer via structured goals.
-    if (
-      candidate.family === "business.identity" &&
-      context.request.requiredSemanticCapability === "structured_turn" &&
-      !isExplicitIdentityResponse(response)
-    ) {
       if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
       continue;
     }

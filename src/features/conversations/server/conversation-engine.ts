@@ -90,6 +90,7 @@ import {
 import {
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
+  isExplicitIdentityGoal,
 } from "@/features/conversations/server/ai-disclosure";
 import type {
   AiRoutingDecision,
@@ -7528,10 +7529,14 @@ async function runInboundTurn(
       };
     }
     // Bounded domain rendering for business identity (PROMPT-AI-UX-02 / Semantic Authority Repair):
-    // An identity reply is backed by the authoritative business.name fact. To ensure that an
-    // explicit identity goal never licenses arbitrary prose or unsupported claims in the reply,
-    // the domain renders the canonical, bounded Arabic identity acknowledgement.
-    const content = disclosure.support.includes("business.identity")
+    // An identity reply is backed by the authoritative business.name fact. When the turn's
+    // active answer goal is business identity (or backed by business.identity support), the domain
+    // renders the canonical, bounded Arabic identity acknowledgement, guaranteeing that arbitrary
+    // unbacked prose (such as fabricated prices or procedure claims) is never emitted.
+    const isIdentityAnswer =
+      disclosure.support.includes("business.identity") ||
+      isExplicitIdentityGoal(resolvedTurn?.plan?.steps[0]);
+    const content = isIdentityAnswer
       ? buildBusinessIdentityContent(business.name)
       : disclosure.response.content;
 
