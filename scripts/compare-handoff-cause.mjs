@@ -7,7 +7,13 @@
  * failures E10 & E12b, and preventing any new regressions.
  */
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,17 +136,26 @@ async function main() {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Symlink root node_modules into tempDir so tsx and dependencies resolve without install
+    // Symlink root node_modules and generated files into tempDir so tsx and prisma client resolve without install
     const sourceNodeModules = join(root, "node_modules");
     const targetNodeModules = join(tempDir, "node_modules");
     if (existsSync(sourceNodeModules) && !existsSync(targetNodeModules)) {
       symlinkSync(sourceNodeModules, targetNodeModules, "junction");
     }
 
+    const sourceGenerated = join(root, "src/generated");
+    const targetGenerated = join(tempDir, "src/generated");
+    if (existsSync(sourceGenerated) && !existsSync(targetGenerated)) {
+      symlinkSync(sourceGenerated, targetGenerated, "junction");
+    }
+
     baseResult = runCheckInDir(tempDir);
     console.log(baseResult.rawOutput);
     console.log(`BASE exit code: ${baseResult.exitCode}\n`);
   } finally {
+    try {
+      rmSync(join(tempDir, "src/generated"), { force: true, recursive: false });
+    } catch {}
     try {
       rmSync(join(tempDir, "node_modules"), { force: true, recursive: false });
     } catch {}
@@ -221,10 +236,7 @@ async function main() {
 - Both revisions demonstrate identical exit status (\`${baseResult.exitCode}\` vs \`${headResult.exitCode}\`) and pass rates (${headResult.parsed.passed}/${headResult.parsed.total}).
 - Net regressions introduced by HEAD: **${newFailures.length}**.
 `;
-      execSync(
-        `echo "${summaryMd.replace(/"/g, '\\"')}" >> "$GITHUB_STEP_SUMMARY"`,
-        { shell: "bash" },
-      );
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, "utf8");
     } catch (e) {
       console.warn("Could not write GITHUB_STEP_SUMMARY:", e);
     }
