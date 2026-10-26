@@ -282,7 +282,10 @@ async function persistenceSection(): Promise<void> {
       resolveAssistantName("مساعد عيادة أفنان") === "مساعد عيادة أفنان",
   );
 
-  // F01 — Assistant response detail: inherited default vs explicit override & unchanged initial dirty/save semantics.
+  // F01 (Service & Storage Layer) — Assistant response detail:
+  // Verifies storage-level unset semantics, runtime default resolution, and partial-update preservation.
+  // Full component lifecycle, RHF isDirty tracking, Save button states, and form payload submission
+  // are exercised separately by the mounted test suite in `assistant-settings-screen.test.tsx`.
   const freshDetailBiz = makeDeps(makeBusiness());
   const freshDetailView = asView(
     await getAssistantSettings(freshDetailBiz, ADMIN),
@@ -291,23 +294,21 @@ async function persistenceSection(): Promise<void> {
     await freshDetailBiz.businessRepository.findById("business-1")
   )?.assistantStyle;
   const freshRuntime = resolveAssistantStyle(freshStored);
-  const initialFormDetail = freshDetailView?.detail ?? undefined;
 
-  // 1. Unset detail in storage yields null view, inherits runtime default "short", and form initialization is undefined (isDirty = false)
+  // 1. Unset detail in storage yields null view and inherits runtime default "short"
   const unsetPreserved =
     freshDetailView !== null &&
     freshDetailView.detail === null &&
-    freshRuntime.detail === "short" &&
-    initialFormDetail === undefined;
+    freshRuntime.detail === "short";
 
-  // 2. Partial save of another field never silently persists detail (preserves unset semantics)
+  // 2. Partial save of another field never silently persists detail (preserves unset semantics in storage)
   await updateAssistantSettings(freshDetailBiz, ADMIN, { name: "اسم جديد" });
   const postSaveView = asView(
     await getAssistantSettings(freshDetailBiz, ADMIN),
   );
   const unsetAfterSave = postSaveView !== null && postSaveView.detail === null;
 
-  // 3. Explicit override is saved and distinguished from inherited default
+  // 3. Explicit override is saved and distinguished from inherited default at runtime
   await updateAssistantSettings(freshDetailBiz, ADMIN, { detail: "balanced" });
   const overrideView = asView(
     await getAssistantSettings(freshDetailBiz, ADMIN),
@@ -322,7 +323,7 @@ async function persistenceSection(): Promise<void> {
     overrideRuntime.detail === "balanced";
 
   record(
-    "F01 تتبع بُعد طول الردود: التمييز بين الافتراضي الموروث والتخصيص الصريح وثبات سلوك الحفظ بدون تخزين صامت",
+    "F01 تتبع بُعد طول الردود في الخدمة: التمييز بين الافتراضي الموروث والتخصيص الصريح وثبات سلوك التخزين دون حفظ صامت",
     unsetPreserved && unsetAfterSave && explicitDistinguished,
   );
 }

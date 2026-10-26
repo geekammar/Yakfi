@@ -58,7 +58,7 @@ function ChoiceGroup<
 }) {
   return (
     <RadioGroup
-      value={value ?? undefined}
+      value={value ?? ""}
       onValueChange={onChange}
       className="gap-2.5"
     >
