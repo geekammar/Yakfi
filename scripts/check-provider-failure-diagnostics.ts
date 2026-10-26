@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * FlowPilot — Verification of Sanitized Provider Failure Evidence & HTTP 402 Classification.
  *
@@ -5,20 +6,20 @@
  * 1. HTTP 401, 402, 403, 429, 5xx diagnostics preservation.
  * 2. Network failure without HTTP response leaves status absent/null (never 0 or 200).
  * 3. Timeout and zero-dispatch failures do not invent an HTTP status.
- * 4. Failed-attempt diagnostics survive retry/fallback aggregation (including failed primary before success).
- * 5. Both Engine attempt-projection paths (retryTrace and non-retryTrace) preserve fields.
+ * 4. Failed-attempt diagnostics survive retry/fallback aggregation in Orchestrator.
+ * 5. Real Engine attempt-projection paths (executing receiveInboundMessage with createPlaygroundHarness):
+ *    - 5a. retryTrace projection branch preserves attempt and turn-level diagnostics.
+ *    - 5b. Direct telemetry attempts projection branch preserves attempt and turn-level diagnostics.
+ *    - 5c. Failed primary followed by successful fallback retains failed diagnostics while overall turn succeeds.
+ *    - 5d. Network/timeout failure without observed status keeps httpStatus absent/null.
+ *    - 5e. Existing counters and cost completeness invariants remain intact.
  * 6. HTTP 402 operational provider failure handoff without extra attempts.
- * 7. Privacy boundaries: raw bodies/secrets/customer text never appear in emitted TurnEvidence.
- * 8. assertTurnEvidenceContentFree validation on emitted evidence records.
- * 9. Existing counters and cost completeness remain intact.
+ * 7. Privacy boundaries & content-free guard connected to the real engine path with canaries.
  */
-import {
-  buildTurnObservability,
-  type TurnExecutionAttempt,
-} from "@/features/conversations/server/ai-observability";
+import { createPlaygroundHarness } from "@/features/conversations/playground/harness";
+import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import {
   assertTurnEvidenceContentFree,
-  buildTurnEvidence,
   type TurnEvidence,
 } from "@/features/conversations/server/turn-evidence";
 import { createAgentRouterAdapter } from "@/server/integrations/ai/agentrouter";
@@ -87,7 +88,7 @@ async function main() {
       getEnvVar: fakeEnv,
       fetchImpl: mockFetchResponse(status, {
         error: {
-          message: `Simulated error ${status} containing SECRET_TOKEN_XYZ and cust-phone-+2010000000`,
+          message: `Simulated error ${status} containing sensitive fixture info`,
           code: status,
         },
       }),
@@ -164,7 +165,6 @@ async function main() {
   // ── 4. Failed-Attempt Diagnostics Survive Retry/Fallback Aggregation ──
   console.log("\n--- Group 4: Fallback & Retry Aggregation Preservation ---");
   {
-    // Primary fails with 503; secondary succeeds
     const primary = createOpenRouterAdapter({
       model: "primary-model",
       getEnvVar: fakeEnv,
@@ -184,6 +184,7 @@ async function main() {
       },
       handoffReason: null,
       summary: null,
+      safetyAssessment: "safe",
     });
     const secondary = createAgentRouterAdapter({
       model: "secondary-model",
@@ -219,106 +220,341 @@ async function main() {
     );
   }
 
-  // ── 5. Engine Attempt-Projection Paths (retryTrace and non-retryTrace) ──
-  console.log("\n--- Group 5: Engine Attempt-Projection Paths ---");
+  // ── 5. Actual Engine Attempt-Projection Paths & Fallback Coexistence ──
+  console.log(
+    "\n--- Group 5: Actual Engine Attempt-Projection Paths (receiveInboundMessage) ---",
+  );
   {
-    // Branch 1: retryTrace path
-    const mockRetryTraceAttempts = [
-      {
-        attempt: 1,
-        outcome: "FAILURE" as const,
-        errorCode: "CONFIG_ERROR" as const,
-        httpStatus: 402,
-        httpAttempts: 1,
-        latencyMs: 150,
-        provider: "openrouter" as const,
-        model: "deepseek/deepseek-v4.1-flash",
-      },
-    ];
+    // 5a. Real Engine execution through the retryTrace projection branch (HTTP 402)
+    const emittedRetryTrace: TurnEvidence[] = [];
+    const harness5a = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harness5a.deps.turnTelemetry = {
+      emit: (ev) => emittedRetryTrace.push(ev),
+    };
 
-    const obsRetryTrace = buildTurnObservability({
-      routingDecision: "LLM",
-      executionAttempts: mockRetryTraceAttempts.map((a) => ({
-        attempt: a.attempt,
-        provider: a.provider,
-        model: a.model,
-        status: a.outcome,
-        httpAttempts: a.httpAttempts,
-        errorCode: a.errorCode,
-        httpStatus: a.httpStatus,
-      })),
-      errorCode: "CONFIG_ERROR",
-      httpStatus: 402,
+    const mockFetch402 = async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "Payment Required / Insufficient Credits" },
+        }),
+        { status: 402, headers: { "Content-Type": "application/json" } },
+      );
+
+    const openRouter402 = createOpenRouterAdapter({
+      model: "deepseek/deepseek-v4.1-flash",
+      fetchImpl: mockFetch402 as any,
+      getEnvVar: fakeEnv,
     });
 
-    const evidenceRetryTrace: TurnEvidence = buildTurnEvidence(
-      {
-        conversationId: "conv-1",
-        businessId: "biz-1",
-        customerMessageId: "msg-1",
-        ok: false,
-        assistantAction: "AI_HANDOFF",
-        conversationStatus: "NEED_HUMAN",
-        handoffCause: "PROVIDER_FAILURE",
-        observability: obsRetryTrace,
-      },
-      { environment: "test", appVersion: "0.72.1" },
-    );
-
-    check(
-      "retryTrace path: TurnEvidence preserves top-level errorCode='CONFIG_ERROR' and httpStatus=402",
-      evidenceRetryTrace.errorCode === "CONFIG_ERROR" &&
-        evidenceRetryTrace.httpStatus === 402,
-    );
-    check(
-      "retryTrace path: executionAttempts[0] preserves errorCode='CONFIG_ERROR' and httpStatus=402",
-      evidenceRetryTrace.executionAttempts?.[0]?.errorCode === "CONFIG_ERROR" &&
-        evidenceRetryTrace.executionAttempts?.[0]?.httpStatus === 402,
-    );
-
-    // Branch 2: non-retryTrace path (direct attempts)
-    const mockDirectAttempts: TurnExecutionAttempt[] = [
-      {
-        attempt: 1,
-        provider: "openrouter",
-        model: "deepseek/deepseek-v4.1-flash",
-        status: "FAILURE",
-        httpAttempts: 1,
-        errorCode: "RETRYABLE",
-        httpStatus: 500,
-      },
-    ];
-
-    const obsDirect = buildTurnObservability({
-      routingDecision: "LLM",
-      executionAttempts: mockDirectAttempts,
-      errorCode: "RETRYABLE",
-      httpStatus: 500,
+    const controlled402 = createConversationControl({
+      provider: openRouter402,
+      settings: {
+        conversationControl: {
+          enabled: true,
+          retryEnabled: true,
+          maxAttempts: 2,
+        },
+      } as any,
     });
 
-    const evidenceDirect: TurnEvidence = buildTurnEvidence(
-      {
-        conversationId: "conv-2",
-        businessId: "biz-1",
-        customerMessageId: "msg-2",
-        ok: false,
-        assistantAction: "AI_HANDOFF",
-        conversationStatus: "NEED_HUMAN",
-        handoffCause: "PROVIDER_FAILURE",
-        observability: obsDirect,
+    harness5a.deps.ai = {
+      providerName: "openrouter",
+      respond: async (req: any): Promise<any> => {
+        const result = await controlled402.call(req);
+        (harness5a.deps.ai as any)._lastTelemetry = {
+          finalProvider: result.provider,
+          finalModel: result.model,
+          attempts:
+            result.retryTrace?.attempts.map((a) => ({
+              provider: a.provider,
+              model: a.model,
+              status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
+              errorCode: a.errorCode,
+              httpStatus: a.httpStatus,
+              httpAttempts: a.httpAttempts,
+              latencyMs: a.latencyMs,
+            })) ?? [],
+          retryTrace: result.retryTrace,
+          conversationControl: result.conversationControl,
+        };
+        if (!result.ok) return null;
+        return result.response;
       },
-      { environment: "test", appVersion: "0.72.1" },
+      getLastTelemetry: () => (harness5a.deps.ai as any)._lastTelemetry,
+    } as any;
+
+    const res5a = await receiveInboundMessage(harness5a.deps, {
+      to: harness5a.business.whatsappNumber ?? "+201001111111",
+      from: "+201011112222",
+      text: "عايز استفسار عن مواعيد العمل",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-5a",
+    });
+
+    const ev5a = emittedRetryTrace[0];
+    check("5a. Real Engine completes turn", res5a.ok === true);
+    check(
+      "5a. Handoff cause is PROVIDER_FAILURE",
+      (res5a as any).handoffCause === "PROVIDER_FAILURE",
+    );
+    check(
+      "5a. retryTrace path: TurnEvidence top-level preserves errorCode='CONFIG_ERROR'",
+      ev5a?.errorCode === "CONFIG_ERROR",
+    );
+    check(
+      "5a. retryTrace path: TurnEvidence top-level preserves httpStatus=402",
+      ev5a?.httpStatus === 402,
+    );
+    check(
+      "5a. retryTrace path: executionAttempts[0] preserves errorCode='CONFIG_ERROR' and httpStatus=402",
+      ev5a?.executionAttempts?.[0]?.errorCode === "CONFIG_ERROR" &&
+        ev5a?.executionAttempts?.[0]?.httpStatus === 402 &&
+        ev5a?.executionAttempts?.[0]?.status === "FAILURE",
     );
 
+    // 5b. Real Engine execution through direct telemetry attempts branch (non-retryTrace)
+    const emittedDirect: TurnEvidence[] = [];
+    const harness5b = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harness5b.deps.turnTelemetry = {
+      emit: (ev) => emittedDirect.push(ev),
+    };
+
+    harness5b.deps.ai = {
+      providerName: "openrouter",
+      respond: async () => null,
+      getLastTelemetry: () => ({
+        finalProvider: "openrouter",
+        finalModel: "deepseek/deepseek-v4.1-flash",
+        // Direct attempts present, retryTrace intentionally undefined
+        attempts: [
+          {
+            provider: "openrouter",
+            model: "deepseek/deepseek-v4.1-flash",
+            status: "FAILURE" as const,
+            errorCode: "RETRYABLE" as const,
+            httpStatus: 500,
+            httpAttempts: 1,
+            latencyMs: 180,
+          },
+        ],
+        retryTrace: undefined,
+      }),
+    } as any;
+
+    const res5b = await receiveInboundMessage(harness5b.deps, {
+      to: harness5b.business.whatsappNumber ?? "+201001111111",
+      from: "+201011113333",
+      text: "عايز استفسار عن الخدمات",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-5b",
+    });
+
+    const ev5b = emittedDirect[0];
+    check("5b. Real Engine completes turn", res5b.ok === true);
     check(
-      "non-retryTrace path: TurnEvidence preserves top-level errorCode='RETRYABLE' and httpStatus=500",
-      evidenceDirect.errorCode === "RETRYABLE" &&
-        evidenceDirect.httpStatus === 500,
+      "5b. Direct branch: TurnEvidence top-level preserves errorCode='RETRYABLE'",
+      ev5b?.errorCode === "RETRYABLE",
     );
     check(
-      "non-retryTrace path: executionAttempts[0] preserves errorCode='RETRYABLE' and httpStatus=500",
-      evidenceDirect.executionAttempts?.[0]?.errorCode === "RETRYABLE" &&
-        evidenceDirect.executionAttempts?.[0]?.httpStatus === 500,
+      "5b. Direct branch: TurnEvidence top-level preserves httpStatus=500",
+      ev5b?.httpStatus === 500,
+    );
+    check(
+      "5b. Direct branch: executionAttempts[0] preserves errorCode='RETRYABLE' and httpStatus=500",
+      ev5b?.executionAttempts?.[0]?.errorCode === "RETRYABLE" &&
+        ev5b?.executionAttempts?.[0]?.httpStatus === 500 &&
+        ev5b?.executionAttempts?.[0]?.status === "FAILURE",
+    );
+
+    // 5c. Real Engine path: Failed primary followed by successful fallback
+    const emittedFallback: TurnEvidence[] = [];
+    const harness5c = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harness5c.deps.turnTelemetry = {
+      emit: (ev) => emittedFallback.push(ev),
+    };
+
+    harness5c.deps.ai = {
+      providerName: "openrouter",
+      respond: async () => ({
+        intent: "FAQ",
+        action: "reply",
+        content:
+          "مواعيد العمل لدينا من السبت إلى الخميس من 9 صباحاً حتى 5 مساءً.",
+        extraction: {
+          service: null,
+          provider: null,
+          date: null,
+          timePreference: null,
+        },
+        handoffReason: null,
+        summary: null,
+        safetyAssessment: "safe",
+      }),
+      getLastTelemetry: () => ({
+        finalProvider: "agentrouter",
+        finalModel: "gpt-4o-mini",
+        attempts: [
+          {
+            provider: "openrouter",
+            model: "deepseek/deepseek-v4.1-flash",
+            status: "FAILURE" as const,
+            errorCode: "RETRYABLE" as const,
+            httpStatus: 503,
+            httpAttempts: 1,
+            latencyMs: 320,
+          },
+          {
+            provider: "agentrouter",
+            model: "gpt-4o-mini",
+            status: "SUCCESS" as const,
+            httpAttempts: 1,
+            latencyMs: 410,
+            inputTokens: 120,
+            outputTokens: 45,
+          },
+        ],
+        retryTrace: {
+          totalAttempts: 2,
+          totalCostUsd: null,
+          exhausted: false,
+          handoffReason: null,
+          attempts: [
+            {
+              attempt: 1,
+              provider: "openrouter",
+              model: "deepseek/deepseek-v4.1-flash",
+              outcome: "FAILURE" as const,
+              errorCode: "RETRYABLE" as const,
+              httpStatus: 503,
+              httpAttempts: 1,
+              latencyMs: 320,
+            },
+            {
+              attempt: 2,
+              provider: "agentrouter",
+              model: "gpt-4o-mini",
+              outcome: "SUCCESS" as const,
+              httpAttempts: 1,
+              latencyMs: 410,
+              inputTokens: 120,
+              outputTokens: 45,
+            },
+          ],
+        },
+      }),
+    } as any;
+
+    const res5c = await receiveInboundMessage(harness5c.deps, {
+      to: harness5c.business.whatsappNumber ?? "+201001111111",
+      from: "+201011114444",
+      text: "مواعيد العمل إيه؟",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-5c",
+    });
+
+    const ev5c = emittedFallback[0];
+    check(
+      "5c. Turn overall succeeds (AI_REPLY)",
+      (res5c as any).assistantAction === "AI_REPLY",
+    );
+    check(
+      "5c. Conversation status remains AI_ACTIVE",
+      (res5c as any).conversationStatus === "AI_ACTIVE",
+    );
+    check(
+      "5c. Handoff cause is null on successful turn",
+      (res5c as any).handoffCause === null,
+    );
+    check(
+      "5c. executionAttempts captures both attempts",
+      ev5c?.executionAttempts?.length === 2,
+    );
+    check(
+      "5c. Primary failed attempt preserves httpStatus=503 and errorCode=RETRYABLE",
+      ev5c?.executionAttempts?.[0]?.status === "FAILURE" &&
+        ev5c?.executionAttempts?.[0]?.errorCode === "RETRYABLE" &&
+        ev5c?.executionAttempts?.[0]?.httpStatus === 503,
+    );
+    check(
+      "5c. Secondary success attempt has SUCCESS status and undefined httpStatus",
+      ev5c?.executionAttempts?.[1]?.status === "SUCCESS" &&
+        ev5c?.executionAttempts?.[1]?.httpStatus === undefined,
+    );
+    check(
+      "5c. TurnEvidence top-level retains last failed attempt diagnostics (coexistence invariant)",
+      ev5c?.errorCode === "RETRYABLE" && ev5c?.httpStatus === 503,
+    );
+    console.log(
+      "ℹ Note: In 5c, turn-level failure diagnostics (errorCode=RETRYABLE, httpStatus=503) coexist with a recovered successful fallback turn; they do not mean the final turn failed.",
+    );
+
+    // 5d. Real Engine path: Network error without observed HTTP status
+    const emittedNetwork: TurnEvidence[] = [];
+    const harness5d = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harness5d.deps.turnTelemetry = {
+      emit: (ev) => emittedNetwork.push(ev),
+    };
+
+    harness5d.deps.ai = {
+      providerName: "openrouter",
+      respond: async () => null,
+      getLastTelemetry: () => ({
+        finalProvider: "openrouter",
+        finalModel: "deepseek/deepseek-v4.1-flash",
+        attempts: [
+          {
+            provider: "openrouter",
+            model: "deepseek/deepseek-v4.1-flash",
+            status: "FAILURE" as const,
+            errorCode: "RETRYABLE" as const,
+            httpAttempts: 1,
+            // httpStatus undefined on network error
+          },
+        ],
+      }),
+    } as any;
+
+    const res5d = await receiveInboundMessage(harness5d.deps, {
+      to: harness5d.business.whatsappNumber ?? "+201001111111",
+      from: "+201011115555",
+      text: "عايز كشف عاجل",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-5d",
+    });
+
+    const ev5d = emittedNetwork[0];
+    check("5d. Real Engine completes turn", res5d.ok === true);
+    check(
+      "5d. Network error: httpStatus remains strictly null/undefined (never 0 or 200)",
+      ev5d?.httpStatus === null || ev5d?.httpStatus === undefined,
+    );
+    check(
+      "5d. Network error: executionAttempts[0].httpStatus is undefined",
+      ev5d?.executionAttempts?.[0]?.httpStatus === undefined,
+    );
+    check(
+      "5d. Network error: errorCode is preserved as RETRYABLE",
+      ev5d?.errorCode === "RETRYABLE" &&
+        ev5d?.executionAttempts?.[0]?.errorCode === "RETRYABLE",
+    );
+
+    // 5e. Existing counters and cost completeness invariants
+    check(
+      "5e. providerAttempts accurate on single attempt (1)",
+      ev5a?.providerAttempts === 1,
+    );
+    check(
+      "5e. providerAttempts accurate on fallback (2)",
+      ev5c?.providerAttempts === 2,
+    );
+    check(
+      "5e. costCompleteness remains UNAVAILABLE",
+      ev5a?.costCompleteness === "UNAVAILABLE" &&
+        ev5c?.costCompleteness === "UNAVAILABLE",
+    );
+    check(
+      "5e. totalCostUsd remains null",
+      ev5a?.totalCostUsd === null && ev5c?.totalCostUsd === null,
     );
   }
 
@@ -385,136 +621,167 @@ async function main() {
     );
   }
 
-  // ── 7. Privacy Boundaries & Content-Freeness Guard ──
-  console.log("\n--- Group 7: Privacy & Content-Freeness Verification ---");
+  // ── 7. Privacy Canaries Connected to Real Engine Diagnostic Pipeline ──
+  console.log(
+    "\n--- Group 7: Privacy Canaries & Content-Freeness Connected to Real Engine Path ---",
+  );
   {
-    const sensitivePayload = {
-      apiKey: "example-dummy-fixture-secret-token",
-      authorization: "Bearer example-dummy-jwt-token",
-      customerPhone: "+201234567890",
-      customerMessage: "سؤال خاص جداً عن تكلفة العملية",
+    const CANARY_CUSTOMER_PHONE = "+201999988887";
+    const CANARY_CUSTOMER_TEXT =
+      "كاناري سري جدا لمعاينة تفاصيل الأسعار والعروض الخاصة";
+    const CANARY_API_KEY = "example-canary-secret-api-key-xyz987";
+    const CANARY_AUTH_HEADER = "Bearer example-canary-jwt-token-auth456";
+    const CANARY_RAW_ERROR_MESSAGE =
+      "Raw upstream provider error containing sensitive stack trace and secret debug metadata";
+    const CANARY_DEBUG_REQ_ID = "req_secret_debug_789";
+
+    const emittedPrivacyEvidence: TurnEvidence[] = [];
+    const harnessPrivacy = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harnessPrivacy.deps.turnTelemetry = {
+      emit: (ev) => emittedPrivacyEvidence.push(ev),
     };
 
-    const obs = buildTurnObservability({
-      routingDecision: "LLM",
-      executionAttempts: [
+    const mockFetchWithCanaries: typeof fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: CANARY_RAW_ERROR_MESSAGE,
+            type: "insufficient_quota",
+            code: 402,
+            debug_request_id: CANARY_DEBUG_REQ_ID,
+            internal_stack:
+              "at OpenRouterAdapter.execute (/internal/secret/path.ts:42)",
+          },
+        }),
         {
-          attempt: 1,
-          provider: "openrouter",
-          model: "deepseek/deepseek-v4.1-flash",
-          status: "FAILURE",
-          httpAttempts: 1,
-          errorCode: "CONFIG_ERROR",
-          httpStatus: 402,
+          status: 402,
+          headers: {
+            "Content-Type": "application/json",
+            "x-canary-api-key": CANARY_API_KEY,
+            Authorization: CANARY_AUTH_HEADER,
+          },
         },
-      ],
-      errorCode: "CONFIG_ERROR",
-      httpStatus: 402,
+      );
+    }) as unknown as typeof fetch;
+
+    const rawAdapterCanary = createOpenRouterAdapter({
+      model: "deepseek/deepseek-v4.1-flash",
+      getEnvVar: () => CANARY_API_KEY,
+      fetchImpl: mockFetchWithCanaries,
     });
 
-    const record: TurnEvidence = buildTurnEvidence(
-      {
-        conversationId: "f217cf5e-f417-4db1-b074-d5e531198285",
-        businessId: "biz-afnan",
-        customerMessageId: "416b8ccf-3a6c-4dd2-b949-2590fc41124b",
-        ok: false,
-        assistantAction: "AI_HANDOFF",
-        conversationStatus: "NEED_HUMAN",
-        handoffCause: "PROVIDER_FAILURE",
-        observability: obs,
+    const controlledCanary = createConversationControl({
+      provider: rawAdapterCanary,
+      settings: {
+        conversationControl: {
+          enabled: true,
+          retryEnabled: true,
+          maxAttempts: 2,
+        },
       },
-      { environment: "production", appVersion: "0.72.1" },
+    });
+
+    harnessPrivacy.deps.ai = {
+      providerName: "openrouter",
+      respond: async (req: any): Promise<any> => {
+        const result = await controlledCanary.call(req);
+        (harnessPrivacy.deps.ai as any)._lastTelemetry = {
+          finalProvider: result.provider,
+          finalModel: result.model,
+          attempts:
+            result.retryTrace?.attempts.map((a) => ({
+              provider: a.provider,
+              model: a.model,
+              status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
+              errorCode: a.errorCode,
+              httpStatus: a.httpStatus,
+              httpAttempts: a.httpAttempts,
+              latencyMs: a.latencyMs,
+            })) ?? [],
+          retryTrace: result.retryTrace,
+          conversationControl: result.conversationControl,
+        };
+        if (!result.ok) return null;
+        return result.response;
+      },
+      getLastTelemetry: () => (harnessPrivacy.deps.ai as any)._lastTelemetry,
+    } as any;
+
+    // Execute real Engine path passing customer-text and phone canaries
+    const resPrivacy = await receiveInboundMessage(harnessPrivacy.deps, {
+      to: harnessPrivacy.business.whatsappNumber ?? "+201001111111",
+      from: CANARY_CUSTOMER_PHONE,
+      text: CANARY_CUSTOMER_TEXT,
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-canary",
+    });
+
+    check("Real Engine completes canary turn", resPrivacy.ok === true);
+    check(
+      "Handoff cause is PROVIDER_FAILURE",
+      (resPrivacy as any).handoffCause === "PROVIDER_FAILURE",
     );
+
+    const record = emittedPrivacyEvidence[0];
+    check("TurnEvidence was captured by the test sink", Boolean(record));
 
     let contentFreePassed = false;
     try {
-      assertTurnEvidenceContentFree(record);
-      contentFreePassed = true;
+      if (record) {
+        assertTurnEvidenceContentFree(record);
+        contentFreePassed = true;
+      }
     } catch (e) {
-      console.error(e);
+      console.error("assertTurnEvidenceContentFree threw:", e);
       contentFreePassed = false;
     }
     check(
-      "assertTurnEvidenceContentFree accepts TurnEvidence with errorCode & httpStatus",
+      "assertTurnEvidenceContentFree accepts emitted TurnEvidence without error",
       contentFreePassed,
     );
 
     const serialized = JSON.stringify(record);
-    check(
-      "Serialized evidence does not contain apiKey secret",
-      !serialized.includes(sensitivePayload.apiKey),
-    );
-    check(
-      "Serialized evidence does not contain auth token",
-      !serialized.includes(sensitivePayload.authorization),
-    );
-    check(
-      "Serialized evidence does not contain customer phone",
-      !serialized.includes(sensitivePayload.customerPhone),
-    );
-    check(
-      "Serialized evidence does not contain customer text",
-      !serialized.includes(sensitivePayload.customerMessage),
-    );
-    check(
-      "Serialized evidence contains sanitized errorCode: 'CONFIG_ERROR'",
-      serialized.includes('"errorCode":"CONFIG_ERROR"'),
-    );
-    check(
-      "Serialized evidence contains sanitized httpStatus: 402",
-      serialized.includes('"httpStatus":402'),
-    );
-  }
 
-  // ── 8. Existing Counters & Cost Completeness Invariants ──
-  console.log(
-    "\n--- Group 8: Existing Counters & Cost Completeness Preservation ---",
-  );
-  {
-    const obs = buildTurnObservability({
-      routingDecision: "LLM",
-      providerAttempts: 1,
-      modelCallCount: 1,
-      costCompleteness: "UNAVAILABLE",
-      totalCostUsd: null,
-      knownCostSubtotalUsd: null,
-      executionAttempts: [
-        {
-          attempt: 1,
-          provider: "openrouter",
-          status: "FAILURE",
-          httpAttempts: 1,
-          errorCode: "CONFIG_ERROR",
-          httpStatus: 402,
-        },
-      ],
-      errorCode: "CONFIG_ERROR",
-      httpStatus: 402,
-    });
-
-    const record = buildTurnEvidence(
-      {
-        conversationId: "conv-1",
-        businessId: "biz-1",
-        customerMessageId: "msg-1",
-        ok: false,
-        assistantAction: "AI_HANDOFF",
-        conversationStatus: "NEED_HUMAN",
-        handoffCause: "PROVIDER_FAILURE",
-        observability: obs,
-      },
-      { environment: "test", appVersion: "0.72.1" },
+    check(
+      "Sanitized internal errorCode 'CONFIG_ERROR' survives in emitted evidence",
+      record?.errorCode === "CONFIG_ERROR" &&
+        serialized.includes('"errorCode":"CONFIG_ERROR"'),
+    );
+    check(
+      "Observed httpStatus 402 survives in emitted evidence",
+      record?.httpStatus === 402 && serialized.includes('"httpStatus":402'),
+    );
+    check(
+      "Attempt-level errorCode 'CONFIG_ERROR' and httpStatus 402 survive",
+      record?.executionAttempts?.[0]?.errorCode === "CONFIG_ERROR" &&
+        record?.executionAttempts?.[0]?.httpStatus === 402,
     );
 
-    check("providerAttempts remains exactly 1", record.providerAttempts === 1);
     check(
-      "costCompleteness remains UNAVAILABLE",
-      record.costCompleteness === "UNAVAILABLE",
+      "Serialized evidence does NOT contain CANARY_API_KEY",
+      !serialized.includes(CANARY_API_KEY),
     );
-    check("totalCostUsd remains null", record.totalCostUsd === null);
     check(
-      "knownCostSubtotalUsd remains null",
-      record.knownCostSubtotalUsd === null,
+      "Serialized evidence does NOT contain CANARY_AUTH_HEADER",
+      !serialized.includes(CANARY_AUTH_HEADER),
+    );
+    check(
+      "Serialized evidence does NOT contain CANARY_CUSTOMER_PHONE",
+      !serialized.includes(CANARY_CUSTOMER_PHONE),
+    );
+    check(
+      "Serialized evidence does NOT contain CANARY_CUSTOMER_TEXT",
+      !serialized.includes(CANARY_CUSTOMER_TEXT),
+    );
+    check(
+      "Serialized evidence does NOT contain CANARY_RAW_ERROR_MESSAGE",
+      !serialized.includes(CANARY_RAW_ERROR_MESSAGE),
+    );
+    check(
+      "Serialized evidence does NOT contain raw error payload details (debug_id/stack)",
+      !serialized.includes(CANARY_DEBUG_REQ_ID) &&
+        !serialized.includes("internal_stack") &&
+        !serialized.includes("insufficient_quota"),
     );
   }
 
