@@ -423,7 +423,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   if (isIdentity) {
     const candidate = {
       family: "business.identity" as const,
-      channel: "businessName",
+      channel: "businessName" as const,
     };
     const record = ledger.find((fact) => fact.key === candidate.family);
     if (!record || !record.included) {

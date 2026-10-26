@@ -23,7 +23,45 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export const KNOWN_PERMISSIBLE_FAILURES = ["E10", "E12b"];
 
-export function getBaseCommit() {
+export interface ProcessRunResult {
+  exitCode: number;
+  rawOutput: string;
+  error?: Error | null;
+  signal?: NodeJS.Signals | string | null;
+}
+
+export interface ParsedRunExecution {
+  exitCode: number;
+  passed: number;
+  total: number;
+  failedChecks: string[];
+  passedChecks: string[];
+  summaryFound: boolean;
+}
+
+export type ValidateRunResult =
+  | { ok: true; parsed: ParsedRunExecution; error?: never }
+  | { ok: false; error: string; parsed?: never };
+
+export type EvaluationResult =
+  | {
+      pass: true;
+      classification: "VERIFIED_IMPROVEMENT" | "IDENTICAL_KNOWN_FAILURES";
+      message: string;
+      baseVal: ValidateRunResult;
+      headVal: ValidateRunResult;
+      error?: never;
+    }
+  | {
+      pass: false;
+      error: string;
+      baseVal?: ValidateRunResult;
+      headVal?: ValidateRunResult | null;
+      classification?: never;
+      message?: never;
+    };
+
+export function getBaseCommit(): string {
   const candidates = [
     process.env.BASE_COMMIT,
     process.env.GITHUB_BASE_REF
@@ -31,7 +69,7 @@ export function getBaseCommit() {
       : null,
     "origin/main",
     "22e64f9c40e93bb11c48d0efe55fc9cd6e1ad205",
-  ].filter(Boolean);
+  ].filter((c): c is string => Boolean(c));
 
   for (const candidate of candidates) {
     try {
@@ -46,7 +84,7 @@ export function getBaseCommit() {
   return "22e64f9c40e93bb11c48d0efe55fc9cd6e1ad205";
 }
 
-export function getHeadCommit() {
+export function getHeadCommit(): string {
   try {
     return execSync("git rev-parse HEAD", {
       cwd: root,
@@ -57,12 +95,17 @@ export function getHeadCommit() {
   }
 }
 
-export function extractCheckCode(label) {
+export function extractCheckCode(label: string): string {
   const match = label.match(/^([A-Za-z0-9_-]+)\./);
-  return match ? match[1] : label.split(" ")[0];
+  return match
+    ? (match[1] ?? label.split(" ")[0] ?? "")
+    : (label.split(" ")[0] ?? "");
 }
 
-export function validateRunExecution(name, run) {
+export function validateRunExecution(
+  name: "BASE" | "HEAD" | string,
+  run: ProcessRunResult,
+): ValidateRunResult {
   if (run.error) {
     return {
       ok: false,
@@ -97,8 +140,8 @@ export function validateRunExecution(name, run) {
   }
 
   const lines = raw.split("\n");
-  const failedChecks = [];
-  const passedChecks = [];
+  const failedChecks: string[] = [];
+  const passedChecks: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith("✘ ")) {
@@ -150,7 +193,10 @@ export function validateRunExecution(name, run) {
   };
 }
 
-export function evaluateHandoffComparison(baseRun, headRun) {
+export function evaluateHandoffComparison(
+  baseRun: ProcessRunResult,
+  headRun: ProcessRunResult,
+): EvaluationResult {
   const baseVal = validateRunExecution("BASE", baseRun);
   if (!baseVal.ok) {
     return { pass: false, error: baseVal.error, baseVal, headVal: null };
@@ -243,7 +289,7 @@ export function evaluateHandoffComparison(baseRun, headRun) {
   };
 }
 
-export function runCheckInDir(dir) {
+export function runCheckInDir(dir: string): ProcessRunResult {
   const scriptPath = join(dir, "scripts/check-handoff-cause.ts");
   if (!existsSync(scriptPath)) {
     throw new Error(`scripts/check-handoff-cause.ts not found in ${dir}`);
@@ -397,6 +443,7 @@ ${evalResult.message || evalResult.error}
 if (
   process.argv[1] &&
   (process.argv[1].endsWith("compare-handoff-cause.mjs") ||
+    process.argv[1].endsWith("compare-handoff-cause.ts") ||
     process.argv[1].endsWith("compare-handoff-cause"))
 ) {
   main().catch((err) => {

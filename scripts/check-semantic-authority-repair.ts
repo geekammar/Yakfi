@@ -928,6 +928,7 @@ async function runSuite(): Promise<void> {
 
     const res = await h.runInbound("أنتم مين؟", "d7a-pop-identity");
     const sentMessages = h.getSent();
+    const firstMsg = sentMessages[0] ?? "";
     const expectedBounded = buildBusinessIdentityContent(
       "مركز رعاية الأسنان التخصصي",
     );
@@ -938,9 +939,9 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0] === expectedBounded &&
-        !sentMessages[0].includes("999") &&
-        !sentMessages[0].includes("عيادة تخصصية"),
+        firstMsg === expectedBounded &&
+        !firstMsg.includes("999") &&
+        !firstMsg.includes("عيادة تخصصية"),
       { sentMessages, expectedBounded },
     );
   }
@@ -1076,6 +1077,7 @@ async function runSuite(): Promise<void> {
       "d7d-mixed-goals",
     );
     const sentMessages = h.getSent();
+    const firstMsg = sentMessages[0] ?? "";
     const expectedBounded = buildBusinessIdentityContent(
       "مركز رعاية الأسنان التخصصي",
     );
@@ -1086,8 +1088,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0].startsWith(expectedBounded) &&
-        sentMessages[0].includes("تحب نحدد ميعاد مناسب لحجزك؟"),
+        firstMsg.startsWith(expectedBounded) &&
+        firstMsg.includes("تحب نحدد ميعاد مناسب لحجزك؟"),
       { sentMessages },
     );
   }

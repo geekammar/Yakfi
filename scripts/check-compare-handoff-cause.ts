@@ -15,7 +15,7 @@
 import {
   evaluateHandoffComparison,
   type ProcessRunResult,
-} from "./compare-handoff-cause.mjs";
+} from "./compare-handoff-cause";
 
 const CHECKS_31 = [
   "U1. كل سبب canonical قابل للتمثيل ويقبل التحقق",
