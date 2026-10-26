@@ -1089,7 +1089,7 @@ async function runSuite(): Promise<void> {
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
         firstMsg.startsWith(expectedBounded) &&
-        firstMsg.includes("تحب نحدد ميعاد مناسب لحجزك؟"),
+        firstMsg.includes("وبخصوص طلب الحجز"),
       { sentMessages },
     );
   }
