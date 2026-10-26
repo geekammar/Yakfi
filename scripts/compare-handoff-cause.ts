@@ -24,7 +24,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const KNOWN_PERMISSIBLE_FAILURES = ["E10", "E12b"];
 
 export interface ProcessRunResult {
-  exitCode: number;
+  exitCode: number | null;
   rawOutput: string;
   error?: Error | null;
   signal?: NodeJS.Signals | string | null;
