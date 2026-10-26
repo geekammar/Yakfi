@@ -54,6 +54,7 @@ const CHECKS_31 = [
 function buildMockOutput(opts: {
   failedCodes?: string[];
   omittedCodes?: string[];
+  extraChecks?: string[];
 }): string {
   const failed = new Set(opts.failedCodes ?? []);
   const omitted = new Set(opts.omittedCodes ?? []);
@@ -71,6 +72,13 @@ function buildMockOutput(opts: {
       failedCount++;
     } else {
       lines.push(`✔ ${check}`);
+      passedCount++;
+    }
+  }
+
+  if (opts.extraChecks) {
+    for (const extra of opts.extraChecks) {
+      lines.push(`✔ ${extra}`);
       passedCount++;
     }
   }
@@ -205,7 +213,7 @@ function runSuite(): void {
     );
   }
 
-  // 5. Incomplete check set / missing executed test cases -> FAIL closed
+  // 5a. Incomplete check set: fewer total checks on HEAD -> FAIL closed
   {
     // HEAD executed only 29 checks by dropping E10 and E12b instead of running them
     const droppedCasesHeadRun: ProcessRunResult = {
@@ -214,7 +222,29 @@ function runSuite(): void {
     };
     const res = evaluateHandoffComparison(standardBaseRun, droppedCasesHeadRun);
     check(
-      "5. Omitted/missing test cases on HEAD fails closed (prevents skipping to pass)",
+      "5a. Omitted/fewer test cases on HEAD fails closed with Incomplete check set",
+      res.pass === false &&
+        Boolean(res.error?.includes("Incomplete check set")),
+      res,
+    );
+  }
+
+  // 5b. Same total checks count but missing executed base cases -> FAIL closed
+  {
+    // HEAD executed 31 checks, but dropped E10 and E12b and substituted dummy checks X1 and X2
+    const substitutedCasesHeadRun: ProcessRunResult = {
+      exitCode: 0,
+      rawOutput: buildMockOutput({
+        omittedCodes: ["E10", "E12b"],
+        extraChecks: ["X1. فحص بديل غير مصرح به", "X2. فحص بديل آخر"],
+      }),
+    };
+    const res = evaluateHandoffComparison(
+      standardBaseRun,
+      substitutedCasesHeadRun,
+    );
+    check(
+      "5b. Substituted/missing base test cases on HEAD fails closed with Missing executed cases",
       res.pass === false &&
         Boolean(res.error?.includes("Missing executed cases")),
       res,
