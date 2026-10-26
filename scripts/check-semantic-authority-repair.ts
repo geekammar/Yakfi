@@ -289,7 +289,8 @@ function createEngineHarness(opts: {
     },
     serviceRepository: {
       listByBusiness: async () => services,
-      listActiveByBusiness: async () => services.filter((s) => s.isActive !== false),
+      listActiveByBusiness: async () =>
+        services.filter((s) => s.isActive !== false),
       findById: async (id: string) => services.find((s) => s.id === id) ?? null,
       findByIdWithinBusiness: async (id: string) =>
         services.find((s) => s.id === id) ?? null,
@@ -393,9 +394,9 @@ async function runSuite(): Promise<void> {
       "A1. Structured mode enrolls business.identity without keyword triggers",
       Boolean(
         identityFact &&
-          identityFact.included &&
-          identityFact.disclosable &&
-          built.request.businessName === "مركز رعاية الأسنان التخصصي",
+        identityFact.included &&
+        identityFact.disclosable &&
+        built.request.businessName === "مركز رعاية الأسنان التخصصي",
       ),
       identityFact,
     );
@@ -443,15 +444,20 @@ async function runSuite(): Promise<void> {
       }),
     });
 
-    const forbiddenLedger = built.facts.filter((f) => f.visibility === "FORBIDDEN");
+    const forbiddenLedger = built.facts.filter(
+      (f) => f.visibility === "FORBIDDEN",
+    );
     const forbiddenIncluded = forbiddenLedger.some((f) => f.included);
     const requestContainsForbiddenId =
       JSON.stringify(built.request).includes("branch-uuid-999") ||
-      ("id" in built.request && (built.request as Record<string, unknown>).id === TENANT_A);
+      ("id" in built.request &&
+        (built.request as Record<string, unknown>).id === TENANT_A);
 
     check(
       "A3a. FORBIDDEN fields (id, defaultBranchId) are excluded from ledger facts and request context",
-      forbiddenLedger.length > 0 && !forbiddenIncluded && !requestContainsForbiddenId,
+      forbiddenLedger.length > 0 &&
+        !forbiddenIncluded &&
+        !requestContainsForbiddenId,
       { forbiddenLedger, requestContainsForbiddenId },
     );
   }
@@ -469,7 +475,9 @@ async function runSuite(): Promise<void> {
       }),
     });
 
-    const internalLedger = built.facts.filter((f) => f.visibility === "INTERNAL");
+    const internalLedger = built.facts.filter(
+      (f) => f.visibility === "INTERNAL",
+    );
     const internalDisclosable = internalLedger.some((f) => f.disclosable);
     const requestContainsDuration =
       "slotDurationMinutes" in built.request ||
@@ -478,7 +486,9 @@ async function runSuite(): Promise<void> {
 
     check(
       "A3b. INTERNAL operational metadata (slotDurationMinutes) is never disclosable nor leaked into request",
-      internalLedger.length > 0 && !internalDisclosable && !requestContainsDuration,
+      internalLedger.length > 0 &&
+        !internalDisclosable &&
+        !requestContainsDuration,
       { internalLedger, requestContainsDuration },
     );
   }
@@ -756,7 +766,8 @@ async function runSuite(): Promise<void> {
 
     check(
       "D5. Missing or foreign-tenant identity cannot authorize a reply",
-      missingResult.kind === "requires-human" && foreignResult.kind === "requires-human",
+      missingResult.kind === "requires-human" &&
+        foreignResult.kind === "requires-human",
       { missingResult, foreignResult },
     );
   }
@@ -796,7 +807,10 @@ async function runSuite(): Promise<void> {
       handoffReason: null,
       summary: null,
     };
-    const priceResult = enforceDisclosure({ context: priceBuilt, response: priceReply });
+    const priceResult = enforceDisclosure({
+      context: priceBuilt,
+      response: priceReply,
+    });
 
     // D6b. Legitimate address channel
     const addressBuilt = buildAiContext({
@@ -968,7 +982,8 @@ async function runSuite(): Promise<void> {
       eq(replyInvalid, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyUnsupported, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyDefault, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
-        replyInvalid === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        replyInvalid ===
+          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
       { replyInvalid },
     );
   }
@@ -1090,7 +1105,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const res = await h.runInbound("أنا مستفسر عن مواعيد العمل", "t3-invalid-schema");
+    const res = await h.runInbound(
+      "أنا مستفسر عن مواعيد العمل",
+      "t3-invalid-schema",
+    );
 
     check(
       "C3a. Genuinely invalid structured output fails validation and produces safe failure reply",
@@ -1098,7 +1116,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] ===
+          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
       { res, sent: h.getSent() },
     );
   }
@@ -1121,7 +1140,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] === "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] ===
+          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
       { res, sent: h.getSent() },
     );
   }
@@ -1214,7 +1234,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "POLICY_REFUSED" &&
         !h.getSent().some((s) => s.includes("300")) &&
-        h.getSent()[0] === "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+        h.getSent()[0] ===
+          "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
       { res, sent: h.getSent() },
     );
   }
@@ -1238,7 +1259,10 @@ async function runSuite(): Promise<void> {
         },
       ],
     });
-    const resProvider = await hProvider.runInbound("عايز أحجز ميعاد الساعة 5", "t7-branch1");
+    const resProvider = await hProvider.runInbound(
+      "عايز أحجز ميعاد الساعة 5",
+      "t7-branch1",
+    );
 
     // 2. Invalid AI response
     const hInvalid = createEngineHarness({
@@ -1281,7 +1305,10 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resSensitive = await hSensitive.runInbound("نزيف شديد بعد خلع الضرس", "t7-branch4");
+    const resSensitive = await hSensitive.runInbound(
+      "نزيف شديد بعد خلع الضرس",
+      "t7-branch4",
+    );
 
     // 5. Disclosure refusal
     const hDisclosure = createEngineHarness({
@@ -1301,7 +1328,10 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resDisclosure = await hDisclosure.runInbound("بكام الزراعة؟", "t7-branch5");
+    const resDisclosure = await hDisclosure.runInbound(
+      "بكام الزراعة؟",
+      "t7-branch5",
+    );
 
     const zeroAppointmentsAll =
       hProvider.getAppointmentAttempts() === 0 &&

@@ -1108,10 +1108,8 @@ export const SAFE_HANDOFF_REPLIES = {
   SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
   PROVIDER_FAILURE:
     "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  INVALID_OUTPUT:
-    "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  DISCLOSURE_REFUSED:
-    "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+  INVALID_OUTPUT: "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+  DISCLOSURE_REFUSED: "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
 } as const;
 
 export type SafeFailureReplyInput = {
