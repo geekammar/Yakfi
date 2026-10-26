@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.72.1",
+  "version": "0.72.2",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -164,6 +164,7 @@
     "check:eval-schema": "tsx scripts/check-eval-schema.ts",
     "eval:coverage": "tsx scripts/eval-coverage.ts",
     "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx",
+    "test:assistant-settings": "vitest run --config vitest.config.ts src/features/assistant/components/assistant-settings-screen.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
     "test:e2e": "playwright test",
     "test:e2e:local": "playwright test tests/e2e/booking-flows.spec.ts tests/e2e/ux-viewports.spec.ts",

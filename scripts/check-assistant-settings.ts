@@ -281,6 +281,51 @@ async function persistenceSection(): Promise<void> {
       resolveAssistantName("   ") === ASSISTANT_NAME_FALLBACK &&
       resolveAssistantName("مساعد عيادة أفنان") === "مساعد عيادة أفنان",
   );
+
+  // F01 (Service & Storage Layer) — Assistant response detail:
+  // Verifies storage-level unset semantics, runtime default resolution, and partial-update preservation.
+  // Full component lifecycle, RHF isDirty tracking, Save button states, and form payload submission
+  // are exercised separately by the mounted test suite in `assistant-settings-screen.test.tsx`.
+  const freshDetailBiz = makeDeps(makeBusiness());
+  const freshDetailView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const freshStored = (
+    await freshDetailBiz.businessRepository.findById("business-1")
+  )?.assistantStyle;
+  const freshRuntime = resolveAssistantStyle(freshStored);
+
+  // 1. Unset detail in storage yields null view and inherits runtime default "short"
+  const unsetPreserved =
+    freshDetailView !== null &&
+    freshDetailView.detail === null &&
+    freshRuntime.detail === "short";
+
+  // 2. Partial save of another field never silently persists detail (preserves unset semantics in storage)
+  await updateAssistantSettings(freshDetailBiz, ADMIN, { name: "اسم جديد" });
+  const postSaveView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const unsetAfterSave = postSaveView !== null && postSaveView.detail === null;
+
+  // 3. Explicit override is saved and distinguished from inherited default at runtime
+  await updateAssistantSettings(freshDetailBiz, ADMIN, { detail: "balanced" });
+  const overrideView = asView(
+    await getAssistantSettings(freshDetailBiz, ADMIN),
+  );
+  const overrideStored = (
+    await freshDetailBiz.businessRepository.findById("business-1")
+  )?.assistantStyle;
+  const overrideRuntime = resolveAssistantStyle(overrideStored);
+  const explicitDistinguished =
+    overrideView !== null &&
+    overrideView.detail === "balanced" &&
+    overrideRuntime.detail === "balanced";
+
+  record(
+    "F01 تتبع بُعد طول الردود في الخدمة: التمييز بين الافتراضي الموروث والتخصيص الصريح وثبات سلوك التخزين دون حفظ صامت",
+    unsetPreserved && unsetAfterSave && explicitDistinguished,
+  );
 }
 
 // ─── B: bounded choices ──────────────────────────────────────────────────────

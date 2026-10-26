@@ -454,7 +454,7 @@ export function ConversationDetail({
               <dd className="mt-0.5 font-medium">{data.customer.name}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">رقم واتساب</dt>
+              <dt className="text-xs text-muted-foreground">رقم الهاتف</dt>
               <dd className="mt-0.5 font-medium" dir="ltr">
                 {data.customer.phone}
               </dd>

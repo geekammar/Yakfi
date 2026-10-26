@@ -330,7 +330,7 @@ export function AppointmentDetail({
                       disabled={isPending}
                     >
                       <UserXIcon />
-                      تحديد كلم يحضر
+                      تسجيل عدم الحضور
                     </Button>
                   </>
                 ) : null}

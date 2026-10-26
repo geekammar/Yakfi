@@ -145,7 +145,7 @@ export function CustomersDirectory({
               className="bg-card min-h-72"
               icon={UsersRoundIcon}
               title="لا يوجد عملاء بعد"
-              description="يُضاف العملاء تلقائياً من محادثات واتساب، أو أضف عميلاً يدوياً لتحجز له موعداً."
+              description="يُضاف العملاء تلقائياً من المحادثات، أو أضف عميلاً يدوياً لتحجز له موعداً."
               action={
                 <Button size="sm" onClick={openCreate}>
                   <PlusIcon aria-hidden className="size-4" />

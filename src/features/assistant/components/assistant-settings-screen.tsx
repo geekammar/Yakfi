@@ -20,6 +20,7 @@ import {
 } from "@/features/conversations/server/assistant-style";
 import { PageHeader } from "@/components/shared/page-header";
 import { SectionHeader } from "@/components/shared/section-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,7 +58,7 @@ function ChoiceGroup<
 }) {
   return (
     <RadioGroup
-      value={value ?? undefined}
+      value={value ?? ""}
       onValueChange={onChange}
       className="gap-2.5"
     >
@@ -350,21 +351,39 @@ export function AssistantSettingsScreen({
           aria-labelledby="assistant-detail-section"
           className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
         >
-          <SectionHeader
-            title="طول الردود"
-            description="ما مدى التفصيل في كل رد."
-          />
           <Controller
             control={form.control}
             name="detail"
-            render={({ field }) => (
-              <ChoiceGroup
-                groupId="assistant-detail"
-                options={ASSISTANT_DETAIL_CHOICES}
-                value={field.value ?? null}
-                onChange={field.onChange}
-              />
-            )}
+            render={({ field }) => {
+              const isOverridden = Boolean(field.value);
+              return (
+                <div className="space-y-4">
+                  <SectionHeader
+                    title="طول الردود"
+                    description="ما مدى التفصيل في كل رد."
+                    actions={
+                      <Badge
+                        variant={isOverridden ? "default" : "secondary"}
+                        className="text-[11px]"
+                      >
+                        {isOverridden ? "تخصيص صريح" : "افتراضي موروث (مختصر)"}
+                      </Badge>
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {isOverridden
+                      ? "تم تحديد طول الردود بتخصيص صريح لهذه المنشأة."
+                      : "يستخدم المساعد حاليًا الوضع الافتراضي العام للنظام (مختصر: جملة أو جملتين فقط). يمكنك اختيار قيمة أدناه لتطبيق تخصيص صريح."}
+                  </p>
+                  <ChoiceGroup
+                    groupId="assistant-detail"
+                    options={ASSISTANT_DETAIL_CHOICES}
+                    value={field.value ?? null}
+                    onChange={field.onChange}
+                  />
+                </div>
+              );
+            }}
           />
         </section>
 
