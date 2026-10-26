@@ -112,6 +112,11 @@ jobs:
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics
+          pnpm check:semantic-authority-repair
+          pnpm check:compare-handoff-cause-test
+
+      - name: Base-versus-HEAD handoff-cause reconciliation
+        run: pnpm check:compare-handoff-cause
 
   ux-qa:
     name: Automated Browser UX QA (Playwright)

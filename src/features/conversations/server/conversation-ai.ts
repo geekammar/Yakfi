@@ -33,6 +33,8 @@ import {
   parseAiRequest,
 } from "@/features/conversations/server/ai-contract";
 import type { AiRoutingDecision } from "@/features/conversations/server/ai-observability";
+import type { HandoffCause } from "@/features/conversations/server/handoff-cause";
+import type { HandoffReason as ControlHandoffReason } from "@/server/integrations/ai/conversation-control/types";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
 
 export type {
@@ -1095,6 +1097,51 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
 
 // ─── Reply / summary templates (assistant voice, vertical-agnostic) ─────────
 
+/**
+ * Safe, deterministic handoff & failure reply constants (Arabic-first).
+ * Sourced byte-for-byte from canonical product voice (REPLIES / HANDOFF_MESSAGES / COPY_REGISTRY).
+ * Runtime seam: used on structured turns to replace lexical re-classification
+ * of customer text when choosing a safe fallback message.
+ */
+export const SAFE_HANDOFF_REPLIES = {
+  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+  PROVIDER_FAILURE:
+    "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+  INVALID_OUTPUT: "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+  DISCLOSURE_REFUSED: "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+} as const;
+
+export type SafeFailureReplyInput = {
+  controlHandoffReason?: ControlHandoffReason | null;
+  failureCause?: HandoffCause | null;
+};
+
+/**
+ * Pure resolver mapping typed execution failure outcomes to safe canonical replies.
+ * Never inspects or re-interprets customer prose with regex or keyword dictionaries.
+ */
+export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
+  const reason = input.controlHandoffReason;
+  if (reason === "CUSTOMER_REQUESTED_HUMAN") {
+    return SAFE_HANDOFF_REPLIES.HUMAN_REQUEST;
+  }
+  if (reason === "SENSITIVE_OR_RESTRICTED_REQUEST") {
+    return SAFE_HANDOFF_REPLIES.SENSITIVE;
+  }
+  if (
+    reason === "PROVIDER_UNAVAILABLE" ||
+    reason === "RETRY_EXHAUSTED" ||
+    reason === "QUOTA_EXHAUSTED" ||
+    reason === "AUTH_OR_CONFIGURATION_FAILURE" ||
+    input.failureCause === "PROVIDER_FAILURE" ||
+    input.failureCause === "RETRY_EXHAUSTED"
+  ) {
+    return SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE;
+  }
+  return SAFE_HANDOFF_REPLIES.INVALID_OUTPUT;
+}
+
 const REPLIES = {
   BOOKING:
     "يسعدنا خدمتك! سيتواصل معك أحد أعضاء الفريق لإتمام الحجز وتحديد الوقت المناسب.",
@@ -1303,7 +1350,7 @@ function greetingResponse(message: string): AiResponse {
 const IDENTITY_INVITE = "تحب نساعدك إزاي؟";
 
 /** The complete deterministic identity copy for one authoritative name. */
-function buildBusinessIdentityContent(businessName: string): string {
+export function buildBusinessIdentityContent(businessName: string): string {
   return `أيوه، ${businessName} معاك. ${IDENTITY_INVITE}`;
 }
 
