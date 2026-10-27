@@ -7132,29 +7132,36 @@ async function runInboundTurn(
           : (bookingAiResponse.extraction.exactTime ?? null);
 
       // Follow-up resolution when replying to unresolved AM/PM clarification
-      if (
-        !rawExactTime &&
-        turnSession.state?.pendingClarification?.type === "exact_time_period" &&
-        timeOfDayPref
-      ) {
-        const prevTimeStr = turnSession.state.knownFacts.exactTime;
-        const prevHour = prevTimeStr
-          ? parseInt(prevTimeStr.slice(0, 2), 10)
-          : 3;
-        const baseHour = prevHour % 12 || 12;
-        const resolvedHour =
-          timeOfDayPref === "afternoon" || timeOfDayPref === "evening"
-            ? (baseHour < 12 ? baseHour + 12 : baseHour)
-            : (baseHour >= 12 ? baseHour - 12 : baseHour);
+      const pendingClar =
+        turnSession.state?.lastClarification?.type === "exact_time_period"
+          ? turnSession.state.lastClarification
+          : null;
+      const unresolved =
+        pendingClar?.unresolvedTime ??
+        turnSession.state?.knownFacts.unresolvedTime;
+
+      if (!rawExactTime && unresolved && timeOfDayPref) {
+        const h = unresolved.hour;
+        const m = unresolved.minute ?? 0;
+        let resolvedHour: number;
+        if (timeOfDayPref === "afternoon" || timeOfDayPref === "evening") {
+          resolvedHour = h === 12 ? 12 : h + 12;
+        } else {
+          resolvedHour = h === 12 ? 0 : h;
+        }
         rawExactTime = {
           type: "specific",
-          time: `${String(resolvedHour).padStart(2, "0")}:00`,
+          time: `${String(resolvedHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
         };
       }
 
       // PROMPT-EXACT-TIME: AM/PM unresolved ambiguity (e.g. "الساعة 3")
       if (rawExactTime && rawExactTime.type === "unresolved_period") {
         if (turnSession.enabled) {
+          await turnSession.invalidateOffer();
+          const { exactTime: _droppedTime, ...prevFacts } =
+            turnSession.state?.knownFacts ?? {};
+          void _droppedTime;
           turnSession.state = {
             ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
             activeTask: {
@@ -7162,20 +7169,32 @@ async function runInboundTurn(
               stage: "DATE_SUPPLIED",
             },
             knownFacts: {
-              ...(turnSession.state?.knownFacts ?? {}),
+              ...prevFacts,
               service: mapped.serviceName,
               date: mapped.date!,
-              exactTime: `${String(rawExactTime.hour).padStart(2, "0")}:00`,
+              unresolvedTime: {
+                hour: rawExactTime.hour,
+                minute: rawExactTime.minute ?? 0,
+              },
               ...(providerId ? { provider: providerId } : {}),
             },
-            pendingClarification: {
+            lastClarification: {
               type: "exact_time_period",
-              missingFacts: ["timePreference"],
+              unresolvedTime: {
+                hour: rawExactTime.hour,
+                minute: rawExactTime.minute ?? 0,
+              },
             },
+            offer: null,
+            suspendedOffer: null,
           };
           await turnSession.commit();
         }
-        const clarMsg = `هل تقصد الساعة ${rawExactTime.hour} عصراً (مساءً) أم ${rawExactTime.hour} فجراً (صباحاً)؟`;
+        const minStr =
+          rawExactTime.minute && rawExactTime.minute > 0
+            ? `:${String(rawExactTime.minute).padStart(2, "0")}`
+            : "";
+        const clarMsg = `هل تقصد الساعة ${rawExactTime.hour}${minStr} عصراً (مساءً) أم ${rawExactTime.hour}${minStr} فجراً (صباحاً)؟`;
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
@@ -7268,6 +7287,9 @@ async function runInboundTurn(
               turnSession.state ?? resolvedState ?? emptyConversationState(),
               slotOffer,
             );
+            const { unresolvedTime: _droppedUnr, ...cleanKnown } =
+              turnSession.state.knownFacts ?? {};
+            void _droppedUnr;
             turnSession.state = {
               ...turnSession.state,
               activeTask: {
@@ -7276,17 +7298,22 @@ async function runInboundTurn(
               },
               bookingStage: "AVAILABILITY_RESOLVED",
               knownFacts: {
-                ...(turnSession.state.knownFacts ?? {}),
+                ...cleanKnown,
                 service: mapped.serviceName,
                 date: mapped.date!,
                 exactTime: exactTimeRequested,
                 ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
                 ...(providerId ? { provider: providerId } : {}),
               },
+              lastClarification: null,
             };
             await turnSession.commit();
           }
         } else if (turnSession.enabled) {
+          await turnSession.invalidateOffer();
+          const { unresolvedTime: _droppedUnr, ...cleanKnown } =
+            turnSession.state?.knownFacts ?? {};
+          void _droppedUnr;
           turnSession.state = {
             ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
             activeTask: {
@@ -7294,13 +7321,16 @@ async function runInboundTurn(
               stage: "DATE_SUPPLIED",
             },
             knownFacts: {
-              ...(turnSession.state?.knownFacts ?? {}),
+              ...cleanKnown,
               service: mapped.serviceName,
               date: mapped.date!,
               exactTime: exactTimeRequested,
               ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
               ...(providerId ? { provider: providerId } : {}),
             },
+            lastClarification: null,
+            offer: null,
+            suspendedOffer: null,
           };
           await turnSession.commit();
         }

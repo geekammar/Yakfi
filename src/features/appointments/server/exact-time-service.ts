@@ -30,9 +30,11 @@ export type ExactTimeUnavailabilityReason =
   | "BUSINESS_CLOSED"
   | "OUTSIDE_HOURS"
   | "SERVICE_TOO_LONG"
+  | "SLOT_GRID_MISMATCH"
   | "CONFLICT"
   | "NO_ELIGIBLE_PROVIDERS"
-  | "FULLY_BOOKED";
+  | "FULLY_BOOKED"
+  | "TECHNICAL_FAILURE";
 
 export type ExactTimeEvaluationResult = {
   readonly isAvailable: boolean;
@@ -42,6 +44,7 @@ export type ExactTimeEvaluationResult = {
   readonly alternatives: readonly RankedBookingPair[];
   readonly serviceName: string;
   readonly serviceDurationMinutes: number;
+  readonly slotDurationMinutes?: number;
   readonly workingHours?: { readonly open: string; readonly close: string };
 };
 
@@ -228,6 +231,11 @@ export async function evaluateExactTimeAvailability(
     slotDurationMinutes: business.slotDurationMinutes,
   });
 
+  const slotGridMatch = candidates.some((c) => c.startTime === requestedTime);
+  if (!preAvailabilityReason && !slotGridMatch) {
+    preAvailabilityReason = "SLOT_GRID_MISMATCH";
+  }
+
   // 4. Provider seams & conflicts
   const seams = await deps.providerRepository.listAssignmentSeams(
     actor.businessId,
@@ -300,14 +308,24 @@ export async function evaluateExactTimeAvailability(
       alternatives: [],
       serviceName: service.name,
       serviceDurationMinutes: service.durationMinutes,
+      slotDurationMinutes: business.slotDurationMinutes,
       workingHours,
     };
   }
 
-  // Unavailable: derive reason and alternatives
-  const unavailabilityReason: ExactTimeUnavailabilityReason =
-    preAvailabilityReason ??
-    (bookablePairs.length === 0 ? "FULLY_BOOKED" : "CONFLICT");
+  // Unavailable: derive reason and alternatives truthfully
+  let unavailabilityReason: ExactTimeUnavailabilityReason;
+  if (preAvailabilityReason) {
+    unavailabilityReason = preAvailabilityReason;
+  } else if (bookablePairs.length === 0) {
+    unavailabilityReason = "FULLY_BOOKED";
+  } else {
+    // Check if an actual booking conflict blocked this candidate time
+    const hasActualConflict = blockingRows.some(
+      (b) => b.startTime <= requestedTime && b.endTime > requestedTime,
+    );
+    unavailabilityReason = hasActualConflict ? "CONFLICT" : "FULLY_BOOKED";
+  }
 
   const alternatives = rankAlternativesByTemporalDistance(
     bookablePairs,
@@ -322,6 +340,7 @@ export async function evaluateExactTimeAvailability(
     alternatives,
     serviceName: service.name,
     serviceDurationMinutes: service.durationMinutes,
+    slotDurationMinutes: business.slotDurationMinutes,
     workingHours,
   };
 }
@@ -379,6 +398,9 @@ export function composeExactTimeResponse(params: {
     case "BUSINESS_CLOSED":
       explanation = `المنشأة مغلقة يوم ${date} — يرجى اختيار تاريخ آخر.`;
       break;
+    case "SLOT_GRID_MISMATCH":
+      explanation = `عذراً، موعد الساعة ${timeArabic} لا يتوافق مع فترات جدول المواعيد المحددة (${evaluation.slotDurationMinutes ?? 30} دقيقة) يوم ${date}.`;
+      break;
     case "CONFLICT":
       explanation = `عذراً، موعد الساعة ${timeArabic} غير متاح يوم ${date} (محجوز مسبقاً).`;
       break;
@@ -387,6 +409,9 @@ export function composeExactTimeResponse(params: {
       break;
     case "NO_ELIGIBLE_PROVIDERS":
       explanation = `لا يوجد مزود متاح لهذه الخدمة يوم ${date}.`;
+      break;
+    case "TECHNICAL_FAILURE":
+      explanation = `تعذر التحقق من توفر موعد الساعة ${timeArabic} حالياً بسبب خلل فني مؤقت.`;
       break;
   }
 

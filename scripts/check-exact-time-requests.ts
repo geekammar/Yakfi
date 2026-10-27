@@ -21,6 +21,12 @@ import {
   createPlaygroundHarness,
 } from "../src/features/conversations/playground/harness";
 import { reconcileTurnSemanticFacts } from "../src/features/conversations/server/semantic-facts";
+import {
+  dehydrateConversationState,
+  emptyConversationState,
+  hydrateConversationState,
+  projectConversationState,
+} from "../src/features/conversations/server/conversation-state";
 
 /**
  * FlowPilot — Exact-Time Requests and Honest Availability Verification Suite
@@ -237,7 +243,7 @@ async function main(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // T04: Genuine AM/PM ambiguity ("الساعة 3")
+  // T04: Genuine AM/PM ambiguity ("الساعة 3:30" and "الساعة 3")
   // ─────────────────────────────────────────────────────────────────────────────
   console.log("--- T04: Genuine AM/PM ambiguity ---");
   {
@@ -246,6 +252,7 @@ async function main(): Promise<void> {
       todayRef: "2026-10-20",
     });
 
+    // Mocked semantic proposal: hour 3, minute 30 unresolved
     harness.deps.ai = {
       providerName: "mock-ai",
       async respond(): Promise<AiResponse> {
@@ -254,7 +261,7 @@ async function main(): Promise<void> {
           content: "يرجى التوضيح",
           service: "كشف أسنان",
           date: "2026-10-21",
-          exactTime: { type: "unresolved_period", hour: 3 },
+          exactTime: { type: "unresolved_period", hour: 3, minute: 30 },
         });
       },
     };
@@ -262,18 +269,18 @@ async function main(): Promise<void> {
     const res = await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber,
       from: harness.customer.phone,
-      text: "عايز موعد الساعة 3",
+      text: "عايز موعد الساعة 3:30",
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
     check("T04: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
     const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
-    check("T04: Asks ONE AM/PM clarifying question", lastReply?.text?.includes("هل تقصد الساعة 3 عصراً (مساءً) أم 3 فجراً (صباحاً)؟"));
+    check("T04: Asks ONE AM/PM clarifying question with exact minutes preserved", lastReply?.text?.includes("هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟"));
     check("T04: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // T05: Clarification resolution on follow-up turn
+  // T05: Clarification resolution on follow-up turn (3:30 PM preservation)
   // ─────────────────────────────────────────────────────────────────────────────
   console.log("--- T05: Clarification resolution on follow-up turn ---");
   {
@@ -282,7 +289,7 @@ async function main(): Promise<void> {
       todayRef: "2026-10-20",
     });
 
-    // Turn 1: ambiguity
+    // Turn 1: ambiguity with minute 30
     harness.deps.ai = {
       providerName: "mock-ai",
       async respond(): Promise<AiResponse> {
@@ -291,7 +298,7 @@ async function main(): Promise<void> {
           content: "توضيح",
           service: "كشف أسنان",
           date: "2026-10-21",
-          exactTime: { type: "unresolved_period", hour: 3 },
+          exactTime: { type: "unresolved_period", hour: 3, minute: 30 },
         });
       },
     };
@@ -299,7 +306,7 @@ async function main(): Promise<void> {
     await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber,
       from: harness.customer.phone,
-      text: "عايز موعد الساعة 3",
+      text: "عايز موعد الساعة 3:30",
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
@@ -326,8 +333,103 @@ async function main(): Promise<void> {
 
     check("T05: Clarification turn succeeded", res2.ok && (res2 as any).conversationStatus === "AI_ACTIVE");
     const reply2 = harness.sentMessages[harness.sentMessages.length - 1];
-    check("T05: Resolved hour 3 + afternoon to 15:00 (3:00 مساءً) availability", reply2?.text?.includes("3:00 مساءً متاح"));
+    check("T05: Resolved hour 3 + minute 30 + afternoon to 15:30 (3:30 مساءً) without minute truncation", reply2?.text?.includes("3:30 مساءً متاح"));
     check("T05: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // T05b: 12 AM / 12 PM ambiguity resolution (noon vs midnight)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("--- T05b: 12 AM / 12 PM ambiguity resolution ---");
+  {
+    const harness = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Turn 1: 12 ambiguous
+    harness.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "توضيح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "unresolved_period", hour: 12 },
+        });
+      },
+    };
+
+    await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "الساعة 12 متاح؟",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    // Turn 2: customer clarifies "ظهراً / مساءً"
+    harness.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "تمام",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "afternoon",
+        });
+      },
+    };
+
+    const res2 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "ظهراً",
+      receivedAt: "2026-10-20T10:01:00Z",
+    });
+
+    check("T05b: 12 + afternoon resolves to 12:00 (12:00 ظهراً)", res2.ok);
+    const reply2 = harness.sentMessages[harness.sentMessages.length - 1];
+    check("T05b: Answers 12:00 ظهراً directly", reply2?.text?.includes("12:00 ظهراً متاح"));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // T05c: Missing clarification state safety (no hardcoded fallback hour 3)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("--- T05c: Missing clarification state safety ---");
+  {
+    const harness = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Turn with bare "مساءً" and NO previous unresolved ambiguity
+    harness.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "تمام",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "evening",
+        });
+      },
+    };
+
+    const res = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "عايز موعد بالليل",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    check("T05c: Inbound succeeded", res.ok);
+    const reply = harness.sentMessages[harness.sentMessages.length - 1];
+    // Must NOT guess hour 3 or claim exact time 3:00 was requested
+    check("T05c: Does not guess hour 3 or invent exact-time request", !reply?.text?.includes("الساعة 3:00"));
+    check("T05c: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -645,6 +747,7 @@ async function main(): Promise<void> {
     check("T13: Inbound handled", res.ok);
     const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
     check("T13: Answers 2:15 is unavailable", lastReply?.text?.includes("2:15 مساءً غير متاح"));
+    check("T13: Explains truthful slot-grid mismatch without falsely claiming booked", lastReply?.text?.includes("لا يتوافق مع فترات جدول المواعيد") && !lastReply?.text?.includes("محجوز مسبقاً"));
     check("T13: Offers nearest aligned slots (14:00 or 14:30)", lastReply?.text?.includes("2:00 مساءً") || lastReply?.text?.includes("2:30 مساءً"));
     check("T13: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -861,6 +964,82 @@ async function main(): Promise<void> {
     });
 
     check("T18: Replayed selection creates ZERO duplicate appointments", harness.capturedAppointmentWrites.length === 1);
+
+    // Sub-case: Invalidate active offer when customer changes exact-time request
+    const harness2 = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Turn 1: request 17:00 -> offer presented
+    harness2.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "17:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harness2.deps, {
+      to: harness2.business.whatsappNumber,
+      from: harness2.customer.phone,
+      text: "عايز موعد الساعة 5 مساء",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+    const offerMsg1 = harness2.sentMessages[harness2.sentMessages.length - 1];
+    const choices1 = (offerMsg1 as any)?.delivery?.choices;
+    const token1 = choices1?.offerToken;
+
+    // Turn 2: customer changes exact time to 19:00 -> offer1 invalidated, offer2 presented
+    harness2.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "19:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harness2.deps, {
+      to: harness2.business.whatsappNumber,
+      from: harness2.customer.phone,
+      text: "لا خليه الساعة 7 مساء",
+      receivedAt: "2026-10-20T10:01:00Z",
+    });
+    const offerMsg2 = harness2.sentMessages[harness2.sentMessages.length - 1];
+    const choices2 = (offerMsg2 as any)?.delivery?.choices;
+    const token2 = choices2?.offerToken;
+
+    if (token1) {
+      // Replay old callback token from offer 1
+      await receiveInboundMessage(harness2.deps, {
+        to: harness2.business.whatsappNumber,
+        from: harness2.customer.phone,
+        text: `fp:${token1}:1`,
+        receivedAt: "2026-10-20T10:02:00Z",
+      });
+      const staleReply = harness2.sentMessages[harness2.sentMessages.length - 1];
+      check("T18: Old offer callback rejected as stale after exact-time change", staleReply?.text?.includes("عرضاً سابقاً لم يعد متاحاً"));
+      check("T18: Zero appointments created from stale callback", harness2.capturedAppointmentWrites.length === 0);
+    }
+
+    if (token2) {
+      // Select newly offered exact-time slot through current callback token
+      await receiveInboundMessage(harness2.deps, {
+        to: harness2.business.whatsappNumber,
+        from: harness2.customer.phone,
+        text: `fp:${token2}:1`,
+        receivedAt: "2026-10-20T10:03:00Z",
+      });
+      check("T18: New exact-time offer callback successfully booked with revalidation", harness2.capturedAppointmentWrites.length === 1);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -894,26 +1073,89 @@ async function main(): Promise<void> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // T20: Correlated evidence check for temporary handoff
+  // T20: Durable state round-trip, context projection & correlated evidence check
   // ─────────────────────────────────────────────────────────────────────────────
-  console.log("--- T20: Correlated evidence check for temporary handoff ---");
+  console.log("--- T20: Durable state round-trip, context projection & correlated evidence check ---");
   {
-    // Correlated evidence analysis:
+    // 1. Correlated evidence analysis:
     // Historical handoff on "الساعة 3" was correlated with schema rejection of non-canonical time strings (e.g. "3 الفجر").
     // In the absence of live provider request traces, cause is classified truthfully as UNKNOWN without paid probes or secret mutations.
     const schemaTest1 = aiExactTimeRequestSchema.safeParse({ type: "specific", time: "17:00" });
     const schemaTest2 = aiExactTimeRequestSchema.safeParse({ type: "unresolved_period", hour: 3 });
+    const schemaTest3 = aiExactTimeRequestSchema.safeParse({ type: "unresolved_period", hour: 3, minute: 30 });
     const extractionTest = aiExtractionSchema.safeParse({
       service: "كشف أسنان",
       provider: null,
       date: "2026-10-21",
       timePreference: null,
-      exactTime: { type: "unresolved_period", hour: 3 },
+      exactTime: { type: "unresolved_period", hour: 3, minute: 30 },
     });
 
     check("T20: Specific exact-time schema validates", schemaTest1.success);
     check("T20: Unresolved period schema validates", schemaTest2.success);
+    check("T20: Unresolved period with minute validates", schemaTest3.success);
     check("T20: Bounded extraction accepts structured exact-time without crashing", extractionTest.success);
+
+    // 2. Durable state dehydration and hydration round-trip
+    const baseState = emptyConversationState();
+    const testState = {
+      ...baseState,
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-21",
+        exactTime: "17:00",
+        unresolvedTime: { hour: 3, minute: 30 },
+      },
+      lastClarification: {
+        type: "exact_time_period",
+        turnId: "turn-test-1",
+        unresolvedTime: { hour: 3, minute: 30 },
+      },
+    };
+
+    const dehydrated = dehydrateConversationState(testState);
+    const jsonStr = JSON.stringify(dehydrated);
+    const reloaded = JSON.parse(jsonStr);
+    const hydrated = hydrateConversationState(reloaded, {
+      businessId: PLAYGROUND_IDS.businessId,
+      conversationId: PLAYGROUND_IDS.conversationId,
+    });
+
+    check("T20: Durable state round-trips via dehydrate -> JSON -> hydrate", hydrated !== null);
+    check("T20: Hydrated state preserves exactTime", hydrated?.knownFacts.exactTime === "17:00");
+    check("T20: Hydrated state preserves typed unresolvedTime { hour: 3, minute: 30 }", hydrated?.knownFacts.unresolvedTime?.hour === 3 && hydrated?.knownFacts.unresolvedTime?.minute === 30);
+    check("T20: Hydrated state preserves typed lastClarification unresolvedTime", (hydrated?.lastClarification as any)?.unresolvedTime?.hour === 3 && (hydrated?.lastClarification as any)?.unresolvedTime?.minute === 30);
+
+    // 3. AI context projection
+    const projection = projectConversationState(hydrated);
+    check("T20: Context projection projects knownExactTime", projection?.knownExactTime === "17:00");
+    check("T20: Context projection projects pendingClarification unresolvedTime", (projection?.pendingClarification as any)?.unresolvedTime?.hour === 3 && (projection?.pendingClarification as any)?.unresolvedTime?.minute === 30);
+
+    // 4. Backward compatibility: hydrate legacy state JSON without exactTime / unresolvedTime
+    const legacyRaw = {
+      version: 1,
+      currentGoal: "BOOKING",
+      activeTask: { kind: "BOOKING", stage: "DATE_SUPPLIED" },
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-21",
+        timePreference: "morning",
+      },
+      missingFacts: [],
+      bookingStage: "DATE_SUPPLIED",
+      pendingGoals: [],
+      lastClarification: null,
+      serviceId: "srv_test",
+      serviceSource: "CUSTOMER",
+      offer: null,
+      suspendedOffer: null,
+      completedTask: null,
+    };
+    const legacyHydrated = hydrateConversationState(legacyRaw, {
+      businessId: PLAYGROUND_IDS.businessId,
+      conversationId: PLAYGROUND_IDS.conversationId,
+    });
+    check("T20: Legacy persisted state without exactTime hydrates safely without error", legacyHydrated !== null && legacyHydrated.knownFacts.exactTime === undefined);
   }
 
   console.log("\n=================================================================");

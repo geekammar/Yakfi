@@ -330,6 +330,12 @@ export const conversationContextProjectionSchema = z.object({
     .object({
       type: z.string().max(64),
       missingFacts: z.array(z.string().max(64)).max(8).optional(),
+      unresolvedTime: z
+        .object({
+          hour: z.number().int().min(1).max(12),
+          minute: z.number().int().min(0).max(59),
+        })
+        .optional(),
     })
     .nullable()
     .optional(),
