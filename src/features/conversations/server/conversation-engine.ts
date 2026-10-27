@@ -3733,20 +3733,45 @@ async function runInboundTurn(
           }
 
           if (serviceMatch && dateMatch && providerMatch) {
-            return presentSlotChoices(
+            turnSession.state = {
+              ...(turnSession.state ?? emptyConversationState()),
+              offer: suspended,
+              suspendedOffer: null,
+              pendingOffer: pendingOfferMirror(suspended),
+              activeTask: { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" },
+              bookingStage: "AVAILABILITY_RESOLVED",
+            };
+            const ok = await turnSession.commit();
+            if (!ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "عذراً، حدث تعارض أثناء تحديث المحادثة. يُرجى المحاولة مرة أخرى.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+              );
+            }
+            const choices = buildChannelChoices(suspended);
+            const optionsMsg = formatBookingOptionsMessage(
+              suspended.serviceName,
+              suspended.date,
+              suspended.options.map((o) => ({
+                index: o.index,
+                displayName: o.displayName,
+                startAt: o.startAt,
+                endAt: o.endAt,
+              })),
+            );
+            return selectionReply(
               deps,
               selectionScope,
-              {
-                serviceId: suspended.serviceId,
-                serviceName: suspended.serviceName,
-                serviceSource: suspended.serviceSource,
-                providerId: suspended.providerId,
-                date: suspended.date,
-                timePreference: suspended.timePreference,
-                range: suspended.range,
-              },
-              turnSession,
-              now,
+              optionsMsg,
+              "AI_ACTIVE",
+              null,
+              undefined,
+              undefined,
+              choices,
             );
           } else {
             if (turnSession.state) {
@@ -5204,36 +5229,34 @@ async function runInboundTurn(
           delivery,
         };
       }
-      if (hasResumableDraftTask(turnSession.state)) {
-        const resumeOffer = buildResumeOffer(
-          { businessId: business.id, conversationId: conversation.id },
-          crypto.randomUUID(),
-          now,
-        );
-        if (resumeOffer && turnSession.enabled) {
-          turnSession.state = withPresentedOffer(
-            turnSession.state ?? emptyConversationState(),
-            resumeOffer,
-          );
-          const ok = await turnSession.commit();
-          if (!ok) {
-            return selectionReply(
-              deps,
-              selectionScope,
-              "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
-              "AI_ACTIVE",
-            );
-          }
+      const activeOffer = turnSession.state?.offer;
+      const isOfferValid =
+        activeOffer &&
+        activeOffer.status === "ACTIVE" &&
+        new Date(activeOffer.expiresAt).getTime() > now.getTime();
+
+      if (isOfferValid) {
+        let continuationMsg: string;
+
+        if (activeOffer.kind === "SLOT") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. ما زالت المواعيد المقترحة متاحة لاختيارك:\n(أو يمكنك كتابة أي استفسار أو موعد آخر مباشرة)`;
+        } else if (activeOffer.kind === "DATE") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى تحديد اليوم أو التاريخ المناسب لمتابعة حجزك:\n(أو يمكنك كتابة أي تاريخ مباشرة)`;
+        } else if (activeOffer.kind === "SERVICE") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار الخدمة المطلوبة لمتابعة حجزك:\n(أو يمكنك كتابة اسم الخدمة مباشرة)`;
+        } else if (activeOffer.kind === "PROVIDER") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. يرجى اختيار مقدم الخدمة:\n(أو يمكنك كتابة اسم الطبيب أو الاختيار مباشرة)`;
+        } else if (activeOffer.kind === "SERVICE_DETAIL") {
+          continuationMsg = `أهلاً بك مجدداً في ${business.name}. تفاصيل الخدمة معروضة أدناه للمتابعة:`;
+        } else {
+          continuationMsg = `أهلاً بك في ${business.name}! يمكنك الاختيار من الخيارات التالية أو كتابة استفسارك مباشرة:`;
         }
 
-        const resumeMsg = `أهلاً بك في ${business.name}! لديك طلب حجز سابق لم يكتمل، هل تود متابعة الطلب أم بدء طلب جديد؟\n1️⃣ متابعة الطلب\n2️⃣ طلب جديد`;
-        const choices = resumeOffer
-          ? buildChannelChoices(resumeOffer)
-          : undefined;
+        const choices = buildChannelChoices(activeOffer);
         const assistantMessage = await persistAssistantReply(
           deps,
           conversation.id,
-          resumeMsg,
+          continuationMsg,
           "AI_ACTIVE",
         );
         const delivery = await deliverAssistantReply(
@@ -5241,7 +5264,7 @@ async function runInboundTurn(
           customer.phone,
           business.name,
           conversation.id,
-          resumeMsg,
+          continuationMsg,
           assistantMessage.id,
           business.id,
           outboundConnectionId,
@@ -5261,6 +5284,65 @@ async function runInboundTurn(
           assistantProvider: deps.ai.providerName,
           delivery,
         };
+      }
+
+      // If active booking task is missing date
+      if (
+        turnSession.state?.activeTask?.kind === "BOOKING" &&
+        turnSession.state.selectedService &&
+        turnSession.state.serviceId
+      ) {
+        const knownDate = turnSession.state.knownFacts.date;
+        const candidateProvider = turnSession.state.knownFacts.provider ?? null;
+        const provRes = await resolveProviderCandidate(
+          deps,
+          business.id,
+          conversation.branchId as string | null,
+          turnSession.state.serviceId,
+          candidateProvider,
+        );
+        if (provRes.kind === "clarification") {
+          return promptProviderClarificationReply(
+            deps,
+            selectionScope,
+            {
+              serviceId: turnSession.state.serviceId,
+              serviceName: turnSession.state.selectedService,
+              date: knownDate ?? null,
+              eligibleProviders: provRes.eligibleProviders,
+              reason: provRes.reason,
+            },
+            turnSession,
+            now,
+          );
+        }
+        if (knownDate) {
+          return presentSlotChoices(
+            deps,
+            selectionScope,
+            {
+              serviceId: turnSession.state.serviceId,
+              serviceName: turnSession.state.selectedService,
+              serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
+              providerId: provRes.providerId,
+              date: knownDate,
+            },
+            turnSession,
+            now,
+          );
+        }
+        return presentDateChoices(
+          deps,
+          selectionScope,
+          {
+            serviceId: turnSession.state.serviceId,
+            serviceName: turnSession.state.selectedService,
+            serviceSource: turnSession.state.serviceSource ?? "CUSTOMER",
+            providerId: provRes.providerId,
+          },
+          turnSession,
+          now,
+        );
       }
 
       // Idle or fresh conversation: present Welcome offer
