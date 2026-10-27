@@ -67,6 +67,16 @@ export interface CanonicalInboundEvent {
 }
 
 /**
+ * Comparable event fingerprint preserved in a session for verifiable replay detection across carry-in.
+ */
+export interface EventFingerprint {
+  readonly eventId: string;
+  readonly canonicalTimestampMs: number;
+  readonly actionType: InboundActionType;
+  readonly senderType: SenderType;
+}
+
+/**
  * Measured commercial session spanning a half-open UTC window [start, start + 24h).
  */
 export interface CommercialSession {
@@ -86,6 +96,8 @@ export interface CommercialSession {
   /** Backwards-compatible alias for totalEventCount. */
   readonly eventCount: number;
   readonly eventIds: ReadonlyArray<string>;
+  /** Optional verifiable fingerprints for carried events to support provable replay deduplication. */
+  readonly eventFingerprints?: ReadonlyArray<EventFingerprint>;
 }
 
 export interface SessionRollupOptions {

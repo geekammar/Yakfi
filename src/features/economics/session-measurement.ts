@@ -11,7 +11,8 @@
  * - Deduplication: repeated event identities in batch or carry-in are idempotent; conflicting facts throw an Error.
  * - Operational traffic pool isolation: SERVING, SHADOW, and TEST pools maintain disjoint sessions and IDs.
  * - Permutation invariance: batch ordering is stabilized by canonical timestamp + eventId tie-breaker.
- * - Explicit prior session state for period carry-in without re-opening expired windows or allowing overlaps.
+ * - Explicit prior session state for period carry-in: deterministic ordering, strict watermark boundaries,
+ *   count validation, and explicit replay fingerprints (unverifiable replays fail closed).
  * - Content-free projection: pure machine identifiers, timestamps, and counts; zero NLP, regexes, or prose.
  */
 
@@ -26,6 +27,7 @@ import {
   type CanonicalInboundEvent,
   type ChannelType,
   type CommercialSession,
+  type EventFingerprint,
   type IdentityScope,
   type InboundActionType,
   type PoolSessionMetrics,
@@ -182,6 +184,7 @@ function validateCanonicalEvent(raw: unknown): {
 
 /**
  * Validate a prior carry-in session.
+ * Rejects coerced strings, invented defaults, invalid counts, or unverified event relationships.
  */
 function validatePriorSession(raw: unknown): CommercialSession {
   if (typeof raw !== "object" || raw === null) {
@@ -242,21 +245,130 @@ function validatePriorSession(raw: unknown): CommercialSession {
       "Prior session initiatingEventId must be a non-empty string",
     );
   }
-  if (!Array.isArray(s.eventIds)) {
-    throw new Error("Prior session eventIds must be an array of strings");
+
+  if (!Array.isArray(s.eventIds) || s.eventIds.length === 0) {
+    throw new Error(
+      "Prior session eventIds must be a non-empty array of strings",
+    );
   }
 
-  const rawCount =
-    typeof s.totalEventCount === "number" ? s.totalEventCount : s.eventCount;
-  const totalEventCount =
-    typeof rawCount === "number" && Number.isSafeInteger(rawCount)
-      ? rawCount
-      : s.eventIds.length;
-  const qualifyingEventCount =
-    typeof s.qualifyingEventCount === "number" &&
-    Number.isSafeInteger(s.qualifyingEventCount)
-      ? s.qualifyingEventCount
-      : 1;
+  const cleanEventIds: string[] = [];
+  for (const id of s.eventIds) {
+    if (typeof id !== "string" || id.trim().length === 0) {
+      throw new Error(
+        "Prior session eventIds must contain only non-empty strings",
+      );
+    }
+    cleanEventIds.push(id.trim());
+  }
+  if (new Set(cleanEventIds).size !== cleanEventIds.length) {
+    throw new Error(
+      "Prior session eventIds must contain unique identifiers without duplicates",
+    );
+  }
+
+  if (
+    typeof s.totalEventCount !== "number" ||
+    !Number.isSafeInteger(s.totalEventCount) ||
+    s.totalEventCount < 1
+  ) {
+    throw new Error(
+      "Prior session totalEventCount must be a positive safe integer",
+    );
+  }
+  if (s.totalEventCount !== cleanEventIds.length) {
+    throw new Error(
+      `Prior session totalEventCount (${s.totalEventCount}) must equal eventIds.length (${cleanEventIds.length})`,
+    );
+  }
+
+  if (
+    typeof s.qualifyingEventCount !== "number" ||
+    !Number.isSafeInteger(s.qualifyingEventCount) ||
+    s.qualifyingEventCount < 1
+  ) {
+    throw new Error(
+      "Prior session qualifyingEventCount must be a positive safe integer",
+    );
+  }
+  if (s.qualifyingEventCount > s.totalEventCount) {
+    throw new Error(
+      `Prior session qualifyingEventCount (${s.qualifyingEventCount}) cannot exceed totalEventCount (${s.totalEventCount})`,
+    );
+  }
+
+  if (s.eventCount !== undefined && s.eventCount !== s.totalEventCount) {
+    throw new Error(
+      `Prior session eventCount (${String(s.eventCount)}) must equal totalEventCount (${s.totalEventCount})`,
+    );
+  }
+
+  if (s.initiatingEventId.trim() !== cleanEventIds[0]) {
+    throw new Error(
+      `Prior session initiatingEventId '${s.initiatingEventId.trim()}' must match the first eventId '${cleanEventIds[0]}'`,
+    );
+  }
+
+  let cleanFingerprints: EventFingerprint[] | undefined;
+  if (s.eventFingerprints !== undefined) {
+    if (!Array.isArray(s.eventFingerprints)) {
+      throw new Error(
+        "Prior session eventFingerprints must be an array when specified",
+      );
+    }
+    if (s.eventFingerprints.length !== cleanEventIds.length) {
+      throw new Error(
+        `Prior session eventFingerprints length (${s.eventFingerprints.length}) must match eventIds.length (${cleanEventIds.length})`,
+      );
+    }
+    cleanFingerprints = [];
+    for (let i = 0; i < s.eventFingerprints.length; i++) {
+      const rawFp = s.eventFingerprints[i] as Record<string, unknown>;
+      if (typeof rawFp !== "object" || rawFp === null) {
+        throw new Error("EventFingerprint must be a non-null object");
+      }
+      if (
+        typeof rawFp.eventId !== "string" ||
+        rawFp.eventId.trim() !== cleanEventIds[i]
+      ) {
+        throw new Error(
+          `EventFingerprint eventId '${String(rawFp.eventId)}' does not match eventIds[${i}] '${cleanEventIds[i]}'`,
+        );
+      }
+      if (
+        typeof rawFp.canonicalTimestampMs !== "number" ||
+        !Number.isSafeInteger(rawFp.canonicalTimestampMs) ||
+        rawFp.canonicalTimestampMs < s.startMs ||
+        rawFp.canonicalTimestampMs >= s.endMs
+      ) {
+        throw new Error(
+          `EventFingerprint canonicalTimestampMs must fall within prior session window [${s.startMs}, ${s.endMs})`,
+        );
+      }
+      if (
+        typeof rawFp.actionType !== "string" ||
+        !INBOUND_ACTION_TYPES.includes(rawFp.actionType as InboundActionType)
+      ) {
+        throw new Error(
+          `Invalid EventFingerprint actionType '${String(rawFp.actionType)}'`,
+        );
+      }
+      if (
+        typeof rawFp.senderType !== "string" ||
+        !SENDER_TYPES.includes(rawFp.senderType as SenderType)
+      ) {
+        throw new Error(
+          `Invalid EventFingerprint senderType '${String(rawFp.senderType)}'`,
+        );
+      }
+      cleanFingerprints.push({
+        eventId: cleanEventIds[i]!,
+        canonicalTimestampMs: rawFp.canonicalTimestampMs,
+        actionType: rawFp.actionType as InboundActionType,
+        senderType: rawFp.senderType as SenderType,
+      });
+    }
+  }
 
   return projectCommercialSession({
     sessionId: s.sessionId.trim(),
@@ -267,11 +379,12 @@ function validatePriorSession(raw: unknown): CommercialSession {
     startMs: s.startMs,
     endAtUtc: expectedEndIso,
     endMs: s.endMs,
-    initiatingEventId: s.initiatingEventId.trim(),
-    qualifyingEventCount,
-    totalEventCount,
-    eventCount: totalEventCount,
-    eventIds: s.eventIds.map((id) => String(id)),
+    initiatingEventId: cleanEventIds[0]!,
+    qualifyingEventCount: s.qualifyingEventCount,
+    totalEventCount: s.totalEventCount,
+    eventCount: s.totalEventCount,
+    eventIds: cleanEventIds,
+    eventFingerprints: cleanFingerprints,
   });
 }
 
@@ -311,6 +424,16 @@ function projectCommercialSession(s: CommercialSession): CommercialSession {
     totalEventCount: s.totalEventCount,
     eventCount: s.totalEventCount,
     eventIds: [...s.eventIds],
+    ...(s.eventFingerprints
+      ? {
+          eventFingerprints: s.eventFingerprints.map((f) => ({
+            eventId: f.eventId,
+            canonicalTimestampMs: f.canonicalTimestampMs,
+            actionType: f.actionType,
+            senderType: f.senderType,
+          })),
+        }
+      : {}),
   };
 }
 
@@ -320,7 +443,8 @@ interface EventIdentityRecord {
   readonly senderType: SenderType;
   readonly scopeKey: string;
   readonly trafficPool: TrafficPool;
-  readonly isPrior?: boolean;
+  readonly isPriorUnverifiable?: boolean;
+  readonly priorSessionId?: string;
 }
 
 /**
@@ -344,18 +468,28 @@ export function rollupCommercialSessions(
   });
 
   // 2. Initialize tracking maps partitioned by operational traffic pool and scope.
-  // Key: `${trafficPool}:${scopeKey}`
   const activeByPoolScope = new Map<string, CommercialSession>();
   const sessionList: CommercialSession[] = [];
   const seenTenantEvents = new Map<string, EventIdentityRecord>();
+  const scopeWatermark = new Map<string, number>();
 
-  // 3. Validate and seed prior sessions (period carry-in)
-  if (options?.priorSessions) {
-    // Check for overlapping prior sessions within the same pool and scope
+  // 3. Validate and seed prior sessions (period carry-in) deterministically.
+  if (options?.priorSessions && options.priorSessions.length > 0) {
+    const validatedPriors = options.priorSessions.map((raw) =>
+      validatePriorSession(raw),
+    );
+
+    // Sort prior sessions deterministically to make input ordering invariant
+    const sortedPriors = [...validatedPriors].sort((a, b) => {
+      if (a.startMs !== b.startMs) {
+        return a.startMs - b.startMs;
+      }
+      return a.sessionId.localeCompare(b.sessionId);
+    });
+
     const priorByPoolScope = new Map<string, CommercialSession[]>();
 
-    for (const rawPrior of options.priorSessions) {
-      const prior = validatePriorSession(rawPrior);
+    for (const prior of sortedPriors) {
       const poolScopeKey = `${prior.trafficPool}:${prior.scopeKey}`;
 
       const existingGroup = priorByPoolScope.get(poolScopeKey) ?? [];
@@ -372,16 +506,38 @@ export function rollupCommercialSessions(
       existingGroup.push(prior);
       priorByPoolScope.set(poolScopeKey, existingGroup);
 
-      // Record prior absorbed event IDs to enforce tenant-scoped idempotency
-      for (const absorbedId of prior.eventIds) {
-        seenTenantEvents.set(`${prior.scope.businessId}:${absorbedId}`, {
-          timestampMs: prior.startMs,
-          actionType: "MESSAGE",
-          senderType: "CUSTOMER",
-          scopeKey: prior.scopeKey,
-          trafficPool: prior.trafficPool,
-          isPrior: true,
-        });
+      // Track the earliest carry-in watermark per pool and scope
+      if (
+        !scopeWatermark.has(poolScopeKey) ||
+        prior.startMs < scopeWatermark.get(poolScopeKey)!
+      ) {
+        scopeWatermark.set(poolScopeKey, prior.startMs);
+      }
+
+      // Record absorbed events: if fingerprints are present, record comparable facts;
+      // if absent, flag as unverifiable so any replay attempts fail closed.
+      if (prior.eventFingerprints && prior.eventFingerprints.length > 0) {
+        for (const fp of prior.eventFingerprints) {
+          seenTenantEvents.set(`${prior.scope.businessId}:${fp.eventId}`, {
+            timestampMs: fp.canonicalTimestampMs,
+            actionType: fp.actionType,
+            senderType: fp.senderType,
+            scopeKey: prior.scopeKey,
+            trafficPool: prior.trafficPool,
+          });
+        }
+      } else {
+        for (const absorbedId of prior.eventIds) {
+          seenTenantEvents.set(`${prior.scope.businessId}:${absorbedId}`, {
+            timestampMs: -1,
+            actionType: "MESSAGE",
+            senderType: "CUSTOMER",
+            scopeKey: prior.scopeKey,
+            trafficPool: prior.trafficPool,
+            isPriorUnverifiable: true,
+            priorSessionId: prior.sessionId,
+          });
+        }
       }
 
       activeByPoolScope.set(poolScopeKey, prior);
@@ -399,16 +555,29 @@ export function rollupCommercialSessions(
     const tenantEventKey = `${scope.businessId}:${event.eventId}`;
     const poolScopeKey = `${pool}:${scopeKey}`;
 
+    // Boundary check: Enforce carry-in watermark. Out-of-contract events predating the prior start fail closed.
+    const watermarkMs = scopeWatermark.get(poolScopeKey);
+    if (watermarkMs !== undefined && timestampMs < watermarkMs) {
+      throw new Error(
+        `Out-of-contract event before carry-in window start: event '${event.eventId}' timestamp (${new Date(timestampMs).toISOString()}) is earlier than prior session start (${new Date(watermarkMs).toISOString()})`,
+      );
+    }
+
     // Tenant-scoped idempotency and conflict verification
     const existingRecord = seenTenantEvents.get(tenantEventKey);
     if (existingRecord) {
+      if (existingRecord.isPriorUnverifiable) {
+        throw new Error(
+          `Unverifiable event replay: eventId '${event.eventId}' was recorded in carry-in session '${existingRecord.priorSessionId}' without comparable facts/fingerprints`,
+        );
+      }
+
       const isIdentical =
         existingRecord.scopeKey === scopeKey &&
         existingRecord.trafficPool === pool &&
-        (existingRecord.isPrior ||
-          (existingRecord.timestampMs === timestampMs &&
-            existingRecord.actionType === event.actionType &&
-            existingRecord.senderType === event.senderType));
+        existingRecord.timestampMs === timestampMs &&
+        existingRecord.actionType === event.actionType &&
+        existingRecord.senderType === event.senderType;
 
       if (isIdentical) {
         // Idempotent duplicate replay -> skip without increasing counts
@@ -458,6 +627,13 @@ export function rollupCommercialSessions(
           event.actionType === "CHOICE_CALLBACK");
 
       const newTotal = currentActive.totalEventCount + 1;
+      const newFp: EventFingerprint = {
+        eventId: event.eventId,
+        canonicalTimestampMs: timestampMs,
+        actionType: event.actionType,
+        senderType: event.senderType,
+      };
+
       const updatedSession: CommercialSession = projectCommercialSession({
         ...currentActive,
         qualifyingEventCount:
@@ -465,6 +641,9 @@ export function rollupCommercialSessions(
         totalEventCount: newTotal,
         eventCount: newTotal,
         eventIds: [...currentActive.eventIds, event.eventId],
+        eventFingerprints: currentActive.eventFingerprints
+          ? [...currentActive.eventFingerprints, newFp]
+          : [newFp],
       });
 
       activeByPoolScope.set(poolScopeKey, updatedSession);
@@ -478,8 +657,9 @@ export function rollupCommercialSessions(
       continue;
     }
 
-    // Beyond active session window (or no active session exists for this pool + scope)
-    if (currentActive && !isWithinActiveSession) {
+    // Beyond active session window: delete active pointer ONLY if event is strictly past endMs.
+    // Never delete the active pointer for earlier events.
+    if (currentActive && timestampMs >= currentActive.endMs) {
       activeByPoolScope.delete(poolScopeKey);
     }
 
@@ -509,6 +689,13 @@ export function rollupCommercialSessions(
         event.eventId,
       );
 
+      const initialFp: EventFingerprint = {
+        eventId: event.eventId,
+        canonicalTimestampMs: timestampMs,
+        actionType: event.actionType,
+        senderType: event.senderType,
+      };
+
       const newSession: CommercialSession = projectCommercialSession({
         sessionId,
         scopeKey,
@@ -523,6 +710,7 @@ export function rollupCommercialSessions(
         totalEventCount: 1,
         eventCount: 1,
         eventIds: [event.eventId],
+        eventFingerprints: [initialFp],
       });
 
       activeByPoolScope.set(poolScopeKey, newSession);

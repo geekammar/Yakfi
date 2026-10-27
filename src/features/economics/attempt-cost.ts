@@ -10,12 +10,17 @@
  * - Matching dated rate snapshot is evaluated second.
  * - Historical rate selection: rates effective after attemptTimestamp never apply.
  *   Array reversal/shuffling yields identical selection. Conflicting snapshots throw Error.
+ * - Explicit snapshot references: snapshotId must resolve to exactly one immutable definition;
+ *   conflicting reuse is rejected; provider/model must match attempt; if attempt time is supplied,
+ *   applicability is strictly enforced.
+ * - Real calendar dates (YYYY-MM-DD with valid days per month) validated.
  * - Missing or unresolvable attempts evaluate to UNKNOWN (cost = null; never coerced to zero).
  * - Status codes (0, 401, 403, 429, TIMEOUT) NEVER imply zero cost unless zero dispatch is proven.
  * - Locally prevented executions (proven zero dispatch) incur 0 external cost and are excluded
  *   from dispatched attempt denominator.
  * - Token caching applies without double counting (cached vs uncached prompt tokens).
- * - Full unrounded precision in accumulators (IEEE 754 64-bit float; binary float, not exact decimal).
+ * - Arithmetic validation: fails explicitly on unrepresentable overflow or NaN; preserves full unrounded
+ *   precision in accumulators (IEEE 754 64-bit float; binary float, not exact decimal).
  * - Explicit content-free output projection stripping arbitrary caller properties.
  */
 
@@ -42,6 +47,46 @@ export function formatMicroUsd(cost: number | null): string | null {
 }
 
 /**
+ * Validate that a date string is a real calendar date in YYYY-MM-DD format.
+ */
+function validateCalendarDate(dateStr: string): void {
+  const trimmed = dateStr.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    throw new Error(
+      `ModelRateSnapshot.effectiveDate must be in YYYY-MM-DD format; received '${dateStr}'`,
+    );
+  }
+  const parts = trimmed.split("-");
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+
+  if (
+    !Number.isSafeInteger(year) ||
+    !Number.isSafeInteger(month) ||
+    !Number.isSafeInteger(day) ||
+    year < 2000 ||
+    year > 2100 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    throw new Error(
+      `ModelRateSnapshot.effectiveDate '${dateStr}' is not a valid calendar date`,
+    );
+  }
+
+  // Days in month validation in UTC
+  const maxDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day > maxDays) {
+    throw new Error(
+      `ModelRateSnapshot.effectiveDate '${dateStr}' is not a valid calendar date (month ${month} has ${maxDays} days)`,
+    );
+  }
+}
+
+/**
  * Validate a ModelRateSnapshot runtime object.
  */
 function validateRateSnapshot(s: unknown): ModelRateSnapshot {
@@ -62,14 +107,12 @@ function validateRateSnapshot(s: unknown): ModelRateSnapshot {
   if (typeof snap.model !== "string" || snap.model.trim().length === 0) {
     throw new Error("ModelRateSnapshot.model must be a non-empty string");
   }
-  if (
-    typeof snap.effectiveDate !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(snap.effectiveDate.trim())
-  ) {
-    throw new Error(
-      `ModelRateSnapshot.effectiveDate must be in YYYY-MM-DD format; received '${String(snap.effectiveDate)}'`,
-    );
+  if (typeof snap.effectiveDate !== "string") {
+    throw new Error("ModelRateSnapshot.effectiveDate must be a string");
   }
+
+  validateCalendarDate(snap.effectiveDate);
+
   if (
     typeof snap.promptCostPerMillionUsd !== "number" ||
     !Number.isFinite(snap.promptCostPerMillionUsd) ||
@@ -120,7 +163,9 @@ function validateRateSnapshot(s: unknown): ModelRateSnapshot {
 }
 
 /**
- * Validate rate snapshots array and detect ambiguous conflicting definitions.
+ * Validate rate snapshots array:
+ * 1. Enforces immutable snapshotId uniqueness (rejecting conflicting reuse of same ID).
+ * 2. Rejects ambiguous conflicting rates for same provider + model + effectiveDate.
  */
 function validateRateSnapshots(
   rateSnapshots?: ReadonlyArray<ModelRateSnapshot>,
@@ -128,31 +173,47 @@ function validateRateSnapshots(
   if (!rateSnapshots || rateSnapshots.length === 0) return [];
 
   const validated: ModelRateSnapshot[] = [];
-  const seenSnapshots = new Map<string, ModelRateSnapshot>();
+  const seenById = new Map<string, ModelRateSnapshot>();
+  const seenByTuple = new Map<string, ModelRateSnapshot>();
 
   for (const raw of rateSnapshots) {
     const snap = validateRateSnapshot(raw);
-    const key = `${snap.provider.toLowerCase()}:${snap.model.toLowerCase()}:${snap.effectiveDate}`;
 
-    const existing = seenSnapshots.get(key);
-    if (existing) {
-      const hasConflict =
-        existing.snapshotId !== snap.snapshotId ||
-        existing.promptCostPerMillionUsd !== snap.promptCostPerMillionUsd ||
-        existing.cachedPromptCostPerMillionUsd !==
-          snap.cachedPromptCostPerMillionUsd ||
-        existing.completionCostPerMillionUsd !==
-          snap.completionCostPerMillionUsd;
+    // 1. Enforce unique, immutable snapshotId across all snapshots
+    const existingById = seenById.get(snap.snapshotId);
+    if (existingById) {
+      const isIdentical =
+        existingById.provider.toLowerCase() === snap.provider.toLowerCase() &&
+        existingById.model.toLowerCase() === snap.model.toLowerCase() &&
+        existingById.effectiveDate === snap.effectiveDate &&
+        existingById.promptCostPerMillionUsd === snap.promptCostPerMillionUsd &&
+        existingById.cachedPromptCostPerMillionUsd ===
+          snap.cachedPromptCostPerMillionUsd &&
+        existingById.completionCostPerMillionUsd ===
+          snap.completionCostPerMillionUsd &&
+        existingById.source === snap.source;
 
-      if (hasConflict) {
+      if (!isIdentical) {
         throw new Error(
-          `Ambiguous conflicting rate snapshots for provider '${snap.provider}', model '${snap.model}', effectiveDate '${snap.effectiveDate}'`,
+          `Conflicting definition for rate snapshotId '${snap.snapshotId}': cannot redefine with different properties`,
         );
       }
-    } else {
-      seenSnapshots.set(key, snap);
-      validated.push(snap);
+      // Identical duplicate definition in array -> idempotent, keep existing
+      continue;
     }
+
+    // 2. Reject conflicting snapshots for the same provider, model, and effectiveDate
+    const tupleKey = `${snap.provider.toLowerCase()}:${snap.model.toLowerCase()}:${snap.effectiveDate}`;
+    const existingByTuple = seenByTuple.get(tupleKey);
+    if (existingByTuple) {
+      throw new Error(
+        `Ambiguous conflicting rate snapshots for provider '${snap.provider}', model '${snap.model}', effectiveDate '${snap.effectiveDate}'`,
+      );
+    }
+
+    seenById.set(snap.snapshotId, snap);
+    seenByTuple.set(tupleKey, snap);
+    validated.push(snap);
   }
 
   return validated;
@@ -331,8 +392,11 @@ function validateAttemptFact(raw: unknown): PhysicalAttemptFact {
  * Find a matching rate snapshot for an attempt deterministically.
  * Rules:
  * 1. If explicit snapshotId is provided on attempt, matches by immutable snapshotId.
- * 2. If attemptTimestamp is provided, rates with effectiveDate in the future (effectiveDate > attemptTimestamp)
- *    are excluded. Among applicable historical rates, the one with the maximum effectiveDate is selected.
+ *    - Verifies snapshot matches attempt provider and model.
+ *    - If attemptTimestamp is supplied, enforces snapshot was effective at attempt time.
+ * 2. If attemptTimestamp is provided without snapshotId, rates with effectiveDate in the future
+ *    (effectiveDate > attemptTimestamp) are excluded. Among applicable historical rates,
+ *    the one with the maximum effectiveDate is selected.
  * 3. Array order (reverse, shuffle) is completely invariant.
  */
 function findMatchingRateSnapshot(
@@ -344,7 +408,40 @@ function findMatchingRateSnapshot(
   // Case A: Explicit immutable snapshot reference
   if (attempt.snapshotId) {
     const targetSnapshotId = attempt.snapshotId.trim();
-    return rateSnapshots.find((s) => s.snapshotId === targetSnapshotId);
+    const matching = rateSnapshots.find(
+      (s) => s.snapshotId === targetSnapshotId,
+    );
+    if (!matching) return undefined;
+
+    // Verify provider matches
+    if (matching.provider.toLowerCase() !== attempt.provider.toLowerCase()) {
+      throw new Error(
+        `Rate snapshot '${attempt.snapshotId}' provider mismatch: expected '${attempt.provider}', found '${matching.provider}'`,
+      );
+    }
+
+    // Verify model matches if attempt specifies a model
+    if (
+      attempt.model &&
+      matching.model.toLowerCase() !== attempt.model.toLowerCase()
+    ) {
+      throw new Error(
+        `Rate snapshot '${attempt.snapshotId}' model mismatch: expected '${attempt.model}', found '${matching.model}'`,
+      );
+    }
+
+    // If attempt time is supplied, enforce applicability consistently
+    if (attempt.attemptTimestamp !== undefined) {
+      const attemptMs = toCanonicalTimestampMs(attempt.attemptTimestamp);
+      const effectiveMs = Date.parse(`${matching.effectiveDate}T00:00:00.000Z`);
+      if (effectiveMs > attemptMs) {
+        throw new Error(
+          `Referenced rate snapshot '${attempt.snapshotId}' is not yet effective at attempt time '${new Date(attemptMs).toISOString()}' (effectiveDate: ${matching.effectiveDate})`,
+        );
+      }
+    }
+
+    return matching;
   }
 
   if (!attempt.model) return undefined;
@@ -385,8 +482,6 @@ function findMatchingRateSnapshot(
   }
 
   // Case C: Neither snapshotId nor attemptTimestamp is provided.
-  // Without a timestamp, future rates cannot be distinguished from historical rates.
-  // Rate snapshot matching is unresolvable -> evaluates to UNKNOWN.
   return undefined;
 }
 
@@ -504,6 +599,13 @@ export function evaluateAttemptCost(
         outputTokens * completionRate) /
       1_000_000;
 
+    // Arithmetic validation: fail explicitly on overflow to Infinity or NaN
+    if (!Number.isFinite(calculatedCost) || calculatedCost < 0) {
+      throw new Error(
+        `Arithmetic overflow or invalid calculation result for attempt '${attempt.attemptId}': costUsd is ${calculatedCost}`,
+      );
+    }
+
     return projectAttemptCostResult({
       attemptId: attempt.attemptId,
       attemptIndex: attempt.attemptIndex,
@@ -581,8 +683,18 @@ function aggregatePoolSummary(
     }
     dispatchedAttempts += 1;
     if (a.completeness === "KNOWN" && a.costUsd !== null) {
+      if (!Number.isFinite(a.costUsd) || a.costUsd < 0) {
+        throw new Error(
+          `Attempt '${a.attemptId}' has invalid non-finite costUsd: ${a.costUsd}`,
+        );
+      }
       knownAttempts += 1;
       knownSubtotalUsd += a.costUsd;
+      if (!Number.isFinite(knownSubtotalUsd) || knownSubtotalUsd < 0) {
+        throw new Error(
+          `Arithmetic overflow or invalid aggregate result for pool '${pool}': knownSubtotalUsd is ${knownSubtotalUsd}`,
+        );
+      }
     } else {
       unknownAttempts += 1;
     }
@@ -602,12 +714,26 @@ function aggregatePoolSummary(
   } else if (unknownAttempts === 0) {
     costCompleteness = "COMPLETE";
     totalCostUsd = knownSubtotalUsd;
+    if (!Number.isFinite(totalCostUsd) || totalCostUsd < 0) {
+      throw new Error(
+        `Pool totalCostUsd overflow or invalid value for pool '${pool}': ${totalCostUsd}`,
+      );
+    }
     coverageRatio = 1.0;
     coveragePercentage = "100.0%";
   } else if (knownAttempts > 0) {
     costCompleteness = "PARTIAL";
     totalCostUsd = null; // Cannot state total cost if some dispatched attempts are unknown
     coverageRatio = knownAttempts / dispatchedAttempts;
+    if (
+      !Number.isFinite(coverageRatio) ||
+      coverageRatio < 0 ||
+      coverageRatio > 1
+    ) {
+      throw new Error(
+        `Invalid coverageRatio for pool '${pool}': ${coverageRatio}`,
+      );
+    }
     coveragePercentage = `${(coverageRatio * 100).toFixed(1)}%`;
   } else {
     costCompleteness = "UNAVAILABLE";

@@ -7,13 +7,14 @@
  * - Half-open UTC 24h session intervals [start, start + 24h).
  * - Qualifying events, start-only commands, callbacks, and duplicate filtering.
  * - Batch ordering permutation invariance (sorting + tie-breaking).
- * - Period carry-in and cross-month attribution.
+ * - Period carry-in, deterministic prior ordering, watermark enforcement, and verifiable replay.
  * - Explicit scope identification (tenant + channel + connection + customer).
  * - Operational pool isolation: SERVING, SHADOW, and TEST maintain disjoint sessions.
  * - Tenant-scoped idempotency: identical replay is skipped; conflicting facts throw Error.
  * - Event count semantics: qualifyingEventCount vs totalEventCount / eventCount.
- * - Deterministic historical rate selection, future rate exclusion, and snapshot conflict rejection.
- * - Fail-closed runtime validation (explicit timezone offsets, non-overlapping carry-in, caching bounds).
+ * - Explicit snapshot references: provider/model matching, applicability, and immutable ID uniqueness.
+ * - Real calendar date validation (YYYY-MM-DD day limits).
+ * - Fail-closed runtime validation and arithmetic overflow protection.
  * - Zero dispatch contradiction rejection.
  * - Full IEEE 754 precision preservation without premature micro-cost rounding.
  * - Strict content-free output projection stripping arbitrary runtime properties.
@@ -415,7 +416,7 @@ function runSuite(): void {
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 8: Period Carry-In & Overlapping State Rejection
+  // GROUP 8: Period Carry-In, Deterministic Prior Ordering & Overlap Rejection
   // ═══════════════════════════════════════════════════════════════════════
   const priorStart = Date.parse("2026-10-31T20:00:00.000Z");
   const priorScope = makeScope();
@@ -428,7 +429,7 @@ function runSuite(): void {
     startMs: priorStart,
     endAtUtc: new Date(priorStart + SESSION_DURATION_MS).toISOString(),
     endMs: priorStart + SESSION_DURATION_MS,
-    initiatingEventId: "evt-prior",
+    initiatingEventId: "p1",
     qualifyingEventCount: 3,
     totalEventCount: 3,
     eventCount: 3,
@@ -466,6 +467,11 @@ function runSuite(): void {
       endAtUtc: new Date(
         priorStart + 10_000 + SESSION_DURATION_MS,
       ).toISOString(),
+      initiatingEventId: "p1",
+      qualifyingEventCount: 3,
+      totalEventCount: 3,
+      eventCount: 3,
+      eventIds: ["p1", "p2", "p3"],
     };
     rollupCommercialSessions([], {
       priorSessions: [priorSession, overlappingPrior],
@@ -623,7 +629,7 @@ function runSuite(): void {
   ];
 
   // Attempt on 2026-10-15 should match rate-current (2026-10-01), NOT rate-future (2026-11-01) or rate-old (2026-09-01)
-  const testAttempt: PhysicalAttemptFact = {
+  const testAttempt: PhysicalAttemptFact[] = {
     attemptId: "att-hist",
     attemptIndex: 1,
     trafficPool: "SERVING",
@@ -667,6 +673,7 @@ function runSuite(): void {
       multiVersionRates[0]!,
       {
         ...multiVersionRates[0]!,
+        snapshotId: "rate-conflict-id",
         promptCostPerMillionUsd: 9.99, // conflict
       },
     ];
@@ -1030,6 +1037,360 @@ function runSuite(): void {
     "G20.1 Output schemas match canonical version identifiers",
     res24h.schema === COMMERCIAL_SESSION_CONTRACT_VERSION &&
       resRetryCost.schema === COST_ENGINE_VERSION,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 21: Explicit Rate Snapshot References & Calendar Date Validation
+  // ═══════════════════════════════════════════════════════════════════════
+  // Provider mismatch when referencing snapshotId
+  let throwsOnProviderMismatch = false;
+  try {
+    evaluateAttemptCost(
+      {
+        attemptId: "att-prov-mismatch",
+        attemptIndex: 1,
+        trafficPool: "SERVING",
+        provider: "anthropic", // mismatch from openrouter
+        snapshotId: "rate-deepseek-v3",
+        status: "SUCCESS",
+        inputTokens: 100,
+        outputTokens: 10,
+      },
+      rateSnapshots,
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("provider mismatch")) {
+      throwsOnProviderMismatch = true;
+    }
+  }
+  check(
+    "G21.1 Explicit snapshotId reference with provider mismatch throws explicit Error",
+    throwsOnProviderMismatch,
+  );
+
+  // Model mismatch when referencing snapshotId
+  let throwsOnModelMismatch = false;
+  try {
+    evaluateAttemptCost(
+      {
+        attemptId: "att-model-mismatch",
+        attemptIndex: 1,
+        trafficPool: "SERVING",
+        provider: "openrouter",
+        model: "openai/gpt-4o", // mismatch from deepseek/deepseek-chat
+        snapshotId: "rate-deepseek-v3",
+        status: "SUCCESS",
+        inputTokens: 100,
+        outputTokens: 10,
+      },
+      rateSnapshots,
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("model mismatch")) {
+      throwsOnModelMismatch = true;
+    }
+  }
+  check(
+    "G21.2 Explicit snapshotId reference with model mismatch throws explicit Error",
+    throwsOnModelMismatch,
+  );
+
+  // Attempt time predating snapshot effective date when referencing snapshotId
+  let throwsOnPrematureSnapshotRef = false;
+  try {
+    evaluateAttemptCost(
+      {
+        attemptId: "att-time-mismatch",
+        attemptIndex: 1,
+        trafficPool: "SERVING",
+        provider: "openrouter",
+        model: "deepseek/deepseek-chat",
+        snapshotId: "rate-deepseek-v3", // effective 2026-10-22
+        attemptTimestamp: "2026-10-20T10:00:00Z", // attempt was 2 days prior!
+        status: "SUCCESS",
+        inputTokens: 100,
+        outputTokens: 10,
+      },
+      rateSnapshots,
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("is not yet effective at attempt time")
+    ) {
+      throwsOnPrematureSnapshotRef = true;
+    }
+  }
+  check(
+    "G21.3 Explicit snapshotId reference that is not yet effective at attempt time throws Error",
+    throwsOnPrematureSnapshotRef,
+  );
+
+  // Non-existent calendar date (February 31)
+  let throwsOnFeb31 = false;
+  try {
+    evaluateAttemptCost(testAttempt, [
+      {
+        snapshotId: "rate-bad-date",
+        provider: "openrouter",
+        model: "test/model",
+        effectiveDate: "2026-02-31", // invalid calendar date!
+        promptCostPerMillionUsd: 1.0,
+        completionCostPerMillionUsd: 1.0,
+        source: "bad_date_test",
+      },
+    ]);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("is not a valid calendar date")
+    ) {
+      throwsOnFeb31 = true;
+    }
+  }
+  check(
+    "G21.4 Rate snapshot with invalid calendar date (2026-02-31) throws explicit Error",
+    throwsOnFeb31,
+  );
+
+  // Conflicting definition for the same snapshotId across provider/model/rate
+  let throwsOnSnapshotIdConflict = false;
+  try {
+    evaluateAttemptCost(testAttempt, [
+      rateSnapshots[0]!,
+      {
+        ...rateSnapshots[0]!,
+        promptCostPerMillionUsd: 99.9, // conflicting rate for same ID!
+      },
+    ]);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Conflicting definition for rate snapshotId")
+    ) {
+      throwsOnSnapshotIdConflict = true;
+    }
+  }
+  check(
+    "G21.5 Conflicting redefinition of the same snapshotId throws explicit Error",
+    throwsOnSnapshotIdConflict,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 22: Carry-In Watermark, Verifiable Replay & Count Integrity
+  // ═══════════════════════════════════════════════════════════════════════
+  // Watermark check: Event before carried session start must fail closed
+  let throwsOnBeforeWatermark = false;
+  try {
+    rollupCommercialSessions(
+      [
+        makeEvent({
+          eventId: "old-event",
+          canonicalTimestamp: "2026-10-31T19:59:59.000Z", // 1 second before carried session start!
+          scope: priorScope,
+        }),
+      ],
+      { priorSessions: [priorSession] },
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Out-of-contract event before carry-in window start")
+    ) {
+      throwsOnBeforeWatermark = true;
+    }
+  }
+  check(
+    "G22.1 Event timestamped earlier than carried prior session start throws watermark violation Error",
+    throwsOnBeforeWatermark,
+  );
+
+  // Replaying event from prior session without fingerprints is unverifiable -> fails closed
+  let throwsOnUnverifiableReplay = false;
+  try {
+    rollupCommercialSessions(
+      [
+        makeEvent({
+          eventId: "p2", // present in priorSession.eventIds, but priorSession lacks eventFingerprints!
+          canonicalTimestamp: "2026-10-31T21:00:00.000Z",
+          scope: priorScope,
+        }),
+      ],
+      { priorSessions: [priorSession] },
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Unverifiable event replay")
+    ) {
+      throwsOnUnverifiableReplay = true;
+    }
+  }
+  check(
+    "G22.2 Replaying an event ID from a prior session lacking fingerprints throws explicit Unverifiable replay Error",
+    throwsOnUnverifiableReplay,
+  );
+
+  // Verifiable replay with fingerprints: identical replay succeeds; changed fact throws conflict
+  const verifiablePrior: CommercialSession = {
+    ...priorSession,
+    sessionId: "sess_verifiable",
+    eventFingerprints: [
+      {
+        eventId: "p1",
+        canonicalTimestampMs: priorStart,
+        actionType: "MESSAGE",
+        senderType: "CUSTOMER",
+      },
+      {
+        eventId: "p2",
+        canonicalTimestampMs: priorStart + 1000,
+        actionType: "MESSAGE",
+        senderType: "CUSTOMER",
+      },
+      {
+        eventId: "p3",
+        canonicalTimestampMs: priorStart + 2000,
+        actionType: "MESSAGE",
+        senderType: "CUSTOMER",
+      },
+    ],
+  };
+
+  const resVerifiableReplay = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "p2",
+        canonicalTimestamp: new Date(priorStart + 1000).toISOString(),
+        actionType: "MESSAGE",
+        senderType: "CUSTOMER",
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [verifiablePrior] },
+  );
+  check(
+    "G22.3 Verifiable identical replay matching prior fingerprint is deduplicated without count inflation",
+    resVerifiableReplay.sessions.length === 1 &&
+      resVerifiableReplay.sessions[0]?.totalEventCount === 3 &&
+      resVerifiableReplay.filteredDuplicateCount === 1,
+  );
+
+  let throwsOnChangedFingerprint = false;
+  try {
+    rollupCommercialSessions(
+      [
+        makeEvent({
+          eventId: "p2",
+          canonicalTimestamp: new Date(priorStart + 9999).toISOString(), // changed timestamp!
+          actionType: "MESSAGE",
+          senderType: "CUSTOMER",
+          scope: priorScope,
+        }),
+      ],
+      { priorSessions: [verifiablePrior] },
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Event fact conflict detected")
+    ) {
+      throwsOnChangedFingerprint = true;
+    }
+  }
+  check(
+    "G22.4 Replaying an absorbed event with changed facts against prior fingerprint throws conflict Error",
+    throwsOnChangedFingerprint,
+  );
+
+  // Prior session count validation
+  let throwsOnInvalidPriorCounts = false;
+  try {
+    rollupCommercialSessions([], {
+      priorSessions: [
+        {
+          ...priorSession,
+          totalEventCount: 2, // mismatch: eventIds has 3 items!
+        },
+      ],
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("must equal eventIds.length")
+    ) {
+      throwsOnInvalidPriorCounts = true;
+    }
+  }
+  check(
+    "G22.5 Prior session with totalEventCount mismatching eventIds.length throws validation Error",
+    throwsOnInvalidPriorCounts,
+  );
+
+  // Deterministic prior session ordering: reversing prior sessions array produces identical results
+  const prior2Start = priorStart + SESSION_DURATION_MS;
+  const priorSession2: CommercialSession = {
+    ...priorSession,
+    sessionId: "sess_prior_2",
+    startMs: prior2Start,
+    endMs: prior2Start + SESSION_DURATION_MS,
+    startAtUtc: new Date(prior2Start).toISOString(),
+    endAtUtc: new Date(prior2Start + SESSION_DURATION_MS).toISOString(),
+    initiatingEventId: "p4",
+    totalEventCount: 1,
+    qualifyingEventCount: 1,
+    eventCount: 1,
+    eventIds: ["p4"],
+  };
+
+  const resPriorsForward = rollupCommercialSessions([], {
+    priorSessions: [priorSession, priorSession2],
+  });
+  const resPriorsReversed = rollupCommercialSessions([], {
+    priorSessions: [priorSession2, priorSession],
+  });
+  check(
+    "G22.6 Prior carry-in sessions passed in reverse order are sorted deterministically and produce byte-for-byte identical output",
+    JSON.stringify(resPriorsForward) === JSON.stringify(resPriorsReversed),
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 23: Arithmetic Overflow & Non-Finite Cost Result Protection
+  // ═══════════════════════════════════════════════════════════════════════
+  let throwsOnOverflowCost = false;
+  try {
+    evaluateAttemptCost(
+      {
+        attemptId: "att-overflow",
+        attemptIndex: 1,
+        trafficPool: "SERVING",
+        provider: "openrouter",
+        model: "deepseek/deepseek-chat",
+        attemptTimestamp: "2026-10-22T10:00:00Z",
+        status: "SUCCESS",
+        inputTokens: 10_000,
+        outputTokens: 10_000,
+      },
+      [
+        {
+          snapshotId: "rate-huge",
+          provider: "openrouter",
+          model: "deepseek/deepseek-chat",
+          effectiveDate: "2026-10-22",
+          promptCostPerMillionUsd: Number.MAX_VALUE, // arithmetic overflow to Infinity!
+          completionCostPerMillionUsd: Number.MAX_VALUE,
+          source: "overflow_test",
+        },
+      ],
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes("Arithmetic overflow")) {
+      throwsOnOverflowCost = true;
+    }
+  }
+  check(
+    "G23.1 Attempt cost calculation overflowing to Infinity throws explicit Arithmetic overflow Error",
+    throwsOnOverflowCost,
   );
 }
 

@@ -94,7 +94,14 @@ Pure, deterministic internal volume measurement:
   - `eventCount`: Backwards-compatible alias for `totalEventCount`.
 - **Start-Only Exclusion:** Telegram `/start` command protocol (`START_COMMAND`) deterministically yields welcome and does NOT open a commercial session.
 - **Permutation Invariance:** Batches are sorted by canonical timestamp (`toCanonicalTimestampMs`) + `eventId` tie-breaker before rollup.
-- **Period Carry-In:** Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods. Overlapping carry-in sessions for the same pool and scope fail closed with an Error.
+- **Period Carry-In & Watermark Enforcement:**
+  - Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods.
+  - Prior sessions are sorted deterministically so caller array ordering (forward, reversed, shuffled) never alters outcomes.
+  - Strict carry-in watermark: out-of-contract events predating the carried prior session start fail closed with an explicit Error.
+  - The active prior session pointer is never deleted by out-of-order events; sessions only expire when events advance to or beyond `endMs`.
+  - Overlapping carry-in sessions for the same pool and scope fail closed with an Error.
+  - Minimal explicit replay contract: carried sessions lacking fingerprints fail closed on replay attempts (`Unverifiable event replay`); verifiable fingerprints (`eventFingerprints`) enable provable deduplication without count inflation or conflicting fact acceptance.
+  - Strict count validation: `eventIds` must be unique and non-empty; `totalEventCount === eventIds.length`; `qualifyingEventCount <= totalEventCount`; counts and IDs are never invented with defaults or coerced with `String()`.
 - **Content-Free Output Projection:** Output records expose only machine keys, timestamps, numbers, and identifiers. Arbitrary runtime caller properties are strictly stripped.
 
 ### 2. Cost Engine (`flowpilot.cost.engine@v1`)
@@ -102,18 +109,20 @@ Pure, deterministic internal volume measurement:
 Pure per-attempt physical execution accounting:
 
 - **Precedence:** Valid provider-reported cost first (`PROVIDER_REPORTED`, including $0.00); otherwise matching dated rate snapshot (`RATE_SNAPSHOT`); otherwise `UNKNOWN`.
-- **Deterministic Historical Rate Selection:**
-  - Rate snapshots with `effectiveDate > attemptTimestamp` never apply.
-  - The latest historical snapshot (`max(effectiveDate) <= attemptTimestamp`) is selected deterministically.
+- **Explicit Snapshot References & Historical Selection:**
+  - `snapshotId` must resolve to exactly one immutable definition; conflicting redefinitions of the same ID are rejected.
+  - When referencing `snapshotId`, the snapshot's provider and model must match the attempt's provider and model.
+  - If attempt time is supplied, applicability is consistently enforced: snapshots effective in the future relative to the attempt time fail closed.
+  - Real calendar dates are strictly validated (YYYY-MM-DD format with real days per month; e.g. February 31 fails closed).
   - Array reversal or shuffling yields identical selection.
-  - Ambiguous conflicting snapshots (differing rates at the same effective date) throw an explicit Error.
   - Full audit provenance (`snapshotId`, `rateEffectiveDate`, `rateSource`) is preserved on each attempt result.
 - **Zero-Dispatch Prevention:** Locally prevented attempts (e.g. `FLOWPILOT_AI_GLOBAL_STOP`, ceiling clamps) have 0 external cost and are excluded from the dispatched coverage denominator.
 - **Status Code Honesty:** HTTP 0, 401, 403, 429, or timeouts NEVER infer zero cost automatically unless proven un-dispatched.
 - **Completeness & Subtotals:** Dispatched attempts with mixed known/unknown costs report `PARTIAL` completeness with `totalCostUsd = null` while preserving `knownSubtotalUsd`. Fully covered turns report `COMPLETE`.
 - **Token Caching:** Evaluates cached vs uncached prompt rates without double counting. `cachedInputTokens` cannot exceed `inputTokens` (fails closed, never silently clamped).
-- **Monetary Policy & Precision:**
+- **Arithmetic Result Validation & Monetary Policy:**
   - JavaScript IEEE 754 64-bit floating point arithmetic (double precision, 53 bits significand, ~15-17 significant decimal digits). Binary floats are not exact decimal arithmetic, but provide sufficient precision to represent sub-micro amounts down to ~$10^-15 without premature underflow or zero-clamping.
+  - All derived attempt costs and aggregate subtotals are validated to remain finite and non-negative. Arithmetic overflow (e.g. `Infinity` or `NaN`) fails closed with an explicit Error; never returns `COMPLETE` with unrepresentable numbers.
   - All internal accumulators retain full unrounded float values without premature zero-rounding.
   - Presentation and export formatting uses `formatMicroUsd` (6 decimal places, micro-USD) and coverage percentages use 1 decimal place (`0.0%`).
 - **Pool Isolation:** Strict separation across `SERVING`, `SHADOW`, and `TEST` pools. Missing shadow data remains unknown, never fabricated.
@@ -124,6 +133,7 @@ Pure per-attempt physical execution accounting:
 
 The proposed persistence schema is a discovery design proposal and is **NOT approved or implemented**:
 
+- **Known Unresolved Historical Failures:** Evaluation baselines note that E10 (turn-level evidence lineage during complex retries) and E12b (cross-process crash recovery reconciliation) remain unresolved known architectural gaps; this foundation PR addresses pure domain contracts only, not runtime infrastructure.
 - **Finished-Only Crash Gaps:** In-flight network attempts that crash the process before turn completion are missing from finished-turn logs.
 - **ID-Based Reconciliation & Grace Period:** Provider billing reconciliation requires an ID-based matching window with an explicit post-month grace period (e.g. 72 hours) before period lock.
 - **Serving / Shadow Lineage Limitations:** Shadow JEV calls share the inbound execution context but must maintain disjoint trace lineage to prevent downstream billing inflation.
