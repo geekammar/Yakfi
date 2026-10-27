@@ -188,33 +188,125 @@ export const aiExtractionSchema = z.object({
     .preprocess((val) => {
       if (typeof val === "string") {
         const trimmed = val.trim();
-        if (/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) {
-          return { type: "specific", time: trimmed };
+
+        // 1. Explicit period indicators in string (AM/PM or Arabic period)
+        const pmMatch =
+          /^([01]?\d):([0-5]\d)(?:\s*(?:pm|p\.m\.|مساءً|مساء|عصراً|عصر|ظهراً|ظهر))$/i.exec(
+            trimmed,
+          );
+        if (pmMatch && pmMatch[1] && pmMatch[2]) {
+          const h = parseInt(pmMatch[1], 10);
+          if (h >= 1 && h <= 12) {
+            const resolvedH = h === 12 ? 12 : h + 12;
+            return {
+              type: "specific",
+              time: `${String(resolvedH).padStart(2, "0")}:${pmMatch[2]}`,
+            };
+          }
         }
-        const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
-        if (m && m[1] && m[2]) {
-          return { type: "specific", time: `${m[1].padStart(2, "0")}:${m[2]}` };
+        const amMatch =
+          /^([01]?\d):([0-5]\d)(?:\s*(?:am|a\.m\.|صباحاً|صباح|فجراً|فجر))$/i.exec(
+            trimmed,
+          );
+        if (amMatch && amMatch[1] && amMatch[2]) {
+          const h = parseInt(amMatch[1], 10);
+          if (h >= 1 && h <= 12) {
+            const resolvedH = h === 12 ? 0 : h;
+            return {
+              type: "specific",
+              time: `${String(resolvedH).padStart(2, "0")}:${amMatch[2]}`,
+            };
+          }
+        }
+
+        // 2. Unambiguous 24-hour wall-clock times (hours 13..23 or hour 00/0)
+        // Hour > 12 has unambiguous 24-hour PM provenance
+        const m24 =
+          /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+        if (m24 && m24[1] && m24[2]) {
+          return { type: "specific", time: `${m24[1]}:${m24[2]}` };
+        }
+        // Hour 00/0 has unambiguous 24-hour midnight provenance
+        const mMidnight = /^(?:0?0):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+        if (mMidnight && mMidnight[1]) {
+          return { type: "specific", time: `00:${mMidnight[1]}` };
+        }
+
+        // 3. Bare 12-hour wall-clock time (hours 1..12, e.g. "4:15", "04:15", "3:30")
+        // An untyped bare string in 1..12 without AM/PM has NO period provenance.
+        // It must NOT silently manufacture AM certainty (e.g. "04:15").
+        // Safe handling policy: treat as unresolved period requiring clarification.
+        const mBare12 = /^([01]?\d):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+        if (mBare12 && mBare12[1] && mBare12[2]) {
+          const h = parseInt(mBare12[1], 10);
+          const m = parseInt(mBare12[2], 10);
+          if (h >= 1 && h <= 12) {
+            return { type: "unresolved_period", hour: h, minute: m };
+          }
         }
       }
+
       if (val && typeof val === "object") {
         const obj = val as Record<string, unknown>;
-        if (obj.type === "exact" && typeof obj.time === "string") {
-          return { ...obj, type: "specific" };
-        }
-        if (obj.type === "specific" && typeof obj.time === "string") {
+
+        // Explicitly typed specific time (preserves legitimate explicit requests)
+        if (
+          (obj.type === "specific" || obj.type === "exact") &&
+          typeof obj.time === "string"
+        ) {
           const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(
             obj.time.trim(),
           );
           if (m && m[1] && m[2]) {
-            return { ...obj, time: `${m[1].padStart(2, "0")}:${m[2]}` };
+            return {
+              ...obj,
+              type: "specific",
+              time: `${m[1].padStart(2, "0")}:${m[2]}`,
+            };
           }
         }
+
+        // Explicitly typed unresolved period
         if (obj.type === "unresolved_period" || obj.type === "ambiguous") {
           return {
             type: "unresolved_period",
             hour: Number(obj.hour),
             minute: obj.minute !== undefined ? Number(obj.minute) : 0,
           };
+        }
+
+        // Untyped object with hour provided (e.g. { hour: 4, minute: 15 })
+        if (obj.type === undefined && obj.hour !== undefined) {
+          const h = Number(obj.hour);
+          if (h >= 1 && h <= 12) {
+            return {
+              type: "unresolved_period",
+              hour: h,
+              minute: obj.minute !== undefined ? Number(obj.minute) : 0,
+            };
+          }
+        }
+
+        // Untyped object with time provided (e.g. { time: "4:15" })
+        if (obj.type === undefined && typeof obj.time === "string") {
+          const trimmed = obj.time.trim();
+          const m24 =
+            /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+          if (m24 && m24[1] && m24[2]) {
+            return { type: "specific", time: `${m24[1]}:${m24[2]}` };
+          }
+          const mMidnight = /^(?:0?0):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+          if (mMidnight && mMidnight[1]) {
+            return { type: "specific", time: `00:${mMidnight[1]}` };
+          }
+          const mBare12 = /^([01]?\d):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+          if (mBare12 && mBare12[1] && mBare12[2]) {
+            const h = parseInt(mBare12[1], 10);
+            const m = parseInt(mBare12[2], 10);
+            if (h >= 1 && h <= 12) {
+              return { type: "unresolved_period", hour: h, minute: m };
+            }
+          }
         }
       }
       return val;
