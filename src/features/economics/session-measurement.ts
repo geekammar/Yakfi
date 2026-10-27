@@ -783,7 +783,14 @@ export function rollupCommercialSessions(
   const lastBatchTimestampMs =
     sorted.length > 0 ? sorted[sorted.length - 1]!.timestampMs : undefined;
 
-  const openSessions = sessionList.filter((s) =>
+  const sortedSessions = [...sessionList].sort((a, b) => {
+    if (a.startMs !== b.startMs) {
+      return a.startMs - b.startMs;
+    }
+    return a.sessionId.localeCompare(b.sessionId);
+  });
+
+  const openSessions = sortedSessions.filter((s) =>
     lastBatchTimestampMs === undefined
       ? true
       : lastBatchTimestampMs >= s.startMs && lastBatchTimestampMs < s.endMs,
@@ -791,7 +798,7 @@ export function rollupCommercialSessions(
 
   return {
     schema: COMMERCIAL_SESSION_CONTRACT_VERSION,
-    sessions: sessionList.map(projectCommercialSession),
+    sessions: sortedSessions.map(projectCommercialSession),
     openSessions: openSessions.map(projectCommercialSession),
     filteredDuplicateCount,
     startOnlyIgnoredCount,
