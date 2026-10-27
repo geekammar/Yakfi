@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
-import type { BookingOptionsServiceDeps } from "../src/features/appointments/server/booking-options-service";
 import {
   composeExactTimeResponse,
   evaluateExactTimeAvailability,
@@ -1004,7 +1003,7 @@ async function main(): Promise<void> {
       todayRef: "2026-10-20",
     });
 
-    const bookingDeps: BookingOptionsServiceDeps = {
+    const bookingDeps: any = {
       eligibility: {
         serviceRepository: harness.deps.serviceRepository,
         branchRepository: harness.deps.branchRepository,
