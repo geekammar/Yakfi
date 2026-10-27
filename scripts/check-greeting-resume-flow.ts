@@ -83,7 +83,13 @@ async function saveDurableState(
 
 async function sendInbound(
   harness: any,
-  inbound: Parameters<typeof receiveInboundMessage>[1],
+  inbound: {
+    from: string;
+    to: string;
+    text: string;
+    receivedAt?: string;
+    externalId?: string;
+  },
 ) {
   if (inbound.receivedAt) {
     harness.setVirtualNow(new Date(inbound.receivedAt));
