@@ -95,7 +95,15 @@ function mockResponse(params: {
       date: params.date ?? null,
       provider: params.provider ?? null,
       timePreference: params.timePreference ?? null,
-      exactTime: params.exactTime ?? null,
+      exactTime: params.exactTime
+        ? params.exactTime.type === "specific"
+          ? params.exactTime
+          : {
+              type: "unresolved_period",
+              hour: params.exactTime.hour,
+              minute: params.exactTime.minute ?? 0,
+            }
+        : null,
     },
     ...(params.factUpdates ? { factUpdates: params.factUpdates as any } : {}),
   };
@@ -147,7 +155,7 @@ async function main(): Promise<void> {
     });
 
     check("T01: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T01: Answers directly that 5:00 PM is available", lastReply?.text?.includes("5:00 مساءً متاح"));
     check("T01: Presents slot option for 5:00 PM", lastReply?.text?.includes("1️⃣ الساعة 5:00 مساءً"));
     check("T01: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
@@ -164,12 +172,12 @@ async function main(): Promise<void> {
       initialAppointments: [
         {
           id: "appt-1300",
-          businessId: PLAYGROUND_IDS.businessId,
-          branchId: PLAYGROUND_IDS.branchId,
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other",
-          serviceId: PLAYGROUND_IDS.serviceId,
-          providerId: PLAYGROUND_IDS.providerId,
-          assignedUserId: PLAYGROUND_IDS.providerUserId,
+          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+          providerId: PLAYGROUND_IDS.PROV_1,
+          assignedUserId: PLAYGROUND_IDS.USER_P1,
           date: new Date("2026-10-21T00:00:00Z"),
           startTime: "13:00",
           endTime: "13:30",
@@ -199,7 +207,7 @@ async function main(): Promise<void> {
     });
 
     check("T02: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T02: Answers directly that 1:00 PM is unavailable", lastReply?.text?.includes("1:00 مساءً غير متاح"));
     check("T02: Explains that slot is booked", lastReply?.text?.includes("محجوز مسبقاً"));
     check("T02: Offers nearby alternatives", lastReply?.text?.includes("أقرب المواعيد المتاحة"));
@@ -237,7 +245,7 @@ async function main(): Promise<void> {
     });
 
     check("T03: Inbound succeeded", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T03: Discovers off-page slot truthfully without inferring from top-3", lastReply?.text?.includes("7:00 مساءً متاح"));
     check("T03: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -274,7 +282,7 @@ async function main(): Promise<void> {
     });
 
     check("T04: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T04: Asks ONE AM/PM clarifying question with exact minutes preserved", lastReply?.text?.includes("هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟"));
     check("T04: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -332,7 +340,7 @@ async function main(): Promise<void> {
     });
 
     check("T05: Clarification turn succeeded", res2.ok && (res2 as any).conversationStatus === "AI_ACTIVE");
-    const reply2 = harness.sentMessages[harness.sentMessages.length - 1];
+    const reply2 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T05: Resolved hour 3 + minute 30 + afternoon to 15:30 (3:30 مساءً) without minute truncation", reply2?.text?.includes("3:30 مساءً متاح"));
     check("T05: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -390,7 +398,7 @@ async function main(): Promise<void> {
     });
 
     check("T05b: 12 + afternoon resolves to 12:00 (12:00 ظهراً)", res2.ok);
-    const reply2 = harness.sentMessages[harness.sentMessages.length - 1];
+    const reply2 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T05b: Answers 12:00 ظهراً directly", reply2?.text?.includes("12:00 ظهراً متاح"));
   }
 
@@ -426,7 +434,7 @@ async function main(): Promise<void> {
     });
 
     check("T05c: Inbound succeeded", res.ok);
-    const reply = harness.sentMessages[harness.sentMessages.length - 1];
+    const reply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     // Must NOT guess hour 3 or claim exact time 3:00 was requested
     check("T05c: Does not guess hour 3 or invent exact-time request", !reply?.text?.includes("الساعة 3:00"));
     check("T05c: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
@@ -509,7 +517,7 @@ async function main(): Promise<void> {
     });
 
     check("T07: Inbound succeeded", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T07: Presents offer option 1 for confirmation", lastReply?.text?.includes("1️⃣ الساعة 5:00 مساءً"));
     check("T07: Never silently creates appointment before confirmation", harness.capturedAppointmentWrites.length === 0);
   }
@@ -629,7 +637,7 @@ async function main(): Promise<void> {
     });
 
     check("T10: Inbound handled", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T10: Preserves provider scope and date scope in alternatives", lastReply?.text?.includes("أقرب المواعيد المتاحة"));
     check("T10: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -665,7 +673,7 @@ async function main(): Promise<void> {
     });
 
     check("T11: Inbound handled", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T11: Directly states outside working hours with business hours explained", lastReply?.text?.includes("خارج أوقات العمل الرسمية") && lastReply?.text?.includes("أوقات العمل"));
     check("T11: Offers nearest in-hours alternatives (e.g. 09:00)", lastReply?.text?.includes("9:00 صباحاً"));
     check("T11: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
@@ -709,7 +717,7 @@ async function main(): Promise<void> {
     });
 
     check("T12: Inbound handled", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T12: States service duration exceeds closing time", lastReply?.text?.includes("تتجاوز موعد إغلاق"));
     check("T12: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -745,7 +753,7 @@ async function main(): Promise<void> {
     });
 
     check("T13: Inbound handled", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T13: Answers 2:15 is unavailable", lastReply?.text?.includes("2:15 مساءً غير متاح"));
     check("T13: Explains truthful slot-grid mismatch without falsely claiming booked", lastReply?.text?.includes("لا يتوافق مع فترات جدول المواعيد") && !lastReply?.text?.includes("محجوز مسبقاً"));
     check("T13: Offers nearest aligned slots (14:00 or 14:30)", lastReply?.text?.includes("2:00 مساءً") || lastReply?.text?.includes("2:30 مساءً"));
@@ -784,7 +792,7 @@ async function main(): Promise<void> {
     });
 
     check("T14: Inbound handled", res.ok);
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T14: Directly states time has passed today", lastReply?.text?.includes("قد مضى اليوم"));
     check("T14: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -990,7 +998,7 @@ async function main(): Promise<void> {
       text: "عايز موعد الساعة 5 مساء",
       receivedAt: "2026-10-20T10:00:00Z",
     });
-    const offerMsg1 = harness2.sentMessages[harness2.sentMessages.length - 1];
+    const offerMsg1 = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
     const choices1 = (offerMsg1 as any)?.delivery?.choices;
     const token1 = choices1?.offerToken;
 
@@ -1013,7 +1021,7 @@ async function main(): Promise<void> {
       text: "لا خليه الساعة 7 مساء",
       receivedAt: "2026-10-20T10:01:00Z",
     });
-    const offerMsg2 = harness2.sentMessages[harness2.sentMessages.length - 1];
+    const offerMsg2 = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
     const choices2 = (offerMsg2 as any)?.delivery?.choices;
     const token2 = choices2?.offerToken;
 
@@ -1025,7 +1033,7 @@ async function main(): Promise<void> {
         text: `fp:${token1}:1`,
         receivedAt: "2026-10-20T10:02:00Z",
       });
-      const staleReply = harness2.sentMessages[harness2.sentMessages.length - 1];
+      const staleReply = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
       check("T18: Old offer callback rejected as stale after exact-time change", staleReply?.text?.includes("عرضاً سابقاً لم يعد متاحاً"));
       check("T18: Zero appointments created from stale callback", harness2.capturedAppointmentWrites.length === 0);
     }
@@ -1067,7 +1075,7 @@ async function main(): Promise<void> {
     });
 
     check("T19: Engine handles provider failure gracefully", res.ok && (res as any).conversationStatus === "NEED_HUMAN");
-    const lastReply = harness.sentMessages[harness.sentMessages.length - 1];
+    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     check("T19: Customer receives safe temporary failure acknowledgment", lastReply?.text?.includes("واجهت صعوبة مؤقتة في الرد") || lastReply?.text?.includes("سيتواصل معك أحد أعضاء الفريق"));
     check("T19: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
   }
@@ -1117,8 +1125,8 @@ async function main(): Promise<void> {
     const jsonStr = JSON.stringify(dehydrated);
     const reloaded = JSON.parse(jsonStr);
     const hydrated = hydrateConversationState(reloaded, {
-      businessId: PLAYGROUND_IDS.businessId,
-      conversationId: PLAYGROUND_IDS.conversationId,
+      businessId: PLAYGROUND_IDS.BIZ_ID,
+      conversationId: "conv_test_1",
     });
 
     check("T20: Durable state round-trips via dehydrate -> JSON -> hydrate", hydrated !== null);
@@ -1152,8 +1160,8 @@ async function main(): Promise<void> {
       completedTask: null,
     };
     const legacyHydrated = hydrateConversationState(legacyRaw, {
-      businessId: PLAYGROUND_IDS.businessId,
-      conversationId: PLAYGROUND_IDS.conversationId,
+      businessId: PLAYGROUND_IDS.BIZ_ID,
+      conversationId: "conv_test_1",
     });
     check("T20: Legacy persisted state without exactTime hydrates safely without error", legacyHydrated !== null && legacyHydrated.knownFacts.exactTime === undefined);
 
@@ -1161,7 +1169,7 @@ async function main(): Promise<void> {
     check("T20: formatTimeArabic formats 17:00 as 5:00 مساءً", formatTimeArabic("17:00") === "5:00 مساءً");
     check("T20: formatTimeArabic formats 00:00 as 12:00 منتصف الليل", formatTimeArabic("00:00") === "12:00 منتصف الليل");
     check("T20: emptyAiExtraction has null exactTime", emptyAiExtraction.exactTime === null);
-    check("T20: aiResponseSchema validates mock response", aiResponseSchema.safeParse(mockResponse({ content: "test" })).success);
+    check("T20: aiResponseSchema validates mock response", aiResponseSchema.safeParse(mockResponse({ intent: "FAQ", content: "test" })).success);
     const mockEvalResult = {
       isAvailable: true,
       matchedSlot: {
