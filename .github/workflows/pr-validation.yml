@@ -107,6 +107,7 @@ jobs:
           pnpm check:telegram-execution-defects
           pnpm check:telegram-acceptance
           pnpm check:channel-neutral-choices
+          pnpm check:greeting-resume-flow
           pnpm check:unified-booking-choices
           pnpm check:semantic-date-ranges
           pnpm check:ai-provider

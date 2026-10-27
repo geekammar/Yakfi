@@ -7,6 +7,7 @@ import type { AiResponse } from "../src/features/conversations/server/ai-contrac
 import type {
   DateOffer,
   ProviderOffer,
+  ResumeOffer,
   ServiceDetailOffer,
   ServiceOffer,
   SlotOffer,
@@ -205,6 +206,24 @@ async function run(): Promise<void> {
       slotChoices.groups[0]?.[0]?.value === "2026-10-25T10:00:00.000Z" &&
       slotChoices.groups[1]?.[0]?.id === "more" &&
       slotChoices.groups[1]?.[1]?.id === "date",
+  );
+
+  // 1.7 RESUME offer
+  const resumeOffer: ResumeOffer = {
+    ...baseOffer,
+    kind: "RESUME",
+    options: [
+      { index: 1, action: "continue", label: "متابعة الطلب" },
+      { index: 2, action: "new_request", label: "طلب جديد" },
+    ],
+  };
+  const resumeChoices = buildChannelChoices(resumeOffer);
+  check(
+    "1.7 RESUME offer builds neutral choices for continue and new_request",
+    resumeChoices.offerKind === "RESUME" &&
+      resumeChoices.groups.length === 2 &&
+      resumeChoices.groups[0]?.[0]?.id === "continue" &&
+      resumeChoices.groups[1]?.[0]?.id === "new_request",
   );
 
   // ── Area 2: Reusable Token Codec ────────────────────────────────────────────

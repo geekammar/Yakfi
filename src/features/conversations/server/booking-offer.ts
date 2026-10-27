@@ -85,6 +85,12 @@ export const slotOfferOptionSchema = z.object({
   endAt: localDateTime,
 });
 
+export const resumeOfferOptionSchema = z.object({
+  index: z.number().int().min(1).max(MAX_OFFER_OPTIONS),
+  action: z.enum(["continue", "new_request"]),
+  label: shortText,
+});
+
 const offerBase = {
   id: shortText,
   /** Short opaque token carried by Telegram callback data. */
@@ -100,6 +106,12 @@ export const welcomeOfferSchema = z.object({
   ...offerBase,
   kind: z.literal("WELCOME"),
   options: z.array(welcomeOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
+});
+
+export const resumeOfferSchema = z.object({
+  ...offerBase,
+  kind: z.literal("RESUME"),
+  options: z.array(resumeOfferOptionSchema).min(1).max(MAX_OFFER_OPTIONS),
 });
 
 export const serviceOfferSchema = z.object({
@@ -179,9 +191,11 @@ export const bookingOfferSchema = z.discriminatedUnion("kind", [
   dateOfferSchema,
   providerOfferSchema,
   slotOfferSchema,
+  resumeOfferSchema,
 ]);
 
 export type WelcomeOffer = z.infer<typeof welcomeOfferSchema>;
+export type ResumeOffer = z.infer<typeof resumeOfferSchema>;
 export type ServiceOffer = z.infer<typeof serviceOfferSchema>;
 export type ServiceDetailOffer = z.infer<typeof serviceDetailOfferSchema>;
 export type DateOffer = z.infer<typeof dateOfferSchema>;
@@ -234,6 +248,24 @@ export function buildWelcomeOffer(
     ],
   };
   const parsed = welcomeOfferSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Build a validated resume offer (continue draft vs start new request). */
+export function buildResumeOffer(
+  scope: OfferScope,
+  id: string,
+  now: Date,
+): ResumeOffer | null {
+  const candidate = {
+    ...offerEnvelope(scope, id, now),
+    kind: "RESUME" as const,
+    options: [
+      { index: 1, action: "continue" as const, label: "متابعة الطلب" },
+      { index: 2, action: "new_request" as const, label: "طلب جديد" },
+    ],
+  };
+  const parsed = resumeOfferSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
 

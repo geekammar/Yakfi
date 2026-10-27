@@ -11,6 +11,7 @@
 import type {
   DateOffer,
   ProviderOffer,
+  ResumeOffer,
   ServiceDetailOffer,
   ServiceOffer,
   SlotOffer,
@@ -51,6 +52,12 @@ export function renderTelegramInlineKeyboard(
           } else if (item.id === "inquire" && !text.includes("ℹ️")) {
             text = `ℹ️ ${text}`;
           }
+        } else if (presentation.offerKind === "RESUME") {
+          if (item.id === "continue" && !text.includes("▶️")) {
+            text = `▶️ ${text}`;
+          } else if (item.id === "new_request" && !text.includes("✨")) {
+            text = `✨ ${text}`;
+          }
         }
         return {
           text,
@@ -68,6 +75,12 @@ export function renderTelegramInlineKeyboard(
 
 export function welcomeOfferKeyboard(
   offer: WelcomeOffer,
+): TelegramInlineKeyboardMarkup {
+  return renderTelegramInlineKeyboard(buildChannelChoices(offer));
+}
+
+export function resumeOfferKeyboard(
+  offer: ResumeOffer,
 ): TelegramInlineKeyboardMarkup {
   return renderTelegramInlineKeyboard(buildChannelChoices(offer));
 }
