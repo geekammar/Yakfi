@@ -26,6 +26,12 @@ export class InMemoryConversationStateStore implements ConversationStateStore {
     { businessId: string; revision: number; state: unknown; updatedAt: Date }
   >();
 
+  constructor(private readonly clock?: () => Date) {}
+
+  private now(): Date {
+    return this.clock ? this.clock() : new Date();
+  }
+
   async load(
     businessId: string,
     conversationId: string,
@@ -54,7 +60,7 @@ export class InMemoryConversationStateStore implements ConversationStateStore {
         businessId,
         revision: 1,
         state: JSON.parse(JSON.stringify(state)),
-        updatedAt: new Date(),
+        updatedAt: this.now(),
       });
       return { status: "saved" as const, revision: 1 };
     }
@@ -70,7 +76,7 @@ export class InMemoryConversationStateStore implements ConversationStateStore {
       businessId,
       revision: nextRevision,
       state: JSON.parse(JSON.stringify(state)),
-      updatedAt: new Date(),
+      updatedAt: this.now(),
     });
     return { status: "saved" as const, revision: nextRevision };
   }
@@ -289,7 +295,8 @@ export function createPlaygroundHarness(
   const appointments: any[] = [];
   const deliveredOutbound: DeliveredOutbound[] = [];
   const dedupeLedger = new Set<string>();
-  const stateStore = options.stateStore ?? new InMemoryConversationStateStore();
+  const stateStore =
+    options.stateStore ?? new InMemoryConversationStateStore(() => virtualNow);
   const capturedAvailabilityQueries: CapturedAvailabilityQuery[] = [];
   const capturedAppointmentWrites: CapturedAppointmentWrite[] = [];
   const capturedHttpAttempts: CapturedHttpAttempt[] = [];

@@ -81,6 +81,16 @@ async function saveDurableState(
   );
 }
 
+async function sendInbound(
+  harness: any,
+  inbound: Parameters<typeof receiveInboundMessage>[1],
+) {
+  if (inbound.receivedAt) {
+    harness.setVirtualNow(new Date(inbound.receivedAt));
+  }
+  return receiveInboundMessage(harness.deps, inbound);
+}
+
 async function loadDurableState(
   harness: any,
 ): Promise<ConversationState | null> {
@@ -166,7 +176,7 @@ async function run(): Promise<void> {
     });
     harness.setVirtualNow(baseNow);
 
-    const res = await receiveInboundMessage(harness.deps, {
+    const res = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -233,7 +243,7 @@ async function run(): Promise<void> {
       hasResumableDraftTask(stateWithDate),
     );
 
-    const res = await receiveInboundMessage(harness.deps, {
+    const res = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "السلام عليكم",
@@ -311,7 +321,7 @@ async function run(): Promise<void> {
     );
     await saveDurableState(harness, stateWithSlot);
 
-    const res = await receiveInboundMessage(harness.deps, {
+    const res = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلاً",
@@ -385,7 +395,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithSlot);
 
     // Greet turn -> presents RESUME
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -398,7 +408,7 @@ async function run(): Promise<void> {
 
     // Click "متابعة الطلب" via callback
     const continueCallback = `fp:${resumeToken}:continue`;
-    const continueRes = await receiveInboundMessage(harness.deps, {
+    const continueRes = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: continueCallback,
@@ -471,7 +481,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithExpired);
 
     // Customer greets
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "السلام عليكم",
@@ -484,7 +494,7 @@ async function run(): Promise<void> {
 
     // Click continue
     const continueCallback = `fp:${resumeToken}:continue`;
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: continueCallback,
@@ -544,7 +554,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithSlot);
 
     // Greet turn
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -557,7 +567,7 @@ async function run(): Promise<void> {
 
     // Click "طلب جديد"
     const newCallback = `fp:${resumeToken}:new_request`;
-    const newRes = await receiveInboundMessage(harness.deps, {
+    const newRes = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: newCallback,
@@ -683,7 +693,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithSlot);
 
     // Greeting 1
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -701,7 +711,7 @@ async function run(): Promise<void> {
     );
 
     // Greeting 2 (immediately repeated)
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "السلام عليكم",
@@ -763,7 +773,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithSlot);
 
     // Greet turn
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -774,7 +784,7 @@ async function run(): Promise<void> {
     const resumeToken = resumeState?.offer?.token;
 
     // Start New request
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: `fp:${resumeToken}:new_request`,
@@ -783,7 +793,7 @@ async function run(): Promise<void> {
 
     // Now try clicking the old slot button from turn 0
     const staleCallback = `fp:${oldSlotToken}:1`;
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: staleCallback,
@@ -793,8 +803,12 @@ async function run(): Promise<void> {
     const sent = lastSentPayload(harness);
     check(
       "I1. Old callback after New request is rejected as stale (no booking created)",
-      sent?.body?.includes("انتهت صلاحية") ||
+      Boolean(
+        sent?.body?.includes("سابقاً") ||
+        sent?.body?.includes("العرض الحالي") ||
+        sent?.body?.includes("انتهت صلاحية") ||
         sent?.body?.includes("استخدم الخيارات الحالية"),
+      ) && harness.appointments.length === 0,
     );
   }
 
@@ -842,7 +856,7 @@ async function run(): Promise<void> {
     await saveDurableState(harness, stateWithSlot);
 
     // Customer asks general question (FAQ)
-    const res = await receiveInboundMessage(harness.deps, {
+    const res = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أين موقعكم؟",
@@ -930,7 +944,7 @@ async function run(): Promise<void> {
     );
     await saveDurableState(harness, stateWithSlot);
 
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "الكشف بكام وممكن أكمل الحجز؟",
@@ -964,7 +978,7 @@ async function run(): Promise<void> {
     // Mark conversation NEED_HUMAN
     harness.conversation.status = "NEED_HUMAN";
 
-    const res = await receiveInboundMessage(harness.deps, {
+    const res = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -1000,7 +1014,7 @@ async function run(): Promise<void> {
     // Force save failure by making stateStore.save fail
     harness.stateStore.save = async () => ({ status: "conflict" });
 
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -1034,7 +1048,7 @@ async function run(): Promise<void> {
     const initialAppointmentCount = harness.appointments.length;
 
     // Greeting 1
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
@@ -1042,7 +1056,7 @@ async function run(): Promise<void> {
     });
 
     // Telegram /start
-    await receiveInboundMessage(harness.deps, {
+    await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "/start",
@@ -1053,7 +1067,7 @@ async function run(): Promise<void> {
     const token = state?.offer?.token;
     if (token) {
       // Continue action
-      await receiveInboundMessage(harness.deps, {
+      await sendInbound(harness, {
         from: "+201000000001",
         to: harness.business.whatsappNumber ?? "+201000000000",
         text: `fp:${token}:continue`,
@@ -1061,7 +1075,7 @@ async function run(): Promise<void> {
       });
 
       // New request action
-      await receiveInboundMessage(harness.deps, {
+      await sendInbound(harness, {
         from: "+201000000001",
         to: harness.business.whatsappNumber ?? "+201000000000",
         text: `fp:${token}:new_request`,

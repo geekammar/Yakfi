@@ -8318,7 +8318,8 @@ async function runInboundTurn(
           }
         }
       } else if (answerAndContinue) {
-        const activeOffer = turnSession.state?.offer;
+        const activeOffer =
+          turnSession.state?.offer ?? turnSession.state?.suspendedOffer;
         const isOfferValid =
           activeOffer &&
           activeOffer.status === "ACTIVE" &&
