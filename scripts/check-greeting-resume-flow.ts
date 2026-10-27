@@ -36,6 +36,7 @@ import {
   buildDateOffer,
   buildSlotOffer,
 } from "../src/features/conversations/server/booking-offer";
+import { offerCallbackData } from "../src/features/conversations/server/channel-choice";
 import {
   receiveInboundMessage,
   type InboundSuccess,
@@ -1389,23 +1390,63 @@ async function run(): Promise<void> {
 
     const stateAfterGreet = await loadDurableState(harness);
     const resumeToken = stateAfterGreet?.offer?.token;
+    check(
+      "O4-pre. Resume offer generated with valid token",
+      Boolean(resumeToken),
+    );
 
     // Continue action
-    await sendInbound(harness, {
+    const continueRes = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: `fp:${resumeToken}:continue`,
       receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
     });
+    check(
+      "O4-res. Continue returns AI_REPLY and was processed",
+      continueRes.ok &&
+        (continueRes as InboundSuccess).assistantAction === "AI_REPLY",
+    );
 
+    const stateAfterContinue = await loadDurableState(harness);
     const sent = lastSentPayload(harness);
     check(
       "O4-a. Bot detects 14:00 is unavailable due to conflicting appointment",
       sent?.body?.includes("غير متاح"),
     );
+
+    const persistedOffer = stateAfterContinue?.offer;
+    const isSlotOffer = persistedOffer?.kind === "SLOT";
+    const persistedOptions = isSlotOffer ? persistedOffer.options : [];
+
+    const choiceGroups = sent?.choices?.groups ?? [];
+    const selectableOptions = choiceGroups
+      .flatMap((g: any) => g)
+      .filter((item: any) => item.role === "option");
+
     check(
-      "O4-b. Honest alternative slots offered or explained (not stale 14:00)",
-      !sent?.choices?.options?.some((o: any) => o.startAt?.includes("14:00")),
+      "O4-b. Persisted offer is SLOT with non-empty options",
+      isSlotOffer && persistedOptions.length > 0,
+    );
+    check(
+      "O4-c. Presented choice groups contain selectable options",
+      sent?.choices?.offerKind === "SLOT" && selectableOptions.length > 0,
+    );
+    check(
+      "O4-d. No selectable option contains conflicting 14:00 start time for PROV_1/date",
+      !persistedOptions.some((o: any) => o.startAt?.includes("14:00")) &&
+        !selectableOptions.some((item: any) => item.value?.includes("14:00")),
+    );
+    check(
+      "O4-e. Expected valid alternative slots are present in persisted offer and choices",
+      persistedOptions.some(
+        (o: any) =>
+          o.startAt?.includes("13:30") || o.startAt?.includes("14:30"),
+      ) &&
+        selectableOptions.some(
+          (item: any) =>
+            item.value?.includes("13:30") || item.value?.includes("14:30"),
+        ),
     );
   }
 
@@ -1535,28 +1576,124 @@ async function run(): Promise<void> {
     const harness = createPlaygroundHarness({
       customAi: {
         providerName: "MOCK_AI",
-        respond: async () => mockAiGreeting(),
+        respond: async (req: any) => {
+          const text = req.message ?? req.userMessage?.text ?? "";
+          if (text.includes("احجز") || text.includes("حجز")) {
+            return {
+              intent: "BOOKING",
+              action: "reply",
+              content: "تفضل باختيار الموعد المناسب:",
+              summary: null,
+              handoffReason: null,
+              safetyAssessment: "safe",
+              extraction: {
+                service: "كشف أسنان",
+                date: "2026-10-29",
+                provider: null,
+                timePreference: null,
+              },
+              factUpdates: [
+                { key: "service", value: "كشف أسنان", operation: "set" },
+                { key: "date", value: "2026-10-29", operation: "set" },
+              ],
+              goals: [
+                {
+                  kind: "DOMAIN_ACTION",
+                  intent: "BOOKING",
+                  requiredKnowledge: "NONE",
+                },
+              ],
+            };
+          }
+          return mockAiGreeting();
+        },
       } as any,
     });
     harness.setVirtualNow(baseNow);
 
-    const oldToken = "tokold99";
-    const oldCallback = `fp:${oldToken}:slot_1`;
-
-    const res = await sendInbound(harness, {
+    // 1. Create a real offer through the engine
+    const initialBookingRes = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
-      text: oldCallback,
+      text: "احجز كشف أسنان يوم 2026-10-29",
       receivedAt: baseNow.toISOString(),
+    });
+    check(
+      "O7-pre-a. Initial booking request processed by engine",
+      initialBookingRes.ok &&
+        (initialBookingRes as InboundSuccess).assistantAction === "AI_REPLY",
+    );
+
+    const stateWithInitialOffer = await loadDurableState(harness);
+    const initialOffer = stateWithInitialOffer?.offer;
+    const initialToken = initialOffer?.token;
+    const hasValidOptions =
+      initialOffer?.kind === "SLOT" &&
+      Array.isArray(initialOffer.options) &&
+      initialOffer.options.length > 0;
+
+    check(
+      "O7-pre-b. Real offer created through engine with non-empty token and valid selectable option",
+      Boolean(initialToken) && hasValidOptions,
+    );
+
+    // Save its actual fp:<token>:<index> callback
+    const originalCallback = offerCallbackData(initialOffer!, 1);
+
+    // 2. Perform Greeting -> Continue superseding transition
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+    check(
+      "O7-pre-c. Greeting transitions to RESUME offer",
+      stateAfterGreet?.offer?.kind === "RESUME" && Boolean(resumeToken),
+    );
+
+    const continueRes = await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(baseNow.getTime() + 2000).toISOString(),
+    });
+    check(
+      "O7-pre-d. Continue processed and generated superseding offer",
+      continueRes.ok &&
+        (continueRes as InboundSuccess).assistantAction === "AI_REPLY",
+    );
+
+    // 3. Replay the original callback and verify rejection and zero booking writes
+    const replayRes = await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: originalCallback,
+      receivedAt: new Date(baseNow.getTime() + 3000).toISOString(),
     });
 
     const isReply =
-      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+      replayRes.ok &&
+      (replayRes as InboundSuccess).assistantAction === "AI_REPLY";
     const sent = lastSentPayload(harness);
-    check("O7-a. Old callback returns AI_REPLY", isReply);
+    check("O7-a. Stale callback replay returns AI_REPLY", isReply);
     check(
-      "O7-b. Old callback correctly rejected as expired/superseded",
-      sent?.body?.includes("انتهت صلاحية") || sent?.body?.includes("غير صالح"),
+      "O7-b. Old callback correctly rejected after flow change",
+      Boolean(
+        sent?.body?.includes("سابقاً") ||
+        sent?.body?.includes("العرض الحالي") ||
+        sent?.body?.includes("انتهت صلاحية") ||
+        sent?.body?.includes("غير صالح") ||
+        sent?.body?.includes("لم يعد متاحاً"),
+      ),
+    );
+    check(
+      "O7-c. Zero booking writes occurred upon replaying stale callback",
+      harness.capturedAppointmentWrites.length === 0 &&
+        harness.appointments.length === 0,
     );
   }
 
@@ -1590,28 +1727,46 @@ async function run(): Promise<void> {
     };
     await saveDurableState(harness, savedState);
 
-    await sendInbound(harness, {
+    const greetRes = await sendInbound(harness, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
       text: "أهلا",
       receivedAt: baseNow.toISOString(),
     });
+    check(
+      "O8-a. Greeting returns AI_REPLY",
+      greetRes.ok &&
+        (greetRes as InboundSuccess).assistantAction === "AI_REPLY",
+    );
 
     const stateAfterGreet = await loadDurableState(harness);
-    const resumeToken = stateAfterGreet?.offer?.token;
+    const resumeOffer = stateAfterGreet?.offer;
+    const resumeToken = resumeOffer?.token;
+    check(
+      "O8-b. Greeting presents valid RESUME offer with non-empty token",
+      resumeOffer?.kind === "RESUME" && Boolean(resumeToken),
+    );
 
-    if (resumeToken) {
-      await sendInbound(harness, {
-        from: "+201000000001",
-        to: harness.business.whatsappNumber ?? "+201000000000",
-        text: `fp:${resumeToken}:continue`,
-        receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
-      });
-    }
+    // Invoke Continue unconditionally
+    const continueRes = await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+    check(
+      "O8-c. Continue action returns AI_REPLY and was processed",
+      continueRes.ok &&
+        (continueRes as InboundSuccess).assistantAction === "AI_REPLY",
+    );
 
     const finalAppointmentCount = harness.appointments.length;
     check(
-      "O8. Total appointments created by Greeting, Resume, and Continue is exactly 0",
+      "O8-d. capturedAppointmentWrites remains empty (zero appointment writes)",
+      harness.capturedAppointmentWrites.length === 0,
+    );
+    check(
+      "O8-e. Total appointments created by Greeting, Resume, and Continue is exactly 0",
       initialAppointmentCount === 0 && finalAppointmentCount === 0,
     );
   }
