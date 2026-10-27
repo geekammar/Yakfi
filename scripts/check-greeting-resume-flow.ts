@@ -34,16 +34,12 @@ import {
 import type { AiResponse } from "../src/features/conversations/server/ai-contract";
 import {
   buildDateOffer,
-  buildResumeOffer,
   buildSlotOffer,
-  buildWelcomeOffer,
-  isOfferLive,
 } from "../src/features/conversations/server/booking-offer";
 import {
-  buildChannelChoices,
-  offerCallbackData,
-} from "../src/features/conversations/server/channel-choice";
-import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+  receiveInboundMessage,
+  type InboundSuccess,
+} from "../src/features/conversations/server/conversation-engine";
 import {
   clearBookingDraft,
   emptyConversationState,
@@ -75,6 +71,11 @@ async function loadDurableState(harness: any): Promise<ConversationState | null>
   return (loaded?.state as ConversationState) ?? null;
 }
 
+function lastSentPayload(harness: any) {
+  if (harness.deliveredOutbound.length === 0) return null;
+  return harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+}
+
 function mockAiGreeting(): AiResponse {
   return {
     intent: "GREETING",
@@ -91,7 +92,7 @@ function mockAiGreeting(): AiResponse {
     },
     goals: [
       {
-        kind: "CONVERSATION_CONTROL",
+        kind: "ANSWER",
         intent: "GREETING",
         requiredKnowledge: "NONE",
       },
@@ -115,7 +116,7 @@ function mockAiFaq(): AiResponse {
     },
     goals: [
       {
-        kind: "KNOWLEDGE",
+        kind: "ANSWER",
         intent: "FAQ",
         requiredKnowledge: "FAQ",
       },
@@ -134,9 +135,12 @@ async function run(): Promise<void> {
   console.log("── Test A: Fresh conversation greeting ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const res = await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
@@ -145,9 +149,10 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    check("A1. Response succeeded with AI_REPLY", res.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
-    check("A2. Choice presentation attached", sent?.choices !== undefined);
+    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    check("A1. Response succeeded with AI_REPLY", isReply);
+    const sent = lastSentPayload(harness);
+    check("A2. Choice presentation attached", sent?.choices !== null && sent?.choices !== undefined);
     check("A3. Offer kind is WELCOME", sent?.choices?.offerKind === "WELCOME");
     check(
       "A4. Options are book and inquire",
@@ -162,17 +167,20 @@ async function run(): Promise<void> {
   console.log("\n── Test B: Active DATE request greeting ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     // Seed conversation state with an active DATE offer
     const dateOffer = buildDateOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_date_1",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         providerId: null,
         dates: [
           { date: "2026-10-29", label: "الخميس 29 أكتوبر" },
@@ -203,8 +211,9 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    check("B1. Greeting on active DATE request returns AI_REPLY", res.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
+    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    check("B1. Greeting on active DATE request returns AI_REPLY", isReply);
+    const sent = lastSentPayload(harness);
     check("B2. Offer kind is RESUME", sent?.choices?.offerKind === "RESUME");
     check(
       "B3. Actions are 'continue' (متابعة الطلب) and 'new_request' (طلب جديد)",
@@ -230,27 +239,30 @@ async function run(): Promise<void> {
   console.log("\n── Test C: Active SLOT request greeting ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_1",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T11:00",
             endAt: "2026-10-29T11:30",
           },
@@ -275,8 +287,9 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    check("C1. Greeting on active SLOT request returns AI_REPLY", res.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
+    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    check("C1. Greeting on active SLOT request returns AI_REPLY", isReply);
+    const sent = lastSentPayload(harness);
     check("C2. Choices kind is RESUME (not SLOT)", sent?.choices?.offerKind === "RESUME");
     check(
       "C3. Buttons are continue/new_request (no old slot buttons)",
@@ -301,22 +314,25 @@ async function run(): Promise<void> {
   console.log("\n── Test D: Continue -> revalidated choices ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
-    // 1. Greet to get RESUME offer
+    // Seed state with slot offer
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_d",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. حسام",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T14:00",
             endAt: "2026-10-29T14:30",
           },
@@ -332,7 +348,7 @@ async function run(): Promise<void> {
       stateWithSlot,
     );
 
-    // Greet turn
+    // Greet turn -> presents RESUME
     await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
       to: harness.business.whatsappNumber ?? "+201000000000",
@@ -344,7 +360,7 @@ async function run(): Promise<void> {
     const resumeToken = resumeState?.offer?.token;
     if (!resumeToken) throw new Error("Resume offer token missing");
 
-    // 2. Click "متابعة الطلب" via callback
+    // Click "متابعة الطلب" via callback
     const continueCallback = `fp:${resumeToken}:continue`;
     const continueRes = await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
@@ -353,12 +369,13 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
     });
 
-    check("D1. Continue action returns AI_REPLY", continueRes.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
-    check("D2. Fresh choices presented (SLOT or DATE)", sent?.choices !== undefined);
+    const isReply = continueRes.ok && (continueRes as InboundSuccess).assistantAction === "AI_REPLY";
+    check("D1. Continue action returns AI_REPLY", isReply);
+    const sent = lastSentPayload(harness);
+    check("D2. Fresh choices presented (SLOT or DATE)", sent?.choices !== null && sent?.choices !== undefined);
     check(
-      "D3. Presented choices correspond to saved service (كشف جلدية)",
-      sent?.body?.includes("جلدية") || sent?.choices?.offerKind === "SLOT" || sent?.choices?.offerKind === "DATE",
+      "D3. Presented choices correspond to saved service (كشف أسنان)",
+      sent?.body?.includes("أسنان") || sent?.choices?.offerKind === "SLOT" || sent?.choices?.offerKind === "DATE",
     );
     check(
       "D4. Offer has fresh token (not stale old token)",
@@ -372,9 +389,12 @@ async function run(): Promise<void> {
   console.log("\n── Test E: Expired offer -> cannot be replayed unchanged ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     // Past date (yesterday)
     const yesterdayDate = "2026-10-27";
@@ -382,13 +402,13 @@ async function run(): Promise<void> {
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_expired",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: yesterdayDate,
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-27T10:00",
             endAt: "2026-10-27T10:30",
           },
@@ -426,7 +446,7 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 10000).toISOString(),
     });
 
-    const sent = harness.lastSentPayload();
+    const sent = lastSentPayload(harness);
     check(
       "E1. Expired/past slot offer is NOT replayed unchanged (presents DATE choices instead)",
       sent?.choices?.offerKind === "DATE",
@@ -443,21 +463,24 @@ async function run(): Promise<void> {
   console.log("\n── Test F: New request clearing ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_f",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
@@ -495,8 +518,9 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
     });
 
-    check("F1. New request returns AI_REPLY", newRes.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
+    const isReply = newRes.ok && (newRes as InboundSuccess).assistantAction === "AI_REPLY";
+    check("F1. New request returns AI_REPLY", isReply);
+    const sent = lastSentPayload(harness);
     check("F2. Welcome choices presented after New", sent?.choices?.offerKind === "WELCOME");
 
     const savedState = await loadDurableState(harness);
@@ -516,17 +540,17 @@ async function run(): Promise<void> {
       ...emptyConversationState(),
       knownFacts: {
         customerName: "أحمد محمود",
-        service: "كشف جلدية",
+        service: "كشف أسنان",
         date: "2026-10-29",
       },
-      selectedService: "كشف جلدية",
+      selectedService: "كشف أسنان",
       selectedDate: "2026-10-29",
       activeTask: { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" },
       completedTask: {
         kind: "BOOKING",
         appointmentId: "apt_existing_123",
-        serviceId: "srv_1",
-        providerId: "prv_1",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        providerId: PLAYGROUND_IDS.PROV_1,
         date: "2026-10-20",
         completedAt: "2026-10-20T12:00:00Z",
       },
@@ -551,21 +575,24 @@ async function run(): Promise<void> {
   console.log("\n── Test H: Repeated greeting stability ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_h",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
@@ -620,21 +647,24 @@ async function run(): Promise<void> {
   console.log("\n── Test I: Old callbacks after New rejected ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_i",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
@@ -680,7 +710,7 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 8000).toISOString(),
     });
 
-    const sent = harness.lastSentPayload();
+    const sent = lastSentPayload(harness);
     check(
       "I1. Old callback after New request is rejected as stale (no booking created)",
       sent?.body?.includes("انتهت صلاحية") || sent?.body?.includes("استخدم الخيارات الحالية"),
@@ -693,21 +723,24 @@ async function run(): Promise<void> {
   console.log("\n── Test J: Unrelated generic reply does not attach old buttons ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiFaq(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiFaq(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_j",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
@@ -732,10 +765,11 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    check("J1. FAQ turn answers normally", res.assistantAction === "AI_REPLY");
-    const sent = harness.lastSentPayload();
+    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    check("J1. FAQ turn answers normally", isReply);
+    const sent = lastSentPayload(harness);
     check("J2. FAQ answer text matches", sent?.body?.includes("المعادي"));
-    check("J3. Choices are NOT attached to unrelated FAQ reply", sent?.choices === undefined);
+    check("J3. Choices are NOT attached to unrelated FAQ reply", sent?.choices === null || sent?.choices === undefined);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -746,19 +780,19 @@ async function run(): Promise<void> {
     const answerAndContinueAi: AiResponse = {
       intent: "FAQ",
       action: "reply",
-      content: "سعر الكشف 300 جنيه.",
+      content: "سعر الكشف 200 جنيه.",
       summary: "سؤال عن السعر مع رغبة في استكمال الحجز",
       handoffReason: null,
       safetyAssessment: "safe",
       extraction: {
-        service: "كشف جلدية",
+        service: "كشف أسنان",
         date: null,
         provider: null,
         timePreference: null,
       },
       goals: [
         {
-          kind: "KNOWLEDGE",
+          kind: "ANSWER",
           intent: "FAQ",
           requiredKnowledge: "FAQ",
         },
@@ -771,21 +805,24 @@ async function run(): Promise<void> {
     };
 
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: answerAndContinueAi,
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => answerAndContinueAi,
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
       { businessId: harness.business.id, conversationId: harness.conversation.id },
       "off_slot_k",
       {
-        serviceId: "srv_1",
-        serviceName: "كشف جلدية",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         date: "2026-10-29",
         options: [
           {
-            providerId: "prv_1",
-            displayName: "د. سارة",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
             startAt: "2026-10-29T10:00",
             endAt: "2026-10-29T10:30",
           },
@@ -809,9 +846,9 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const sent = harness.lastSentPayload();
-    check("K1. Answer-and-continue content delivered", sent?.body?.includes("300 جنيه"));
-    check("K2. Booking choices preserved when answerAndContinue is active", sent?.choices !== undefined);
+    const sent = lastSentPayload(harness);
+    check("K1. Answer-and-continue content delivered", sent?.body?.includes("200 جنيه"));
+    check("K2. Booking choices preserved when answerAndContinue is active", sent?.choices !== null && sent?.choices !== undefined);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -820,14 +857,18 @@ async function run(): Promise<void> {
   console.log("\n── Test L: Staff-owned / NEED_HUMAN protections intact ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     // Mark conversation NEED_HUMAN
-    await harness.conversationRepo.update(harness.conversation.id, {
+    await harness.deps.conversationRepository.update(harness.conversation.id, {
       status: "NEED_HUMAN",
     });
+    harness.conversation.status = "NEED_HUMAN";
 
     const res = await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
@@ -836,9 +877,10 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    check("L1. Inbound message is DEFERRED_TO_STAFF", res.assistantAction === "DEFERRED_TO_STAFF");
-    check("L2. Status remains NEED_HUMAN", res.conversationStatus === "NEED_HUMAN");
-    check("L3. Zero assistant messages delivered to transport", harness.lastSentPayload() === null);
+    const isDeferred = res.ok && (res as any).assistantAction === "DEFERRED_TO_STAFF";
+    check("L1. Inbound message is DEFERRED_TO_STAFF", isDeferred);
+    check("L2. Status remains NEED_HUMAN", (res as any).conversationStatus === "NEED_HUMAN");
+    check("L3. Zero assistant messages delivered to transport", lastSentPayload(harness) === null);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -847,9 +889,12 @@ async function run(): Promise<void> {
   console.log("\n── Test M: State commit failure -> no unpersisted buttons ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
     // Force save failure by making stateStore.save fail
     harness.stateStore.save = async () => ({ status: "conflict" });
@@ -861,8 +906,8 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const sent = harness.lastSentPayload();
-    check("M1. On state commit conflict, choices are undefined (not sent)", sent?.choices === undefined);
+    const sent = lastSentPayload(harness);
+    check("M1. On state commit conflict, choices are null/undefined (not sent)", sent?.choices === null || sent?.choices === undefined);
     check(
       "M2. Emits safe temporary conflict message",
       sent?.body?.includes("تعارض مؤقت") ?? false,
@@ -875,11 +920,14 @@ async function run(): Promise<void> {
   console.log("\n── Test N: Zero appointments created ──");
   {
     const harness = createPlaygroundHarness({
-      now: baseNow,
-      aiResponse: mockAiGreeting(),
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
     });
+    harness.setVirtualNow(baseNow);
 
-    const initialAppointmentCount = harness.appointmentRepo.createdAppointments.length;
+    const initialAppointmentCount = harness.appointments.length;
 
     // Greeting 1
     await receiveInboundMessage(harness.deps, {
@@ -917,7 +965,7 @@ async function run(): Promise<void> {
       });
     }
 
-    const finalAppointmentCount = harness.appointmentRepo.createdAppointments.length;
+    const finalAppointmentCount = harness.appointments.length;
     check(
       "N1. Total appointments created across Greetings, Continue, and New is exactly 0",
       initialAppointmentCount === 0 && finalAppointmentCount === 0,
