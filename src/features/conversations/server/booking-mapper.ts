@@ -214,6 +214,15 @@ export function matchProviderByName(
     }
   }
 
+  const byId = eligibleProviders.find((p) => p.providerId === providerText);
+  if (byId) {
+    return {
+      status: "ok",
+      providerId: byId.providerId,
+      displayName: byId.displayName,
+    };
+  }
+
   const needle = normalizeArabicText(providerText);
   if (needle.length === 0) {
     // In catalog_strict mode, normalization-empty input (e.g. punctuation or diacritics only)

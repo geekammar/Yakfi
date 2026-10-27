@@ -439,6 +439,10 @@ test.describe("Authenticated Preview QA", () => {
       ).toBeLessThanOrEqual(5);
     }
 
+    const preScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+
     // Screenshot Conversation Detail Scrolled (Middle)
     await page.screenshot({
       path: path.join(
@@ -447,6 +451,10 @@ test.describe("Authenticated Preview QA", () => {
       ),
       fullPage: true,
     });
+
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate((y) => window.scrollTo(0, y), preScreenshotScrollY);
+    await page.waitForTimeout(50);
 
     // Check Bottom: Scroll to bottom
     await messageLog.evaluate((el) => {

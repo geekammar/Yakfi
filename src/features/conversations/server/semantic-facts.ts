@@ -97,6 +97,17 @@ export function reconcileTurnSemanticFacts(
       setFacts.set("timePreference", { value: extraction.timePreference });
       touchedKeys.add("timePreference");
     }
+    if (extraction.exactTime) {
+      touchedKeys.add("exactTime");
+      if (extraction.exactTime.type === "specific") {
+        operations.set("exactTime", {
+          key: "exactTime",
+          operation: "set",
+          value: extraction.exactTime.time,
+        });
+        setFacts.set("exactTime", { value: extraction.exactTime.time });
+      }
+    }
     if (extraction.provider) {
       operations.set("provider", {
         key: "provider",
@@ -145,12 +156,23 @@ export function reconcileTurnSemanticFacts(
   const timePreference: CanonicalTimePreference | null =
     isCanonicalTimePreference(rawTimePref) ? rawTimePref : null;
 
+  let normalizedExactTime = extraction?.exactTime ?? null;
+  if (removedKeys.has("exactTime")) {
+    normalizedExactTime = null;
+  } else if (setFacts.has("exactTime")) {
+    normalizedExactTime = {
+      type: "specific",
+      time: setFacts.get("exactTime")!.value,
+    };
+  }
+
   const normalizedExtraction: AiExtraction = {
     service: setFacts.get("service")?.value ?? extraction?.service ?? null,
     date: removedKeys.has("date")
       ? null
       : (setFacts.get("date")?.value ?? extraction?.date ?? null),
     timePreference,
+    exactTime: normalizedExactTime,
     provider: removedKeys.has("provider")
       ? null
       : (setFacts.get("provider")?.value ?? extraction?.provider ?? null),

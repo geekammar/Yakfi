@@ -129,6 +129,11 @@ export type ConversationKnownFacts = {
     readonly endDate: string;
   };
   readonly timePreference?: string;
+  readonly exactTime?: string;
+  readonly unresolvedTime?: {
+    readonly hour: number;
+    readonly minute: number;
+  };
   readonly provider?: string;
   readonly customerName?: string;
   readonly followUpRequestId?: string;
@@ -228,6 +233,10 @@ export type ConversationState = {
   readonly lastClarification: {
     readonly type: string;
     readonly turnId?: string;
+    readonly unresolvedTime?: {
+      readonly hour: number;
+      readonly minute: number;
+    };
   } | null;
   /**
    * CONV-CORE-01 — the RESOLVED service identity (server-matched against the
@@ -317,6 +326,8 @@ export function factUpdatesFromExtraction(
   if (extraction.date) updates.push({ key: "date", value: extraction.date });
   if (extraction.timePreference)
     updates.push({ key: "timePreference", value: extraction.timePreference });
+  if (extraction.exactTime && extraction.exactTime.type === "specific")
+    updates.push({ key: "exactTime", value: extraction.exactTime.time });
   if (extraction.provider)
     updates.push({ key: "provider", value: extraction.provider });
   return updates;
@@ -391,6 +402,10 @@ export type MergeConversationStateInput = {
   readonly clarification?: {
     readonly type: string;
     readonly missingFacts?: readonly ConversationFactKey[];
+    readonly unresolvedTime?: {
+      readonly hour: number;
+      readonly minute: number;
+    };
   } | null;
   /**
    * CONV-CORE-01 — the service identity the ENGINE resolved this turn against
@@ -451,7 +466,10 @@ export function mergeConversationState(
           : null;
 
     if (update.operation === "remove") {
-      if (rawPrev !== null) {
+      if (
+        rawPrev !== null ||
+        (key === "exactTime" && knownFacts.unresolvedTime !== undefined)
+      ) {
         revisions.push({
           key,
           from: prevStr,
@@ -461,7 +479,13 @@ export function mergeConversationState(
         });
         const { [key]: _dropped, ...rest } = knownFacts;
         void _dropped;
-        knownFacts = rest;
+        if (key === "exactTime") {
+          const { unresolvedTime: _droppedUnr, ...cleanRest } = rest;
+          void _droppedUnr;
+          knownFacts = cleanRest;
+        } else {
+          knownFacts = rest;
+        }
       }
       continue;
     }
@@ -521,6 +545,19 @@ export function mergeConversationState(
         ...rest,
         dateRange: parsedRange.data,
       };
+    } else if (key === "exactTime") {
+      if (rawPrev !== null) {
+        revisions.push({
+          key,
+          from: prevStr,
+          to: nextValue,
+          isRevision: update.isRevision === true,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+        });
+      }
+      const { unresolvedTime: _droppedUnr, ...rest } = knownFacts;
+      void _droppedUnr;
+      knownFacts = { ...rest, exactTime: nextValue };
     } else {
       if (rawPrev !== null) {
         revisions.push({
@@ -588,12 +625,20 @@ export function mergeConversationState(
     void _dropped;
     knownFacts = rest;
   }
+  const unresolvedTimeChanged =
+    Boolean(state.knownFacts.unresolvedTime || knownFacts.unresolvedTime) &&
+    (state.knownFacts.unresolvedTime?.hour !==
+      knownFacts.unresolvedTime?.hour ||
+      state.knownFacts.unresolvedTime?.minute !==
+        knownFacts.unresolvedTime?.minute);
   const slotDependencyChanged =
     serviceIdentityChanged ||
     changed("date") ||
     changed("dateRange") ||
     changed("provider") ||
-    changed("timePreference");
+    changed("timePreference") ||
+    changed("exactTime") ||
+    unresolvedTimeChanged;
   let offer: BookingOffer | null = state.offer;
   if (offer && offer.status === "ACTIVE") {
     const invalidate =
@@ -773,6 +818,9 @@ export function mergeConversationState(
     lastClarification = {
       type: input.clarification.type,
       ...(input.turnId ? { turnId: input.turnId } : {}),
+      ...(input.clarification.unresolvedTime
+        ? { unresolvedTime: input.clarification.unresolvedTime }
+        : {}),
     };
   } else if (lastClarification && missingFacts.length === 0) {
     // The outstanding clarification's facts are all supplied → resume.
@@ -1050,12 +1098,19 @@ export function liveOffer(
 
 export const CONVERSATION_STATE_VERSION = 1;
 
+const unresolvedTimeFactSchema = z.object({
+  hour: z.number().int().min(1).max(12),
+  minute: z.number().int().min(0).max(59),
+});
+
 const factsSchema = z
   .object({
     service: z.string().max(200).optional(),
     date: z.string().max(40).optional(),
     dateRange: dateRangeSchema.optional(),
     timePreference: z.string().max(80).optional(),
+    exactTime: z.string().max(20).optional(),
+    unresolvedTime: unresolvedTimeFactSchema.optional(),
     provider: z.string().max(200).optional(),
     customerName: z.string().max(200).optional(),
     followUpRequestId: z.string().max(200).optional(),
@@ -1083,7 +1138,13 @@ const persistedStateSchema = z.object({
       }),
     )
     .max(MAX_PENDING_GOALS),
-  lastClarification: z.object({ type: z.string().max(60) }).nullable(),
+  lastClarification: z
+    .object({
+      type: z.string().max(60),
+      turnId: z.string().max(100).optional(),
+      unresolvedTime: unresolvedTimeFactSchema.optional(),
+    })
+    .nullable(),
   serviceId: z.string().max(200).nullable(),
   serviceSource: z.enum(["CUSTOMER", "DEFAULT"]).nullable(),
   offer: bookingOfferSchema.nullable(),
@@ -1115,7 +1176,15 @@ export function dehydrateConversationState(
     bookingStage: state.bookingStage,
     pendingGoals: state.pendingGoals.map((g) => ({ ...g })),
     lastClarification: state.lastClarification
-      ? { type: state.lastClarification.type }
+      ? {
+          type: state.lastClarification.type,
+          ...(state.lastClarification.turnId
+            ? { turnId: state.lastClarification.turnId }
+            : {}),
+          ...(state.lastClarification.unresolvedTime
+            ? { unresolvedTime: state.lastClarification.unresolvedTime }
+            : {}),
+        }
       : null,
     serviceId: state.serviceId,
     serviceSource: state.serviceSource,
@@ -1258,6 +1327,11 @@ export function projectConversationState(
     pendingClarification = {
       type: state.lastClarification?.type ?? "MISSING_FACTS",
       missingFacts: state.missingFacts.slice(0, 8),
+      ...(state.lastClarification?.unresolvedTime
+        ? { unresolvedTime: state.lastClarification.unresolvedTime }
+        : state.knownFacts.unresolvedTime
+          ? { unresolvedTime: state.knownFacts.unresolvedTime }
+          : {}),
     };
   }
 
@@ -1296,6 +1370,7 @@ export function projectConversationState(
     knownDateRange: state.knownFacts.dateRange ?? state.dateRange ?? null,
     timePreference:
       state.knownFacts.timePreference ?? state.selectedTimePref ?? null,
+    knownExactTime: state.knownFacts.exactTime ?? null,
     providerPreference:
       state.knownFacts.provider ?? state.providerPreference ?? null,
     pendingClarification,

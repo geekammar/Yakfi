@@ -255,11 +255,16 @@ async function main(): Promise<void> {
             row.consumedAt === null &&
             row.expiresAt > new Date(),
         ) ?? null,
-      findLatestByBusiness: async (businessId: string) =>
-        ledger
-          .filter((row) => row.businessId === businessId)
-          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ??
-        null,
+      findLatestByBusiness: async (businessId: string) => {
+        const matches = ledger.filter((row) => row.businessId === businessId);
+        return (
+          matches.sort(
+            (a, b) =>
+              b.createdAt.getTime() - a.createdAt.getTime() ||
+              matches.indexOf(b) - matches.indexOf(a),
+          )[0] ?? null
+        );
+      },
       bindCreator: async (
         startToken: string,
         creatorTelegramUserId: string,
