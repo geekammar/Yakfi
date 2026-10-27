@@ -221,8 +221,9 @@ export const aiExtractionSchema = z.object({
 
         // 2. Unambiguous 24-hour wall-clock times (hours 13..23 or hour 00/0)
         // Hour > 12 has unambiguous 24-hour PM provenance
-        const m24 =
-          /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+        const m24 = /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(
+          trimmed,
+        );
         if (m24 && m24[1] && m24[2]) {
           return { type: "specific", time: `${m24[1]}:${m24[2]}` };
         }
@@ -290,8 +291,9 @@ export const aiExtractionSchema = z.object({
         // Untyped object with time provided (e.g. { time: "4:15" })
         if (obj.type === undefined && typeof obj.time === "string") {
           const trimmed = obj.time.trim();
-          const m24 =
-            /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+          const m24 = /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(
+            trimmed,
+          );
           if (m24 && m24[1] && m24[2]) {
             return { type: "specific", time: `${m24[1]}:${m24[2]}` };
           }

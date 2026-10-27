@@ -2323,7 +2323,9 @@ async function main(): Promise<void> {
     // ─────────────────────────────────────────────────────────────────────────
     // T22.0: Raw AI response normalization & schema validation tests
     // ─────────────────────────────────────────────────────────────────────────
-    console.log("--- T22.0: Raw AI response normalization & contract validation ---");
+    console.log(
+      "--- T22.0: Raw AI response normalization & contract validation ---",
+    );
 
     // 1. Bare strings (1..12) without period provenance normalize to unresolved_period
     const rBare415 = parseAiResponse({
