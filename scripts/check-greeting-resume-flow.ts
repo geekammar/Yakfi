@@ -63,7 +63,9 @@ function check(title: string, passed: unknown, extraInfo?: string): void {
   }
 }
 
-async function loadDurableState(harness: any): Promise<ConversationState | null> {
+async function loadDurableState(
+  harness: any,
+): Promise<ConversationState | null> {
   const loaded = await harness.stateStore.load(
     harness.business.id,
     harness.conversation.id,
@@ -149,10 +151,14 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
     check("A1. Response succeeded with AI_REPLY", isReply);
     const sent = lastSentPayload(harness);
-    check("A2. Choice presentation attached", sent?.choices !== null && sent?.choices !== undefined);
+    check(
+      "A2. Choice presentation attached",
+      sent?.choices !== null && sent?.choices !== undefined,
+    );
     check("A3. Offer kind is WELCOME", sent?.choices?.offerKind === "WELCOME");
     check(
       "A4. Options are book and inquire",
@@ -176,7 +182,10 @@ async function run(): Promise<void> {
 
     // Seed conversation state with an active DATE offer
     const dateOffer = buildDateOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_date_1",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -191,7 +200,10 @@ async function run(): Promise<void> {
     );
     if (!dateOffer) throw new Error("Failed to build test dateOffer");
 
-    const stateWithDate = withPresentedOffer(emptyConversationState(), dateOffer);
+    const stateWithDate = withPresentedOffer(
+      emptyConversationState(),
+      dateOffer,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -211,7 +223,8 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
     check("B1. Greeting on active DATE request returns AI_REPLY", isReply);
     const sent = lastSentPayload(harness);
     check("B2. Offer kind is RESUME", sent?.choices?.offerKind === "RESUME");
@@ -247,7 +260,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_1",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -272,7 +288,10 @@ async function run(): Promise<void> {
     );
     if (!slotOffer) throw new Error("Failed to build test slotOffer");
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -287,10 +306,14 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
     check("C1. Greeting on active SLOT request returns AI_REPLY", isReply);
     const sent = lastSentPayload(harness);
-    check("C2. Choices kind is RESUME (not SLOT)", sent?.choices?.offerKind === "RESUME");
+    check(
+      "C2. Choices kind is RESUME (not SLOT)",
+      sent?.choices?.offerKind === "RESUME",
+    );
     check(
       "C3. Buttons are continue/new_request (no old slot buttons)",
       sent?.choices?.groups?.[0]?.[0]?.id === "continue" &&
@@ -323,7 +346,10 @@ async function run(): Promise<void> {
 
     // Seed state with slot offer
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_d",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -340,7 +366,10 @@ async function run(): Promise<void> {
       },
       baseNow,
     );
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -369,17 +398,25 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
     });
 
-    const isReply = continueRes.ok && (continueRes as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      continueRes.ok &&
+      (continueRes as InboundSuccess).assistantAction === "AI_REPLY";
     check("D1. Continue action returns AI_REPLY", isReply);
     const sent = lastSentPayload(harness);
-    check("D2. Fresh choices presented (SLOT or DATE)", sent?.choices !== null && sent?.choices !== undefined);
+    check(
+      "D2. Fresh choices presented (SLOT or DATE)",
+      sent?.choices !== null && sent?.choices !== undefined,
+    );
     check(
       "D3. Presented choices correspond to saved service (كشف أسنان)",
-      sent?.body?.includes("أسنان") || sent?.choices?.offerKind === "SLOT" || sent?.choices?.offerKind === "DATE",
+      sent?.body?.includes("أسنان") ||
+        sent?.choices?.offerKind === "SLOT" ||
+        sent?.choices?.offerKind === "DATE",
     );
     check(
       "D4. Offer has fresh token (not stale old token)",
-      sent?.choices?.offerToken !== resumeToken && sent?.choices?.offerToken !== slotOffer?.token,
+      sent?.choices?.offerToken !== resumeToken &&
+        sent?.choices?.offerToken !== slotOffer?.token,
     );
   }
 
@@ -399,7 +436,10 @@ async function run(): Promise<void> {
     // Past date (yesterday)
     const yesterdayDate = "2026-10-27";
     const expiredSlotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_expired",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -417,7 +457,10 @@ async function run(): Promise<void> {
       new Date("2026-10-27T08:00:00Z"),
     );
 
-    const stateWithExpired = withPresentedOffer(emptyConversationState(), expiredSlotOffer!);
+    const stateWithExpired = withPresentedOffer(
+      emptyConversationState(),
+      expiredSlotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -471,7 +514,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_f",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -489,7 +535,10 @@ async function run(): Promise<void> {
       baseNow,
     );
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -518,17 +567,36 @@ async function run(): Promise<void> {
       receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
     });
 
-    const isReply = newRes.ok && (newRes as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      newRes.ok && (newRes as InboundSuccess).assistantAction === "AI_REPLY";
     check("F1. New request returns AI_REPLY", isReply);
     const sent = lastSentPayload(harness);
-    check("F2. Welcome choices presented after New", sent?.choices?.offerKind === "WELCOME");
+    check(
+      "F2. Welcome choices presented after New",
+      sent?.choices?.offerKind === "WELCOME",
+    );
 
     const savedState = await loadDurableState(harness);
-    check("F3. Active draft task cleared (null)", savedState?.activeTask === null);
-    check("F4. Selected service cleared (null)", savedState?.selectedService === null);
-    check("F5. Selected date cleared (null)", savedState?.selectedDate === null);
-    check("F6. Suspended offer cleared (null)", savedState?.suspendedOffer === null);
-    check("F7. Booking stage reset to NOT_APPLICABLE", savedState?.bookingStage === "NOT_APPLICABLE");
+    check(
+      "F3. Active draft task cleared (null)",
+      savedState?.activeTask === null,
+    );
+    check(
+      "F4. Selected service cleared (null)",
+      savedState?.selectedService === null,
+    );
+    check(
+      "F5. Selected date cleared (null)",
+      savedState?.selectedDate === null,
+    );
+    check(
+      "F6. Suspended offer cleared (null)",
+      savedState?.suspendedOffer === null,
+    );
+    check(
+      "F7. Booking stage reset to NOT_APPLICABLE",
+      savedState?.bookingStage === "NOT_APPLICABLE",
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -565,8 +633,15 @@ async function run(): Promise<void> {
       "G2. Customer identity (customerName) is preserved after clearBookingDraft",
       cleared.knownFacts.customerName === "أحمد محمود",
     );
-    check("G3. Draft service is cleared", cleared.selectedService === null && cleared.knownFacts.service === undefined);
-    check("G4. Draft date is cleared", cleared.selectedDate === null && cleared.knownFacts.date === undefined);
+    check(
+      "G3. Draft service is cleared",
+      cleared.selectedService === null &&
+        cleared.knownFacts.service === undefined,
+    );
+    check(
+      "G4. Draft date is cleared",
+      cleared.selectedDate === null && cleared.knownFacts.date === undefined,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -583,7 +658,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_h",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -601,7 +679,10 @@ async function run(): Promise<void> {
       baseNow,
     );
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -618,8 +699,14 @@ async function run(): Promise<void> {
     });
 
     const state1 = await loadDurableState(harness);
-    check("H1. First greeting presents RESUME offer", state1?.offer?.kind === "RESUME");
-    check("H2. Draft preserved in suspendedOffer", state1?.suspendedOffer?.kind === "SLOT");
+    check(
+      "H1. First greeting presents RESUME offer",
+      state1?.offer?.kind === "RESUME",
+    );
+    check(
+      "H2. Draft preserved in suspendedOffer",
+      state1?.suspendedOffer?.kind === "SLOT",
+    );
 
     // Greeting 2 (immediately repeated)
     await receiveInboundMessage(harness.deps, {
@@ -630,15 +717,15 @@ async function run(): Promise<void> {
     });
 
     const state2 = await loadDurableState(harness);
-    check("H3. Second greeting also presents RESUME offer (no crash, no nest)", state2?.offer?.kind === "RESUME");
+    check(
+      "H3. Second greeting also presents RESUME offer (no crash, no nest)",
+      state2?.offer?.kind === "RESUME",
+    );
     check(
       "H4. Original slot offer is still intact in suspendedOffer (not overwritten by RESUME)",
       state2?.suspendedOffer?.kind === "SLOT",
     );
-    check(
-      "H5. Still hasResumableDraftTask",
-      hasResumableDraftTask(state2),
-    );
+    check("H5. Still hasResumableDraftTask", hasResumableDraftTask(state2));
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -655,7 +742,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_i",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -674,7 +764,10 @@ async function run(): Promise<void> {
     );
     const oldSlotToken = slotOffer!.token;
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -713,14 +806,17 @@ async function run(): Promise<void> {
     const sent = lastSentPayload(harness);
     check(
       "I1. Old callback after New request is rejected as stale (no booking created)",
-      sent?.body?.includes("انتهت صلاحية") || sent?.body?.includes("استخدم الخيارات الحالية"),
+      sent?.body?.includes("انتهت صلاحية") ||
+        sent?.body?.includes("استخدم الخيارات الحالية"),
     );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // Test J: Unrelated generic reply -> no automatic stale booking buttons
   // ══════════════════════════════════════════════════════════════════════════
-  console.log("\n── Test J: Unrelated generic reply does not attach old buttons ──");
+  console.log(
+    "\n── Test J: Unrelated generic reply does not attach old buttons ──",
+  );
   {
     const harness = createPlaygroundHarness({
       customAi: {
@@ -731,7 +827,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_j",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -749,7 +848,10 @@ async function run(): Promise<void> {
       baseNow,
     );
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -765,17 +867,23 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const isReply = res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    const isReply =
+      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
     check("J1. FAQ turn answers normally", isReply);
     const sent = lastSentPayload(harness);
     check("J2. FAQ answer text matches", sent?.body?.includes("المعادي"));
-    check("J3. Choices are NOT attached to unrelated FAQ reply", sent?.choices === null || sent?.choices === undefined);
+    check(
+      "J3. Choices are NOT attached to unrelated FAQ reply",
+      sent?.choices === null || sent?.choices === undefined,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // Test K: Intentional answer-and-continue remains functional
   // ══════════════════════════════════════════════════════════════════════════
-  console.log("\n── Test K: Intentional answer-and-continue preserves choices ──");
+  console.log(
+    "\n── Test K: Intentional answer-and-continue preserves choices ──",
+  );
   {
     const answerAndContinueAi: AiResponse = {
       intent: "FAQ",
@@ -813,7 +921,10 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     const slotOffer = buildSlotOffer(
-      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      {
+        businessId: harness.business.id,
+        conversationId: harness.conversation.id,
+      },
       "off_slot_k",
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
@@ -831,7 +942,10 @@ async function run(): Promise<void> {
       baseNow,
     );
 
-    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    const stateWithSlot = withPresentedOffer(
+      emptyConversationState(),
+      slotOffer!,
+    );
     await harness.stateStore.save(
       harness.business.id,
       harness.conversation.id,
@@ -847,8 +961,14 @@ async function run(): Promise<void> {
     });
 
     const sent = lastSentPayload(harness);
-    check("K1. Answer-and-continue content delivered", sent?.body?.includes("200 جنيه"));
-    check("K2. Booking choices preserved when answerAndContinue is active", sent?.choices !== null && sent?.choices !== undefined);
+    check(
+      "K1. Answer-and-continue content delivered",
+      sent?.body?.includes("200 جنيه"),
+    );
+    check(
+      "K2. Booking choices preserved when answerAndContinue is active",
+      sent?.choices !== null && sent?.choices !== undefined,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -874,10 +994,17 @@ async function run(): Promise<void> {
       receivedAt: baseNow.toISOString(),
     });
 
-    const isDeferred = res.ok && (res as any).assistantAction === "DEFERRED_TO_STAFF";
+    const isDeferred =
+      res.ok && (res as any).assistantAction === "DEFERRED_TO_STAFF";
     check("L1. Inbound message is DEFERRED_TO_STAFF", isDeferred);
-    check("L2. Status remains NEED_HUMAN", (res as any).conversationStatus === "NEED_HUMAN");
-    check("L3. Zero assistant messages delivered to transport", lastSentPayload(harness) === null);
+    check(
+      "L2. Status remains NEED_HUMAN",
+      (res as any).conversationStatus === "NEED_HUMAN",
+    );
+    check(
+      "L3. Zero assistant messages delivered to transport",
+      lastSentPayload(harness) === null,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -904,7 +1031,10 @@ async function run(): Promise<void> {
     });
 
     const sent = lastSentPayload(harness);
-    check("M1. On state commit conflict, choices are null/undefined (not sent)", sent?.choices === null || sent?.choices === undefined);
+    check(
+      "M1. On state commit conflict, choices are null/undefined (not sent)",
+      sent?.choices === null || sent?.choices === undefined,
+    );
     check(
       "M2. Emits safe temporary conflict message",
       sent?.body?.includes("تعارض مؤقت") ?? false,

@@ -556,7 +556,8 @@ export function interpretOfferReply(
     const sel = parseBookingSelection(trimmedText);
     if (sel?.kind === "index") {
       if (sel.index === 1) return { kind: "resume_action", action: "continue" };
-      if (sel.index === 2) return { kind: "resume_action", action: "new_request" };
+      if (sel.index === 2)
+        return { kind: "resume_action", action: "new_request" };
     }
     return { kind: "none" };
   }

@@ -4144,7 +4144,9 @@ async function runInboundTurn(
         const savedServiceName =
           turnSession.state?.knownFacts.service ??
           turnSession.state?.selectedService ??
-          (suspended && "serviceName" in suspended ? suspended.serviceName : null);
+          (suspended && "serviceName" in suspended
+            ? suspended.serviceName
+            : null);
 
         const activeServices = services.filter((s) => s.isActive !== false);
         const targetService = activeServices.find(
@@ -4232,7 +4234,9 @@ async function runInboundTurn(
         const candidateProvider =
           turnSession.state?.knownFacts.provider ??
           turnSession.state?.providerPreference ??
-          (suspended && "providerId" in suspended ? suspended.providerId : null);
+          (suspended && "providerId" in suspended
+            ? suspended.providerId
+            : null);
 
         const provRes = await resolveProviderCandidate(
           deps,
@@ -4272,7 +4276,9 @@ async function runInboundTurn(
           (isCanonicalTimePreference(rawPersistedTimePref)
             ? rawPersistedTimePref
             : null) ??
-          (suspended && "timePreference" in suspended && suspended.timePreference
+          (suspended &&
+          "timePreference" in suspended &&
+          suspended.timePreference
             ? suspended.timePreference
             : null);
 

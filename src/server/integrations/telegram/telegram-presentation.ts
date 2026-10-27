@@ -11,8 +11,8 @@
 import type {
   DateOffer,
   ProviderOffer,
-  ServiceDetailOffer,
   ResumeOffer,
+  ServiceDetailOffer,
   ServiceOffer,
   SlotOffer,
   WelcomeOffer,
