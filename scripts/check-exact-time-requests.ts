@@ -277,12 +277,13 @@ async function main(): Promise<void> {
     );
 
     // Sub-case: 14:00–15:00 requested with booking beginning at 14:30 and other slots free
+    const SERV_60MIN = "33333333-3333-4333-8333-333333333360";
     const harness60min = createPlaygroundHarness({
       businessConfig: { workingHours: standardWorkingHours },
       todayRef: "2026-10-20",
       customServices: [
         {
-          id: "serv_60min",
+          id: SERV_60MIN,
           businessId: PLAYGROUND_IDS.BIZ_ID,
           name: "جلسة علاج",
           durationMinutes: 60,
@@ -299,7 +300,7 @@ async function main(): Promise<void> {
           businessId: PLAYGROUND_IDS.BIZ_ID,
           branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other-1",
-          serviceId: "serv_60min",
+          serviceId: SERV_60MIN,
           providerId: PLAYGROUND_IDS.PROV_1,
           assignedUserId: PLAYGROUND_IDS.USER_P1,
           date: new Date("2026-10-21T00:00:00Z"),
@@ -312,7 +313,7 @@ async function main(): Promise<void> {
           businessId: PLAYGROUND_IDS.BIZ_ID,
           branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other-2",
-          serviceId: "serv_60min",
+          serviceId: SERV_60MIN,
           providerId: PLAYGROUND_IDS.PROV_2,
           assignedUserId: PLAYGROUND_IDS.USER_P2,
           date: new Date("2026-10-21T00:00:00Z"),
