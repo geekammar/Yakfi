@@ -7293,27 +7293,11 @@ async function runInboundTurn(
         null;
 
       if (hasTurnExactProposal && rawExactTime?.type === "unresolved_period") {
-        // A current explicit ambiguous proposal was stated on this turn.
-        // If and only if the current turn ALSO provided an explicit period clarification,
-        // resolve using the CURRENT proposal's hour and minute.
-        // Stale/inherited timePreference must NEVER override a current unresolved proposal.
-        if (currentPeriodClarification) {
-          const h = rawExactTime.hour;
-          const m = rawExactTime.minute ?? 0;
-          let resolvedHour: number;
-          if (
-            currentPeriodClarification === "afternoon" ||
-            currentPeriodClarification === "evening"
-          ) {
-            resolvedHour = h === 12 ? 12 : h + 12;
-          } else {
-            resolvedHour = h === 12 ? 0 : h;
-          }
-          rawExactTime = {
-            type: "specific",
-            time: `${String(resolvedHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
-          };
-        }
+        // A current explicit ambiguous proposal was stated on this turn (e.g. "الساعة 3" or bare "4:15").
+        // It expresses genuine AM/PM uncertainty where the customer has not resolved the period.
+        // Contradictory period proposals on the same turn (e.g. model emitting timePreference: "morning"
+        // while the customer stated "لسه مش محدد صباحاً ولا مساءً") must NEVER collapse this uncertainty into a specific time.
+        // Resolution is reserved strictly for subsequent follow-up turns where the customer answers the clarification.
       } else if (
         !hasTurnExactProposal &&
         priorUnresolved &&
@@ -7342,9 +7326,13 @@ async function runInboundTurn(
       if (rawExactTime && rawExactTime.type === "unresolved_period") {
         if (turnSession.enabled) {
           await turnSession.invalidateOffer();
-          const { exactTime: _droppedTime, ...prevFacts } =
-            turnSession.state?.knownFacts ?? {};
+          const {
+            exactTime: _droppedTime,
+            timePreference: _droppedTimePref,
+            ...prevFacts
+          } = turnSession.state?.knownFacts ?? {};
           void _droppedTime;
+          void _droppedTimePref;
           turnSession.state = {
             ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
             activeTask: {
