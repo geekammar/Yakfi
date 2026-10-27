@@ -34,17 +34,22 @@ import {
 export function toCanonicalTimestampMs(ts: string | Date): number {
   if (ts instanceof Date) {
     const ms = ts.getTime();
-    if (Number.isNaN(ms)) throw new Error("Invalid Date instance provided as canonical timestamp");
+    if (Number.isNaN(ms))
+      throw new Error("Invalid Date instance provided as canonical timestamp");
     return ms;
   }
   if (typeof ts === "string") {
     const trimmed = ts.trim();
-    if (trimmed.length === 0) throw new Error("Empty string provided as canonical timestamp");
+    if (trimmed.length === 0)
+      throw new Error("Empty string provided as canonical timestamp");
     const ms = Date.parse(trimmed);
-    if (Number.isNaN(ms)) throw new Error(`Invalid ISO timestamp string: '${ts}'`);
+    if (Number.isNaN(ms))
+      throw new Error(`Invalid ISO timestamp string: '${ts}'`);
     return ms;
   }
-  throw new Error("canonicalTimestamp must be a valid ISO string or Date instance");
+  throw new Error(
+    "canonicalTimestamp must be a valid ISO string or Date instance",
+  );
 }
 
 /**
@@ -69,15 +74,17 @@ export function rollupCommercialSessions(
 ): SessionRollupResult {
   // 1. Sort deterministically: primary = timestampMs, secondary = eventId tie-breaker.
   // This guarantees complete invariance under any input permutation (shuffled, reverse, etc.).
-  const sorted = [...events].map((evt) => ({
-    event: evt,
-    timestampMs: toCanonicalTimestampMs(evt.canonicalTimestamp),
-  })).sort((a, b) => {
-    if (a.timestampMs !== b.timestampMs) {
-      return a.timestampMs - b.timestampMs;
-    }
-    return a.event.eventId.localeCompare(b.event.eventId);
-  });
+  const sorted = [...events]
+    .map((evt) => ({
+      event: evt,
+      timestampMs: toCanonicalTimestampMs(evt.canonicalTimestamp),
+    }))
+    .sort((a, b) => {
+      if (a.timestampMs !== b.timestampMs) {
+        return a.timestampMs - b.timestampMs;
+      }
+      return a.event.eventId.localeCompare(b.event.eventId);
+    });
 
   // 2. Initialize tracking maps.
   // activeByScope tracks the currently open session per scopeKey.
@@ -126,7 +133,9 @@ export function rollupCommercialSessions(
       activeByScope.set(scopeKey, updatedSession);
 
       // Update in-place in sessionList.
-      const idx = sessionList.findIndex((s) => s.sessionId === currentActive.sessionId);
+      const idx = sessionList.findIndex(
+        (s) => s.sessionId === currentActive.sessionId,
+      );
       if (idx !== -1) {
         sessionList[idx] = updatedSession;
       }
@@ -152,10 +161,17 @@ export function rollupCommercialSessions(
     }
 
     // Rule: Qualifying customer actions (MESSAGE or CHOICE_CALLBACK) initiate a new 24h session.
-    if (event.actionType === "MESSAGE" || event.actionType === "CHOICE_CALLBACK") {
+    if (
+      event.actionType === "MESSAGE" ||
+      event.actionType === "CHOICE_CALLBACK"
+    ) {
       const startMs = timestampMs;
       const endMs = startMs + SESSION_DURATION_MS;
-      const sessionId = generateDeterministicSessionId(scopeKey, startMs, event.eventId);
+      const sessionId = generateDeterministicSessionId(
+        scopeKey,
+        startMs,
+        event.eventId,
+      );
 
       const newSession: CommercialSession = {
         sessionId,
@@ -177,7 +193,10 @@ export function rollupCommercialSessions(
   }
 
   // 4. Compute metrics per traffic pool.
-  const metricsByPool: Record<TrafficPool, { sessionCount: number; eventCount: number }> = {
+  const metricsByPool: Record<
+    TrafficPool,
+    { sessionCount: number; eventCount: number }
+  > = {
     SERVING: { sessionCount: 0, eventCount: 0 },
     SHADOW: { sessionCount: 0, eventCount: 0 },
     TEST: { sessionCount: 0, eventCount: 0 },

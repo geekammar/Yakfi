@@ -44,7 +44,8 @@ function findMatchingRateSnapshot(
   attempt: PhysicalAttemptFact,
   rateSnapshots?: ReadonlyArray<ModelRateSnapshot>,
 ): ModelRateSnapshot | undefined {
-  if (!rateSnapshots || rateSnapshots.length === 0 || !attempt.model) return undefined;
+  if (!rateSnapshots || rateSnapshots.length === 0 || !attempt.model)
+    return undefined;
   const targetProvider = attempt.provider.trim().toLowerCase();
   const targetModel = attempt.model.trim().toLowerCase();
 
@@ -121,7 +122,9 @@ export function evaluateAttemptCost(
   if (snapshot && hasValidTokenCounts) {
     const rawCached = attempt.cachedInputTokens;
     const cachedTokens =
-      typeof rawCached === "number" && Number.isFinite(rawCached) && rawCached >= 0
+      typeof rawCached === "number" &&
+      Number.isFinite(rawCached) &&
+      rawCached >= 0
         ? Math.min(rawCached, inputTokens)
         : 0;
 
@@ -256,7 +259,9 @@ export function evaluateTurnCost(
   attempts: ReadonlyArray<PhysicalAttemptFact>,
   rateSnapshots?: ReadonlyArray<ModelRateSnapshot>,
 ): TurnCostResult {
-  const attemptResults = attempts.map((a) => evaluateAttemptCost(a, rateSnapshots));
+  const attemptResults = attempts.map((a) =>
+    evaluateAttemptCost(a, rateSnapshots),
+  );
 
   const pools: Record<TrafficPool, PoolCostSummary> = {
     SERVING: aggregatePoolSummary("SERVING", attemptResults),

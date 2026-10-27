@@ -57,10 +57,13 @@ function makeScope(overrides?: Partial<IdentityScope>): IdentityScope {
   };
 }
 
-function makeEvent(overrides?: Partial<CanonicalInboundEvent>): CanonicalInboundEvent {
+function makeEvent(
+  overrides?: Partial<CanonicalInboundEvent>,
+): CanonicalInboundEvent {
   return {
     eventId: overrides?.eventId ?? "evt-1",
-    canonicalTimestamp: overrides?.canonicalTimestamp ?? "2026-10-01T10:00:00.000Z",
+    canonicalTimestamp:
+      overrides?.canonicalTimestamp ?? "2026-10-01T10:00:00.000Z",
     senderType: overrides?.senderType ?? "CUSTOMER",
     actionType: overrides?.actionType ?? "MESSAGE",
     scope: overrides?.scope ?? makeScope(),
@@ -75,7 +78,10 @@ function runSuite(): void {
   // ═══════════════════════════════════════════════════════════════════════
   const tIso = toCanonicalTimestampMs("2026-10-01T12:00:00.000Z");
   const tDate = toCanonicalTimestampMs(new Date("2026-10-01T12:00:00.000Z"));
-  check("G1.1 toCanonicalTimestampMs parses valid ISO string and Date identically", tIso === tDate && tIso === 1790856000000);
+  check(
+    "G1.1 toCanonicalTimestampMs parses valid ISO string and Date identically",
+    tIso === tDate && tIso === 1790856000000,
+  );
 
   let throwsOnEmpty = false;
   try {
@@ -83,7 +89,10 @@ function runSuite(): void {
   } catch {
     throwsOnEmpty = true;
   }
-  check("G1.2 toCanonicalTimestampMs throws on empty or whitespace string", throwsOnEmpty);
+  check(
+    "G1.2 toCanonicalTimestampMs throws on empty or whitespace string",
+    throwsOnEmpty,
+  );
 
   let throwsOnInvalid = false;
   try {
@@ -91,14 +100,21 @@ function runSuite(): void {
   } catch {
     throwsOnInvalid = true;
   }
-  check("G1.3 toCanonicalTimestampMs throws on invalid date string", throwsOnInvalid);
+  check(
+    "G1.3 toCanonicalTimestampMs throws on invalid date string",
+    throwsOnInvalid,
+  );
 
   // ═══════════════════════════════════════════════════════════════════════
   // GROUP 2: Exact 24-Hour Half-Open Window [start, start + 24h)
   // ═══════════════════════════════════════════════════════════════════════
   const baseT = "2026-10-01T10:00:00.000Z";
-  const insideT = new Date(Date.parse(baseT) + SESSION_DURATION_MS - 1).toISOString(); // T + 24h - 1ms
-  const boundaryT = new Date(Date.parse(baseT) + SESSION_DURATION_MS).toISOString(); // T + 24h exactly
+  const insideT = new Date(
+    Date.parse(baseT) + SESSION_DURATION_MS - 1,
+  ).toISOString(); // T + 24h - 1ms
+  const boundaryT = new Date(
+    Date.parse(baseT) + SESSION_DURATION_MS,
+  ).toISOString(); // T + 24h exactly
 
   const res24h = rollupCommercialSessions([
     makeEvent({ eventId: "e1", canonicalTimestamp: baseT }),
@@ -126,16 +142,29 @@ function runSuite(): void {
   // GROUP 3: Start-Only Protocol vs Interactive Choice Callbacks
   // ═══════════════════════════════════════════════════════════════════════
   const resStartOnly = rollupCommercialSessions([
-    makeEvent({ eventId: "s1", actionType: "START_COMMAND", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
+    makeEvent({
+      eventId: "s1",
+      actionType: "START_COMMAND",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+    }),
   ]);
   check(
     "G3.1 Start-only command does not open a commercial session (0 sessions, ignored=1)",
-    resStartOnly.sessions.length === 0 && resStartOnly.startOnlyIgnoredCount === 1,
+    resStartOnly.sessions.length === 0 &&
+      resStartOnly.startOnlyIgnoredCount === 1,
   );
 
   const resStartThenCallback = rollupCommercialSessions([
-    makeEvent({ eventId: "s1", actionType: "START_COMMAND", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
-    makeEvent({ eventId: "cb1", actionType: "CHOICE_CALLBACK", canonicalTimestamp: "2026-10-01T10:05:00Z" }),
+    makeEvent({
+      eventId: "s1",
+      actionType: "START_COMMAND",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+    }),
+    makeEvent({
+      eventId: "cb1",
+      actionType: "CHOICE_CALLBACK",
+      canonicalTimestamp: "2026-10-01T10:05:00Z",
+    }),
   ]);
   check(
     "G3.2 Subsequent CHOICE_CALLBACK initiates session successfully",
@@ -149,7 +178,11 @@ function runSuite(): void {
   // ═══════════════════════════════════════════════════════════════════════
   const resDedupe = rollupCommercialSessions([
     makeEvent({ eventId: "d1", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
-    makeEvent({ eventId: "d1-dup", isDuplicate: true, canonicalTimestamp: "2026-10-01T10:00:01Z" }),
+    makeEvent({
+      eventId: "d1-dup",
+      isDuplicate: true,
+      canonicalTimestamp: "2026-10-01T10:00:01Z",
+    }),
   ]);
   check(
     "G4.1 Duplicate payloads are excluded from session event count (filteredDuplicateCount=1)",
@@ -162,16 +195,37 @@ function runSuite(): void {
   // GROUP 5: Permutation Invariance (Batch Ordering & Tie-Breaking)
   // ═══════════════════════════════════════════════════════════════════════
   const rawBatch: CanonicalInboundEvent[] = [
-    makeEvent({ eventId: "evt-01", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
-    makeEvent({ eventId: "evt-02", canonicalTimestamp: "2026-10-01T12:00:00Z" }),
-    makeEvent({ eventId: "evt-03", canonicalTimestamp: "2026-10-01T12:00:00Z" }), // tie in ms
-    makeEvent({ eventId: "evt-04", canonicalTimestamp: "2026-10-02T15:00:00Z" }), // session 2
-    makeEvent({ eventId: "evt-05", canonicalTimestamp: "2026-10-02T16:00:00Z" }),
+    makeEvent({
+      eventId: "evt-01",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+    }),
+    makeEvent({
+      eventId: "evt-02",
+      canonicalTimestamp: "2026-10-01T12:00:00Z",
+    }),
+    makeEvent({
+      eventId: "evt-03",
+      canonicalTimestamp: "2026-10-01T12:00:00Z",
+    }), // tie in ms
+    makeEvent({
+      eventId: "evt-04",
+      canonicalTimestamp: "2026-10-02T15:00:00Z",
+    }), // session 2
+    makeEvent({
+      eventId: "evt-05",
+      canonicalTimestamp: "2026-10-02T16:00:00Z",
+    }),
   ];
 
   const chronological = rollupCommercialSessions(rawBatch);
   const reversed = rollupCommercialSessions([...rawBatch].reverse());
-  const shuffled = rollupCommercialSessions([rawBatch[3]!, rawBatch[0]!, rawBatch[4]!, rawBatch[2]!, rawBatch[1]!]);
+  const shuffled = rollupCommercialSessions([
+    rawBatch[3]!,
+    rawBatch[0]!,
+    rawBatch[4]!,
+    rawBatch[2]!,
+    rawBatch[1]!,
+  ]);
 
   const jsonChrono = JSON.stringify(chronological);
   const jsonReversed = JSON.stringify(reversed);
@@ -202,7 +256,12 @@ function runSuite(): void {
   };
 
   const resCarryIn = rollupCommercialSessions(
-    [makeEvent({ eventId: "nov-1", canonicalTimestamp: "2026-11-01T04:00:00.000Z" })],
+    [
+      makeEvent({
+        eventId: "nov-1",
+        canonicalTimestamp: "2026-11-01T04:00:00.000Z",
+      }),
+    ],
     { priorSessions: [priorSession] },
   );
 
@@ -219,10 +278,30 @@ function runSuite(): void {
   // ═══════════════════════════════════════════════════════════════════════
   const sameTime = "2026-10-01T10:00:00.000Z";
   const isoBatch = [
-    makeEvent({ eventId: "c1", canonicalTimestamp: sameTime, scope: makeScope({ businessId: "b1", connectionId: "c1" }) }),
-    makeEvent({ eventId: "c2", canonicalTimestamp: sameTime, scope: makeScope({ businessId: "b1", connectionId: "c2" }) }), // diff conn
-    makeEvent({ eventId: "c3", canonicalTimestamp: sameTime, scope: makeScope({ businessId: "b2", connectionId: "c1" }) }), // diff tenant
-    makeEvent({ eventId: "c4", canonicalTimestamp: sameTime, scope: makeScope({ businessId: "b1", channel: "whatsapp", connectionId: "wa1" }) }), // diff channel
+    makeEvent({
+      eventId: "c1",
+      canonicalTimestamp: sameTime,
+      scope: makeScope({ businessId: "b1", connectionId: "c1" }),
+    }),
+    makeEvent({
+      eventId: "c2",
+      canonicalTimestamp: sameTime,
+      scope: makeScope({ businessId: "b1", connectionId: "c2" }),
+    }), // diff conn
+    makeEvent({
+      eventId: "c3",
+      canonicalTimestamp: sameTime,
+      scope: makeScope({ businessId: "b2", connectionId: "c1" }),
+    }), // diff tenant
+    makeEvent({
+      eventId: "c4",
+      canonicalTimestamp: sameTime,
+      scope: makeScope({
+        businessId: "b1",
+        channel: "whatsapp",
+        connectionId: "wa1",
+      }),
+    }), // diff channel
   ];
 
   const resIso = rollupCommercialSessions(isoBatch);
@@ -250,8 +329,8 @@ function runSuite(): void {
       provider: "openrouter",
       model: "meta-llama/llama-3.1-70b-instruct",
       effectiveDate: "2026-10-22",
-      promptCostPerMillionUsd: 0.40,
-      completionCostPerMillionUsd: 0.80,
+      promptCostPerMillionUsd: 0.4,
+      completionCostPerMillionUsd: 0.8,
       source: "openrouter_audited",
     },
   ];
@@ -283,14 +362,16 @@ function runSuite(): void {
 
   const resRetryCost = evaluateTurnCost(retryFallbackAttempts, rateSnapshots);
   const costAtt1 = (2000 * 0.2574) / 1_000_000; // 0.0005148
-  const costAtt2 = (2000 * 0.40 + 250 * 0.80) / 1_000_000; // 0.001000
+  const costAtt2 = (2000 * 0.4 + 250 * 0.8) / 1_000_000; // 0.001000
   const expectedTurnCost = costAtt1 + costAtt2; // 0.0015148
 
   check(
     "G8.1 Retry and fallback attempts evaluate with respective model rates and sum accurately",
     resRetryCost.serving.costCompleteness === "COMPLETE" &&
-      Math.abs((resRetryCost.serving.totalCostUsd ?? 0) - expectedTurnCost) < 1e-9 &&
-      resRetryCost.serving.knownSubtotalUsd === resRetryCost.serving.totalCostUsd,
+      Math.abs((resRetryCost.serving.totalCostUsd ?? 0) - expectedTurnCost) <
+        1e-9 &&
+      resRetryCost.serving.knownSubtotalUsd ===
+        resRetryCost.serving.totalCostUsd,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -328,10 +409,14 @@ function runSuite(): void {
     outputTokens: 100,
   };
 
-  const resPosCost = evaluateAttemptCost(positiveReportedAttempt, rateSnapshots);
+  const resPosCost = evaluateAttemptCost(
+    positiveReportedAttempt,
+    rateSnapshots,
+  );
   check(
     "G9.2 Positive reported cost overrides token rate calculation",
-    resPosCost.costUsd === 0.0035 && resPosCost.provenance === "PROVIDER_REPORTED",
+    resPosCost.costUsd === 0.0035 &&
+      resPosCost.provenance === "PROVIDER_REPORTED",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -434,7 +519,8 @@ function runSuite(): void {
   // Cached: 8,000 * 0.07 = 0.5600
   // Completion: 500 * 1.0287 = 0.51435
   // Total: (0.5148 + 0.5600 + 0.51435) / 1,000 = 0.00158915 USD
-  const expectedCachedCost = (2000 * 0.2574 + 8000 * 0.07 + 500 * 1.0287) / 1_000_000;
+  const expectedCachedCost =
+    (2000 * 0.2574 + 8000 * 0.07 + 500 * 1.0287) / 1_000_000;
   check(
     "G13.1 Prompt caching evaluates cached vs uncached tokens without double counting",
     resCached.uncachedInputTokens === 2000 &&
@@ -460,7 +546,8 @@ function runSuite(): void {
   const rawTinyCost = (5 * 0.2574 + 1 * 1.0287) / 1_000_000; // 0.0000023157
   check(
     "G14.1 Micro-costs are accumulated with full double precision and formatted accurately to 6 decimals",
-    resTiny.costUsd === rawTinyCost && formatMicroUsd(resTiny.costUsd) === "0.000002",
+    resTiny.costUsd === rawTinyCost &&
+      formatMicroUsd(resTiny.costUsd) === "0.000002",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -507,7 +594,14 @@ function runSuite(): void {
   // ═══════════════════════════════════════════════════════════════════════
   // GROUP 16: Content-Free Structural Integrity
   // ═══════════════════════════════════════════════════════════════════════
-  const forbiddenContentKeys = ["content", "text", "prompt", "messageText", "responseProse", "body"];
+  const forbiddenContentKeys = [
+    "content",
+    "text",
+    "prompt",
+    "messageText",
+    "responseProse",
+    "body",
+  ];
   const sessionStr = JSON.stringify(res24h);
   const costStr = JSON.stringify(resRetryCost);
 
@@ -531,7 +625,9 @@ function runSuite(): void {
 }
 
 function main(): void {
-  console.log("🔍 Running Economics Measurement & Cost Engine Acceptance Suite...");
+  console.log(
+    "🔍 Running Economics Measurement & Cost Engine Acceptance Suite...",
+  );
   runSuite();
 
   const failed = checks.filter((c) => !c.pass);
@@ -543,7 +639,9 @@ function main(): void {
   }
 
   const passedCount = checks.length - failed.length;
-  console.log(`\n${failed.length === 0 ? "PASS" : "FAIL"} — ${passedCount}/${checks.length} checks passed.`);
+  console.log(
+    `\n${failed.length === 0 ? "PASS" : "FAIL"} — ${passedCount}/${checks.length} checks passed.`,
+  );
 
   if (failed.length > 0) {
     process.exitCode = 1;
