@@ -4486,22 +4486,24 @@ async function runInboundTurn(
                 now,
               );
               if (slotOffer) {
-                turnSession.state = withPresentedOffer(
-                  turnSession.state ?? emptyConversationState(),
+                const priorState =
+                  turnSession.state ?? emptyConversationState();
+                const presentedState = withPresentedOffer(
+                  priorState,
                   slotOffer,
                 );
                 const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-                  turnSession.state.knownFacts ?? {};
+                  presentedState.knownFacts ?? {};
                 void _droppedUnr;
                 turnSession.state = {
-                  ...turnSession.state,
+                  ...presentedState,
                   selectedDate: savedDate,
                   selectedService: targetService.name,
                   serviceId: targetService.id,
                   serviceSource,
                   providerPreference:
                     provRes.providerId ??
-                    turnSession.state.providerPreference ??
+                    presentedState.providerPreference ??
                     null,
                   selectedTimePref: timePref ?? null,
                   activeTask: {
@@ -4534,19 +4536,18 @@ async function runInboundTurn(
               }
             } else if (turnSession.enabled) {
               await turnSession.invalidateOffer();
+              const priorState = turnSession.state ?? emptyConversationState();
               const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-                turnSession.state?.knownFacts ?? {};
+                priorState.knownFacts ?? {};
               void _droppedUnr;
               turnSession.state = {
-                ...(turnSession.state ?? emptyConversationState()),
+                ...priorState,
                 selectedDate: savedDate,
                 selectedService: targetService.name,
                 serviceId: targetService.id,
                 serviceSource,
                 providerPreference:
-                  provRes.providerId ??
-                  turnSession.state.providerPreference ??
-                  null,
+                  provRes.providerId ?? priorState.providerPreference ?? null,
                 selectedTimePref: timePref ?? null,
                 activeTask: {
                   kind: "BOOKING",
