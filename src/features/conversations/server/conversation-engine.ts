@@ -1247,8 +1247,7 @@ function resumeBookingExtraction(
     (exactTime?.type === "unresolved_period" &&
       response.extraction.exactTime?.type === "unresolved_period" &&
       exactTime.hour === response.extraction.exactTime.hour &&
-      (exactTime.minute ?? 0) ===
-        (response.extraction.exactTime.minute ?? 0));
+      (exactTime.minute ?? 0) === (response.extraction.exactTime.minute ?? 0));
 
   const factUpdatesModifiedExtraction =
     rec.isTouched("service") ||
@@ -6008,8 +6007,11 @@ async function runInboundTurn(
               },
             };
             if (resolvedState) {
-              const { exactTime: _droppedEt, unresolvedTime: _droppedUt, ...nextFacts } =
-                resolvedState.knownFacts;
+              const {
+                exactTime: _droppedEt,
+                unresolvedTime: _droppedUt,
+                ...nextFacts
+              } = resolvedState.knownFacts;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,

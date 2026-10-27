@@ -345,9 +345,7 @@ async function main(): Promise<void> {
 
     check("T02: 60-min conflict inbound succeeded", res60.ok);
     const reply60 =
-      harness60min.deliveredOutbound[
-        harness60min.deliveredOutbound.length - 1
-      ];
+      harness60min.deliveredOutbound[harness60min.deliveredOutbound.length - 1];
     check(
       "T02: 14:00-15:00 classified as conflict when overlapping 14:30 booking",
       reply60?.body?.includes("2:00 مساءً غير متاح") &&
@@ -1497,7 +1495,9 @@ async function main(): Promise<void> {
       ];
     check(
       "T19: Technical failure returns honest unable-to-check explanation",
-      repoFailReply?.body?.includes("تعذر التحقق من توفر موعد الساعة 6:00 مساءً حالياً بسبب خلل فني مؤقت"),
+      repoFailReply?.body?.includes(
+        "تعذر التحقق من توفر موعد الساعة 6:00 مساءً حالياً بسبب خلل فني مؤقت",
+      ),
     );
     check(
       "T19: Technical failure does NOT append 'no other appointments' claim",
@@ -1515,7 +1515,8 @@ async function main(): Promise<void> {
     const stateAfterFail = await loadDurableState(harnessRepoFail);
     check(
       "T19: Obsolete offer is safely invalidated/cleared after technical failure",
-      stateAfterFail?.offer === null || stateAfterFail?.offer?.status !== "ACTIVE",
+      stateAfterFail?.offer === null ||
+        stateAfterFail?.offer?.status !== "ACTIVE",
     );
   }
 
@@ -1790,9 +1791,7 @@ async function main(): Promise<void> {
           service: "كشف أسنان",
           date: "2026-10-21",
           exactTime: null,
-          factUpdates: [
-            { key: "exactTime", value: "14:00", operation: "set" },
-          ],
+          factUpdates: [{ key: "exactTime", value: "14:00", operation: "set" }],
         });
       },
     };
@@ -1820,8 +1819,9 @@ async function main(): Promise<void> {
     );
     check(
       "T21.2a: factUpdates-only SET offer contents match 14:00",
-      stateSet?.offer?.options?.some((o: any) => o.startAt?.includes("14:00")) &&
-        choicesSet?.offerKind === "SLOT",
+      stateSet?.offer?.options?.some((o: any) =>
+        o.startAt?.includes("14:00"),
+      ) && choicesSet?.offerKind === "SLOT",
     );
 
     // 2b. factUpdates-only REMOVE: extraction has exactTime null, factUpdates removes exactTime
@@ -1867,9 +1867,7 @@ async function main(): Promise<void> {
           service: "كشف أسنان",
           date: "2026-10-21",
           exactTime: { type: "specific", time: "16:00" },
-          factUpdates: [
-            { key: "exactTime", value: "18:00", operation: "set" },
-          ],
+          factUpdates: [{ key: "exactTime", value: "18:00", operation: "set" }],
         });
       },
     };

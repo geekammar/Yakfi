@@ -251,11 +251,12 @@ export async function evaluateExactTimeAvailability(
         scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId),
       ),
     ];
-    const blockingRows = await deps.appointmentRepository.listBlockingByAssignees(
-      actor.businessId,
-      date,
-      assigneeIds,
-    );
+    const blockingRows =
+      await deps.appointmentRepository.listBlockingByAssignees(
+        actor.businessId,
+        date,
+        assigneeIds,
+      );
     const blockingByAssignee = new Map<
       string,
       Array<{ startTime: string; endTime: string }>
