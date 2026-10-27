@@ -1190,8 +1190,8 @@ async function run(): Promise<void> {
               handoffReason: null,
               safetyAssessment: "safe",
               extraction: {
-                service: null,
-                date: null,
+                service: "كشف أسنان",
+                date: "2026-10-29",
                 provider: null,
                 timePreference: "afternoon",
               },

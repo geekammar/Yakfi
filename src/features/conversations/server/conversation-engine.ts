@@ -4345,15 +4345,22 @@ async function runInboundTurn(
           if (savedUnresolved) {
             if (turnSession.enabled) {
               await turnSession.invalidateOffer();
+              const priorState = turnSession.state ?? emptyConversationState();
               const {
                 exactTime: _droppedTime,
                 timePreference: _droppedTimePref,
                 ...prevFacts
-              } = turnSession.state?.knownFacts ?? {};
+              } = priorState.knownFacts ?? {};
               void _droppedTime;
               void _droppedTimePref;
               turnSession.state = {
-                ...(turnSession.state ?? emptyConversationState()),
+                ...priorState,
+                selectedDate: savedDate,
+                selectedService: targetService.name,
+                serviceId: targetService.id,
+                serviceSource,
+                providerPreference:
+                  provRes.providerId ?? priorState.providerPreference ?? null,
                 activeTask: {
                   kind: "BOOKING",
                   stage: "DATE_SUPPLIED",
