@@ -209,4 +209,105 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     expect(container.textContent).toContain("سياق الحجز");
     expect(container.textContent).toContain("عميل مميز");
   });
+
+  it("U04: BOOKED status displays actual assignment separately without conflating status with assignee", async () => {
+    const root1 = createRoot(container);
+    const bookedDataWithAssignee: ConversationDetailData = {
+      ...mockData,
+      status: "BOOKED",
+      assignedUser: {
+        id: "user-other",
+        name: "د. سارة الاستشارية",
+        image: null,
+      },
+    };
+
+    await act(async () => {
+      root1.render(<ConversationDetail data={bookedDataWithAssignee} />);
+    });
+
+    // Conversation status badge shows BOOKED (محجوز)
+    const statusBadge = container.querySelector(
+      '[aria-label="حالة المحادثة: محجوز"]',
+    );
+    expect(statusBadge).not.toBeNull();
+
+    // Assignee badge shows actual assigned staff name, NOT "مكتمل الحجز"
+    const staffAssignee = container.querySelector(
+      '[aria-label="المسؤول الحالي: د. سارة الاستشارية"]',
+    );
+    expect(staffAssignee).not.toBeNull();
+    expect(staffAssignee?.textContent).toContain("د. سارة الاستشارية");
+
+    // Clean up first root before second test
+    await act(async () => {
+      root1.unmount();
+    });
+
+    // Also verify unassigned BOOKED conversation
+    const root2 = createRoot(container);
+    const bookedUnassigned: ConversationDetailData = {
+      ...mockData,
+      status: "BOOKED",
+      assignedUser: null,
+    };
+
+    await act(async () => {
+      root2.render(<ConversationDetail data={bookedUnassigned} />);
+    });
+
+    const unassignedBadge = container.querySelector(
+      '[aria-label="المسؤول الحالي: غير معينة"]',
+    );
+    expect(unassignedBadge).not.toBeNull();
+  });
+
+  it("Preserves draft text across mobile view toggles", async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const textarea = container.querySelector(
+      'textarea[aria-label="رد على العميل"]',
+    ) as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+
+    // Type a draft by invoking native value setter so React registers onChange
+    await act(async () => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeSetter?.call(textarea, "مسودة رد غير مرسلة");
+      textarea.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(textarea.value).toBe("مسودة رد غير مرسلة");
+
+    // Toggle to context view
+    const toggleToContext = container.querySelector(
+      'button[aria-label="عرض سياق العميل والمواعيد"]',
+    );
+    await act(async () => {
+      toggleToContext?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    // Toggle back to messages
+    const toggleToMessages = container.querySelector(
+      'button[aria-label="العودة إلى المحادثة"]',
+    );
+    await act(async () => {
+      toggleToMessages?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    // Draft text is preserved
+    const restoredTextarea = container.querySelector(
+      'textarea[aria-label="رد على العميل"]',
+    ) as HTMLTextAreaElement;
+    expect(restoredTextarea.value).toBe("مسودة رد غير مرسلة");
+  });
 });

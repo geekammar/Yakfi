@@ -156,18 +156,6 @@ function AssigneeResponderBadge({
     );
   }
 
-  if (status === "BOOKED") {
-    return (
-      <span
-        aria-label="المسؤول الحالي: مكتمل الحجز"
-        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success-foreground"
-      >
-        <CheckIcon aria-hidden className="size-3" />
-        <span>محجوز</span>
-      </span>
-    );
-  }
-
   return (
     <span
       aria-label="المسؤول الحالي: غير معينة"
@@ -394,11 +382,67 @@ export function ConversationDetail({
   const messageEndRef = useRef<HTMLDivElement>(null);
   const messageLogRef = useRef<HTMLDivElement>(null);
 
+  const NEAR_BOTTOM_THRESHOLD_PX = 100;
+  const initialScrolledRef = useRef(false);
+  const ownSendPendingRef = useRef(false);
+  const isNearBottomRef = useRef(true);
+  const savedScrollTopRef = useRef<number>(0);
+
+  // Track scroll position and proximity to bottom
+  const handleLogScroll = () => {
+    const el = messageLogRef.current;
+    if (!el) return;
+    savedScrollTopRef.current = el.scrollTop;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
+  };
+
+  // Initial scroll to bottom on mount
   useEffect(() => {
-    if (messageLogRef.current) {
-      messageLogRef.current.scrollTop = messageLogRef.current.scrollHeight;
+    const el = messageLogRef.current;
+    if (!el || initialScrolledRef.current) return;
+    el.scrollTop = el.scrollHeight;
+    savedScrollTopRef.current = el.scrollTop;
+    initialScrolledRef.current = true;
+  }, []);
+
+  // Follow messages when sending or near bottom; preserve reading position when reviewing older messages
+  useEffect(() => {
+    const el = messageLogRef.current;
+    if (!el) return;
+
+    if (!initialScrolledRef.current) {
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+      initialScrolledRef.current = true;
+      return;
+    }
+
+    if (ownSendPendingRef.current) {
+      // Own-send: explicitly follow own message to bottom
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+      isNearBottomRef.current = true;
+      ownSendPendingRef.current = false;
+      return;
+    }
+
+    if (isNearBottomRef.current) {
+      // Already near bottom: follow incoming message
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+    } else {
+      // Reviewing older messages: preserve exact reading position
+      el.scrollTop = savedScrollTopRef.current;
     }
   }, [data.messages.length]);
+
+  // Explicit context-toggle behavior: restore reading position across mobile view switches
+  useEffect(() => {
+    if (mobileTab === "messages" && messageLogRef.current) {
+      messageLogRef.current.scrollTop = savedScrollTopRef.current;
+    }
+  }, [mobileTab]);
 
   async function runAction(
     action: () => Promise<{ success: boolean; message?: string }>,
@@ -464,6 +508,8 @@ export function ConversationDetail({
     event.preventDefault();
     const content = reply.trim();
     if (!content) return;
+
+    ownSendPendingRef.current = true;
 
     // Optimistic append — rolled back if the server rejects the reply.
     const pendingId = crypto.randomUUID();
@@ -701,6 +747,7 @@ export function ConversationDetail({
             role="log"
             aria-label="رسائل المحادثة"
             tabIndex={0}
+            onScroll={handleLogScroll}
             className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
           >
             {/* Mobile unpinned action buttons inside transcript */}

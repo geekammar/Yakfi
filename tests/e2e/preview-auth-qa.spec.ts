@@ -321,155 +321,235 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
 
-    // Inspect conversation items in inbox
+    // Inspect conversation items in inbox — deterministic long thread requirement
     const conversationLinks = page.locator('a[href^="/conversations/"]');
+    await expect(conversationLinks.first()).toBeVisible({ timeout: 10_000 });
     const conversationCount = await conversationLinks.count();
+    expect(conversationCount).toBeGreaterThan(0);
 
-    if (conversationCount > 0) {
-      const firstConvLink = conversationLinks.first();
-      await firstConvLink.click();
-      await page.waitForURL((url) => url.pathname.includes("/conversations/"), {
-        timeout: 10_000,
-        waitUntil: "domcontentloaded",
-      });
+    const firstConvLink = conversationLinks.first();
+    await firstConvLink.click();
+    await page.waitForURL((url) => url.pathname.includes("/conversations/"), {
+      timeout: 10_000,
+      waitUntil: "domcontentloaded",
+    });
 
-      // U01 & U08: Persistent Header presence & initial geometry
-      const persistentHeader = page.locator(
-        'header[data-testid="conversation-persistent-header"]',
+    // U01 & U08: Persistent Header presence & initial geometry
+    const persistentHeader = page.locator(
+      'header[data-testid="conversation-persistent-header"]',
+    );
+    await expect(persistentHeader).toBeVisible();
+
+    const initialHeaderBox = await persistentHeader.boundingBox();
+    expect(initialHeaderBox).not.toBeNull();
+    if (initialHeaderBox) {
+      // Must be located at or immediately below the sticky app bar
+      expect(initialHeaderBox.y).toBeGreaterThanOrEqual(20);
+      expect(initialHeaderBox.y).toBeLessThanOrEqual(120);
+    }
+
+    // U02: Real customer identity with truncation
+    const customerH1 = persistentHeader.locator("h1");
+    await expect(customerH1).toBeVisible();
+    expect(
+      await customerH1.evaluate((el) => el.classList.contains("truncate")),
+    ).toBe(true);
+
+    const customerPhone = persistentHeader.locator('p[dir="ltr"]');
+    await expect(customerPhone).toBeVisible();
+
+    // U03: Status badge & reason chip
+    const statusBadge = persistentHeader.locator(
+      '[aria-label^="حالة المحادثة:"]',
+    );
+    await expect(statusBadge).toBeVisible();
+
+    // U04: Actual assignee / responder context (separated from status)
+    const assigneeBadge = persistentHeader.locator(
+      '[aria-label^="المسؤول الحالي:"]',
+    );
+    await expect(assigneeBadge).toBeVisible();
+
+    // U05: Non-bloated actions: on mobile, persistent header height is compact (<= 160px even on narrow 320px)
+    if (vpName.startsWith("mobile") && initialHeaderBox) {
+      expect(initialHeaderBox.height).toBeLessThanOrEqual(160);
+    }
+
+    // U06: Independently scrollable message history
+    const messageLog = page.locator('div[role="log"]');
+    await expect(messageLog).toBeVisible();
+    expect(await messageLog.getAttribute("tabindex")).toBe("0");
+
+    // Require deterministic long conversation: content height must strictly exceed view container height
+    const initialMetrics = await messageLog.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      scrollTop: el.scrollTop,
+    }));
+    expect(initialMetrics.scrollHeight).toBeGreaterThan(
+      initialMetrics.clientHeight,
+    );
+
+    // Initial mount auto-scrolls to bottom so latest messages are visible
+    expect(initialMetrics.scrollTop).toBeGreaterThan(0);
+
+    // Check Top: Scroll to top (scrollTop = 0)
+    await messageLog.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await page.waitForTimeout(150);
+    const topScroll = await messageLog.evaluate((el) => el.scrollTop);
+    expect(topScroll).toBe(0);
+
+    // Verify Persistent Header remains visible and pinned at top
+    const topHeaderBox = await persistentHeader.boundingBox();
+    expect(topHeaderBox).not.toBeNull();
+    if (topHeaderBox && initialHeaderBox) {
+      expect(Math.abs(topHeaderBox.y - initialHeaderBox.y)).toBeLessThanOrEqual(
+        5,
       );
-      await expect(persistentHeader).toBeVisible();
+    }
 
-      const initialHeaderBox = await persistentHeader.boundingBox();
-      expect(initialHeaderBox).not.toBeNull();
-      if (initialHeaderBox) {
-        // Must be located at or immediately below the sticky app bar
-        expect(initialHeaderBox.y).toBeGreaterThanOrEqual(20);
-        expect(initialHeaderBox.y).toBeLessThanOrEqual(120);
-      }
+    // Screenshot Conversation Detail Top
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${vpName}-08-conversation-detail-top.png`,
+      ),
+      fullPage: true,
+    });
 
-      // U02: Real customer identity with truncation
-      const customerH1 = persistentHeader.locator("h1");
-      await expect(customerH1).toBeVisible();
+    // Check Middle: Scroll to middle reading position
+    const middleTarget = Math.floor(
+      (initialMetrics.scrollHeight - initialMetrics.clientHeight) / 2,
+    );
+    await messageLog.evaluate((el, target) => {
+      el.scrollTop = target;
+    }, middleTarget);
+    await page.waitForTimeout(150);
+    const middleScroll = await messageLog.evaluate((el) => el.scrollTop);
+    expect(Math.abs(middleScroll - middleTarget)).toBeLessThanOrEqual(5);
+
+    // Verify Persistent Header remains pinned
+    const middleHeaderBox = await persistentHeader.boundingBox();
+    expect(middleHeaderBox).not.toBeNull();
+    if (middleHeaderBox && initialHeaderBox) {
       expect(
-        await customerH1.evaluate((el) => el.classList.contains("truncate")),
-      ).toBe(true);
+        Math.abs(middleHeaderBox.y - initialHeaderBox.y),
+      ).toBeLessThanOrEqual(5);
+    }
 
-      const customerPhone = persistentHeader.locator('p[dir="ltr"]');
-      await expect(customerPhone).toBeVisible();
+    // Screenshot Conversation Detail Scrolled (Middle)
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${vpName}-09-conversation-detail-scrolled.png`,
+      ),
+      fullPage: true,
+    });
 
-      // U03: Status badge & reason chip
-      const statusBadge = persistentHeader.locator(
-        '[aria-label^="حالة المحادثة:"]',
-      );
-      await expect(statusBadge).toBeVisible();
+    // Check Bottom: Scroll to bottom
+    await messageLog.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(150);
+    const bottomScroll = await messageLog.evaluate((el) => el.scrollTop);
+    expect(bottomScroll).toBeGreaterThan(middleTarget);
 
-      // U04: Actual assignee / responder context
-      const assigneeBadge = persistentHeader.locator(
-        '[aria-label^="المسؤول الحالي:"]',
-      );
-      await expect(assigneeBadge).toBeVisible();
+    const bottomHeaderBox = await persistentHeader.boundingBox();
+    expect(bottomHeaderBox).not.toBeNull();
+    if (bottomHeaderBox && initialHeaderBox) {
+      expect(
+        Math.abs(bottomHeaderBox.y - initialHeaderBox.y),
+      ).toBeLessThanOrEqual(5);
+    }
 
-      // U05: Non-bloated actions: on mobile, persistent header height is compact (<= 160px even on narrow 320px)
-      if (vpName.startsWith("mobile") && initialHeaderBox) {
-        expect(initialHeaderBox.height).toBeLessThanOrEqual(160);
-      }
+    // Verify document window itself has not scrolled away (no document runaway / window scroll trap)
+    const windowScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(windowScrollY).toBeLessThanOrEqual(10);
 
-      // U06: Independently scrollable message history
-      const messageLog = page.locator('div[role="log"]');
-      await expect(messageLog).toBeVisible();
-      expect(await messageLog.getAttribute("tabindex")).toBe("0");
+    // U07: Composer usable & positioned above bottom navigation
+    const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
+    await expect(replyTextarea).toBeVisible();
+    const sendButton = page.locator('button[aria-label="إرسال الرد"]');
+    await expect(sendButton).toBeVisible();
 
-      // Screenshot Conversation Detail Top
-      await page.screenshot({
-        path: path.join(
-          SCREENSHOT_DIR,
-          `${vpName}-08-conversation-detail-top.png`,
-        ),
-        fullPage: true,
-      });
-
-      // Scroll transcript by 500px to test independent scrolling & header persistence
-      await messageLog.evaluate((el) => {
-        el.scrollTop = 500;
-      });
-      await page.waitForTimeout(300);
-
-      // Verify Persistent Header DID NOT SCROLL AWAY
-      const scrolledHeaderBox = await persistentHeader.boundingBox();
-      expect(scrolledHeaderBox).not.toBeNull();
-      if (scrolledHeaderBox && initialHeaderBox) {
-        expect(
-          Math.abs(scrolledHeaderBox.y - initialHeaderBox.y),
-        ).toBeLessThanOrEqual(5);
-      }
-
-      // Screenshot Conversation Detail Scrolled
-      await page.screenshot({
-        path: path.join(
-          SCREENSHOT_DIR,
-          `${vpName}-09-conversation-detail-scrolled.png`,
-        ),
-        fullPage: true,
-      });
-
-      // U07: Composer usable & positioned above bottom navigation
-      const replyTextarea = page.locator(
-        'textarea[aria-label="رد على العميل"]',
-      );
-      await expect(replyTextarea).toBeVisible();
-      const sendButton = page.locator('button[aria-label="إرسال الرد"]');
-      await expect(sendButton).toBeVisible();
-
-      if (vpName.startsWith("mobile")) {
-        const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
-        if (await bottomNav.isVisible()) {
-          const navBox = await bottomNav.boundingBox();
-          const composerBox = await replyTextarea.boundingBox();
-          if (navBox && composerBox) {
-            // Composer must sit above the fixed bottom navigation bar
-            expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(
-              navBox.y + 10,
-            );
-          }
+    if (vpName.startsWith("mobile")) {
+      const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
+      if (await bottomNav.isVisible()) {
+        const navBox = await bottomNav.boundingBox();
+        const composerBox = await replyTextarea.boundingBox();
+        if (navBox && composerBox) {
+          // Composer must sit above the fixed bottom navigation bar (no intersection)
+          expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(
+            navBox.y + 10,
+          );
         }
       }
-
-      // U08 & U09: Zero horizontal overflow across all viewports
-      isOverflowing = await page.evaluate(() => {
-        return document.documentElement.scrollWidth > window.innerWidth;
-      });
-      expect(isOverflowing).toBe(false);
-
-      // Test mobile context view toggle if visible
-      const contextToggle = persistentHeader.locator(
-        'button[aria-label="عرض سياق العميل والمواعيد"]',
-      );
-      if (await contextToggle.isVisible()) {
-        await contextToggle.click();
-        await page.waitForTimeout(200);
-
-        // Verify context details rendered
-        await expect(
-          page.getByRole("heading", { name: "سياق العميل" }).first(),
-        ).toBeVisible();
-
-        await page.screenshot({
-          path: path.join(
-            SCREENSHOT_DIR,
-            `${vpName}-10-conversation-detail-context.png`,
-          ),
-          fullPage: true,
-        });
-
-        // Toggle back to messages
-        const messagesToggle = persistentHeader.locator(
-          'button[aria-label="العودة إلى المحادثة"]',
-        );
-        await messagesToggle.click();
-        await page.waitForTimeout(200);
-        await expect(messageLog).toBeVisible();
-      }
     }
+
+    // Verify reading-position preservation and draft preservation across view toggles
+    // Set reading position to middle
+    await messageLog.evaluate((el, target) => {
+      el.scrollTop = target;
+    }, middleTarget);
+    await page.waitForTimeout(100);
+
+    // Type draft text into composer
+    await replyTextarea.fill("مسودة رد للاختبار الحقيقي");
+    expect(await replyTextarea.inputValue()).toBe("مسودة رد للاختبار الحقيقي");
+
+    // Test mobile context view toggle if visible
+    const contextToggle = persistentHeader.locator(
+      'button[aria-label="عرض سياق العميل والمواعيد"]',
+    );
+    if (await contextToggle.isVisible()) {
+      await contextToggle.click();
+      await page.waitForTimeout(200);
+
+      // Verify context details rendered
+      await expect(
+        page.getByRole("heading", { name: "سياق العميل" }).first(),
+      ).toBeVisible();
+
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `${vpName}-10-conversation-detail-context.png`,
+        ),
+        fullPage: true,
+      });
+
+      // Toggle back to messages
+      const messagesToggle = persistentHeader.locator(
+        'button[aria-label="العودة إلى المحادثة"]',
+      );
+      await messagesToggle.click();
+      await page.waitForTimeout(200);
+      await expect(messageLog).toBeVisible();
+
+      // Verify draft text is preserved across view toggle
+      expect(await replyTextarea.inputValue()).toBe(
+        "مسودة رد للاختبار الحقيقي",
+      );
+
+      // Verify reading position (scrollTop) is preserved across view toggle
+      const restoredScrollTop = await messageLog.evaluate((el) => el.scrollTop);
+      expect(Math.abs(restoredScrollTop - middleTarget)).toBeLessThanOrEqual(
+        20,
+      );
+    }
+
+    // U08 & U09: Zero horizontal overflow across all viewports
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
+
+    // Note: Physical on-screen keyboard behavior (iOS dynamic visualViewport vs Android IME resize)
+    // is explicitly unverified by synthetic browser emulation. Physical device smoke test advised.
 
     // Assert no critical console errors
     expect(consoleErrors).toEqual([]);
