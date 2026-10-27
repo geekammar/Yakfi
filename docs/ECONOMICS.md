@@ -94,14 +94,17 @@ Pure, deterministic internal volume measurement:
   - `eventCount`: Backwards-compatible alias for `totalEventCount`.
 - **Start-Only Exclusion:** Telegram `/start` command protocol (`START_COMMAND`) deterministically yields welcome and does NOT open a commercial session.
 - **Permutation Invariance:** Batches are sorted by canonical timestamp (`toCanonicalTimestampMs`) + `eventId` tie-breaker before rollup.
-- **Period Carry-In & Watermark Enforcement:**
+- **Period Carry-In & Multi-Interval Resolution:**
   - Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods.
   - Prior sessions are sorted deterministically so caller array ordering (forward, reversed, shuffled) never alters outcomes.
-  - Strict carry-in watermark: out-of-contract events predating the carried prior session start fail closed with an explicit Error.
-  - The active prior session pointer is never deleted by out-of-order events; sessions only expire when events advance to or beyond `endMs`.
-  - Overlapping carry-in sessions for the same pool and scope fail closed with an Error.
+  - Multiple non-overlapping prior sessions for the same pool and scope are resolved against all accepted prior intervals: events inside any accepted session interval $[start, end)$ append directly to that session.
+  - Strict carry-in watermark: out-of-contract events predating the earliest carried session start fail closed with an explicit Error.
+  - Events between prior sessions cannot initiate overlapping intervals: if an event at $t$ initiates a session where $t + 24\text{h}$ collides with any subsequent accepted session, it fails closed with an Error.
   - Minimal explicit replay contract: carried sessions lacking fingerprints fail closed on replay attempts (`Unverifiable event replay`); verifiable fingerprints (`eventFingerprints`) enable provable deduplication without count inflation or conflicting fact acceptance.
   - Strict count validation: `eventIds` must be unique and non-empty; `totalEventCount === eventIds.length`; `qualifyingEventCount <= totalEventCount`; counts and IDs are never invented with defaults or coerced with `String()`.
+- **Output-to-Input Closure:**
+  - Appending an event to a prior session lacking fingerprints preserves the `eventFingerprints: undefined` status without fabricating historical facts.
+  - Every valid rollup output session is 100% reusable as prior state across arbitrary successive batches.
 - **Content-Free Output Projection:** Output records expose only machine keys, timestamps, numbers, and identifiers. Arbitrary runtime caller properties are strictly stripped.
 
 ### 2. Cost Engine (`flowpilot.cost.engine@v1`)
@@ -133,7 +136,7 @@ Pure per-attempt physical execution accounting:
 
 The proposed persistence schema is a discovery design proposal and is **NOT approved or implemented**:
 
-- **Known Unresolved Historical Failures:** Evaluation baselines note that E10 (turn-level evidence lineage during complex retries) and E12b (cross-process crash recovery reconciliation) remain unresolved known architectural gaps; this foundation PR addresses pure domain contracts only, not runtime infrastructure.
+- **Independent Handoff Evidence Integrity:** Handoff regression suites (`scripts/check-handoff-cause.ts`) independently verify conversation-engine handoff causes: E10 validates inactive-service / `TENANT_CONFIGURATION` behavior, and E12b validates deterministic sensitive-handoff precedence over model `HUMAN_REQUEST` claims (`SENSITIVE_OR_RESTRICTED`). These are conversation control and safety rules, not economics cost or retry-lineage tests, and their expected outcomes remain untouched.
 - **Finished-Only Crash Gaps:** In-flight network attempts that crash the process before turn completion are missing from finished-turn logs.
 - **ID-Based Reconciliation & Grace Period:** Provider billing reconciliation requires an ID-based matching window with an explicit post-month grace period (e.g. 72 hours) before period lock.
 - **Serving / Shadow Lineage Limitations:** Shadow JEV calls share the inbound execution context but must maintain disjoint trace lineage to prevent downstream billing inflation.

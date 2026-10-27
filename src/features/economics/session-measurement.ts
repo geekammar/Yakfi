@@ -11,8 +11,10 @@
  * - Deduplication: repeated event identities in batch or carry-in are idempotent; conflicting facts throw an Error.
  * - Operational traffic pool isolation: SERVING, SHADOW, and TEST pools maintain disjoint sessions and IDs.
  * - Permutation invariance: batch ordering is stabilized by canonical timestamp + eventId tie-breaker.
- * - Explicit prior session state for period carry-in: deterministic ordering, strict watermark boundaries,
- *   count validation, and explicit replay fingerprints (unverifiable replays fail closed).
+ * - Multi-interval carry-in resolution: events resolve deterministically against all accepted prior sessions;
+ *   events between priors cannot initiate overlapping sessions (fail closed).
+ * - Output-to-input closure: legacy un-fingerprinted prior sessions preserve undefined fingerprint status;
+ *   rollup output is 100% reusable as prior state across successive batches.
  * - Content-free projection: pure machine identifiers, timestamps, and counts; zero NLP, regexes, or prose.
  */
 
@@ -424,7 +426,7 @@ function projectCommercialSession(s: CommercialSession): CommercialSession {
     totalEventCount: s.totalEventCount,
     eventCount: s.totalEventCount,
     eventIds: [...s.eventIds],
-    ...(s.eventFingerprints
+    ...(s.eventFingerprints !== undefined
       ? {
           eventFingerprints: s.eventFingerprints.map((f) => ({
             eventId: f.eventId,
@@ -467,8 +469,9 @@ export function rollupCommercialSessions(
     return a.event.eventId.localeCompare(b.event.eventId);
   });
 
-  // 2. Initialize tracking maps partitioned by operational traffic pool and scope.
-  const activeByPoolScope = new Map<string, CommercialSession>();
+  // 2. Initialize tracking structures partitioned by operational traffic pool and scope.
+  // sessionsByPoolScope tracks all non-overlapping sessions for each pool:scope.
+  const sessionsByPoolScope = new Map<string, CommercialSession[]>();
   const sessionList: CommercialSession[] = [];
   const seenTenantEvents = new Map<string, EventIdentityRecord>();
   const scopeWatermark = new Map<string, number>();
@@ -487,12 +490,10 @@ export function rollupCommercialSessions(
       return a.sessionId.localeCompare(b.sessionId);
     });
 
-    const priorByPoolScope = new Map<string, CommercialSession[]>();
-
     for (const prior of sortedPriors) {
       const poolScopeKey = `${prior.trafficPool}:${prior.scopeKey}`;
 
-      const existingGroup = priorByPoolScope.get(poolScopeKey) ?? [];
+      const existingGroup = sessionsByPoolScope.get(poolScopeKey) ?? [];
       for (const existing of existingGroup) {
         const hasOverlap =
           Math.max(prior.startMs, existing.startMs) <
@@ -504,7 +505,7 @@ export function rollupCommercialSessions(
         }
       }
       existingGroup.push(prior);
-      priorByPoolScope.set(poolScopeKey, existingGroup);
+      sessionsByPoolScope.set(poolScopeKey, existingGroup);
 
       // Track the earliest carry-in watermark per pool and scope
       if (
@@ -540,7 +541,6 @@ export function rollupCommercialSessions(
         }
       }
 
-      activeByPoolScope.set(poolScopeKey, prior);
       sessionList.push(prior);
     }
   }
@@ -611,22 +611,21 @@ export function rollupCommercialSessions(
       trafficPool: pool,
     });
 
-    const currentActive = activeByPoolScope.get(poolScopeKey);
+    const poolSessions = sessionsByPoolScope.get(poolScopeKey) ?? [];
 
-    // Strictly half-open interval: [startMs, startMs + 24h)
-    const isWithinActiveSession =
-      currentActive !== undefined &&
-      timestampMs >= currentActive.startMs &&
-      timestampMs < currentActive.endMs;
+    // Find if the event falls inside ANY existing accepted session interval [startMs, endMs)
+    const matchingSession = poolSessions.find(
+      (s) => timestampMs >= s.startMs && timestampMs < s.endMs,
+    );
 
-    if (isWithinActiveSession && currentActive) {
-      // Event falls inside existing open session -> append
+    if (matchingSession) {
+      // Event falls inside an active or prior open session -> append
       const isQualifying =
         event.senderType === "CUSTOMER" &&
         (event.actionType === "MESSAGE" ||
           event.actionType === "CHOICE_CALLBACK");
 
-      const newTotal = currentActive.totalEventCount + 1;
+      const newTotal = matchingSession.totalEventCount + 1;
       const newFp: EventFingerprint = {
         eventId: event.eventId,
         canonicalTimestampMs: timestampMs,
@@ -635,34 +634,37 @@ export function rollupCommercialSessions(
       };
 
       const updatedSession: CommercialSession = projectCommercialSession({
-        ...currentActive,
+        ...matchingSession,
         qualifyingEventCount:
-          currentActive.qualifyingEventCount + (isQualifying ? 1 : 0),
+          matchingSession.qualifyingEventCount + (isQualifying ? 1 : 0),
         totalEventCount: newTotal,
         eventCount: newTotal,
-        eventIds: [...currentActive.eventIds, event.eventId],
-        eventFingerprints: currentActive.eventFingerprints
-          ? [...currentActive.eventFingerprints, newFp]
-          : [newFp],
+        eventIds: [...matchingSession.eventIds, event.eventId],
+        // Output-to-input closure: if matching session had fingerprints, append new fingerprint;
+        // if it lacked fingerprints (legacy un-fingerprinted prior), preserve undefined status
+        eventFingerprints:
+          matchingSession.eventFingerprints !== undefined
+            ? [...matchingSession.eventFingerprints, newFp]
+            : undefined,
       });
 
-      activeByPoolScope.set(poolScopeKey, updatedSession);
-
-      const idx = sessionList.findIndex(
-        (s) => s.sessionId === currentActive.sessionId,
+      const poolIdx = poolSessions.findIndex(
+        (s) => s.sessionId === matchingSession.sessionId,
       );
-      if (idx !== -1) {
-        sessionList[idx] = updatedSession;
+      if (poolIdx !== -1) {
+        poolSessions[poolIdx] = updatedSession;
+      }
+
+      const listIdx = sessionList.findIndex(
+        (s) => s.sessionId === matchingSession.sessionId,
+      );
+      if (listIdx !== -1) {
+        sessionList[listIdx] = updatedSession;
       }
       continue;
     }
 
-    // Beyond active session window: delete active pointer ONLY if event is strictly past endMs.
-    // Never delete the active pointer for earlier events.
-    if (currentActive && timestampMs >= currentActive.endMs) {
-      activeByPoolScope.delete(poolScopeKey);
-    }
-
+    // Event does not fall inside any accepted session interval.
     // Rule: Non-customer events cannot initiate a session
     if (event.senderType !== "CUSTOMER") {
       nonCustomerIgnoredCount += 1;
@@ -682,6 +684,18 @@ export function rollupCommercialSessions(
     ) {
       const startMs = timestampMs;
       const endMs = startMs + SESSION_DURATION_MS;
+
+      // Interval collision check: Never silently create overlapping sessions with any accepted session!
+      for (const existing of poolSessions) {
+        const hasOverlap =
+          Math.max(startMs, existing.startMs) < Math.min(endMs, existing.endMs);
+        if (hasOverlap) {
+          throw new Error(
+            `Event '${event.eventId}' at ${new Date(startMs).toISOString()} cannot initiate session: interval [${new Date(startMs).toISOString()}, ${new Date(endMs).toISOString()}) overlaps with existing session '${existing.sessionId}' [${existing.startAtUtc}, ${existing.endAtUtc})`,
+          );
+        }
+      }
+
       const sessionId = generateDeterministicSessionId(
         pool,
         scopeKey,
@@ -713,7 +727,9 @@ export function rollupCommercialSessions(
         eventFingerprints: [initialFp],
       });
 
-      activeByPoolScope.set(poolScopeKey, newSession);
+      poolSessions.push(newSession);
+      poolSessions.sort((a, b) => a.startMs - b.startMs);
+      sessionsByPoolScope.set(poolScopeKey, poolSessions);
       sessionList.push(newSession);
     }
   }
@@ -764,12 +780,19 @@ export function rollupCommercialSessions(
     TEST: { ...poolAccumulators.TEST },
   };
 
+  const lastBatchTimestampMs =
+    sorted.length > 0 ? sorted[sorted.length - 1]!.timestampMs : undefined;
+
+  const openSessions = sessionList.filter((s) =>
+    lastBatchTimestampMs === undefined
+      ? true
+      : lastBatchTimestampMs >= s.startMs && lastBatchTimestampMs < s.endMs,
+  );
+
   return {
     schema: COMMERCIAL_SESSION_CONTRACT_VERSION,
     sessions: sessionList.map(projectCommercialSession),
-    openSessions: Array.from(activeByPoolScope.values()).map(
-      projectCommercialSession,
-    ),
+    openSessions: openSessions.map(projectCommercialSession),
     filteredDuplicateCount,
     startOnlyIgnoredCount,
     nonCustomerIgnoredCount,

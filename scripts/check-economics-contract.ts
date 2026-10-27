@@ -1392,6 +1392,179 @@ function runSuite(): void {
     "G23.1 Attempt cost calculation overflowing to Infinity throws explicit Arithmetic overflow Error",
     throwsOnOverflowCost,
   );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 24: Output-to-Input Closure Across Successive Batches
+  // ═══════════════════════════════════════════════════════════════════════
+  // Batch 1: Appending to a legacy prior session without fingerprints preserves undefined status
+  const batch1Res = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "b1-evt",
+        canonicalTimestamp: new Date(priorStart + 3600_000).toISOString(),
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [priorSession] },
+  );
+  const out1 = batch1Res.sessions[0]!;
+  check(
+    "G24.1 Batch 1 output preserves absence of fingerprints when appending to un-fingerprinted prior",
+    out1.eventFingerprints === undefined &&
+      out1.totalEventCount === 4 &&
+      out1.eventIds.length === 4,
+  );
+
+  // Batch 2: Feeding Batch 1 output as prior session to Batch 2 succeeds
+  const batch2Res = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "b2-evt",
+        canonicalTimestamp: new Date(priorStart + 7200_000).toISOString(),
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [out1] },
+  );
+  const out2 = batch2Res.sessions[0]!;
+  check(
+    "G24.2 Batch 2 output successfully accepts Batch 1 output as prior state without validation failure",
+    out2.eventFingerprints === undefined &&
+      out2.totalEventCount === 5 &&
+      out2.eventIds.length === 5,
+  );
+
+  // Batch 3: Feeding Batch 2 output as prior session to Batch 3 succeeds
+  const batch3Res = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "b3-evt",
+        canonicalTimestamp: new Date(priorStart + 10800_000).toISOString(),
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [out2] },
+  );
+  const out3 = batch3Res.sessions[0]!;
+  check(
+    "G24.3 Batch 3 output successfully accepts Batch 2 output as prior state (closure across 3 successive batches)",
+    out3.eventFingerprints === undefined &&
+      out3.totalEventCount === 6 &&
+      out3.eventIds.length === 6,
+  );
+
+  // Replay in Batch 3 of an older event from legacy prior session whose facts are unavailable fails closed
+  let throwsOnOldReplayInBatch3 = false;
+  try {
+    rollupCommercialSessions(
+      [
+        makeEvent({
+          eventId: "p1", // from original legacy session
+          canonicalTimestamp: new Date(priorStart).toISOString(),
+          scope: priorScope,
+        }),
+      ],
+      { priorSessions: [out3] },
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Unverifiable event replay")
+    ) {
+      throwsOnOldReplayInBatch3 = true;
+    }
+  }
+  check(
+    "G24.4 Replaying an older event from un-fingerprinted carry-in chain fails closed with Unverifiable replay Error",
+    throwsOnOldReplayInBatch3,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 25: Multiple Prior Sessions For One Pool / Scope
+  // ═══════════════════════════════════════════════════════════════════════
+  // Prior 1 spans [T, T + 24h). Prior 2 spans [T + 48h, T + 72h).
+  const multiPrior1 = { ...priorSession, sessionId: "sess_multi_1" };
+  const multiPrior2Start = priorStart + 48 * 3600_000;
+  const multiPrior2: CommercialSession = {
+    sessionId: "sess_multi_2",
+    scopeKey: buildIdentityScopeKey(priorScope),
+    scope: priorScope,
+    trafficPool: "SERVING",
+    startAtUtc: new Date(multiPrior2Start).toISOString(),
+    startMs: multiPrior2Start,
+    endAtUtc: new Date(multiPrior2Start + SESSION_DURATION_MS).toISOString(),
+    endMs: multiPrior2Start + SESSION_DURATION_MS,
+    initiatingEventId: "mp2-init",
+    qualifyingEventCount: 1,
+    totalEventCount: 1,
+    eventCount: 1,
+    eventIds: ["mp2-init"],
+  };
+
+  // Event inside earlier prior P1 resolves and appends to P1 without creating new session or touching P2
+  const resInsideEarlier = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "inside-p1",
+        canonicalTimestamp: new Date(priorStart + 3600_000).toISOString(),
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [multiPrior1, multiPrior2] },
+  );
+  check(
+    "G25.1 Event inside earlier prior interval correctly appends to earlier prior without creating new session",
+    resInsideEarlier.sessions.length === 2 &&
+      resInsideEarlier.sessions.find((s) => s.sessionId === "sess_multi_1")
+        ?.totalEventCount === 4 &&
+      resInsideEarlier.sessions.find((s) => s.sessionId === "sess_multi_2")
+        ?.totalEventCount === 1,
+  );
+
+  // Event between priors that would overlap with P2 (t = T + 30h, t + 24h = T + 54h > P2.startMs) fails closed
+  let throwsOnBetweenOverlap = false;
+  try {
+    rollupCommercialSessions(
+      [
+        makeEvent({
+          eventId: "between-colliding",
+          canonicalTimestamp: new Date(
+            priorStart + 30 * 3600_000,
+          ).toISOString(),
+          scope: priorScope,
+        }),
+      ],
+      { priorSessions: [multiPrior1, multiPrior2] },
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("overlaps with existing session")
+    ) {
+      throwsOnBetweenOverlap = true;
+    }
+  }
+  check(
+    "G25.2 Event between priors whose 24h window would overlap subsequent prior throws explicit overlap Error",
+    throwsOnBetweenOverlap,
+  );
+
+  // Event between priors with sufficient gap (e.g. t = T + 24h, t + 24h = T + 48h == P2.startMs) creates non-overlapping session
+  const resBetweenSafe = rollupCommercialSessions(
+    [
+      makeEvent({
+        eventId: "between-safe",
+        canonicalTimestamp: new Date(priorStart + 24 * 3600_000).toISOString(),
+        scope: priorScope,
+      }),
+    ],
+    { priorSessions: [multiPrior1, multiPrior2] },
+  );
+  check(
+    "G25.3 Event between priors with non-overlapping window initiates clean distinct session between priors",
+    resBetweenSafe.sessions.length === 3 &&
+      resBetweenSafe.sessions[1]?.initiatingEventId === "between-safe",
+  );
 }
 
 function main(): void {
