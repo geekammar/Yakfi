@@ -1097,6 +1097,504 @@ async function run(): Promise<void> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // Test O: PR45 Full Booking Scope on Resume & Local Temporal Revalidation
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log(
+    "\n── Test O: PR45 Full Booking Scope on Resume & Local Temporal Revalidation ──",
+  );
+
+  // O1: Greeting -> Continue with saved specific time
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    harness.setVirtualNow(baseNow);
+
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-29",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      },
+      bookingStage: "AVAILABILITY_RESOLVED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-29",
+        exactTime: "14:00",
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    // Greeting -> presents resume offer
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+    check(
+      "O1-a. Greeting presents resume offer when specific exactTime exists",
+      stateAfterGreet?.offer?.kind === "RESUME" && Boolean(resumeToken),
+    );
+
+    // Continue action
+    const continueRes = await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+
+    const isReply =
+      continueRes.ok &&
+      (continueRes as InboundSuccess).assistantAction === "AI_REPLY";
+    check("O1-b. Continue action returns AI_REPLY", isReply);
+
+    const reloaded = await loadDurableState(harness);
+    const sent = lastSentPayload(harness);
+
+    check(
+      "O1-c. Preserves specific exactTime 14:00 in durable knownFacts",
+      reloaded?.knownFacts.exactTime === "14:00",
+    );
+    check(
+      "O1-d. Evaluates exact time availability and offers 14:00 (2:00 مساءً) slot choice",
+      sent?.choices?.offerKind === "SLOT" && sent?.body?.includes("2:00 مساءً"),
+    );
+  }
+
+  // O2 & O3: Greeting -> Continue with saved unresolved 4:15, then subsequent period answer resolves it
+  {
+    let periodRequested = false;
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async (req: any) => {
+          const text = req.userMessage?.text ?? "";
+          if (text.includes("عصراً")) {
+            periodRequested = true;
+            return {
+              intent: "BOOKING",
+              action: "reply",
+              content: "تمام، بعد الظهر.",
+              summary: null,
+              handoffReason: null,
+              safetyAssessment: "safe",
+              extraction: {
+                service: null,
+                date: null,
+                provider: null,
+                timePreference: "afternoon",
+              },
+              factUpdates: [
+                {
+                  key: "timePreference",
+                  value: "afternoon",
+                  operation: "set",
+                },
+              ],
+              goals: [
+                {
+                  kind: "SCHEDULE",
+                  intent: "BOOKING",
+                  requiredKnowledge: "NONE",
+                },
+              ],
+            };
+          }
+          return mockAiGreeting();
+        },
+      } as any,
+    });
+    harness.setVirtualNow(baseNow);
+
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-29",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "DATE_SUPPLIED",
+      },
+      bookingStage: "DATE_SUPPLIED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-29",
+        unresolvedTime: { hour: 4, minute: 15 },
+      },
+      lastClarification: {
+        type: "exact_time_period",
+        unresolvedTime: { hour: 4, minute: 15 },
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    // Greeting -> presents resume offer
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+    check(
+      "O2-a. Greeting presents resume offer when unresolved 4:15 exists",
+      stateAfterGreet?.offer?.kind === "RESUME" && Boolean(resumeToken),
+    );
+
+    // Continue action
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+
+    const reloadedAfterContinue = await loadDurableState(harness);
+    const sentAfterContinue = lastSentPayload(harness);
+
+    check(
+      "O2-b. Asks pending exact_time_period clarification for 4:15 (عصراً أم فجراً)",
+      sentAfterContinue?.body?.includes(
+        "4:15 عصراً (مساءً) أم 4:15 فجراً (صباحاً)",
+      ),
+    );
+    check(
+      "O2-c. Does not present slot buttons while time is unresolved",
+      sentAfterContinue?.choices === undefined ||
+        sentAfterContinue?.choices === null,
+    );
+    check(
+      "O2-d. Durable state preserves unresolvedTime { hour: 4, minute: 15 }",
+      reloadedAfterContinue?.knownFacts.unresolvedTime?.hour === 4 &&
+        reloadedAfterContinue?.knownFacts.unresolvedTime?.minute === 15 &&
+        reloadedAfterContinue?.lastClarification?.type === "exact_time_period",
+    );
+
+    // O3: Customer answers "عصراً"
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "عصراً إن شاء الله",
+      receivedAt: new Date(baseNow.getTime() + 2000).toISOString(),
+    });
+
+    const reloadedAfterPeriod = await loadDurableState(harness);
+    const sentAfterPeriod = lastSentPayload(harness);
+
+    check(
+      "O3-a. Customer period answer received and processed",
+      periodRequested,
+    );
+    check(
+      "O3-b. Unresolved 4:15 resolved to specific exactTime 16:15",
+      reloadedAfterPeriod?.knownFacts.exactTime === "16:15",
+    );
+    check(
+      "O3-c. Availability evaluated for 16:15 (4:15 مساءً)",
+      sentAfterPeriod?.body?.includes("4:15 مساءً") ||
+        sentAfterPeriod?.choices?.offerKind === "SLOT",
+    );
+  }
+
+  // O4: Changed availability produces fresh valid options, not replayed ones
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    harness.setVirtualNow(baseNow);
+
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-29",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      },
+      bookingStage: "AVAILABILITY_RESOLVED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-29",
+        exactTime: "14:00",
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    // A conflicting appointment was booked in the meantime at 14:00 for the same provider
+    harness.appointments.push({
+      id: "appt-conflict-1",
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      customerId: "cust-other",
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      providerId: PLAYGROUND_IDS.PROV_1,
+      assignedUserId: PLAYGROUND_IDS.USER_P1,
+      date: new Date("2026-10-29T00:00:00Z"),
+      startTime: "14:00",
+      endTime: "14:30",
+      status: "CONFIRMED",
+      notes: null,
+      followUpRequestId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    });
+
+    // Greeting -> presents resume offer
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+
+    // Continue action
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+
+    const sent = lastSentPayload(harness);
+    check(
+      "O4-a. Bot detects 14:00 is unavailable due to conflicting appointment",
+      sent?.body?.includes("غير متاح"),
+    );
+    check(
+      "O4-b. Honest alternative slots offered or explained (not stale 14:00)",
+      !sent?.choices?.options?.some((o: any) => o.startAt?.includes("14:00")),
+    );
+  }
+
+  // O5: Business-local day differs from UTC near midnight
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    // Cairo is UTC+2. At 22:30 UTC on Oct 28, it is 00:30 on Oct 29 in Cairo!
+    const nearMidnightUtc = new Date("2026-10-28T22:30:00.000Z");
+    harness.setVirtualNow(nearMidnightUtc);
+
+    // Saved date was 2026-10-28 (which is in the past in Cairo local time)
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-28",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "DATE_SUPPLIED",
+      },
+      bookingStage: "DATE_SUPPLIED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-28",
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    // Greeting -> presents resume offer
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: nearMidnightUtc.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+
+    // Continue action
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(nearMidnightUtc.getTime() + 1000).toISOString(),
+    });
+
+    const reloaded = await loadDurableState(harness);
+    const sent = lastSentPayload(harness);
+
+    check(
+      "O5-a. Past date 2026-10-28 recognized as past in Cairo local timezone",
+      reloaded?.knownFacts.date === undefined ||
+        reloaded?.knownFacts.date === null,
+    );
+    check(
+      "O5-b. Presents date choices for upcoming days instead of stale past slots",
+      sent?.choices?.offerKind === "DATE" ||
+        sent?.body?.includes("تحديد اليوم"),
+    );
+  }
+
+  // O6: Saved date/time is now past in the business timezone
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    // Virtual time: 15:00 UTC (17:00 Cairo) on 2026-10-28
+    const afternoonUtc = new Date("2026-10-28T15:00:00.000Z");
+    harness.setVirtualNow(afternoonUtc);
+
+    // Saved date was today 2026-10-28, but requested time was 10:00 (past)
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-28",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      },
+      bookingStage: "AVAILABILITY_RESOLVED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-28",
+        exactTime: "10:00",
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    // Greeting -> presents resume offer
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: afternoonUtc.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+
+    // Continue action
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:continue`,
+      receivedAt: new Date(afternoonUtc.getTime() + 1000).toISOString(),
+    });
+
+    const sent = lastSentPayload(harness);
+    check(
+      "O6-a. Bot detects 10:00 is past on the current local day",
+      sent?.body?.includes("قد مضى اليوم"),
+    );
+  }
+
+  // O7: Old callbacks remain invalid after the flow changes
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    harness.setVirtualNow(baseNow);
+
+    const oldToken = "tokold99";
+    const oldCallback = `fp:${oldToken}:slot_1`;
+
+    const res = await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: oldCallback,
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const isReply =
+      res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
+    const sent = lastSentPayload(harness);
+    check("O7-a. Old callback returns AI_REPLY", isReply);
+    check(
+      "O7-b. Old callback correctly rejected as expired/superseded",
+      sent?.body?.includes("انتهت صلاحية") || sent?.body?.includes("غير صالح"),
+    );
+  }
+
+  // O8: Inquiry/Continue creates zero appointments
+  {
+    const harness = createPlaygroundHarness({
+      customAi: {
+        providerName: "MOCK_AI",
+        respond: async () => mockAiGreeting(),
+      } as any,
+    });
+    harness.setVirtualNow(baseNow);
+
+    const initialAppointmentCount = harness.appointments.length;
+
+    const savedState: ConversationState = {
+      ...emptyConversationState(),
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+      selectedService: "كشف أسنان",
+      selectedDate: "2026-10-29",
+      activeTask: {
+        kind: "BOOKING",
+        stage: "AVAILABILITY_RESOLVED",
+      },
+      bookingStage: "AVAILABILITY_RESOLVED",
+      knownFacts: {
+        service: "كشف أسنان",
+        date: "2026-10-29",
+        exactTime: "14:00",
+      },
+    };
+    await saveDurableState(harness, savedState);
+
+    await sendInbound(harness, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const stateAfterGreet = await loadDurableState(harness);
+    const resumeToken = stateAfterGreet?.offer?.token;
+
+    if (resumeToken) {
+      await sendInbound(harness, {
+        from: "+201000000001",
+        to: harness.business.whatsappNumber ?? "+201000000000",
+        text: `fp:${resumeToken}:continue`,
+        receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+      });
+    }
+
+    const finalAppointmentCount = harness.appointments.length;
+    check(
+      "O8. Total appointments created by Greeting, Resume, and Continue is exactly 0",
+      initialAppointmentCount === 0 && finalAppointmentCount === 0,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // Summary
   // ══════════════════════════════════════════════════════════════════════════
   console.log(`\n══════════════════════════════════════════════`);

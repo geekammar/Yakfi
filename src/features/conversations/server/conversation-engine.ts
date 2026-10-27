@@ -4286,16 +4286,36 @@ async function runInboundTurn(
           );
         }
 
+        const turnBusinessTz = resolveValidTimeZone(business.timezone);
+        const todayIso = todayIsoInTimeZone(now, turnBusinessTz);
+
         const savedDate =
           turnSession.state?.knownFacts.date ??
           turnSession.state?.selectedDate ??
           (suspended?.kind === "SLOT" ? suspended.date : null);
 
-        const todayIso = now.toISOString().slice(0, 10);
         const isDateValidAndCurrent =
           savedDate != null &&
           isValidIsoCalendarDate(savedDate) &&
           savedDate >= todayIso;
+
+        if (turnSession.state && savedDate != null && savedDate < todayIso) {
+          const {
+            date: _d,
+            exactTime: _t,
+            unresolvedTime: _u,
+            ...keptFacts
+          } = turnSession.state.knownFacts;
+          void _d;
+          void _t;
+          void _u;
+          turnSession.state = {
+            ...turnSession.state,
+            selectedDate: null,
+            knownFacts: keptFacts,
+            lastClarification: null,
+          };
+        }
 
         const timePref =
           (isCanonicalTimePreference(rawPersistedTimePref)
@@ -4313,6 +4333,287 @@ async function runInboundTurn(
           (suspended && "range" in suspended ? suspended.range : null);
 
         if (isDateValidAndCurrent) {
+          const pendingClar =
+            turnSession.state?.lastClarification?.type === "exact_time_period"
+              ? turnSession.state.lastClarification
+              : null;
+          const savedUnresolved =
+            pendingClar?.unresolvedTime ??
+            turnSession.state?.knownFacts.unresolvedTime ??
+            null;
+
+          if (savedUnresolved) {
+            if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+              const {
+                exactTime: _droppedTime,
+                timePreference: _droppedTimePref,
+                ...prevFacts
+              } = turnSession.state?.knownFacts ?? {};
+              void _droppedTime;
+              void _droppedTimePref;
+              turnSession.state = {
+                ...(turnSession.state ?? emptyConversationState()),
+                activeTask: {
+                  kind: "BOOKING",
+                  stage: "DATE_SUPPLIED",
+                },
+                bookingStage: "DATE_SUPPLIED",
+                knownFacts: {
+                  ...prevFacts,
+                  service: targetService.name,
+                  date: savedDate,
+                  unresolvedTime: {
+                    hour: savedUnresolved.hour,
+                    minute: savedUnresolved.minute ?? 0,
+                  },
+                  ...(provRes.providerId
+                    ? { provider: provRes.providerId }
+                    : {}),
+                },
+                lastClarification: {
+                  type: "exact_time_period",
+                  unresolvedTime: {
+                    hour: savedUnresolved.hour,
+                    minute: savedUnresolved.minute ?? 0,
+                  },
+                },
+                offer: null,
+                suspendedOffer: null,
+              };
+              const ok = await turnSession.commit();
+              if (!ok) {
+                return selectionReply(
+                  deps,
+                  selectionScope,
+                  "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                  "AI_ACTIVE",
+                  null,
+                );
+              }
+            }
+            const minStr =
+              savedUnresolved.minute && savedUnresolved.minute > 0
+                ? `:${String(savedUnresolved.minute).padStart(2, "0")}`
+                : "";
+            const clarMsg = `هل تقصد الساعة ${savedUnresolved.hour}${minStr} عصراً (مساءً) أم ${savedUnresolved.hour}${minStr} فجراً (صباحاً)؟`;
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              clarMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              clarMsg,
+              assistantMessage.id,
+              business.id,
+              selectionScope.connectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: selectionScope.customerMessageId,
+              assistantAction: "AI_REPLY",
+              intent: "AVAILABILITY",
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
+          const savedExactTime =
+            turnSession.state?.knownFacts.exactTime ?? null;
+
+          if (savedExactTime) {
+            const eligibilityDeps = buildEligibilityDeps(deps);
+            const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+            const exactTimeEval = await evaluateExactTimeAvailability(
+              bookingDeps as unknown as Parameters<
+                typeof evaluateExactTimeAvailability
+              >[0],
+              { userId: customer.id, businessId: business.id },
+              {
+                serviceId: targetService.id,
+                branchId: (conversation.branchId as string | null) ?? null,
+                providerId: provRes.providerId ?? null,
+                date: savedDate,
+                requestedTime: savedExactTime,
+                now,
+                businessTimezone: turnBusinessTz,
+              },
+            );
+
+            const { message: exactTimeMsg, slotsToOffer } =
+              composeExactTimeResponse({
+                evaluation: exactTimeEval,
+                date: savedDate,
+                requestedTime: savedExactTime,
+                intent: "BOOKING",
+              });
+
+            let slotOffer: SlotOffer | null = null;
+            if (turnSession.enabled && slotsToOffer.length > 0) {
+              slotOffer = buildSlotOffer(
+                { businessId: business.id, conversationId: conversation.id },
+                crypto.randomUUID(),
+                {
+                  serviceId: targetService.id,
+                  serviceName: targetService.name,
+                  serviceSource,
+                  providerId: provRes.providerId ?? null,
+                  timePreference: timePref ?? null,
+                  date: savedDate,
+                  followUpRequestId: null,
+                  shownCount: slotsToOffer.length,
+                  shownSlotKeys: slotsToOffer.map(
+                    (o) => `${o.providerId}:${savedDate}T${o.startTime}`,
+                  ),
+                  options: slotsToOffer.map((o) => ({
+                    providerId: o.providerId,
+                    displayName: o.displayName,
+                    startAt: `${savedDate}T${o.startTime}`,
+                    endAt: `${savedDate}T${o.endTime}`,
+                  })),
+                },
+                now,
+              );
+              if (slotOffer) {
+                turnSession.state = withPresentedOffer(
+                  turnSession.state ?? emptyConversationState(),
+                  slotOffer,
+                );
+                const { unresolvedTime: _droppedUnr, ...cleanKnown } =
+                  turnSession.state.knownFacts ?? {};
+                void _droppedUnr;
+                turnSession.state = {
+                  ...turnSession.state,
+                  selectedDate: savedDate,
+                  selectedService: targetService.name,
+                  serviceId: targetService.id,
+                  serviceSource,
+                  providerPreference:
+                    provRes.providerId ??
+                    turnSession.state.providerPreference ??
+                    null,
+                  selectedTimePref: timePref ?? null,
+                  activeTask: {
+                    kind: "BOOKING",
+                    stage: "AVAILABILITY_RESOLVED",
+                  },
+                  bookingStage: "AVAILABILITY_RESOLVED",
+                  knownFacts: {
+                    ...cleanKnown,
+                    service: targetService.name,
+                    date: savedDate,
+                    exactTime: savedExactTime,
+                    ...(timePref ? { timePreference: timePref } : {}),
+                    ...(provRes.providerId
+                      ? { provider: provRes.providerId }
+                      : {}),
+                  },
+                  lastClarification: null,
+                };
+                const ok = await turnSession.commit();
+                if (!ok) {
+                  return selectionReply(
+                    deps,
+                    selectionScope,
+                    "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                    "AI_ACTIVE",
+                    null,
+                  );
+                }
+              }
+            } else if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+              const { unresolvedTime: _droppedUnr, ...cleanKnown } =
+                turnSession.state?.knownFacts ?? {};
+              void _droppedUnr;
+              turnSession.state = {
+                ...(turnSession.state ?? emptyConversationState()),
+                selectedDate: savedDate,
+                selectedService: targetService.name,
+                serviceId: targetService.id,
+                serviceSource,
+                providerPreference:
+                  provRes.providerId ??
+                  turnSession.state.providerPreference ??
+                  null,
+                selectedTimePref: timePref ?? null,
+                activeTask: {
+                  kind: "BOOKING",
+                  stage: "DATE_SUPPLIED",
+                },
+                knownFacts: {
+                  ...cleanKnown,
+                  service: targetService.name,
+                  date: savedDate,
+                  exactTime: savedExactTime,
+                  ...(timePref ? { timePreference: timePref } : {}),
+                  ...(provRes.providerId
+                    ? { provider: provRes.providerId }
+                    : {}),
+                },
+                lastClarification: null,
+                offer: null,
+                suspendedOffer: null,
+              };
+              const ok = await turnSession.commit();
+              if (!ok) {
+                return selectionReply(
+                  deps,
+                  selectionScope,
+                  "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                  "AI_ACTIVE",
+                  null,
+                );
+              }
+            }
+
+            const choices = slotOffer
+              ? buildChannelChoices(slotOffer)
+              : undefined;
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              exactTimeMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              exactTimeMsg,
+              assistantMessage.id,
+              business.id,
+              selectionScope.connectionId,
+              choices,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: selectionScope.customerMessageId,
+              assistantAction: "AI_REPLY",
+              intent: "AVAILABILITY",
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
           return presentSlotChoices(
             deps,
             selectionScope,
