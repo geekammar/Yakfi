@@ -30,7 +30,7 @@ import { reconcileTurnSemanticFacts } from "../src/features/conversations/server
 
 /**
  * FlowPilot — Exact-Time Requests and Honest Availability Verification Suite
- * Covers T01 through T20:
+ * Covers T01 through T22:
  *  - T01: Exact-time inquiry when slot is available (answers directly, creates 0 appointments)
  *  - T02: Exact-time inquiry when slot is unavailable (answers directly, offers up to 3 nearby alternatives, 0 appointments)
  *  - T03: Off-page availability (time absent from initial top-N page is found via domain schedule)
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
     "=================================================================",
   );
   console.log(
-    "  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T21)",
+    "  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T22)",
   );
   console.log(
     "=================================================================\n",
@@ -2311,6 +2311,418 @@ async function main(): Promise<void> {
     );
   }
 
+  // =========================================================================
+  // T22: Live Ambiguous-Time Correction Sequence & Structured Variants
+  // =========================================================================
+  {
+    console.log(
+      "\n--- T22: Live ambiguous-time correction sequence (2026-10-29 / استشارة أسنان) ---",
+    );
+
+    const istisharaServices = [
+      {
+        id: PLAYGROUND_IDS.SERV_DENTAL,
+        businessId: PLAYGROUND_IDS.BIZ_ID,
+        name: "استشارة أسنان",
+        durationMinutes: 30,
+        price: 300,
+        currency: "EGP",
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+
+    const clinicWorkingHours09to17 = {
+      sat: { open: "09:00", close: "17:00", closed: false },
+      sun: { open: "09:00", close: "17:00", closed: false },
+      mon: { open: "09:00", close: "17:00", closed: false },
+      tue: { open: "09:00", close: "17:00", closed: false },
+      wed: { open: "09:00", close: "17:00", closed: false },
+      thu: { open: "09:00", close: "17:00", closed: false },
+      fri: { open: "09:00", close: "17:00", closed: false },
+    };
+
+    const harnessT22 = createPlaygroundHarness({
+      businessConfig: {
+        workingHours: clinicWorkingHours09to17,
+        slotDurationMinutes: 30,
+      },
+      customServices: istisharaServices,
+      todayRef: "2026-10-27",
+    });
+
+    // Turn 1: Request 17:00 on 2026-10-29 for "استشارة أسنان"
+    // Working hours: 09:00 - 17:00 (closing at 17:00)
+    // 17:00 is OUTSIDE_HOURS (>= 17:00 close time)
+    // Alternatives: 16:30, 16:00, 15:30 (closest working slots before close)
+    harnessT22.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "17:00",
+          service: "استشارة أسنان",
+          date: "2026-10-29",
+          exactTime: { type: "specific", time: "17:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessT22.deps, {
+      to: harnessT22.business.whatsappNumber,
+      from: harnessT22.customer.phone,
+      text: "عايز موعد الساعة 17:00 لاستشارة أسنان يوم 2026-10-29",
+      receivedAt: "2026-10-27T10:00:00Z",
+    });
+    const replyT22_1 =
+      harnessT22.deliveredOutbound[harnessT22.deliveredOutbound.length - 1];
+    const stateT22_1 = await loadDurableState(harnessT22);
+    const offerTokenT22_1 = stateT22_1?.offer?.token;
+
+    check(
+      "T22: Turn 1 reports outside hours 09:00-17:00",
+      replyT22_1?.body?.includes("خارج أوقات العمل الرسمية") &&
+        replyT22_1?.body?.includes("9:00 صباحاً إلى 5:00 مساءً"),
+    );
+    check(
+      "T22: Turn 1 offers nearby in-hours alternatives (e.g. 16:30, 16:00)",
+      replyT22_1?.body?.includes("4:30 مساءً") &&
+        replyT22_1?.body?.includes("4:00 مساءً"),
+    );
+    check(
+      "T22: Turn 1 records valid offer token and preserves scope",
+      typeof offerTokenT22_1 === "string" &&
+        offerTokenT22_1.length > 0 &&
+        stateT22_1?.knownFacts.service === "استشارة أسنان" &&
+        stateT22_1?.knownFacts.date === "2026-10-29" &&
+        stateT22_1?.knownFacts.exactTime === "17:00",
+    );
+    check(
+      "T22: Turn 1 zero appointments created during inquiry",
+      harnessT22.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 2: Customer explicitly leaves 3:30 AM/PM unresolved
+    // Model extracts unresolved_period: hour 3, minute 30
+    harnessT22.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "الساعة 3:30",
+          exactTime: { type: "unresolved_period", hour: 3, minute: 30 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessT22.deps, {
+      to: harnessT22.business.whatsappNumber,
+      from: harnessT22.customer.phone,
+      text: "عايز موعد الساعة 3:30",
+      receivedAt: "2026-10-27T10:01:00Z",
+    });
+    const replyT22_2 =
+      harnessT22.deliveredOutbound[harnessT22.deliveredOutbound.length - 1];
+    const stateT22_2 = await loadDurableState(harnessT22);
+
+    check(
+      "T22: Turn 2 clarifies 3:30 AM vs PM without guessing",
+      replyT22_2?.body?.includes(
+        "هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟",
+      ),
+    );
+    check(
+      "T22: Turn 2 invalidates obsolete Turn 1 offer",
+      stateT22_2?.offer === null && stateT22_2?.suspendedOffer === null,
+    );
+    check(
+      "T22: Turn 2 preserves service and date and records typed uncertainty",
+      stateT22_2?.knownFacts.service === "استشارة أسنان" &&
+        stateT22_2?.knownFacts.date === "2026-10-29" &&
+        stateT22_2?.knownFacts.unresolvedTime?.hour === 3 &&
+        stateT22_2?.knownFacts.unresolvedTime?.minute === 30 &&
+        stateT22_2?.knownFacts.exactTime === undefined &&
+        stateT22_2?.lastClarification?.type === "exact_time_period",
+    );
+
+    // Stale offer callback attempt from Turn 1 is rejected
+    await receiveInboundMessage(harnessT22.deps, {
+      to: harnessT22.business.whatsappNumber,
+      from: harnessT22.customer.phone,
+      text: `fp:${offerTokenT22_1}:1`,
+      receivedAt: "2026-10-27T10:01:30Z",
+    });
+    const replyStaleT22 =
+      harnessT22.deliveredOutbound[harnessT22.deliveredOutbound.length - 1];
+    check(
+      "T22: Obsolete Turn 1 offer callback is rejected as stale",
+      replyStaleT22?.body?.includes("انتهت صلاحية") ||
+        replyStaleT22?.body?.includes("لم يعد متاحاً"),
+    );
+    check(
+      "T22: Stale callback rejection creates zero appointments",
+      harnessT22.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 3: Customer corrects to 4:15, explicitly leaving AM/PM unresolved
+    // Variant A: Model correctly extracts unresolved_period: hour 4, minute 15
+    harnessT22.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "الساعة 4 وربع",
+          exactTime: { type: "unresolved_period", hour: 4, minute: 15 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessT22.deps, {
+      to: harnessT22.business.whatsappNumber,
+      from: harnessT22.customer.phone,
+      text: "لا خليه الساعة 4 وربع",
+      receivedAt: "2026-10-27T10:02:00Z",
+    });
+    const replyT22_3 =
+      harnessT22.deliveredOutbound[harnessT22.deliveredOutbound.length - 1];
+    const stateT22_3 = await loadDurableState(harnessT22);
+
+    check(
+      "T22: Turn 3 clarifies latest hour/minute 4:15 and does not resolve old 3:30",
+      replyT22_3?.body?.includes(
+        "هل تقصد الساعة 4:15 عصراً (مساءً) أم 4:15 فجراً (صباحاً)؟",
+      ) &&
+        !replyT22_3?.body?.includes("3:30") &&
+        !replyT22_3?.body?.includes("15:30"),
+    );
+    check(
+      "T22: Turn 3 does NOT report outside hours or offer morning slots when unresolved",
+      !replyT22_3?.body?.includes("خارج أوقات العمل الرسمية") &&
+        !replyT22_3?.body?.includes("9:00 صباحاً"),
+    );
+    check(
+      "T22: Turn 3 updates uncertainty to 4:15 and preserves service/date",
+      stateT22_3?.knownFacts.service === "استشارة أسنان" &&
+        stateT22_3?.knownFacts.date === "2026-10-29" &&
+        stateT22_3?.knownFacts.unresolvedTime?.hour === 4 &&
+        stateT22_3?.knownFacts.unresolvedTime?.minute === 15 &&
+        stateT22_3?.knownFacts.exactTime === undefined &&
+        stateT22_3?.lastClarification?.type === "exact_time_period" &&
+        stateT22_3?.lastClarification?.unresolvedTime?.hour === 4 &&
+        stateT22_3?.lastClarification?.unresolvedTime?.minute === 15,
+    );
+    check(
+      "T22: Turn 3 zero appointments created during inquiry",
+      harnessT22.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 4a: Legitimate follow-up: Customer clarifies "مساءً" (afternoon/evening)
+    // Resolves latest pending 4:15 to 16:15
+    // Evaluates 16:15 on 30-min slot grid: 16:15 is SLOT_GRID_MISMATCH (30m)
+    // Nearest afternoon alternatives: 16:00, 16:30, 15:30 (NEVER morning 09:00/09:30)
+    harnessT22.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "مساءً",
+          timePreference: "afternoon",
+        });
+      },
+    };
+    await receiveInboundMessage(harnessT22.deps, {
+      to: harnessT22.business.whatsappNumber,
+      from: harnessT22.customer.phone,
+      text: "مساءً",
+      receivedAt: "2026-10-27T10:03:00Z",
+    });
+    const replyT22_4a =
+      harnessT22.deliveredOutbound[harnessT22.deliveredOutbound.length - 1];
+    const stateT22_4a = await loadDurableState(harnessT22);
+
+    check(
+      "T22: Turn 4a afternoon clarification evaluates 16:15 as slot-grid mismatch (30m)",
+      replyT22_4a?.body?.includes("4:15 مساءً") &&
+        replyT22_4a?.body?.includes(
+          "لا يتوافق مع فترات جدول المواعيد المحددة (30 دقيقة)",
+        ) &&
+        !replyT22_4a?.body?.includes("خارج أوقات العمل الرسمية"),
+    );
+    check(
+      "T22: Turn 4a offers nearest afternoon alternatives 16:00, 16:30 (never morning)",
+      replyT22_4a?.body?.includes("4:00 مساءً") &&
+        replyT22_4a?.body?.includes("4:30 مساءً") &&
+        !replyT22_4a?.body?.includes("9:00 صباحاً"),
+    );
+    check(
+      "T22: Turn 4a preserves service and date and records resolved exactTime 16:15",
+      stateT22_4a?.knownFacts.service === "استشارة أسنان" &&
+        stateT22_4a?.knownFacts.date === "2026-10-29" &&
+        stateT22_4a?.knownFacts.exactTime === "16:15" &&
+        stateT22_4a?.knownFacts.unresolvedTime === undefined &&
+        stateT22_4a?.lastClarification === null,
+    );
+    check(
+      "T22: Turn 4a zero appointments created during inquiry",
+      harnessT22.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 4b: Alternative branching investigation: Morning clarification ("صباحاً")
+    // If the customer had clarified morning, 4:15 resolves to 04:15
+    // 04:15 is OUTSIDE_HOURS (09:00-17:00)
+    // Nearest alternatives to 04:15 are 09:00 and 09:30!
+    // Proves that outside-hours explanation + morning alternatives reproduce IF AND ONLY IF evaluated time is 04:15
+    const harnessBranchMorning = createPlaygroundHarness({
+      businessConfig: {
+        workingHours: clinicWorkingHours09to17,
+        slotDurationMinutes: 30,
+      },
+      customServices: istisharaServices,
+      todayRef: "2026-10-27",
+    });
+    // Set up prior state matching Turn 3 (pending 4:15 unresolved)
+    harnessBranchMorning.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "الساعة 4 وربع",
+          service: "استشارة أسنان",
+          date: "2026-10-29",
+          exactTime: { type: "unresolved_period", hour: 4, minute: 15 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessBranchMorning.deps, {
+      to: harnessBranchMorning.business.whatsappNumber,
+      from: harnessBranchMorning.customer.phone,
+      text: "عايز موعد الساعة 4 وربع لاستشارة أسنان يوم 2026-10-29",
+      receivedAt: "2026-10-27T10:02:00Z",
+    });
+
+    // Customer clarifies "صباحاً" (morning)
+    harnessBranchMorning.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "صباحاً",
+          timePreference: "morning",
+        });
+      },
+    };
+    await receiveInboundMessage(harnessBranchMorning.deps, {
+      to: harnessBranchMorning.business.whatsappNumber,
+      from: harnessBranchMorning.customer.phone,
+      text: "صباحاً",
+      receivedAt: "2026-10-27T10:03:00Z",
+    });
+    const replyMorning =
+      harnessBranchMorning.deliveredOutbound[
+        harnessBranchMorning.deliveredOutbound.length - 1
+      ];
+    check(
+      "T22: Morning clarification for 4:15 resolves to 04:15 and reports outside hours",
+      replyMorning?.body?.includes("4:15 صباحاً") &&
+        replyMorning?.body?.includes("خارج أوقات العمل الرسمية"),
+    );
+    check(
+      "T22: Morning resolution 04:15 produces morning alternatives 09:00 and 09:30 by temporal proximity",
+      replyMorning?.body?.includes("9:00 صباحاً") &&
+        replyMorning?.body?.includes("9:30 صباحاً"),
+    );
+
+    // Variant B: Telemetric hypothesis — Direct specific 04:15 extraction on Turn 3
+    // If an external model emitted specific "04:15" (or string "4:15" coerced to 04:15)
+    const harnessVariant0415 = createPlaygroundHarness({
+      businessConfig: {
+        workingHours: clinicWorkingHours09to17,
+        slotDurationMinutes: 30,
+      },
+      customServices: istisharaServices,
+      todayRef: "2026-10-27",
+    });
+    harnessVariant0415.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "04:15",
+          service: "استشارة أسنان",
+          date: "2026-10-29",
+          exactTime: { type: "specific", time: "04:15" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessVariant0415.deps, {
+      to: harnessVariant0415.business.whatsappNumber,
+      from: harnessVariant0415.customer.phone,
+      text: "الساعة 4:15",
+      receivedAt: "2026-10-27T10:02:00Z",
+    });
+    const replyVariant0415 =
+      harnessVariant0415.deliveredOutbound[
+        harnessVariant0415.deliveredOutbound.length - 1
+      ];
+    check(
+      "T22: Direct 04:15 extraction reproduces outside hours and 09:00/09:30 alternatives exactly",
+      replyVariant0415?.body?.includes("خارج أوقات العمل الرسمية") &&
+        replyVariant0415?.body?.includes("4:15 صباحاً") &&
+        replyVariant0415?.body?.includes("9:00 صباحاً") &&
+        replyVariant0415?.body?.includes("9:30 صباحاً"),
+    );
+
+    // Variant C: Direct specific 16:15 extraction on Turn 3
+    // Proves 16:15 NEVER produces outside hours or morning alternatives for 09:00-17:00
+    const harnessVariant1615 = createPlaygroundHarness({
+      businessConfig: {
+        workingHours: clinicWorkingHours09to17,
+        slotDurationMinutes: 30,
+      },
+      customServices: istisharaServices,
+      todayRef: "2026-10-27",
+    });
+    harnessVariant1615.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "16:15",
+          service: "استشارة أسنان",
+          date: "2026-10-29",
+          exactTime: { type: "specific", time: "16:15" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessVariant1615.deps, {
+      to: harnessVariant1615.business.whatsappNumber,
+      from: harnessVariant1615.customer.phone,
+      text: "الساعة 16:15",
+      receivedAt: "2026-10-27T10:02:00Z",
+    });
+    const replyVariant1615 =
+      harnessVariant1615.deliveredOutbound[
+        harnessVariant1615.deliveredOutbound.length - 1
+      ];
+    check(
+      "T22: Direct 16:15 extraction produces slot-grid mismatch and afternoon alternatives, NEVER outside hours",
+      replyVariant1615?.body?.includes("4:15 مساءً") &&
+        replyVariant1615?.body?.includes(
+          "لا يتوافق مع فترات جدول المواعيد المحددة (30 دقيقة)",
+        ) &&
+        !replyVariant1615?.body?.includes("خارج أوقات العمل الرسمية") &&
+        replyVariant1615?.body?.includes("4:00 مساءً") &&
+        replyVariant1615?.body?.includes("4:30 مساءً") &&
+        !replyVariant1615?.body?.includes("9:00 صباحاً"),
+    );
+
+    check(
+      "T22: Zero appointments created across all inquiry variants",
+      harnessT22.capturedAppointmentWrites.length === 0 &&
+        harnessBranchMorning.capturedAppointmentWrites.length === 0 &&
+        harnessVariant0415.capturedAppointmentWrites.length === 0 &&
+        harnessVariant1615.capturedAppointmentWrites.length === 0,
+    );
+  }
+
   console.log(
     "\n=================================================================",
   );
@@ -2320,7 +2732,7 @@ async function main(): Promise<void> {
     for (const f of failures) console.error(`   - ${f}`);
     process.exit(1);
   } else {
-    console.log("  ALL TESTS PASSED (T01–T21) ✅");
+    console.log("  ALL TESTS PASSED (T01–T22) ✅");
     console.log(
       "=================================================================",
     );
