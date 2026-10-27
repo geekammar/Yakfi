@@ -79,23 +79,46 @@ Pure, deterministic internal volume measurement:
 
 - **Interval:** Half-open UTC window $[T_{\text{start}},\, T_{\text{start}} + 24\text{ hours})$.
 - **Scope Key:** `businessId:channel:connectionId:customerId` (anchored to tenant, customer, transport channel, and exact connection).
-- **Qualifying Events:** Substantive customer messages (`MESSAGE`) and validated interactive selections (`CHOICE_CALLBACK`). Zero NLP, zero free-text regexes.
-- **Start-Only Activity:** Telegram `/start` command protocol (`START_COMMAND`) deterministically yields welcome and does NOT open a commercial session.
-- **Deduplication & Test Isolation:** Intercepted duplicate payloads are excluded (`isDuplicate`); test ingress traffic is isolated in the `TEST` pool.
-- **Permutation Invariance:** Batches are sorted by `canonicalTimestamp` + `eventId` tie-breaker before rollup.
-- **Period Carry-In:** Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods.
+- **Traffic Pool Isolation:**
+  - Active tracking, carry-in, and deterministic IDs are strictly partitioned by operational pool (`SERVING`, `TEST`, `SHADOW`).
+  - **SERVING:** Real user traffic. Substantive customer messages (`MESSAGE`) and interactive callbacks (`CHOICE_CALLBACK`) initiate 24h sessions. Assistant replies (`ASSISTANT_REPLY`) and start commands (`START_COMMAND`) arriving within an open session are absorbed into the session without inflating `qualifyingEventCount`.
+  - **TEST:** Synthetic/test harness traffic, manual verification runs, and automated smoke suites. Segregated completely so production metrics are never distorted.
+  - **SHADOW:** Background evaluation traffic, shadow prompting, dual-run experiments.
+- **Idempotency & Tenant Conflict Detection:**
+  - Tracked per tenant identity (`businessId:eventId`).
+  - Identical replays in a batch or carry-in are idempotent (skipped without inflating session counts or duplicate billing).
+  - Conflicting facts for the same `eventId` within a tenant throw an explicit Error.
+- **Counting Definitions:**
+  - `qualifyingEventCount`: Substantive customer messages and validated callbacks.
+  - `totalEventCount`: Total accepted events in the window (qualifying customer events, assistant replies, start commands).
+  - `eventCount`: Backwards-compatible alias for `totalEventCount`.
+- **Start-Only Exclusion:** Telegram `/start` command protocol (`START_COMMAND`) deterministically yields welcome and does NOT open a commercial session.
+- **Permutation Invariance:** Batches are sorted by canonical timestamp (`toCanonicalTimestampMs`) + `eventId` tie-breaker before rollup.
+- **Period Carry-In:** Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods. Overlapping carry-in sessions for the same pool and scope fail closed with an Error.
+- **Content-Free Output Projection:** Output records expose only machine keys, timestamps, numbers, and identifiers. Arbitrary runtime caller properties are strictly stripped.
 
 ### 2. Cost Engine (`flowpilot.cost.engine@v1`)
 
 Pure per-attempt physical execution accounting:
 
 - **Precedence:** Valid provider-reported cost first (`PROVIDER_REPORTED`, including $0.00); otherwise matching dated rate snapshot (`RATE_SNAPSHOT`); otherwise `UNKNOWN`.
+- **Deterministic Historical Rate Selection:**
+  - Rate snapshots with `effectiveDate > attemptTimestamp` never apply.
+  - The latest historical snapshot (`max(effectiveDate) <= attemptTimestamp`) is selected deterministically.
+  - Array reversal or shuffling yields identical selection.
+  - Ambiguous conflicting snapshots (differing rates at the same effective date) throw an explicit Error.
+  - Full audit provenance (`snapshotId`, `rateEffectiveDate`, `rateSource`) is preserved on each attempt result.
 - **Zero-Dispatch Prevention:** Locally prevented attempts (e.g. `FLOWPILOT_AI_GLOBAL_STOP`, ceiling clamps) have 0 external cost and are excluded from the dispatched coverage denominator.
 - **Status Code Honesty:** HTTP 0, 401, 403, 429, or timeouts NEVER infer zero cost automatically unless proven un-dispatched.
 - **Completeness & Subtotals:** Dispatched attempts with mixed known/unknown costs report `PARTIAL` completeness with `totalCostUsd = null` while preserving `knownSubtotalUsd`. Fully covered turns report `COMPLETE`.
-- **Token Caching:** Evaluates cached vs uncached prompt rates without double counting.
+- **Token Caching:** Evaluates cached vs uncached prompt rates without double counting. `cachedInputTokens` cannot exceed `inputTokens` (fails closed, never silently clamped).
+- **Monetary Policy & Precision:**
+  - JavaScript IEEE 754 64-bit floating point arithmetic (double precision, 53 bits significand, ~15-17 significant decimal digits). Binary floats are not exact decimal arithmetic, but provide sufficient precision to represent sub-micro amounts down to ~$10^-15 without premature underflow or zero-clamping.
+  - All internal accumulators retain full unrounded float values without premature zero-rounding.
+  - Presentation and export formatting uses `formatMicroUsd` (6 decimal places, micro-USD) and coverage percentages use 1 decimal place (`0.0%`).
 - **Pool Isolation:** Strict separation across `SERVING`, `SHADOW`, and `TEST` pools. Missing shadow data remains unknown, never fabricated.
 - **Coverage Denominator:** Coverage ratio reflects known dispatched attempts divided by total dispatched wire attempts. Zero denominator yields null (`N/A`).
+- **Content-Free Output Projection:** All attempt results and pool summaries are projected through allowlists to strip caller properties.
 
 ### 3. Persistence Caveats & Architectural Gaps (Under Review)
 

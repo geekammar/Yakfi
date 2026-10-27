@@ -9,12 +9,14 @@
  * - Batch ordering permutation invariance (sorting + tie-breaking).
  * - Period carry-in and cross-month attribution.
  * - Explicit scope identification (tenant + channel + connection + customer).
- * - Multi-attempt cost accounting (reported cost, rate snapshots, prompt caching).
- * - Zero dispatch prevention (kill switches / clamps) vs dispatched attempts.
- * - Negative rule: status codes never imply 0 cost automatically.
- * - Precision preservation (micro/sub-micro arithmetic without premature rounding).
- * - Disjoint pool separation (SERVING, SHADOW, TEST).
- * - Content-freedom and invalid input fail-closed behavior.
+ * - Operational pool isolation: SERVING, SHADOW, and TEST maintain disjoint sessions.
+ * - Tenant-scoped idempotency: identical replay is skipped; conflicting facts throw Error.
+ * - Event count semantics: qualifyingEventCount vs totalEventCount / eventCount.
+ * - Deterministic historical rate selection, future rate exclusion, and snapshot conflict rejection.
+ * - Fail-closed runtime validation (explicit timezone offsets, non-overlapping carry-in, caching bounds).
+ * - Zero dispatch contradiction rejection.
+ * - Full IEEE 754 precision preservation without premature micro-cost rounding.
+ * - Strict content-free output projection stripping arbitrary runtime properties.
  *
  * Zero DB, zero network, zero AI calls, zero external side effects.
  */
@@ -74,13 +76,25 @@ function makeEvent(
 
 function runSuite(): void {
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 1: Canonical Timestamp Parsing
+  // GROUP 1: Canonical Timestamp Parsing & Timezone Offset Enforcement
   // ═══════════════════════════════════════════════════════════════════════
   const tIso = toCanonicalTimestampMs("2026-10-01T12:00:00.000Z");
   const tDate = toCanonicalTimestampMs(new Date("2026-10-01T12:00:00.000Z"));
   check(
     "G1.1 toCanonicalTimestampMs parses valid ISO string and Date identically",
     tIso === tDate && tIso === 1790856000000,
+  );
+
+  let throwsOnNaive = false;
+  try {
+    // Naive ISO string without timezone offset
+    toCanonicalTimestampMs("2026-10-01T12:00:00.000");
+  } catch {
+    throwsOnNaive = true;
+  }
+  check(
+    "G1.2 toCanonicalTimestampMs throws on naive timestamp missing explicit timezone offset",
+    throwsOnNaive,
   );
 
   let throwsOnEmpty = false;
@@ -90,7 +104,7 @@ function runSuite(): void {
     throwsOnEmpty = true;
   }
   check(
-    "G1.2 toCanonicalTimestampMs throws on empty or whitespace string",
+    "G1.3 toCanonicalTimestampMs throws on empty or whitespace string",
     throwsOnEmpty,
   );
 
@@ -101,7 +115,7 @@ function runSuite(): void {
     throwsOnInvalid = true;
   }
   check(
-    "G1.3 toCanonicalTimestampMs throws on invalid date string",
+    "G1.4 toCanonicalTimestampMs throws on invalid date string",
     throwsOnInvalid,
   );
 
@@ -122,7 +136,9 @@ function runSuite(): void {
   ]);
   check(
     "G2.1 Event at T + 24h - 1ms falls inside active half-open window (1 session, count=2)",
-    res24h.sessions.length === 1 && res24h.sessions[0]?.eventCount === 2,
+    res24h.sessions.length === 1 &&
+      res24h.sessions[0]?.eventCount === 2 &&
+      res24h.sessions[0]?.qualifyingEventCount === 2,
   );
 
   const resNewWindow = rollupCommercialSessions([
@@ -170,13 +186,14 @@ function runSuite(): void {
     "G3.2 Subsequent CHOICE_CALLBACK initiates session successfully",
     resStartThenCallback.sessions.length === 1 &&
       resStartThenCallback.sessions[0]?.initiatingEventId === "cb1" &&
+      resStartThenCallback.sessions[0]?.qualifyingEventCount === 1 &&
       resStartThenCallback.startOnlyIgnoredCount === 1,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 4: Duplicate Interception
+  // GROUP 4: Idempotency, Duplicate Interception & Tenant Conflict Detection
   // ═══════════════════════════════════════════════════════════════════════
-  const resDedupe = rollupCommercialSessions([
+  const resFlaggedDedupe = rollupCommercialSessions([
     makeEvent({ eventId: "d1", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
     makeEvent({
       eventId: "d1-dup",
@@ -185,14 +202,127 @@ function runSuite(): void {
     }),
   ]);
   check(
-    "G4.1 Duplicate payloads are excluded from session event count (filteredDuplicateCount=1)",
-    resDedupe.sessions.length === 1 &&
-      resDedupe.sessions[0]?.eventCount === 1 &&
-      resDedupe.filteredDuplicateCount === 1,
+    "G4.1 Explicit isDuplicate flag excludes payload (filteredDuplicateCount=1)",
+    resFlaggedDedupe.sessions.length === 1 &&
+      resFlaggedDedupe.sessions[0]?.eventCount === 1 &&
+      resFlaggedDedupe.filteredDuplicateCount === 1,
+  );
+
+  // Repeated identical event identity in batch (idempotent replay)
+  const resIdenticalReplay = rollupCommercialSessions([
+    makeEvent({ eventId: "rep-1", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
+    makeEvent({ eventId: "rep-1", canonicalTimestamp: "2026-10-01T10:00:00Z" }),
+  ]);
+  check(
+    "G4.2 Repeated identical event identity in batch is idempotent (filteredDuplicateCount=1, eventCount=1)",
+    resIdenticalReplay.sessions.length === 1 &&
+      resIdenticalReplay.sessions[0]?.eventCount === 1 &&
+      resIdenticalReplay.filteredDuplicateCount === 1,
+  );
+
+  // Conflicting facts for the same tenant event identity must fail explicitly
+  let throwsOnConflict = false;
+  try {
+    rollupCommercialSessions([
+      makeEvent({
+        eventId: "conf-1",
+        canonicalTimestamp: "2026-10-01T10:00:00Z",
+        actionType: "MESSAGE",
+      }),
+      makeEvent({
+        eventId: "conf-1",
+        canonicalTimestamp: "2026-10-01T10:05:00Z", // conflicting timestamp
+        actionType: "MESSAGE",
+      }),
+    ]);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Event fact conflict detected")
+    ) {
+      throwsOnConflict = true;
+    }
+  }
+  check(
+    "G4.3 Conflicting facts for same tenant eventId throw explicit conflict Error",
+    throwsOnConflict,
+  );
+
+  // Cross-tenant eventId collision is safe (different tenants)
+  const resCrossTenant = rollupCommercialSessions([
+    makeEvent({
+      eventId: "shared-id",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+      scope: makeScope({ businessId: "tenant-a" }),
+    }),
+    makeEvent({
+      eventId: "shared-id",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+      scope: makeScope({ businessId: "tenant-b" }),
+    }),
+  ]);
+  check(
+    "G4.4 Identical eventId across different tenants is isolated without false conflict",
+    resCrossTenant.sessions.length === 2 &&
+      resCrossTenant.filteredDuplicateCount === 0,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 5: Permutation Invariance (Batch Ordering & Tie-Breaking)
+  // GROUP 5: Operational Traffic Pool Isolation (SERVING, SHADOW, TEST)
+  // ═══════════════════════════════════════════════════════════════════════
+  const poolScope = makeScope();
+  const poolTime = "2026-10-01T10:00:00.000Z";
+
+  // Identical scope and timestamp across SERVING, TEST, SHADOW in order 1: SERVING then TEST
+  const resServingThenTest = rollupCommercialSessions([
+    makeEvent({
+      eventId: "e-serv",
+      trafficPool: "SERVING",
+      scope: poolScope,
+      canonicalTimestamp: poolTime,
+    }),
+    makeEvent({
+      eventId: "e-test",
+      trafficPool: "TEST",
+      scope: poolScope,
+      canonicalTimestamp: poolTime,
+    }),
+  ]);
+
+  // Order 2: TEST then SERVING
+  const resTestThenServing = rollupCommercialSessions([
+    makeEvent({
+      eventId: "e-test",
+      trafficPool: "TEST",
+      scope: poolScope,
+      canonicalTimestamp: poolTime,
+    }),
+    makeEvent({
+      eventId: "e-serv",
+      trafficPool: "SERVING",
+      scope: poolScope,
+      canonicalTimestamp: poolTime,
+    }),
+  ]);
+
+  check(
+    "G5.1 Traffic pools SERVING and TEST maintain strictly isolated sessions regardless of input order",
+    resServingThenTest.sessions.length === 2 &&
+      resTestThenServing.sessions.length === 2 &&
+      resServingThenTest.metricsByPool.SERVING.sessionCount === 1 &&
+      resServingThenTest.metricsByPool.TEST.sessionCount === 1 &&
+      resTestThenServing.metricsByPool.SERVING.sessionCount === 1 &&
+      resTestThenServing.metricsByPool.TEST.sessionCount === 1 &&
+      resServingThenTest.sessions.some(
+        (s) => s.trafficPool === "SERVING" && s.initiatingEventId === "e-serv",
+      ) &&
+      resServingThenTest.sessions.some(
+        (s) => s.trafficPool === "TEST" && s.initiatingEventId === "e-test",
+      ),
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 6: Permutation Invariance (Batch Ordering & Tie-Breaking)
   // ═══════════════════════════════════════════════════════════════════════
   const rawBatch: CanonicalInboundEvent[] = [
     makeEvent({
@@ -232,12 +362,60 @@ function runSuite(): void {
   const jsonShuffled = JSON.stringify(shuffled);
 
   check(
-    "G5.1 Batch results are byte-for-byte invariant under input permutation",
+    "G6.1 Batch results are byte-for-byte invariant under input permutation",
     jsonChrono === jsonReversed && jsonChrono === jsonShuffled,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 6: Period Carry-In Support
+  // GROUP 7: Event Counts & In-Session Assistant / Start Events
+  // ═══════════════════════════════════════════════════════════════════════
+  const resInSessionAssistant = rollupCommercialSessions([
+    makeEvent({
+      eventId: "cust-start",
+      senderType: "CUSTOMER",
+      actionType: "MESSAGE",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+    }),
+    makeEvent({
+      eventId: "bot-reply",
+      senderType: "ASSISTANT",
+      actionType: "ASSISTANT_REPLY",
+      canonicalTimestamp: "2026-10-01T10:00:05Z",
+    }),
+    makeEvent({
+      eventId: "cust-start-cmd",
+      senderType: "CUSTOMER",
+      actionType: "START_COMMAND",
+      canonicalTimestamp: "2026-10-01T10:01:00Z",
+    }),
+  ]);
+
+  check(
+    "G7.1 In-session assistant reply and start command increment totalEventCount but not qualifyingEventCount",
+    resInSessionAssistant.sessions.length === 1 &&
+      resInSessionAssistant.sessions[0]?.qualifyingEventCount === 1 &&
+      resInSessionAssistant.sessions[0]?.totalEventCount === 3 &&
+      resInSessionAssistant.sessions[0]?.eventCount === 3 &&
+      resInSessionAssistant.sessions[0]?.eventIds.length === 3,
+  );
+
+  // Assistant reply arriving outside open session is ignored and does not open a session
+  const resAssistantOnly = rollupCommercialSessions([
+    makeEvent({
+      eventId: "bot-orphan",
+      senderType: "ASSISTANT",
+      actionType: "ASSISTANT_REPLY",
+      canonicalTimestamp: "2026-10-01T10:00:00Z",
+    }),
+  ]);
+  check(
+    "G7.2 Orphan assistant reply outside open session does not initiate a session (nonCustomerIgnoredCount=1)",
+    resAssistantOnly.sessions.length === 0 &&
+      resAssistantOnly.nonCustomerIgnoredCount === 1,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 8: Period Carry-In & Overlapping State Rejection
   // ═══════════════════════════════════════════════════════════════════════
   const priorStart = Date.parse("2026-10-31T20:00:00.000Z");
   const priorScope = makeScope();
@@ -251,6 +429,8 @@ function runSuite(): void {
     endAtUtc: new Date(priorStart + SESSION_DURATION_MS).toISOString(),
     endMs: priorStart + SESSION_DURATION_MS,
     initiatingEventId: "evt-prior",
+    qualifyingEventCount: 3,
+    totalEventCount: 3,
     eventCount: 3,
     eventIds: ["p1", "p2", "p3"],
   };
@@ -266,15 +446,45 @@ function runSuite(): void {
   );
 
   check(
-    "G6.1 Qualifying event in new month appends to unexpired carry-in session without new session creation",
+    "G8.1 Qualifying event in new month appends to unexpired carry-in session without new session creation",
     resCarryIn.sessions.length === 1 &&
       resCarryIn.sessions[0]?.sessionId === "sess_prior" &&
-      resCarryIn.sessions[0]?.eventCount === 4 &&
+      resCarryIn.sessions[0]?.totalEventCount === 4 &&
+      resCarryIn.sessions[0]?.qualifyingEventCount === 4 &&
       Boolean(resCarryIn.sessions[0]?.eventIds.includes("nov-1")),
   );
 
+  // Overlapping carry-in sessions for the same pool and scope must throw Error
+  let throwsOnOverlappingPrior = false;
+  try {
+    const overlappingPrior: CommercialSession = {
+      ...priorSession,
+      sessionId: "sess_prior_overlap",
+      startMs: priorStart + 10_000,
+      endMs: priorStart + 10_000 + SESSION_DURATION_MS,
+      startAtUtc: new Date(priorStart + 10_000).toISOString(),
+      endAtUtc: new Date(
+        priorStart + 10_000 + SESSION_DURATION_MS,
+      ).toISOString(),
+    };
+    rollupCommercialSessions([], {
+      priorSessions: [priorSession, overlappingPrior],
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Contradictory or overlapping prior session")
+    ) {
+      throwsOnOverlappingPrior = true;
+    }
+  }
+  check(
+    "G8.2 Overlapping prior carry-in sessions in same pool and scope throw explicit Error",
+    throwsOnOverlappingPrior,
+  );
+
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 7: Tenant, Channel & Connection Scope Isolation
+  // GROUP 9: Tenant, Channel & Connection Scope Isolation
   // ═══════════════════════════════════════════════════════════════════════
   const sameTime = "2026-10-01T10:00:00.000Z";
   const isoBatch = [
@@ -306,12 +516,12 @@ function runSuite(): void {
 
   const resIso = rollupCommercialSessions(isoBatch);
   check(
-    "G7.1 Different business, channel, connection, or customer maintain strictly isolated sessions",
+    "G9.1 Different business, channel, connection, or customer maintain strictly isolated sessions",
     resIso.sessions.length === 4,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 8: Cost Engine — Retry and Fallback with Separate Rates
+  // GROUP 10: Cost Engine — Retry and Fallback with Historical Rate Provenance
   // ═══════════════════════════════════════════════════════════════════════
   const rateSnapshots: ModelRateSnapshot[] = [
     {
@@ -342,6 +552,7 @@ function runSuite(): void {
       trafficPool: "SERVING",
       provider: "openrouter",
       model: "deepseek/deepseek-chat",
+      attemptTimestamp: "2026-10-22T10:00:00Z",
       status: "FAILURE",
       inputTokens: 2000,
       outputTokens: 0,
@@ -353,6 +564,7 @@ function runSuite(): void {
       trafficPool: "SERVING",
       provider: "openrouter",
       model: "meta-llama/llama-3.1-70b-instruct",
+      attemptTimestamp: "2026-10-22T10:00:00Z",
       status: "SUCCESS",
       inputTokens: 2000,
       outputTokens: 250,
@@ -366,16 +578,114 @@ function runSuite(): void {
   const expectedTurnCost = costAtt1 + costAtt2; // 0.0015148
 
   check(
-    "G8.1 Retry and fallback attempts evaluate with respective model rates and sum accurately",
+    "G10.1 Retry and fallback attempts evaluate with respective model rates, sum accurately and preserve provenance",
     resRetryCost.serving.costCompleteness === "COMPLETE" &&
       Math.abs((resRetryCost.serving.totalCostUsd ?? 0) - expectedTurnCost) <
         1e-9 &&
       resRetryCost.serving.knownSubtotalUsd ===
-        resRetryCost.serving.totalCostUsd,
+        resRetryCost.serving.totalCostUsd &&
+      resRetryCost.attempts[0]?.snapshotId === "rate-deepseek-v3" &&
+      resRetryCost.attempts[0]?.rateEffectiveDate === "2026-10-22" &&
+      resRetryCost.attempts[0]?.rateSource === "openrouter_audited",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 9: Cost Engine — Reported Cost Precedence Including Zero
+  // GROUP 11: Historical Rate Selection & Reversal Invariance
+  // ═══════════════════════════════════════════════════════════════════════
+  const multiVersionRates: ModelRateSnapshot[] = [
+    {
+      snapshotId: "rate-old",
+      provider: "openrouter",
+      model: "test/model",
+      effectiveDate: "2026-09-01",
+      promptCostPerMillionUsd: 1.0,
+      completionCostPerMillionUsd: 2.0,
+      source: "v1",
+    },
+    {
+      snapshotId: "rate-current",
+      provider: "openrouter",
+      model: "test/model",
+      effectiveDate: "2026-10-01",
+      promptCostPerMillionUsd: 0.5,
+      completionCostPerMillionUsd: 1.0,
+      source: "v2",
+    },
+    {
+      snapshotId: "rate-future",
+      provider: "openrouter",
+      model: "test/model",
+      effectiveDate: "2026-11-01",
+      promptCostPerMillionUsd: 0.1,
+      completionCostPerMillionUsd: 0.2,
+      source: "v3",
+    },
+  ];
+
+  // Attempt on 2026-10-15 should match rate-current (2026-10-01), NOT rate-future (2026-11-01) or rate-old (2026-09-01)
+  const testAttempt: PhysicalAttemptFact = {
+    attemptId: "att-hist",
+    attemptIndex: 1,
+    trafficPool: "SERVING",
+    provider: "openrouter",
+    model: "test/model",
+    attemptTimestamp: "2026-10-15T10:00:00Z",
+    status: "SUCCESS",
+    inputTokens: 1000,
+    outputTokens: 1000,
+  };
+
+  const resForward = evaluateAttemptCost(testAttempt, multiVersionRates);
+  const resReversed = evaluateAttemptCost(
+    testAttempt,
+    [...multiVersionRates].reverse(),
+  );
+
+  check(
+    "G11.1 Historical rate selection ignores future rates, picks newest applicable snapshot, and is invariant under array reversal",
+    resForward.snapshotId === "rate-current" &&
+      resReversed.snapshotId === "rate-current" &&
+      resForward.costUsd === (1000 * 0.5 + 1000 * 1.0) / 1_000_000 &&
+      resForward.costUsd === resReversed.costUsd,
+  );
+
+  // Attempt before any snapshot was effective cannot match future rates -> UNKNOWN
+  const preAttempt: PhysicalAttemptFact = {
+    ...testAttempt,
+    attemptTimestamp: "2026-08-01T10:00:00Z",
+  };
+  const resPre = evaluateAttemptCost(preAttempt, multiVersionRates);
+  check(
+    "G11.2 Attempt predating all snapshots does not apply future rates (evaluates to UNKNOWN)",
+    resPre.completeness === "UNKNOWN" && resPre.costUsd === null,
+  );
+
+  // Ambiguous conflicting snapshots at the same effective date throw Error
+  let throwsOnSnapshotConflict = false;
+  try {
+    const conflictingRates: ModelRateSnapshot[] = [
+      multiVersionRates[0]!,
+      {
+        ...multiVersionRates[0]!,
+        promptCostPerMillionUsd: 9.99, // conflict
+      },
+    ];
+    evaluateAttemptCost(testAttempt, conflictingRates);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Ambiguous conflicting rate snapshots")
+    ) {
+      throwsOnSnapshotConflict = true;
+    }
+  }
+  check(
+    "G11.3 Ambiguous conflicting rate snapshots at same effectiveDate throw explicit Error",
+    throwsOnSnapshotConflict,
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GROUP 12: Cost Engine — Reported Cost Precedence Including Zero
   // ═══════════════════════════════════════════════════════════════════════
   const zeroReportedAttempt: PhysicalAttemptFact = {
     attemptId: "att-zero",
@@ -391,7 +701,7 @@ function runSuite(): void {
 
   const resZeroCost = evaluateAttemptCost(zeroReportedAttempt, rateSnapshots);
   check(
-    "G9.1 Reported cost of zero is preserved with PROVIDER_REPORTED provenance (not overridden by rate snapshot)",
+    "G12.1 Reported cost of zero is preserved with PROVIDER_REPORTED provenance (not overridden by rate snapshot)",
     resZeroCost.costUsd === 0.0 &&
       resZeroCost.provenance === "PROVIDER_REPORTED" &&
       resZeroCost.completeness === "KNOWN",
@@ -414,13 +724,13 @@ function runSuite(): void {
     rateSnapshots,
   );
   check(
-    "G9.2 Positive reported cost overrides token rate calculation",
+    "G12.2 Positive reported cost overrides token rate calculation",
     resPosCost.costUsd === 0.0035 &&
       resPosCost.provenance === "PROVIDER_REPORTED",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 10: Negative Rule — Never Infer Zero Cost Solely from Status Codes
+  // GROUP 13: Negative Rule — Never Infer Zero Cost Solely from Status Codes
   // ═══════════════════════════════════════════════════════════════════════
   const timeoutAttempt: PhysicalAttemptFact = {
     attemptId: "att-to",
@@ -437,14 +747,14 @@ function runSuite(): void {
 
   const resTimeout = evaluateAttemptCost(timeoutAttempt, rateSnapshots);
   check(
-    "G10.1 Failed attempt with missing tokens/cost evaluates to UNKNOWN (cost=null, never coerced to 0)",
+    "G13.1 Failed attempt with missing tokens/cost evaluates to UNKNOWN (cost=null, never coerced to 0)",
     resTimeout.costUsd === null &&
       resTimeout.provenance === "UNKNOWN" &&
       resTimeout.completeness === "UNKNOWN",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 11: All-Unknown vs Mixed Costs & Coverage Ratio
+  // GROUP 14: All-Unknown vs Mixed Costs & Coverage Ratio
   // ═══════════════════════════════════════════════════════════════════════
   const mixedAttempts: PhysicalAttemptFact[] = [
     {
@@ -461,7 +771,7 @@ function runSuite(): void {
 
   const resMixed = evaluateTurnCost(mixedAttempts, rateSnapshots);
   check(
-    "G11.1 Mixed known and unknown attempts produce PARTIAL completeness with totalCost=null and knownSubtotal preserved",
+    "G14.1 Mixed known and unknown attempts produce PARTIAL completeness with totalCost=null and knownSubtotal preserved",
     resMixed.serving.costCompleteness === "PARTIAL" &&
       resMixed.serving.totalCostUsd === null &&
       resMixed.serving.knownSubtotalUsd === 0.0012 &&
@@ -470,14 +780,14 @@ function runSuite(): void {
 
   const resAllUnknown = evaluateTurnCost([timeoutAttempt], rateSnapshots);
   check(
-    "G11.2 All-unknown dispatched attempts produce UNAVAILABLE completeness with coverage 0.0%",
+    "G14.2 All-unknown dispatched attempts produce UNAVAILABLE completeness with coverage 0.0%",
     resAllUnknown.serving.costCompleteness === "UNAVAILABLE" &&
       resAllUnknown.serving.totalCostUsd === null &&
       resAllUnknown.serving.coveragePercentage === "0.0%",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 12: Locally Prevented Zero Dispatch
+  // GROUP 15: Locally Prevented Zero Dispatch & Contradiction Rejection
   // ═══════════════════════════════════════════════════════════════════════
   const preventedAttempt: PhysicalAttemptFact = {
     attemptId: "prev-1",
@@ -491,7 +801,7 @@ function runSuite(): void {
 
   const resPrevented = evaluateTurnCost([preventedAttempt], rateSnapshots);
   check(
-    "G12.1 Locally prevented request has 0 dispatched count and null coverage (N/A, not an invented percentage)",
+    "G15.1 Locally prevented request has 0 dispatched count and null coverage (N/A, not an invented percentage)",
     resPrevented.serving.dispatchedAttempts === 0 &&
       resPrevented.serving.locallyPreventedAttempts === 1 &&
       resPrevented.serving.totalCostUsd === 0 &&
@@ -499,8 +809,33 @@ function runSuite(): void {
       resPrevented.serving.coveragePercentage === null,
   );
 
+  // Reject contradictory zero dispatch combined with positive cost or tokens
+  let throwsOnContradiction = false;
+  try {
+    evaluateAttemptCost({
+      attemptId: "prev-bad",
+      attemptIndex: 1,
+      trafficPool: "SERVING",
+      provider: "openrouter",
+      locallyPreventedZeroDispatch: true,
+      status: "FAILURE",
+      reportedCostUsd: 0.01, // contradictory!
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("Contradictory evidence")
+    ) {
+      throwsOnContradiction = true;
+    }
+  }
+  check(
+    "G15.2 Contradictory locallyPreventedZeroDispatch=true with positive cost throws explicit Error",
+    throwsOnContradiction,
+  );
+
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 13: Prompt Caching Without Double Counting
+  // GROUP 16: Prompt Caching Without Double Counting & Invariant Enforcement
   // ═══════════════════════════════════════════════════════════════════════
   const cachedAttempt: PhysicalAttemptFact = {
     attemptId: "cache-1",
@@ -508,6 +843,7 @@ function runSuite(): void {
     trafficPool: "SERVING",
     provider: "openrouter",
     model: "deepseek/deepseek-chat",
+    attemptTimestamp: "2026-10-22T10:00:00Z",
     status: "SUCCESS",
     inputTokens: 10_000,
     cachedInputTokens: 8_000, // 8k cached, 2k uncached
@@ -515,43 +851,95 @@ function runSuite(): void {
   };
 
   const resCached = evaluateAttemptCost(cachedAttempt, rateSnapshots);
-  // Uncached: 2,000 * 0.2574 = 0.5148
-  // Cached: 8,000 * 0.07 = 0.5600
-  // Completion: 500 * 1.0287 = 0.51435
-  // Total: (0.5148 + 0.5600 + 0.51435) / 1,000 = 0.00158915 USD
   const expectedCachedCost =
     (2000 * 0.2574 + 8000 * 0.07 + 500 * 1.0287) / 1_000_000;
   check(
-    "G13.1 Prompt caching evaluates cached vs uncached tokens without double counting",
+    "G16.1 Prompt caching evaluates cached vs uncached tokens without double counting",
     resCached.uncachedInputTokens === 2000 &&
       resCached.cachedInputTokens === 8000 &&
       Math.abs((resCached.costUsd ?? 0) - expectedCachedCost) < 1e-9,
   );
 
+  // Reject cachedInputTokens > inputTokens without silent clamping
+  let throwsOnCacheExceeded = false;
+  try {
+    evaluateAttemptCost({
+      attemptId: "cache-bad",
+      attemptIndex: 1,
+      trafficPool: "SERVING",
+      provider: "openrouter",
+      model: "deepseek/deepseek-chat",
+      status: "SUCCESS",
+      inputTokens: 100,
+      cachedInputTokens: 200, // exceeds inputTokens!
+    });
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      err.message.includes("cannot exceed inputTokens")
+    ) {
+      throwsOnCacheExceeded = true;
+    }
+  }
+  check(
+    "G16.2 cachedInputTokens exceeding inputTokens throws explicit Error (never silently clamped)",
+    throwsOnCacheExceeded,
+  );
+
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 14: Sub-Micro Precision Preservation
+  // GROUP 17: Monetary Policy & Sub-Micro Accumulation
   // ═══════════════════════════════════════════════════════════════════════
-  const tinyAttempt: PhysicalAttemptFact = {
-    attemptId: "tiny-1",
+  // 1 token at $0.25 / 1,000,000 = $0.00000025 USD (genuine positive sub-micro cost)
+  const singleSubMicroAttempt: PhysicalAttemptFact = {
+    attemptId: "micro-1",
     attemptIndex: 1,
     trafficPool: "SERVING",
     provider: "openrouter",
     model: "deepseek/deepseek-chat",
+    attemptTimestamp: "2026-10-22T10:00:00Z",
     status: "SUCCESS",
-    inputTokens: 5,
-    outputTokens: 1,
+    inputTokens: 1,
+    cachedInputTokens: 0,
+    outputTokens: 0,
   };
 
-  const resTiny = evaluateAttemptCost(tinyAttempt, rateSnapshots);
-  const rawTinyCost = (5 * 0.2574 + 1 * 1.0287) / 1_000_000; // 0.0000023157
+  const microSnapshot: ModelRateSnapshot = {
+    snapshotId: "rate-micro",
+    provider: "openrouter",
+    model: "deepseek/deepseek-chat",
+    effectiveDate: "2026-10-22",
+    promptCostPerMillionUsd: 0.25,
+    completionCostPerMillionUsd: 1.0,
+    source: "micro_test",
+  };
+
+  const resSingleMicro = evaluateAttemptCost(singleSubMicroAttempt, [
+    microSnapshot,
+  ]);
+  const rawSingleCost = 0.00000025;
+
+  // 4 identical sub-micro attempts summed
+  const fourMicroAttempts: PhysicalAttemptFact[] = [
+    { ...singleSubMicroAttempt, attemptId: "m-1", attemptIndex: 1 },
+    { ...singleSubMicroAttempt, attemptId: "m-2", attemptIndex: 2 },
+    { ...singleSubMicroAttempt, attemptId: "m-3", attemptIndex: 3 },
+    { ...singleSubMicroAttempt, attemptId: "m-4", attemptIndex: 4 },
+  ];
+
+  const resFourMicro = evaluateTurnCost(fourMicroAttempts, [microSnapshot]);
+  const expectedFourSum = 0.000001; // exactly $0.00000100 USD
+
   check(
-    "G14.1 Micro-costs are accumulated with full double precision and formatted accurately to 6 decimals",
-    resTiny.costUsd === rawTinyCost &&
-      formatMicroUsd(resTiny.costUsd) === "0.000002",
+    "G17.1 Single sub-micro cost is strictly positive ($0.00000025), and 4 attempts aggregate to $0.000001 without premature zero-clamping",
+    resSingleMicro.costUsd === rawSingleCost &&
+      formatMicroUsd(resSingleMicro.costUsd) === "0.000000" && // presentation formats to 6 decimals
+      resFourMicro.serving.totalCostUsd !== null &&
+      Math.abs(resFourMicro.serving.totalCostUsd - expectedFourSum) < 1e-12 &&
+      formatMicroUsd(resFourMicro.serving.totalCostUsd) === "0.000001",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 15: Traffic Pool Separation (SERVING, SHADOW, TEST)
+  // GROUP 18: Disjoint Operational Pool Aggregation
   // ═══════════════════════════════════════════════════════════════════════
   const multiPoolAttempts: PhysicalAttemptFact[] = [
     {
@@ -582,7 +970,7 @@ function runSuite(): void {
 
   const resPools = evaluateTurnCost(multiPoolAttempts, rateSnapshots);
   check(
-    "G15.1 Serving, Shadow, and Test pools are aggregated independently without cost leakage",
+    "G18.1 Serving, Shadow, and Test pools are aggregated independently without cost leakage",
     resPools.serving.knownSubtotalUsd === 0.004 &&
       resPools.shadow.knownSubtotalUsd === 0.0008 &&
       resPools.test.knownSubtotalUsd === 0.0015 &&
@@ -592,33 +980,54 @@ function runSuite(): void {
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 16: Content-Free Structural Integrity
+  // GROUP 19: Content-Free Structural Integrity & Output Projection
   // ═══════════════════════════════════════════════════════════════════════
+  // Pass an event and attempt with extra forbidden runtime properties (simulating malicious or un-sanitized input)
+  const dirtyEvent = {
+    ...makeEvent({ eventId: "clean-id" }),
+    content: "raw prompt and customer chat prose",
+    text: "hello world",
+    prompt: "system prompt text",
+  } as unknown as CanonicalInboundEvent;
+
+  const dirtySessionResult = rollupCommercialSessions([dirtyEvent]);
+  const dirtySessionStr = JSON.stringify(dirtySessionResult);
+
+  const dirtyAttempt = {
+    ...testAttempt,
+    unapprovedKey: "leaked value",
+    promptText: "system instructions",
+  } as unknown as PhysicalAttemptFact;
+
+  const dirtyAttemptResult = evaluateAttemptCost(dirtyAttempt, rateSnapshots);
+  const dirtyAttemptStr = JSON.stringify(dirtyAttemptResult);
+
   const forbiddenContentKeys = [
     "content",
     "text",
     "prompt",
+    "promptText",
+    "unapprovedKey",
     "messageText",
     "responseProse",
-    "body",
   ];
-  const sessionStr = JSON.stringify(res24h);
-  const costStr = JSON.stringify(resRetryCost);
 
-  const containsForbidden = forbiddenContentKeys.some(
-    (key) => sessionStr.includes(`"${key}"`) || costStr.includes(`"${key}"`),
+  const leaksForbidden = forbiddenContentKeys.some(
+    (key) =>
+      dirtySessionStr.includes(`"${key}"`) ||
+      dirtyAttemptStr.includes(`"${key}"`),
   );
 
   check(
-    "G16.1 Generated session and cost records are strictly content-free (machine keys, numbers, and IDs only)",
-    !containsForbidden,
+    "G19.1 Output projections strip arbitrary extra runtime properties and remain strictly content-free",
+    !leaksForbidden,
   );
 
   // ═══════════════════════════════════════════════════════════════════════
-  // GROUP 17: Schema Tagging & Version Integrity
+  // GROUP 20: Schema Tagging & Version Integrity
   // ═══════════════════════════════════════════════════════════════════════
   check(
-    "G17.1 Output schemas match canonical version identifiers",
+    "G20.1 Output schemas match canonical version identifiers",
     res24h.schema === COMMERCIAL_SESSION_CONTRACT_VERSION &&
       resRetryCost.schema === COST_ENGINE_VERSION,
   );

@@ -55,7 +55,7 @@ export function buildIdentityScopeKey(scope: IdentityScope): string {
  */
 export interface CanonicalInboundEvent {
   readonly eventId: string;
-  /** Explicit canonical event instant (ISO string or Date). */
+  /** Explicit canonical event instant (ISO string with timezone offset or Date). */
   readonly canonicalTimestamp: string | Date;
   readonly senderType: SenderType;
   readonly actionType: InboundActionType;
@@ -79,6 +79,11 @@ export interface CommercialSession {
   readonly endAtUtc: string;
   readonly endMs: number;
   readonly initiatingEventId: string;
+  /** Number of qualifying substantive customer events (MESSAGE, CHOICE_CALLBACK) in this session. */
+  readonly qualifyingEventCount: number;
+  /** Total number of all accepted events in this session (initiating, assistant, start commands). */
+  readonly totalEventCount: number;
+  /** Backwards-compatible alias for totalEventCount. */
   readonly eventCount: number;
   readonly eventIds: ReadonlyArray<string>;
 }
@@ -94,6 +99,8 @@ export interface SessionRollupOptions {
 
 export interface PoolSessionMetrics {
   readonly sessionCount: number;
+  readonly qualifyingEventCount: number;
+  readonly totalEventCount: number;
   readonly eventCount: number;
 }
 
@@ -117,6 +124,10 @@ export interface PhysicalAttemptFact {
   readonly trafficPool: TrafficPool;
   readonly provider: string;
   readonly model?: string | null;
+  /** Optional attempt execution timestamp with explicit timezone offset or Date instance. */
+  readonly attemptTimestamp?: string | Date;
+  /** Optional explicit reference to an immutable rate snapshot. */
+  readonly snapshotId?: string | null;
   /**
    * True ONLY if proven that no HTTP request left the host process
    * (e.g. halted by FLOWPILOT_AI_GLOBAL_STOP, max attempt ceiling clamp, or deterministic bypass).
@@ -160,11 +171,13 @@ export interface AttemptCostResult {
   readonly provider: string;
   readonly model: string | null;
   readonly isDispatched: boolean;
-  /** Raw high-precision unrounded USD cost (micro/sub-micro precision). Null if unknown. */
+  /** Raw high-precision unrounded USD cost (IEEE 754 64-bit float). Null if unknown. */
   readonly costUsd: number | null;
   readonly provenance: AttemptCostProvenance;
   readonly completeness: AttemptCostCompleteness;
   readonly snapshotId?: string;
+  readonly rateEffectiveDate?: string;
+  readonly rateSource?: string;
   readonly uncachedInputTokens?: number | null;
   readonly cachedInputTokens?: number | null;
   readonly outputTokens?: number | null;
@@ -180,7 +193,7 @@ export interface PoolCostSummary {
   readonly locallyPreventedAttempts: number;
   /** Total cost if all dispatched attempts are known. Null if any attempt is unknown. */
   readonly totalCostUsd: number | null;
-  /** Sum of all known attempt costs in this pool. Preserved separately from total. */
+  /** Sum of all known attempt costs in this pool (unrounded float). Preserved separately from total. */
   readonly knownSubtotalUsd: number;
   readonly costCompleteness: CostCompleteness;
   /** Null when dispatchedAttempts === 0 (N/A); otherwise knownAttempts / dispatchedAttempts. */
