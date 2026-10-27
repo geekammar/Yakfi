@@ -243,6 +243,8 @@ export type OfferReply =
   | { kind: "service_invalid_index"; max: number }
   /** Welcome menu action (book or inquire). */
   | { kind: "welcome_action"; action: "book" | "inquire" }
+  /** Resume menu action (continue previous request or start new request). */
+  | { kind: "resume_action"; action: "continue" | "new_request" }
   /** Service detail action (book_service, other_services, menu). */
   | {
       kind: "service_detail_action";
@@ -353,6 +355,28 @@ export function interpretOfferReply(
         }
         if (callback.action.index === 2) {
           return { kind: "welcome_action", action: "inquire" };
+        }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+      }
+      return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+    }
+
+    if (offer.kind === "RESUME") {
+      if (callback.action.kind === "action") {
+        if (callback.action.name === "continue") {
+          return { kind: "resume_action", action: "continue" };
+        }
+        if (callback.action.name === "new_request") {
+          return { kind: "resume_action", action: "new_request" };
+        }
+        return { kind: "stale", reason: "UNKNOWN_TOKEN" };
+      }
+      if (callback.action.kind === "index") {
+        if (callback.action.index === 1) {
+          return { kind: "resume_action", action: "continue" };
+        }
+        if (callback.action.index === 2) {
+          return { kind: "resume_action", action: "new_request" };
         }
         return { kind: "stale", reason: "UNKNOWN_TOKEN" };
       }
@@ -524,6 +548,15 @@ export function interpretOfferReply(
     if (sel?.kind === "index") {
       if (sel.index === 1) return { kind: "welcome_action", action: "book" };
       if (sel.index === 2) return { kind: "welcome_action", action: "inquire" };
+    }
+    return { kind: "none" };
+  }
+
+  if (offer.kind === "RESUME") {
+    const sel = parseBookingSelection(trimmedText);
+    if (sel?.kind === "index") {
+      if (sel.index === 1) return { kind: "resume_action", action: "continue" };
+      if (sel.index === 2) return { kind: "resume_action", action: "new_request" };
     }
     return { kind: "none" };
   }

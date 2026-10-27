@@ -94,6 +94,17 @@ export function buildChannelChoices(
         ],
       };
 
+    case "RESUME":
+      return {
+        offerToken: offer.token,
+        offerId: offer.id,
+        offerKind: offer.kind,
+        groups: [
+          [{ id: "continue", label: "متابعة الطلب", role: "action" }],
+          [{ id: "new_request", label: "طلب جديد", role: "action" }],
+        ],
+      };
+
     case "SERVICE":
       return {
         offerToken: offer.token,

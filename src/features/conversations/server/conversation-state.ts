@@ -966,15 +966,25 @@ export function withPresentedOffer(
     offer.kind === "DATE" ||
     offer.kind === "PROVIDER" ||
     (offer.kind === "SERVICE" && offer.purpose === "BOOKING");
+  const isResume = offer.kind === "RESUME";
   const isWelcomeOrInquiry =
     offer.kind === "WELCOME" ||
     offer.kind === "SERVICE_DETAIL" ||
-    (offer.kind === "SERVICE" && offer.purpose === "INQUIRY");
+    (offer.kind === "SERVICE" && offer.purpose === "INQUIRY") ||
+    isResume;
 
-  // If presenting welcome or inquiry while an active booking offer is live, preserve it in suspendedOffer
+  // If presenting welcome, inquiry, or resume while an active booking offer is live, preserve it in suspendedOffer
   let suspendedOffer = state.suspendedOffer ?? null;
   if (
+    isResume &&
+    state.offer &&
+    state.offer.kind !== "RESUME" &&
+    state.offer.status === "ACTIVE"
+  ) {
+    suspendedOffer = state.offer;
+  } else if (
     isWelcomeOrInquiry &&
+    !isResume &&
     state.offer &&
     (state.offer.kind === "SLOT" ||
       state.offer.kind === "DATE" ||
@@ -1087,6 +1097,78 @@ export function liveOffer(
   now: Date,
 ): BookingOffer | null {
   return isOfferLive(state.offer, now) ? state.offer : null;
+}
+
+/**
+ * Determines whether a resumable draft booking task exists in conversation state.
+ * Returns true if an active booking task, pending/suspended booking offer,
+ * or customer-selected service/facts exist and the task is not yet completed.
+ */
+export function hasResumableDraftTask(
+  state: ConversationState | null | undefined,
+): boolean {
+  if (!state) return false;
+  if (state.bookingStage === "COMPLETED" && !state.activeTask) {
+    return false;
+  }
+  if (state.offer?.kind === "RESUME") {
+    return true;
+  }
+  if (state.activeTask?.kind === "BOOKING") {
+    return true;
+  }
+  const offerKind = state.offer?.kind;
+  if (
+    offerKind === "SLOT" ||
+    offerKind === "DATE" ||
+    offerKind === "PROVIDER" ||
+    (offerKind === "SERVICE" && state.offer?.purpose === "BOOKING")
+  ) {
+    return true;
+  }
+  const suspendedKind = state.suspendedOffer?.kind;
+  if (
+    suspendedKind === "SLOT" ||
+    suspendedKind === "DATE" ||
+    suspendedKind === "PROVIDER" ||
+    (suspendedKind === "SERVICE" && state.suspendedOffer?.purpose === "BOOKING")
+  ) {
+    return true;
+  }
+  if (state.serviceId || state.selectedService || state.knownFacts.service) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Clears booking draft facts, pending clarification, active/suspended offers,
+ * and compatibility mirrors consistently.
+ * Preserves confirmed appointments (completedTask) and customer identity (customerName).
+ */
+export function clearBookingDraft(state: ConversationState): ConversationState {
+  return {
+    ...state,
+    currentGoal: null,
+    activeTask: null,
+    bookingStage: "NOT_APPLICABLE",
+    selectedService: null,
+    selectedDate: null,
+    dateRange: null,
+    selectedTimePref: null,
+    providerPreference: null,
+    serviceId: null,
+    serviceSource: null,
+    missingFacts: [],
+    lastClarification: null,
+    pendingGoals: [],
+    pendingOffer: null,
+    suspendedOffer: null,
+    offer: state.offer ? { ...state.offer, status: "INVALIDATED" } : null,
+    knownFacts: state.knownFacts.customerName
+      ? { customerName: state.knownFacts.customerName }
+      : {},
+  };
 }
 
 // ─── Durable envelope (CONV-CORE-01) ─────────────────────────────────────────

@@ -1,0 +1,946 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * FlowPilot — Explicit Greeting Resume-or-New Flow Verification Suite
+ *
+ * Deterministic offline verification of:
+ *   Test A: Fresh conversation greeting -> normal welcome choices (1️⃣ حجز موعد, 2️⃣ استفسار عن خدمة).
+ *   Test B: Active DATE request greeting -> asks whether to continue or start new request (متابعة الطلب / طلب جديد).
+ *   Test C: Active SLOT request greeting -> asks whether to continue or start new request; does not attach old slots.
+ *   Test D: Continue -> recovers saved request scope, revalidates service/provider/date/availability before presenting fresh choices.
+ *   Test E: Expired offer -> cannot be replayed unchanged; revalidates dates and availability.
+ *   Test F: New -> booking draft and dependent offer mirrors cleared consistently; starts welcome flow.
+ *   Test G: Confirmed appointment/history survives New -> completedTask and customer identity preserved.
+ *   Test H: Repeated greeting -> stable resume behavior; no nested menus, no duplicate draft tasks, draft preserved.
+ *   Test I: Old callbacks after New -> rejected as stale unknown token.
+ *   Test J: Unrelated generic reply -> does not automatically attach stale booking offer buttons.
+ *   Test K: Intentional answer-and-continue remains functional.
+ *   Test L: Staff-owned / NEED_HUMAN protections remain intact (zero assistant intervention).
+ *   Test M: State commit failure -> no unpersisted actionable buttons presented.
+ *   Test N: Greetings, Continue, and New create zero appointments.
+ *
+ * Controlled semantic proposals are used for engine tests to prove deterministic state/offer
+ * orchestration (these do not prove live model language understanding).
+ *
+ * Usage:
+ *   pnpm check:greeting-resume-flow
+ */
+
+import "./setup-test-env";
+
+import {
+  PLAYGROUND_IDS,
+  createPlaygroundHarness,
+} from "../src/features/conversations/playground/harness";
+import type { AiResponse } from "../src/features/conversations/server/ai-contract";
+import {
+  buildDateOffer,
+  buildResumeOffer,
+  buildSlotOffer,
+  buildWelcomeOffer,
+  isOfferLive,
+} from "../src/features/conversations/server/booking-offer";
+import {
+  buildChannelChoices,
+  offerCallbackData,
+} from "../src/features/conversations/server/channel-choice";
+import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+import {
+  clearBookingDraft,
+  emptyConversationState,
+  hasResumableDraftTask,
+  withPresentedOffer,
+  type ConversationState,
+} from "../src/features/conversations/server/conversation-state";
+
+let totalChecks = 0;
+let passedChecks = 0;
+const failures: string[] = [];
+
+function check(title: string, passed: unknown, extraInfo?: string): void {
+  totalChecks++;
+  if (Boolean(passed)) {
+    passedChecks++;
+    console.log(`✔ ${title}`);
+  } else {
+    failures.push(title);
+    console.error(`❌ ${title}${extraInfo ? ` -> ${extraInfo}` : ""}`);
+  }
+}
+
+async function loadDurableState(harness: any): Promise<ConversationState | null> {
+  const loaded = await harness.stateStore.load(
+    harness.business.id,
+    harness.conversation.id,
+  );
+  return (loaded?.state as ConversationState) ?? null;
+}
+
+function mockAiGreeting(): AiResponse {
+  return {
+    intent: "GREETING",
+    action: "reply",
+    content: "أهلاً بك! يسعدنا مساعدتك.",
+    summary: null,
+    handoffReason: null,
+    safetyAssessment: "safe",
+    extraction: {
+      service: null,
+      date: null,
+      provider: null,
+      timePreference: null,
+    },
+    goals: [
+      {
+        kind: "CONVERSATION_CONTROL",
+        intent: "GREETING",
+        requiredKnowledge: "NONE",
+      },
+    ],
+  };
+}
+
+function mockAiFaq(): AiResponse {
+  return {
+    intent: "FAQ",
+    action: "reply",
+    content: "نحن متواجدون في شارع المعادي، القاهرة.",
+    summary: "استفسار عن الموقع",
+    handoffReason: null,
+    safetyAssessment: "safe",
+    extraction: {
+      service: null,
+      date: null,
+      provider: null,
+      timePreference: null,
+    },
+    goals: [
+      {
+        kind: "KNOWLEDGE",
+        intent: "FAQ",
+        requiredKnowledge: "FAQ",
+      },
+    ],
+  };
+}
+
+async function run(): Promise<void> {
+  console.log("── SUITE: Explicit Greeting Resume-or-New Flow ──\n");
+
+  const baseNow = new Date("2026-10-28T10:00:00.000Z");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test A: Fresh conversation greeting -> normal welcome choices
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("── Test A: Fresh conversation greeting ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const res = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    check("A1. Response succeeded with AI_REPLY", res.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("A2. Choice presentation attached", sent?.choices !== undefined);
+    check("A3. Offer kind is WELCOME", sent?.choices?.offerKind === "WELCOME");
+    check(
+      "A4. Options are book and inquire",
+      sent?.choices?.groups?.[0]?.[0]?.id === "book" &&
+        sent?.choices?.groups?.[1]?.[0]?.id === "inquire",
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test B: Active DATE request greeting -> resume/new question
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test B: Active DATE request greeting ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    // Seed conversation state with an active DATE offer
+    const dateOffer = buildDateOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_date_1",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        providerId: null,
+        dates: [
+          { date: "2026-10-29", label: "الخميس 29 أكتوبر" },
+          { date: "2026-10-30", label: "الجمعة 30 أكتوبر" },
+        ],
+      },
+      baseNow,
+    );
+    if (!dateOffer) throw new Error("Failed to build test dateOffer");
+
+    const stateWithDate = withPresentedOffer(emptyConversationState(), dateOffer);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithDate,
+    );
+
+    check(
+      "B0. hasResumableDraftTask is true for active DATE offer",
+      hasResumableDraftTask(stateWithDate),
+    );
+
+    const res = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "السلام عليكم",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    check("B1. Greeting on active DATE request returns AI_REPLY", res.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("B2. Offer kind is RESUME", sent?.choices?.offerKind === "RESUME");
+    check(
+      "B3. Actions are 'continue' (متابعة الطلب) and 'new_request' (طلب جديد)",
+      sent?.choices?.groups?.[0]?.[0]?.id === "continue" &&
+        sent?.choices?.groups?.[1]?.[0]?.id === "new_request",
+    );
+    check(
+      "B4. Copy explicitly asks to continue previous request or start new",
+      sent?.body?.includes("متابعة") && sent?.body?.includes("جديد"),
+    );
+
+    // Verify draft was preserved in suspendedOffer
+    const savedState = await loadDurableState(harness);
+    check(
+      "B5. Previous date offer preserved in suspendedOffer",
+      savedState?.suspendedOffer?.kind === "DATE",
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test C: Active SLOT request greeting -> resume/new question, no old slots
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test C: Active SLOT request greeting ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_1",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T11:00",
+            endAt: "2026-10-29T11:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+    if (!slotOffer) throw new Error("Failed to build test slotOffer");
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    const res = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلاً",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    check("C1. Greeting on active SLOT request returns AI_REPLY", res.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("C2. Choices kind is RESUME (not SLOT)", sent?.choices?.offerKind === "RESUME");
+    check(
+      "C3. Buttons are continue/new_request (no old slot buttons)",
+      sent?.choices?.groups?.[0]?.[0]?.id === "continue" &&
+        sent?.choices?.groups?.[1]?.[0]?.id === "new_request",
+    );
+    check(
+      "C4. Old slots are NOT attached to outgoing choices",
+      !JSON.stringify(sent?.choices?.groups ?? []).includes("10:00"),
+    );
+
+    const savedState = await loadDurableState(harness);
+    check(
+      "C5. Previous slot offer suspended safely",
+      savedState?.suspendedOffer?.kind === "SLOT",
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test D: Continue -> correct saved scope and revalidated choices
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test D: Continue -> revalidated choices ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    // 1. Greet to get RESUME offer
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_d",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. حسام",
+            startAt: "2026-10-29T14:00",
+            endAt: "2026-10-29T14:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    // Greet turn
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const resumeState = await loadDurableState(harness);
+    const resumeToken = resumeState?.offer?.token;
+    if (!resumeToken) throw new Error("Resume offer token missing");
+
+    // 2. Click "متابعة الطلب" via callback
+    const continueCallback = `fp:${resumeToken}:continue`;
+    const continueRes = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: continueCallback,
+      receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
+    });
+
+    check("D1. Continue action returns AI_REPLY", continueRes.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("D2. Fresh choices presented (SLOT or DATE)", sent?.choices !== undefined);
+    check(
+      "D3. Presented choices correspond to saved service (كشف جلدية)",
+      sent?.body?.includes("جلدية") || sent?.choices?.offerKind === "SLOT" || sent?.choices?.offerKind === "DATE",
+    );
+    check(
+      "D4. Offer has fresh token (not stale old token)",
+      sent?.choices?.offerToken !== resumeToken && sent?.choices?.offerToken !== slotOffer?.token,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test E: Expired offer -> cannot be replayed unchanged
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test E: Expired offer -> cannot be replayed unchanged ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    // Past date (yesterday)
+    const yesterdayDate = "2026-10-27";
+    const expiredSlotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_expired",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: yesterdayDate,
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-27T10:00",
+            endAt: "2026-10-27T10:30",
+          },
+        ],
+      },
+      new Date("2026-10-27T08:00:00Z"),
+    );
+
+    const stateWithExpired = withPresentedOffer(emptyConversationState(), expiredSlotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithExpired,
+    );
+
+    // Customer greets
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "السلام عليكم",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const resumeState = await loadDurableState(harness);
+    const resumeToken = resumeState?.offer?.token;
+    if (!resumeToken) throw new Error("Resume offer token missing");
+
+    // Click continue
+    const continueCallback = `fp:${resumeToken}:continue`;
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: continueCallback,
+      receivedAt: new Date(baseNow.getTime() + 10000).toISOString(),
+    });
+
+    const sent = harness.lastSentPayload();
+    check(
+      "E1. Expired/past slot offer is NOT replayed unchanged (presents DATE choices instead)",
+      sent?.choices?.offerKind === "DATE",
+    );
+    check(
+      "E2. Expired past date (2026-10-27) is not offered as a valid slot choice",
+      !JSON.stringify(sent?.choices?.groups ?? []).includes("2026-10-27T10:00"),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test F: New -> draft and dependent offer mirrors cleared consistently
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test F: New request clearing ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_f",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    // Greet turn
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const resumeState = await loadDurableState(harness);
+    const resumeToken = resumeState?.offer?.token;
+    if (!resumeToken) throw new Error("Resume offer token missing");
+
+    // Click "طلب جديد"
+    const newCallback = `fp:${resumeToken}:new_request`;
+    const newRes = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: newCallback,
+      receivedAt: new Date(baseNow.getTime() + 5000).toISOString(),
+    });
+
+    check("F1. New request returns AI_REPLY", newRes.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("F2. Welcome choices presented after New", sent?.choices?.offerKind === "WELCOME");
+
+    const savedState = await loadDurableState(harness);
+    check("F3. Active draft task cleared (null)", savedState?.activeTask === null);
+    check("F4. Selected service cleared (null)", savedState?.selectedService === null);
+    check("F5. Selected date cleared (null)", savedState?.selectedDate === null);
+    check("F6. Suspended offer cleared (null)", savedState?.suspendedOffer === null);
+    check("F7. Booking stage reset to NOT_APPLICABLE", savedState?.bookingStage === "NOT_APPLICABLE");
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test G: Confirmed appointment/history survives New
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test G: Confirmed appointment & identity survive New ──");
+  {
+    const stateWithCompleted: ConversationState = {
+      ...emptyConversationState(),
+      knownFacts: {
+        customerName: "أحمد محمود",
+        service: "كشف جلدية",
+        date: "2026-10-29",
+      },
+      selectedService: "كشف جلدية",
+      selectedDate: "2026-10-29",
+      activeTask: { kind: "BOOKING", stage: "AVAILABILITY_RESOLVED" },
+      completedTask: {
+        kind: "BOOKING",
+        appointmentId: "apt_existing_123",
+        serviceId: "srv_1",
+        providerId: "prv_1",
+        date: "2026-10-20",
+        completedAt: "2026-10-20T12:00:00Z",
+      },
+    };
+
+    const cleared = clearBookingDraft(stateWithCompleted);
+    check(
+      "G1. Confirmed appointment (completedTask) is preserved after clearBookingDraft",
+      cleared.completedTask?.appointmentId === "apt_existing_123",
+    );
+    check(
+      "G2. Customer identity (customerName) is preserved after clearBookingDraft",
+      cleared.knownFacts.customerName === "أحمد محمود",
+    );
+    check("G3. Draft service is cleared", cleared.selectedService === null && cleared.knownFacts.service === undefined);
+    check("G4. Draft date is cleared", cleared.selectedDate === null && cleared.knownFacts.date === undefined);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test H: Repeated greeting -> stable resume behavior
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test H: Repeated greeting stability ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_h",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    // Greeting 1
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const state1 = await loadDurableState(harness);
+    check("H1. First greeting presents RESUME offer", state1?.offer?.kind === "RESUME");
+    check("H2. Draft preserved in suspendedOffer", state1?.suspendedOffer?.kind === "SLOT");
+
+    // Greeting 2 (immediately repeated)
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "السلام عليكم",
+      receivedAt: new Date(baseNow.getTime() + 2000).toISOString(),
+    });
+
+    const state2 = await loadDurableState(harness);
+    check("H3. Second greeting also presents RESUME offer (no crash, no nest)", state2?.offer?.kind === "RESUME");
+    check(
+      "H4. Original slot offer is still intact in suspendedOffer (not overwritten by RESUME)",
+      state2?.suspendedOffer?.kind === "SLOT",
+    );
+    check(
+      "H5. Still hasResumableDraftTask",
+      hasResumableDraftTask(state2),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test I: Old callbacks after New -> rejected
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test I: Old callbacks after New rejected ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_i",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+    const oldSlotToken = slotOffer!.token;
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    // Greet turn
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const resumeState = await loadDurableState(harness);
+    const resumeToken = resumeState?.offer?.token;
+
+    // Start New request
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: `fp:${resumeToken}:new_request`,
+      receivedAt: new Date(baseNow.getTime() + 4000).toISOString(),
+    });
+
+    // Now try clicking the old slot button from turn 0
+    const staleCallback = `fp:${oldSlotToken}:1`;
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: staleCallback,
+      receivedAt: new Date(baseNow.getTime() + 8000).toISOString(),
+    });
+
+    const sent = harness.lastSentPayload();
+    check(
+      "I1. Old callback after New request is rejected as stale (no booking created)",
+      sent?.body?.includes("انتهت صلاحية") || sent?.body?.includes("استخدم الخيارات الحالية"),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test J: Unrelated generic reply -> no automatic stale booking buttons
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test J: Unrelated generic reply does not attach old buttons ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiFaq(),
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_j",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    // Customer asks general question (FAQ)
+    const res = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أين موقعكم؟",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    check("J1. FAQ turn answers normally", res.assistantAction === "AI_REPLY");
+    const sent = harness.lastSentPayload();
+    check("J2. FAQ answer text matches", sent?.body?.includes("المعادي"));
+    check("J3. Choices are NOT attached to unrelated FAQ reply", sent?.choices === undefined);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test K: Intentional answer-and-continue remains functional
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test K: Intentional answer-and-continue preserves choices ──");
+  {
+    const answerAndContinueAi: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "سعر الكشف 300 جنيه.",
+      summary: "سؤال عن السعر مع رغبة في استكمال الحجز",
+      handoffReason: null,
+      safetyAssessment: "safe",
+      extraction: {
+        service: "كشف جلدية",
+        date: null,
+        provider: null,
+        timePreference: null,
+      },
+      goals: [
+        {
+          kind: "KNOWLEDGE",
+          intent: "FAQ",
+          requiredKnowledge: "FAQ",
+        },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          requiredKnowledge: "NONE",
+        },
+      ],
+    };
+
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: answerAndContinueAi,
+    });
+
+    const slotOffer = buildSlotOffer(
+      { businessId: harness.business.id, conversationId: harness.conversation.id },
+      "off_slot_k",
+      {
+        serviceId: "srv_1",
+        serviceName: "كشف جلدية",
+        date: "2026-10-29",
+        options: [
+          {
+            providerId: "prv_1",
+            displayName: "د. سارة",
+            startAt: "2026-10-29T10:00",
+            endAt: "2026-10-29T10:30",
+          },
+        ],
+      },
+      baseNow,
+    );
+
+    const stateWithSlot = withPresentedOffer(emptyConversationState(), slotOffer!);
+    await harness.stateStore.save(
+      harness.business.id,
+      harness.conversation.id,
+      null,
+      stateWithSlot,
+    );
+
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "الكشف بكام وممكن أكمل الحجز؟",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const sent = harness.lastSentPayload();
+    check("K1. Answer-and-continue content delivered", sent?.body?.includes("300 جنيه"));
+    check("K2. Booking choices preserved when answerAndContinue is active", sent?.choices !== undefined);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test L: Staff-owned / NEED_HUMAN protections remain intact
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test L: Staff-owned / NEED_HUMAN protections intact ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    // Mark conversation NEED_HUMAN
+    await harness.conversationRepo.update(harness.conversation.id, {
+      status: "NEED_HUMAN",
+    });
+
+    const res = await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    check("L1. Inbound message is DEFERRED_TO_STAFF", res.assistantAction === "DEFERRED_TO_STAFF");
+    check("L2. Status remains NEED_HUMAN", res.conversationStatus === "NEED_HUMAN");
+    check("L3. Zero assistant messages delivered to transport", harness.lastSentPayload() === null);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test M: State commit failure -> no unpersisted actionable buttons
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test M: State commit failure -> no unpersisted buttons ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    // Force save failure by making stateStore.save fail
+    harness.stateStore.save = async () => ({ status: "conflict" });
+
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    const sent = harness.lastSentPayload();
+    check("M1. On state commit conflict, choices are undefined (not sent)", sent?.choices === undefined);
+    check(
+      "M2. Emits safe temporary conflict message",
+      sent?.body?.includes("تعارض مؤقت") ?? false,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test N: Greetings, Continue, and New create zero appointments
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log("\n── Test N: Zero appointments created ──");
+  {
+    const harness = createPlaygroundHarness({
+      now: baseNow,
+      aiResponse: mockAiGreeting(),
+    });
+
+    const initialAppointmentCount = harness.appointmentRepo.createdAppointments.length;
+
+    // Greeting 1
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "أهلا",
+      receivedAt: baseNow.toISOString(),
+    });
+
+    // Telegram /start
+    await receiveInboundMessage(harness.deps, {
+      from: "+201000000001",
+      to: harness.business.whatsappNumber ?? "+201000000000",
+      text: "/start",
+      receivedAt: new Date(baseNow.getTime() + 1000).toISOString(),
+    });
+
+    const state = await loadDurableState(harness);
+    const token = state?.offer?.token;
+    if (token) {
+      // Continue action
+      await receiveInboundMessage(harness.deps, {
+        from: "+201000000001",
+        to: harness.business.whatsappNumber ?? "+201000000000",
+        text: `fp:${token}:continue`,
+        receivedAt: new Date(baseNow.getTime() + 2000).toISOString(),
+      });
+
+      // New request action
+      await receiveInboundMessage(harness.deps, {
+        from: "+201000000001",
+        to: harness.business.whatsappNumber ?? "+201000000000",
+        text: `fp:${token}:new_request`,
+        receivedAt: new Date(baseNow.getTime() + 3000).toISOString(),
+      });
+    }
+
+    const finalAppointmentCount = harness.appointmentRepo.createdAppointments.length;
+    check(
+      "N1. Total appointments created across Greetings, Continue, and New is exactly 0",
+      initialAppointmentCount === 0 && finalAppointmentCount === 0,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Summary
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log(`\n══════════════════════════════════════════════`);
+  console.log(`Explicit Greeting Resume-or-New Flow Summary:`);
+  console.log(`Total Checks: ${totalChecks}`);
+  console.log(`Passed Checks: ${passedChecks}`);
+  console.log(`Failed Checks: ${failures.length}`);
+  console.log(`══════════════════════════════════════════════\n`);
+
+  if (failures.length > 0) {
+    console.error("FAILURES:\n" + failures.map((f) => `  - ${f}`).join("\n"));
+    process.exit(1);
+  }
+}
+
+run().catch((err) => {
+  console.error("Fatal error running check-greeting-resume-flow suite:", err);
+  process.exit(1);
+});
