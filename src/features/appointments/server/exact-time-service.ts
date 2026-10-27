@@ -20,8 +20,10 @@ import {
   resolveWorkingDay,
   weekdayOf,
 } from "@/features/appointments/server/availability-service";
-import type { BookingOptionsServiceDeps } from "@/features/appointments/server/booking-options-service";
-import type { RankedBookingPair } from "@/features/appointments/server/booking-options-service";
+import type {
+  BookingOptionsServiceDeps,
+  RankedBookingPair,
+} from "@/features/appointments/server/booking-options-service";
 import { resolveEligibleProviders } from "@/features/appointments/server/provider-eligibility-service";
 import { toMinutes } from "@/lib/scheduling/slot-grid";
 
@@ -244,7 +246,9 @@ export async function evaluateExactTimeAvailability(
   const seamByProvider = new Map(seams.map((s) => [s.providerId, s.userId]));
 
   const assigneeIds = [
-    ...new Set(scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId)),
+    ...new Set(
+      scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId),
+    ),
   ];
   const blockingRows = await deps.appointmentRepository.listBlockingByAssignees(
     actor.businessId,

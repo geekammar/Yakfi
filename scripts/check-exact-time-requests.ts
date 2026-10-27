@@ -8,6 +8,10 @@ import {
   rankAlternativesByTemporalDistance,
 } from "../src/features/appointments/server/exact-time-service";
 import {
+  PLAYGROUND_IDS,
+  createPlaygroundHarness,
+} from "../src/features/conversations/playground/harness";
+import {
   aiExactTimeRequestSchema,
   aiExtractionSchema,
   aiResponseSchema,
@@ -17,16 +21,12 @@ import {
 } from "../src/features/conversations/server/ai-contract";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
-  PLAYGROUND_IDS,
-  createPlaygroundHarness,
-} from "../src/features/conversations/playground/harness";
-import { reconcileTurnSemanticFacts } from "../src/features/conversations/server/semantic-facts";
-import {
   dehydrateConversationState,
   emptyConversationState,
   hydrateConversationState,
   projectConversationState,
 } from "../src/features/conversations/server/conversation-state";
+import { reconcileTurnSemanticFacts } from "../src/features/conversations/server/semantic-facts";
 
 /**
  * FlowPilot — Exact-Time Requests and Honest Availability Verification Suite
@@ -60,9 +60,9 @@ let totalChecks = 0;
 let passedChecks = 0;
 const failures: string[] = [];
 
-function check(title: string, passed: boolean, extraInfo?: string): void {
+function check(title: string, passed: unknown, extraInfo?: string): void {
   totalChecks++;
-  if (passed) {
+  if (Boolean(passed)) {
     passedChecks++;
     console.log(`✔ ${title}`);
   } else {
@@ -78,9 +78,16 @@ function mockResponse(params: {
   service?: string | null;
   date?: string | null;
   provider?: string | null;
-  exactTime?: { type: "specific"; time: string } | { type: "unresolved_period"; hour: number; minute?: number } | null;
+  exactTime?:
+    | { type: "specific"; time: string }
+    | { type: "unresolved_period"; hour: number; minute?: number }
+    | null;
   timePreference?: "morning" | "afternoon" | "evening" | null;
-  factUpdates?: Array<{ key: string; operation?: "set" | "remove"; value?: string }>;
+  factUpdates?: Array<{
+    key: string;
+    operation?: "set" | "remove";
+    value?: string;
+  }>;
   handoffReason?: any;
 }): AiResponse {
   return {
@@ -110,9 +117,15 @@ function mockResponse(params: {
 }
 
 async function main(): Promise<void> {
-  console.log("=================================================================");
-  console.log("  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T20)");
-  console.log("=================================================================\n");
+  console.log(
+    "=================================================================",
+  );
+  console.log(
+    "  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T20)",
+  );
+  console.log(
+    "=================================================================\n",
+  );
 
   const standardWorkingHours = {
     sat: { open: "09:00", close: "21:00", closed: false },
@@ -154,11 +167,24 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T01: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T01: Answers directly that 5:00 PM is available", lastReply?.body?.includes("5:00 مساءً متاح"));
-    check("T01: Presents slot option for 5:00 PM", lastReply?.body?.includes("1️⃣ الساعة 5:00 مساءً"));
-    check("T01: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T01: Inbound succeeded and active",
+      res.ok && (res as any).conversationStatus === "AI_ACTIVE",
+    );
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T01: Answers directly that 5:00 PM is available",
+      lastReply?.body?.includes("5:00 مساءً متاح"),
+    );
+    check(
+      "T01: Presents slot option for 5:00 PM",
+      lastReply?.body?.includes("1️⃣ الساعة 5:00 مساءً"),
+    );
+    check(
+      "T01: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -206,12 +232,28 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T02: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T02: Answers directly that 1:00 PM is unavailable", lastReply?.body?.includes("1:00 مساءً غير متاح"));
-    check("T02: Explains that slot is booked", lastReply?.body?.includes("محجوز مسبقاً"));
-    check("T02: Offers nearby alternatives", lastReply?.body?.includes("أقرب المواعيد المتاحة"));
-    check("T02: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T02: Inbound succeeded and active",
+      res.ok && (res as any).conversationStatus === "AI_ACTIVE",
+    );
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T02: Answers directly that 1:00 PM is unavailable",
+      lastReply?.body?.includes("1:00 مساءً غير متاح"),
+    );
+    check(
+      "T02: Explains that slot is booked",
+      lastReply?.body?.includes("محجوز مسبقاً"),
+    );
+    check(
+      "T02: Offers nearby alternatives",
+      lastReply?.body?.includes("أقرب المواعيد المتاحة"),
+    );
+    check(
+      "T02: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -244,10 +286,20 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T03: Inbound succeeded", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T03: Discovers off-page slot truthfully without inferring from top-3", lastReply?.body?.includes("7:00 مساءً متاح"));
-    check("T03: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T03: Inbound succeeded",
+      res.ok && (res as any).conversationStatus === "AI_ACTIVE",
+    );
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T03: Discovers off-page slot truthfully without inferring from top-3",
+      lastReply?.body?.includes("7:00 مساءً متاح"),
+    );
+    check(
+      "T03: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -281,10 +333,22 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T04: Inbound succeeded and active", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T04: Asks ONE AM/PM clarifying question with exact minutes preserved", lastReply?.body?.includes("هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟"));
-    check("T04: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T04: Inbound succeeded and active",
+      res.ok && (res as any).conversationStatus === "AI_ACTIVE",
+    );
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T04: Asks ONE AM/PM clarifying question with exact minutes preserved",
+      lastReply?.body?.includes(
+        "هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟",
+      ),
+    );
+    check(
+      "T04: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -339,10 +403,20 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:01:00Z",
     });
 
-    check("T05: Clarification turn succeeded", res2.ok && (res2 as any).conversationStatus === "AI_ACTIVE");
-    const reply2 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T05: Resolved hour 3 + minute 30 + afternoon to 15:30 (3:30 مساءً) without minute truncation", reply2?.body?.includes("3:30 مساءً متاح"));
-    check("T05: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T05: Clarification turn succeeded",
+      res2.ok && (res2 as any).conversationStatus === "AI_ACTIVE",
+    );
+    const reply2 =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T05: Resolved hour 3 + minute 30 + afternoon to 15:30 (3:30 مساءً) without minute truncation",
+      reply2?.body?.includes("3:30 مساءً متاح"),
+    );
+    check(
+      "T05: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -398,8 +472,12 @@ async function main(): Promise<void> {
     });
 
     check("T05b: 12 + afternoon resolves to 12:00 (12:00 ظهراً)", res2.ok);
-    const reply2 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T05b: Answers 12:00 ظهراً directly", reply2?.body?.includes("12:00 ظهراً متاح"));
+    const reply2 =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T05b: Answers 12:00 ظهراً directly",
+      reply2?.body?.includes("12:00 ظهراً متاح"),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -434,10 +512,17 @@ async function main(): Promise<void> {
     });
 
     check("T05c: Inbound succeeded", res.ok);
-    const reply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    const reply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
     // Must NOT guess hour 3 or claim exact time 3:00 was requested
-    check("T05c: Does not guess hour 3 or invent exact-time request", !reply?.body?.includes("الساعة 3:00"));
-    check("T05c: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T05c: Does not guess hour 3 or invent exact-time request",
+      !reply?.body?.includes("الساعة 3:00"),
+    );
+    check(
+      "T05c: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -453,7 +538,11 @@ async function main(): Promise<void> {
     harness.deps.ai = {
       providerName: "mock-ai",
       async respond(req: AiRequest): Promise<AiResponse> {
-        const time = req.message.includes("5") ? "17:00" : req.message.includes("6") ? "18:00" : "19:00";
+        const time = req.message.includes("5")
+          ? "17:00"
+          : req.message.includes("6")
+            ? "18:00"
+            : "19:00";
         return mockResponse({
           intent: "AVAILABILITY",
           content: "فحص",
@@ -483,7 +572,10 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:02:00Z",
     });
 
-    check("T06: Zero appointments created across all availability questions", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T06: Zero appointments created across all availability questions",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -517,15 +609,24 @@ async function main(): Promise<void> {
     });
 
     check("T07: Inbound succeeded", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T07: Presents offer option 1 for confirmation", lastReply?.body?.includes("1️⃣ الساعة 5:00 مساءً"));
-    check("T07: Never silently creates appointment before confirmation", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T07: Presents offer option 1 for confirmation",
+      lastReply?.body?.includes("1️⃣ الساعة 5:00 مساءً"),
+    );
+    check(
+      "T07: Never silently creates appointment before confirmation",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // T08: Unavailable requested time NEVER silently books an alternative
   // ─────────────────────────────────────────────────────────────────────────────
-  console.log("--- T08: Unavailable requested time NEVER silently books alternative ---");
+  console.log(
+    "--- T08: Unavailable requested time NEVER silently books alternative ---",
+  );
   {
     const harness = createPlaygroundHarness({
       businessConfig: { workingHours: standardWorkingHours },
@@ -533,12 +634,12 @@ async function main(): Promise<void> {
       initialAppointments: [
         {
           id: "appt-conflict-1400",
-          businessId: PLAYGROUND_IDS.businessId,
-          branchId: PLAYGROUND_IDS.branchId,
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other",
-          serviceId: PLAYGROUND_IDS.serviceId,
-          providerId: PLAYGROUND_IDS.providerId,
-          assignedUserId: PLAYGROUND_IDS.providerUserId,
+          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+          providerId: PLAYGROUND_IDS.PROV_1,
+          assignedUserId: PLAYGROUND_IDS.USER_P1,
           date: new Date("2026-10-21T00:00:00Z"),
           startTime: "14:00",
           endTime: "14:30",
@@ -567,8 +668,14 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T08: Inbound handled", res.ok && (res as any).conversationStatus === "AI_ACTIVE");
-    check("T08: Alternatives presented without silent booking", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T08: Inbound handled",
+      res.ok && (res as any).conversationStatus === "AI_ACTIVE",
+    );
+    check(
+      "T08: Alternatives presented without silent booking",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -577,17 +684,47 @@ async function main(): Promise<void> {
   console.log("--- T09: Nearby alternatives ranking ---");
   {
     const slots = [
-      { providerOrder: 0, providerId: "p1", displayName: "د. أحمد", startTime: "13:00", endTime: "13:30" },
-      { providerOrder: 0, providerId: "p1", displayName: "د. أحمد", startTime: "13:30", endTime: "14:00" },
-      { providerOrder: 0, providerId: "p1", displayName: "د. أحمد", startTime: "14:30", endTime: "15:00" },
-      { providerOrder: 0, providerId: "p1", displayName: "د. أحمد", startTime: "15:00", endTime: "15:30" },
+      {
+        providerOrder: 0,
+        providerId: "p1",
+        displayName: "د. أحمد",
+        startTime: "13:00",
+        endTime: "13:30",
+      },
+      {
+        providerOrder: 0,
+        providerId: "p1",
+        displayName: "د. أحمد",
+        startTime: "13:30",
+        endTime: "14:00",
+      },
+      {
+        providerOrder: 0,
+        providerId: "p1",
+        displayName: "د. أحمد",
+        startTime: "14:30",
+        endTime: "15:00",
+      },
+      {
+        providerOrder: 0,
+        providerId: "p1",
+        displayName: "د. أحمد",
+        startTime: "15:00",
+        endTime: "15:30",
+      },
     ];
     // Target 14:00: 13:30 and 14:30 are both distance 30. Earlier time (13:30) must win tie.
     const alts = rankAlternativesByTemporalDistance(slots, "14:00", 3);
     check("T09: Exactly 3 alternatives returned", alts.length === 3);
-    check("T09: Rank 1 is 13:30 (closer/earlier tie breaker)", alts[0]?.startTime === "13:30");
+    check(
+      "T09: Rank 1 is 13:30 (closer/earlier tie breaker)",
+      alts[0]?.startTime === "13:30",
+    );
     check("T09: Rank 2 is 14:30", alts[1]?.startTime === "14:30");
-    check("T09: Rank 3 is 13:00 (distance 60, earlier than 15:00)", alts[2]?.startTime === "13:00");
+    check(
+      "T09: Rank 3 is 13:00 (distance 60, earlier than 15:00)",
+      alts[2]?.startTime === "13:00",
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -601,12 +738,12 @@ async function main(): Promise<void> {
       initialAppointments: [
         {
           id: "appt-conflict-dr1",
-          businessId: PLAYGROUND_IDS.businessId,
-          branchId: PLAYGROUND_IDS.branchId,
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other",
-          serviceId: PLAYGROUND_IDS.serviceId,
-          providerId: PLAYGROUND_IDS.providerId,
-          assignedUserId: PLAYGROUND_IDS.providerUserId,
+          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+          providerId: PLAYGROUND_IDS.PROV_1,
+          assignedUserId: PLAYGROUND_IDS.USER_P1,
           date: new Date("2026-10-21T00:00:00Z"),
           startTime: "16:00",
           endTime: "16:30",
@@ -623,7 +760,7 @@ async function main(): Promise<void> {
           content: "فحص",
           service: "كشف أسنان",
           date: "2026-10-21",
-          provider: PLAYGROUND_IDS.providerName,
+          provider: "د. أحمد سامي",
           exactTime: { type: "specific", time: "16:00" },
         });
       },
@@ -637,9 +774,16 @@ async function main(): Promise<void> {
     });
 
     check("T10: Inbound handled", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T10: Preserves provider scope and date scope in alternatives", lastReply?.body?.includes("أقرب المواعيد المتاحة"));
-    check("T10: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T10: Preserves provider scope and date scope in alternatives",
+      lastReply?.body?.includes("أقرب المواعيد المتاحة"),
+    );
+    check(
+      "T10: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -673,10 +817,21 @@ async function main(): Promise<void> {
     });
 
     check("T11: Inbound handled", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T11: Directly states outside working hours with business hours explained", lastReply?.body?.includes("خارج أوقات العمل الرسمية") && lastReply?.body?.includes("أوقات العمل"));
-    check("T11: Offers nearest in-hours alternatives (e.g. 09:00)", lastReply?.body?.includes("9:00 صباحاً"));
-    check("T11: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T11: Directly states outside working hours with business hours explained",
+      lastReply?.body?.includes("خارج أوقات العمل الرسمية") &&
+        lastReply?.body?.includes("أوقات العمل"),
+    );
+    check(
+      "T11: Offers nearest in-hours alternatives (e.g. 09:00)",
+      lastReply?.body?.includes("9:00 صباحاً"),
+    );
+    check(
+      "T11: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -690,9 +845,11 @@ async function main(): Promise<void> {
     });
 
     // Update service duration to 60 mins
-    const origFindById = harness.deps.serviceRepository.findById;
+    const origFindById = harness.deps.serviceRepository.findById?.bind(
+      harness.deps.serviceRepository,
+    );
     harness.deps.serviceRepository.findById = async (id: string) => {
-      const s = await origFindById(id);
+      const s = origFindById ? await origFindById(id) : null;
       return s ? { ...s, durationMinutes: 60 } : null;
     };
 
@@ -717,9 +874,16 @@ async function main(): Promise<void> {
     });
 
     check("T12: Inbound handled", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T12: States service duration exceeds closing time", lastReply?.body?.includes("تتجاوز موعد إغلاق"));
-    check("T12: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T12: States service duration exceeds closing time",
+      lastReply?.body?.includes("تتجاوز موعد إغلاق"),
+    );
+    check(
+      "T12: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -728,7 +892,10 @@ async function main(): Promise<void> {
   console.log("--- T13: Non-slot grid alignment ---");
   {
     const harness = createPlaygroundHarness({
-      businessConfig: { workingHours: standardWorkingHours, slotDurationMinutes: 30 },
+      businessConfig: {
+        workingHours: standardWorkingHours,
+        slotDurationMinutes: 30,
+      },
       todayRef: "2026-10-20",
     });
 
@@ -753,11 +920,26 @@ async function main(): Promise<void> {
     });
 
     check("T13: Inbound handled", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T13: Answers 2:15 is unavailable", lastReply?.body?.includes("2:15 مساءً غير متاح"));
-    check("T13: Explains truthful slot-grid mismatch without falsely claiming booked", lastReply?.body?.includes("لا يتوافق مع فترات جدول المواعيد") && !lastReply?.body?.includes("محجوز مسبقاً"));
-    check("T13: Offers nearest aligned slots (14:00 or 14:30)", lastReply?.body?.includes("2:00 مساءً") || lastReply?.body?.includes("2:30 مساءً"));
-    check("T13: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T13: Answers 2:15 is unavailable",
+      lastReply?.body?.includes("2:15 مساءً غير متاح"),
+    );
+    check(
+      "T13: Explains truthful slot-grid mismatch without falsely claiming booked",
+      lastReply?.body?.includes("لا يتوافق مع فترات جدول المواعيد") &&
+        !lastReply?.body?.includes("محجوز مسبقاً"),
+    );
+    check(
+      "T13: Offers nearest aligned slots (14:00 or 14:30)",
+      lastReply?.body?.includes("2:00 مساءً") ||
+        lastReply?.body?.includes("2:30 مساءً"),
+    );
+    check(
+      "T13: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -766,7 +948,10 @@ async function main(): Promise<void> {
   console.log("--- T14: Past-time rule on today ---");
   {
     const harness = createPlaygroundHarness({
-      businessConfig: { workingHours: standardWorkingHours, timezone: "Africa/Cairo" },
+      businessConfig: {
+        workingHours: standardWorkingHours,
+        timezone: "Africa/Cairo",
+      },
       todayRef: "2026-10-20",
     });
 
@@ -792,9 +977,16 @@ async function main(): Promise<void> {
     });
 
     check("T14: Inbound handled", res.ok);
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T14: Directly states time has passed today", lastReply?.body?.includes("قد مضى اليوم"));
-    check("T14: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T14: Directly states time has passed today",
+      lastReply?.body?.includes("قد مضى اليوم"),
+    );
+    check(
+      "T14: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -807,24 +999,31 @@ async function main(): Promise<void> {
       {
         eligibility: {} as any,
         businessRepository: {
-          findById: async () => ({
-            id: PLAYGROUND_IDS.businessId,
-            name: "عيادة النور",
-            timezone: "Africa/Cairo",
-            slotDurationMinutes: 30,
-            workingHours: standardWorkingHours,
-          } as any),
+          findById: async () =>
+            ({
+              id: PLAYGROUND_IDS.BIZ_ID,
+              name: "عيادة النور",
+              timezone: "Africa/Cairo",
+              slotDurationMinutes: 30,
+              workingHours: standardWorkingHours,
+            }) as any,
         },
         serviceRepository: {
-          findById: async () => ({
-            id: PLAYGROUND_IDS.SERV_DENTAL,
-            name: "كشف أسنان",
-            durationMinutes: 30,
-            isActive: true,
-          } as any),
+          findById: async () =>
+            ({
+              id: PLAYGROUND_IDS.SERV_DENTAL,
+              name: "كشف أسنان",
+              durationMinutes: 30,
+              isActive: true,
+            }) as any,
         },
         providerRepository: {
-          listAssignmentSeams: async () => [{ providerId: PLAYGROUND_IDS.PROV_1, userId: PLAYGROUND_IDS.USER_P1 }],
+          listAssignmentSeams: async () => [
+            {
+              providerId: PLAYGROUND_IDS.PROV_1,
+              userId: PLAYGROUND_IDS.USER_P1,
+            },
+          ],
         },
         appointmentRepository: {
           listBlockingByAssignees: async () => [],
@@ -840,13 +1039,19 @@ async function main(): Promise<void> {
       },
     );
 
-    check("T15: Timezone awareness correctly identifies past time in Cairo", evalResult.isAvailable === false && evalResult.unavailabilityReason === "PAST_TIME");
+    check(
+      "T15: Timezone awareness correctly identifies past time in Cairo",
+      evalResult.isAvailable === false &&
+        evalResult.unavailabilityReason === "PAST_TIME",
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // T16: Numeric protocol selection distinct from "الساعة 3"
   // ─────────────────────────────────────────────────────────────────────────────
-  console.log("--- T16: Numeric protocol selection distinct from 'الساعة 3' ---");
+  console.log(
+    "--- T16: Numeric protocol selection distinct from 'الساعة 3' ---",
+  );
   {
     const harness = createPlaygroundHarness({
       businessConfig: { workingHours: standardWorkingHours },
@@ -885,8 +1090,14 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:01:00Z",
     });
 
-    check("T16: Bare numeric '2' triggers appointment booking with 0 model calls", modelCallCount === callsBeforeSelection && selectRes.ok);
-    check("T16: Appointment successfully created by numeric selection", harness.capturedAppointmentWrites.length === 1);
+    check(
+      "T16: Bare numeric '2' triggers appointment booking with 0 model calls",
+      modelCallCount === callsBeforeSelection && selectRes.ok,
+    );
+    check(
+      "T16: Appointment successfully created by numeric selection",
+      harness.capturedAppointmentWrites.length === 1,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -906,7 +1117,11 @@ async function main(): Promise<void> {
       [{ key: "exactTime", operation: "set", value: "18:00" }],
     );
 
-    check("T17: Fact update replaces previous exactTime with 18:00", rec1.normalizedExtraction.exactTime?.type === "specific" && (rec1.normalizedExtraction.exactTime as any).time === "18:00");
+    check(
+      "T17: Fact update replaces previous exactTime with 18:00",
+      rec1.normalizedExtraction.exactTime?.type === "specific" &&
+        (rec1.normalizedExtraction.exactTime as any).time === "18:00",
+    );
 
     const rec2 = reconcileTurnSemanticFacts(
       {
@@ -920,7 +1135,10 @@ async function main(): Promise<void> {
       [{ key: "exactTime", operation: "remove" }],
     );
 
-    check("T17: Fact update remove explicitly clears exactTime", rec2.normalizedExtraction.exactTime === null);
+    check(
+      "T17: Fact update remove explicitly clears exactTime",
+      rec2.normalizedExtraction.exactTime === null,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -971,7 +1189,10 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:02:00Z",
     });
 
-    check("T18: Replayed selection creates ZERO duplicate appointments", harness.capturedAppointmentWrites.length === 1);
+    check(
+      "T18: Replayed selection creates ZERO duplicate appointments",
+      harness.capturedAppointmentWrites.length === 1,
+    );
 
     // Sub-case: Invalidate active offer when customer changes exact-time request
     const harness2 = createPlaygroundHarness({
@@ -998,7 +1219,8 @@ async function main(): Promise<void> {
       text: "عايز موعد الساعة 5 مساء",
       receivedAt: "2026-10-20T10:00:00Z",
     });
-    const offerMsg1 = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
+    const offerMsg1 =
+      harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
     const choices1 = (offerMsg1 as any)?.delivery?.choices;
     const token1 = choices1?.offerToken;
 
@@ -1021,7 +1243,8 @@ async function main(): Promise<void> {
       text: "لا خليه الساعة 7 مساء",
       receivedAt: "2026-10-20T10:01:00Z",
     });
-    const offerMsg2 = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
+    const offerMsg2 =
+      harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
     const choices2 = (offerMsg2 as any)?.delivery?.choices;
     const token2 = choices2?.offerToken;
 
@@ -1033,9 +1256,16 @@ async function main(): Promise<void> {
         text: `fp:${token1}:1`,
         receivedAt: "2026-10-20T10:02:00Z",
       });
-      const staleReply = harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
-      check("T18: Old offer callback rejected as stale after exact-time change", staleReply?.body?.includes("عرضاً سابقاً لم يعد متاحاً"));
-      check("T18: Zero appointments created from stale callback", harness2.capturedAppointmentWrites.length === 0);
+      const staleReply =
+        harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
+      check(
+        "T18: Old offer callback rejected as stale after exact-time change",
+        staleReply?.body?.includes("عرضاً سابقاً لم يعد متاحاً"),
+      );
+      check(
+        "T18: Zero appointments created from stale callback",
+        harness2.capturedAppointmentWrites.length === 0,
+      );
     }
 
     if (token2) {
@@ -1046,7 +1276,10 @@ async function main(): Promise<void> {
         text: `fp:${token2}:1`,
         receivedAt: "2026-10-20T10:03:00Z",
       });
-      check("T18: New exact-time offer callback successfully booked with revalidation", harness2.capturedAppointmentWrites.length === 1);
+      check(
+        "T18: New exact-time offer callback successfully booked with revalidation",
+        harness2.capturedAppointmentWrites.length === 1,
+      );
     }
   }
 
@@ -1074,23 +1307,46 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    check("T19: Engine handles provider failure gracefully", res.ok && (res as any).conversationStatus === "NEED_HUMAN");
-    const lastReply = harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
-    check("T19: Customer receives safe temporary failure acknowledgment", lastReply?.body?.includes("واجهت صعوبة مؤقتة في الرد") || lastReply?.body?.includes("سيتواصل معك أحد أعضاء الفريق"));
-    check("T19: Zero appointments created", harness.capturedAppointmentWrites.length === 0);
+    check(
+      "T19: Engine handles provider failure gracefully",
+      res.ok && (res as any).conversationStatus === "NEED_HUMAN",
+    );
+    const lastReply =
+      harness.deliveredOutbound[harness.deliveredOutbound.length - 1];
+    check(
+      "T19: Customer receives safe temporary failure acknowledgment",
+      lastReply?.body?.includes("واجهت صعوبة مؤقتة في الرد") ||
+        lastReply?.body?.includes("سيتواصل معك أحد أعضاء الفريق"),
+    );
+    check(
+      "T19: Zero appointments created",
+      harness.capturedAppointmentWrites.length === 0,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // T20: Durable state round-trip, context projection & correlated evidence check
   // ─────────────────────────────────────────────────────────────────────────────
-  console.log("--- T20: Durable state round-trip, context projection & correlated evidence check ---");
+  console.log(
+    "--- T20: Durable state round-trip, context projection & correlated evidence check ---",
+  );
   {
     // 1. Correlated evidence analysis:
     // Historical handoff on "الساعة 3" was correlated with schema rejection of non-canonical time strings (e.g. "3 الفجر").
     // In the absence of live provider request traces, cause is classified truthfully as UNKNOWN without paid probes or secret mutations.
-    const schemaTest1 = aiExactTimeRequestSchema.safeParse({ type: "specific", time: "17:00" });
-    const schemaTest2 = aiExactTimeRequestSchema.safeParse({ type: "unresolved_period", hour: 3 });
-    const schemaTest3 = aiExactTimeRequestSchema.safeParse({ type: "unresolved_period", hour: 3, minute: 30 });
+    const schemaTest1 = aiExactTimeRequestSchema.safeParse({
+      type: "specific",
+      time: "17:00",
+    });
+    const schemaTest2 = aiExactTimeRequestSchema.safeParse({
+      type: "unresolved_period",
+      hour: 3,
+    });
+    const schemaTest3 = aiExactTimeRequestSchema.safeParse({
+      type: "unresolved_period",
+      hour: 3,
+      minute: 30,
+    });
     const extractionTest = aiExtractionSchema.safeParse({
       service: "كشف أسنان",
       provider: null,
@@ -1102,7 +1358,10 @@ async function main(): Promise<void> {
     check("T20: Specific exact-time schema validates", schemaTest1.success);
     check("T20: Unresolved period schema validates", schemaTest2.success);
     check("T20: Unresolved period with minute validates", schemaTest3.success);
-    check("T20: Bounded extraction accepts structured exact-time without crashing", extractionTest.success);
+    check(
+      "T20: Bounded extraction accepts structured exact-time without crashing",
+      extractionTest.success,
+    );
 
     // 2. Durable state dehydration and hydration round-trip
     const baseState = emptyConversationState();
@@ -1129,15 +1388,37 @@ async function main(): Promise<void> {
       conversationId: "conv_test_1",
     });
 
-    check("T20: Durable state round-trips via dehydrate -> JSON -> hydrate", hydrated !== null);
-    check("T20: Hydrated state preserves exactTime", hydrated?.knownFacts.exactTime === "17:00");
-    check("T20: Hydrated state preserves typed unresolvedTime { hour: 3, minute: 30 }", hydrated?.knownFacts.unresolvedTime?.hour === 3 && hydrated?.knownFacts.unresolvedTime?.minute === 30);
-    check("T20: Hydrated state preserves typed lastClarification unresolvedTime", (hydrated?.lastClarification as any)?.unresolvedTime?.hour === 3 && (hydrated?.lastClarification as any)?.unresolvedTime?.minute === 30);
+    check(
+      "T20: Durable state round-trips via dehydrate -> JSON -> hydrate",
+      hydrated !== null,
+    );
+    check(
+      "T20: Hydrated state preserves exactTime",
+      hydrated?.knownFacts.exactTime === "17:00",
+    );
+    check(
+      "T20: Hydrated state preserves typed unresolvedTime { hour: 3, minute: 30 }",
+      hydrated?.knownFacts.unresolvedTime?.hour === 3 &&
+        hydrated?.knownFacts.unresolvedTime?.minute === 30,
+    );
+    check(
+      "T20: Hydrated state preserves typed lastClarification unresolvedTime",
+      (hydrated?.lastClarification as any)?.unresolvedTime?.hour === 3 &&
+        (hydrated?.lastClarification as any)?.unresolvedTime?.minute === 30,
+    );
 
     // 3. AI context projection
     const projection = projectConversationState(hydrated);
-    check("T20: Context projection projects knownExactTime", projection?.knownExactTime === "17:00");
-    check("T20: Context projection projects pendingClarification unresolvedTime", (projection?.pendingClarification as any)?.unresolvedTime?.hour === 3 && (projection?.pendingClarification as any)?.unresolvedTime?.minute === 30);
+    check(
+      "T20: Context projection projects knownExactTime",
+      projection?.knownExactTime === "17:00",
+    );
+    check(
+      "T20: Context projection projects pendingClarification unresolvedTime",
+      (projection?.pendingClarification as any)?.unresolvedTime?.hour === 3 &&
+        (projection?.pendingClarification as any)?.unresolvedTime?.minute ===
+          30,
+    );
 
     // 4. Backward compatibility: hydrate legacy state JSON without exactTime / unresolvedTime
     const legacyRaw = {
@@ -1163,13 +1444,31 @@ async function main(): Promise<void> {
       businessId: PLAYGROUND_IDS.BIZ_ID,
       conversationId: "conv_test_1",
     });
-    check("T20: Legacy persisted state without exactTime hydrates safely without error", legacyHydrated !== null && legacyHydrated.knownFacts.exactTime === undefined);
+    check(
+      "T20: Legacy persisted state without exactTime hydrates safely without error",
+      legacyHydrated !== null &&
+        legacyHydrated.knownFacts.exactTime === undefined,
+    );
 
     // 5. Unit checks for formatting, default extraction, and response schema
-    check("T20: formatTimeArabic formats 17:00 as 5:00 مساءً", formatTimeArabic("17:00") === "5:00 مساءً");
-    check("T20: formatTimeArabic formats 00:00 as 12:00 منتصف الليل", formatTimeArabic("00:00") === "12:00 منتصف الليل");
-    check("T20: emptyAiExtraction has null exactTime", emptyAiExtraction.exactTime === null);
-    check("T20: aiResponseSchema validates mock response", aiResponseSchema.safeParse(mockResponse({ intent: "FAQ", content: "test" })).success);
+    check(
+      "T20: formatTimeArabic formats 17:00 as 5:00 مساءً",
+      formatTimeArabic("17:00") === "5:00 مساءً",
+    );
+    check(
+      "T20: formatTimeArabic formats 00:00 as 12:00 منتصف الليل",
+      formatTimeArabic("00:00") === "12:00 منتصف الليل",
+    );
+    check(
+      "T20: emptyAiExtraction has null exactTime",
+      emptyAiExtraction.exactTime === null,
+    );
+    check(
+      "T20: aiResponseSchema validates mock response",
+      aiResponseSchema.safeParse(
+        mockResponse({ intent: "FAQ", content: "test" }),
+      ).success,
+    );
     const mockEvalResult = {
       isAvailable: true,
       matchedSlot: {
@@ -1190,10 +1489,15 @@ async function main(): Promise<void> {
       requestedTime: "17:00",
       intent: "AVAILABILITY",
     });
-    check("T20: composeExactTimeResponse formats availability message", composed.message.includes("5:00 مساءً"));
+    check(
+      "T20: composeExactTimeResponse formats availability message",
+      composed.message.includes("5:00 مساءً"),
+    );
   }
 
-  console.log("\n=================================================================");
+  console.log(
+    "\n=================================================================",
+  );
   console.log(`  SUMMARY: ${passedChecks}/${totalChecks} checks passed`);
   if (failures.length > 0) {
     console.error(`  FAILURES (${failures.length}):`);
@@ -1201,7 +1505,9 @@ async function main(): Promise<void> {
     process.exit(1);
   } else {
     console.log("  ALL TESTS PASSED (T01–T20) ✅");
-    console.log("=================================================================");
+    console.log(
+      "=================================================================",
+    );
   }
 }
 

@@ -202,7 +202,9 @@ export const aiExtractionSchema = z.object({
           return { ...obj, type: "specific" };
         }
         if (obj.type === "specific" && typeof obj.time === "string") {
-          const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(obj.time.trim());
+          const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(
+            obj.time.trim(),
+          );
           if (m && m[1] && m[2]) {
             return { ...obj, time: `${m[1].padStart(2, "0")}:${m[2]}` };
           }

@@ -7247,14 +7247,13 @@ async function runInboundTurn(
           },
         );
 
-        const { message: exactTimeMsg, slotsToOffer } = composeExactTimeResponse(
-          {
+        const { message: exactTimeMsg, slotsToOffer } =
+          composeExactTimeResponse({
             evaluation: exactTimeEval,
             date: mapped.date!,
             requestedTime: exactTimeRequested,
             intent: validated.intent,
-          },
-        );
+          });
 
         let slotOffer: SlotOffer | null = null;
         if (turnSession.enabled && slotsToOffer.length > 0) {

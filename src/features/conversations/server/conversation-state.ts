@@ -627,8 +627,10 @@ export function mergeConversationState(
   }
   const unresolvedTimeChanged =
     Boolean(state.knownFacts.unresolvedTime || knownFacts.unresolvedTime) &&
-    (state.knownFacts.unresolvedTime?.hour !== knownFacts.unresolvedTime?.hour ||
-      state.knownFacts.unresolvedTime?.minute !== knownFacts.unresolvedTime?.minute);
+    (state.knownFacts.unresolvedTime?.hour !==
+      knownFacts.unresolvedTime?.hour ||
+      state.knownFacts.unresolvedTime?.minute !==
+        knownFacts.unresolvedTime?.minute);
   const slotDependencyChanged =
     serviceIdentityChanged ||
     changed("date") ||
