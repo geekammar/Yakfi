@@ -267,3 +267,9 @@
     outline-offset: 2px;
   }
 }
+
+@media (min-width: 1024px) {
+  :root {
+    --conversation-height: calc(100dvh - 8.5rem);
+  }
+}
