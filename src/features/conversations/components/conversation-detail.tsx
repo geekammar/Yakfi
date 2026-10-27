@@ -578,7 +578,7 @@ export function ConversationDetail({
 
   return (
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
-      <section className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]">
+      <section className="flex h-[calc(100dvh-11rem)] h-[calc(100dvh_-_11rem)] max-h-[calc(100dvh-11rem)] max-h-[calc(100dvh_-_11rem)] min-h-[16rem] md:min-h-[28rem] flex-1 min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)] lg:h-[calc(100dvh_-_8.5rem)] lg:max-h-[calc(100dvh-8.5rem)] lg:max-h-[calc(100dvh_-_8.5rem)]">
         <header
           data-testid="conversation-persistent-header"
           className="sticky top-0 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-3"
@@ -694,7 +694,7 @@ export function ConversationDetail({
             role="log"
             aria-label="رسائل المحادثة"
             tabIndex={0}
-            className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
+            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
           >
             {/* Mobile unpinned action buttons inside transcript */}
             <div className="md:hidden flex flex-wrap gap-2 pb-3 mb-2 border-b border-border/50">
