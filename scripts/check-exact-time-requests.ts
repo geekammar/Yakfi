@@ -2034,6 +2034,281 @@ async function main(): Promise<void> {
       "T21.5: Removing exactTime clears lastClarification",
       stateUnresolved2?.lastClarification === null,
     );
+
+    // 6. Current explicit time proposal precedence over older pending time and stale period preference:
+    // Demonstrates:
+    // - prior unresolved 3:30 and older saved evening preference;
+    // - current semantic proposal unresolved 4:15 with no current period -> preserves 4:15 and clarifies, never resolves old 3:30;
+    // - same pending hour with changed minute 4:45 with no current period -> preserves 4:45 and clarifies;
+    // - legitimate follow-up: explicit evening resolves latest pending hour and minute (4:45 مساءً / 16:45);
+    // - explicit specific time (17:00 / 5:00 مساءً) wins and supersedes prior offer token;
+    // - removal clears pending uncertainty;
+    // - stale callback rejected, zero appointments created during inquiries.
+    const harnessPrecedence = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Turn 1: Establish older saved evening preference
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "مساءً",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "evening",
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "عايز موعد في المساء لكشف أسنان يوم 2026-10-21",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+    const statePrec1 = await loadDurableState(harnessPrecedence);
+    check(
+      "T21.6: Turn 1 established older saved evening preference",
+      statePrec1?.knownFacts.timePreference === "evening",
+    );
+
+    // Turn 2: Prior unresolved 3:30 proposed without current period
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "توضيح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "unresolved_period", hour: 3, minute: 30 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "عايز موعد الساعة 3:30",
+      receivedAt: "2026-10-20T10:01:00Z",
+    });
+    const replyPrec2 =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    const statePrec2 = await loadDurableState(harnessPrecedence);
+    check(
+      "T21.6: Turn 2 prior unresolved 3:30 asks clarification and does not resolve using old evening preference",
+      replyPrec2?.body?.includes(
+        "هل تقصد الساعة 3:30 عصراً (مساءً) أم 3:30 فجراً (صباحاً)؟",
+      ) &&
+        statePrec2?.knownFacts.unresolvedTime?.hour === 3 &&
+        statePrec2?.knownFacts.unresolvedTime?.minute === 30 &&
+        statePrec2?.knownFacts.exactTime === undefined,
+    );
+
+    // Turn 3: Current newly stated ambiguous proposal 4:15 with no current period
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "توضيح 4:15",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "unresolved_period", hour: 4, minute: 15 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "لا خليه الساعة 4 وربع",
+      receivedAt: "2026-10-20T10:02:00Z",
+    });
+    const replyPrec3 =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    const statePrec3 = await loadDurableState(harnessPrecedence);
+    check(
+      "T21.6: Turn 3 preserves 4:15 and clarifies, never resolves old 3:30",
+      replyPrec3?.body?.includes(
+        "هل تقصد الساعة 4:15 عصراً (مساءً) أم 4:15 فجراً (صباحاً)؟",
+      ) &&
+        !replyPrec3?.body?.includes("3:30") &&
+        !replyPrec3?.body?.includes("15:30") &&
+        statePrec3?.knownFacts.unresolvedTime?.hour === 4 &&
+        statePrec3?.knownFacts.unresolvedTime?.minute === 15 &&
+        statePrec3?.knownFacts.exactTime === undefined,
+    );
+    check(
+      "T21.6: Turn 3 zero appointments created",
+      harnessPrecedence.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 4: Same pending hour 4 with changed minute 30 (4:30) with no current period
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "توضيح 4:30",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "unresolved_period", hour: 4, minute: 30 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "قصدي الساعة 4:30",
+      receivedAt: "2026-10-20T10:03:00Z",
+    });
+    const replyPrec4 =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    const statePrec4 = await loadDurableState(harnessPrecedence);
+    check(
+      "T21.6: Turn 4 same pending hour with changed minute 30 preserves 4:30 and clarifies",
+      replyPrec4?.body?.includes(
+        "هل تقصد الساعة 4:30 عصراً (مساءً) أم 4:30 فجراً (صباحاً)؟",
+      ) &&
+        !replyPrec4?.body?.includes("4:15") &&
+        statePrec4?.knownFacts.unresolvedTime?.hour === 4 &&
+        statePrec4?.knownFacts.unresolvedTime?.minute === 30 &&
+        statePrec4?.knownFacts.exactTime === undefined,
+    );
+
+    // Turn 5: Legitimate follow-up resolution with explicit evening
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "مساءً",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          timePreference: "evening",
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "مساءً",
+      receivedAt: "2026-10-20T10:04:00Z",
+    });
+    const replyPrec5 =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    const statePrec5 = await loadDurableState(harnessPrecedence);
+    const offerTokenPrec5 = statePrec5?.offer?.token;
+    check(
+      "T21.6: Turn 5 explicit evening resolves latest pending 4:30 to 16:30 (4:30 مساءً)",
+      replyPrec5?.body?.includes("4:30 مساءً") &&
+        statePrec5?.knownFacts.exactTime === "16:30" &&
+        statePrec5?.knownFacts.unresolvedTime === undefined &&
+        statePrec5?.lastClarification === null,
+    );
+    check(
+      "T21.6: Turn 5 offer created for 16:30 with valid token",
+      typeof offerTokenPrec5 === "string" &&
+        offerTokenPrec5.length > 0 &&
+        statePrec5?.offer?.options?.some((o: any) =>
+          o.startAt?.includes("16:30"),
+        ),
+    );
+
+    // Turn 6: Explicit specific time (17:00 / 5:00 مساءً) wins and supersedes prior offer
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "17:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "لا خليها الساعة 5 مساءً بالضبط",
+      receivedAt: "2026-10-20T10:05:00Z",
+    });
+    const replyPrec6 =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    const statePrec6 = await loadDurableState(harnessPrecedence);
+    const offerTokenPrec6 = statePrec6?.offer?.token;
+    check(
+      "T21.6: Turn 6 explicit specific time wins directly",
+      replyPrec6?.body?.includes("5:00 مساءً") &&
+        statePrec6?.knownFacts.exactTime === "17:00" &&
+        statePrec6?.knownFacts.unresolvedTime === undefined &&
+        typeof offerTokenPrec6 === "string" &&
+        offerTokenPrec6 !== offerTokenPrec5,
+    );
+
+    // Stale offer 5 callback rejected
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: `fp:${offerTokenPrec5}:1`,
+      receivedAt: "2026-10-20T10:06:00Z",
+    });
+    const replyStale =
+      harnessPrecedence.deliveredOutbound[
+        harnessPrecedence.deliveredOutbound.length - 1
+      ];
+    check(
+      "T21.6: Obsolete offer 5 callback rejected as stale after specific time change",
+      replyStale?.body?.includes("لم يعد متاحاً"),
+    );
+    check(
+      "T21.6: Zero appointments created from stale callback",
+      harnessPrecedence.capturedAppointmentWrites.length === 0,
+    );
+
+    // Turn 7: Removal clears pending uncertainty and exactTime
+    harnessPrecedence.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "أي وقت",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: null,
+          factUpdates: [{ key: "exactTime", operation: "remove" }],
+        });
+      },
+    };
+    await receiveInboundMessage(harnessPrecedence.deps, {
+      to: harnessPrecedence.business.whatsappNumber,
+      from: harnessPrecedence.customer.phone,
+      text: "بلاش وقت محدد اعرض المتاح",
+      receivedAt: "2026-10-20T10:07:00Z",
+    });
+    const statePrec7 = await loadDurableState(harnessPrecedence);
+    check(
+      "T21.6: Turn 7 removal clears exactTime, unresolvedTime, and lastClarification from durable state",
+      statePrec7?.knownFacts.exactTime === undefined &&
+        statePrec7?.knownFacts.unresolvedTime === undefined &&
+        statePrec7?.lastClarification === null,
+    );
+    check(
+      "T21.6: Zero appointment writes throughout all inquiries and clarifications",
+      harnessPrecedence.capturedAppointmentWrites.length === 0,
+    );
   }
 
   console.log(

@@ -6054,6 +6054,38 @@ async function runInboundTurn(
                   turnSession.state = resolvedState;
                 }
               }
+            } else if (
+              bookingAiResponse.extraction.exactTime?.type ===
+              "unresolved_period"
+            ) {
+              const currentUnresolved = bookingAiResponse.extraction.exactTime;
+              if (resolvedState) {
+                const { exactTime: _droppedEt, ...nextFacts } =
+                  resolvedState.knownFacts;
+                void _droppedEt;
+                resolvedState = {
+                  ...resolvedState,
+                  knownFacts: {
+                    ...nextFacts,
+                    unresolvedTime: {
+                      hour: currentUnresolved.hour,
+                      minute: currentUnresolved.minute ?? 0,
+                    },
+                  },
+                  lastClarification: {
+                    type: "exact_time_period",
+                    unresolvedTime: {
+                      hour: currentUnresolved.hour,
+                      minute: currentUnresolved.minute ?? 0,
+                    },
+                  },
+                  offer: null,
+                  suspendedOffer: null,
+                };
+                if (turnSession.enabled) {
+                  turnSession.state = resolvedState;
+                }
+              }
             }
           }
         }
@@ -7232,24 +7264,70 @@ async function runInboundTurn(
 
       let rawExactTime = bookingAiResponse.extraction.exactTime ?? null;
 
-      // Follow-up resolution when replying to unresolved AM/PM clarification
+      const hasTurnExactProposal =
+        turnReconciled.isTouched("exactTime") ||
+        Boolean(validated.extraction.exactTime);
+
+      const hasTurnPeriodClarification =
+        turnReconciled.isTouched("timePreference") &&
+        Boolean(
+          turnReconciled.setFacts.get("timePreference")?.value ??
+          validated.extraction.timePreference,
+        );
+      const turnPeriodRaw = hasTurnPeriodClarification
+        ? (turnReconciled.setFacts.get("timePreference")?.value ??
+          validated.extraction.timePreference ??
+          null)
+        : null;
+      const currentPeriodClarification: CanonicalTimePreference | null =
+        isCanonicalTimePreference(turnPeriodRaw) ? turnPeriodRaw : null;
+
+      // Pending uncertainty from prior turn
       const pendingClar =
         turnSession.state?.lastClarification?.type === "exact_time_period"
           ? turnSession.state.lastClarification
           : null;
-      const unresolved =
+      const priorUnresolved =
         pendingClar?.unresolvedTime ??
-        turnSession.state?.knownFacts.unresolvedTime;
+        turnSession.state?.knownFacts.unresolvedTime ??
+        null;
 
-      if (
-        (!rawExactTime || rawExactTime.type === "unresolved_period") &&
-        unresolved &&
-        timeOfDayPref
+      if (hasTurnExactProposal && rawExactTime?.type === "unresolved_period") {
+        // A current explicit ambiguous proposal was stated on this turn.
+        // If and only if the current turn ALSO provided an explicit period clarification,
+        // resolve using the CURRENT proposal's hour and minute.
+        // Stale/inherited timePreference must NEVER override a current unresolved proposal.
+        if (currentPeriodClarification) {
+          const h = rawExactTime.hour;
+          const m = rawExactTime.minute ?? 0;
+          let resolvedHour: number;
+          if (
+            currentPeriodClarification === "afternoon" ||
+            currentPeriodClarification === "evening"
+          ) {
+            resolvedHour = h === 12 ? 12 : h + 12;
+          } else {
+            resolvedHour = h === 12 ? 0 : h;
+          }
+          rawExactTime = {
+            type: "specific",
+            time: `${String(resolvedHour).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
+          };
+        }
+      } else if (
+        !hasTurnExactProposal &&
+        priorUnresolved &&
+        currentPeriodClarification
       ) {
-        const h = unresolved.hour;
-        const m = unresolved.minute ?? 0;
+        // Legitimate follow-up turn: customer answered the pending AM/PM clarification
+        // with explicit morning/afternoon/evening on this turn.
+        const h = priorUnresolved.hour;
+        const m = priorUnresolved.minute ?? 0;
         let resolvedHour: number;
-        if (timeOfDayPref === "afternoon" || timeOfDayPref === "evening") {
+        if (
+          currentPeriodClarification === "afternoon" ||
+          currentPeriodClarification === "evening"
+        ) {
           resolvedHour = h === 12 ? 12 : h + 12;
         } else {
           resolvedHour = h === 12 ? 0 : h;
