@@ -115,6 +115,7 @@ jobs:
           pnpm check:semantic-authority-repair
           pnpm check:compare-handoff-cause-test
           pnpm check:economics-contract
+          pnpm check:exact-time-requests
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

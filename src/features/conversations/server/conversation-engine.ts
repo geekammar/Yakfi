@@ -65,6 +65,10 @@ import {
   weekdayOf,
 } from "@/features/appointments/server/availability-service";
 import { resolveBookingOptions } from "@/features/appointments/server/booking-options-service";
+import {
+  composeExactTimeResponse,
+  evaluateExactTimeAvailability,
+} from "@/features/appointments/server/exact-time-service";
 import { resolveEligibleProviders } from "@/features/appointments/server/provider-eligibility-service";
 import {
   inboundMessageSchema,
@@ -7120,6 +7124,221 @@ async function runInboundTurn(
       const currentTime = nowTimeInTimeZone(now, turnBusinessTz);
 
       const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
+
+      let rawExactTime = isStructuredSemanticTurn
+        ? (bookingAiResponse.extraction.exactTime ?? null)
+        : turnReconciled.isTouched("exactTime")
+          ? (turnReconciled.normalizedExtraction.exactTime ?? null)
+          : (bookingAiResponse.extraction.exactTime ?? null);
+
+      // Follow-up resolution when replying to unresolved AM/PM clarification
+      if (
+        !rawExactTime &&
+        turnSession.state?.pendingClarification?.type === "exact_time_period" &&
+        timeOfDayPref
+      ) {
+        const prevTimeStr = turnSession.state.knownFacts.exactTime;
+        const prevHour = prevTimeStr
+          ? parseInt(prevTimeStr.slice(0, 2), 10)
+          : 3;
+        const baseHour = prevHour % 12 || 12;
+        const resolvedHour =
+          timeOfDayPref === "afternoon" || timeOfDayPref === "evening"
+            ? (baseHour < 12 ? baseHour + 12 : baseHour)
+            : (baseHour >= 12 ? baseHour - 12 : baseHour);
+        rawExactTime = {
+          type: "specific",
+          time: `${String(resolvedHour).padStart(2, "0")}:00`,
+        };
+      }
+
+      // PROMPT-EXACT-TIME: AM/PM unresolved ambiguity (e.g. "الساعة 3")
+      if (rawExactTime && rawExactTime.type === "unresolved_period") {
+        if (turnSession.enabled) {
+          turnSession.state = {
+            ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
+            activeTask: {
+              kind: "BOOKING",
+              stage: "DATE_SUPPLIED",
+            },
+            knownFacts: {
+              ...(turnSession.state?.knownFacts ?? {}),
+              service: mapped.serviceName,
+              date: mapped.date!,
+              exactTime: `${String(rawExactTime.hour).padStart(2, "0")}:00`,
+              ...(providerId ? { provider: providerId } : {}),
+            },
+            pendingClarification: {
+              type: "exact_time_period",
+              missingFacts: ["timePreference"],
+            },
+          };
+          await turnSession.commit();
+        }
+        const clarMsg = `هل تقصد الساعة ${rawExactTime.hour} عصراً (مساءً) أم ${rawExactTime.hour} فجراً (صباحاً)؟`;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          clarMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          clarMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: validated.intent,
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
+          delivery,
+        };
+      }
+
+      // PROMPT-EXACT-TIME: Specific exact time requested or inquired
+      if (rawExactTime && rawExactTime.type === "specific") {
+        const exactTimeRequested = rawExactTime.time;
+        const exactTimeEval = await evaluateExactTimeAvailability(
+          bookingDeps as unknown as Parameters<
+            typeof evaluateExactTimeAvailability
+          >[0],
+          { userId: customer.id, businessId: business.id },
+          {
+            serviceId: mapped.serviceId,
+            branchId: mapped.branchId ?? null,
+            providerId: providerId ?? null,
+            date: mapped.date!,
+            requestedTime: exactTimeRequested,
+            now,
+            businessTimezone: turnBusinessTz,
+          },
+        );
+
+        const { message: exactTimeMsg, slotsToOffer } = composeExactTimeResponse(
+          {
+            evaluation: exactTimeEval,
+            date: mapped.date!,
+            requestedTime: exactTimeRequested,
+            intent: validated.intent,
+          },
+        );
+
+        let slotOffer: SlotOffer | null = null;
+        if (turnSession.enabled && slotsToOffer.length > 0) {
+          slotOffer = buildSlotOffer(
+            { businessId: business.id, conversationId: conversation.id },
+            crypto.randomUUID(),
+            {
+              serviceId: mapped.serviceId,
+              serviceName: mapped.serviceName,
+              serviceSource: mapped.serviceSource,
+              providerId: providerId ?? null,
+              timePreference: timeOfDayPref ?? null,
+              date: mapped.date!,
+              followUpRequestId: activeFollowUpId,
+              shownCount: slotsToOffer.length,
+              shownSlotKeys: slotsToOffer.map(
+                (o) => `${o.providerId}:${mapped.date}T${o.startTime}`,
+              ),
+              options: slotsToOffer.map((o) => ({
+                providerId: o.providerId,
+                displayName: o.displayName,
+                startAt: `${mapped.date}T${o.startTime}`,
+                endAt: `${mapped.date}T${o.endTime}`,
+              })),
+            },
+            now,
+          );
+          if (slotOffer) {
+            turnSession.state = withPresentedOffer(
+              turnSession.state ?? resolvedState ?? emptyConversationState(),
+              slotOffer,
+            );
+            turnSession.state = {
+              ...turnSession.state,
+              activeTask: {
+                kind: "BOOKING",
+                stage: "AVAILABILITY_RESOLVED",
+              },
+              bookingStage: "AVAILABILITY_RESOLVED",
+              knownFacts: {
+                ...(turnSession.state.knownFacts ?? {}),
+                service: mapped.serviceName,
+                date: mapped.date!,
+                exactTime: exactTimeRequested,
+                ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+                ...(providerId ? { provider: providerId } : {}),
+              },
+            };
+            await turnSession.commit();
+          }
+        } else if (turnSession.enabled) {
+          turnSession.state = {
+            ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
+            activeTask: {
+              kind: "BOOKING",
+              stage: "DATE_SUPPLIED",
+            },
+            knownFacts: {
+              ...(turnSession.state?.knownFacts ?? {}),
+              service: mapped.serviceName,
+              date: mapped.date!,
+              exactTime: exactTimeRequested,
+              ...(timeOfDayPref ? { timePreference: timeOfDayPref } : {}),
+              ...(providerId ? { provider: providerId } : {}),
+            },
+          };
+          await turnSession.commit();
+        }
+
+        const choices = slotOffer ? buildChannelChoices(slotOffer) : undefined;
+        const assistantMessage = await persistAssistantReply(
+          deps,
+          conversation.id,
+          exactTimeMsg,
+          "AI_ACTIVE",
+        );
+        const delivery = await deliverAssistantReply(
+          deps,
+          customer.phone,
+          business.name,
+          conversation.id,
+          exactTimeMsg,
+          assistantMessage.id,
+          business.id,
+          outboundConnectionId,
+          choices,
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          businessId: business.id,
+          conversationId: conversation.id,
+          customerId: customer.id,
+          customerMessageId: customerMessage.id,
+          assistantAction: "AI_REPLY",
+          intent: validated.intent,
+          conversationStatus: "AI_ACTIVE",
+          handoffCause: null,
+          assistantProvider: deps.ai.providerName,
+          observability: turnObservability,
+          delivery,
+        };
+      }
       const bookingResult = await resolveBookingOptions(
         bookingDeps as unknown as Parameters<typeof resolveBookingOptions>[0],
         { userId: customer.id, businessId: business.id },

@@ -129,6 +129,7 @@ export type ConversationKnownFacts = {
     readonly endDate: string;
   };
   readonly timePreference?: string;
+  readonly exactTime?: string;
   readonly provider?: string;
   readonly customerName?: string;
   readonly followUpRequestId?: string;

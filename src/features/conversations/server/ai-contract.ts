@@ -144,10 +144,32 @@ export const aiTemporalRequestSchema = z.discriminatedUnion("type", [
 export type AiTemporalRequest = z.infer<typeof aiTemporalRequestSchema>;
 
 /**
+ * Structured exact-time request schema (PROMPT-EXACT-TIME).
+ * Distinguishes a fully resolved 24-hour wall-clock time from a customer request
+ * where the 12-hour hour was stated but AM/PM is genuinely unresolved (e.g. "الساعة 3").
+ */
+export const aiExactTimeRequestSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("specific"),
+    /** "HH:mm" 24-hour wall-clock format (e.g. "17:00", "13:00", "09:30") */
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "تنسيق الوقت غير صالح"),
+  }),
+  z.object({
+    type: z.literal("unresolved_period"),
+    /** 12-hour format hour (1..12) where AM vs PM was not stated */
+    hour: z.number().int().min(1).max(12),
+    /** Optional minute (0..59), defaults to 0 */
+    minute: z.number().int().min(0).max(59).default(0),
+  }),
+]);
+
+export type AiExactTimeRequest = z.infer<typeof aiExactTimeRequestSchema>;
+
+/**
  * Bounded facts extracted from the customer message — FACTS ONLY, never
  * reasoning. `timePreference` must strictly use canonical machine values
- * ("morning" | "afternoon" | "evening"); exact times (e.g. "10:30") are not
- * supported and must not be accepted as canonical machine preferences.
+ * ("morning" | "afternoon" | "evening"). Stated exact times are carried
+ * in structured `exactTime` without losing AM/PM uncertainty.
  * The DOMAIN resolves actual slots deterministically.
  */
 export const aiExtractionSchema = z.object({
@@ -161,6 +183,41 @@ export const aiExtractionSchema = z.object({
   timePreference: canonicalTimePreferenceSchema.nullable().default(null),
   /** Structured temporal request (exact, relative day, calendar week, or explicit range). */
   temporalRequest: aiTemporalRequestSchema.nullable().optional(),
+  /** Structured exact-time request (specific HH:mm or unresolved period requiring clarification). */
+  exactTime: z
+    .preprocess((val) => {
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        if (/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) {
+          return { type: "specific", time: trimmed };
+        }
+        const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
+        if (m && m[1] && m[2]) {
+          return { type: "specific", time: `${m[1].padStart(2, "0")}:${m[2]}` };
+        }
+      }
+      if (val && typeof val === "object") {
+        const obj = val as Record<string, unknown>;
+        if (obj.type === "exact" && typeof obj.time === "string") {
+          return { ...obj, type: "specific" };
+        }
+        if (obj.type === "specific" && typeof obj.time === "string") {
+          const m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(obj.time.trim());
+          if (m && m[1] && m[2]) {
+            return { ...obj, time: `${m[1].padStart(2, "0")}:${m[2]}` };
+          }
+        }
+        if (obj.type === "unresolved_period" || obj.type === "ambiguous") {
+          return {
+            type: "unresolved_period",
+            hour: Number(obj.hour),
+            minute: obj.minute !== undefined ? Number(obj.minute) : 0,
+          };
+        }
+      }
+      return val;
+    }, aiExactTimeRequestSchema.nullable().optional())
+    .default(null),
 });
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;
@@ -171,6 +228,7 @@ export const emptyAiExtraction: AiExtraction = {
   date: null,
   timePreference: null,
   temporalRequest: null,
+  exactTime: null,
 };
 
 // ─── Request (minimal context) ───────────────────────────────────────────────
@@ -266,6 +324,7 @@ export const conversationContextProjectionSchema = z.object({
     .nullable()
     .optional(),
   timePreference: z.string().max(80).nullable().optional(),
+  knownExactTime: z.string().max(20).nullable().optional(),
   providerPreference: z.string().max(200).nullable().optional(),
   pendingClarification: z
     .object({
@@ -497,11 +556,14 @@ export const aiSetFactUpdateSchema = z
           update.value,
         );
       }
+      if (update.key === "exactTime") {
+        return /^([01]\d|2[0-3]):[0-5]\d$/.test(update.value);
+      }
       return true;
     },
     {
       message:
-        "قيمة تفضيل الوقت غير صالحة — القيم المعتمدة هي morning أو afternoon أو evening",
+        "قيمة تفضيل الوقت غير صالحة — القيم المعتمدة هي morning أو afternoon أو evening، أو تنسيق وقت دقيق HH:mm",
       path: ["value"],
     },
   );
