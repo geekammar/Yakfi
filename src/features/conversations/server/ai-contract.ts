@@ -217,7 +217,8 @@ export const aiExtractionSchema = z.object({
       }
       return val;
     }, aiExactTimeRequestSchema.nullable().optional())
-    .default(null),
+    .default(null)
+    .optional(),
 });
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;

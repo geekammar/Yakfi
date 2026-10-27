@@ -353,7 +353,7 @@ export function composeExactTimeResponse(params: {
   date: string;
   requestedTime: string;
   intent: "AVAILABILITY" | "BOOKING" | string;
-}): { message: string; slotsToOffer: RankedBookingPair[] } {
+}): { message: string; slotsToOffer: readonly RankedBookingPair[] } {
   const { evaluation, date, requestedTime, intent } = params;
   const timeArabic = formatTimeArabic(requestedTime);
   const serviceName = evaluation.serviceName;

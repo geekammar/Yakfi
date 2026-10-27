@@ -870,7 +870,7 @@ async function main(): Promise<void> {
     const callsBeforeSelection = modelCallCount;
 
     // Bare number "2" is mechanical protocol selection (0 AI calls)
-    const selectRes = await receiveInboundMessage(harness.deps, {
+    const _selectRes = await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber,
       from: harness.customer.phone,
       text: "2",
@@ -1156,6 +1156,33 @@ async function main(): Promise<void> {
       conversationId: PLAYGROUND_IDS.conversationId,
     });
     check("T20: Legacy persisted state without exactTime hydrates safely without error", legacyHydrated !== null && legacyHydrated.knownFacts.exactTime === undefined);
+
+    // 5. Unit checks for formatting, default extraction, and response schema
+    check("T20: formatTimeArabic formats 17:00 as 5:00 مساءً", formatTimeArabic("17:00") === "5:00 مساءً");
+    check("T20: formatTimeArabic formats 00:00 as 12:00 منتصف الليل", formatTimeArabic("00:00") === "12:00 منتصف الليل");
+    check("T20: emptyAiExtraction has null exactTime", emptyAiExtraction.exactTime === null);
+    check("T20: aiResponseSchema validates mock response", aiResponseSchema.safeParse(mockResponse({ content: "test" })).success);
+    const mockEvalResult = {
+      isAvailable: true,
+      matchedSlot: {
+        providerOrder: 0,
+        providerId: "prov_1",
+        displayName: "دكتور",
+        startTime: "17:00",
+        endTime: "17:30",
+      },
+      allAvailableSlots: [],
+      alternatives: [],
+      serviceName: "كشف أسنان",
+      serviceDurationMinutes: 30,
+    };
+    const composed = composeExactTimeResponse({
+      evaluation: mockEvalResult,
+      date: "2026-10-21",
+      requestedTime: "17:00",
+      intent: "AVAILABILITY",
+    });
+    check("T20: composeExactTimeResponse formats availability message", composed.message.includes("5:00 مساءً"));
   }
 
   console.log("\n=================================================================");
