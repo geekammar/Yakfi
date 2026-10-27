@@ -2447,7 +2447,9 @@ async function main(): Promise<void> {
         (r24_0030.extraction.exactTime as any).time === "00:30",
     );
 
-    // 4. Explicit strings with AM/PM or Arabic period markers resolve to specific 24h
+    // 4. Format validation keeps natural language interpretation separate from the contract:
+    // Raw strings with uncanonical language period vocabulary are rejected by format validation,
+    // requiring the model to emit canonical 24-hour time or explicit typed contract objects.
     const rPmEn = parseAiResponse({
       intent: "BOOKING",
       action: "booking_handoff",
@@ -2457,9 +2459,8 @@ async function main(): Promise<void> {
       extraction: { exactTime: "4:15 PM" },
     });
     check(
-      "T22.0: parseAiResponse normalizes '4:15 PM' to specific 16:15",
-      rPmEn?.extraction?.exactTime?.type === "specific" &&
-        (rPmEn.extraction.exactTime as any).time === "16:15",
+      "T22.0: parseAiResponse rejects uncanonical language string '4:15 PM' (format validation separate from language interpretation)",
+      rPmEn === null,
     );
 
     const rPmAr = parseAiResponse({
@@ -2471,9 +2472,8 @@ async function main(): Promise<void> {
       extraction: { exactTime: "4:15 مساءً" },
     });
     check(
-      "T22.0: parseAiResponse normalizes '4:15 مساءً' to specific 16:15",
-      rPmAr?.extraction?.exactTime?.type === "specific" &&
-        (rPmAr.extraction.exactTime as any).time === "16:15",
+      "T22.0: parseAiResponse rejects uncanonical language string '4:15 مساءً' (format validation separate from language interpretation)",
+      rPmAr === null,
     );
 
     const rAmEn = parseAiResponse({
@@ -2485,9 +2485,8 @@ async function main(): Promise<void> {
       extraction: { exactTime: "4:15 AM" },
     });
     check(
-      "T22.0: parseAiResponse normalizes '4:15 AM' to specific 04:15",
-      rAmEn?.extraction?.exactTime?.type === "specific" &&
-        (rAmEn.extraction.exactTime as any).time === "04:15",
+      "T22.0: parseAiResponse rejects uncanonical language string '4:15 AM' (format validation separate from language interpretation)",
+      rAmEn === null,
     );
 
     const rAmAr = parseAiResponse({
@@ -2499,9 +2498,8 @@ async function main(): Promise<void> {
       extraction: { exactTime: "4:15 صباحاً" },
     });
     check(
-      "T22.0: parseAiResponse normalizes '4:15 صباحاً' to specific 04:15",
-      rAmAr?.extraction?.exactTime?.type === "specific" &&
-        (rAmAr.extraction.exactTime as any).time === "04:15",
+      "T22.0: parseAiResponse rejects uncanonical language string '4:15 صباحاً' (format validation separate from language interpretation)",
+      rAmAr === null,
     );
 
     // 5. Explicitly typed objects preserve their type and value

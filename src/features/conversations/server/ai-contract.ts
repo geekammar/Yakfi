@@ -189,37 +189,7 @@ export const aiExtractionSchema = z.object({
       if (typeof val === "string") {
         const trimmed = val.trim();
 
-        // 1. Explicit period indicators in string (AM/PM or Arabic period)
-        const pmMatch =
-          /^([01]?\d):([0-5]\d)(?:\s*(?:pm|p\.m\.|مساءً|مساء|عصراً|عصر|ظهراً|ظهر))$/i.exec(
-            trimmed,
-          );
-        if (pmMatch && pmMatch[1] && pmMatch[2]) {
-          const h = parseInt(pmMatch[1], 10);
-          if (h >= 1 && h <= 12) {
-            const resolvedH = h === 12 ? 12 : h + 12;
-            return {
-              type: "specific",
-              time: `${String(resolvedH).padStart(2, "0")}:${pmMatch[2]}`,
-            };
-          }
-        }
-        const amMatch =
-          /^([01]?\d):([0-5]\d)(?:\s*(?:am|a\.m\.|صباحاً|صباح|فجراً|فجر))$/i.exec(
-            trimmed,
-          );
-        if (amMatch && amMatch[1] && amMatch[2]) {
-          const h = parseInt(amMatch[1], 10);
-          if (h >= 1 && h <= 12) {
-            const resolvedH = h === 12 ? 0 : h;
-            return {
-              type: "specific",
-              time: `${String(resolvedH).padStart(2, "0")}:${amMatch[2]}`,
-            };
-          }
-        }
-
-        // 2. Unambiguous 24-hour wall-clock times (hours 13..23 or hour 00/0)
+        // 1. Unambiguous 24-hour wall-clock times (hours 13..23 or hour 00/0)
         // Hour > 12 has unambiguous 24-hour PM provenance
         const m24 = /^(?:([1][3-9]|2[0-3])):([0-5]\d)(?::[0-5]\d)?$/.exec(
           trimmed,
@@ -233,8 +203,8 @@ export const aiExtractionSchema = z.object({
           return { type: "specific", time: `00:${mMidnight[1]}` };
         }
 
-        // 3. Bare 12-hour wall-clock time (hours 1..12, e.g. "4:15", "04:15", "3:30")
-        // An untyped bare string in 1..12 without AM/PM has NO period provenance.
+        // 2. Bare 12-hour wall-clock time (hours 1..12, e.g. "4:15", "04:15", "3:30")
+        // An untyped bare string in 1..12 has NO period provenance.
         // It must NOT silently manufacture AM certainty (e.g. "04:15").
         // Safe handling policy: treat as unresolved period requiring clarification.
         const mBare12 = /^([01]?\d):([0-5]\d)(?::[0-5]\d)?$/.exec(trimmed);
