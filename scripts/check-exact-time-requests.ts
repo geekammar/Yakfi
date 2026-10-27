@@ -197,13 +197,26 @@ async function main(): Promise<void> {
       todayRef: "2026-10-20",
       initialAppointments: [
         {
-          id: "appt-1300",
+          id: "appt-1300-p1",
           businessId: PLAYGROUND_IDS.BIZ_ID,
           branchId: PLAYGROUND_IDS.BRANCH_ID,
           customerId: "cust-other",
           serviceId: PLAYGROUND_IDS.SERV_DENTAL,
           providerId: PLAYGROUND_IDS.PROV_1,
           assignedUserId: PLAYGROUND_IDS.USER_P1,
+          date: new Date("2026-10-21T00:00:00Z"),
+          startTime: "13:00",
+          endTime: "13:30",
+          status: "CONFIRMED",
+        },
+        {
+          id: "appt-1300-p2",
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
+          customerId: "cust-other-2",
+          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+          providerId: PLAYGROUND_IDS.PROV_2,
+          assignedUserId: PLAYGROUND_IDS.USER_P2,
           date: new Date("2026-10-21T00:00:00Z"),
           startTime: "13:00",
           endTime: "13:30",
@@ -1304,7 +1317,8 @@ async function main(): Promise<void> {
     check(
       "T19: Customer receives safe temporary failure acknowledgment",
       lastReply?.body?.includes("واجهت صعوبة مؤقتة في الرد") ||
-        lastReply?.body?.includes("سيتواصل معك أحد أعضاء الفريق"),
+        lastReply?.body?.includes("سيتواصل معك أحد أعضاء الفريق") ||
+        lastReply?.body?.includes("جارٍ تحويلك لأحد أعضاء الفريق"),
     );
     check(
       "T19: Zero appointments created",
