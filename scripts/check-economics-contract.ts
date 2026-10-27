@@ -106,7 +106,7 @@ function runSuite(): void {
   ]);
   check(
     "G2.1 Event at T + 24h - 1ms falls inside active half-open window (1 session, count=2)",
-    res24h.sessions.length === 1 && res24h.sessions[0].eventCount === 2,
+    res24h.sessions.length === 1 && res24h.sessions[0]?.eventCount === 2,
   );
 
   const resNewWindow = rollupCommercialSessions([
@@ -117,9 +117,9 @@ function runSuite(): void {
   check(
     "G2.2 Event at exact boundary T + 24h opens a new session (2 sessions total)",
     resNewWindow.sessions.length === 2 &&
-      resNewWindow.sessions[0].eventCount === 2 &&
-      resNewWindow.sessions[1].eventCount === 1 &&
-      resNewWindow.sessions[1].initiatingEventId === "e3",
+      resNewWindow.sessions[0]?.eventCount === 2 &&
+      resNewWindow.sessions[1]?.eventCount === 1 &&
+      resNewWindow.sessions[1]?.initiatingEventId === "e3",
   );
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -140,7 +140,7 @@ function runSuite(): void {
   check(
     "G3.2 Subsequent CHOICE_CALLBACK initiates session successfully",
     resStartThenCallback.sessions.length === 1 &&
-      resStartThenCallback.sessions[0].initiatingEventId === "cb1" &&
+      resStartThenCallback.sessions[0]?.initiatingEventId === "cb1" &&
       resStartThenCallback.startOnlyIgnoredCount === 1,
   );
 
@@ -154,7 +154,7 @@ function runSuite(): void {
   check(
     "G4.1 Duplicate payloads are excluded from session event count (filteredDuplicateCount=1)",
     resDedupe.sessions.length === 1 &&
-      resDedupe.sessions[0].eventCount === 1 &&
+      resDedupe.sessions[0]?.eventCount === 1 &&
       resDedupe.filteredDuplicateCount === 1,
   );
 
@@ -171,7 +171,7 @@ function runSuite(): void {
 
   const chronological = rollupCommercialSessions(rawBatch);
   const reversed = rollupCommercialSessions([...rawBatch].reverse());
-  const shuffled = rollupCommercialSessions([rawBatch[3], rawBatch[0], rawBatch[4], rawBatch[2], rawBatch[1]]);
+  const shuffled = rollupCommercialSessions([rawBatch[3]!, rawBatch[0]!, rawBatch[4]!, rawBatch[2]!, rawBatch[1]!]);
 
   const jsonChrono = JSON.stringify(chronological);
   const jsonReversed = JSON.stringify(reversed);
@@ -209,9 +209,9 @@ function runSuite(): void {
   check(
     "G6.1 Qualifying event in new month appends to unexpired carry-in session without new session creation",
     resCarryIn.sessions.length === 1 &&
-      resCarryIn.sessions[0].sessionId === "sess_prior" &&
-      resCarryIn.sessions[0].eventCount === 4 &&
-      resCarryIn.sessions[0].eventIds.includes("nov-1"),
+      resCarryIn.sessions[0]?.sessionId === "sess_prior" &&
+      resCarryIn.sessions[0]?.eventCount === 4 &&
+      Boolean(resCarryIn.sessions[0]?.eventIds.includes("nov-1")),
   );
 
   // ═══════════════════════════════════════════════════════════════════════

@@ -19,9 +19,6 @@
 
 import {
   COST_ENGINE_VERSION,
-  TRAFFIC_POOLS,
-  type AttemptCostCompleteness,
-  type AttemptCostProvenance,
   type AttemptCostResult,
   type CostCompleteness,
   type ModelRateSnapshot,
