@@ -42,8 +42,10 @@ import {
 } from "../src/features/conversations/server/conversation-engine";
 import {
   clearBookingDraft,
+  dehydrateConversationState,
   emptyConversationState,
   hasResumableDraftTask,
+  hydrateConversationState,
   withPresentedOffer,
   type ConversationState,
 } from "../src/features/conversations/server/conversation-state";
@@ -63,6 +65,22 @@ function check(title: string, passed: unknown, extraInfo?: string): void {
   }
 }
 
+async function saveDurableState(
+  harness: any,
+  state: ConversationState,
+): Promise<void> {
+  const existing = await harness.stateStore.load(
+    harness.business.id,
+    harness.conversation.id,
+  );
+  await harness.stateStore.save(
+    harness.business.id,
+    harness.conversation.id,
+    existing ? existing.revision : null,
+    dehydrateConversationState(state),
+  );
+}
+
 async function loadDurableState(
   harness: any,
 ): Promise<ConversationState | null> {
@@ -70,7 +88,11 @@ async function loadDurableState(
     harness.business.id,
     harness.conversation.id,
   );
-  return (loaded?.state as ConversationState) ?? null;
+  if (!loaded?.state) return null;
+  return hydrateConversationState(loaded.state, {
+    businessId: harness.business.id,
+    conversationId: harness.conversation.id,
+  });
 }
 
 function lastSentPayload(harness: any) {
@@ -204,12 +226,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       dateOffer,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithDate,
-    );
+    await saveDurableState(harness, stateWithDate);
 
     check(
       "B0. hasResumableDraftTask is true for active DATE offer",
@@ -292,12 +309,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     const res = await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
@@ -370,12 +382,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     // Greet turn -> presents RESUME
     await receiveInboundMessage(harness.deps, {
@@ -461,12 +468,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       expiredSlotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithExpired,
-    );
+    await saveDurableState(harness, stateWithExpired);
 
     // Customer greets
     await receiveInboundMessage(harness.deps, {
@@ -539,12 +541,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     // Greet turn
     await receiveInboundMessage(harness.deps, {
@@ -683,12 +680,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     // Greeting 1
     await receiveInboundMessage(harness.deps, {
@@ -768,12 +760,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     // Greet turn
     await receiveInboundMessage(harness.deps, {
@@ -852,12 +839,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     // Customer asks general question (FAQ)
     const res = await receiveInboundMessage(harness.deps, {
@@ -946,12 +928,7 @@ async function run(): Promise<void> {
       emptyConversationState(),
       slotOffer!,
     );
-    await harness.stateStore.save(
-      harness.business.id,
-      harness.conversation.id,
-      null,
-      stateWithSlot,
-    );
+    await saveDurableState(harness, stateWithSlot);
 
     await receiveInboundMessage(harness.deps, {
       from: "+201000000001",
