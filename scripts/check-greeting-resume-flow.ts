@@ -865,9 +865,6 @@ async function run(): Promise<void> {
     harness.setVirtualNow(baseNow);
 
     // Mark conversation NEED_HUMAN
-    await harness.deps.conversationRepository.update(harness.conversation.id, {
-      status: "NEED_HUMAN",
-    });
     harness.conversation.status = "NEED_HUMAN";
 
     const res = await receiveInboundMessage(harness.deps, {

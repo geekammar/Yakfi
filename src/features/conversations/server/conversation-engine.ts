@@ -112,7 +112,6 @@ import {
 import type {
   DateOffer,
   ProviderOffer,
-  ResumeOffer,
   ServiceOffer,
   SlotOffer,
 } from "@/features/conversations/server/booking-offer";
@@ -207,6 +206,7 @@ import {
 import {
   addDaysToIso,
   daysBetweenIso,
+  isValidIsoCalendarDate,
   resolveServerTemporalRequest,
   resolveValidTimeZone,
 } from "@/features/conversations/server/temporal-context";
@@ -4140,13 +4140,11 @@ async function runInboundTurn(
         const suspended = turnSession.state?.suspendedOffer;
         const savedServiceId =
           turnSession.state?.serviceId ??
-          suspended?.serviceId ??
-          null;
+          (suspended && "serviceId" in suspended ? suspended.serviceId : null);
         const savedServiceName =
           turnSession.state?.knownFacts.service ??
           turnSession.state?.selectedService ??
-          suspended?.serviceName ??
-          null;
+          (suspended && "serviceName" in suspended ? suspended.serviceName : null);
 
         const activeServices = services.filter((s) => s.isActive !== false);
         const targetService = activeServices.find(
