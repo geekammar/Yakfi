@@ -403,7 +403,7 @@ export function composeExactTimeResponse(params: {
       explanation = `المنشأة مغلقة يوم ${date} — يرجى اختيار تاريخ آخر.`;
       break;
     case "SLOT_GRID_MISMATCH":
-      explanation = `عذراً، موعد الساعة ${timeArabic} لا يتوافق مع فترات جدول المواعيد المحددة (${evaluation.slotDurationMinutes ?? 30} دقيقة) يوم ${date}.`;
+      explanation = `عذراً، موعد الساعة ${timeArabic} غير متاح (لا يتوافق مع فترات جدول المواعيد المحددة (${evaluation.slotDurationMinutes ?? 30} دقيقة)) يوم ${date}.`;
       break;
     case "CONFLICT":
       explanation = `عذراً، موعد الساعة ${timeArabic} غير متاح يوم ${date} (محجوز مسبقاً).`;

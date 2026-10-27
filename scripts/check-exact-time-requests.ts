@@ -995,40 +995,16 @@ async function main(): Promise<void> {
   console.log("--- T15: Business timezone awareness ---");
   {
     // Cairo is UTC+2
-    const evalResult = await evaluateExactTimeAvailability(
-      {
-        eligibility: {} as any,
-        businessRepository: {
-          findById: async () =>
-            ({
-              id: PLAYGROUND_IDS.BIZ_ID,
-              name: "عيادة النور",
-              timezone: "Africa/Cairo",
-              slotDurationMinutes: 30,
-              workingHours: standardWorkingHours,
-            }) as any,
-        },
-        serviceRepository: {
-          findById: async () =>
-            ({
-              id: PLAYGROUND_IDS.SERV_DENTAL,
-              name: "كشف أسنان",
-              durationMinutes: 30,
-              isActive: true,
-            }) as any,
-        },
-        providerRepository: {
-          listAssignmentSeams: async () => [
-            {
-              providerId: PLAYGROUND_IDS.PROV_1,
-              userId: PLAYGROUND_IDS.USER_P1,
-            },
-          ],
-        },
-        appointmentRepository: {
-          listBlockingByAssignees: async () => [],
-        } as any,
+    const harness = createPlaygroundHarness({
+      businessConfig: {
+        workingHours: standardWorkingHours,
+        timezone: "Africa/Cairo",
       },
+      todayRef: "2026-10-20",
+    });
+
+    const evalResult = await evaluateExactTimeAvailability(
+      harness.deps,
       { businessId: PLAYGROUND_IDS.BIZ_ID, userId: "u1" },
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
