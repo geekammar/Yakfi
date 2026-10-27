@@ -439,6 +439,10 @@ test.describe("Authenticated Preview QA", () => {
       ).toBeLessThanOrEqual(5);
     }
 
+    const preScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+
     // Screenshot Conversation Detail Scrolled (Middle)
     await page.screenshot({
       path: path.join(
@@ -448,8 +452,8 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
 
-    // Reset document window scroll after fullPage screenshot
-    await page.evaluate(() => window.scrollTo(0, 0));
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate((y) => window.scrollTo(0, y), preScreenshotScrollY);
     await page.waitForTimeout(50);
 
     // Check Bottom: Scroll to bottom
@@ -472,7 +476,7 @@ test.describe("Authenticated Preview QA", () => {
     const windowScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
-    expect(windowScrollY).toBeLessThanOrEqual(25);
+    expect(windowScrollY).toBeLessThanOrEqual(10);
 
     // U07: Composer usable & positioned above bottom navigation
     const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');

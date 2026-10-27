@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     "=================================================================",
   );
   console.log(
-    "  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T20)",
+    "  FLOWPILOT — EXACT-TIME REQUESTS & HONEST AVAILABILITY (T01–T21)",
   );
   console.log(
     "=================================================================\n",
@@ -266,6 +266,97 @@ async function main(): Promise<void> {
     check(
       "T02: Zero appointments created",
       harness.capturedAppointmentWrites.length === 0,
+    );
+
+    // Sub-case: 14:00–15:00 requested with booking beginning at 14:30 and other slots free
+    const harness60min = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+      customServices: [
+        {
+          id: "serv_60min",
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          name: "جلسة علاج",
+          durationMinutes: 60,
+          price: 500,
+          currency: "EGP",
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      initialAppointments: [
+        {
+          id: "appt-1430-p1",
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
+          customerId: "cust-other-1",
+          serviceId: "serv_60min",
+          providerId: PLAYGROUND_IDS.PROV_1,
+          assignedUserId: PLAYGROUND_IDS.USER_P1,
+          date: new Date("2026-10-21T00:00:00Z"),
+          startTime: "14:30",
+          endTime: "15:00",
+          status: "CONFIRMED",
+        },
+        {
+          id: "appt-1430-p2",
+          businessId: PLAYGROUND_IDS.BIZ_ID,
+          branchId: PLAYGROUND_IDS.BRANCH_ID,
+          customerId: "cust-other-2",
+          serviceId: "serv_60min",
+          providerId: PLAYGROUND_IDS.PROV_2,
+          assignedUserId: PLAYGROUND_IDS.USER_P2,
+          date: new Date("2026-10-21T00:00:00Z"),
+          startTime: "14:30",
+          endTime: "15:00",
+          status: "CONFIRMED",
+        },
+      ],
+    });
+
+    harness60min.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "AVAILABILITY",
+          content: "فحص",
+          service: "جلسة علاج",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "14:00" },
+        });
+      },
+    };
+
+    const res60 = await receiveInboundMessage(harness60min.deps, {
+      to: harness60min.business.whatsappNumber,
+      from: harness60min.customer.phone,
+      text: "عايز موعد الساعة 2 مساء لجلسة علاج",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    check("T02: 60-min conflict inbound succeeded", res60.ok);
+    const reply60 =
+      harness60min.deliveredOutbound[
+        harness60min.deliveredOutbound.length - 1
+      ];
+    check(
+      "T02: 14:00-15:00 classified as conflict when overlapping 14:30 booking",
+      reply60?.body?.includes("2:00 مساءً غير متاح") &&
+        reply60?.body?.includes("محجوز مسبقاً"),
+    );
+    check(
+      "T02: Never claims whole day is fully booked when alternatives are free",
+      !reply60?.body?.includes("جميع المواعيد محجوزة بالكامل"),
+    );
+    check(
+      "T02: Returns genuine alternatives nearby",
+      reply60?.body?.includes("أقرب المواعيد المتاحة") &&
+        reply60?.body?.includes("1️⃣ الساعة"),
+    );
+    check(
+      "T02: Zero appointments created for 60-min conflict inquiry",
+      harness60min.capturedAppointmentWrites.length === 0,
     );
   }
 
@@ -1222,8 +1313,12 @@ async function main(): Promise<void> {
     });
     const offerMsg1 =
       harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
-    const choices1 = (offerMsg1 as any)?.delivery?.choices;
+    const choices1 = (offerMsg1 as any)?.choices;
     const token1 = choices1?.offerToken;
+    check(
+      "T18: Offer 1 yielded a valid callback offerToken",
+      typeof token1 === "string" && token1.length > 0,
+    );
 
     // Turn 2: customer changes exact time to 19:00 -> offer1 invalidated, offer2 presented
     harness2.deps.ai = {
@@ -1246,42 +1341,47 @@ async function main(): Promise<void> {
     });
     const offerMsg2 =
       harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
-    const choices2 = (offerMsg2 as any)?.delivery?.choices;
+    const choices2 = (offerMsg2 as any)?.choices;
     const token2 = choices2?.offerToken;
+    check(
+      "T18: Offer 2 yielded a valid callback offerToken",
+      typeof token2 === "string" && token2.length > 0,
+    );
+    check(
+      "T18: New offer has a distinct offerToken from offer 1",
+      token2 !== token1,
+    );
 
-    if (token1) {
-      // Replay old callback token from offer 1
-      await receiveInboundMessage(harness2.deps, {
-        to: harness2.business.whatsappNumber,
-        from: harness2.customer.phone,
-        text: `fp:${token1}:1`,
-        receivedAt: "2026-10-20T10:02:00Z",
-      });
-      const staleReply =
-        harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
-      check(
-        "T18: Old offer callback rejected as stale after exact-time change",
-        staleReply?.body?.includes("عرضاً سابقاً لم يعد متاحاً"),
-      );
-      check(
-        "T18: Zero appointments created from stale callback",
-        harness2.capturedAppointmentWrites.length === 0,
-      );
-    }
+    // Replay old callback token from offer 1 unconditionally (must be rejected)
+    await receiveInboundMessage(harness2.deps, {
+      to: harness2.business.whatsappNumber,
+      from: harness2.customer.phone,
+      text: `fp:${token1}:1`,
+      receivedAt: "2026-10-20T10:02:00Z",
+    });
+    const staleReply =
+      harness2.deliveredOutbound[harness2.deliveredOutbound.length - 1];
+    check(
+      "T18: Old offer callback rejected as stale after exact-time change",
+      staleReply?.body?.includes("عرضاً سابقاً لم يعد متاحاً") ||
+        staleReply?.body?.includes("لم يعد متاحاً"),
+    );
+    check(
+      "T18: Zero appointments created from stale callback",
+      harness2.capturedAppointmentWrites.length === 0,
+    );
 
-    if (token2) {
-      // Select newly offered exact-time slot through current callback token
-      await receiveInboundMessage(harness2.deps, {
-        to: harness2.business.whatsappNumber,
-        from: harness2.customer.phone,
-        text: `fp:${token2}:1`,
-        receivedAt: "2026-10-20T10:03:00Z",
-      });
-      check(
-        "T18: New exact-time offer callback successfully booked with revalidation",
-        harness2.capturedAppointmentWrites.length === 1,
-      );
-    }
+    // Select newly offered exact-time slot through current callback token unconditionally (must succeed)
+    await receiveInboundMessage(harness2.deps, {
+      to: harness2.business.whatsappNumber,
+      from: harness2.customer.phone,
+      text: `fp:${token2}:1`,
+      receivedAt: "2026-10-20T10:03:00Z",
+    });
+    check(
+      "T18: New exact-time offer callback successfully booked with revalidation",
+      harness2.capturedAppointmentWrites.length === 1,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1323,6 +1423,95 @@ async function main(): Promise<void> {
     check(
       "T19: Zero appointments created",
       harness.capturedAppointmentWrites.length === 0,
+    );
+
+    // Sub-case: Repository lookup failure during exact-time availability check
+    const harnessRepoFail = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Seed state with an existing active offer
+    harnessRepoFail.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "17:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessRepoFail.deps, {
+      to: harnessRepoFail.business.whatsappNumber,
+      from: harnessRepoFail.customer.phone,
+      text: "عايز موعد الساعة 5 مساء",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+    const priorState = harnessRepoFail.stateStore.get(
+      harnessRepoFail.conversation.id,
+    );
+    check(
+      "T19: Prior offer was active before technical failure",
+      priorState?.offer?.status === "ACTIVE",
+    );
+
+    // Inject repository lookup failure on subsequent exact-time lookup
+    harnessRepoFail.deps.appointmentRepository.listBlockingByAssignees =
+      async () => {
+        throw new Error("Database connection pool exhausted");
+      };
+
+    harnessRepoFail.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "فحص",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "18:00" },
+        });
+      },
+    };
+
+    const failRes = await receiveInboundMessage(harnessRepoFail.deps, {
+      to: harnessRepoFail.business.whatsappNumber,
+      from: harnessRepoFail.customer.phone,
+      text: "عايز موعد الساعة 6 مساء",
+      receivedAt: "2026-10-20T10:05:00Z",
+    });
+
+    check("T19: Technical repository failure turn handled safely", failRes.ok);
+    const repoFailReply =
+      harnessRepoFail.deliveredOutbound[
+        harnessRepoFail.deliveredOutbound.length - 1
+      ];
+    check(
+      "T19: Technical failure returns honest unable-to-check explanation",
+      repoFailReply?.body?.includes("تعذر التحقق من توفر موعد الساعة 6:00 مساءً حالياً بسبب خلل فني مؤقت"),
+    );
+    check(
+      "T19: Technical failure does NOT append 'no other appointments' claim",
+      !repoFailReply?.body?.includes("ولا تتوفر مواعيد أخرى"),
+    );
+    check(
+      "T19: Technical failure offers zero alternatives / choices",
+      (repoFailReply as any)?.choices === null ||
+        (repoFailReply as any)?.choices === undefined,
+    );
+    check(
+      "T19: Zero appointment writes on technical failure",
+      harnessRepoFail.capturedAppointmentWrites.length === 0,
+    );
+    const stateAfterFail = harnessRepoFail.stateStore.get(
+      harnessRepoFail.conversation.id,
+    );
+    check(
+      "T19: Obsolete offer is safely invalidated/cleared after technical failure",
+      stateAfterFail?.offer === null || stateAfterFail?.offer?.status !== "ACTIVE",
     );
   }
 
@@ -1497,6 +1686,371 @@ async function main(): Promise<void> {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // T21: Full-engine exact-time resume & reconciliation with durable reloads
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(
+    "--- T21: Full-engine exact-time resume & reconciliation with durable reloads ---",
+  );
+  {
+    // 1. Omission across durable reloads:
+    // Turn 1: Customer requests exact time 17:00 on 2026-10-21.
+    // Turn 2: Customer specifies provider only ("مع دكتور أحمد"). AI extraction omits exactTime, date, and service.
+    // Verify: exactTime 17:00 restored from durable state; persisted state, response, and offer contents agree.
+    const harnessOmission = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    harnessOmission.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "17:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessOmission.deps, {
+      to: harnessOmission.business.whatsappNumber,
+      from: harnessOmission.customer.phone,
+      text: "عايز موعد كشف أسنان بكرة الساعة 5 مساء",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    // Durable reload: read state directly from stateStore
+    const stateTurn1 = harnessOmission.stateStore.get(
+      harnessOmission.conversation.id,
+    );
+    check(
+      "T21.1: Turn 1 persisted state carries exactTime 17:00",
+      stateTurn1?.knownFacts.exactTime === "17:00",
+    );
+
+    // Turn 2: Customer provides provider; AI extraction omits exactTime and date
+    harnessOmission.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          provider: PLAYGROUND_IDS.PROV_1,
+        });
+      },
+    };
+    await receiveInboundMessage(harnessOmission.deps, {
+      to: harnessOmission.business.whatsappNumber,
+      from: harnessOmission.customer.phone,
+      text: "مع دكتور أحمد",
+      receivedAt: "2026-10-20T10:01:00Z",
+    });
+
+    const replyTurn2 =
+      harnessOmission.deliveredOutbound[
+        harnessOmission.deliveredOutbound.length - 1
+      ];
+    const stateTurn2 = harnessOmission.stateStore.get(
+      harnessOmission.conversation.id,
+    );
+    const choicesTurn2 = (replyTurn2 as any)?.choices;
+
+    check(
+      "T21.1: Omission turn response answers for resumed exact time 17:00",
+      replyTurn2?.body?.includes("5:00 مساءً"),
+    );
+    check(
+      "T21.1: Omission turn offer is present and bound to resumed exact time 17:00",
+      choicesTurn2?.offerKind === "SLOT" &&
+        stateTurn2?.offer?.options?.some((o: any) =>
+          o.startAt?.includes("17:00"),
+        ),
+    );
+    check(
+      "T21.1: Persisted state, outgoing response, and offer contents agree on resumed exact time",
+      stateTurn2?.knownFacts.exactTime === "17:00" &&
+        stateTurn2?.knownFacts.provider === PLAYGROUND_IDS.PROV_1,
+    );
+
+    // 2. factUpdates-only set and remove across durable reloads:
+    const harnessFactUpdates = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // 2a. factUpdates-only SET: extraction has exactTime null, factUpdates sets exactTime: "14:00"
+    harnessFactUpdates.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: null,
+          factUpdates: [
+            { key: "exactTime", value: "14:00", operation: "set" },
+          ],
+        });
+      },
+    };
+    await receiveInboundMessage(harnessFactUpdates.deps, {
+      to: harnessFactUpdates.business.whatsappNumber,
+      from: harnessFactUpdates.customer.phone,
+      text: "عايز موعد كشف أسنان بكرة",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    const replySet =
+      harnessFactUpdates.deliveredOutbound[
+        harnessFactUpdates.deliveredOutbound.length - 1
+      ];
+    const stateSet = harnessFactUpdates.stateStore.get(
+      harnessFactUpdates.conversation.id,
+    );
+    const choicesSet = (replySet as any)?.choices;
+
+    check(
+      "T21.2a: factUpdates-only SET makes reconciled exact time authoritative in response",
+      replySet?.body?.includes("2:00 مساءً"),
+    );
+    check(
+      "T21.2a: factUpdates-only SET persists exactTime 14:00 in durable state",
+      stateSet?.knownFacts.exactTime === "14:00",
+    );
+    check(
+      "T21.2a: factUpdates-only SET offer contents match 14:00",
+      stateSet?.offer?.options?.some((o: any) => o.startAt?.includes("14:00")) &&
+        choicesSet?.offerKind === "SLOT",
+    );
+
+    // 2b. factUpdates-only REMOVE: extraction has exactTime null, factUpdates removes exactTime
+    harnessFactUpdates.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "أي وقت",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: null,
+          factUpdates: [{ key: "exactTime", operation: "remove" }],
+        });
+      },
+    };
+    await receiveInboundMessage(harnessFactUpdates.deps, {
+      to: harnessFactUpdates.business.whatsappNumber,
+      from: harnessFactUpdates.customer.phone,
+      text: "أي وقت مناسب مش لازم 2",
+      receivedAt: "2026-10-20T10:02:00Z",
+    });
+
+    const stateRemove = harnessFactUpdates.stateStore.get(
+      harnessFactUpdates.conversation.id,
+    );
+    check(
+      "T21.2b: factUpdates-only REMOVE removes exactTime from persisted durable state",
+      stateRemove?.knownFacts.exactTime === undefined,
+    );
+
+    // 3. Conflicting extraction and factUpdate:
+    // Extraction says 16:00, but factUpdates says 18:00 (factUpdate must win authoritative)
+    const harnessConflict = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    harnessConflict.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "فحص",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "16:00" },
+          factUpdates: [
+            { key: "exactTime", value: "18:00", operation: "set" },
+          ],
+        });
+      },
+    };
+    await receiveInboundMessage(harnessConflict.deps, {
+      to: harnessConflict.business.whatsappNumber,
+      from: harnessConflict.customer.phone,
+      text: "خليه الساعة 6 مساء",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    const replyConflict =
+      harnessConflict.deliveredOutbound[
+        harnessConflict.deliveredOutbound.length - 1
+      ];
+    const stateConflict = harnessConflict.stateStore.get(
+      harnessConflict.conversation.id,
+    );
+    check(
+      "T21.3: Conflicting extraction vs factUpdate: factUpdate 18:00 wins in response",
+      replyConflict?.body?.includes("6:00 مساءً"),
+    );
+    check(
+      "T21.3: Conflicting extraction vs factUpdate: persisted state has 18:00",
+      stateConflict?.knownFacts.exactTime === "18:00",
+    );
+    check(
+      "T21.3: Conflicting extraction vs factUpdate: offer options match 18:00",
+      stateConflict?.offer?.options?.some((o: any) =>
+        o.startAt?.includes("18:00"),
+      ),
+    );
+
+    // 4. Date and provider correction with durable reload:
+    // Turn 1: 14:00 on 2026-10-21 -> Offer 1
+    // Turn 2: date corrected to 2026-10-22 (omits exactTime) -> Offer 1 invalidated, exactTime 14:00 evaluated on 2026-10-22
+    const harnessCorrection = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    harnessCorrection.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "specific", time: "14:00" },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessCorrection.deps, {
+      to: harnessCorrection.business.whatsappNumber,
+      from: harnessCorrection.customer.phone,
+      text: "عايز موعد كشف أسنان بكرة الساعة 2 مساء",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+    const stateCorr1 = harnessCorrection.stateStore.get(
+      harnessCorrection.conversation.id,
+    );
+    const offerTokenCorr1 = stateCorr1?.offer?.token;
+    check(
+      "T21.4: Turn 1 offer created with valid token",
+      typeof offerTokenCorr1 === "string" && offerTokenCorr1.length > 0,
+    );
+
+    // Turn 2: date corrected to 2026-10-22, exactTime omitted
+    harnessCorrection.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "متاح",
+          date: "2026-10-22",
+        });
+      },
+    };
+    await receiveInboundMessage(harnessCorrection.deps, {
+      to: harnessCorrection.business.whatsappNumber,
+      from: harnessCorrection.customer.phone,
+      text: "لا خليه يوم الخميس 2026-10-22",
+      receivedAt: "2026-10-20T10:02:00Z",
+    });
+    const replyCorr2 =
+      harnessCorrection.deliveredOutbound[
+        harnessCorrection.deliveredOutbound.length - 1
+      ];
+    const stateCorr2 = harnessCorrection.stateStore.get(
+      harnessCorrection.conversation.id,
+    );
+    check(
+      "T21.4: Date correction evaluates resumed exact time 14:00 on new date 2026-10-22",
+      replyCorr2?.body?.includes("2:00 مساءً") &&
+        replyCorr2?.body?.includes("2026-10-22"),
+    );
+    check(
+      "T21.4: Date correction offer matches new date and resumed exact time",
+      stateCorr2?.offer?.date === "2026-10-22" &&
+        stateCorr2?.offer?.options?.some((o: any) =>
+          o.startAt?.includes("2026-10-22T14:00"),
+        ),
+    );
+    check(
+      "T21.4: Offer 1 token is superseded and distinct from new offer token",
+      stateCorr2?.offer?.token !== offerTokenCorr1,
+    );
+
+    // 5. Removal of unresolved time across durable reloads:
+    const harnessUnresolvedRemove = createPlaygroundHarness({
+      businessConfig: { workingHours: standardWorkingHours },
+      todayRef: "2026-10-20",
+    });
+
+    // Turn 1: Customer asks "الساعة 3" -> ambiguity clarification
+    harnessUnresolvedRemove.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "أي وقت؟",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: { type: "unresolved_period", hour: 3, minute: 0 },
+        });
+      },
+    };
+    await receiveInboundMessage(harnessUnresolvedRemove.deps, {
+      to: harnessUnresolvedRemove.business.whatsappNumber,
+      from: harnessUnresolvedRemove.customer.phone,
+      text: "عايز موعد الساعة 3",
+      receivedAt: "2026-10-20T10:00:00Z",
+    });
+
+    const stateUnresolved1 = harnessUnresolvedRemove.stateStore.get(
+      harnessUnresolvedRemove.conversation.id,
+    );
+    check(
+      "T21.5: Turn 1 persisted state has typed unresolvedTime and clarification",
+      stateUnresolved1?.knownFacts.unresolvedTime?.hour === 3 &&
+        stateUnresolved1?.lastClarification?.type === "exact_time_period",
+    );
+
+    // Turn 2: Customer removes exactTime via factUpdate
+    harnessUnresolvedRemove.deps.ai = {
+      providerName: "mock-ai",
+      async respond(): Promise<AiResponse> {
+        return mockResponse({
+          intent: "BOOKING",
+          content: "تم الإلغاء",
+          service: "كشف أسنان",
+          date: "2026-10-21",
+          exactTime: null,
+          factUpdates: [{ key: "exactTime", operation: "remove" }],
+        });
+      },
+    };
+    await receiveInboundMessage(harnessUnresolvedRemove.deps, {
+      to: harnessUnresolvedRemove.business.whatsappNumber,
+      from: harnessUnresolvedRemove.customer.phone,
+      text: "بلاش الساعة 3 اعرض لي كل المتاح",
+      receivedAt: "2026-10-20T10:02:00Z",
+    });
+
+    const stateUnresolved2 = harnessUnresolvedRemove.stateStore.get(
+      harnessUnresolvedRemove.conversation.id,
+    );
+    check(
+      "T21.5: Removing exactTime clears unresolvedTime from durable state",
+      stateUnresolved2?.knownFacts.unresolvedTime === undefined,
+    );
+    check(
+      "T21.5: Removing exactTime clears lastClarification",
+      stateUnresolved2?.lastClarification === null,
+    );
+  }
+
   console.log(
     "\n=================================================================",
   );
@@ -1506,7 +2060,7 @@ async function main(): Promise<void> {
     for (const f of failures) console.error(`   - ${f}`);
     process.exit(1);
   } else {
-    console.log("  ALL TESTS PASSED (T01–T20) ✅");
+    console.log("  ALL TESTS PASSED (T01–T21) ✅");
     console.log(
       "=================================================================",
     );

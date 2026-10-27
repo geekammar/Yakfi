@@ -1216,17 +1216,61 @@ function resumeBookingExtraction(
       e.date ??
       (stateDate && RESUME_ISO_DATE.test(stateDate) ? stateDate : null));
 
+  let exactTime = e.exactTime ?? null;
+  if (rec.isRemoved("exactTime")) {
+    exactTime = null;
+  } else if (rec.setFacts.has("exactTime")) {
+    exactTime = {
+      type: "specific",
+      time: rec.setFacts.get("exactTime")!.value,
+    };
+  } else if (!rec.isTouched("exactTime") && !e.exactTime) {
+    if (state.knownFacts.exactTime) {
+      exactTime = {
+        type: "specific",
+        time: state.knownFacts.exactTime,
+      };
+    } else if (state.knownFacts.unresolvedTime) {
+      exactTime = {
+        type: "unresolved_period",
+        hour: state.knownFacts.unresolvedTime.hour,
+        minute: state.knownFacts.unresolvedTime.minute ?? 0,
+      };
+    }
+  }
+
+  const exactTimeUnchanged =
+    (exactTime === null && response.extraction.exactTime == null) ||
+    (exactTime?.type === "specific" &&
+      response.extraction.exactTime?.type === "specific" &&
+      exactTime.time === response.extraction.exactTime.time) ||
+    (exactTime?.type === "unresolved_period" &&
+      response.extraction.exactTime?.type === "unresolved_period" &&
+      exactTime.hour === response.extraction.exactTime.hour &&
+      (exactTime.minute ?? 0) ===
+        (response.extraction.exactTime.minute ?? 0));
+
+  const factUpdatesModifiedExtraction =
+    rec.isTouched("service") ||
+    rec.isTouched("provider") ||
+    rec.isTouched("date") ||
+    rec.isTouched("dateRange") ||
+    rec.isTouched("timePreference") ||
+    rec.isTouched("exactTime");
+
   if (
+    !factUpdatesModifiedExtraction &&
     service === response.extraction.service &&
     provider === response.extraction.provider &&
     timePreference === response.extraction.timePreference &&
-    date === response.extraction.date
+    date === response.extraction.date &&
+    exactTimeUnchanged
   ) {
     return response; // nothing to supplement — unchanged
   }
   return {
     ...response,
-    extraction: { ...e, service, provider, date, timePreference },
+    extraction: { ...e, service, provider, date, timePreference, exactTime },
   };
 }
 
@@ -5952,6 +5996,65 @@ async function runInboundTurn(
             }
           }
         }
+
+        // Exact time handling: authoritative state / explicit turn proposals only
+        if (turnReconciled.isTouched("exactTime")) {
+          if (turnReconciled.isRemoved("exactTime")) {
+            bookingAiResponse = {
+              ...bookingAiResponse,
+              extraction: {
+                ...bookingAiResponse.extraction,
+                exactTime: null,
+              },
+            };
+            if (resolvedState) {
+              const { exactTime: _droppedEt, unresolvedTime: _droppedUt, ...nextFacts } =
+                resolvedState.knownFacts;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "exact_time_period"
+                    ? null
+                    : resolvedState.lastClarification,
+                offer: null,
+                suspendedOffer: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+              }
+            }
+          } else {
+            const rawExplicitExact =
+              turnReconciled.setFacts.get("exactTime")?.value ??
+              (bookingAiResponse.extraction.exactTime?.type === "specific"
+                ? bookingAiResponse.extraction.exactTime.time
+                : null);
+            if (rawExplicitExact) {
+              bookingAiResponse = {
+                ...bookingAiResponse,
+                extraction: {
+                  ...bookingAiResponse.extraction,
+                  exactTime: { type: "specific", time: rawExplicitExact },
+                },
+              };
+              if (resolvedState) {
+                const { unresolvedTime: _droppedUt, ...nextFacts } =
+                  resolvedState.knownFacts;
+                resolvedState = {
+                  ...resolvedState,
+                  knownFacts: {
+                    ...nextFacts,
+                    exactTime: rawExplicitExact,
+                  },
+                };
+                if (turnSession.enabled) {
+                  turnSession.state = resolvedState;
+                }
+              }
+            }
+          }
+        }
       } else {
         const turnDateRes = resolveEgyptianRelativeDateDetailed(
           inbound.text,
@@ -7125,11 +7228,7 @@ async function runInboundTurn(
 
       const bookingDeps = buildBookingDeps(deps, eligibilityDeps);
 
-      let rawExactTime = isStructuredSemanticTurn
-        ? (bookingAiResponse.extraction.exactTime ?? null)
-        : turnReconciled.isTouched("exactTime")
-          ? (turnReconciled.normalizedExtraction.exactTime ?? null)
-          : (bookingAiResponse.extraction.exactTime ?? null);
+      let rawExactTime = bookingAiResponse.extraction.exactTime ?? null;
 
       // Follow-up resolution when replying to unresolved AM/PM clarification
       const pendingClar =
@@ -7140,7 +7239,11 @@ async function runInboundTurn(
         pendingClar?.unresolvedTime ??
         turnSession.state?.knownFacts.unresolvedTime;
 
-      if (!rawExactTime && unresolved && timeOfDayPref) {
+      if (
+        (!rawExactTime || rawExactTime.type === "unresolved_period") &&
+        unresolved &&
+        timeOfDayPref
+      ) {
         const h = unresolved.hour;
         const m = unresolved.minute ?? 0;
         let resolvedHour: number;

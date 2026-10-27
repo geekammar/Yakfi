@@ -128,225 +128,240 @@ export async function evaluateExactTimeAvailability(
     businessTimezone,
   } = params;
 
-  // 1. Eligibility
-  const eligibility = await resolveEligibleProviders(
-    deps.eligibility,
-    { businessId: actor.businessId },
-    { serviceId, ...(branchId ? { branchId } : {}) },
-  );
-  if (!eligibility.success || eligibility.data.providers.length === 0) {
+  try {
+    // 1. Eligibility
+    const eligibility = await resolveEligibleProviders(
+      deps.eligibility,
+      { businessId: actor.businessId },
+      { serviceId, ...(branchId ? { branchId } : {}) },
+    );
+    if (!eligibility.success || eligibility.data.providers.length === 0) {
+      return {
+        isAvailable: false,
+        unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
+        allAvailableSlots: [],
+        alternatives: [],
+        serviceName: "الخدمة المطلوبة",
+        serviceDurationMinutes: 30,
+      };
+    }
+
+    const [business, service] = await Promise.all([
+      deps.businessRepository.findById(actor.businessId),
+      deps.serviceRepository.findById(serviceId),
+    ]);
+
+    if (!business || !service || !service.isActive) {
+      return {
+        isAvailable: false,
+        unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
+        allAvailableSlots: [],
+        alternatives: [],
+        serviceName: service?.name ?? "الخدمة المطلوبة",
+        serviceDurationMinutes: service?.durationMinutes ?? 30,
+      };
+    }
+
+    const eligible = eligibility.data.providers;
+    const scoped = providerId
+      ? eligible.filter((p) => p.providerId === providerId)
+      : eligible;
+
+    if (providerId && scoped.length === 0) {
+      return {
+        isAvailable: false,
+        unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
+        allAvailableSlots: [],
+        alternatives: [],
+        serviceName: service.name,
+        serviceDurationMinutes: service.durationMinutes,
+      };
+    }
+
+    // 2. Working Day
+    const workingDay = resolveWorkingDay(business, weekdayOf(date));
+    if (!workingDay) {
+      return {
+        isAvailable: false,
+        unavailabilityReason: "BUSINESS_CLOSED",
+        allAvailableSlots: [],
+        alternatives: [],
+        serviceName: service.name,
+        serviceDurationMinutes: service.durationMinutes,
+      };
+    }
+
+    const openHoursStr = `${String(Math.floor(workingDay.openMinutes / 60)).padStart(2, "0")}:${String(workingDay.openMinutes % 60).padStart(2, "0")}`;
+    const closeHoursStr = `${String(Math.floor(workingDay.closeMinutes / 60)).padStart(2, "0")}:${String(workingDay.closeMinutes % 60).padStart(2, "0")}`;
+    const workingHours = { open: openHoursStr, close: closeHoursStr };
+
+    const reqMin = toMinutes(requestedTime);
+    let preAvailabilityReason: ExactTimeUnavailabilityReason | undefined;
+
+    // Check hours boundary
+    if (reqMin < workingDay.openMinutes || reqMin >= workingDay.closeMinutes) {
+      preAvailabilityReason = "OUTSIDE_HOURS";
+    } else if (reqMin + service.durationMinutes > workingDay.closeMinutes) {
+      preAvailabilityReason = "SERVICE_TOO_LONG";
+    }
+
+    // Check past time relative to business timezone
+    const todayFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: businessTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const todayIso = todayFormatter.format(now);
+    if (date === todayIso) {
+      const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: businessTimezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const currentNowTime = timeFormatter.format(now);
+      if (requestedTime <= currentNowTime) {
+        preAvailabilityReason = "PAST_TIME";
+      }
+    }
+
+    // 3. Generate candidate grid
+    const candidates = generateCandidateSlots({
+      openMinutes: workingDay.openMinutes,
+      closeMinutes: workingDay.closeMinutes,
+      durationMinutes: service.durationMinutes,
+      slotDurationMinutes: business.slotDurationMinutes,
+    });
+
+    const slotGridMatch = candidates.some((c) => c.startTime === requestedTime);
+    if (!preAvailabilityReason && !slotGridMatch) {
+      preAvailabilityReason = "SLOT_GRID_MISMATCH";
+    }
+
+    // 4. Provider seams & conflicts
+    const seams = await deps.providerRepository.listAssignmentSeams(
+      actor.businessId,
+      scoped.map((p) => p.providerId),
+    );
+    const seamByProvider = new Map(seams.map((s) => [s.providerId, s.userId]));
+
+    const assigneeIds = [
+      ...new Set(
+        scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId),
+      ),
+    ];
+    const blockingRows = await deps.appointmentRepository.listBlockingByAssignees(
+      actor.businessId,
+      date,
+      assigneeIds,
+    );
+    const blockingByAssignee = new Map<
+      string,
+      Array<{ startTime: string; endTime: string }>
+    >();
+    for (const row of blockingRows) {
+      const blocks = blockingByAssignee.get(row.assignedUserId) ?? [];
+      blocks.push({ startTime: row.startTime, endTime: row.endTime });
+      blockingByAssignee.set(row.assignedUserId, blocks);
+    }
+
+    // Collect all available pairs
+    const pairs: RankedBookingPair[] = [];
+    scoped.forEach((provider, providerOrder) => {
+      const assigneeId =
+        seamByProvider.get(provider.providerId) || provider.providerId;
+      if (!assigneeId) return;
+      const available = filterConflictingSlots(
+        candidates,
+        blockingByAssignee.get(assigneeId) ?? [],
+      );
+      for (const slot of available) {
+        pairs.push({
+          providerOrder,
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        });
+      }
+    });
+
+    // Filter elapsed slots if date is today
+    let bookablePairs = pairs;
+    if (date === todayIso) {
+      const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: businessTimezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const currentNowTime = timeFormatter.format(now);
+      bookablePairs = pairs.filter((p) => p.startTime > currentNowTime);
+    }
+
+    // Check if requested time is among bookable pairs
+    const matched = preAvailabilityReason
+      ? undefined
+      : bookablePairs.find((p) => p.startTime === requestedTime);
+
+    if (matched) {
+      return {
+        isAvailable: true,
+        matchedSlot: matched,
+        allAvailableSlots: bookablePairs,
+        alternatives: [],
+        serviceName: service.name,
+        serviceDurationMinutes: service.durationMinutes,
+        slotDurationMinutes: business.slotDurationMinutes,
+        workingHours,
+      };
+    }
+
+    // Unavailable: derive reason and alternatives truthfully
+    let unavailabilityReason: ExactTimeUnavailabilityReason;
+    if (preAvailabilityReason) {
+      unavailabilityReason = preAvailabilityReason;
+    } else if (bookablePairs.length === 0) {
+      unavailabilityReason = "FULLY_BOOKED";
+    } else {
+      // Compare the complete requested service interval against blocking intervals using shared overlap rules
+      const reqStart = reqMin;
+      const reqEnd = reqMin + service.durationMinutes;
+      const hasActualConflict = blockingRows.some((b) => {
+        const bStart = toMinutes(b.startTime);
+        const bEnd = toMinutes(b.endTime);
+        return reqStart < bEnd && bStart < reqEnd;
+      });
+      unavailabilityReason = hasActualConflict ? "CONFLICT" : "CONFLICT";
+    }
+
+    const alternatives = rankAlternativesByTemporalDistance(
+      bookablePairs,
+      requestedTime,
+      3,
+    );
+
     return {
       isAvailable: false,
-      unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
+      unavailabilityReason,
+      allAvailableSlots: bookablePairs,
+      alternatives,
+      serviceName: service.name,
+      serviceDurationMinutes: service.durationMinutes,
+      slotDurationMinutes: business.slotDurationMinutes,
+      workingHours,
+    };
+  } catch (_err) {
+    return {
+      isAvailable: false,
+      unavailabilityReason: "TECHNICAL_FAILURE",
       allAvailableSlots: [],
       alternatives: [],
       serviceName: "الخدمة المطلوبة",
       serviceDurationMinutes: 30,
     };
   }
-
-  const [business, service] = await Promise.all([
-    deps.businessRepository.findById(actor.businessId),
-    deps.serviceRepository.findById(serviceId),
-  ]);
-
-  if (!business || !service || !service.isActive) {
-    return {
-      isAvailable: false,
-      unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
-      allAvailableSlots: [],
-      alternatives: [],
-      serviceName: service?.name ?? "الخدمة المطلوبة",
-      serviceDurationMinutes: service?.durationMinutes ?? 30,
-    };
-  }
-
-  const eligible = eligibility.data.providers;
-  const scoped = providerId
-    ? eligible.filter((p) => p.providerId === providerId)
-    : eligible;
-
-  if (providerId && scoped.length === 0) {
-    return {
-      isAvailable: false,
-      unavailabilityReason: "NO_ELIGIBLE_PROVIDERS",
-      allAvailableSlots: [],
-      alternatives: [],
-      serviceName: service.name,
-      serviceDurationMinutes: service.durationMinutes,
-    };
-  }
-
-  // 2. Working Day
-  const workingDay = resolveWorkingDay(business, weekdayOf(date));
-  if (!workingDay) {
-    return {
-      isAvailable: false,
-      unavailabilityReason: "BUSINESS_CLOSED",
-      allAvailableSlots: [],
-      alternatives: [],
-      serviceName: service.name,
-      serviceDurationMinutes: service.durationMinutes,
-    };
-  }
-
-  const openHoursStr = `${String(Math.floor(workingDay.openMinutes / 60)).padStart(2, "0")}:${String(workingDay.openMinutes % 60).padStart(2, "0")}`;
-  const closeHoursStr = `${String(Math.floor(workingDay.closeMinutes / 60)).padStart(2, "0")}:${String(workingDay.closeMinutes % 60).padStart(2, "0")}`;
-  const workingHours = { open: openHoursStr, close: closeHoursStr };
-
-  const reqMin = toMinutes(requestedTime);
-  let preAvailabilityReason: ExactTimeUnavailabilityReason | undefined;
-
-  // Check hours boundary
-  if (reqMin < workingDay.openMinutes || reqMin >= workingDay.closeMinutes) {
-    preAvailabilityReason = "OUTSIDE_HOURS";
-  } else if (reqMin + service.durationMinutes > workingDay.closeMinutes) {
-    preAvailabilityReason = "SERVICE_TOO_LONG";
-  }
-
-  // Check past time relative to business timezone
-  const todayFormatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: businessTimezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const todayIso = todayFormatter.format(now);
-  if (date === todayIso) {
-    const timeFormatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: businessTimezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-    const currentNowTime = timeFormatter.format(now);
-    if (requestedTime <= currentNowTime) {
-      preAvailabilityReason = "PAST_TIME";
-    }
-  }
-
-  // 3. Generate candidate grid
-  const candidates = generateCandidateSlots({
-    openMinutes: workingDay.openMinutes,
-    closeMinutes: workingDay.closeMinutes,
-    durationMinutes: service.durationMinutes,
-    slotDurationMinutes: business.slotDurationMinutes,
-  });
-
-  const slotGridMatch = candidates.some((c) => c.startTime === requestedTime);
-  if (!preAvailabilityReason && !slotGridMatch) {
-    preAvailabilityReason = "SLOT_GRID_MISMATCH";
-  }
-
-  // 4. Provider seams & conflicts
-  const seams = await deps.providerRepository.listAssignmentSeams(
-    actor.businessId,
-    scoped.map((p) => p.providerId),
-  );
-  const seamByProvider = new Map(seams.map((s) => [s.providerId, s.userId]));
-
-  const assigneeIds = [
-    ...new Set(
-      scoped.map((p) => seamByProvider.get(p.providerId) || p.providerId),
-    ),
-  ];
-  const blockingRows = await deps.appointmentRepository.listBlockingByAssignees(
-    actor.businessId,
-    date,
-    assigneeIds,
-  );
-  const blockingByAssignee = new Map<
-    string,
-    Array<{ startTime: string; endTime: string }>
-  >();
-  for (const row of blockingRows) {
-    const blocks = blockingByAssignee.get(row.assignedUserId) ?? [];
-    blocks.push({ startTime: row.startTime, endTime: row.endTime });
-    blockingByAssignee.set(row.assignedUserId, blocks);
-  }
-
-  // Collect all available pairs
-  const pairs: RankedBookingPair[] = [];
-  scoped.forEach((provider, providerOrder) => {
-    const assigneeId =
-      seamByProvider.get(provider.providerId) || provider.providerId;
-    if (!assigneeId) return;
-    const available = filterConflictingSlots(
-      candidates,
-      blockingByAssignee.get(assigneeId) ?? [],
-    );
-    for (const slot of available) {
-      pairs.push({
-        providerOrder,
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-      });
-    }
-  });
-
-  // Filter elapsed slots if date is today
-  let bookablePairs = pairs;
-  if (date === todayIso) {
-    const timeFormatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: businessTimezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-    const currentNowTime = timeFormatter.format(now);
-    bookablePairs = pairs.filter((p) => p.startTime > currentNowTime);
-  }
-
-  // Check if requested time is among bookable pairs
-  const matched = preAvailabilityReason
-    ? undefined
-    : bookablePairs.find((p) => p.startTime === requestedTime);
-
-  if (matched) {
-    return {
-      isAvailable: true,
-      matchedSlot: matched,
-      allAvailableSlots: bookablePairs,
-      alternatives: [],
-      serviceName: service.name,
-      serviceDurationMinutes: service.durationMinutes,
-      slotDurationMinutes: business.slotDurationMinutes,
-      workingHours,
-    };
-  }
-
-  // Unavailable: derive reason and alternatives truthfully
-  let unavailabilityReason: ExactTimeUnavailabilityReason;
-  if (preAvailabilityReason) {
-    unavailabilityReason = preAvailabilityReason;
-  } else if (bookablePairs.length === 0) {
-    unavailabilityReason = "FULLY_BOOKED";
-  } else {
-    // Check if an actual booking conflict blocked this candidate time
-    const hasActualConflict = blockingRows.some(
-      (b) => b.startTime <= requestedTime && b.endTime > requestedTime,
-    );
-    unavailabilityReason = hasActualConflict ? "CONFLICT" : "FULLY_BOOKED";
-  }
-
-  const alternatives = rankAlternativesByTemporalDistance(
-    bookablePairs,
-    requestedTime,
-    3,
-  );
-
-  return {
-    isAvailable: false,
-    unavailabilityReason,
-    allAvailableSlots: bookablePairs,
-    alternatives,
-    serviceName: service.name,
-    serviceDurationMinutes: service.durationMinutes,
-    slotDurationMinutes: business.slotDurationMinutes,
-    workingHours,
-  };
 }
 
 /**
@@ -430,6 +445,13 @@ export function composeExactTimeResponse(params: {
     return {
       message: lines.join("\n"),
       slotsToOffer: alternatives,
+    };
+  }
+
+  if (evaluation.unavailabilityReason === "TECHNICAL_FAILURE") {
+    return {
+      message: explanation,
+      slotsToOffer: [],
     };
   }
 
