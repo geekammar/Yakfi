@@ -116,6 +116,255 @@ function appointmentStatusLabel(
   }[status];
 }
 
+/**
+ * Actual assignee / responder badge (CONV-UI-01).
+ * Informs the operator immediately who owns or is actively handling the
+ * thread without requiring navigation to the sidebar or footer.
+ */
+function AssigneeResponderBadge({
+  status,
+  assignedUser,
+  currentUserId,
+}: {
+  status: ConversationDetailData["status"];
+  assignedUser: ConversationDetailData["assignedUser"];
+  currentUserId: string;
+}) {
+  if (status === "AI_ACTIVE") {
+    return (
+      <span
+        aria-label="المسؤول الحالي: المساعد الذكي"
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+      >
+        <BotIcon aria-hidden className="size-3" />
+        <span>المساعد الذكي</span>
+      </span>
+    );
+  }
+
+  if (assignedUser) {
+    const isCurrentUser = assignedUser.id === currentUserId;
+    const name = isCurrentUser ? "أنت" : assignedUser.name;
+    return (
+      <span
+        aria-label={`المسؤول الحالي: ${name}`}
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-info/30 bg-info/10 px-2 py-0.5 text-[11px] font-medium text-info-foreground"
+      >
+        <UserRoundIcon aria-hidden className="size-3" />
+        <span className="max-w-[70px] truncate sm:max-w-[120px]">{name}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      aria-label="المسؤول الحالي: غير معينة"
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"
+    >
+      <UsersRoundIcon aria-hidden className="size-3" />
+      <span>غير معينة</span>
+    </span>
+  );
+}
+
+function ContextCards({
+  data,
+  summary,
+  setSummary,
+  isPending,
+  handleAssignment,
+  handleSummarySave,
+  handleTransition,
+  showActions = false,
+}: {
+  data: ConversationDetailData;
+  summary: string;
+  setSummary: (value: string) => void;
+  isPending: boolean;
+  handleAssignment: (value: string) => void;
+  handleSummarySave: () => void;
+  handleTransition: (
+    transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF",
+  ) => void;
+  showActions?: boolean;
+}) {
+  return (
+    <>
+      {showActions ? (
+        <section className="rounded-xl border bg-card p-4 shadow-xs">
+          <div className="mb-3 flex items-center gap-2">
+            <BotIcon className="size-4 text-primary" />
+            <h2 className="font-semibold">إجراءات المحادثة</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {data.status === "AI_ACTIVE" ||
+            (data.status === "NEED_HUMAN" && !data.assignedUser) ? (
+              <Button
+                type="button"
+                size="sm"
+                className="min-h-11 md:min-h-8"
+                onClick={() => handleTransition("TAKE_OVER")}
+                disabled={isPending}
+              >
+                <UserRoundIcon />
+                تولّي المحادثة
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="min-h-11 md:min-h-8"
+                onClick={() => handleTransition("RETURN_TO_AI")}
+                disabled={isPending}
+              >
+                <BotIcon />
+                إعادة للمساعد
+              </Button>
+            )}
+            {data.status !== "BOOKED" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="min-h-11 md:min-h-8"
+                onClick={() => handleTransition("MARK_BOOKED")}
+                disabled={isPending}
+              >
+                <CheckIcon />
+                تحديد كمحجوز
+              </Button>
+            ) : null}
+            {data.status === "AI_ACTIVE" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="min-h-11 md:min-h-8"
+                onClick={() => handleTransition("HANDOFF")}
+                disabled={isPending}
+              >
+                <UsersRoundIcon />
+                تحويل للفريق
+              </Button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="mb-3 flex items-center gap-2">
+          <UserRoundIcon className="size-4 text-primary" />
+          <h2 className="font-semibold">سياق العميل</h2>
+        </div>
+        <dl className="space-y-3 text-sm">
+          <div>
+            <dt className="text-xs text-muted-foreground">الاسم</dt>
+            <dd className="mt-0.5 font-medium">{data.customer.name}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">رقم الهاتف</dt>
+            <dd className="mt-0.5 font-medium" dir="ltr">
+              {data.customer.phone}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">ملاحظات</dt>
+            <dd className="mt-0.5 leading-6">
+              {data.customer.notes ?? "لا توجد ملاحظات مسجلة."}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="mb-3 flex items-center gap-2">
+          <CalendarDaysIcon className="size-4 text-primary" />
+          <h2 className="font-semibold">سياق الحجز</h2>
+        </div>
+        {data.appointments.length === 0 ? (
+          <p className="text-sm leading-6 text-muted-foreground">
+            لا توجد مواعيد مرتبطة بهذا العميل.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {data.appointments.map((appointment) => (
+              <div
+                key={appointment.id}
+                className="rounded-lg border bg-muted/30 p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium">{appointment.service.name}</p>
+                  <span className="text-xs text-muted-foreground">
+                    {appointmentStatusLabel(appointment.status)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatAppointmentDate(appointment.date)} ·{" "}
+                  {formatAppointmentTime(appointment.startTime)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="mb-3 flex items-center gap-2">
+          <UsersRoundIcon className="size-4 text-primary" />
+          <h2 className="font-semibold">التعيين</h2>
+        </div>
+        <Label htmlFor="conversation-assignee" className="sr-only">
+          تعيين عضو الفريق
+        </Label>
+        <Select
+          value={data.assignedUser?.id ?? "UNASSIGNED"}
+          onValueChange={handleAssignment}
+          disabled={isPending}
+        >
+          <SelectTrigger id="conversation-assignee" className="w-full">
+            <SelectValue placeholder="غير معينة" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="UNASSIGNED">غير معينة</SelectItem>
+            {data.team.map((user) => (
+              <SelectItem key={user.id} value={user.id}>
+                {user.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </section>
+
+      <section className="rounded-xl border bg-card p-4 shadow-xs">
+        <div className="mb-3 flex items-center gap-2">
+          <MessageCircleIcon className="size-4 text-primary" />
+          <h2 className="font-semibold">ملخص المساعد</h2>
+        </div>
+        <Textarea
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          placeholder="أضف ملخصاً يساعد الفريق على فهم المحادثة…"
+          aria-label="ملخص المساعد"
+          rows={4}
+          maxLength={4000}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={handleSummarySave}
+          disabled={isPending || summary === data.aiSummary}
+        >
+          {isPending ? <LoaderCircleIcon className="animate-spin" /> : null}
+          حفظ الملخص
+        </Button>
+      </section>
+    </>
+  );
+}
+
 export function ConversationDetail({
   data: initialData,
 }: {
@@ -126,12 +375,74 @@ export function ConversationDetail({
   const [summary, setSummary] = useState(initialData.aiSummary);
   const [error, setError] = useState<string | null>(null);
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<"messages" | "context">(
+    "messages",
+  );
   const [isPending, startTransition] = useTransition();
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const messageLogRef = useRef<HTMLDivElement>(null);
 
+  const NEAR_BOTTOM_THRESHOLD_PX = 100;
+  const initialScrolledRef = useRef(false);
+  const ownSendPendingRef = useRef(false);
+  const isNearBottomRef = useRef(true);
+  const savedScrollTopRef = useRef<number>(0);
+
+  // Track scroll position and proximity to bottom
+  const handleLogScroll = () => {
+    const el = messageLogRef.current;
+    if (!el) return;
+    savedScrollTopRef.current = el.scrollTop;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
+  };
+
+  // Initial scroll to bottom on mount
   useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ block: "end" });
+    const el = messageLogRef.current;
+    if (!el || initialScrolledRef.current) return;
+    el.scrollTop = el.scrollHeight;
+    savedScrollTopRef.current = el.scrollTop;
+    initialScrolledRef.current = true;
+  }, []);
+
+  // Follow messages when sending or near bottom; preserve reading position when reviewing older messages
+  useEffect(() => {
+    const el = messageLogRef.current;
+    if (!el) return;
+
+    if (!initialScrolledRef.current) {
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+      initialScrolledRef.current = true;
+      return;
+    }
+
+    if (ownSendPendingRef.current) {
+      // Own-send: explicitly follow own message to bottom
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+      isNearBottomRef.current = true;
+      ownSendPendingRef.current = false;
+      return;
+    }
+
+    if (isNearBottomRef.current) {
+      // Already near bottom: follow incoming message
+      el.scrollTop = el.scrollHeight;
+      savedScrollTopRef.current = el.scrollTop;
+    } else {
+      // Reviewing older messages: preserve exact reading position
+      el.scrollTop = savedScrollTopRef.current;
+    }
   }, [data.messages.length]);
+
+  // Explicit context-toggle behavior: restore reading position across mobile view switches
+  useEffect(() => {
+    if (mobileTab === "messages" && messageLogRef.current) {
+      messageLogRef.current.scrollTop = savedScrollTopRef.current;
+    }
+  }, [mobileTab]);
 
   async function runAction(
     action: () => Promise<{ success: boolean; message?: string }>,
@@ -198,6 +509,8 @@ export function ConversationDetail({
     const content = reply.trim();
     if (!content) return;
 
+    ownSendPendingRef.current = true;
+
     // Optimistic append — rolled back if the server rejects the reply.
     const pendingId = crypto.randomUUID();
     setPendingMessageId(pendingId);
@@ -253,10 +566,76 @@ export function ConversationDetail({
     });
   }
 
+  const actionButtons = (
+    <>
+      {data.status === "AI_ACTIVE" ||
+      (data.status === "NEED_HUMAN" && !data.assignedUser) ? (
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11 md:min-h-8"
+          onClick={() => handleTransition("TAKE_OVER")}
+          disabled={isPending}
+        >
+          <UserRoundIcon />
+          تولّي المحادثة
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="min-h-11 md:min-h-8"
+          onClick={() => handleTransition("RETURN_TO_AI")}
+          disabled={isPending}
+        >
+          <BotIcon />
+          إعادة للمساعد
+        </Button>
+      )}
+      {data.status !== "BOOKED" ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="min-h-11 md:min-h-8"
+          onClick={() => handleTransition("MARK_BOOKED")}
+          disabled={isPending}
+        >
+          <CheckIcon />
+          تحديد كمحجوز
+        </Button>
+      ) : null}
+      {data.status === "AI_ACTIVE" ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="min-h-11 md:min-h-8"
+          onClick={() => handleTransition("HANDOFF")}
+          disabled={isPending}
+        >
+          <UsersRoundIcon />
+          تحويل للفريق
+        </Button>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
-      <section className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]">
-        <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+      <section
+        style={{
+          height: "var(--conversation-height, calc(100dvh - 11rem))",
+          maxHeight: "var(--conversation-height, calc(100dvh - 11rem))",
+          minHeight: 0,
+        }}
+        className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
+      >
+        <header
+          data-testid="conversation-persistent-header"
+          className="sticky top-0 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-3"
+        >
           <Button
             asChild
             variant="ghost"
@@ -267,7 +646,7 @@ export function ConversationDetail({
               <ArrowRightIcon />
             </Link>
           </Button>
-          <div className="flex size-9 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+          <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs sm:text-sm font-semibold text-accent-foreground">
             {data.customer.name.slice(0, 2)}
           </div>
           <div className="min-w-0 flex-1">
@@ -276,90 +655,105 @@ export function ConversationDetail({
               {data.customer.phone}
             </p>
           </div>
-          <ConversationStatusBadge status={data.status} />
-          {data.attentionReason ? (
-            <AttentionReasonChip
-              reason={data.attentionReason}
-              cause={data.attentionCause}
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            <ConversationStatusBadge status={data.status} />
+            {data.attentionReason ? (
+              <AttentionReasonChip
+                reason={data.attentionReason}
+                cause={data.attentionCause}
+              />
+            ) : null}
+            <AssigneeResponderBadge
+              status={data.status}
+              assignedUser={data.assignedUser}
+              currentUserId={data.currentUserId}
             />
-          ) : null}
-          {/* B-07 §A — the conversation's customer is already known
-           * context; booking from here prefills العميل and opens the
-           * flow past that step (no re-search). */}
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="min-h-11 md:min-h-8"
-          >
-            <Link href={`/appointments/new?customerId=${data.customer.id}`}>
-              <CalendarDaysIcon aria-hidden className="size-4" />
-              حجز موعد
-            </Link>
-          </Button>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* B-07 §A — booking shortcut */}
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+            >
+              <Link href={`/appointments/new?customerId=${data.customer.id}`}>
+                <CalendarDaysIcon aria-hidden className="size-4" />
+                <span className="hidden sm:inline">حجز موعد</span>
+                <span className="sm:hidden">حجز</span>
+              </Link>
+            </Button>
+            {/* Mobile view toggle: messages vs context */}
+            <Button
+              type="button"
+              variant={mobileTab === "context" ? "secondary" : "ghost"}
+              size="sm"
+              className="min-h-11 md:min-h-8 lg:hidden"
+              onClick={() =>
+                setMobileTab((current) =>
+                  current === "messages" ? "context" : "messages",
+                )
+              }
+              aria-label={
+                mobileTab === "context"
+                  ? "العودة إلى المحادثة"
+                  : "عرض سياق العميل والمواعيد"
+              }
+            >
+              {mobileTab === "context" ? (
+                <>
+                  <MessageCircleIcon aria-hidden className="size-4" />
+                  <span className="text-xs">المحادثة</span>
+                </>
+              ) : (
+                <>
+                  <UserRoundIcon aria-hidden className="size-4" />
+                  <span className="text-xs">السياق</span>
+                </>
+              )}
+            </Button>
+          </div>
         </header>
 
-        <div className="flex flex-wrap gap-2 border-b px-4 py-2.5">
-          {data.status === "AI_ACTIVE" ||
-          (data.status === "NEED_HUMAN" && !data.assignedUser) ? (
-            <Button
-              type="button"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-              onClick={() => handleTransition("TAKE_OVER")}
-              disabled={isPending}
-            >
-              <UserRoundIcon />
-              تولّي المحادثة
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="min-h-11 md:min-h-8"
-              onClick={() => handleTransition("RETURN_TO_AI")}
-              disabled={isPending}
-            >
-              <BotIcon />
-              إعادة للمساعد
-            </Button>
-          )}
-          {data.status !== "BOOKED" ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="min-h-11 md:min-h-8"
-              onClick={() => handleTransition("MARK_BOOKED")}
-              disabled={isPending}
-            >
-              <CheckIcon />
-              تحديد كمحجوز
-            </Button>
-          ) : null}
-          {data.status === "AI_ACTIVE" ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="min-h-11 md:min-h-8"
-              onClick={() => handleTransition("HANDOFF")}
-              disabled={isPending}
-            >
-              <UsersRoundIcon />
-              تحويل للفريق
-            </Button>
-          ) : null}
+        {/* Desktop action toolbar */}
+        <div className="hidden md:flex flex-wrap gap-2 border-b px-4 py-2.5">
+          {actionButtons}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col">
+        {/* Mobile context view when context tab is active */}
+        {mobileTab === "context" ? (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 lg:hidden">
+            <ContextCards
+              data={data}
+              summary={summary}
+              setSummary={setSummary}
+              isPending={isPending}
+              handleAssignment={handleAssignment}
+              handleSummarySave={handleSummarySave}
+              handleTransition={handleTransition}
+              showActions={true}
+            />
+          </div>
+        ) : null}
+
+        {/* Messages & Composer */}
+        <div
+          className={`min-h-0 flex-1 flex-col ${
+            mobileTab === "context" ? "hidden lg:flex" : "flex"
+          }`}
+        >
           <div
+            ref={messageLogRef}
             role="log"
             aria-label="رسائل المحادثة"
             tabIndex={0}
-            className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
+            onScroll={handleLogScroll}
+            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
           >
+            {/* Mobile unpinned action buttons inside transcript */}
+            <div className="md:hidden flex flex-wrap gap-2 pb-3 mb-2 border-b border-border/50">
+              {actionButtons}
+            </div>
             {data.messages.length === 0 ? (
               <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted-foreground">
                 لا توجد رسائل في هذه المحادثة.
@@ -442,116 +836,17 @@ export function ConversationDetail({
         </div>
       </section>
 
-      <aside className="space-y-4">
-        <section className="rounded-xl border bg-card p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <UserRoundIcon className="size-4 text-primary" />
-            <h2 className="font-semibold">سياق العميل</h2>
-          </div>
-          <dl className="space-y-3 text-sm">
-            <div>
-              <dt className="text-xs text-muted-foreground">الاسم</dt>
-              <dd className="mt-0.5 font-medium">{data.customer.name}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">رقم الهاتف</dt>
-              <dd className="mt-0.5 font-medium" dir="ltr">
-                {data.customer.phone}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">ملاحظات</dt>
-              <dd className="mt-0.5 leading-6">
-                {data.customer.notes ?? "لا توجد ملاحظات مسجلة."}
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <section className="rounded-xl border bg-card p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <CalendarDaysIcon className="size-4 text-primary" />
-            <h2 className="font-semibold">سياق الحجز</h2>
-          </div>
-          {data.appointments.length === 0 ? (
-            <p className="text-sm leading-6 text-muted-foreground">
-              لا توجد مواعيد مرتبطة بهذا العميل.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {data.appointments.map((appointment) => (
-                <div
-                  key={appointment.id}
-                  className="rounded-lg border bg-muted/30 p-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-medium">{appointment.service.name}</p>
-                    <span className="text-xs text-muted-foreground">
-                      {appointmentStatusLabel(appointment.status)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatAppointmentDate(appointment.date)} ·{" "}
-                    {formatAppointmentTime(appointment.startTime)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-xl border bg-card p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <UsersRoundIcon className="size-4 text-primary" />
-            <h2 className="font-semibold">التعيين</h2>
-          </div>
-          <Label htmlFor="conversation-assignee" className="sr-only">
-            تعيين عضو الفريق
-          </Label>
-          <Select
-            value={data.assignedUser?.id ?? "UNASSIGNED"}
-            onValueChange={handleAssignment}
-            disabled={isPending}
-          >
-            <SelectTrigger id="conversation-assignee" className="w-full">
-              <SelectValue placeholder="غير معينة" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="UNASSIGNED">غير معينة</SelectItem>
-              {data.team.map((user) => (
-                <SelectItem key={user.id} value={user.id}>
-                  {user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </section>
-
-        <section className="rounded-xl border bg-card p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <MessageCircleIcon className="size-4 text-primary" />
-            <h2 className="font-semibold">ملخص المساعد</h2>
-          </div>
-          <Textarea
-            value={summary}
-            onChange={(event) => setSummary(event.target.value)}
-            placeholder="أضف ملخصاً يساعد الفريق على فهم المحادثة…"
-            aria-label="ملخص المساعد"
-            rows={4}
-            maxLength={4000}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            onClick={handleSummarySave}
-            disabled={isPending || summary === data.aiSummary}
-          >
-            {isPending ? <LoaderCircleIcon className="animate-spin" /> : null}
-            حفظ الملخص
-          </Button>
-        </section>
+      <aside className="hidden lg:block space-y-4">
+        <ContextCards
+          data={data}
+          summary={summary}
+          setSummary={setSummary}
+          isPending={isPending}
+          handleAssignment={handleAssignment}
+          handleSummarySave={handleSummarySave}
+          handleTransition={handleTransition}
+          showActions={false}
+        />
       </aside>
     </div>
   );
