@@ -70,3 +70,35 @@ Spec B evidence.
 WTP, renewal, and gross margin are discovery decision criteria
 (`PRODUCT_STRATEGY.md`). The metering above is what makes them measurable
 from real pilot data instead of memory.
+
+## Versioned Measurement & Cost Contracts (v0.73.0)
+
+### 1. Commercial Session Measurement Contract (`flowpilot.commercial.session.contract@v1`)
+
+Pure, deterministic internal volume measurement:
+- **Interval:** Half-open UTC window $[T_{\text{start}},\, T_{\text{start}} + 24\text{ hours})$.
+- **Scope Key:** `businessId:channel:connectionId:customerId` (anchored to tenant, customer, transport channel, and exact connection).
+- **Qualifying Events:** Substantive customer messages (`MESSAGE`) and validated interactive selections (`CHOICE_CALLBACK`). Zero NLP, zero free-text regexes.
+- **Start-Only Activity:** Telegram `/start` command protocol (`START_COMMAND`) deterministically yields welcome and does NOT open a commercial session.
+- **Deduplication & Test Isolation:** Intercepted duplicate payloads are excluded (`isDuplicate`); test ingress traffic is isolated in the `TEST` pool.
+- **Permutation Invariance:** Batches are sorted by `canonicalTimestamp` + `eventId` tie-breaker before rollup.
+- **Period Carry-In:** Explicit prior session state (`priorSessions`) prevents artificial session splits across measurement periods.
+
+### 2. Cost Engine (`flowpilot.cost.engine@v1`)
+
+Pure per-attempt physical execution accounting:
+- **Precedence:** Valid provider-reported cost first (`PROVIDER_REPORTED`, including $0.00); otherwise matching dated rate snapshot (`RATE_SNAPSHOT`); otherwise `UNKNOWN`.
+- **Zero-Dispatch Prevention:** Locally prevented attempts (e.g. `FLOWPILOT_AI_GLOBAL_STOP`, ceiling clamps) have 0 external cost and are excluded from the dispatched coverage denominator.
+- **Status Code Honesty:** HTTP 0, 401, 403, 429, or timeouts NEVER infer zero cost automatically unless proven un-dispatched.
+- **Completeness & Subtotals:** Dispatched attempts with mixed known/unknown costs report `PARTIAL` completeness with `totalCostUsd = null` while preserving `knownSubtotalUsd`. Fully covered turns report `COMPLETE`.
+- **Token Caching:** Evaluates cached vs uncached prompt rates without double counting.
+- **Pool Isolation:** Strict separation across `SERVING`, `SHADOW`, and `TEST` pools. Missing shadow data remains unknown, never fabricated.
+- **Coverage Denominator:** Coverage ratio reflects known dispatched attempts divided by total dispatched wire attempts. Zero denominator yields null (`N/A`).
+
+### 3. Persistence Caveats & Architectural Gaps (Under Review)
+
+The proposed persistence schema is a discovery design proposal and is **NOT approved or implemented**:
+- **Finished-Only Crash Gaps:** In-flight network attempts that crash the process before turn completion are missing from finished-turn logs.
+- **ID-Based Reconciliation & Grace Period:** Provider billing reconciliation requires an ID-based matching window with an explicit post-month grace period (e.g. 72 hours) before period lock.
+- **Serving / Shadow Lineage Limitations:** Shadow JEV calls share the inbound execution context but must maintain disjoint trace lineage to prevent downstream billing inflation.
+
