@@ -531,7 +531,14 @@ export function rollupCommercialSessions(
   }
 
   // 5. Compute metrics strictly partitioned per traffic pool
-  const metricsByPool: Record<TrafficPool, PoolSessionMetrics> = {
+  type MutableMetrics = {
+    sessionCount: number;
+    qualifyingEventCount: number;
+    totalEventCount: number;
+    eventCount: number;
+  };
+
+  const poolAccumulators: Record<TrafficPool, MutableMetrics> = {
     SERVING: {
       sessionCount: 0,
       qualifyingEventCount: 0,
@@ -556,12 +563,18 @@ export function rollupCommercialSessions(
     const targetPool = TRAFFIC_POOLS.includes(session.trafficPool)
       ? session.trafficPool
       : "SERVING";
-    metricsByPool[targetPool].sessionCount += 1;
-    metricsByPool[targetPool].qualifyingEventCount +=
-      session.qualifyingEventCount;
-    metricsByPool[targetPool].totalEventCount += session.totalEventCount;
-    metricsByPool[targetPool].eventCount += session.eventCount;
+    const acc = poolAccumulators[targetPool];
+    acc.sessionCount += 1;
+    acc.qualifyingEventCount += session.qualifyingEventCount;
+    acc.totalEventCount += session.totalEventCount;
+    acc.eventCount += session.eventCount;
   }
+
+  const metricsByPool: Record<TrafficPool, PoolSessionMetrics> = {
+    SERVING: { ...poolAccumulators.SERVING },
+    SHADOW: { ...poolAccumulators.SHADOW },
+    TEST: { ...poolAccumulators.TEST },
+  };
 
   return {
     schema: COMMERCIAL_SESSION_CONTRACT_VERSION,
