@@ -219,7 +219,6 @@ export const aiExtractionSchema = z.object({
       }
       return val;
     }, aiExactTimeRequestSchema.nullable().optional())
-    .default(null)
     .optional(),
 });
 
