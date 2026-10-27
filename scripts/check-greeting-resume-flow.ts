@@ -1179,7 +1179,7 @@ async function run(): Promise<void> {
       customAi: {
         providerName: "MOCK_AI",
         respond: async (req: any) => {
-          const text = req.userMessage?.text ?? "";
+          const text = req.message ?? req.userMessage?.text ?? "";
           if (text.includes("عصراً")) {
             periodRequested = true;
             return {
@@ -1324,6 +1324,7 @@ async function run(): Promise<void> {
       serviceId: PLAYGROUND_IDS.SERV_DENTAL,
       selectedService: "كشف أسنان",
       selectedDate: "2026-10-29",
+      providerPreference: PLAYGROUND_IDS.PROV_1,
       activeTask: {
         kind: "BOOKING",
         stage: "AVAILABILITY_RESOLVED",
@@ -1332,30 +1333,51 @@ async function run(): Promise<void> {
       knownFacts: {
         service: "كشف أسنان",
         date: "2026-10-29",
+        provider: PLAYGROUND_IDS.PROV_1,
         exactTime: "14:00",
       },
     };
     await saveDurableState(harness, savedState);
 
-    // A conflicting appointment was booked in the meantime at 14:00 for the same provider
-    harness.appointments.push({
-      id: "appt-conflict-1",
-      businessId: harness.business.id,
-      branchId: harness.business.defaultBranchId,
-      customerId: "cust-other",
-      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
-      providerId: PLAYGROUND_IDS.PROV_1,
-      assignedUserId: PLAYGROUND_IDS.USER_P1,
-      date: new Date("2026-10-29T00:00:00Z"),
-      startTime: "14:00",
-      endTime: "14:30",
-      status: "CONFIRMED",
-      notes: null,
-      followUpRequestId: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deletedAt: null,
-    });
+    // Conflicting appointments booked at 14:00 for the eligible providers
+    harness.appointments.push(
+      {
+        id: "appt-conflict-1",
+        businessId: harness.business.id,
+        branchId: harness.business.defaultBranchId,
+        customerId: "cust-other-1",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        providerId: PLAYGROUND_IDS.PROV_1,
+        assignedUserId: PLAYGROUND_IDS.USER_P1,
+        date: new Date("2026-10-29T00:00:00Z"),
+        startTime: "14:00",
+        endTime: "14:30",
+        status: "CONFIRMED",
+        notes: null,
+        followUpRequestId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      },
+      {
+        id: "appt-conflict-2",
+        businessId: harness.business.id,
+        branchId: harness.business.defaultBranchId,
+        customerId: "cust-other-2",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        providerId: PLAYGROUND_IDS.PROV_2,
+        assignedUserId: PLAYGROUND_IDS.USER_P2,
+        date: new Date("2026-10-29T00:00:00Z"),
+        startTime: "14:00",
+        endTime: "14:30",
+        status: "CONFIRMED",
+        notes: null,
+        followUpRequestId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      },
+    );
 
     // Greeting -> presents resume offer
     await sendInbound(harness, {
