@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import type { BookingOptionsServiceDeps } from "../src/features/appointments/server/booking-options-service";
 import {
   composeExactTimeResponse,
   evaluateExactTimeAvailability,
@@ -1003,8 +1004,20 @@ async function main(): Promise<void> {
       todayRef: "2026-10-20",
     });
 
+    const bookingDeps: BookingOptionsServiceDeps = {
+      eligibility: {
+        serviceRepository: harness.deps.serviceRepository,
+        branchRepository: harness.deps.branchRepository,
+        providerRepository: harness.deps.providerRepository,
+      },
+      businessRepository: harness.deps.businessRepository,
+      serviceRepository: harness.deps.serviceRepository,
+      providerRepository: harness.deps.providerRepository,
+      appointmentRepository: harness.deps.appointmentRepository,
+    };
+
     const evalResult = await evaluateExactTimeAvailability(
-      harness.deps,
+      bookingDeps,
       { businessId: PLAYGROUND_IDS.BIZ_ID, userId: "u1" },
       {
         serviceId: PLAYGROUND_IDS.SERV_DENTAL,
