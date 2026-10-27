@@ -46,8 +46,9 @@ async function main(): Promise<void> {
   );
   check(
     "U01b. لوحة المحادثة بارتفاع محدود + overflow-hidden (لا فيضان على النافذة)",
-    detail.includes("overflow-hidden") &&
-      (detail.includes("100dvh-11rem") || detail.includes("100dvh_-_11rem")),
+    /className="flex h-\[calc\(100dvh-11rem\)\] min-h-\[28rem\] flex-1 flex-col overflow-hidden/.test(
+      detail,
+    ),
   );
   check(
     "U01c. الشريط الجانبي مخفي على الجوال في وضع الرسائل (hidden lg:block) لمنع التمرير المزدوج",
