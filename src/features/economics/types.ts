@@ -149,10 +149,7 @@ export interface ModelRateSnapshot {
 }
 
 export type AttemptCostProvenance =
-  | "PROVIDER_REPORTED"
-  | "RATE_SNAPSHOT"
-  | "ZERO_DISPATCH_PREVENTED"
-  | "UNKNOWN";
+  "PROVIDER_REPORTED" | "RATE_SNAPSHOT" | "ZERO_DISPATCH_PREVENTED" | "UNKNOWN";
 
 export type AttemptCostCompleteness = "KNOWN" | "UNKNOWN";
 
