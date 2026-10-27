@@ -1204,7 +1204,7 @@ async function run(): Promise<void> {
               ],
               goals: [
                 {
-                  kind: "SCHEDULE",
+                  kind: "DOMAIN_ACTION",
                   intent: "BOOKING",
                   requiredKnowledge: "NONE",
                 },
