@@ -71,6 +71,14 @@ function check(title: string, passed: unknown, extraInfo?: string): void {
   }
 }
 
+async function loadDurableState(harness: any): Promise<any> {
+  const loaded = await harness.stateStore.load(
+    harness.business.id,
+    harness.conversation.id,
+  );
+  return loaded?.state ?? null;
+}
+
 function mockResponse(params: {
   intent: "AVAILABILITY" | "BOOKING" | "FAQ";
   action?: "reply" | "booking_handoff" | "handoff";
@@ -1450,16 +1458,14 @@ async function main(): Promise<void> {
       text: "عايز موعد الساعة 5 مساء",
       receivedAt: "2026-10-20T10:00:00Z",
     });
-    const priorState = harnessRepoFail.stateStore.get(
-      harnessRepoFail.conversation.id,
-    );
+    const priorState = await loadDurableState(harnessRepoFail);
     check(
       "T19: Prior offer was active before technical failure",
       priorState?.offer?.status === "ACTIVE",
     );
 
     // Inject repository lookup failure on subsequent exact-time lookup
-    harnessRepoFail.deps.appointmentRepository.listBlockingByAssignees =
+    harnessRepoFail.deps.appointmentRepository!.listBlockingByAssignees =
       async () => {
         throw new Error("Database connection pool exhausted");
       };
@@ -1506,9 +1512,7 @@ async function main(): Promise<void> {
       "T19: Zero appointment writes on technical failure",
       harnessRepoFail.capturedAppointmentWrites.length === 0,
     );
-    const stateAfterFail = harnessRepoFail.stateStore.get(
-      harnessRepoFail.conversation.id,
-    );
+    const stateAfterFail = await loadDurableState(harnessRepoFail);
     check(
       "T19: Obsolete offer is safely invalidated/cleared after technical failure",
       stateAfterFail?.offer === null || stateAfterFail?.offer?.status !== "ACTIVE",
@@ -1722,9 +1726,7 @@ async function main(): Promise<void> {
     });
 
     // Durable reload: read state directly from stateStore
-    const stateTurn1 = harnessOmission.stateStore.get(
-      harnessOmission.conversation.id,
-    );
+    const stateTurn1 = await loadDurableState(harnessOmission);
     check(
       "T21.1: Turn 1 persisted state carries exactTime 17:00",
       stateTurn1?.knownFacts.exactTime === "17:00",
@@ -1752,9 +1754,7 @@ async function main(): Promise<void> {
       harnessOmission.deliveredOutbound[
         harnessOmission.deliveredOutbound.length - 1
       ];
-    const stateTurn2 = harnessOmission.stateStore.get(
-      harnessOmission.conversation.id,
-    );
+    const stateTurn2 = await loadDurableState(harnessOmission);
     const choicesTurn2 = (replyTurn2 as any)?.choices;
 
     check(
@@ -1807,9 +1807,7 @@ async function main(): Promise<void> {
       harnessFactUpdates.deliveredOutbound[
         harnessFactUpdates.deliveredOutbound.length - 1
       ];
-    const stateSet = harnessFactUpdates.stateStore.get(
-      harnessFactUpdates.conversation.id,
-    );
+    const stateSet = await loadDurableState(harnessFactUpdates);
     const choicesSet = (replySet as any)?.choices;
 
     check(
@@ -1847,9 +1845,7 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:02:00Z",
     });
 
-    const stateRemove = harnessFactUpdates.stateStore.get(
-      harnessFactUpdates.conversation.id,
-    );
+    const stateRemove = await loadDurableState(harnessFactUpdates);
     check(
       "T21.2b: factUpdates-only REMOVE removes exactTime from persisted durable state",
       stateRemove?.knownFacts.exactTime === undefined,
@@ -1888,9 +1884,7 @@ async function main(): Promise<void> {
       harnessConflict.deliveredOutbound[
         harnessConflict.deliveredOutbound.length - 1
       ];
-    const stateConflict = harnessConflict.stateStore.get(
-      harnessConflict.conversation.id,
-    );
+    const stateConflict = await loadDurableState(harnessConflict);
     check(
       "T21.3: Conflicting extraction vs factUpdate: factUpdate 18:00 wins in response",
       replyConflict?.body?.includes("6:00 مساءً"),
@@ -1932,9 +1926,7 @@ async function main(): Promise<void> {
       text: "عايز موعد كشف أسنان بكرة الساعة 2 مساء",
       receivedAt: "2026-10-20T10:00:00Z",
     });
-    const stateCorr1 = harnessCorrection.stateStore.get(
-      harnessCorrection.conversation.id,
-    );
+    const stateCorr1 = await loadDurableState(harnessCorrection);
     const offerTokenCorr1 = stateCorr1?.offer?.token;
     check(
       "T21.4: Turn 1 offer created with valid token",
@@ -1962,9 +1954,7 @@ async function main(): Promise<void> {
       harnessCorrection.deliveredOutbound[
         harnessCorrection.deliveredOutbound.length - 1
       ];
-    const stateCorr2 = harnessCorrection.stateStore.get(
-      harnessCorrection.conversation.id,
-    );
+    const stateCorr2 = await loadDurableState(harnessCorrection);
     check(
       "T21.4: Date correction evaluates resumed exact time 14:00 on new date 2026-10-22",
       replyCorr2?.body?.includes("2:00 مساءً") &&
@@ -2008,9 +1998,7 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:00:00Z",
     });
 
-    const stateUnresolved1 = harnessUnresolvedRemove.stateStore.get(
-      harnessUnresolvedRemove.conversation.id,
-    );
+    const stateUnresolved1 = await loadDurableState(harnessUnresolvedRemove);
     check(
       "T21.5: Turn 1 persisted state has typed unresolvedTime and clarification",
       stateUnresolved1?.knownFacts.unresolvedTime?.hour === 3 &&
@@ -2038,9 +2026,7 @@ async function main(): Promise<void> {
       receivedAt: "2026-10-20T10:02:00Z",
     });
 
-    const stateUnresolved2 = harnessUnresolvedRemove.stateStore.get(
-      harnessUnresolvedRemove.conversation.id,
-    );
+    const stateUnresolved2 = await loadDurableState(harnessUnresolvedRemove);
     check(
       "T21.5: Removing exactTime clears unresolvedTime from durable state",
       stateUnresolved2?.knownFacts.unresolvedTime === undefined,

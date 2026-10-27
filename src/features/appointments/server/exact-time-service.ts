@@ -352,7 +352,7 @@ export async function evaluateExactTimeAvailability(
       slotDurationMinutes: business.slotDurationMinutes,
       workingHours,
     };
-  } catch (_err) {
+  } catch {
     return {
       isAvailable: false,
       unavailabilityReason: "TECHNICAL_FAILURE",
