@@ -16,11 +16,12 @@ export function StatusBadge({
   status,
   withIcon = true,
   className,
+  ...props
 }: {
   status: StatusValue | string;
   withIcon?: boolean;
   className?: string;
-}) {
+} & React.HTMLAttributes<HTMLSpanElement>) {
   const definition = resolveStatus(status);
   const Icon = definition.icon;
 
@@ -31,6 +32,7 @@ export function StatusBadge({
         toneStyles[definition.tone],
         className,
       )}
+      {...props}
     >
       {withIcon && <Icon aria-hidden className="size-3" />}
       {definition.labelAr}

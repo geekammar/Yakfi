@@ -303,6 +303,172 @@ test.describe("Authenticated Preview QA", () => {
     });
     expect(page.url()).toContain("/admin/team");
 
+    // 9. Conversations Inbox & Persistent Header QA (CONV-UI-01 / U01–U10)
+    await page.goto("/conversations", { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveTitle(/المحادثات|FlowPilot/);
+    await expect(page.locator("body")).toBeVisible();
+
+    // Verify RTL & zero horizontal overflow on inbox
+    expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
+
+    // Screenshot Inbox
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `${vpName}-07-conversations-inbox.png`),
+      fullPage: true,
+    });
+
+    // Inspect conversation items in inbox
+    const conversationLinks = page.locator('a[href^="/conversations/"]');
+    const conversationCount = await conversationLinks.count();
+
+    if (conversationCount > 0) {
+      const firstConvLink = conversationLinks.first();
+      await firstConvLink.click();
+      await page.waitForURL((url) => url.pathname.includes("/conversations/"), {
+        timeout: 10_000,
+        waitUntil: "domcontentloaded",
+      });
+
+      // U01 & U08: Persistent Header presence & initial geometry
+      const persistentHeader = page.locator(
+        'header[data-testid="conversation-persistent-header"]',
+      );
+      await expect(persistentHeader).toBeVisible();
+
+      const initialHeaderBox = await persistentHeader.boundingBox();
+      expect(initialHeaderBox).not.toBeNull();
+      if (initialHeaderBox) {
+        // Must be located at or immediately below the sticky app bar
+        expect(initialHeaderBox.y).toBeGreaterThanOrEqual(0);
+        expect(initialHeaderBox.y).toBeLessThanOrEqual(60);
+      }
+
+      // U02: Real customer identity with truncation
+      const customerH1 = persistentHeader.locator("h1");
+      await expect(customerH1).toBeVisible();
+      expect(
+        await customerH1.evaluate((el) => el.classList.contains("truncate")),
+      ).toBe(true);
+
+      const customerPhone = persistentHeader.locator('p[dir="ltr"]');
+      await expect(customerPhone).toBeVisible();
+
+      // U03: Status badge & reason chip
+      const statusBadge = persistentHeader.locator(
+        '[aria-label^="حالة المحادثة:"]',
+      );
+      await expect(statusBadge).toBeVisible();
+
+      // U04: Actual assignee / responder context
+      const assigneeBadge = persistentHeader.locator(
+        '[aria-label^="المسؤول الحالي:"]',
+      );
+      await expect(assigneeBadge).toBeVisible();
+
+      // U05: Non-bloated actions: on mobile, persistent header height is compact (<= 130px)
+      if (vpName.startsWith("mobile") && initialHeaderBox) {
+        expect(initialHeaderBox.height).toBeLessThanOrEqual(130);
+      }
+
+      // U06: Independently scrollable message history
+      const messageLog = page.locator('div[role="log"]');
+      await expect(messageLog).toBeVisible();
+      expect(await messageLog.getAttribute("tabindex")).toBe("0");
+
+      // Screenshot Conversation Detail Top
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `${vpName}-08-conversation-detail-top.png`,
+        ),
+        fullPage: true,
+      });
+
+      // Scroll transcript by 500px to test independent scrolling & header persistence
+      await messageLog.evaluate((el) => {
+        el.scrollTop = 500;
+      });
+      await page.waitForTimeout(300);
+
+      // Verify Persistent Header DID NOT SCROLL AWAY
+      const scrolledHeaderBox = await persistentHeader.boundingBox();
+      expect(scrolledHeaderBox).not.toBeNull();
+      if (scrolledHeaderBox && initialHeaderBox) {
+        expect(
+          Math.abs(scrolledHeaderBox.y - initialHeaderBox.y),
+        ).toBeLessThanOrEqual(5);
+      }
+
+      // Screenshot Conversation Detail Scrolled
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `${vpName}-09-conversation-detail-scrolled.png`,
+        ),
+        fullPage: true,
+      });
+
+      // U07: Composer usable & positioned above bottom navigation
+      const replyTextarea = page.locator(
+        'textarea[aria-label="رد على العميل"]',
+      );
+      await expect(replyTextarea).toBeVisible();
+      const sendButton = page.locator('button[aria-label="إرسال الرد"]');
+      await expect(sendButton).toBeVisible();
+
+      if (vpName.startsWith("mobile")) {
+        const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
+        if (await bottomNav.isVisible()) {
+          const navBox = await bottomNav.boundingBox();
+          const composerBox = await replyTextarea.boundingBox();
+          if (navBox && composerBox) {
+            // Composer must sit above the fixed bottom navigation bar
+            expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(
+              navBox.y + 10,
+            );
+          }
+        }
+      }
+
+      // U08 & U09: Zero horizontal overflow across all viewports
+      isOverflowing = await page.evaluate(() => {
+        return document.documentElement.scrollWidth > window.innerWidth;
+      });
+      expect(isOverflowing).toBe(false);
+
+      // Test mobile context view toggle if visible
+      const contextToggle = persistentHeader.locator(
+        'button[aria-label="عرض سياق العميل والمواعيد"]',
+      );
+      if (await contextToggle.isVisible()) {
+        await contextToggle.click();
+        await page.waitForTimeout(200);
+
+        // Verify context details rendered
+        await expect(page.getByText("سياق العميل")).toBeVisible();
+
+        await page.screenshot({
+          path: path.join(
+            SCREENSHOT_DIR,
+            `${vpName}-10-conversation-detail-context.png`,
+          ),
+          fullPage: true,
+        });
+
+        // Toggle back to messages
+        const messagesToggle = persistentHeader.locator(
+          'button[aria-label="العودة إلى المحادثة"]',
+        );
+        await messagesToggle.click();
+        await page.waitForTimeout(200);
+        await expect(messageLog).toBeVisible();
+      }
+    }
+
     // Assert no critical console errors
     expect(consoleErrors).toEqual([]);
   });

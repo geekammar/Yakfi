@@ -181,6 +181,28 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
       ),
       fullPage: true,
     });
+
+    // 3. Conversation inbox screen (/conversations) unauthenticated redirect
+    await page.goto("/conversations", { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(/.*\/sign-in\?redirect=%2Fconversations/);
+    expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
+
+    // 4. Conversation detail screen (/conversations/conv-demo-01) unauthenticated redirect
+    await page.goto("/conversations/conv-demo-01", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(page).toHaveURL(
+      /.*\/sign-in\?redirect=%2Fconversations%2Fconv-demo-01/,
+    );
+    expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+    isOverflowing = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > window.innerWidth;
+    });
+    expect(isOverflowing).toBe(false);
   });
 
   test("PWA Offline screen (/offline.html): RTL, responsiveness and recovery guidance", async ({
