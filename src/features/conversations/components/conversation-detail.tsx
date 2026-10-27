@@ -392,9 +392,12 @@ export function ConversationDetail({
   );
   const [isPending, startTransition] = useTransition();
   const messageEndRef = useRef<HTMLDivElement>(null);
+  const messageLogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ block: "end" });
+    if (messageLogRef.current) {
+      messageLogRef.current.scrollTop = messageLogRef.current.scrollHeight;
+    }
   }, [data.messages.length]);
 
   async function runAction(
@@ -687,6 +690,7 @@ export function ConversationDetail({
           }`}
         >
           <div
+            ref={messageLogRef}
             role="log"
             aria-label="رسائل المحادثة"
             tabIndex={0}

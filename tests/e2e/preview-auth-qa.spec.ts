@@ -342,9 +342,9 @@ test.describe("Authenticated Preview QA", () => {
       const initialHeaderBox = await persistentHeader.boundingBox();
       expect(initialHeaderBox).not.toBeNull();
       if (initialHeaderBox) {
-        // Must be located at or immediately below the sticky app bar
-        expect(initialHeaderBox.y).toBeGreaterThanOrEqual(0);
-        expect(initialHeaderBox.y).toBeLessThanOrEqual(60);
+        // Must be located at or immediately below the sticky app bar (top bar h-14 = 56px, main pt-6 = 24px)
+        expect(initialHeaderBox.y).toBeGreaterThanOrEqual(40);
+        expect(initialHeaderBox.y).toBeLessThanOrEqual(120);
       }
 
       // U02: Real customer identity with truncation
