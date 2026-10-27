@@ -629,7 +629,7 @@ function runSuite(): void {
   ];
 
   // Attempt on 2026-10-15 should match rate-current (2026-10-01), NOT rate-future (2026-11-01) or rate-old (2026-09-01)
-  const testAttempt: PhysicalAttemptFact[] = {
+  const testAttempt: PhysicalAttemptFact = {
     attemptId: "att-hist",
     attemptIndex: 1,
     trafficPool: "SERVING",
