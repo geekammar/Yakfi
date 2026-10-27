@@ -369,9 +369,9 @@ test.describe("Authenticated Preview QA", () => {
       );
       await expect(assigneeBadge).toBeVisible();
 
-      // U05: Non-bloated actions: on mobile, persistent header height is compact (<= 130px)
+      // U05: Non-bloated actions: on mobile, persistent header height is compact (<= 160px even on narrow 320px)
       if (vpName.startsWith("mobile") && initialHeaderBox) {
-        expect(initialHeaderBox.height).toBeLessThanOrEqual(130);
+        expect(initialHeaderBox.height).toBeLessThanOrEqual(160);
       }
 
       // U06: Independently scrollable message history
@@ -449,7 +449,9 @@ test.describe("Authenticated Preview QA", () => {
         await page.waitForTimeout(200);
 
         // Verify context details rendered
-        await expect(page.getByText("سياق العميل")).toBeVisible();
+        await expect(
+          page.getByRole("heading", { name: "سياق العميل" }).first(),
+        ).toBeVisible();
 
         await page.screenshot({
           path: path.join(

@@ -581,7 +581,7 @@ export function ConversationDetail({
       <section className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]">
         <header
           data-testid="conversation-persistent-header"
-          className="sticky top-0 z-20 flex flex-wrap items-center gap-2 border-b bg-card/95 backdrop-blur-xs px-3 py-2.5 sm:px-4 sm:py-3"
+          className="sticky top-0 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-3"
         >
           <Button
             asChild
@@ -593,7 +593,7 @@ export function ConversationDetail({
               <ArrowRightIcon />
             </Link>
           </Button>
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+          <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs sm:text-sm font-semibold text-accent-foreground">
             {data.customer.name.slice(0, 2)}
           </div>
           <div className="min-w-0 flex-1">
