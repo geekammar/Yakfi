@@ -11,8 +11,8 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
       "Scenario runs once in isolated desktop-1280 profile",
     );
 
-    // 1. Navigate to a known origin route so we have a valid secure origin context
-    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    // 1. Navigate to /offline.html so we have a valid secure origin context without auto-registering sw.js
+    await page.goto("/offline.html", { waitUntil: "domcontentloaded" });
 
     // 2. Establish a stale old icon in the legacy v2 cache (flowpilot-static-v2)
     const staleLegacySvg = `<svg id="legacy-v2-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#999999"/></svg>`;
@@ -48,9 +48,17 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
     });
     expect(staleVerification).toContain("legacy-v2-icon");
 
-    // 3. Exercise actual new service worker (/sw.js) installation and activation via page reload
-    await page.reload({ waitUntil: "domcontentloaded" });
+    // 3. Exercise actual new service worker (/sw.js) installation and activation
     await page.evaluate(async () => {
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await new Promise<void>((resolve) => {
+        const worker = reg.installing || reg.waiting || reg.active;
+        if (!worker) return resolve();
+        if (worker.state === "activated") return resolve();
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "activated") resolve();
+        });
+      });
       await navigator.serviceWorker.ready;
     });
 
