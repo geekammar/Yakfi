@@ -511,7 +511,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // Test mobile context view toggle if visible
     const contextToggle = persistentHeader.locator(
-      'button[aria-label="عرض سياق العميل والمواعيد"]',
+      'button[aria-label="عرض تفاصيل العميل والمواعيد"], button[aria-label="عرض سياق العميل والمواعيد"]',
     );
     if (await contextToggle.isVisible()) {
       await contextToggle.click();

@@ -151,20 +151,35 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     expect(selfAssignee?.textContent).toContain("أنت");
   });
 
-  it("U05: Mobile action buttons are present inside scrollable transcript and not pinned", async () => {
+  it("U05: Actions are directly accessible in the persistent header on mobile and desktop without opening context", async () => {
     const root = createRoot(container);
     await act(async () => {
       root.render(<ConversationDetail data={mockData} />);
     });
 
-    const log = container.querySelector('div[role="log"]');
-    expect(log).not.toBeNull();
-    expect(log?.className).toContain("overflow-y-auto");
+    const header = container.querySelector(
+      'header[data-testid="conversation-persistent-header"]',
+    );
+    expect(header).not.toBeNull();
 
-    // Action buttons container inside transcript on mobile
-    const mobileActionsContainer = log?.querySelector("div.md\\:hidden");
-    expect(mobileActionsContainer).not.toBeNull();
-    expect(mobileActionsContainer?.textContent).toContain("تولّي المحادثة");
+    // Primary action button is directly in header
+    expect(header?.textContent).toContain("تولّي");
+    const takeOverBtn = header?.querySelector(
+      'button[aria-label="تولّي المحادثة"]',
+    );
+    expect(takeOverBtn).not.toBeNull();
+
+    // Booking shortcut is directly in header
+    expect(header?.textContent).toContain("حجز");
+    const bookingLink = header?.querySelector('a[aria-label="حجز موعد"]');
+    expect(bookingLink).not.toBeNull();
+
+    // Details toggle button is directly in header with label "التفاصيل"
+    const detailsBtn = header?.querySelector(
+      'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
+    );
+    expect(detailsBtn).not.toBeNull();
+    expect(detailsBtn?.textContent).toContain("التفاصيل");
   });
 
   it("U06 & U07: Independently scrollable log and usable composer with labels", async () => {
@@ -195,7 +210,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     });
 
     const toggleBtn = container.querySelector(
-      'button[aria-label="عرض سياق العميل والمواعيد"]',
+      'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
     );
     expect(toggleBtn).not.toBeNull();
 
@@ -286,7 +301,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
     // Toggle to context view
     const toggleToContext = container.querySelector(
-      'button[aria-label="عرض سياق العميل والمواعيد"]',
+      'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
     );
     await act(async () => {
       toggleToContext?.dispatchEvent(
@@ -309,5 +324,111 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       'textarea[aria-label="رد على العميل"]',
     ) as HTMLTextAreaElement;
     expect(restoredTextarea.value).toBe("مسودة رد غير مرسلة");
+  });
+
+  it("Handles long Arabic customer names and allows up to two lines on narrow screens", async () => {
+    const root = createRoot(container);
+    const longNameData: ConversationDetailData = {
+      ...mockData,
+      customer: {
+        ...mockData.customer,
+        name: "عبد الرحمن عبد الرحيم عبد الصمد المصطفى الشريف بن هاشم",
+      },
+    };
+
+    await act(async () => {
+      root.render(<ConversationDetail data={longNameData} />);
+    });
+
+    const h1 = container.querySelector("h1");
+    expect(h1).not.toBeNull();
+    expect(h1?.textContent).toBe(longNameData.customer.name);
+    expect(h1?.className).toContain("line-clamp-2");
+    expect(h1?.className).toContain("break-words");
+    expect(h1?.className).toContain("truncate");
+  });
+
+  it("NEED_HUMAN with attention cause and unassigned does not infer an active human responder", async () => {
+    const root = createRoot(container);
+    const needHumanData: ConversationDetailData = {
+      ...mockData,
+      status: "NEED_HUMAN",
+      assignedUser: null,
+      attentionReason: "AI_HANDOFF",
+      attentionCause: "CUSTOMER_REQUESTED_HUMAN",
+    };
+
+    await act(async () => {
+      root.render(<ConversationDetail data={needHumanData} />);
+    });
+
+    // Status is NEED_HUMAN
+    const statusBadge = container.querySelector(
+      '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
+    );
+    expect(statusBadge).not.toBeNull();
+
+    // Attention cause chip is displayed
+    const attentionChip = container.querySelector(
+      '[aria-label^="سبب انتباه المشغل:"]',
+    );
+    expect(attentionChip).not.toBeNull();
+    expect(attentionChip?.textContent).toContain("العميل طلب مسؤولاً");
+
+    // Assignee shows "غير معينة" — does NOT infer active responder
+    const assigneeBadge = container.querySelector(
+      '[aria-label="المسؤول الحالي: غير معينة"]',
+    );
+    expect(assigneeBadge).not.toBeNull();
+    expect(assigneeBadge?.textContent).toContain("غير معينة");
+  });
+
+  it("AI_ACTIVE renders compact status 'نشط' without duplicate AI labels", async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    // Compact status badge displays "نشط"
+    const statusBadge = container.querySelector(
+      '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+    );
+    expect(statusBadge).not.toBeNull();
+    expect(statusBadge?.textContent).toBe("نشط");
+
+    // Assignee displays "المساعد الذكي"
+    const assigneeBadge = container.querySelector(
+      '[aria-label="المسؤول الحالي: المساعد الذكي"]',
+    );
+    expect(assigneeBadge).not.toBeNull();
+    expect(assigneeBadge?.textContent).toContain("المساعد الذكي");
+  });
+
+  it("Primary action switches to 'إعادة للمساعد' when assigned to human", async () => {
+    const root = createRoot(container);
+    const assignedData: ConversationDetailData = {
+      ...mockData,
+      status: "NEED_HUMAN",
+      assignedUser: { id: "user-me", name: "أحمد المشرف", image: null },
+    };
+
+    await act(async () => {
+      root.render(<ConversationDetail data={assignedData} />);
+    });
+
+    const returnBtn = container.querySelector(
+      'button[aria-label="إعادة للمساعد"]',
+    );
+    expect(returnBtn).not.toBeNull();
+    expect(returnBtn?.textContent).toContain("إعادة");
+
+    // Clicking Return to AI triggers transitionConversation
+    await act(async () => {
+      returnBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(transitionConversation).toHaveBeenCalledWith({
+      id: "conv-test-1",
+      transition: "RETURN_TO_AI",
+    });
   });
 });

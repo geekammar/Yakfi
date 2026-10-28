@@ -9,6 +9,19 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
+**Product version: v0.75.3 (feature branch; candidate PR)** — `Responsive Conversation Header and Direct Actions Repair`. Baseline: v0.75.2 (PR #48 candidate baseline, commit `ed49e018ca94969af359985ef9bff1479b07c2be`). Focused responsive UI repair in `conversation-detail.tsx` and directly related presentation components:
+
+1. **Independent Customer Identity Layout**: Isolated customer identity from status badges into a dedicated layout area (`min-w-0 flex-1`), allowing long Arabic names up to two lines on narrow screens (`line-clamp-2 whitespace-normal break-words font-semibold text-sm sm:text-base leading-tight`) without getting squeezed or truncated into a few characters. Kept phone numbers strictly LTR (`dir="ltr"`).
+2. **Dedicated Status & Assignee Wrapping Area**: Placed status badge, operator attention cause chip (`AttentionReasonChip`), and assignee badge (`AssigneeResponderBadge`) into a separate wrapping sub-row below customer identity (`flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/40 text-xs sm:pt-1.5`).
+3. **Non-Duplicated AI Ownership & Truthful Responder Information**: For `AI_ACTIVE`, introduced `compact` status label «نشط» alongside assignee badge «المساعد الذكي», eliminating redundant duplicate AI labels while preserving distinct status and ownership semantics. For `NEED_HUMAN` unassigned state, rendered «غير معينة» without inferring an active human responder.
+4. **Direct Accessible Primary & Secondary Actions**: Created a single shared action component `ConversationActions` (`src/features/conversations/components/conversation-actions.tsx`) used across both mobile and desktop views:
+   - Direct primary action button (`TAKE_OVER` «تولّي» / «تولّي المحادثة» or `RETURN_TO_AI` «إعادة» / «إعادة للمساعد») directly accessible in the pinned header without opening context.
+   - Direct booking shortcut (`/appointments/new?customerId=...`).
+   - Mobile context view toggle («التفاصيل» / «المحادثة», `aria-label="عرض تفاصيل العميل والمواعيد"`).
+   - Secondary actions in an accessible «المزيد» `DropdownMenu` (`MARK_BOOKED` «تحديد كمحجوز», `HANDOFF` «تحويل للفريق») when available.
+5. **Preserved Shell, Scroll & Safety Invariants**: Kept pinned conversation header (`sticky top-0 z-20`), internally scrolling message transcript (`div[role="log"]`), PR47 sidebar constraints (`maxHeight: "var(--conversation-height, calc(100dvh - 8.5rem))"`), composer clearance above bottom navigation (`pb-24`), draft preservation across view switches, reading position stability, and zero DB migrations or backend logic alterations.
+6. **Acceptance Verification**: Verified by 12/12 unit and interaction tests in `conversation-detail.test.tsx` (covering viewports, long Arabic names, unassigned NEED_HUMAN, AI_ACTIVE label non-duplication, state transitions, and draft preservation), 20/20 checks in `scripts/check-conv-ui-01.ts`, 18/18 checks in `scripts/check-conversation-ux.ts`, `pnpm check:version` (v0.75.3 strictly incremented), and full lightweight local quality gate `pnpm verify:local` (security, ai-prompts, typecheck, lint, and format all green).
+
 **Product version: v0.75.2 (feature branch; candidate PR)** — `Bounded OpenRouter Attempt Timeout Adjustment (12s -> 18s)`. Baseline: v0.75.1 (PR #47 merged baseline, commit `9e4c0073d4bc7d52806b47d388b0ca57d0799e89`).
 
 1. **OpenRouter Per-Attempt Timeout Adjustment**: Raised `OPENROUTER_TIMEOUT_MS` from 12,000 ms to 18,000 ms in `src/server/integrations/ai/openrouter.ts` to accommodate slower, structured generative completions without exceeding the client-side attempt abort timer.
