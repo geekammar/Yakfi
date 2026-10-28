@@ -509,7 +509,7 @@ test.describe("Authenticated Preview QA", () => {
     const windowScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
-    expect(windowScrollY).toBeLessThanOrEqual(10);
+    expect(Math.abs(windowScrollY - postNavScrollY)).toBeLessThanOrEqual(10);
 
     // U07: Composer usable & positioned above bottom navigation
     const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');

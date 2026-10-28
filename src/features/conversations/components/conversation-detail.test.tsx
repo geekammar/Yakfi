@@ -4,16 +4,16 @@
  * Verifies the component lifecycle, persistent header elements, assignee/responder
  * resolution, mobile context tab switching, and transition actions in JSDOM.
  */
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import {
   ConversationDetail,
   formatAppointmentDate,
 } from "@/features/conversations/components/conversation-detail";
-import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import type { ConversationDetailData } from "@/features/conversations/types";
-
-import { createRoot } from "react-dom/client";
-import { act } from "react-dom/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   assignConversation,
@@ -437,18 +437,21 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
   });
 
   describe("Appointment calendar date formatting consistency", () => {
-    it("formats 2026-11-07 as Saturday 7 November without shifting backward", () => {
-      const formatted = formatAppointmentDate("2026-11-07");
-      // Day of week is Saturday (السبت)
-      expect(formatted).toContain("السبت");
-      // Month is November (نوفمبر)
-      expect(formatted).toContain("نوفمبر");
-      // Day number is 7 (٧ or 7)
-      expect(formatted).toMatch(/[7٧]/);
-      // Must NOT be Friday (الجمعة) or 6 (٦)
-      expect(formatted).not.toContain("الجمعة");
-      expect(formatted).not.toMatch(/[6٦]/);
-    });
+    it(
+      "formats 2026-11-07 as Saturday 7 November without shifting backward",
+      () => {
+        const formatted = formatAppointmentDate("2026-11-07");
+        // Day of week is Saturday (السبت)
+        expect(formatted).toContain("السبت");
+        // Month is November (نوفمبر)
+        expect(formatted).toContain("نوفمبر");
+        // Day number is 7 (٧ or 7)
+        expect(formatted).toMatch(/[7٧]/);
+        // Must NOT be Friday (الجمعة) or 6 (٦)
+        expect(formatted).not.toContain("الجمعة");
+        expect(formatted).not.toMatch(/[6٦]/);
+      },
+    );
 
     it("formats 2026-11-08 as Sunday 8 November", () => {
       const formatted = formatAppointmentDate("2026-11-08");
@@ -458,58 +461,64 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(formatted).not.toContain("السبت");
     });
 
-    it("matches appointment details (formatArabicDate) on intended calendar date parts", () => {
-      const testDates = [
-        "2026-11-07",
-        "2026-11-08",
-        "2026-10-30",
-        "2026-12-01",
-      ];
-      for (const d of testDates) {
-        const convDate = formatAppointmentDate(d);
-        const apptDate = formatArabicDate(d);
-        // Both must agree on the Arabic day of week and month
-        if (d === "2026-11-07") {
-          expect(convDate).toContain("السبت");
-          expect(apptDate).toContain("السبت");
-          expect(convDate).toContain("نوفمبر");
-          expect(apptDate).toContain("نوفمبر");
-        } else if (d === "2026-11-08") {
-          expect(convDate).toContain("الأحد");
-          expect(apptDate).toContain("الأحد");
-          expect(convDate).toContain("نوفمبر");
-          expect(apptDate).toContain("نوفمبر");
+    it(
+      "matches appointment details (formatArabicDate) on intended calendar date parts",
+      () => {
+        const testDates = [
+          "2026-11-07",
+          "2026-11-08",
+          "2026-10-30",
+          "2026-12-01",
+        ];
+        for (const d of testDates) {
+          const convDate = formatAppointmentDate(d);
+          const apptDate = formatArabicDate(d);
+          // Both must agree on the Arabic day of week and month
+          if (d === "2026-11-07") {
+            expect(convDate).toContain("السبت");
+            expect(apptDate).toContain("السبت");
+            expect(convDate).toContain("نوفمبر");
+            expect(apptDate).toContain("نوفمبر");
+          } else if (d === "2026-11-08") {
+            expect(convDate).toContain("الأحد");
+            expect(apptDate).toContain("الأحد");
+            expect(convDate).toContain("نوفمبر");
+            expect(apptDate).toContain("نوفمبر");
+          }
         }
-      }
-    });
+      },
+    );
 
-    it("ConversationDetail renders consistent Saturday 7 November in appointment context", async () => {
-      const root = createRoot(container);
-      const dataWithNov7Apt: ConversationDetailData = {
-        ...mockData,
-        appointments: [
-          {
-            id: "apt-nov-7",
-            date: "2026-11-07",
-            startTime: "2026-11-07T10:00:00Z",
-            status: "CONFIRMED",
-            notes: null,
-            service: { name: "تنظيف أسنان", durationMinutes: 30 },
-          },
-        ],
-      };
+    it(
+      "ConversationDetail renders consistent Saturday 7 November in appointment context",
+      async () => {
+        const root = createRoot(container);
+        const dataWithNov7Apt: ConversationDetailData = {
+          ...mockData,
+          appointments: [
+            {
+              id: "apt-nov-7",
+              date: "2026-11-07",
+              startTime: "2026-11-07T10:00:00Z",
+              status: "CONFIRMED",
+              notes: null,
+              service: { name: "تنظيف أسنان", durationMinutes: 30 },
+            },
+          ],
+        };
 
-      await act(async () => {
-        root.render(<ConversationDetail data={dataWithNov7Apt} />);
-      });
+        await act(async () => {
+          root.render(<ConversationDetail data={dataWithNov7Apt} />);
+        });
 
-      // Check rendered text inside container
-      expect(container.textContent).toContain("السبت");
-      expect(container.textContent).toContain("نوفمبر");
-      expect(container.textContent).toMatch(/[7٧]/);
-      // Ensure Friday 6 November does not appear as appointment date
-      expect(container.textContent).not.toContain("الجمعة، ٦ نوفمبر");
-      expect(container.textContent).not.toContain("الجمعة، 6 نوفمبر");
-    });
+        // Check rendered text inside container
+        expect(container.textContent).toContain("السبت");
+        expect(container.textContent).toContain("نوفمبر");
+        expect(container.textContent).toMatch(/[7٧]/);
+        // Ensure Friday 6 November does not appear as appointment date
+        expect(container.textContent).not.toContain("الجمعة، ٦ نوفمبر");
+        expect(container.textContent).not.toContain("الجمعة، 6 نوفمبر");
+      },
+    );
   });
 });
