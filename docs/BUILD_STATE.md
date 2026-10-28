@@ -9,7 +9,15 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.75.5 (feature branch; candidate PR)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Focused responsive UI enhancement in `conversation-actions.tsx` and `conversation-detail.tsx`:
+**Product version: v0.76.0 (feature branch; candidate PR)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Platform identity transition and PWA/browser asset update:
+
+1. **Platform Identity Definition**: Updated `APP_NAME` to `يكفي` and `APP_DESCRIPTION` to `إدارة المحادثات وحجز المواعيد ومتابعتها.` in `src/lib/app-config.ts` (with `APP_NAME_LATIN = "yakfi"`). Preserved business, customer, bot identity, and infrastructure identifiers.
+2. **Accessible Brand Headers & Links**: Embedded `<YakfiSymbol />` (`src/components/shared/yakfi-symbol.tsx`) with 24px size and 8px gap alongside Arabic name `يكفي` in `app-shell.tsx` (desktop sidebar and mobile topbar), `(auth)/layout.tsx`, and `onboarding-shell.tsx`. Kept existing text sizing, `h-14` toolbar height, and single-row action geometry.
+3. **PWA Manifest & Metadata**: Updated `src/app/manifest.ts` to name `يكفي — إدارة المحادثات والمواعيد`, short name `يكفي`, `background_color: "#F4F7FB"`, `theme_color: "#173B63"`. Updated root layout light themeColor to `#F4F7FB`.
+4. **Canonical & Maskable Assets**: Implemented `public/icon.svg`, `public/icons/icon-192.svg`, `public/icons/icon-512.svg`, and `public/icons/maskable.svg` with approved Yakfi converging-Y geometry (`#173B63` navy, `#FFFFFF` stem, `#64B9CD` sky dot). Ensured maskable and Apple icon derivatives keep all artwork strictly inside the central 40% radius safe circle. Packaged dual-resolution `favicon.ico` (16x16 and 32x32).
+5. **Reproducible Generation & Cache Migration**: Updated `scripts/generate-pwa-icons.mjs` with exact Yakfi geometry and `--check` validation. Bumped Service Worker static cache version to `v3` (`flowpilot-static-v3`) in `public/sw.js` for safe cache eviction. Updated offline page title in `public/offline.html`.
+
+**Product version: v0.75.5 (main)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Merged via PR #50 (commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Focused responsive UI enhancement in `conversation-actions.tsx` and `conversation-detail.tsx`:
 
 1. **Full Visible Action Labels**: Render complete visible Arabic labels across all viewports (mobile and desktop): «تولّي المحادثة» for `TAKE_OVER` and «حجز موعد» for booking shortcut.
 2. **Width Recovery via Responsive Icon Hiding**: Recover narrow-screen width by hiding decorative icons beside clearly labeled actions below the `sm` breakpoint (`hidden sm:inline` on `UserRoundIcon`, `CalendarDaysIcon`, `BotIcon`, and Details `UserRoundIcon`/`MessageCircleIcon`). Kept More icon (`MoreHorizontalIcon`) visible.

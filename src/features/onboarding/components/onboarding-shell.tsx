@@ -1,5 +1,7 @@
 "use client";
 
+import { YakfiSymbol } from "@/components/shared/yakfi-symbol";
+import { APP_NAME } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
 import { CheckIcon } from "lucide-react";
@@ -25,8 +27,12 @@ export function OnboardingShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-dvh bg-background">
       <header className="border-b bg-card">
         <div className="mx-auto flex h-14 max-w-4xl items-center px-4 sm:px-6">
-          <Link href="/onboarding" className="text-sm font-semibold">
-            FlowPilot
+          <Link
+            href="/onboarding"
+            className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary"
+          >
+            <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
+            <span>{APP_NAME}</span>
           </Link>
           <span className="ms-auto text-xs text-muted-foreground">
             الخطوة {currentIndex + 1} من {STEPS.length}
