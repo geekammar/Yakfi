@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { APP_NAME } from "@/lib/app-config";
 
 import { DownloadIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -56,7 +57,7 @@ export function InstallPrompt() {
       className="bg-card fixed inset-x-4 bottom-20 z-[var(--z-banner)] flex items-center gap-3 rounded-xl border p-3 shadow-lg md:bottom-6 md:inset-x-auto md:end-6 md:max-w-sm"
     >
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">ثبّت FlowPilot على جهازك</p>
+        <p className="text-sm font-medium">ثبّت {APP_NAME} على جهازك</p>
         <p className="text-muted-foreground truncate text-xs">
           وصول أسرع وتجربة أفضل.
         </p>

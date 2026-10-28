@@ -6,7 +6,7 @@
  *  - Everything else: pass-through (no caching of API traffic).
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC_CACHE = `flowpilot-static-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
 
