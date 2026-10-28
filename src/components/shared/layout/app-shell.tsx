@@ -72,7 +72,7 @@ export function AppShell({
         <main
           id="main-content"
           className={cn(
-            "mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-24 sm:px-6 md:pb-10",
+            "mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-24 sm:px-6 md:pb-10 scroll-mt-14",
             className,
           )}
         >
