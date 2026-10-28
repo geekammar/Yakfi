@@ -10,8 +10,12 @@ const STATUS_LABELS: Record<ConversationStatus, string> = {
 
 export function ConversationStatusBadge({
   status,
+  compact = false,
+  className,
 }: {
   status: ConversationStatus;
+  compact?: boolean;
+  className?: string;
 }) {
   const values = {
     AI_ACTIVE: "ai-active",
@@ -20,10 +24,16 @@ export function ConversationStatusBadge({
     INCOMPLETE: "incomplete",
   } as const;
 
+  const label =
+    compact && status === "AI_ACTIVE" ? "نشط" : STATUS_LABELS[status];
+
   return (
     <StatusBadge
       status={values[status]}
       aria-label={`حالة المحادثة: ${STATUS_LABELS[status]}`}
-    />
+      className={className}
+    >
+      {label}
+    </StatusBadge>
   );
 }

@@ -50,6 +50,9 @@ async function main(): Promise<void> {
   const detail = read(
     "src/features/conversations/components/conversation-detail.tsx",
   );
+  const actions = read(
+    "src/features/conversations/components/conversation-actions.tsx",
+  );
   const inbox = read("src/features/conversations/components/inbox-list.tsx");
   const appShell = read("src/components/shared/layout/app-shell.tsx");
   const bottomNav = read("src/components/shared/layout/bottom-nav.tsx");
@@ -81,7 +84,8 @@ async function main(): Promise<void> {
   // ── U2. identity is real identity ──────────────────────────────────────
   check(
     "U2a. الترويسة تحمل <h1> باسم العميل + هاتفاً dir=ltr (مقطوع، لا فيضان)",
-    detail.includes(`<h1 className="truncate font-semibold">`) &&
+    /<h1[^>]*class(?:Name)?="[^"]*font-semibold[^"]*"/.test(detail) &&
+      detail.includes("truncate") &&
       /<p className="truncate text-xs text-muted-foreground" dir="ltr">/.test(
         detail,
       ) &&
@@ -90,13 +94,14 @@ async function main(): Promise<void> {
   check(
     "U2b. اسم العميل لا يُكرَّر داخل السجل (الهوية في الترويسة فقط)",
     (detail.match(/data\.customer\.name/g) ?? []).length >= 1 &&
-      (detail.match(/<h1[^>]*>\{data\.customer\.name\}/g) ?? []).length === 1,
+      (detail.match(/<h1[^>]*>\s*\{data\.customer\.name\}\s*<\/h1>/g) ?? [])
+        .length === 1,
   );
 
   // ── U3. AI/human ownership is visible and accessible ───────────────────
   check(
     "U3a. شارة الحالة تُعرض في الترويسة (AI_ACTIVE / NEED_HUMAN مفتوحان)",
-    detail.includes("<ConversationStatusBadge status={data.status} />"),
+    detail.includes("<ConversationStatusBadge status={data.status}"),
   );
   check(
     "U3b. شارة الحالة تحمل اسماً متاحاً (ليست لوناً فقط)",
@@ -110,11 +115,11 @@ async function main(): Promise<void> {
   );
   check(
     "U3d. الإجراءات الصريحة للمشغل موجودة (تولّي / إعادة للمساعد / محجوز / فريق)",
-    detail.includes('"TAKE_OVER"') &&
-      detail.includes('"RETURN_TO_AI"') &&
-      detail.includes('"MARK_BOOKED"') &&
-      detail.includes('"HANDOFF"') &&
-      detail.includes("إعادة للمساعد"),
+    (detail + actions).includes('"TAKE_OVER"') &&
+      (detail + actions).includes('"RETURN_TO_AI"') &&
+      (detail + actions).includes('"MARK_BOOKED"') &&
+      (detail + actions).includes('"HANDOFF"') &&
+      (detail + actions).includes("إعادة للمساعد"),
   );
 
   // ── U4. NEED_HUMAN reason visibility (never color-only) ────────────────
@@ -151,8 +156,9 @@ async function main(): Promise<void> {
       "min-h-11 md:min-h-8", // حجز موعد + the 4 transition actions
       "min-h-11 min-w-11 md:min-h-10 md:min-w-10", // send (icon)
     ];
-    const allPresent = touchTargets.every((cls) => detail.includes(cls));
-    const count = (detail.match(/min-h-11/g) ?? []).length;
+    const combined = detail + actions;
+    const allPresent = touchTargets.every((cls) => combined.includes(cls));
+    const count = (combined.match(/min-h-11/g) ?? []).length;
     check(
       "U5c. الإجراءات الأساسية 44px على الجوال (7 عناصر: رجوع/حجز/٤ أفعال/إرسال)",
       allPresent && count >= 7,
@@ -178,6 +184,7 @@ async function main(): Promise<void> {
     check(
       "U6. مكونات المحادثة تستخدم خصائص منطقية فقط (RTL سليم)",
       isRtlClean(detail) &&
+        isRtlClean(actions) &&
         isRtlClean(inbox) &&
         isRtlClean(appShell) &&
         isRtlClean(bottomNav),

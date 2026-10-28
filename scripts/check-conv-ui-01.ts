@@ -34,6 +34,9 @@ async function main(): Promise<void> {
   const detail = read(
     "src/features/conversations/components/conversation-detail.tsx",
   );
+  const actions = read(
+    "src/features/conversations/components/conversation-actions.tsx",
+  );
   const appShell = read("src/components/shared/layout/app-shell.tsx");
   const bottomNav = read("src/components/shared/layout/bottom-nav.tsx");
   const sharedStatusBadge = read("src/components/shared/status-badge.tsx");
@@ -58,7 +61,8 @@ async function main(): Promise<void> {
   // ── U02: Real customer identity with truncation ───────────────────────────
   check(
     "U02a. اسم العميل داخل <h1> مع truncate font-semibold داخل min-w-0 flex-1",
-    detail.includes('<h1 className="truncate font-semibold">') &&
+    /<h1[^>]*class(?:Name)?="[^"]*font-semibold[^"]*"/.test(detail) &&
+      detail.includes("truncate") &&
       detail.includes("min-w-0 flex-1"),
   );
   check(
@@ -71,7 +75,7 @@ async function main(): Promise<void> {
   // ── U03: Accessible status & attention reason ─────────────────────────────
   check(
     "U03a. شارة الحالة معروضة في الترويسة الدائمة",
-    detail.includes("<ConversationStatusBadge status={data.status} />"),
+    detail.includes("<ConversationStatusBadge status={data.status}"),
   );
   check(
     "U03b. شارة سبب الانتباه معروضة عند وجود سبب (أيقونة + نص عربي + اسم متاح)",
@@ -103,16 +107,16 @@ async function main(): Promise<void> {
 
   // ── U05: Mobile viewport protection (non-bloated actions) ───────────────────
   check(
-    "U05a. أزرار الإجراءات على الجوال داخل سجل التمرير وليست مثبتة تستهلك الشاشة",
-    detail.includes("md:hidden flex flex-wrap gap-2 pb-3 mb-2 border-b") &&
-      detail.includes("hidden md:flex flex-wrap gap-2 border-b px-4 py-2.5"),
+    "U05a. الإجراء المشترك متاح على الجوال والمكتب في الترويسة عبر ConversationActions",
+    detail.includes("<ConversationActions") &&
+      actions.includes("export function ConversationActions"),
   );
   check(
     "U05b. الإجراءات الأربعة الصريحة موجودة وتعمل مع الصلاحيات (تولّي/إعادة/محجوز/تحويل)",
-    detail.includes('"TAKE_OVER"') &&
-      detail.includes('"RETURN_TO_AI"') &&
-      detail.includes('"MARK_BOOKED"') &&
-      detail.includes('"HANDOFF"'),
+    (detail + actions).includes('"TAKE_OVER"') &&
+      (detail + actions).includes('"RETURN_TO_AI"') &&
+      (detail + actions).includes('"MARK_BOOKED"') &&
+      (detail + actions).includes('"HANDOFF"'),
   );
 
   // ── U06: Independently scrollable message history ─────────────────────────
@@ -171,7 +175,10 @@ async function main(): Promise<void> {
       !physical.some((pattern) => pattern.test(source));
     check(
       "U09. مكونات المحادثة والغلاف تستخدم خصائص منطقية فقط (RTL سليم)",
-      isRtlClean(detail) && isRtlClean(appShell) && isRtlClean(bottomNav),
+      isRtlClean(detail) &&
+        isRtlClean(actions) &&
+        isRtlClean(appShell) &&
+        isRtlClean(bottomNav),
     );
   }
 
@@ -182,8 +189,9 @@ async function main(): Promise<void> {
       "min-h-11 md:min-h-8", // booking + transition actions
       "min-h-11 min-w-11 md:min-h-10 md:min-w-10", // send
     ];
-    const allPresent = touchTargets.every((cls) => detail.includes(cls));
-    const count = (detail.match(/min-h-11/g) ?? []).length;
+    const combined = detail + actions;
+    const allPresent = touchTargets.every((cls) => combined.includes(cls));
+    const count = (combined.match(/min-h-11/g) ?? []).length;
     check(
       "U10. الإجراءات التفاعلية تحقق 44px على الجوال (min-h-11) مع الحفاظ على المقاس المكتبي",
       allPresent && count >= 7 && detail.includes('role="alert"'),

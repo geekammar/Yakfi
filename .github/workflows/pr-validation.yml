@@ -120,6 +120,7 @@ jobs:
           pnpm check:scarce-availability
           pnpm check:conversation-ux
           pnpm check:conv-ui-01
+          pnpm check:qa-harness
           pnpm test:conversation-detail
 
       - name: Base-versus-HEAD handoff-cause reconciliation
@@ -182,6 +183,8 @@ jobs:
 
       - name: Build Next.js application
         if: steps.change-check.outputs.should_run == 'true'
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: pnpm build
 
       - name: Resolve dynamic Vercel Preview URL
@@ -194,6 +197,8 @@ jobs:
 
       - name: Run Automated UX QA Suite
         if: steps.change-check.outputs.should_run == 'true'
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: node scripts/run-ux-qa.mjs
 
       - name: Append UX QA report to Job Summary

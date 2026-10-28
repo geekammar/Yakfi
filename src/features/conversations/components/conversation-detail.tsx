@@ -6,6 +6,7 @@ import {
   transitionConversation,
   updateAiSummary,
 } from "@/features/conversations/actions/conversation-actions";
+import { ConversationActions } from "@/features/conversations/components/conversation-actions";
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
 import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
 import type { ConversationDetailData } from "@/features/conversations/types";
@@ -26,7 +27,6 @@ import {
   ArrowRightIcon,
   BotIcon,
   CalendarDaysIcon,
-  CheckIcon,
   LoaderCircleIcon,
   MessageCircleIcon,
   SendIcon,
@@ -174,8 +174,6 @@ function ContextCards({
   isPending,
   handleAssignment,
   handleSummarySave,
-  handleTransition,
-  showActions = false,
 }: {
   data: ConversationDetailData;
   summary: string;
@@ -183,75 +181,9 @@ function ContextCards({
   isPending: boolean;
   handleAssignment: (value: string) => void;
   handleSummarySave: () => void;
-  handleTransition: (
-    transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF",
-  ) => void;
-  showActions?: boolean;
 }) {
   return (
     <>
-      {showActions ? (
-        <section className="rounded-xl border bg-card p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <BotIcon className="size-4 text-primary" />
-            <h2 className="font-semibold">إجراءات المحادثة</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {data.status === "AI_ACTIVE" ||
-            (data.status === "NEED_HUMAN" && !data.assignedUser) ? (
-              <Button
-                type="button"
-                size="sm"
-                className="min-h-11 md:min-h-8"
-                onClick={() => handleTransition("TAKE_OVER")}
-                disabled={isPending}
-              >
-                <UserRoundIcon />
-                تولّي المحادثة
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="min-h-11 md:min-h-8"
-                onClick={() => handleTransition("RETURN_TO_AI")}
-                disabled={isPending}
-              >
-                <BotIcon />
-                إعادة للمساعد
-              </Button>
-            )}
-            {data.status !== "BOOKED" ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="min-h-11 md:min-h-8"
-                onClick={() => handleTransition("MARK_BOOKED")}
-                disabled={isPending}
-              >
-                <CheckIcon />
-                تحديد كمحجوز
-              </Button>
-            ) : null}
-            {data.status === "AI_ACTIVE" ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="min-h-11 md:min-h-8"
-                onClick={() => handleTransition("HANDOFF")}
-                disabled={isPending}
-              >
-                <UsersRoundIcon />
-                تحويل للفريق
-              </Button>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
       <section className="rounded-xl border bg-card p-4 shadow-xs">
         <div className="mb-3 flex items-center gap-2">
           <UserRoundIcon className="size-4 text-primary" />
@@ -365,11 +297,18 @@ function ContextCards({
   );
 }
 
+export type ConversationDetailProps = {
+  data: ConversationDetailData;
+  onTransition?: (payload: {
+    id: string;
+    transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
+  }) => Promise<{ success: boolean; message?: string }>;
+};
+
 export function ConversationDetail({
   data: initialData,
-}: {
-  data: ConversationDetailData;
-}) {
+  onTransition,
+}: ConversationDetailProps) {
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
   const [summary, setSummary] = useState(initialData.aiSummary);
@@ -461,7 +400,9 @@ export function ConversationDetail({
   ) {
     startTransition(async () => {
       const success = await runAction(() =>
-        transitionConversation({ id: data.id, transition }),
+        onTransition
+          ? onTransition({ id: data.id, transition })
+          : transitionConversation({ id: data.id, transition }),
       );
       if (!success) return;
       const nextStatus = {
@@ -566,62 +507,6 @@ export function ConversationDetail({
     });
   }
 
-  const actionButtons = (
-    <>
-      {data.status === "AI_ACTIVE" ||
-      (data.status === "NEED_HUMAN" && !data.assignedUser) ? (
-        <Button
-          type="button"
-          size="sm"
-          className="min-h-11 md:min-h-8"
-          onClick={() => handleTransition("TAKE_OVER")}
-          disabled={isPending}
-        >
-          <UserRoundIcon />
-          تولّي المحادثة
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="min-h-11 md:min-h-8"
-          onClick={() => handleTransition("RETURN_TO_AI")}
-          disabled={isPending}
-        >
-          <BotIcon />
-          إعادة للمساعد
-        </Button>
-      )}
-      {data.status !== "BOOKED" ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="min-h-11 md:min-h-8"
-          onClick={() => handleTransition("MARK_BOOKED")}
-          disabled={isPending}
-        >
-          <CheckIcon />
-          تحديد كمحجوز
-        </Button>
-      ) : null}
-      {data.status === "AI_ACTIVE" ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="min-h-11 md:min-h-8"
-          onClick={() => handleTransition("HANDOFF")}
-          disabled={isPending}
-        >
-          <UsersRoundIcon />
-          تحويل للفريق
-        </Button>
-      ) : null}
-    </>
-  );
-
   return (
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
       <section
@@ -634,29 +519,50 @@ export function ConversationDetail({
       >
         <header
           data-testid="conversation-persistent-header"
-          className="sticky top-0 z-20 flex flex-wrap items-center gap-1.5 sm:gap-2 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-3"
+          className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-2.5 space-y-1.5 sm:space-y-2"
         >
-          <Button
-            asChild
-            variant="ghost"
-            size="icon-sm"
-            className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden"
-          >
-            <Link href="/conversations" aria-label="العودة إلى المحادثات">
-              <ArrowRightIcon />
-            </Link>
-          </Button>
-          <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs sm:text-sm font-semibold text-accent-foreground">
-            {data.customer.name.slice(0, 2)}
+          {/* Identity & Direct Actions Area */}
+          <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-1.5 sm:gap-2">
+            {/* Customer Identity: independent layout area allowing up to 2 lines on narrow screens */}
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3 w-full lg:w-auto lg:flex-1">
+              <Button
+                asChild
+                variant="ghost"
+                size="icon-sm"
+                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden shrink-0"
+              >
+                <Link href="/conversations" aria-label="العودة إلى المحادثات">
+                  <ArrowRightIcon />
+                </Link>
+              </Button>
+              <div className="flex size-8 sm:size-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs sm:text-sm font-semibold text-accent-foreground">
+                {data.customer.name.slice(0, 2)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate line-clamp-2 whitespace-normal break-words font-semibold text-sm sm:text-base leading-tight">
+                  {data.customer.name}
+                </h1>
+                <p className="truncate text-xs text-muted-foreground" dir="ltr">
+                  {data.customer.phone}
+                </p>
+              </div>
+            </div>
+
+            {/* Direct Actions: wraps to its own row on mobile so customer name is never squeezed */}
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+              <ConversationActions
+                data={data}
+                isPending={isPending}
+                handleTransition={handleTransition}
+                mobileTab={mobileTab}
+                setMobileTab={setMobileTab}
+              />
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-semibold">{data.customer.name}</h1>
-            <p className="truncate text-xs text-muted-foreground" dir="ltr">
-              {data.customer.phone}
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-            <ConversationStatusBadge status={data.status} />
+
+          {/* Status, responder/assignee, and optional attention cause wrapping area */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/40 text-xs sm:pt-1.5">
+            <ConversationStatusBadge status={data.status} compact />
             {data.attentionReason ? (
               <AttentionReasonChip
                 reason={data.attentionReason}
@@ -669,58 +575,9 @@ export function ConversationDetail({
               currentUserId={data.currentUserId}
             />
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {/* B-07 §A — booking shortcut */}
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="min-h-11 md:min-h-8"
-            >
-              <Link href={`/appointments/new?customerId=${data.customer.id}`}>
-                <CalendarDaysIcon aria-hidden className="size-4" />
-                <span className="hidden sm:inline">حجز موعد</span>
-                <span className="sm:hidden">حجز</span>
-              </Link>
-            </Button>
-            {/* Mobile view toggle: messages vs context */}
-            <Button
-              type="button"
-              variant={mobileTab === "context" ? "secondary" : "ghost"}
-              size="sm"
-              className="min-h-11 md:min-h-8 lg:hidden"
-              onClick={() =>
-                setMobileTab((current) =>
-                  current === "messages" ? "context" : "messages",
-                )
-              }
-              aria-label={
-                mobileTab === "context"
-                  ? "العودة إلى المحادثة"
-                  : "عرض سياق العميل والمواعيد"
-              }
-            >
-              {mobileTab === "context" ? (
-                <>
-                  <MessageCircleIcon aria-hidden className="size-4" />
-                  <span className="text-xs">المحادثة</span>
-                </>
-              ) : (
-                <>
-                  <UserRoundIcon aria-hidden className="size-4" />
-                  <span className="text-xs">السياق</span>
-                </>
-              )}
-            </Button>
-          </div>
         </header>
 
-        {/* Desktop action toolbar */}
-        <div className="hidden md:flex flex-wrap gap-2 border-b px-4 py-2.5">
-          {actionButtons}
-        </div>
-
-        {/* Mobile context view when context tab is active */}
+        {/* Mobile context view when details tab is active */}
         {mobileTab === "context" ? (
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 lg:hidden">
             <ContextCards
@@ -730,8 +587,6 @@ export function ConversationDetail({
               isPending={isPending}
               handleAssignment={handleAssignment}
               handleSummarySave={handleSummarySave}
-              handleTransition={handleTransition}
-              showActions={true}
             />
           </div>
         ) : null}
@@ -750,10 +605,6 @@ export function ConversationDetail({
             onScroll={handleLogScroll}
             className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
           >
-            {/* Mobile unpinned action buttons inside transcript */}
-            <div className="md:hidden flex flex-wrap gap-2 pb-3 mb-2 border-b border-border/50">
-              {actionButtons}
-            </div>
             {data.messages.length === 0 ? (
               <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted-foreground">
                 لا توجد رسائل في هذه المحادثة.
@@ -851,8 +702,6 @@ export function ConversationDetail({
           isPending={isPending}
           handleAssignment={handleAssignment}
           handleSummarySave={handleSummarySave}
-          handleTransition={handleTransition}
-          showActions={false}
         />
       </aside>
     </div>
