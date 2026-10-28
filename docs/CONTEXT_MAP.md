@@ -239,6 +239,7 @@ Docs:
 - scripts/check-conversation-ux.ts
 - scripts/check-conversation-handoff.ts
 - scripts/check-operator-attention.ts
+- scripts/check-appointment-calendar-dates.ts
 
 ## Boundaries needing later refinement
 

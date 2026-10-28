@@ -68,6 +68,7 @@
     "eval:jev": "tsx scripts/eval-jev-benchmark.ts",
     "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
     "check:conv-ui-01": "tsx scripts/check-conv-ui-01.ts",
+    "check:appointment-calendar-dates": "tsx scripts/check-appointment-calendar-dates.ts",
     "check:qa-harness": "tsx scripts/check-qa-harness.ts",
     "check:ui-accessibility": "tsx scripts/check-ui-accessibility.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
