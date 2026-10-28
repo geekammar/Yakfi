@@ -59,6 +59,13 @@ check(
   }) === false,
 );
 check(
+  "isPublicPath(/qa/accessibility-repairs) === false في إنتاج فيرسيل حتى مع تفعيل الراية",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
+    VERCEL_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === false,
+);
+check(
   "isQaHarnessAllowed({ NEXT_PUBLIC_VERCEL_ENV: 'production', FLOWPILOT_ENABLE_QA_HARNESS: 'true' }) === false",
   isQaHarnessAllowed({
     NEXT_PUBLIC_VERCEL_ENV: "production",
@@ -68,6 +75,13 @@ check(
 check(
   "isPublicPath(/qa/conversation-header) === false مع NEXT_PUBLIC_VERCEL_ENV=production",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    NEXT_PUBLIC_VERCEL_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === false,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs) === false مع NEXT_PUBLIC_VERCEL_ENV=production",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
     NEXT_PUBLIC_VERCEL_ENV: "production",
     FLOWPILOT_ENABLE_QA_HARNESS: "true",
   }) === false,
@@ -110,6 +124,12 @@ check(
 check(
   "isPublicPath(/qa/conversation-header) === true في بيئات معاينة فيرسيل",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    VERCEL_ENV: "preview",
+  }) === true,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs) === true في بيئات معاينة فيرسيل",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
     VERCEL_ENV: "preview",
   }) === true,
 );

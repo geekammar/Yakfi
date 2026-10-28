@@ -133,6 +133,18 @@ test.describe("UI & Accessibility Repairs QA", () => {
     // Next focusable element is close button
     await expect(rtlCloseButton).toBeFocused();
 
+    // Forward wrapping: pressing Tab from last element wraps back to first element
+    await page.keyboard.press("Tab");
+    await expect(inputInside).toBeFocused();
+
+    // Reverse wrapping: pressing Shift+Tab from first element wraps in reverse to last element
+    await page.keyboard.press("Shift+Tab");
+    await expect(rtlCloseButton).toBeFocused();
+
+    // Shift+Tab from close button moves backward to first element
+    await page.keyboard.press("Shift+Tab");
+    await expect(inputInside).toBeFocused();
+
     // Test Escape key handling and focus return
     await page.keyboard.press("Escape");
     await expect(rtlContent).not.toBeVisible();
@@ -363,6 +375,16 @@ test.describe("UI & Accessibility Repairs QA", () => {
     const calendarDotInitial = calendarViewButton.locator("span.rounded-full");
     await expect(calendarDotInitial).toHaveCount(0);
 
+    // Assert content reflects List View: appointment card is visible, timeline section is not
+    const listAppointmentCard = page.locator("article", {
+      hasText: "خالد بن فهد",
+    });
+    await expect(listAppointmentCard).toBeVisible();
+    const calendarTimelineSection = page.locator(
+      'section[aria-label="الجدول الزمني لليوم"]',
+    );
+    await expect(calendarTimelineSection).toHaveCount(0);
+
     // Screenshot List View
     await page.screenshot({
       path: path.join(
@@ -382,6 +404,13 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(calendarDot).toBeVisible();
     await expect(listViewButton.locator("span.rounded-full")).toHaveCount(0);
 
+    // Assert content reflects Calendar View: timeline section is rendered, list card is hidden
+    await expect(calendarTimelineSection).toBeVisible();
+    await expect(
+      calendarTimelineSection.locator("text=الجدول الزمني والفترات المتاحة"),
+    ).toBeVisible();
+    await expect(listAppointmentCard).toHaveCount(0);
+
     // Screenshot Calendar View
     await page.screenshot({
       path: path.join(
@@ -395,5 +424,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await listViewButton.click();
     await expect(listViewButton).toHaveAttribute("aria-pressed", "true");
     await expect(calendarViewButton).toHaveAttribute("aria-pressed", "false");
+
+    // Content changes back: List card returns and timeline section is removed
+    await expect(listAppointmentCard).toBeVisible();
+    await expect(calendarTimelineSection).toHaveCount(0);
   });
 });
