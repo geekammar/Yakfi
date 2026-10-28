@@ -22,7 +22,12 @@ export default async function ConversationsPage() {
         title="صندوق المحادثات"
         description="تابع محادثات العملاء وساعدهم في الوقت المناسب."
       />
-      <InboxList conversations={items} team={team} />
+      <InboxList
+        conversations={items}
+        team={team}
+        businessId={session.user.businessId}
+        currentUserId={session.user.id}
+      />
     </div>
   );
 }

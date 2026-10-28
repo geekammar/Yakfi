@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/app-config";
 
 import { DownloadIcon, XIcon } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 type BeforeInstallPromptEvent = Event & {
@@ -11,18 +12,27 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-const DISMISS_KEY = "flowpilot-install-dismissed-at";
-const DISMISS_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 7; // one week
+export const DISMISS_KEY = "flowpilot-install-dismissed-at";
+export const DISMISS_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 7; // one week
 
 /**
  * Non-intrusive install banner driven by `beforeinstallprompt`.
  * Respects a dismissal cooldown stored in localStorage.
  */
-export function InstallPrompt() {
+export function InstallPrompt({
+  forcedPathname,
+}: {
+  forcedPathname?: string;
+} = {}) {
+  const currentPathname = usePathname();
+  const pathname = forcedPathname ?? currentPathname;
   const [promptEvent, setPromptEvent] =
     useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.installPromptReady = "true";
+    }
     const handler = (event: Event) => {
       event.preventDefault();
       const dismissedAt = Number(
@@ -34,7 +44,12 @@ export function InstallPrompt() {
     };
 
     window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      if (typeof document !== "undefined") {
+        delete document.documentElement.dataset.installPromptReady;
+      }
+    };
   }, []);
 
   const dismiss = useCallback(() => {
@@ -49,12 +64,32 @@ export function InstallPrompt() {
     setPromptEvent(null);
   }, [promptEvent]);
 
-  if (!promptEvent) return null;
+  // Suppress prompt on conversation detail and booking task routes.
+  // Provide non-obstructive installation entry only on Home and Settings.
+  const isConversationDetail = pathname?.startsWith("/conversations/") ?? false;
+  const isBookingTaskRoute =
+    (pathname?.startsWith("/appointments/") ||
+      pathname === "/appointments/new" ||
+      pathname?.startsWith("/onboarding/booking")) ??
+    false;
+  const isHomeOrSettings =
+    pathname === "/" ||
+    pathname === "/staff" ||
+    (pathname?.startsWith("/settings") ?? false);
+
+  if (
+    !promptEvent ||
+    isConversationDetail ||
+    isBookingTaskRoute ||
+    !isHomeOrSettings
+  ) {
+    return null;
+  }
 
   return (
     <aside
       aria-label="تثبيت التطبيق"
-      className="bg-card fixed inset-x-4 bottom-20 z-[var(--z-banner)] flex items-center gap-3 rounded-xl border p-3 shadow-lg md:bottom-6 md:inset-x-auto md:end-6 md:max-w-sm"
+      className="bg-card fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] z-[var(--z-banner)] flex items-center gap-3 rounded-xl border p-3 shadow-lg md:bottom-6 md:inset-x-auto md:end-6 md:max-w-sm"
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">ثبّت {APP_NAME} على جهازك</p>
@@ -62,7 +97,11 @@ export function InstallPrompt() {
           وصول أسرع وتجربة أفضل.
         </p>
       </div>
-      <Button size="sm" onClick={install}>
+      <Button
+        size="sm"
+        onClick={install}
+        className="min-h-11 min-w-11 md:min-h-9 md:min-w-fit gap-1.5"
+      >
         <DownloadIcon aria-hidden className="size-4" />
         تثبيت
       </Button>
@@ -71,6 +110,7 @@ export function InstallPrompt() {
         variant="ghost"
         aria-label="إغلاق"
         onClick={dismiss}
+        className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
       >
         <XIcon aria-hidden className="size-4" />
       </Button>

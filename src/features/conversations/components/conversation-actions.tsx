@@ -86,8 +86,7 @@ export function ConversationActions({
           aria-label="إعادة للمساعد"
         >
           <BotIcon className="hidden sm:inline size-4" aria-hidden />
-          <span className="hidden sm:inline">إعادة للمساعد</span>
-          <span className="sm:hidden">إعادة</span>
+          <span>إعادة للمساعد</span>
         </Button>
       )}
 
