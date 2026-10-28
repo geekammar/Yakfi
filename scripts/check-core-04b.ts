@@ -25,10 +25,14 @@ import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { createJevDecisionsProvider } from "@/server/integrations/ai/jev-decisions-provider";
 import { createSemanticJevStrategy } from "@/server/integrations/ai/jev-semantic-strategy";
 import {
+  JEV_SHADOW_TIMEOUT_MS,
   createShadowJevStrategy,
   createShadowSampler,
 } from "@/server/integrations/ai/jev-shadow-strategy";
-import { createOpenRouterAdapter } from "@/server/integrations/ai/openrouter";
+import {
+  OPENROUTER_TIMEOUT_MS,
+  createOpenRouterAdapter,
+} from "@/server/integrations/ai/openrouter";
 import { createAiOrchestrator } from "@/server/integrations/ai/orchestrator";
 import type { AiProviderAdapter } from "@/server/integrations/ai/types";
 
@@ -2550,6 +2554,431 @@ async function run() {
     check(
       "R_E4. evaluateResponseCompletion rejects cancelled response via caller signal",
       abortedVerdict.ok === false && abortedVerdict.reason === "ABORTED",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Group S: OpenRouter 18s Attempt Timeout Budget & Boundary Enforcement
+  // -------------------------------------------------------------------------
+  console.log(
+    "\n--- Group S: OpenRouter 18s Attempt Timeout Budget & Boundary Enforcement ---",
+  );
+  {
+    // S1. OPENROUTER_TIMEOUT_MS constant is 18000
+    check(
+      "S1. OPENROUTER_TIMEOUT_MS constant is 18000ms",
+      OPENROUTER_TIMEOUT_MS === 18000,
+    );
+
+    // S2. 13-second response: rejected with explicit 12-second timeout, accepted with 18-second default
+    let clockS2 = 1000;
+    const fetch13s: typeof fetch = async () => {
+      clockS2 += 13000; // Simulated 13s response duration
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    // With explicit 12-second timeout: rejected
+    const adapter12s = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: fetch13s,
+      timeoutMs: 12000,
+    });
+    const orch12s = createAiOrchestrator({
+      primary: adapter12s,
+      fallbackEnabled: false,
+      getNow: () => clockS2,
+    });
+    const session12s = createServingExecutionSession({
+      getNow: () => clockS2,
+      timeoutMs: 60000,
+      maxAttemptsOverride: 1,
+    });
+    const res12s = await orch12s.callWithFallback(sampleRequest(), {
+      session: session12s,
+    });
+    check(
+      "S2_a. 13-second response rejected under explicit 12-second timeout",
+      res12s.response === null &&
+        res12s.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+
+    // With 18-second default (timeoutMs undefined): accepted
+    let clockS2b = 1000;
+    const fetch13sb: typeof fetch = async () => {
+      clockS2b += 13000;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const adapter18s = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: fetch13sb,
+      // timeoutMs left undefined -> uses OPENROUTER_TIMEOUT_MS (18000)
+    });
+    const orch18s = createAiOrchestrator({
+      primary: adapter18s,
+      fallbackEnabled: false,
+      getNow: () => clockS2b,
+    });
+    const session18s = createServingExecutionSession({
+      getNow: () => clockS2b,
+      timeoutMs: 60000,
+      maxAttemptsOverride: 1,
+    });
+    const res18s = await orch18s.callWithFallback(sampleRequest(), {
+      session: session18s,
+    });
+    check(
+      "S2_b. 13-second response accepted under new 18-second adapter default",
+      res18s.response !== null && res18s.telemetry.finalStatus === "SUCCESS",
+    );
+
+    // S3. Timeout/completion behavior at the 18-second boundary (completion predicate)
+    const verdict17999 = evaluateResponseCompletion({
+      startedAtMs: 1000,
+      effectiveTimeoutMs: 18000,
+      completedAtMs: 18999, // 17999ms elapsed
+    });
+    check(
+      "S3_a. Completion predicate accepts response at 17,999ms (< 18,000ms)",
+      verdict17999.ok === true,
+    );
+
+    const verdict18000 = evaluateResponseCompletion({
+      startedAtMs: 1000,
+      effectiveTimeoutMs: 18000,
+      completedAtMs: 19000, // exactly 18000ms elapsed
+    });
+    check(
+      "S3_b. Completion predicate rejects response at 18,000ms boundary",
+      verdict18000.ok === false &&
+        verdict18000.code === "TIMEOUT" &&
+        verdict18000.reason === "REQUEST_TIMEOUT",
+    );
+
+    const verdict18001 = evaluateResponseCompletion({
+      startedAtMs: 1000,
+      effectiveTimeoutMs: 18000,
+      completedAtMs: 19001, // 18001ms elapsed
+    });
+    check(
+      "S3_c. Completion predicate rejects response at 18,001ms (> 18,000ms)",
+      verdict18001.ok === false &&
+        verdict18001.code === "TIMEOUT" &&
+        verdict18001.reason === "REQUEST_TIMEOUT",
+    );
+
+    // S4. Cancellation and delayed response-body completion
+    const abortCtrlS4 = new AbortController();
+    abortCtrlS4.abort();
+    const verdictCancelled = evaluateResponseCompletion({
+      startedAtMs: 1000,
+      effectiveTimeoutMs: 18000,
+      completedAtMs: 5000,
+      signal: abortCtrlS4.signal,
+    });
+    check(
+      "S4_a. Cancellation via caller signal rejects with ABORTED even within 18s",
+      verdictCancelled.ok === false && verdictCancelled.reason === "ABORTED",
+    );
+
+    // Delayed response-body exceeding 18s (headers return first, body delayed past 18s)
+    let clockS4b = 1000;
+    const slowBodyFetch18s: typeof fetch = async () => {
+      const resp = new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+      resp.text = async () => {
+        clockS4b += 18050; // body read delays past 18s
+        return JSON.stringify(openAiEnvelope(validAiResponseJson()));
+      };
+      return resp;
+    };
+    const adapterSlowBody18s = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: slowBodyFetch18s,
+    });
+    const orchSlowBody18s = createAiOrchestrator({
+      primary: adapterSlowBody18s,
+      fallbackEnabled: false,
+      getNow: () => clockS4b,
+    });
+    const sessionSlowBody = createServingExecutionSession({
+      getNow: () => clockS4b,
+      timeoutMs: 60000,
+      maxAttemptsOverride: 1,
+    });
+    const resSlowBody = await orchSlowBody18s.callWithFallback(
+      sampleRequest(),
+      { session: sessionSlowBody },
+    );
+    check(
+      "S4_b. Delayed response-body exceeding 18s rejected as TIMEOUT",
+      resSlowBody.response === null &&
+        resSlowBody.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+
+    // S5. Explicit shorter override remains effective
+    let clockS5 = 1000;
+    const fetch6s: typeof fetch = async () => {
+      clockS5 += 6000;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const adapterOverride5s = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: fetch6s,
+      timeoutMs: 5000, // Shorter explicit override
+    });
+    const orchOverride5s = createAiOrchestrator({
+      primary: adapterOverride5s,
+      fallbackEnabled: false,
+      getNow: () => clockS5,
+    });
+    const sessionOverride5s = createServingExecutionSession({
+      getNow: () => clockS5,
+      timeoutMs: 60000,
+      maxAttemptsOverride: 1,
+    });
+    const resOverride5s = await orchOverride5s.callWithFallback(
+      sampleRequest(),
+      { session: sessionOverride5s },
+    );
+    check(
+      "S5. Explicit shorter override (5000ms) rejects 6000ms response despite 18s default",
+      resOverride5s.response === null &&
+        resOverride5s.telemetry.attempts[0]?.errorCode === "TIMEOUT",
+    );
+
+    // S6. Shorter shared serving deadline still wins
+    let clockS6 = 1000;
+    const sessionShorterDeadline = createServingExecutionSession({
+      getNow: () => clockS6,
+      timeoutMs: 7000, // Shared session deadline is 7000ms
+      maxAttemptsOverride: 1,
+    });
+    const fetch8s: typeof fetch = async () => {
+      clockS6 += 8000;
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+    const adapterDefaultS6 = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: fetch8s,
+    });
+    const orchS6 = createAiOrchestrator({
+      primary: adapterDefaultS6,
+      fallbackEnabled: false,
+      getNow: () => clockS6,
+    });
+    const resS6 = await orchS6.callWithFallback(sampleRequest(), {
+      session: sessionShorterDeadline,
+    });
+    check(
+      "S6. Shorter shared serving deadline (7000ms) wins over 18s default (stopReason DEADLINE_EXHAUSTED)",
+      resS6.response === null &&
+        resS6.telemetry.stopReason === "DEADLINE_EXHAUSTED",
+    );
+
+    // S7. Two simulated timeouts preserve existing bounded attempts and safe handoff
+    let wireCallsS7 = 0;
+    const fetchTwoTimeouts: typeof fetch = async () => {
+      wireCallsS7++;
+      throw new DOMException("The operation was aborted", "AbortError");
+    };
+    const adapterTwoTimeouts = createOpenRouterAdapter({
+      model: "openrouter/auto",
+      getEnvVar: () => "valid-key",
+      fetchImpl: fetchTwoTimeouts,
+    });
+    const aiTwoTimeouts = createLlmConversationAi({
+      primary: createConversationControl({ provider: adapterTwoTimeouts }),
+      fallbackEnabled: false,
+    });
+    const emittedEvidenceS7: TurnEvidence[] = [];
+    const harnessS7 = createPlaygroundHarness({
+      channel: "WHATSAPP",
+      todayRef: "2026-10-22",
+    });
+    harnessS7.deps.ai = aiTwoTimeouts;
+    harnessS7.deps.turnTelemetry = {
+      emit: (ev: TurnEvidence) => emittedEvidenceS7.push(ev),
+    };
+    const resS7 = await receiveInboundMessage(harnessS7.deps, {
+      to: harnessS7.business.whatsappNumber ?? "+201000000000",
+      from: harnessS7.customer.phone,
+      text: "عايز موعد كشف أسنان",
+      receivedAt: new Date().toISOString(),
+      externalId: "ext-msg-s7",
+    });
+    check(
+      "S7_a. Engine completes safely after two simulated timeouts",
+      resS7.ok === true,
+    );
+    check(
+      "S7_b. Exactly 2 wire calls dispatched (initial + 1 retry)",
+      wireCallsS7 === 2,
+    );
+    check(
+      "S7_c. TurnEvidence records providerAttempts === 2",
+      emittedEvidenceS7[0]?.providerAttempts === 2,
+    );
+    check(
+      "S7_d. Safe handoff triggered with handoff outcome AI_HANDOFF, status NEED_HUMAN, and cause RETRY_EXHAUSTED",
+      emittedEvidenceS7[0]?.finalOutcome === "AI_HANDOFF" &&
+        emittedEvidenceS7[0]?.conversationStatus === "NEED_HUMAN" &&
+        emittedEvidenceS7[0]?.handoffCause === "RETRY_EXHAUSTED" &&
+        harnessS7.conversation.status === "NEED_HUMAN",
+    );
+    check(
+      "S7_e. Zero appointments created and captured appointment writes remain empty on timeout exhaustion",
+      harnessS7.appointments.length === 0 &&
+        harnessS7.capturedAppointmentWrites.length === 0,
+    );
+
+    // S8. Factory composition separation: logical turn deadline is NOT 18 seconds
+    // Exercise default factory composition path without timeoutMs
+    const mockGetAiPolicyS8 = async () => ({
+      success: true as const,
+      data: {
+        policy: {
+          id: "policy-test-s8",
+          primaryProvider: "openrouter",
+          primaryModel: "openrouter/auto",
+          secondaryProvider: null,
+          secondaryModel: null,
+          fallbackEnabled: false,
+          openRouterProviderOnly: null,
+          primarySecretRef: "OPENROUTER_API_KEY",
+          secondarySecretRef: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        effective: {
+          primaryProvider: "openrouter" as const,
+          primaryModel: "openrouter/auto",
+          secondary: null,
+          openRouterProviderOnly: null,
+        },
+      },
+    });
+
+    const envS8 = (name: string) => {
+      if (name === "OPENROUTER_API_KEY") return "valid-key";
+      if (name === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "0";
+      if (name === "FLOWPILOT_JEV_SEMANTIC_ENABLED") return "0";
+      return undefined;
+    };
+
+    const realDateNowS8 = Date.now;
+    let mockNowS8 = 1_000_000;
+    Date.now = () => mockNowS8;
+
+    let wireAttemptsS8 = 0;
+    const fetchS8: typeof fetch = async () => {
+      wireAttemptsS8++;
+      if (wireAttemptsS8 === 1) {
+        mockNowS8 += 14000; // Attempt 1 takes 14s (<= 18s adapter timeout)
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      mockNowS8 += 10000; // Attempt 2 takes 10s (<= 18s adapter timeout)
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    let resS8: any = null;
+    let teleS8: any = null;
+    try {
+      const factoryAiS8 = await createPolicyBackedAi({
+        getAiPolicyImpl: mockGetAiPolicyS8 as any,
+        getEnvVar: envS8,
+        fetchImpl: fetchS8,
+        // timeoutMs intentionally omitted to exercise default factory composition
+      });
+      resS8 = await factoryAiS8.respond(sampleRequest());
+      teleS8 = (factoryAiS8 as any).getLastTelemetry();
+    } finally {
+      Date.now = realDateNowS8;
+    }
+
+    check(
+      "S8_a. Default factory composition allows two attempts collectively taking 24s (> 18s)",
+      resS8 !== null &&
+        resS8.action === "reply" &&
+        wireAttemptsS8 === 2 &&
+        teleS8?.totalHttpAttempts === 2 &&
+        mockNowS8 - 1_000_000 === 24000,
+    );
+    check(
+      "S8_b. Logical turn budget is not accidentally limited to 18 seconds",
+      mockNowS8 - 1_000_000 > 18000,
+    );
+
+    // S9. Existing shorter shadow budgets remain effective (exercising shadow execution path)
+    const envShadowS9 = (k: string) => {
+      if (k === "FLOWPILOT_JEV_SHADOW_ENABLED") return "true";
+      if (k === "SHADOW_SAMPLE_RATE") return "1.0";
+      if (k === "OPENROUTER_API_KEY") return "valid-key";
+      return undefined;
+    };
+
+    const realDateNowS9 = Date.now;
+    let mockNowS9 = 2_000_000;
+    Date.now = () => mockNowS9;
+
+    const slowShadowFetch: typeof fetch = async () => {
+      mockNowS9 += 7000; // 7s delays past 6s shadow deadline, but within 18s adapter timeout
+      return new Response(
+        JSON.stringify({
+          id: "dec-s9",
+          choices: [{ message: { content: JSON.stringify({ answers: {} }) } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    let evidenceS9: any = null;
+    try {
+      const shadowProviderS9 = createJevDecisionsProvider({
+        getEnvVar: envShadowS9,
+        fetchImpl: slowShadowFetch,
+        timeoutMs: JEV_SHADOW_TIMEOUT_MS, // 6000ms
+      });
+      const shadowStrategyS9 = createShadowJevStrategy({
+        provider: shadowProviderS9,
+        sampler: createShadowSampler({ getEnvVar: envShadowS9 }),
+        timeoutMs: JEV_SHADOW_TIMEOUT_MS,
+      });
+
+      evidenceS9 = await shadowStrategyS9.evaluate(
+        sampleRequest("عايز موعد كشف أسنان"),
+      );
+    } finally {
+      Date.now = realDateNowS9;
+    }
+
+    check(
+      "S9. Shadow execution path stops delayed work past 6000ms as TIMEOUT despite 18s adapter default",
+      evidenceS9 !== null &&
+        evidenceS9.failureCode === "TIMEOUT" &&
+        evidenceS9.evidenceRole === "SHADOW" &&
+        evidenceS9.latencyMs === 7000,
     );
   }
 

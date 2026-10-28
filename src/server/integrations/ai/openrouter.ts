@@ -14,7 +14,7 @@ import type {
 export const OPENROUTER_ENDPOINT =
   "https://openrouter.ai/api/v1/chat/completions";
 export const OPENROUTER_SECRET_REF = "OPENROUTER_API_KEY";
-export const OPENROUTER_TIMEOUT_MS = 12000;
+export const OPENROUTER_TIMEOUT_MS = 18000;
 
 export type OpenRouterDeps = {
   model: string;
