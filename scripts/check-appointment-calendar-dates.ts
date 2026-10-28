@@ -39,6 +39,12 @@ function check(label: string, pass: boolean): void {
 }
 
 async function main(): Promise<void> {
+  process.env.DATABASE_URL ??=
+    "postgresql://user:password@localhost:5432/placeholder";
+  process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
+  process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
+  process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
+
   const fs = await import("node:fs");
   const path = await import("node:path");
   const { spawnSync } = await import("node:child_process");
