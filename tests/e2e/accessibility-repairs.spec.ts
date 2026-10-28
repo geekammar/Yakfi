@@ -66,22 +66,52 @@ test.describe("UI & Accessibility Repairs QA", () => {
         "Close button in RTL must be on the left half",
       ).toBeLessThan(contentCenterX);
 
-      // Verify header space: long Arabic title must not overlap close button
-      const titleBox = await page
-        .locator('[data-testid="dialog-rtl-title"]')
+      // Verify header space: DialogHeader reserves space so title text & icon cannot overlap close button
+      const headerPadding = await page
+        .locator('[data-testid="dialog-rtl-header"]')
+        .evaluate((el) => {
+          const style = window.getComputedStyle(el);
+          return {
+            paddingInlineEnd: parseFloat(style.paddingInlineEnd) || 0,
+            paddingLeft: parseFloat(style.paddingLeft) || 0,
+          };
+        });
+      expect(
+        headerPadding.paddingInlineEnd >= 44 || headerPadding.paddingLeft >= 44,
+        "DialogHeader must reserve at least 44px on inline-end / left in RTL",
+      ).toBe(true);
+
+      const iconBox = await page
+        .locator('[data-testid="dialog-rtl-icon"]')
         .boundingBox();
-      expect(titleBox).not.toBeNull();
-      if (titleBox) {
-        // Geometric non-overlap in 2D space
-        const isOverlapping = !(
-          closeBox.x + closeBox.width <= titleBox.x ||
-          titleBox.x + titleBox.width <= closeBox.x ||
-          closeBox.y + closeBox.height <= titleBox.y ||
-          titleBox.y + titleBox.height <= closeBox.y
+      expect(iconBox).not.toBeNull();
+      if (iconBox) {
+        const iconOverlaps = !(
+          closeBox.x + closeBox.width <= iconBox.x ||
+          iconBox.x + iconBox.width <= closeBox.x ||
+          closeBox.y + closeBox.height <= iconBox.y ||
+          iconBox.y + iconBox.height <= closeBox.y
         );
         expect(
-          isOverlapping,
-          "Title and close button must not overlap in RTL dialog header",
+          iconOverlaps,
+          "Title icon and close button must not overlap in RTL dialog header",
+        ).toBe(false);
+      }
+
+      const textSpanBox = await page
+        .locator('[data-testid="dialog-rtl-title"] span')
+        .boundingBox();
+      expect(textSpanBox).not.toBeNull();
+      if (textSpanBox) {
+        const textOverlaps = !(
+          closeBox.x + closeBox.width <= textSpanBox.x ||
+          textSpanBox.x + textSpanBox.width <= closeBox.x ||
+          closeBox.y + closeBox.height <= textSpanBox.y ||
+          textSpanBox.y + textSpanBox.height <= closeBox.y
+        );
+        expect(
+          textOverlaps,
+          "Title text and close button must not overlap in RTL dialog header",
         ).toBe(false);
       }
     }
@@ -136,6 +166,22 @@ test.describe("UI & Accessibility Repairs QA", () => {
         ltrCloseBox.x,
         "Close button in LTR must be on the right half",
       ).toBeGreaterThan(ltrContentCenterX);
+
+      // Verify LTR header space reservation
+      const ltrHeaderPadding = await page
+        .locator('[data-testid="dialog-ltr-header"]')
+        .evaluate((el) => {
+          const style = window.getComputedStyle(el);
+          return {
+            paddingInlineEnd: parseFloat(style.paddingInlineEnd) || 0,
+            paddingRight: parseFloat(style.paddingRight) || 0,
+          };
+        });
+      expect(
+        ltrHeaderPadding.paddingInlineEnd >= 44 ||
+          ltrHeaderPadding.paddingRight >= 44,
+        "DialogHeader in LTR must reserve at least 44px on inline-end / right",
+      ).toBe(true);
     }
 
     // Capture LTR Dialog Screenshot
