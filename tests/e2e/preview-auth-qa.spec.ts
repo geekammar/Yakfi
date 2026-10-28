@@ -110,7 +110,7 @@ test.describe("Authenticated Preview QA", () => {
     // Verify rendered candidate identity
     await expect(page.locator("body")).toContainText("يكفي");
     await expect(
-      page.locator('svg[data-testid="yakfi-symbol"]').first(),
+      page.locator('svg[data-testid="yakfi-symbol"]:visible'),
     ).toBeVisible();
 
     // Verify RTL on sign-in
@@ -177,7 +177,7 @@ test.describe("Authenticated Preview QA", () => {
     await expect(page).toHaveTitle(/لوحة الإدارة.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
     await expect(
-      page.locator('svg[data-testid="yakfi-symbol"]').first(),
+      page.locator('svg[data-testid="yakfi-symbol"]:visible'),
     ).toBeVisible();
 
     // Verify RTL

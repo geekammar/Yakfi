@@ -41,7 +41,7 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
     // Verify rendered candidate identity
     await expect(page.locator("body")).toContainText("يكفي");
     await expect(
-      page.locator('svg[data-testid="yakfi-symbol"]').first(),
+      page.locator('svg[data-testid="yakfi-symbol"]:visible'),
     ).toBeVisible();
 
     // 2. Arabic RTL Assertion
