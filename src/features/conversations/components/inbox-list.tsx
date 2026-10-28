@@ -24,7 +24,10 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+
+const INBOX_STATE_KEY = "flowpilot-inbox-state";
+const INBOX_SCROLL_KEY = "flowpilot-inbox-scroll";
 
 /**
  * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
@@ -83,6 +86,53 @@ export function InboxList({
   const [status, setStatus] =
     useState<(typeof STATUS_FILTERS)[number]["value"]>("ALL");
   const [assignee, setAssignee] = useState("ALL");
+  const isInitialMount = useRef(true);
+
+  // Restore inbox search, filters, and scroll position across Back/Forward navigation
+  useEffect(() => {
+    try {
+      const savedState = sessionStorage.getItem(INBOX_STATE_KEY);
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        if (typeof parsed.search === "string") setSearch(parsed.search);
+        if (
+          typeof parsed.status === "string" &&
+          STATUS_FILTERS.some((f) => f.value === parsed.status)
+        ) {
+          setStatus(parsed.status as (typeof STATUS_FILTERS)[number]["value"]);
+        }
+        if (typeof parsed.assignee === "string") setAssignee(parsed.assignee);
+      }
+      const savedScroll = sessionStorage.getItem(INBOX_SCROLL_KEY);
+      if (savedScroll) {
+        const y = Number(savedScroll);
+        if (!Number.isNaN(y) && y > 0) {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: y, behavior: "instant" });
+          });
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  // Sync active filters to sessionStorage for Back restoration
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        INBOX_STATE_KEY,
+        JSON.stringify({ search, status, assignee }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [search, status, assignee]);
+
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase());
   const hasActiveFilters =
     Boolean(search) || status !== "ALL" || assignee !== "ALL";
@@ -111,6 +161,12 @@ export function InboxList({
     setSearch("");
     setStatus("ALL");
     setAssignee("ALL");
+    try {
+      sessionStorage.removeItem(INBOX_STATE_KEY);
+      sessionStorage.removeItem(INBOX_SCROLL_KEY);
+    } catch {
+      // ignore
+    }
   }
 
   return (
@@ -197,6 +253,17 @@ export function InboxList({
             <Link
               key={conversation.id}
               href={`/conversations/${conversation.id}`}
+              scroll={false}
+              onClick={() => {
+                try {
+                  sessionStorage.setItem(
+                    INBOX_SCROLL_KEY,
+                    String(window.scrollY || document.documentElement.scrollTop),
+                  );
+                } catch {
+                  // ignore
+                }
+              }}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
             >
               <div className="flex size-10 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">

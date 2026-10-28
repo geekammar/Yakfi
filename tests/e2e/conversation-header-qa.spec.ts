@@ -451,16 +451,15 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       );
     }
 
-    // 6. Desktop PR47 sidebar constraints assertion
+    // 6. Window scroll position must remain <= 10px across all viewports (no document runaway / scroll trap)
+    const windowScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(windowScrollY).toBeLessThanOrEqual(10);
+
     if (vpName.includes("desktop")) {
       const sidebarHeading = page.getByRole("heading", { name: "سياق العميل" });
       await expect(sidebarHeading).toBeVisible();
-
-      // Window scroll position must remain at 0 (no document-level overflow runaway)
-      const windowScrollY = await page.evaluate(
-        () => window.scrollY || document.documentElement.scrollTop,
-      );
-      expect(windowScrollY).toBeLessThanOrEqual(10);
     }
 
     // 7. Zero document horizontal overflow
@@ -468,6 +467,109 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       return document.documentElement.scrollWidth > window.innerWidth;
     });
     expect(hasHorizontalOverflow).toBe(false);
+  });
+
+  test("Mobile conversation repair scenarios: scrolled entry, details/back draft, viewport height changes & install prompt suppression", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const viewport = page.viewportSize();
+    const originalWidth = viewport?.width ?? 390;
+    const originalHeight = viewport?.height ?? 844;
+
+    // 1. Direct load & outer scroll verification (must be <= 10px immediately without normalizing)
+    await page.goto("/qa/conversation-header?fixture=need_human_unassigned", {
+      waitUntil: "domcontentloaded",
+    });
+
+    const entryScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(entryScrollY).toBeLessThanOrEqual(10);
+
+    // Verify customer identity is immediately and completely visible
+    const customerH1 = page.locator(
+      'header[data-testid="conversation-persistent-header"] h1',
+    );
+    await expect(customerH1).toBeVisible();
+    const headerBox = await page
+      .locator('header[data-testid="conversation-persistent-header"]')
+      .boundingBox();
+    expect(headerBox).not.toBeNull();
+    if (headerBox) {
+      expect(headerBox.y).toBeGreaterThanOrEqual(20);
+      expect(headerBox.y).toBeLessThanOrEqual(120);
+      if (vpName.startsWith("mobile")) {
+        expect(headerBox.height).toBeLessThanOrEqual(160);
+      }
+    }
+
+    // 2. Install prompt suppression on conversation route
+    const installBanner = page.locator('aside[aria-label="تثبيت التطبيق"]');
+    await expect(installBanner).not.toBeVisible();
+
+    // 3. Draft preservation across details toggle («التفاصيل»)
+    const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
+    await expect(replyTextarea).toBeVisible();
+    const testDraft = "مسودة رد محفوظة عبر التفاصيل والعودة";
+    await replyTextarea.fill(testDraft);
+    expect(await replyTextarea.inputValue()).toBe(testDraft);
+
+    if (!vpName.includes("desktop")) {
+      const detailsToggle = page.locator(
+        'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
+      );
+      await expect(detailsToggle).toBeVisible();
+      await detailsToggle.click();
+      await page.waitForTimeout(100);
+
+      // Verify details screen shown
+      await expect(
+        page.getByRole("heading", { name: "سياق العميل" }).first(),
+      ).toBeVisible();
+
+      // Return to conversation
+      const backToggle = page.locator(
+        'button[aria-label="العودة إلى المحادثة"]',
+      );
+      await expect(backToggle).toBeVisible();
+      await backToggle.click();
+      await page.waitForTimeout(100);
+
+      // Draft is preserved
+      await expect(replyTextarea).toBeVisible();
+      expect(await replyTextarea.inputValue()).toBe(testDraft);
+    }
+
+    // 4. Viewport height changes (emulating on-screen keyboard resize or orientation changes)
+    if (vpName.startsWith("mobile")) {
+      // Shrink height to simulate soft keyboard emergence
+      await page.setViewportSize({ width: originalWidth, height: 420 });
+      await page.waitForTimeout(100);
+
+      // Composer remains accessible
+      await expect(replyTextarea).toBeVisible();
+      const sendButton = page.locator('button[aria-label="إرسال الرد"]');
+      await expect(sendButton).toBeVisible();
+
+      // Zero horizontal overflow during viewport change
+      let isOverflowing = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      );
+      expect(isOverflowing).toBe(false);
+
+      // Restore original viewport
+      await page.setViewportSize({
+        width: originalWidth,
+        height: originalHeight,
+      });
+      await page.waitForTimeout(100);
+
+      isOverflowing = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      );
+      expect(isOverflowing).toBe(false);
+    }
   });
 
   test("QA harness route boundaries: fixture available in intended CI test configuration & broad /qa/ closed", async ({

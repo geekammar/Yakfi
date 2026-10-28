@@ -9,7 +9,16 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.75.5 (feature branch; candidate PR)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Focused responsive UI enhancement in `conversation-actions.tsx` and `conversation-detail.tsx`:
+**Product version: v0.75.6 (feature branch; candidate PR)** — `Mobile Conversation Usability Repair`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Focused mobile conversation usability repair in shell layout, PWA install prompt, route scroll restoration, and draft preservation:
+
+1. **Suppressed Install Prompt Obstruction**: Confined PWA install prompt to Home (`/`, `/staff`) and Settings (`/settings*`) routes with safe-area spacing (`bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]`), completely suppressing it on conversation detail (`/conversations/[id]`) and booking task routes (`/appointments/*`). Ensured touch targets >= 44px on mobile and honored dismissal.
+2. **Unmasked Customer Identity on Scrolled Entry**: Ensured window scroll is immediately and reliably reset to 0 upon conversation route entry, preventing the customer identity header from sliding behind the sticky AppShell bar (`h-14`) when entering from a scrolled inbox. Main-content has `scroll-mt-14`.
+3. **Inbox State & Scroll Restoration Across Back/Forward**: Stored inbox search query, status filter, assignee filter, and `window.scrollY` in `sessionStorage` upon navigation; restored full inbox state and scroll position on mount.
+4. **Draft Text Preservation Across View Toggles & Back**: Persisted unsent reply drafts in `sessionStorage` keyed by conversation ID; preserved drafts across mobile details tab switches («التفاصيل») and across navigating Back to the inbox and re-entering the conversation.
+5. **Safe-Area Composer Clearance & Full Action Labels**: Updated conversation card height to account for `env(safe-area-inset-bottom, 0px)` so the composer sits safely above the fixed bottom navigation and device home indicator. Rendered full visible label «إعادة للمساعد» across all viewports.
+6. **Automated CI & Viewport Verification**: Enforced absolute outer scroll position `<= 10px` without normalizing, tested across 320/360/390/768/1280 viewports, direct load, scrolled entry, details/back, and viewport height adjustments in `tests/e2e/conversation-header-qa.spec.ts` and `tests/e2e/preview-auth-qa.spec.ts`.
+
+**Product version: v0.75.5 (main)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Merged via PR #50 (commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Focused responsive UI enhancement in `conversation-actions.tsx` and `conversation-detail.tsx`:
 
 1. **Full Visible Action Labels**: Render complete visible Arabic labels across all viewports (mobile and desktop): «تولّي المحادثة» for `TAKE_OVER` and «حجز موعد» for booking shortcut.
 2. **Width Recovery via Responsive Icon Hiding**: Recover narrow-screen width by hiding decorative icons beside clearly labeled actions below the `sm` breakpoint (`hidden sm:inline` on `UserRoundIcon`, `CalendarDaysIcon`, `BotIcon`, and Details `UserRoundIcon`/`MessageCircleIcon`). Kept More icon (`MoreHorizontalIcon`) visible.

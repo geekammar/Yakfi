@@ -326,6 +326,7 @@ export function ConversationDetail({
   const ownSendPendingRef = useRef(false);
   const isNearBottomRef = useRef(true);
   const savedScrollTopRef = useRef<number>(0);
+  const draftKey = `flowpilot-draft-${data.id}`;
 
   // Track scroll position and proximity to bottom
   const handleLogScroll = () => {
@@ -334,6 +335,44 @@ export function ConversationDetail({
     savedScrollTopRef.current = el.scrollTop;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
+  };
+
+  // Ensure window scroll is at top so sticky top bar and persistent header align without masking
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const rafId = requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  // Restore unsent draft across details toggle and Back navigation
+  useEffect(() => {
+    try {
+      const savedDraft = sessionStorage.getItem(draftKey);
+      if (savedDraft) {
+        setReply(savedDraft);
+      }
+    } catch {
+      // ignore
+    }
+  }, [draftKey]);
+
+  const handleReplyTextChange = (text: string) => {
+    setReply(text);
+    try {
+      if (text.trim()) {
+        sessionStorage.setItem(draftKey, text);
+      } else {
+        sessionStorage.removeItem(draftKey);
+      }
+    } catch {
+      // ignore
+    }
   };
 
   // Initial scroll to bottom on mount
@@ -456,6 +495,11 @@ export function ConversationDetail({
     const pendingId = crypto.randomUUID();
     setPendingMessageId(pendingId);
     setReply("");
+    try {
+      sessionStorage.removeItem(draftKey);
+    } catch {
+      // ignore
+    }
     setData((current) => ({
       ...current,
       messages: [
@@ -482,6 +526,11 @@ export function ConversationDetail({
           ),
         }));
         setReply(content);
+        try {
+          sessionStorage.setItem(draftKey, content);
+        } catch {
+          // ignore
+        }
         return;
       }
       setData((current) => ({
@@ -511,8 +560,10 @@ export function ConversationDetail({
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
       <section
         style={{
-          height: "var(--conversation-height, calc(100dvh - 11rem))",
-          maxHeight: "var(--conversation-height, calc(100dvh - 11rem))",
+          height:
+            "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
+          maxHeight:
+            "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
           minHeight: 0,
         }}
         className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
@@ -603,7 +654,7 @@ export function ConversationDetail({
             aria-label="رسائل المحادثة"
             tabIndex={0}
             onScroll={handleLogScroll}
-            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
+            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5 [overflow-anchor:none]"
           >
             {data.messages.length === 0 ? (
               <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted-foreground">
@@ -657,7 +708,7 @@ export function ConversationDetail({
             <div className="flex items-end gap-2">
               <Textarea
                 value={reply}
-                onChange={(event) => setReply(event.target.value)}
+                onChange={(event) => handleReplyTextChange(event.target.value)}
                 placeholder="اكتب ردك للعميل…"
                 aria-label="رد على العميل"
                 rows={2}

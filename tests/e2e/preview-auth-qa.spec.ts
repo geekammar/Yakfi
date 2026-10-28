@@ -362,6 +362,12 @@ test.describe("Authenticated Preview QA", () => {
     console.log(
       `[QA-DIAG] ${vpName} | preInboxScrollY=${preInboxScreenshotScrollY} | postNavScrollY=${postNavScrollY} | initialHeaderY=${initialHeaderBox?.y} initialHeaderH=${initialHeaderBox?.height}`,
     );
+    // Outer scroll position must stay at top (<= 10px) upon route entry (no document runaway / header masking)
+    expect(postNavScrollY).toBeLessThanOrEqual(10);
+
+    // Suppress install prompt on conversation detail route (no composer / content obstruction)
+    const installPromptOnConv = page.locator('aside[aria-label="تثبيت التطبيق"]');
+    await expect(installPromptOnConv).not.toBeVisible();
 
     // U02: Real customer identity with truncation
     const customerH1 = persistentHeader.locator("h1");
@@ -581,6 +587,43 @@ test.describe("Authenticated Preview QA", () => {
       expect(Math.abs(restoredScrollTop - middleTarget)).toBeLessThanOrEqual(
         20,
       );
+
+      // Back to inbox and re-entry preserves unsent draft
+      const backToInboxBtn = persistentHeader.locator(
+        'a[aria-label="العودة إلى المحادثات"]',
+      );
+      if (await backToInboxBtn.isVisible()) {
+        await backToInboxBtn.click();
+        await page.waitForURL(
+          (url) => !url.pathname.includes("/conversations/"),
+          {
+            timeout: 10_000,
+            waitUntil: "domcontentloaded",
+          },
+        );
+        await expect(
+          page.locator('a[href^="/conversations/"]').first(),
+        ).toBeVisible();
+
+        // Re-enter conversation
+        await firstConvLink.click();
+        await page.waitForURL(
+          (url) => url.pathname.includes("/conversations/"),
+          {
+            timeout: 10_000,
+            waitUntil: "domcontentloaded",
+          },
+        );
+
+        // Verify draft text is preserved across route navigation
+        const restoredDraftArea = page.locator(
+          'textarea[aria-label="رد على العميل"]',
+        );
+        await expect(restoredDraftArea).toBeVisible();
+        expect(await restoredDraftArea.inputValue()).toBe(
+          "مسودة رد للاختبار الحقيقي",
+        );
+      }
     }
 
     // U08 & U09: Zero horizontal overflow across all viewports
