@@ -159,9 +159,15 @@ async function main(): Promise<void> {
       continue;
     }
 
+    const jsonStr = match[1];
+    if (!jsonStr) {
+      check(`3 [${tz}]. Subprocess produced JSON match group`, false);
+      continue;
+    }
+
     let parsed = { res7: "", appt7: "", res8: "", appt8: "" };
     try {
-      parsed = JSON.parse(match[1]);
+      parsed = JSON.parse(jsonStr);
     } catch {
       check(`3 [${tz}]. Valid JSON payload from subprocess`, false);
       continue;
@@ -236,9 +242,10 @@ async function main(): Promise<void> {
   const unpatchedMatch = unpatchedCairo.stdout?.match(
     /__JSON_START__(.*?)__JSON_END__/s,
   );
-  if (unpatchedCairo.status === 0 && unpatchedMatch) {
+  const unpatchedJson = unpatchedMatch?.[1];
+  if (unpatchedCairo.status === 0 && unpatchedJson) {
     try {
-      const { unpatched } = JSON.parse(unpatchedMatch[1]);
+      const { unpatched } = JSON.parse(unpatchedJson);
       const shiftedToFriday =
         unpatched.includes("الجمعة") || /[6٦]/.test(unpatched);
       check(
