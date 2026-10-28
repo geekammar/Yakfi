@@ -2844,7 +2844,7 @@ async function run() {
     );
 
     // S8. Factory composition separation: logical turn deadline is NOT 18 seconds
-    let clockS8 = 1000;
+    const clockS8 = 1000;
     const defaultTurnSession = createServingExecutionSession({
       getNow: () => clockS8,
       // timeoutMs left undefined as in default conversation-engine composition
