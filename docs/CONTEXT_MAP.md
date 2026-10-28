@@ -180,6 +180,7 @@ Docs:
 - scripts/check-booking-ux.ts
 - scripts/check-reschedule.ts
 - scripts/check-booking-options.ts
+- scripts/check-scarce-availability-regressions.ts
 - scripts/check-provider-eligibility.ts
 - scripts/check-booking-confirm.ts
 
