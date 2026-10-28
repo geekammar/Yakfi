@@ -36,7 +36,13 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
 
     // 1. Navigate to /sign-in
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/(?:يكفي|FlowPilot)/);
+    await expect(page).toHaveTitle(/تسجيل الدخول \| يكفي/);
+
+    // Verify rendered candidate identity
+    await expect(page.locator("body")).toContainText("يكفي");
+    await expect(
+      page.locator('svg[data-testid="yakfi-symbol"]').first(),
+    ).toBeVisible();
 
     // 2. Arabic RTL Assertion
     const htmlDir = await page.locator("html").getAttribute("dir");

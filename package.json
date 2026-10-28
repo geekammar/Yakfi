@@ -125,6 +125,8 @@
     "check:pre-ship": "node scripts/check-pre-ship.mjs",
     "vercel:check": "node scripts/vercel-check.mjs",
     "check:release-guard": "node scripts/test-release-guard.mjs",
+    "check:icons": "node scripts/generate-pwa-icons.mjs --check",
+    "icons": "node scripts/generate-pwa-icons.mjs",
     "check:version": "node scripts/check-pr-version.mjs",
     "version:bump": "node scripts/bump-version.mjs",
     "deploy": "node scripts/deploy.mjs",
