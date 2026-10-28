@@ -456,7 +456,7 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
         const rgbaMatch = str.match(
           /rgba?\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)(?:,\s*(\d+(?:\.\d+)?))?\)/,
         );
-        if (rgbaMatch) {
+        if (rgbaMatch && rgbaMatch[1] && rgbaMatch[2] && rgbaMatch[3]) {
           return {
             r: parseFloat(rgbaMatch[1]),
             g: parseFloat(rgbaMatch[2]),
@@ -466,11 +466,19 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
         }
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 1;
-        const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = str;
-        ctx.fillRect(0, 0, 1, 1);
-        const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-        return { r, g, b, a: a / 255 };
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = str;
+          ctx.fillRect(0, 0, 1, 1);
+          const data = ctx.getImageData(0, 0, 1, 1).data;
+          return {
+            r: data[0] ?? 0,
+            g: data[1] ?? 0,
+            b: data[2] ?? 0,
+            a: (data[3] ?? 255) / 255,
+          };
+        }
+        return { r: 0, g: 0, b: 0, a: 1 };
       }
 
       const fg = parseColor(fgColorStr);
@@ -483,15 +491,19 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
         b: Math.round(bgBadge.b * bgBadge.a + bgCard.b * (1 - bgBadge.a)),
       };
 
+      function channelLuminance(val: number): number {
+        const s = val / 255;
+        return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      }
+
       function relativeLuminance(rgb: {
         r: number;
         g: number;
         b: number;
       }): number {
-        const [R, G, B] = [rgb.r, rgb.g, rgb.b].map((c) => {
-          const s = c / 255;
-          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-        });
+        const R = channelLuminance(rgb.r);
+        const G = channelLuminance(rgb.g);
+        const B = channelLuminance(rgb.b);
         return 0.2126 * R + 0.7152 * G + 0.0722 * B;
       }
 
