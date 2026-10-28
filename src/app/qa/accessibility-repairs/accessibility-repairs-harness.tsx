@@ -37,7 +37,6 @@ const ADMIN_MEMBER: TeamMemberItem = {
   email: "ahmed@example.com",
   role: "ADMIN",
   isActive: true,
-  createdAt: "2026-01-01T00:00:00Z",
 };
 
 const STAFF_MEMBER_1: TeamMemberItem = {
@@ -46,7 +45,6 @@ const STAFF_MEMBER_1: TeamMemberItem = {
   email: "sara@example.com",
   role: "STAFF",
   isActive: true,
-  createdAt: "2026-01-02T00:00:00Z",
 };
 
 const STAFF_MEMBER_2: TeamMemberItem = {
@@ -55,12 +53,13 @@ const STAFF_MEMBER_2: TeamMemberItem = {
   email: "mohammed@example.com",
   role: "STAFF",
   isActive: false,
-  createdAt: "2026-01-03T00:00:00Z",
 };
 
 const FIXTURE_APPOINTMENTS: AppointmentAgendaItem[] = [
   {
     id: "apt-1",
+    date: "2026-10-28",
+    notes: null,
     customer: { id: "cust-1", name: "خالد بن فهد", phone: "+966501112233" },
     service: { id: "srv-1", name: "استشارة طبية أولية", durationMinutes: 30 },
     provider: { id: "prov-1", name: "د. عبدالكريم الصالح" },
@@ -93,9 +92,12 @@ export function AccessibilityRepairsHarness() {
   return (
     <div className="container mx-auto p-4 sm:p-6 space-y-8 max-w-4xl">
       <div className="border-b pb-4">
-        <h1 className="text-2xl font-bold">QA Harness — Accessibility & UI Repairs</h1>
+        <h1 className="text-2xl font-bold">
+          QA Harness — Accessibility & UI Repairs
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Automated verification for Dialogs, Working Hours, Team Members, and View Switcher.
+          Automated verification for Dialogs, Working Hours, Team Members, and
+          View Switcher.
         </p>
 
         {/* Tab selection for test isolation */}
@@ -166,11 +168,14 @@ export function AccessibilityRepairsHarness() {
                       </span>
                     </DialogTitle>
                     <DialogDescription>
-                      نافذة حوار مخصصة للتحقق من أبعاد زر الإغلاق وعدم التداخل مع العناوين الطويلة.
+                      نافذة حوار مخصصة للتحقق من أبعاد زر الإغلاق وعدم التداخل
+                      مع العناوين الطويلة.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="py-4">
-                    <p className="text-sm">محتوى نافذة الحوار للاختبار التفاعلي.</p>
+                    <p className="text-sm">
+                      محتوى نافذة الحوار للاختبار التفاعلي.
+                    </p>
                     <input
                       type="text"
                       placeholder="حقل تركيز داخل النافذة"
@@ -200,11 +205,14 @@ export function AccessibilityRepairsHarness() {
                       Comprehensive Medical Service Confirmation Details
                     </DialogTitle>
                     <DialogDescription>
-                      Verification of close button positioning on the right side in LTR.
+                      Verification of close button positioning on the right side
+                      in LTR.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="py-4">
-                    <p className="text-sm">Test content for LTR verification.</p>
+                    <p className="text-sm">
+                      Test content for LTR verification.
+                    </p>
                   </div>
                 </DialogContent>
               </Dialog>

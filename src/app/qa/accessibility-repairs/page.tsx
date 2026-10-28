@@ -1,6 +1,6 @@
 import { isQaHarnessAllowed } from "@/lib/qa-harness";
-import { AccessibilityRepairsHarness } from "./accessibility-repairs-harness";
 
+import { AccessibilityRepairsHarness } from "./accessibility-repairs-harness";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 

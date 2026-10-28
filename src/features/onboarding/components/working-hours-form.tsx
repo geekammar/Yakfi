@@ -84,7 +84,10 @@ export function WorkingHoursForm({
                   className="text-xs text-muted-foreground"
                 >
                   من
-                  <span className="sr-only"> (بداية العمل يوم {day.label})</span>
+                  <span className="sr-only">
+                    {" "}
+                    (بداية العمل يوم {day.label})
+                  </span>
                 </Label>
                 <Input
                   id={`working-hours-${day.key}-open`}
@@ -101,7 +104,10 @@ export function WorkingHoursForm({
                   className="text-xs text-muted-foreground"
                 >
                   إلى
-                  <span className="sr-only"> (نهاية العمل يوم {day.label})</span>
+                  <span className="sr-only">
+                    {" "}
+                    (نهاية العمل يوم {day.label})
+                  </span>
                 </Label>
                 <Input
                   id={`working-hours-${day.key}-close`}

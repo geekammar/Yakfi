@@ -46,7 +46,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     const closeSrText = await rtlCloseButton
       .locator("span.sr-only")
       .textContent();
-    expect(closeLabel === "إغلاق" || closeSrText?.trim() === "إغلاق").toBe(true);
+    expect(closeLabel === "إغلاق" || closeSrText?.trim() === "إغلاق").toBe(
+      true,
+    );
 
     // Check touch target >= 44x44px
     const closeBox = await rtlCloseButton.boundingBox();

@@ -96,8 +96,8 @@ check(
 
 check(
   "2.3 Working hours inputs preserve aria-label for assistive tech",
-  workingHoursSrc.includes('aria-label={`بداية العمل يوم ${day.label}`}') &&
-    workingHoursSrc.includes('aria-label={`نهاية العمل يوم ${day.label}`}'),
+  workingHoursSrc.includes("aria-label={`بداية العمل يوم ${day.label}`}") &&
+    workingHoursSrc.includes("aria-label={`نهاية العمل يوم ${day.label}`}"),
 );
 
 check(
@@ -190,5 +190,7 @@ if (failed > 0) {
   console.error(`❌ FAILED: ${failed}/${checks.length} checks failed.`);
   process.exit(1);
 } else {
-  console.log(`✅ PASSED: All ${checks.length}/${checks.length} checks passed successfully.`);
+  console.log(
+    `✅ PASSED: All ${checks.length}/${checks.length} checks passed successfully.`,
+  );
 }
