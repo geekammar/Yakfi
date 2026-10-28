@@ -109,6 +109,9 @@ async function main(): Promise<void> {
   );
 
   // ── 3. Cross-Timezone Evaluation in Isolated Host Subprocesses ───────────
+  // Note: These subprocesses verify production helpers under varied host (Node)
+  // timezones. They do not represent real browser execution (which is verified
+  // via Playwright automated UX QA in Chromium).
   const targetTimezones = [
     { tz: "UTC", label: "UTC (zero offset)" },
     { tz: "Africa/Cairo", label: "Africa/Cairo (positive offset, Egypt)" },
@@ -117,80 +120,96 @@ async function main(): Promise<void> {
   ];
 
   const runnerCode = [
-    "function formatAppointmentDate(date) {",
-    "  const dateOnly = date.slice(0, 10);",
-    '  return new Intl.DateTimeFormat("ar-EG", {',
-    '    timeZone: "UTC",',
-    '    weekday: "short",',
-    '    day: "numeric",',
-    '    month: "short",',
-    '  }).format(new Date(dateOnly + "T00:00:00.000Z"));',
-    "}",
-    "function formatArabicDate(date) {",
-    '  return new Intl.DateTimeFormat("ar-EG", {',
-    '    timeZone: "UTC",',
-    '    weekday: "long",',
-    '    day: "numeric",',
-    '    month: "long",',
-    '    year: "numeric",',
-    '  }).format(new Date(date + "T00:00:00.000Z"));',
-    "}",
+    'import { formatAppointmentDate } from "./src/features/conversations/components/conversation-detail";',
+    'import { formatArabicDate } from "./src/features/appointments/components/smart-create/date-format";',
     'const res7 = formatAppointmentDate("2026-11-07");',
     'const appt7 = formatArabicDate("2026-11-07");',
     'const res8 = formatAppointmentDate("2026-11-08");',
     'const appt8 = formatArabicDate("2026-11-08");',
-    "console.log(JSON.stringify({ res7, appt7, res8, appt8 }));",
+    'console.log("__JSON_START__" + JSON.stringify({ res7, appt7, res8, appt8 }) + "__JSON_END__");',
   ].join("\n");
 
+  const childEnv = {
+    ...process.env,
+    DATABASE_URL:
+      process.env.DATABASE_URL ||
+      "postgresql://user:password@localhost:5432/placeholder",
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "0".repeat(32),
+    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+    NEXT_PUBLIC_APP_URL:
+      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  };
+
   for (const { tz, label } of targetTimezones) {
-    const outcome = spawnSync(process.execPath, ["-e", runnerCode], {
+    const outcome = spawnSync("pnpm", ["exec", "tsx", "-e", runnerCode], {
       cwd: process.cwd(),
-      env: { ...process.env, TZ: tz },
+      env: { ...childEnv, TZ: tz },
       encoding: "utf8",
     });
 
-    check(`3. Subprocess execution succeeds in ${label}`, outcome.status === 0);
+    const match = outcome.stdout?.match(/__JSON_START__(.*?)__JSON_END__/s);
+    const success = outcome.status === 0 && match !== null;
+    check(`3. Production helpers execute successfully in ${label}`, success);
 
-    if (outcome.status === 0) {
-      let parsed = { res7: "", appt7: "", res8: "", appt8: "" };
-      try {
-        parsed = JSON.parse((outcome.stdout ?? "").trim());
-      } catch {
-        // Handled by equality checks below
-      }
-
-      const isNov7Saturday =
-        parsed.res7.includes("السبت") &&
-        parsed.res7.includes("نوفمبر") &&
-        /[7٧]/.test(parsed.res7) &&
-        !parsed.res7.includes("الجمعة") &&
-        !/[6٦]/.test(parsed.res7);
-
-      check(
-        `3a [${tz}]. 2026-11-07 Saturday 7 November in conversation context`,
-        isNov7Saturday,
+    if (!success) {
+      console.error(
+        `Subprocess failed for ${label} (exit ${outcome.status}):`,
+        outcome.stderr || outcome.stdout,
       );
-
-      const parityNov7 =
-        parsed.appt7.includes("السبت") &&
-        parsed.appt7.includes("نوفمبر") &&
-        /[7٧]/.test(parsed.appt7);
-
-      check(
-        `3b [${tz}]. 2026-11-07 conversation context agrees with appt details`,
-        parityNov7 && isNov7Saturday,
-      );
-
-      const isNov8Sunday =
-        parsed.res8.includes("الأحد") &&
-        parsed.res8.includes("نوفمبر") &&
-        /[8٨]/.test(parsed.res8);
-
-      check(
-        `3c [${tz}]. 2026-11-08 Sunday 8 November without off-by-one drift`,
-        isNov8Sunday,
-      );
+      continue;
     }
+
+    let parsed = { res7: "", appt7: "", res8: "", appt8: "" };
+    try {
+      parsed = JSON.parse(match[1]);
+    } catch {
+      check(`3 [${tz}]. Valid JSON payload from subprocess`, false);
+      continue;
+    }
+
+    const isNov7Saturday =
+      parsed.res7.includes("السبت") &&
+      parsed.res7.includes("نوفمبر") &&
+      /[7٧]/.test(parsed.res7) &&
+      !parsed.res7.includes("الجمعة") &&
+      !/[6٦]/.test(parsed.res7);
+
+    check(
+      `3a [${tz}]. 2026-11-07 Saturday 7 November in conversation context`,
+      isNov7Saturday,
+    );
+
+    const parityNov7 =
+      parsed.appt7.includes("السبت") &&
+      parsed.appt7.includes("نوفمبر") &&
+      /[7٧]/.test(parsed.appt7);
+
+    check(
+      `3b [${tz}]. 2026-11-07 conversation context agrees with appt details parity`,
+      parityNov7 && isNov7Saturday,
+    );
+
+    const isNov8Sunday =
+      parsed.res8.includes("الأحد") &&
+      parsed.res8.includes("نوفمبر") &&
+      /[8٨]/.test(parsed.res8) &&
+      !parsed.res8.includes("السبت") &&
+      !/[7٧]/.test(parsed.res8);
+
+    check(
+      `3c [${tz}]. 2026-11-08 Sunday 8 November without off-by-one drift`,
+      isNov8Sunday,
+    );
+
+    const parityNov8 =
+      parsed.appt8.includes("الأحد") &&
+      parsed.appt8.includes("نوفمبر") &&
+      /[8٨]/.test(parsed.appt8);
+
+    check(
+      `3d [${tz}]. 2026-11-08 conversation context agrees with appt details parity`,
+      parityNov8 && isNov8Sunday,
+    );
   }
 
   // ── 4. Regression Proof: Verify Unpatched Pattern Fails in Cairo ─────────
@@ -201,18 +220,25 @@ async function main(): Promise<void> {
     '  day: "numeric",',
     '  month: "short",',
     '}).format(new Date("2026-11-07T00:00:00"));',
-    "console.log(JSON.stringify({ unpatched }));",
+    'console.log("__JSON_START__" + JSON.stringify({ unpatched }) + "__JSON_END__");',
   ].join("\n");
 
-  const unpatchedCairo = spawnSync(process.execPath, ["-e", unpatchedCode], {
-    cwd: process.cwd(),
-    env: { ...process.env, TZ: "Africa/Cairo" },
-    encoding: "utf8",
-  });
+  const unpatchedCairo = spawnSync(
+    "pnpm",
+    ["exec", "tsx", "-e", unpatchedCode],
+    {
+      cwd: process.cwd(),
+      env: { ...childEnv, TZ: "Africa/Cairo" },
+      encoding: "utf8",
+    },
+  );
 
-  if (unpatchedCairo.status === 0) {
+  const unpatchedMatch = unpatchedCairo.stdout?.match(
+    /__JSON_START__(.*?)__JSON_END__/s,
+  );
+  if (unpatchedCairo.status === 0 && unpatchedMatch) {
     try {
-      const { unpatched } = JSON.parse((unpatchedCairo.stdout ?? "").trim());
+      const { unpatched } = JSON.parse(unpatchedMatch[1]);
       const shiftedToFriday =
         unpatched.includes("الجمعة") || /[6٦]/.test(unpatched);
       check(
@@ -222,6 +248,8 @@ async function main(): Promise<void> {
     } catch {
       check("4. Regression proof parsed successfully", false);
     }
+  } else {
+    check("4. Regression proof subprocess succeeded", false);
   }
 
   // ── Report ────────────────────────────────────────────────────────────────
