@@ -1,6 +1,14 @@
 "use client";
 
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import {
+  clearStoredInboxScroll,
+  clearStoredInboxState,
+  getStoredInboxScroll,
+  getStoredInboxState,
+  setStoredInboxScroll,
+  setStoredInboxState,
+} from "@/features/conversations/lib/storage";
 import type {
   InboxConversation,
   InboxUser,
@@ -24,7 +32,7 @@ import {
   UserRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
@@ -75,14 +83,74 @@ function initials(name: string) {
 export function InboxList({
   conversations,
   team,
+  businessId,
+  currentUserId,
+  conversationHrefPrefix = "/conversations",
 }: {
   conversations: InboxConversation[];
   team: InboxUser[];
+  businessId?: string;
+  currentUserId?: string;
+  conversationHrefPrefix?: string;
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] =
     useState<(typeof STATUS_FILTERS)[number]["value"]>("ALL");
   const [assignee, setAssignee] = useState("ALL");
+  const [isRestored, setIsRestored] = useState(false);
+  const isInitialMount = useRef(true);
+  const restoredScrollTargetRef = useRef<number | null>(null);
+
+  // Restore inbox search, filters, and scroll position across Back/Forward navigation
+  useEffect(() => {
+    if (!businessId || !currentUserId) {
+      queueMicrotask(() => {
+        setIsRestored(true);
+      });
+      return;
+    }
+    const savedState = getStoredInboxState(businessId, currentUserId);
+    const savedScroll = getStoredInboxScroll(businessId, currentUserId);
+    if (savedScroll && savedScroll > 0) {
+      restoredScrollTargetRef.current = savedScroll;
+    }
+    if (savedState) {
+      queueMicrotask(() => {
+        if (typeof savedState.search === "string") setSearch(savedState.search);
+        if (
+          typeof savedState.status === "string" &&
+          STATUS_FILTERS.some((f) => f.value === savedState.status)
+        ) {
+          setStatus(
+            savedState.status as (typeof STATUS_FILTERS)[number]["value"],
+          );
+        }
+        if (typeof savedState.assignee === "string") {
+          setAssignee(savedState.assignee);
+        }
+        setIsRestored(true);
+      });
+    } else {
+      queueMicrotask(() => {
+        setIsRestored(true);
+      });
+    }
+  }, [businessId, currentUserId]);
+
+  // Sync active filters to scoped storage for Back restoration
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (!businessId || !currentUserId) return;
+    setStoredInboxState(businessId, currentUserId, {
+      search,
+      status,
+      assignee,
+    });
+  }, [search, status, assignee, businessId, currentUserId]);
+
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase());
   const hasActiveFilters =
     Boolean(search) || status !== "ALL" || assignee !== "ALL";
@@ -107,10 +175,37 @@ export function InboxList({
     });
   }, [assignee, conversations, deferredSearch, status]);
 
+  // Restore scroll position once the filtered list is rendered and ready
+  useEffect(() => {
+    if (!isRestored) return;
+    const target = restoredScrollTargetRef.current;
+    if (target !== null && target > 0) {
+      const maxScroll =
+        document.documentElement.scrollHeight - window.innerHeight;
+      if (
+        maxScroll >= target ||
+        document.documentElement.scrollHeight > window.innerHeight
+      ) {
+        window.scrollTo({ top: target, behavior: "instant" });
+        if (
+          Math.abs(
+            (window.scrollY || document.documentElement.scrollTop) - target,
+          ) <= 5
+        ) {
+          restoredScrollTargetRef.current = null;
+        }
+      }
+    }
+  }, [filtered, isRestored]);
+
   function clearFilters() {
     setSearch("");
     setStatus("ALL");
     setAssignee("ALL");
+    if (businessId && currentUserId) {
+      clearStoredInboxState(businessId, currentUserId);
+      clearStoredInboxScroll(businessId, currentUserId);
+    }
   }
 
   return (
@@ -196,8 +291,21 @@ export function InboxList({
           {filtered.map((conversation) => (
             <Link
               key={conversation.id}
-              href={`/conversations/${conversation.id}`}
+              href={
+                conversationHrefPrefix.includes("?")
+                  ? `${conversationHrefPrefix}&id=${conversation.id}`
+                  : `${conversationHrefPrefix}/${conversation.id}`
+              }
               scroll={false}
+              onClick={() => {
+                if (businessId && currentUserId) {
+                  setStoredInboxScroll(
+                    businessId,
+                    currentUserId,
+                    window.scrollY || document.documentElement.scrollTop,
+                  );
+                }
+              }}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
             >
               <div className="flex size-10 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">

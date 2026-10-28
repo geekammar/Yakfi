@@ -125,6 +125,7 @@ jobs:
           pnpm check:conv-ui-01
           pnpm check:appointment-calendar-dates
           pnpm test:conversation-detail
+          pnpm test:install-prompt
           pnpm check:qa-harness
 
       - name: Base-versus-HEAD handoff-cause reconciliation

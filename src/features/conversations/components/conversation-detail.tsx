@@ -8,6 +8,11 @@ import {
 } from "@/features/conversations/actions/conversation-actions";
 import { ConversationActions } from "@/features/conversations/components/conversation-actions";
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import {
+  getStoredDraft,
+  removeStoredDraft,
+  setStoredDraft,
+} from "@/features/conversations/lib/storage";
 import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
 import type { ConversationDetailData } from "@/features/conversations/types";
 import { Button } from "@/components/ui/button";
@@ -32,6 +37,7 @@ import {
   SendIcon,
   UserRoundIcon,
   UsersRoundIcon,
+  XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -304,11 +310,15 @@ export type ConversationDetailProps = {
     id: string;
     transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
   }) => Promise<{ success: boolean; message?: string }>;
+  backHref?: string;
+  businessId?: string;
 };
 
 export function ConversationDetail({
   data: initialData,
   onTransition,
+  backHref,
+  businessId: propBusinessId,
 }: ConversationDetailProps) {
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
@@ -328,6 +338,16 @@ export function ConversationDetail({
   const isNearBottomRef = useRef(true);
   const savedScrollTopRef = useRef<number>(0);
 
+  const draftRevisionRef = useRef(0);
+  const activeSubmissionRef = useRef<{
+    rawDraft: string;
+    revision: number;
+  } | null>(null);
+  const [failedSubmission, setFailedSubmission] = useState<string | null>(null);
+
+  const effectiveBusinessId = propBusinessId ?? initialData.businessId;
+  const effectiveUserId = initialData.currentUserId;
+
   // Track scroll position and proximity to bottom
   const handleLogScroll = () => {
     const el = messageLogRef.current;
@@ -342,6 +362,28 @@ export function ConversationDetail({
     window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
+  // Restore unsent draft across details toggle and Back navigation
+  useEffect(() => {
+    if (!effectiveBusinessId || !effectiveUserId) return;
+    const savedDraft = getStoredDraft(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+    if (savedDraft) {
+      queueMicrotask(() => {
+        setReply(savedDraft);
+      });
+    }
+  }, [effectiveBusinessId, effectiveUserId, data.id]);
+
+  const handleReplyTextChange = (text: string) => {
+    draftRevisionRef.current += 1;
+    setReply(text);
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
+    }
+  };
   // Initial scroll to bottom on mount
   useEffect(() => {
     const el = messageLogRef.current;
@@ -454,14 +496,25 @@ export function ConversationDetail({
   function handleReply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = reply.trim();
-    if (!content) return;
+    if (!content || isPending) return;
 
     ownSendPendingRef.current = true;
 
     // Optimistic append — rolled back if the server rejects the reply.
     const pendingId = crypto.randomUUID();
     setPendingMessageId(pendingId);
+
+    // Keep recoverable raw draft snapshot and revision until confirmed success.
+    const rawDraftSnapshot = reply;
+    const submittedRevision = draftRevisionRef.current;
+    activeSubmissionRef.current = {
+      rawDraft: rawDraftSnapshot,
+      revision: submittedRevision,
+    };
+
     setReply("");
+    setFailedSubmission(null);
+
     setData((current) => ({
       ...current,
       messages: [
@@ -480,16 +533,53 @@ export function ConversationDetail({
         sendStaffReply({ id: data.id, content }),
       );
       setPendingMessageId(null);
+
+      const submission = activeSubmissionRef.current;
+      activeSubmissionRef.current = null;
+
       if (!success) {
+        // Rollback optimistic message
         setData((current) => ({
           ...current,
           messages: current.messages.filter(
             (message) => message.id !== pendingId,
           ),
         }));
-        setReply(content);
+
+        // Failure handling:
+        // Did operator type newer text while pending?
+        const hasNewerText =
+          draftRevisionRef.current > (submission?.revision ?? 0);
+
+        if (!hasNewerText && submission?.rawDraft) {
+          // If no newer text was typed, restore the failed submission directly
+          setReply(submission.rawDraft);
+          if (effectiveBusinessId && effectiveUserId) {
+            setStoredDraft(
+              effectiveBusinessId,
+              effectiveUserId,
+              data.id,
+              submission.rawDraft,
+            );
+          }
+        } else if (submission?.rawDraft) {
+          // Newer text typed while pending:
+          // Keep current newer draft UNCHANGED (no automatic concatenation!).
+          // Preserve failed submission separately with explicit recovery affordance.
+          setFailedSubmission(submission.rawDraft);
+        }
         return;
       }
+
+      // Success handling:
+      // Remove only if not superseded by newer operator text
+      const hasNewerText =
+        draftRevisionRef.current > (submission?.revision ?? 0);
+
+      if (!hasNewerText && effectiveBusinessId && effectiveUserId) {
+        removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
+      }
+
       setData((current) => ({
         ...current,
         status: "NEED_HUMAN",
@@ -517,8 +607,10 @@ export function ConversationDetail({
     <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
       <section
         style={{
-          height: "var(--conversation-height, calc(100dvh - 11rem))",
-          maxHeight: "var(--conversation-height, calc(100dvh - 11rem))",
+          height:
+            "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
+          maxHeight:
+            "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
           minHeight: 0,
         }}
         className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
@@ -535,9 +627,12 @@ export function ConversationDetail({
                 asChild
                 variant="ghost"
                 size="icon-sm"
-                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden shrink-0"
+                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 shrink-0"
               >
-                <Link href="/conversations" aria-label="العودة إلى المحادثات">
+                <Link
+                  href={backHref ?? "/conversations"}
+                  aria-label="العودة إلى المحادثات"
+                >
                   <ArrowRightIcon />
                 </Link>
               </Button>
@@ -660,10 +755,56 @@ export function ConversationDetail({
           </div>
 
           <form onSubmit={handleReply} className="border-t bg-card p-3 sm:p-4">
+            {failedSubmission ? (
+              <div
+                role="alert"
+                aria-label="تنبيه تعذر إرسال الرد"
+                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0" />
+                  <span className="truncate">
+                    تعذر إرسال: &ldquo;{failedSubmission.trim()}&rdquo;
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setReply(failedSubmission);
+                      if (effectiveBusinessId && effectiveUserId) {
+                        setStoredDraft(
+                          effectiveBusinessId,
+                          effectiveUserId,
+                          data.id,
+                          failedSubmission,
+                        );
+                      }
+                      setFailedSubmission(null);
+                    }}
+                  >
+                    استعادة الرد
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    aria-label="تجاهل الرد المتعثر"
+                    onClick={() => setFailedSubmission(null)}
+                  >
+                    <XIcon className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <div className="flex items-end gap-2">
               <Textarea
                 value={reply}
-                onChange={(event) => setReply(event.target.value)}
+                onChange={(event) => handleReplyTextChange(event.target.value)}
                 placeholder="اكتب ردك للعميل…"
                 aria-label="رد على العميل"
                 rows={2}

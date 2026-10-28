@@ -451,16 +451,15 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       );
     }
 
-    // 6. Desktop PR47 sidebar constraints assertion
+    // 6. Window scroll position must remain <= 10px across all viewports (no document runaway / scroll trap)
+    const windowScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(windowScrollY).toBeLessThanOrEqual(10);
+
     if (vpName.includes("desktop")) {
       const sidebarHeading = page.getByRole("heading", { name: "سياق العميل" });
       await expect(sidebarHeading).toBeVisible();
-
-      // Window scroll position must remain at 0 (no document-level overflow runaway)
-      const windowScrollY = await page.evaluate(
-        () => window.scrollY || document.documentElement.scrollTop,
-      );
-      expect(windowScrollY).toBeLessThanOrEqual(10);
     }
 
     // 7. Zero document horizontal overflow
@@ -468,6 +467,286 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       return document.documentElement.scrollWidth > window.innerWidth;
     });
     expect(hasHorizontalOverflow).toBe(false);
+  });
+
+  test("Controlled beforeinstallprompt event & route-based install banner suppression", async ({
+    page,
+  }) => {
+    // 1. Allowed Settings route: banner appears when beforeinstallprompt fires and dismissal is honored
+    await page.goto("/qa/conversation-header?installRoute=/settings", {
+      waitUntil: "domcontentloaded",
+    });
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
+
+    const installBanner = page.locator('aside[aria-label="تثبيت التطبيق"]');
+    await expect(installBanner).not.toBeVisible();
+
+    // Fire controlled beforeinstallprompt event
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+
+    await expect(installBanner).toBeVisible();
+
+    // Dismiss banner
+    const dismissBtn = installBanner.locator('button[aria-label="إغلاق"]');
+    await dismissBtn.click();
+    await expect(installBanner).not.toBeVisible();
+
+    // Subsequent beforeinstallprompt event within cooldown does NOT show banner
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+
+    // 2. Conversation detail route: banner is strictly suppressed (even without dismissal cooldown)
+    await page.goto(
+      "/qa/conversation-header?installRoute=/conversations/conv-123",
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+
+    // 3. Booking task route: banner is strictly suppressed (even without dismissal cooldown)
+    await page.goto("/qa/conversation-header?installRoute=/appointments/new", {
+      waitUntil: "domcontentloaded",
+    });
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+  });
+
+  test("Deterministic inbox restoration: 30 fixture rows, non-zero scroll, Back/Forward & draft preservation", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const isMobile = vpName.startsWith("mobile");
+
+    // 1. Load inbox with 30 fixture rows
+    await page.goto("/qa/conversation-header?view=inbox", {
+      waitUntil: "domcontentloaded",
+    });
+
+    // Verify inbox rendered
+    const searchInput = page.locator(
+      'input[placeholder="ابحث باسم العميل أو الرسالة"]',
+    );
+    await expect(searchInput).toBeVisible();
+
+    // Set non-empty search and status filter
+    await searchInput.fill("سارة");
+    const statusSelect = page.locator('button[aria-label="تصفية حسب الحالة"]');
+    await statusSelect.click();
+    await page.getByRole("option", { name: "تحتاج تدخلاً" }).click();
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
+
+    // Verify filtered items rendered
+    const conversationLinks = page.locator('a[href*="view=conversation"]');
+    await expect(conversationLinks.first()).toBeVisible();
+    const count = await conversationLinks.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Scroll inbox down to non-zero position
+    await page.evaluate(() => window.scrollTo(0, 200));
+    const initialScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(initialScrollY).toBeGreaterThanOrEqual(150);
+
+    // Open first filtered conversation
+    await conversationLinks.first().click();
+
+    // Assert outer scroll is <= 10px immediately upon entry
+    await page.waitForSelector(
+      'header[data-testid="conversation-persistent-header"]',
+    );
+    const entryScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(entryScrollY).toBeLessThanOrEqual(10);
+
+    // Complete customer identity visible
+    const customerH1 = page.locator(
+      'header[data-testid="conversation-persistent-header"] h1',
+    );
+    await expect(customerH1).toBeVisible();
+
+    // Type a draft
+    const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
+    await expect(replyTextarea).toBeVisible();
+    const testDraft = "مسودة اختبار استعادة الفلاتر والتمرير";
+    await replyTextarea.fill(testDraft);
+
+    // If mobile, test details screen toggle preserves draft (strictly asserted, never silently skipped)
+    if (isMobile) {
+      const detailsToggle = page.locator(
+        'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
+      );
+      await expect(detailsToggle).toBeVisible();
+      await detailsToggle.click();
+      await expect(
+        page.getByRole("heading", { name: "سياق العميل" }).first(),
+      ).toBeVisible();
+
+      const backToggle = page.locator(
+        'button[aria-label="العودة إلى المحادثة"]',
+      );
+      await expect(backToggle).toBeVisible();
+      await backToggle.click();
+      await expect(replyTextarea).toHaveValue(testDraft);
+    }
+
+    // 2. Return using in-app Back button
+    const backBtn = page.locator('a[aria-label="العودة إلى المحادثات"]');
+    await backBtn.click();
+
+    // Verify restored search and filter
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toHaveValue("سارة");
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
+
+    // Verify restored scroll position matches initial position within justified 15px tolerance
+    await expect
+      .poll(async () => {
+        const current = await page.evaluate(
+          () => window.scrollY || document.documentElement.scrollTop,
+        );
+        return Math.abs(current - initialScrollY);
+      })
+      .toBeLessThanOrEqual(15);
+
+    // Reopen the conversation and verify draft intact
+    await conversationLinks.first().click();
+    await expect(replyTextarea).toBeVisible();
+    await expect(replyTextarea).toHaveValue(testDraft);
+
+    // 3. Test browser Back and Forward navigation
+    await page.goBack();
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toHaveValue("سارة");
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
+    await expect
+      .poll(async () => {
+        const current = await page.evaluate(
+          () => window.scrollY || document.documentElement.scrollTop,
+        );
+        return Math.abs(current - initialScrollY);
+      })
+      .toBeLessThanOrEqual(15);
+
+    await page.goForward();
+    await expect(replyTextarea).toBeVisible();
+    await expect(replyTextarea).toHaveValue(testDraft);
+  });
+
+  test("Mobile composer geometry and bottom navigation clearance across viewports", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const isMobile = vpName.startsWith("mobile");
+    if (!isMobile) return;
+
+    await page.goto("/qa/conversation-header?fixture=need_human_unassigned", {
+      waitUntil: "domcontentloaded",
+    });
+
+    const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
+    const sendButton = page.locator('button[aria-label="إرسال الرد"]');
+    const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
+
+    await expect(replyTextarea).toBeVisible();
+    await expect(sendButton).toBeVisible();
+    await expect(bottomNav).toBeVisible();
+
+    // Evaluate geometry on normal height and reduced height (e.g. SE/landscape clearance)
+    const testHeights = [844, 667, 600];
+    const viewport = page.viewportSize();
+    const width = viewport?.width ?? 390;
+
+    for (const h of testHeights) {
+      await page.setViewportSize({ width, height: h });
+      await page.waitForTimeout(50);
+
+      const composerBox = await replyTextarea.boundingBox();
+      const sendBox = await sendButton.boundingBox();
+      const navBox = await bottomNav.boundingBox();
+
+      expect(composerBox).not.toBeNull();
+      expect(sendBox).not.toBeNull();
+      expect(navBox).not.toBeNull();
+
+      if (composerBox && navBox && sendBox) {
+        // 1. Composer textarea is inside the viewport
+        expect(composerBox.y).toBeGreaterThanOrEqual(0);
+        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(h);
+
+        // 2. Composer textarea is strictly above the bottom navigation (unobstructed)
+        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(
+          navBox.y,
+        );
+
+        // 3. Send button is inside viewport and above bottom navigation
+        expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(navBox.y);
+        expect(sendBox.width).toBeGreaterThanOrEqual(44);
+        expect(sendBox.height).toBeGreaterThanOrEqual(44);
+
+        // 4. Zero horizontal overflow
+        const isOverflowing = await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        );
+        expect(isOverflowing).toBe(false);
+      }
+    }
   });
 
   test("QA harness route boundaries: fixture available in intended CI test configuration & broad /qa/ closed", async ({

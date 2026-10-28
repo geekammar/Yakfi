@@ -9,7 +9,7 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.1 (PR #52 merged baseline, commit `4077f98b6ae412ea6d7c54b253c6502837aa30cc`). Design system typography and token implementation:
+**Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.2 (PR #53 merged baseline, commit `b38d79f0f951e73719001372cf93b9666f272a8c`). Design system typography and token implementation:
 
 1. **Circular Font-Sans Fix**: Repaired the circular `--font-sans: var(--font-sans)` mapping in `src/app/globals.css` to properly map to loaded `IBM Plex Sans Arabic` (`var(--font-arabic)`), restoring intended typography across all UI text, headings, controls, and body elements.
 2. **Brand Typography (Arabic & Latin)**: Added Google fonts `Readex_Pro` and `Manrope` via `next/font/google` in `src/app/layout.tsx`. Implemented `<YakfiBrandText />` (`src/components/shared/yakfi-brand-text.tsx`) rendering Arabic brand text "يكفي" with Readex Pro 600, and Latin "yakfi" with Manrope 600 where displayed. Preserved customer names, business names, and assistant names.
@@ -17,7 +17,17 @@
 4. **Explicit Radius Token Mapping**: Explicitly mapped card radius `--radius-card` to `12px` and control radius `--radius-control` to `8px` in `@theme inline` and `:root`. Mapped `--radius-xl` to card radius and `--radius-md` to control radius.
 5. **Semantic Foreground & Contrast Safety**: Ensured warning badges and notices on translucent light backgrounds (`bg-warning/10`) use dark warning foreground (`oklch(0.28 0.06 70)`), avoiding white-on-light contrast degradation. Left dark mode activation and colors unchanged.
 
-**Product version: v0.76.0 (main)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Platform identity transition and PWA/browser asset update:
+**Product version: v0.76.2 (main)** — `Mobile Conversation Usability Repair: Draft Lifecycle, Tenant State Isolation, and Meaningful Acceptance`. Baseline: v0.76.1 (PR #52 merged baseline, commit `4077f9859f77f0d0e2e5c830580daef18d9efaf9`). Merged via PR #53 (commit `b38d79f0f951e73719001372cf93b9666f272a8c`). Focused mobile conversation usability repair in draft lifecycle, tenant state isolation, install prompt suppression, and viewport geometry:
+
+1. **Recoverable Draft Lifecycle**: Retained draft in storage until confirmed server success; removed draft on success only if not superseded by newer text. Preserved submitted text on failure without overwriting newer drafts typed while pending. Recovered pending drafts across page reload/remount.
+2. **Tenant- and Operator-Scoped Storage**: Scoped drafts (`fp_draft:${businessId}:${userId}:${conversationId}`), inbox search/filters (`fp_inbox_state:${businessId}:${userId}`), and scroll restoration (`fp_inbox_scroll:${businessId}:${userId}`) to trusted business and operator IDs without PII. Cleared only conversation feature state on user logout.
+3. **Controlled Install Prompt Acceptance**: Mounted `<InstallPrompt />` with route context and verified via controlled `beforeinstallprompt` event: visible on allowed Home/Settings routes, completely suppressed on conversation detail and booking routes, with dismissal cooldown honored.
+4. **Deterministic Inbox Restoration & Composer Clearance**: Added 30-row inbox fixture scenario asserting scroll restoration after filtered list is rendered, verified Back/Forward navigation preserves query, filters, and scroll. Proved composer and send button remain strictly inside viewport and unobstructed above bottom navigation across 320/360/390 viewports and reduced height (`composerBox.y + height <= navBox.y`).
+5. **Reconciled Scroll Repair & Identity Assets**: Preserved PR51 mount scroll reset (`window.scrollTo({ top: 0, behavior: "instant" })`), `scroll-mt-14` on main content, and Yakfi Wave A brand identity assets.
+
+**Product version: v0.76.1 (main)** — `Consistent Appointment Calendar Date Parsing and Formatting`. Baseline: v0.76.0 (PR #51 merged baseline, commit `02b4cf54043cfea2a1d079d7103d23bc34618a87`). Merged via PR #52 (commit `4077f9859f77f0d0e2e5c830580daef18d9efaf9`). Fixed appointment date parsing and formatting alignment across timezones.
+
+**Product version: v0.76.0 (main)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Merged via PR #51 (commit `02b4cf54043cfea2a1d079d7103d23bc34618a87`). Platform identity transition and PWA/browser asset update:
 
 1. **Platform Identity Definition**: Updated `APP_NAME` to `يكفي` and `APP_DESCRIPTION` to `إدارة المحادثات وحجز المواعيد ومتابعتها.` in `src/lib/app-config.ts` (with `APP_NAME_LATIN = "yakfi"`). Preserved business, customer, bot identity, and infrastructure identifiers.
 2. **Accessible Brand Headers & Links**: Embedded `<YakfiSymbol />` (`src/components/shared/yakfi-symbol.tsx`) with 24px size and 8px gap alongside Arabic name `يكفي` in `app-shell.tsx` (desktop sidebar and mobile topbar), `(auth)/layout.tsx`, and `onboarding-shell.tsx`. Kept existing text sizing, `h-14` toolbar height, and single-row action geometry.

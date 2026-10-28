@@ -1,6 +1,11 @@
 import { ConversationDetail } from "@/features/conversations/components/conversation-detail";
-import type { ConversationDetailData } from "@/features/conversations/types";
+import { InboxList } from "@/features/conversations/components/inbox-list";
+import type {
+  ConversationDetailData,
+  InboxConversation,
+} from "@/features/conversations/types";
 import { AppShell } from "@/components/shared/layout/app-shell";
+import { InstallPrompt } from "@/components/shared/pwa/install-prompt";
 import { APP_NAV_ITEMS } from "@/lib/app-config";
 import { isQaHarnessAllowed } from "@/lib/qa-harness";
 
@@ -205,6 +210,44 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
   }
 }
 
+const INBOX_FIXTURES: InboxConversation[] = Array.from(
+  { length: 30 },
+  (_, index) => {
+    const num = index + 1;
+    const isSarah = num % 2 === 0;
+    const isAhmed = num % 2 === 1;
+    const status = num % 2 === 0 ? "NEED_HUMAN" : "AI_ACTIVE";
+    return {
+      id: `conv-qa-${num}`,
+      status,
+      customer: {
+        id: `cust-${num}`,
+        name: isSarah
+          ? `سارة ${num} — استفسار متابعة`
+          : `أحمد ${num} — حجز موعد عيادة`,
+        phone: `+96650111${String(num).padStart(4, "0")}`,
+      },
+      assignedUser: isAhmed
+        ? (TEAM_MEMBERS[0] ?? null)
+        : isSarah
+          ? (TEAM_MEMBERS[1] ?? null)
+          : null,
+      lastMessage: {
+        content:
+          num === 1
+            ? "السلام عليكم، أحتاج مساعدة بخصوص التأمين"
+            : num === 2
+              ? "هل العيادة مفتوحة اليوم؟"
+              : `رسالة تجريبية من العميل رقم ${num}`,
+        senderType: num % 2 === 0 ? "CUSTOMER" : "STAFF",
+        createdAt: new Date(Date.now() - num * 3600000).toISOString(),
+      },
+      lastActivityAt: new Date(Date.now() - num * 3600000).toISOString(),
+      hasAttention: status === "NEED_HUMAN",
+    };
+  },
+);
+
 async function handleQaTransition(_payload: {
   id: string;
   transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
@@ -219,18 +262,50 @@ async function handleQaTransition(_payload: {
 export default async function QaConversationHeaderPage({
   searchParams,
 }: {
-  searchParams: Promise<{ fixture?: string }>;
+  searchParams: Promise<{
+    fixture?: string;
+    view?: string;
+    installRoute?: string;
+    id?: string;
+  }>;
 }) {
   if (!isQaHarnessAllowed()) {
     notFound();
   }
 
-  const { fixture = "need_human_unassigned" } = await searchParams;
+  const {
+    fixture = "need_human_unassigned",
+    view = "conversation",
+    installRoute,
+    id,
+  } = await searchParams;
   const data = buildFixture(fixture);
+  if (id) {
+    data.id = id;
+  }
 
   return (
     <AppShell navItems={APP_NAV_ITEMS}>
-      <ConversationDetail data={data} onTransition={handleQaTransition} />
+      {view === "inbox" ? (
+        <div className="space-y-4">
+          <h1 className="text-xl font-bold">صندوق المحادثات (QA)</h1>
+          <InboxList
+            conversations={INBOX_FIXTURES}
+            team={TEAM_MEMBERS}
+            businessId="biz-qa"
+            currentUserId={CURRENT_USER_ID}
+            conversationHrefPrefix="/qa/conversation-header?view=conversation"
+          />
+        </div>
+      ) : (
+        <ConversationDetail
+          data={data}
+          businessId="biz-qa"
+          backHref="/qa/conversation-header?view=inbox"
+          onTransition={handleQaTransition}
+        />
+      )}
+      <InstallPrompt forcedPathname={installRoute} />
     </AppShell>
   );
 }
