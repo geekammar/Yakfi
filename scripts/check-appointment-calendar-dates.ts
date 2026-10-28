@@ -31,17 +31,17 @@
  */
 export {};
 
-type Check = { label: string; pass: boolean; detail?: string };
+type Check = { label: string; pass: boolean };
 
 const checks: Check[] = [];
-function check(label: string, pass: boolean, detail?: string): void {
-  checks.push({ label, pass, detail });
+function check(label: string, pass: boolean): void {
+  checks.push({ label, pass });
 }
 
 async function main(): Promise<void> {
-  const { spawnSync } = await import("node:child_process");
   const fs = await import("node:fs");
   const path = await import("node:path");
+  const { spawnSync } = await import("node:child_process");
 
   const { formatArabicDate } = await import(
     "../src/features/appointments/components/smart-create/date-format"
@@ -57,23 +57,6 @@ async function main(): Promise<void> {
   );
   const convDetailSource = fs.readFileSync(convDetailPath, "utf8");
 
-  // Subprocess runner evaluating formatting under designated TZ env variable.
-  function evalInTimezone(
-    tz: string,
-    code: string,
-  ): { stdout: string; stderr: string; status: number } {
-    const result = spawnSync(process.execPath, ["-e", code], {
-      cwd: process.cwd(),
-      env: { ...process.env, TZ: tz },
-      encoding: "utf8",
-    });
-    return {
-      stdout: (result.stdout ?? "").trim(),
-      stderr: (result.stderr ?? "").trim(),
-      status: result.status ?? 1,
-    };
-  }
-
   // ── 1. Source Contract Verification ───────────────────────────────────────
   check(
     "1a. formatAppointmentDate is exported from conversation-detail.tsx",
@@ -82,16 +65,14 @@ async function main(): Promise<void> {
   check(
     "1b. formatAppointmentDate parses with UTC Zulu suffix (.000Z)",
     /T00:00:00\.000Z/.test(convDetailSource),
-    "must append .000Z to prevent local midnight parsing",
   );
   check(
-    "1c. formatAppointmentDate does NOT contain un-suffixed `${date}T00:00:00`",
-    !/\$\{date\}T00:00:00`/.test(convDetailSource),
-    "un-suffixed local date-time string causes positive-offset date shifts",
+    "1c. formatAppointmentDate does not contain unsuffixed date-time literal",
+    !convDetailSource.includes("T00:00:00`"),
   );
   check(
-    "1d. formatAppointmentDate specifies timeZone: 'UTC'",
-    /timeZone:\s*"UTC"/.test(convDetailSource),
+    "1d. formatAppointmentDate specifies timeZone UTC",
+    convDetailSource.includes('timeZone: "UTC"'),
   );
 
   // ── 2. Direct In-Process Verification ─────────────────────────────────────
@@ -101,17 +82,14 @@ async function main(): Promise<void> {
   check(
     "2a. formatAppointmentDate('2026-11-07') contains Saturday and November",
     nov7.includes("السبت") && nov7.includes("نوفمبر"),
-    `got: "${nov7}"`,
   );
   check(
     "2b. formatAppointmentDate('2026-11-07') displays day 7 and never 6",
     /[7٧]/.test(nov7) && !/[6٦]/.test(nov7),
-    `got: "${nov7}"`,
   );
   check(
     "2c. formatAppointmentDate('2026-11-08') contains Sunday and day 8",
     nov8.includes("الأحد") && /[8٨]/.test(nov8),
-    `got: "${nov8}"`,
   );
 
   // Parity with appointment details helper
@@ -120,12 +98,10 @@ async function main(): Promise<void> {
   check(
     "2d. 2026-11-07 conversation date agrees with appointment details",
     appt7.includes("السبت") && nov7.includes("السبت"),
-    `conv: "${nov7}", appt: "${appt7}"`,
   );
   check(
     "2e. 2026-11-08 conversation date agrees with appointment details",
     appt8.includes("الأحد") && nov8.includes("الأحد"),
-    `conv: "${nov8}", appt: "${appt8}"`,
   );
 
   // ── 3. Cross-Timezone Evaluation in Isolated Host Subprocesses ───────────
@@ -136,52 +112,49 @@ async function main(): Promise<void> {
     { tz: "America/Los_Angeles", label: "America/Los_Angeles (US Pacific)" },
   ];
 
-  // The runner script executes pure formatting logic directly in timezone
-  const runnerScript = `
-    function formatAppointmentDate(date) {
-      const dateOnly = date.slice(0, 10);
-      return new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "UTC",
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      }).format(new Date(dateOnly + "T00:00:00.000Z"));
-    }
-
-    function formatArabicDate(date) {
-      return new Intl.DateTimeFormat("ar-EG", {
-        timeZone: "UTC",
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      }).format(new Date(date + "T00:00:00.000Z"));
-    }
-
-    const res7 = formatAppointmentDate("2026-11-07");
-    const appt7 = formatArabicDate("2026-11-07");
-    const res8 = formatAppointmentDate("2026-11-08");
-    const appt8 = formatArabicDate("2026-11-08");
-    console.log(JSON.stringify({ res7, appt7, res8, appt8 }));
-  `;
+  const runnerCode = [
+    'function formatAppointmentDate(date) {',
+    '  const dateOnly = date.slice(0, 10);',
+    '  return new Intl.DateTimeFormat("ar-EG", {',
+    '    timeZone: "UTC",',
+    '    weekday: "short",',
+    '    day: "numeric",',
+    '    month: "short",',
+    '  }).format(new Date(dateOnly + "T00:00:00.000Z"));',
+    '}',
+    'function formatArabicDate(date) {',
+    '  return new Intl.DateTimeFormat("ar-EG", {',
+    '    timeZone: "UTC",',
+    '    weekday: "long",',
+    '    day: "numeric",',
+    '    month: "long",',
+    '    year: "numeric",',
+    '  }).format(new Date(date + "T00:00:00.000Z"));',
+    '}',
+    'const res7 = formatAppointmentDate("2026-11-07");',
+    'const appt7 = formatArabicDate("2026-11-07");',
+    'const res8 = formatAppointmentDate("2026-11-08");',
+    'const appt8 = formatArabicDate("2026-11-08");',
+    'console.log(JSON.stringify({ res7, appt7, res8, appt8 }));',
+  ].join("\n");
 
   for (const { tz, label } of targetTimezones) {
-    const outcome = evalInTimezone(tz, runnerScript);
-    check(
-      `3. Subprocess execution succeeds in ${label}`,
-      outcome.status === 0,
-      outcome.stderr || outcome.stdout,
-    );
+    const outcome = spawnSync(process.execPath, ["-e", runnerCode], {
+      cwd: process.cwd(),
+      env: { ...process.env, TZ: tz },
+      encoding: "utf8",
+    });
+
+    check(`3. Subprocess execution succeeds in ${label}`, outcome.status === 0);
 
     if (outcome.status === 0) {
-      let parsed: { res7: string; appt7: string; res8: string; appt8: string };
+      let parsed = { res7: "", appt7: "", res8: "", appt8: "" };
       try {
-        parsed = JSON.parse(outcome.stdout);
+        parsed = JSON.parse((outcome.stdout ?? "").trim());
       } catch {
-        parsed = { res7: "", appt7: "", res8: "", appt8: "" };
+        // Handled by equality checks below
       }
 
-      // Check 2026-11-07: Must be Saturday, day 7, November in conv context
       const isNov7Saturday =
         parsed.res7.includes("السبت") &&
         parsed.res7.includes("نوفمبر") &&
@@ -192,10 +165,8 @@ async function main(): Promise<void> {
       check(
         `3a [${tz}]. 2026-11-07 Saturday 7 November in conversation context`,
         isNov7Saturday,
-        `conversation formatted: "${parsed.res7}"`,
       );
 
-      // Check parity between conversation context and appointment details
       const parityNov7 =
         parsed.appt7.includes("السبت") &&
         parsed.appt7.includes("نوفمبر") &&
@@ -204,10 +175,8 @@ async function main(): Promise<void> {
       check(
         `3b [${tz}]. 2026-11-07 conversation context agrees with appt details`,
         parityNov7 && isNov7Saturday,
-        `conv: "${parsed.res7}", appt: "${parsed.appt7}"`,
       );
 
-      // Check adjacent date 2026-11-08
       const isNov8Sunday =
         parsed.res8.includes("الأحد") &&
         parsed.res8.includes("نوفمبر") &&
@@ -216,60 +185,60 @@ async function main(): Promise<void> {
       check(
         `3c [${tz}]. 2026-11-08 Sunday 8 November without off-by-one drift`,
         isNov8Sunday,
-        `conversation formatted: "${parsed.res8}"`,
       );
     }
   }
 
   // ── 4. Regression Proof: Verify Unpatched Pattern Fails in Cairo ─────────
-  const unpatchedScript = `
-    const unpatched = new Intl.DateTimeFormat("ar-EG", {
-      timeZone: "UTC",
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    }).format(new Date("2026-11-07T00:00:00"));
-    console.log(JSON.stringify({ unpatched }));
-  `;
+  const unpatchedCode = [
+    'const unpatched = new Intl.DateTimeFormat("ar-EG", {',
+    '  timeZone: "UTC",',
+    '  weekday: "short",',
+    '  day: "numeric",',
+    '  month: "short",',
+    '}).format(new Date("2026-11-07T00:00:00"));',
+    'console.log(JSON.stringify({ unpatched }));',
+  ].join("\n");
 
-  const unpatchedCairo = evalInTimezone("Africa/Cairo", unpatchedScript);
+  const unpatchedCairo = spawnSync(process.execPath, ["-e", unpatchedCode], {
+    cwd: process.cwd(),
+    env: { ...process.env, TZ: "Africa/Cairo" },
+    encoding: "utf8",
+  });
+
   if (unpatchedCairo.status === 0) {
     try {
-      const { unpatched } = JSON.parse(unpatchedCairo.stdout);
-      // In Africa/Cairo (UTC+2), local midnight is 22:00 UTC previous day
+      const { unpatched } = JSON.parse((unpatchedCairo.stdout ?? "").trim());
       const shiftedToFriday =
         unpatched.includes("الجمعة") || /[6٦]/.test(unpatched);
       check(
         "4. Regression proof: unpatched in Cairo reproduces 1-day backward shift",
         shiftedToFriday,
-        `unpatched produced: "${unpatched}"`,
       );
-    } catch (e) {
-      check("4. Regression proof parsed successfully", false, String(e));
+    } catch {
+      check("4. Regression proof parsed successfully", false);
     }
   }
 
-  // ── Summary ───────────────────────────────────────────────────────────────
-  let failed = 0;
-  for (const { label, pass, detail } of checks) {
-    if (pass) {
-      console.log(`✔ ${label}`);
-    } else {
-      console.error(`✘ ${label}${detail ? ` (${detail})` : ""}`);
-      failed += 1;
-    }
-  }
-
-  if (failed > 0) {
-    console.error(`\nفشل ${failed} من ${checks.length} فحص.`);
-    process.exit(1);
+  // ── Report ────────────────────────────────────────────────────────────────
+  const failed = checks.filter((item) => !item.pass);
+  console.log(
+    `\n── APPOINTMENT CALENDAR DATE CONSISTENCY — ${checks.length} checks ──`,
+  );
+  for (const item of checks) {
+    console.log(`${item.pass ? "PASS" : "FAIL"}  ${item.label}`);
   }
   console.log(
-    `\nثوابت تطابق تواريخ التقويم صحيحة: ${checks.length}/${checks.length} فحص ناجح.`,
+    `\n${checks.length - failed.length}/${checks.length} passed, ${failed.length} failed`,
   );
+  if (failed.length > 0) {
+    console.log("\nFAILURES:");
+    for (const item of failed) console.log(`  ✗ ${item.label}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error: Error) => {
-  console.error(`فشل غير متوقع: ${error.message}`);
+  console.error(`check crashed: ${error.message}`);
   process.exit(1);
 });
