@@ -43,12 +43,10 @@ async function main(): Promise<void> {
   const path = await import("node:path");
   const { spawnSync } = await import("node:child_process");
 
-  const { formatArabicDate } = await import(
-    "../src/features/appointments/components/smart-create/date-format"
-  );
-  const { formatAppointmentDate } = await import(
-    "../src/features/conversations/components/conversation-detail"
-  );
+  const { formatArabicDate } =
+    await import("../src/features/appointments/components/smart-create/date-format");
+  const { formatAppointmentDate } =
+    await import("../src/features/conversations/components/conversation-detail");
 
   const root = process.cwd();
   const convDetailPath = path.join(
@@ -113,16 +111,16 @@ async function main(): Promise<void> {
   ];
 
   const runnerCode = [
-    'function formatAppointmentDate(date) {',
-    '  const dateOnly = date.slice(0, 10);',
+    "function formatAppointmentDate(date) {",
+    "  const dateOnly = date.slice(0, 10);",
     '  return new Intl.DateTimeFormat("ar-EG", {',
     '    timeZone: "UTC",',
     '    weekday: "short",',
     '    day: "numeric",',
     '    month: "short",',
     '  }).format(new Date(dateOnly + "T00:00:00.000Z"));',
-    '}',
-    'function formatArabicDate(date) {',
+    "}",
+    "function formatArabicDate(date) {",
     '  return new Intl.DateTimeFormat("ar-EG", {',
     '    timeZone: "UTC",',
     '    weekday: "long",',
@@ -130,12 +128,12 @@ async function main(): Promise<void> {
     '    month: "long",',
     '    year: "numeric",',
     '  }).format(new Date(date + "T00:00:00.000Z"));',
-    '}',
+    "}",
     'const res7 = formatAppointmentDate("2026-11-07");',
     'const appt7 = formatArabicDate("2026-11-07");',
     'const res8 = formatAppointmentDate("2026-11-08");',
     'const appt8 = formatArabicDate("2026-11-08");',
-    'console.log(JSON.stringify({ res7, appt7, res8, appt8 }));',
+    "console.log(JSON.stringify({ res7, appt7, res8, appt8 }));",
   ].join("\n");
 
   for (const { tz, label } of targetTimezones) {
@@ -197,7 +195,7 @@ async function main(): Promise<void> {
     '  day: "numeric",',
     '  month: "short",',
     '}).format(new Date("2026-11-07T00:00:00"));',
-    'console.log(JSON.stringify({ unpatched }));',
+    "console.log(JSON.stringify({ unpatched }));",
   ].join("\n");
 
   const unpatchedCairo = spawnSync(process.execPath, ["-e", unpatchedCode], {
