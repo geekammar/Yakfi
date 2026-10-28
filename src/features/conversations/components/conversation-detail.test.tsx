@@ -443,6 +443,15 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     const userA = "user-alice";
     const userB = "user-bob";
 
+    function typeInTextarea(element: HTMLTextAreaElement, value: string) {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeSetter?.call(element, value);
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
     beforeEach(() => {
       window.sessionStorage.clear();
       vi.clearAllMocks();
@@ -475,8 +484,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       // 1. Operator types draft
       await act(async () => {
-        textarea.value = "مسودة تحتاج تأكيد الإرسال";
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        typeInTextarea(textarea, "مسودة تحتاج تأكيد الإرسال");
       });
       expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
         "مسودة تحتاج تأكيد الإرسال",
@@ -525,8 +533,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       ) as HTMLTextAreaElement;
 
       await act(async () => {
-        textarea.value = "رسالة فشل إرسالها";
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        typeInTextarea(textarea, "رسالة فشل إرسالها");
       });
 
       const form = container.querySelector("form");
@@ -565,8 +572,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       // 1. Submit first message
       await act(async () => {
-        textarea.value = "الرسالة الأولى";
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        typeInTextarea(textarea, "الرسالة الأولى");
       });
       const form = container.querySelector("form");
       await act(async () => {
@@ -577,8 +583,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       // 2. Operator types second draft while first send is pending
       await act(async () => {
-        textarea.value = "الرسالة الثانية أثناء الانتظار";
-        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        typeInTextarea(textarea, "الرسالة الثانية أثناء الانتظار");
       });
       expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
         "الرسالة الثانية أثناء الانتظار",
@@ -651,8 +656,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       // Operator B types their own draft
       await act(async () => {
-        textareaB.value = "مسودة خاصة بالمشغل ب";
-        textareaB.dispatchEvent(new Event("input", { bubbles: true }));
+        typeInTextarea(textareaB, "مسودة خاصة بالمشغل ب");
       });
 
       // Verify both drafts exist under their distinct scoped keys
