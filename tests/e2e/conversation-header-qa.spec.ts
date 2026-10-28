@@ -156,6 +156,10 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
         'button[aria-label="تولّي المحادثة"], button[aria-label="إعادة للمساعد"]',
       );
       await expect(primaryAction).toBeVisible();
+      if (fixture.expectedPrimaryActionLabel === "تولّي المحادثة") {
+        // Must show complete visible label «تولّي المحادثة» at every viewport
+        await expect(primaryAction).toContainText("تولّي المحادثة");
+      }
       const primaryBox = await primaryAction.boundingBox();
       expect(primaryBox).not.toBeNull();
       if (!primaryBox) return;
@@ -174,9 +178,10 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
         headerBox.y + headerBox.height + 2,
       );
 
-      // Verify booking shortcut button is directly accessible
+      // Verify booking shortcut button is directly accessible with complete visible label «حجز موعد»
       const bookingLink = persistentHeader.locator('a[aria-label="حجز موعد"]');
       await expect(bookingLink).toBeVisible();
+      await expect(bookingLink).toContainText("حجز موعد");
       const bookingBox = await bookingLink.boundingBox();
       expect(bookingBox).not.toBeNull();
       if (bookingBox) {
@@ -185,6 +190,10 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
           headerBox.y + headerBox.height + 2,
         );
       }
+
+      console.log(
+        `[GEOMETRY] ${vpName} | ${fixture.key} => Header: ${Math.round(headerBox.width)}x${Math.round(headerBox.height)}px | PrimaryBtn: ${Math.round(primaryBox.width)}x${Math.round(primaryBox.height)}px | BookingBtn: ${bookingBox ? `${Math.round(bookingBox.width)}x${Math.round(bookingBox.height)}px` : "N/A"} | CustomerNameWidth: ${Math.round(nameBox.width)}px`,
+      );
 
       // Verify details toggle («التفاصيل») is visible on mobile/tablet viewports
       if (!vpName.includes("desktop")) {

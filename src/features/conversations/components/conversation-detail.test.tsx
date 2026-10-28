@@ -163,14 +163,14 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     expect(header).not.toBeNull();
 
     // Primary action button is directly in header
-    expect(header?.textContent).toContain("تولّي");
+    expect(header?.textContent).toContain("تولّي المحادثة");
     const takeOverBtn = header?.querySelector(
       'button[aria-label="تولّي المحادثة"]',
     );
     expect(takeOverBtn).not.toBeNull();
 
     // Booking shortcut is directly in header
-    expect(header?.textContent).toContain("حجز");
+    expect(header?.textContent).toContain("حجز موعد");
     const bookingLink = header?.querySelector('a[aria-label="حجز موعد"]');
     expect(bookingLink).not.toBeNull();
 
