@@ -549,8 +549,7 @@ export function ConversationDetail({
         // Failure handling:
         // Did operator type newer text while pending?
         const hasNewerText =
-          draftRevisionRef.current > (submission?.revision ?? 0) ||
-          reply.trim().length > 0;
+          draftRevisionRef.current > (submission?.revision ?? 0);
 
         if (!hasNewerText && submission?.rawDraft) {
           // If no newer text was typed, restore the failed submission directly
@@ -575,8 +574,7 @@ export function ConversationDetail({
       // Success handling:
       // Remove only if not superseded by newer operator text
       const hasNewerText =
-        draftRevisionRef.current > (submission?.revision ?? 0) ||
-        reply.trim().length > 0;
+        draftRevisionRef.current > (submission?.revision ?? 0);
 
       if (!hasNewerText && effectiveBusinessId && effectiveUserId) {
         removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
