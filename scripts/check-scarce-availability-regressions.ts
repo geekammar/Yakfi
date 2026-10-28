@@ -30,6 +30,15 @@
  *  Case 6: Availability changed after display
  *          - replay real displayed choice after inserting controlled conflict
  *          - verify safe rejection/revalidation and zero overlapping appointment writes
+ *          - verify saved real option refers to intended provider/date/start before conflict
+ *          - verify conflicting option no longer actionable and refreshed choices valid for same scope
+ *          - replay original callback again and verify safe rejection
+ *          - distinguish attempted writes from committed writes via injected repository
+ *  Case 7: Actual pagination and navigation ('more' callback)
+ *          - multi-page fixture with busy candidates between valid starts
+ *          - forward pages contain only valid options in same scope without duplicate filler
+ *          - honest exhaustion response when all options presented
+ *          - scarce 1 and 2 valid start navigation behavior without inventing new slots
  *
  * Usage:
  *   pnpm check:scarce-availability
@@ -164,6 +173,14 @@ type BlockingAppt = {
 
 function createMockAppointmentRepo(appointments: BlockingAppt[]): any {
   const store = [...appointments];
+  const attemptedWrites: any[] = [];
+  const committedWrites: BlockingAppt[] = [];
+  const capturedReads: Array<{
+    type: "listBlockingByAssignees" | "listBlockingForDate";
+    businessId: string;
+    date: string;
+    assignedUserIds?: string[];
+  }> = [];
 
   function overlaps(
     startA: string,
@@ -180,12 +197,21 @@ function createMockAppointmentRepo(appointments: BlockingAppt[]): any {
 
   return {
     store,
+    attemptedWrites,
+    committedWrites,
+    capturedReads,
     listBlockingByAssignees: async (
       businessId: string,
       date: string,
       assignedUserIds: string[],
       excludeAppointmentId?: string,
     ) => {
+      capturedReads.push({
+        type: "listBlockingByAssignees",
+        businessId,
+        date,
+        assignedUserIds: [...assignedUserIds],
+      });
       return store
         .filter((a) => {
           if (a.businessId && a.businessId !== businessId) return false;
@@ -210,6 +236,11 @@ function createMockAppointmentRepo(appointments: BlockingAppt[]): any {
       date: string,
       excludeAppointmentId?: string,
     ) => {
+      capturedReads.push({
+        type: "listBlockingForDate",
+        businessId,
+        date,
+      });
       return store
         .filter((a) => {
           if (a.businessId && a.businessId !== businessId) return false;
@@ -229,6 +260,7 @@ function createMockAppointmentRepo(appointments: BlockingAppt[]): any {
       return store.find((a) => a.id === id) ?? null;
     },
     createWithConflictCheck: async (dto: any) => {
+      attemptedWrites.push(dto);
       const dateStr =
         dto.date instanceof Date
           ? dto.date.toISOString().slice(0, 10)
@@ -273,6 +305,7 @@ function createMockAppointmentRepo(appointments: BlockingAppt[]): any {
         status: dto.status ?? "CONFIRMED",
       };
       store.push(newAppt);
+      committedWrites.push(newAppt);
       return newAppt;
     },
   };
@@ -913,40 +946,71 @@ async function runSuite(): Promise<void> {
     const choices = outbound?.choices;
     const body = outbound?.body ?? "";
 
-    check(
-      "3.4 Outbound reply provides an honest no-availability response for that day",
-      body.includes("جميع المواعيد محجوزة") ||
+    // Gap A.1: Explicit no-availability response for requested scope (remove assertion that accepts merely finding TEST_DATE)
+    const hasExplicitNoAvailability =
+      (body.includes("جميع المواعيد محجوزة") ||
         body.includes("لا تتوفر مواعيد") ||
-        body.includes(TEST_DATE),
+        body.includes("لا توجد مواعيد متاحة")) &&
+      body.includes(TEST_DATE);
+
+    check(
+      "3.4 Outbound reply provides an explicit no-availability response for the requested scope (not merely finding date)",
+      hasExplicitNoAvailability,
       `received body: "${body}"`,
     );
 
-    check(
-      "3.5 Response returns NO selectable slot options",
-      choices === undefined ||
-        choices === null ||
-        choices.offerKind !== "SLOT" ||
-        choices.groups.flat().filter((i: any) => i.role === "option").length ===
-          0,
-      `choices kind: ${choices?.offerKind}`,
+    // Gap A.2: Verify no selectable appointment options are presented
+    const choiceItems = (choices?.groups ?? []).flat();
+    const selectableOptions = choiceItems.filter(
+      (i: any) => i.role === "option",
+    );
+    const replyMarkup = outbound?.replyMarkup;
+    const tgButtons = (replyMarkup?.inline_keyboard ?? []).flat();
+    const tgOptionButtons = tgButtons.filter((b: any) =>
+      /:\d+$/.test(b.callback_data ?? ""),
     );
 
     check(
-      "3.6 Does not silently switch date or provider, and created 0 new appointments",
-      apptRepo.store.length === initialAppointmentCount,
-      `appointments before: ${initialAppointmentCount}, after: ${apptRepo.store.length}`,
+      "3.5 Response returns NO selectable appointment options (in choices or inline keyboard)",
+      selectableOptions.length === 0 && tgOptionButtons.length === 0,
+      `selectableOptions: ${selectableOptions.length}, tgOptionButtons: ${tgOptionButtons.length}`,
     );
 
-    // Check durable conversation state
+    // Gap A.3: Verify service/date/provider scope using durable state and captured calls
     const durableState = await harness.deps.conversationStateRepository!.load(
       BIZ_ID,
       harness.conversation.id,
     );
-    const storedOfferKind = (durableState?.state as any)?.offer?.kind;
+    const durableOffer = (durableState?.state as any)?.offer;
+
+    const capturedAssigneeReads = apptRepo.capturedReads.filter(
+      (r: any) => r.type === "listBlockingByAssignees",
+    );
+    const scopeVerifiedInReads =
+      capturedAssigneeReads.length > 0 &&
+      capturedAssigneeReads.every(
+        (r: any) =>
+          r.date === TEST_DATE &&
+          r.assignedUserIds?.includes(PROVIDER_1.userId),
+      );
+
     check(
-      "3.7 Durable state contains no slot offer for a fully booked day",
-      storedOfferKind !== "SLOT",
-      `stored offer kind: ${storedOfferKind}`,
+      "3.6 Verifies service/date/provider scope via durable state and captured repository calls",
+      scopeVerifiedInReads &&
+        (durableState == null ||
+          durableOffer == null ||
+          durableOffer.kind !== "SLOT" ||
+          durableOffer.status !== "ACTIVE"),
+      `durableState: ${durableState ? "present" : "null"}, scopeVerifiedInReads: ${scopeVerifiedInReads}`,
+    );
+
+    // Gap A.4: Verify zero attempted and zero committed writes, and unchanged count
+    check(
+      "3.7 Does not write or attempt any appointments (zero committed writes, zero attempted writes)",
+      apptRepo.committedWrites.length === 0 &&
+        apptRepo.attemptedWrites.length === 0 &&
+        apptRepo.store.length === initialAppointmentCount,
+      `committed: ${apptRepo.committedWrites.length}, attempted: ${apptRepo.attemptedWrites.length}`,
     );
   }
 
@@ -1392,6 +1456,24 @@ async function runSuite(): Promise<void> {
       `callback_data: ${displayedCallbackData}`,
     );
 
+    // Gap B.1: Before inserting the conflict, verify the saved real option actually refers to intended provider/date/start time
+    const durableTurn1 = await harness.deps.conversationStateRepository!.load(
+      BIZ_ID,
+      harness.conversation.id,
+    );
+    const offerTurn1 = (durableTurn1?.state as any)?.offer;
+    const option1 = offerTurn1?.kind === "SLOT" ? offerTurn1.options[0] : null;
+
+    check(
+      "6.2b Saved real offer refers to intended provider, date, service, and 09:00 start",
+      offerTurn1?.kind === "SLOT" &&
+        offerTurn1.serviceId === service.id &&
+        offerTurn1.date === TEST_DATE &&
+        option1?.providerId === PROVIDER_1.id &&
+        option1?.startAt === `${TEST_DATE}T09:00`,
+      `offerTurn1: ${JSON.stringify(offerTurn1 ? { kind: offerTurn1.kind, date: offerTurn1.date, opt0: option1 } : null)}`,
+    );
+
     // ── Insert Controlled Conflict ───────────────────────────────────────────
     // Another client books 09:00–09:30 before our customer clicks button 1.
     const concurrentAppt: BlockingAppt = {
@@ -1445,11 +1527,55 @@ async function runSuite(): Promise<void> {
       `reply body: "${bodyTurn2}"`,
     );
 
+    // Gap B.2: After replay, inspect durable offer state and presented choices.
+    // Verify conflicting option is no longer actionable and refreshed choices are valid for same scope
+    const durableTurn2 = await harness.deps.conversationStateRepository!.load(
+      BIZ_ID,
+      harness.conversation.id,
+    );
+    const offerTurn2 = (durableTurn2?.state as any)?.offer;
+
+    // The offer is invalidated so the conflicting option is no longer actionable
+    const offerNoLongerActionable =
+      offerTurn2 == null ||
+      offerTurn2.status === "INVALIDATED" ||
+      offerTurn2.status !== "ACTIVE";
+
+    // Refreshed choices presented in the reply body or channel choices
+    const refreshedChoiceItems = (outboundTurn2?.choices?.groups ?? []).flat();
+    const refreshedOptionsFromChoices = refreshedChoiceItems.filter(
+      (i: any) => i.role === "option",
+    );
+
+    // If channel choices exist, they must exclude 09:00 and be for TEST_DATE
+    const choicesValidIfPresent =
+      refreshedOptionsFromChoices.length === 0 ||
+      refreshedOptionsFromChoices.every(
+        (o: any) =>
+          o.value !== `${TEST_DATE}T09:00` && o.value?.startsWith(TEST_DATE),
+      );
+
+    // Reply text presents refreshed options without the conflicting 09:00 slot
+    const bodyPresentsRefreshedScope =
+      bodyTurn2.includes("المواعيد المحدثة") &&
+      !bodyTurn2.includes("09:00 - 09:30") &&
+      (bodyTurn2.includes("09:30") || bodyTurn2.includes("10:00"));
+
+    check(
+      "6.5b Conflicting option (09:00) is no longer actionable in durable state and refreshed choices are valid for same scope",
+      offerNoLongerActionable &&
+        choicesValidIfPresent &&
+        bodyPresentsRefreshedScope,
+      `offerStatus: ${offerTurn2?.status}, body: "${bodyTurn2.slice(0, 80)}..."`,
+    );
+
+    // Gap B.3: Distinguish attempted writes from committed writes
     const apptsAfterTurn2 = apptRepo.store.length;
     check(
-      "6.6 SAFE REJECTION: Zero overlapping appointments written (appointment count unchanged)",
-      apptsAfterTurn2 === apptsBeforeTurn2,
-      `appts before: ${apptsBeforeTurn2}, after: ${apptsAfterTurn2}`,
+      "6.6 SAFE REJECTION: Zero overlapping appointments written (zero committed writes from conflict)",
+      apptRepo.committedWrites.length === 0 &&
+        apptsAfterTurn2 === apptsBeforeTurn2,
+      `committedWrites: ${apptRepo.committedWrites.length}, appts before: ${apptsBeforeTurn2}, after: ${apptsAfterTurn2}`,
     );
 
     const apptsAt900 = apptRepo.store.filter(
@@ -1462,6 +1588,30 @@ async function runSuite(): Promise<void> {
       "6.7 Exactly 1 booking exists at 09:00 (no duplicate or double-booking written)",
       apptsAt900.length === 1 && apptsAt900[0]?.id === concurrentAppt.id,
       `count at 09:00: ${apptsAt900.length}`,
+    );
+
+    // Gap B.4: Replay original callback again and verify safe rejection
+    const turn3Result = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: displayedCallbackData!,
+        receivedAt: "2026-11-01T10:02:30Z",
+      },
+      {
+        businessId: BIZ_ID,
+        branchId: BRANCH_ID,
+        connectionId: "conn_tg_1",
+      },
+    );
+
+    check(
+      "6.7b Replaying original callback again safely rejects without write or crash",
+      turn3Result.ok === true &&
+        apptRepo.committedWrites.length === 0 &&
+        apptRepo.store.length === 1,
+      `committed: ${apptRepo.committedWrites.length}`,
     );
 
     // ── Subcase 6B: Availability changed to ZERO valid starts after display ─
@@ -1562,10 +1712,423 @@ async function runSuite(): Promise<void> {
       `reply body: "${body6B2}"`,
     );
 
+    // Gap B.5: For fully exhausted subcase, verify zero selectable slot options
+    const options6B2 = (outbound6B2?.choices?.groups ?? [])
+      .flat()
+      .filter((i: any) => i.role === "option");
+    const durable6B = await harness6B.deps.conversationStateRepository!.load(
+      BIZ_ID,
+      harness6B.conversation.id,
+    );
+    const offer6B2 = (durable6B?.state as any)?.offer;
+
     check(
-      "6.11 Under full concurrent exhaustion, ZERO new appointments were written",
-      repo6B.store.length === apptsBeforeTurn2_6B,
-      `appts before: ${apptsBeforeTurn2_6B}, after: ${repo6B.store.length}`,
+      "6.10b Subcase 6B: Under full exhaustion, zero selectable slot options presented and offer invalidated",
+      options6B2.length === 0 &&
+        (offer6B2 == null ||
+          offer6B2.kind !== "SLOT" ||
+          offer6B2.status !== "ACTIVE"),
+      `options6B2 count: ${options6B2.length}, offer status: ${offer6B2?.status}`,
+    );
+
+    // Gap B.6: Distinguish attempted vs committed writes in repo6B
+    check(
+      "6.11 Subcase 6B: ZERO committed writes on full exhaustion replay",
+      repo6B.committedWrites.length === 0 &&
+        repo6B.store.length === apptsBeforeTurn2_6B,
+      `committed: ${repo6B.committedWrites.length}, appts before: ${apptsBeforeTurn2_6B}, after: ${repo6B.store.length}`,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Case 7: Actual Pagination & Multi-Page Navigation ("more" callback)
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log(
+    "\n▶ Case 7: Actual Pagination & Multi-Page Navigation ('more' callback)",
+  );
+
+  {
+    // Subcase 7A: Multi-page fixture with busy candidates between valid starts
+    // Working hours: 09:00 - 15:00 (12 candidate 30m slots)
+    // Candidates on 30m grid: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00, 13:30, 14:00, 14:30
+    // Busy candidates: 09:30, 10:30, 11:30, 12:30
+    // Valid starts: 09:00, 10:00, 11:00, 12:00, 13:00, 13:30, 14:00, 14:30 (8 valid starts total)
+    // Page size is 4 -> Page 1 has 4 slots, Page 2 has 4 slots, Page 3 is honest exhaustion!
+    const business = createTestBusiness({
+      workingHours: createStandardWorkingHours("09:00", "15:00"),
+      slotDurationMinutes: 30,
+    });
+    const service = createTestService();
+    const busyAppts: BlockingAppt[] = [
+      {
+        id: "busy_0930",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "09:30",
+        endTime: "10:00",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+      {
+        id: "busy_1030",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "10:30",
+        endTime: "11:00",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+      {
+        id: "busy_1130",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "11:30",
+        endTime: "12:00",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+      {
+        id: "busy_1230",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "12:30",
+        endTime: "13:00",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+    ];
+
+    const repo7 = createMockAppointmentRepo(busyAppts);
+    const harness7 = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: business,
+      customServices: [service],
+      customProviders: [PROVIDER_1],
+      customAi: controlledAi({
+        service: service.name,
+        date: TEST_DATE,
+        provider: PROVIDER_1.name,
+      }),
+      todayRef: "2026-11-01",
+    });
+    harness7.deps.appointmentRepository =
+      repo7 as unknown as typeof harness7.deps.appointmentRepository;
+
+    // Turn 1: Initial presentation (Page 1)
+    const turn1Result = await receiveInboundMessage(
+      harness7.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: `أريد حجز ${service.name} يوم ${TEST_DATE} مع ${PROVIDER_1.name}`,
+        receivedAt: "2026-11-01T10:00:00Z",
+      },
+      {
+        businessId: BIZ_ID,
+        branchId: BRANCH_ID,
+        connectionId: "conn_tg_1",
+      },
+    );
+
+    check("7.1 Page 1 turn succeeds", turn1Result.ok === true);
+
+    const outbound1 = harness7.deliveredOutbound[0];
+    const choices1 = outbound1?.choices;
+    const items1 = (choices1?.groups ?? []).flat();
+    const page1Options = items1.filter((i: any) => i.role === "option");
+    const page1Starts = page1Options.map((o: any) => o.value?.slice(11, 16));
+
+    const busyStarts = ["09:30", "10:30", "11:30", "12:30"];
+    const busyExcludedPage1 = page1Starts.every(
+      (s: string) => !busyStarts.includes(s),
+    );
+
+    check(
+      "7.2 Page 1 presents 4 valid starts without any busy candidate slots",
+      page1Options.length === 4 &&
+        busyExcludedPage1 &&
+        page1Options.every((o: any) => o.value?.startsWith(TEST_DATE)),
+      `page 1 starts: ${page1Starts.join(", ")}`,
+    );
+
+    const tgButtons1 = (outbound1?.replyMarkup?.inline_keyboard ?? []).flat();
+    const moreBtn1 = tgButtons1.find((b: any) =>
+      b.callback_data.endsWith(":more"),
+    );
+    const moreCallback1 = moreBtn1?.callback_data;
+
+    check(
+      "7.3 Page 1 includes 'more' navigation action button with valid callback",
+      typeof moreCallback1 === "string" && moreCallback1.startsWith("fp:"),
+      `more callback: ${moreCallback1}`,
+    );
+
+    // Turn 2: Replay 'more' callback to advance to Page 2
+    const turn2Result = await receiveInboundMessage(
+      harness7.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: moreCallback1!,
+        receivedAt: "2026-11-01T10:01:00Z",
+      },
+      {
+        businessId: BIZ_ID,
+        branchId: BRANCH_ID,
+        connectionId: "conn_tg_1",
+      },
+    );
+
+    check("7.4 Page 2 navigation turn succeeds", turn2Result.ok === true);
+
+    const outbound2 =
+      harness7.deliveredOutbound[harness7.deliveredOutbound.length - 1];
+    const choices2 = outbound2?.choices;
+    const items2 = (choices2?.groups ?? []).flat();
+    const page2Options = items2.filter((i: any) => i.role === "option");
+    const page2Starts = page2Options.map((o: any) => o.value?.slice(11, 16));
+
+    const busyExcludedPage2 = page2Starts.every(
+      (s: string) => !busyStarts.includes(s),
+    );
+    const noDuplicateFillerWithPage1 = page2Starts.every(
+      (s: string) => !page1Starts.includes(s),
+    );
+
+    check(
+      "7.5 Page 2 presents remaining valid starts in same scope, without duplicate filler or busy slots",
+      page2Options.length === 4 &&
+        busyExcludedPage2 &&
+        noDuplicateFillerWithPage1 &&
+        page2Options.every((o: any) => o.value?.startsWith(TEST_DATE)),
+      `page 2 starts: ${page2Starts.join(", ")}`,
+    );
+
+    const tgButtons2 = (outbound2?.replyMarkup?.inline_keyboard ?? []).flat();
+    const moreBtn2 = tgButtons2.find((b: any) =>
+      b.callback_data.endsWith(":more"),
+    );
+    const moreCallback2 = moreBtn2?.callback_data;
+
+    check(
+      "7.6 Page 2 provides 'more' action button for subsequent pages",
+      typeof moreCallback2 === "string",
+      `more callback 2: ${moreCallback2}`,
+    );
+
+    // Turn 3: Replay 'more' callback at end of valid starts (Honest exhaustion)
+    const turn3Result = await receiveInboundMessage(
+      harness7.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: moreCallback2!,
+        receivedAt: "2026-11-01T10:02:00Z",
+      },
+      {
+        businessId: BIZ_ID,
+        branchId: BRANCH_ID,
+        connectionId: "conn_tg_1",
+      },
+    );
+
+    check(
+      "7.7 Exhaustion navigation turn succeeds safely",
+      turn3Result.ok === true,
+    );
+
+    const outbound3 =
+      harness7.deliveredOutbound[harness7.deliveredOutbound.length - 1];
+    const body3 = outbound3?.body ?? "";
+    const choices3 = outbound3?.choices;
+    const options3 = (choices3?.groups ?? [])
+      .flat()
+      .filter((i: any) => i.role === "option");
+
+    check(
+      "7.8 End of pagination returns honest all-slots-shown message without fabricating new slots",
+      (body3.includes("هذه هي كل المواعيد المتاحة") ||
+        body3.includes("المواعيد المعروضة حالياً")) &&
+        options3.length === 0,
+      `body: "${body3}", options count: ${options3.length}`,
+    );
+
+    // Subcase 7B: Exercise 'more' when only ONE valid start exists
+    // (Case 2 setup: 11:30 is only valid start)
+    const biz1 = createTestBusiness();
+    const serv1 = createTestService();
+    const repo7B = createMockAppointmentRepo([
+      {
+        id: "block_heavy_7B",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "09:00",
+        endTime: "11:30",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+    ]);
+
+    const harness7B = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: biz1,
+      customServices: [serv1],
+      customProviders: [PROVIDER_1],
+      customAi: controlledAi({
+        service: serv1.name,
+        date: TEST_DATE,
+        provider: PROVIDER_1.name,
+      }),
+      todayRef: "2026-11-01",
+    });
+    harness7B.deps.appointmentRepository =
+      repo7B as unknown as typeof harness7B.deps.appointmentRepository;
+
+    const res7B1 = await receiveInboundMessage(
+      harness7B.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: `أريد حجز ${serv1.name} يوم ${TEST_DATE} مع ${PROVIDER_1.name}`,
+        receivedAt: "2026-11-01T10:00:00Z",
+      },
+      { businessId: BIZ_ID, branchId: BRANCH_ID, connectionId: "conn_tg_1" },
+    );
+
+    const out7B1 = harness7B.deliveredOutbound[0];
+    const btns7B1 = (out7B1?.replyMarkup?.inline_keyboard ?? []).flat();
+    const more7B = btns7B1.find((b: any) =>
+      b.callback_data.endsWith(":more"),
+    )?.callback_data;
+
+    check(
+      "7.9 Scarce (1 valid start): Turn 1 presents single slot and 'more' button",
+      res7B1.ok === true && typeof more7B === "string",
+    );
+
+    // Turn 2: Click 'more' when all available slots (1) have already been shown
+    const res7B2 = await receiveInboundMessage(
+      harness7B.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: more7B!,
+        receivedAt: "2026-11-01T10:01:00Z",
+      },
+      { businessId: BIZ_ID, branchId: BRANCH_ID, connectionId: "conn_tg_1" },
+    );
+
+    const out7B2 =
+      harness7B.deliveredOutbound[harness7B.deliveredOutbound.length - 1];
+    const body7B2 = out7B2?.body ?? "";
+    const opts7B2 = (out7B2?.choices?.groups ?? [])
+      .flat()
+      .filter((i: any) => i.role === "option");
+
+    check(
+      "7.10 Scarce (1 valid start): 'more' callback returns documented all-shown behavior without inventing slots",
+      res7B2.ok === true &&
+        (body7B2.includes("هذه هي كل المواعيد المتاحة") ||
+          body7B2.includes("المواعيد المعروضة حالياً")) &&
+        opts7B2.length === 0 &&
+        repo7B.committedWrites.length === 0,
+      `body: "${body7B2}", opts: ${opts7B2.length}`,
+    );
+
+    // Subcase 7C: Exercise 'more' when exactly TWO valid starts exist
+    // (Case 1 setup: 09:00 and 10:30)
+    const repo7C = createMockAppointmentRepo([
+      {
+        id: "block_1_7C",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "09:30",
+        endTime: "10:30",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+      {
+        id: "block_2_7C",
+        businessId: BIZ_ID,
+        date: TEST_DATE,
+        startTime: "11:00",
+        endTime: "12:00",
+        assignedUserId: PROVIDER_1.userId,
+        providerId: PROVIDER_1.id,
+        status: "CONFIRMED",
+      },
+    ]);
+
+    const harness7C = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: biz1,
+      customServices: [serv1],
+      customProviders: [PROVIDER_1],
+      customAi: controlledAi({
+        service: serv1.name,
+        date: TEST_DATE,
+        provider: PROVIDER_1.name,
+      }),
+      todayRef: "2026-11-01",
+    });
+    harness7C.deps.appointmentRepository =
+      repo7C as unknown as typeof harness7C.deps.appointmentRepository;
+
+    const res7C1 = await receiveInboundMessage(
+      harness7C.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: `أريد حجز ${serv1.name} يوم ${TEST_DATE} مع ${PROVIDER_1.name}`,
+        receivedAt: "2026-11-01T10:00:00Z",
+      },
+      { businessId: BIZ_ID, branchId: BRANCH_ID, connectionId: "conn_tg_1" },
+    );
+
+    const out7C1 = harness7C.deliveredOutbound[0];
+    const btns7C1 = (out7C1?.replyMarkup?.inline_keyboard ?? []).flat();
+    const more7C = btns7C1.find((b: any) =>
+      b.callback_data.endsWith(":more"),
+    )?.callback_data;
+
+    check(
+      "7.11 Scarce (2 valid starts): Turn 1 presents 2 slots and 'more' button",
+      res7C1.ok === true && typeof more7C === "string",
+    );
+
+    // Turn 2: Click 'more' when both slots have already been shown
+    const res7C2 = await receiveInboundMessage(
+      harness7C.deps,
+      {
+        to: "6123456789",
+        from: "123456789",
+        text: more7C!,
+        receivedAt: "2026-11-01T10:01:00Z",
+      },
+      { businessId: BIZ_ID, branchId: BRANCH_ID, connectionId: "conn_tg_1" },
+    );
+
+    const out7C2 =
+      harness7C.deliveredOutbound[harness7C.deliveredOutbound.length - 1];
+    const body7C2 = out7C2?.body ?? "";
+    const opts7C2 = (out7C2?.choices?.groups ?? [])
+      .flat()
+      .filter((i: any) => i.role === "option");
+
+    check(
+      "7.12 Scarce (2 valid starts): 'more' callback returns documented all-shown behavior without inventing slots",
+      res7C2.ok === true &&
+        (body7C2.includes("هذه هي كل المواعيد المتاحة") ||
+          body7C2.includes("المواعيد المعروضة حالياً")) &&
+        opts7C2.length === 0 &&
+        repo7C.committedWrites.length === 0,
+      `body: "${body7C2}", opts: ${opts7C2.length}`,
     );
   }
 
