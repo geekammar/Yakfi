@@ -9,13 +9,15 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.76.1 (feature branch; candidate PR)** — `Mobile Conversation Usability Repair: Draft Lifecycle, Tenant State Isolation, and Meaningful Acceptance`. Baseline: v0.76.0 (PR #51 merged baseline, commit `02b4cf54043cfea2a1d079d7103d23bc34618a87`). Focused mobile conversation usability repair in draft lifecycle, tenant state isolation, install prompt suppression, and viewport geometry:
+**Product version: v0.76.2 (feature branch; candidate PR)** — `Mobile Conversation Usability Repair: Draft Lifecycle, Tenant State Isolation, and Meaningful Acceptance`. Baseline: v0.76.1 (PR #52 merged baseline, commit `4077f9859f77f0d0e2e5c830580daef18d9efaf9`). Focused mobile conversation usability repair in draft lifecycle, tenant state isolation, install prompt suppression, and viewport geometry:
 
 1. **Recoverable Draft Lifecycle**: Retained draft in storage until confirmed server success; removed draft on success only if not superseded by newer text. Preserved submitted text on failure without overwriting newer drafts typed while pending. Recovered pending drafts across page reload/remount.
 2. **Tenant- and Operator-Scoped Storage**: Scoped drafts (`fp_draft:${businessId}:${userId}:${conversationId}`), inbox search/filters (`fp_inbox_state:${businessId}:${userId}`), and scroll restoration (`fp_inbox_scroll:${businessId}:${userId}`) to trusted business and operator IDs without PII. Cleared only conversation feature state on user logout.
 3. **Controlled Install Prompt Acceptance**: Mounted `<InstallPrompt />` with route context and verified via controlled `beforeinstallprompt` event: visible on allowed Home/Settings routes, completely suppressed on conversation detail and booking routes, with dismissal cooldown honored.
 4. **Deterministic Inbox Restoration & Composer Clearance**: Added 30-row inbox fixture scenario asserting scroll restoration after filtered list is rendered, verified Back/Forward navigation preserves query, filters, and scroll. Proved composer and send button remain strictly inside viewport and unobstructed above bottom navigation across 320/360/390 viewports and reduced height (`composerBox.y + height <= navBox.y`).
 5. **Reconciled Scroll Repair & Identity Assets**: Preserved PR51 mount scroll reset (`window.scrollTo({ top: 0, behavior: "instant" })`), `scroll-mt-14` on main content, and Yakfi Wave A brand identity assets.
+
+**Product version: v0.76.1 (main)** — `Consistent Appointment Calendar Date Parsing and Formatting`. Baseline: v0.76.0 (PR #51 merged baseline, commit `02b4cf54043cfea2a1d079d7103d23bc34618a87`). Merged via PR #52 (commit `4077f9859f77f0d0e2e5c830580daef18d9efaf9`). Fixed appointment date parsing and formatting alignment across timezones.
 
 **Product version: v0.76.0 (main)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Merged via PR #51 (commit `02b4cf54043cfea2a1d079d7103d23bc34618a87`). Platform identity transition and PWA/browser asset update:
 

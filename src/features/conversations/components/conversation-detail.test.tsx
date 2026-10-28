@@ -4,7 +4,10 @@
  * Verifies the component lifecycle, persistent header elements, assignee/responder
  * resolution, mobile context tab switching, and transition actions in JSDOM.
  */
-import { ConversationDetail } from "@/features/conversations/components/conversation-detail";
+import {
+  ConversationDetail,
+  formatAppointmentDate,
+} from "@/features/conversations/components/conversation-detail";
 import {
   clearConversationStorage,
   getDraftStorageKey,
@@ -691,6 +694,52 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'textarea[aria-label="رد على العميل"]',
       ) as HTMLTextAreaElement;
       expect(textarea).not.toBeNull();
+    });
+  });
+
+  describe("Appointment calendar date formatting consistency", () => {
+    it("formats 2026-11-07 as Saturday 7 November", () => {
+      const formatted = formatAppointmentDate("2026-11-07");
+      expect(formatted).toContain("السبت");
+      expect(formatted).toContain("نوفمبر");
+      expect(formatted).toMatch(/[7٧]/);
+      expect(formatted).not.toContain("الجمعة");
+      expect(formatted).not.toMatch(/[6٦]/);
+    });
+
+    it("formats 2026-11-08 as Sunday 8 November", () => {
+      const formatted = formatAppointmentDate("2026-11-08");
+      expect(formatted).toContain("الأحد");
+      expect(formatted).toContain("نوفمبر");
+      expect(formatted).toMatch(/[8٨]/);
+      expect(formatted).not.toContain("السبت");
+    });
+
+    it("renders consistent Saturday 7 November in appointment card", async () => {
+      const root = createRoot(container);
+      const dataWithNov7Apt: ConversationDetailData = {
+        ...mockData,
+        appointments: [
+          {
+            id: "apt-nov-7",
+            date: "2026-11-07",
+            startTime: "2026-11-07T10:00:00Z",
+            status: "CONFIRMED",
+            notes: null,
+            service: { name: "تنظيف أسنان", durationMinutes: 30 },
+          },
+        ],
+      };
+
+      await act(async () => {
+        root.render(<ConversationDetail data={dataWithNov7Apt} />);
+      });
+
+      expect(container.textContent).toContain("السبت");
+      expect(container.textContent).toContain("نوفمبر");
+      expect(container.textContent).toMatch(/[7٧]/);
+      expect(container.textContent).not.toContain("الجمعة، ٦ نوفمبر");
+      expect(container.textContent).not.toContain("الجمعة، 6 نوفمبر");
     });
   });
 });

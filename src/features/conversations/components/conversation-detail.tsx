@@ -48,13 +48,14 @@ function formatMessageTime(date: string) {
   }).format(new Date(date));
 }
 
-function formatAppointmentDate(date: string) {
+export function formatAppointmentDate(date: string) {
+  const dateOnly = date.slice(0, 10);
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     weekday: "short",
     day: "numeric",
     month: "short",
-  }).format(new Date(`${date}T00:00:00`));
+  }).format(new Date(`${dateOnly}T00:00:00.000Z`));
 }
 
 function formatAppointmentTime(date: string) {
