@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/shared/status-badge";
+import { cn } from "@/lib/utils";
 import type { ConversationStatus } from "@/types/domain";
 
 const STATUS_LABELS: Record<ConversationStatus, string> = {
@@ -31,7 +32,7 @@ export function ConversationStatusBadge({
     <StatusBadge
       status={values[status]}
       aria-label={`حالة المحادثة: ${STATUS_LABELS[status]}`}
-      className={className}
+      className={cn("leading-tight", className)}
     >
       {label}
     </StatusBadge>

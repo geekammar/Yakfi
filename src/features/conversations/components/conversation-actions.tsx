@@ -72,9 +72,8 @@ export function ConversationActions({
           disabled={isPending}
           aria-label="تولّي المحادثة"
         >
-          <UserRoundIcon className="size-4" aria-hidden />
-          <span className="hidden sm:inline">تولّي المحادثة</span>
-          <span className="sm:hidden">تولّي</span>
+          <UserRoundIcon className="hidden sm:inline size-4" aria-hidden />
+          <span>تولّي المحادثة</span>
         </Button>
       ) : (
         <Button
@@ -86,7 +85,7 @@ export function ConversationActions({
           disabled={isPending}
           aria-label="إعادة للمساعد"
         >
-          <BotIcon className="size-4" aria-hidden />
+          <BotIcon className="hidden sm:inline size-4" aria-hidden />
           <span className="hidden sm:inline">إعادة للمساعد</span>
           <span className="sm:hidden">إعادة</span>
         </Button>
@@ -103,9 +102,8 @@ export function ConversationActions({
           href={`/appointments/new?customerId=${data.customer.id}`}
           aria-label="حجز موعد"
         >
-          <CalendarDaysIcon aria-hidden className="size-4" />
-          <span className="hidden sm:inline">حجز موعد</span>
-          <span className="sm:hidden">حجز</span>
+          <CalendarDaysIcon aria-hidden className="hidden sm:inline size-4" />
+          <span>حجز موعد</span>
         </Link>
       </Button>
 
@@ -129,12 +127,15 @@ export function ConversationActions({
         >
           {mobileTab === "context" ? (
             <>
-              <MessageCircleIcon aria-hidden className="size-4" />
+              <MessageCircleIcon
+                aria-hidden
+                className="hidden sm:inline size-4"
+              />
               <span className="text-xs">المحادثة</span>
             </>
           ) : (
             <>
-              <UserRoundIcon aria-hidden className="size-4" />
+              <UserRoundIcon aria-hidden className="hidden sm:inline size-4" />
               <span className="text-xs">التفاصيل</span>
             </>
           )}

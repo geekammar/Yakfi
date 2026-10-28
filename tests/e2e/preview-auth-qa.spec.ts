@@ -316,10 +316,18 @@ test.describe("Authenticated Preview QA", () => {
     expect(isOverflowing).toBe(false);
 
     // Screenshot Inbox
+    const preInboxScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, `${vpName}-07-conversations-inbox.png`),
       fullPage: true,
     });
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate((y) => {
+      window.scrollTo({ top: y, behavior: "instant" });
+      document.documentElement.scrollTop = y;
+    }, preInboxScreenshotScrollY);
 
     // Inspect conversation items in inbox — deterministic long thread requirement
     const conversationLinks = page.locator('a[href^="/conversations/"]');
@@ -347,6 +355,13 @@ test.describe("Authenticated Preview QA", () => {
       expect(initialHeaderBox.y).toBeGreaterThanOrEqual(20);
       expect(initialHeaderBox.y).toBeLessThanOrEqual(120);
     }
+
+    const postNavScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    console.log(
+      `[QA-DIAG] ${vpName} | preInboxScrollY=${preInboxScreenshotScrollY} | postNavScrollY=${postNavScrollY} | initialHeaderY=${initialHeaderBox?.y} initialHeaderH=${initialHeaderBox?.height}`,
+    );
 
     // U02: Real customer identity with truncation
     const customerH1 = persistentHeader.locator("h1");
@@ -411,6 +426,9 @@ test.describe("Authenticated Preview QA", () => {
     }
 
     // Screenshot Conversation Detail Top
+    const preTopScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
     await page.screenshot({
       path: path.join(
         SCREENSHOT_DIR,
@@ -418,6 +436,18 @@ test.describe("Authenticated Preview QA", () => {
       ),
       fullPage: true,
     });
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate((y) => {
+      window.scrollTo({ top: y, behavior: "instant" });
+      document.documentElement.scrollTop = y;
+    }, preTopScreenshotScrollY);
+
+    const postTopScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    console.log(
+      `[QA-DIAG] ${vpName} | preTopScrollY=${preTopScreenshotScrollY} postTopScrollY=${postTopScreenshotScrollY} | topHeaderY=${topHeaderBox?.y}`,
+    );
 
     // Check Middle: Scroll to middle reading position
     const middleTarget = Math.floor(
@@ -433,6 +463,9 @@ test.describe("Authenticated Preview QA", () => {
     // Verify Persistent Header remains pinned
     const middleHeaderBox = await persistentHeader.boundingBox();
     expect(middleHeaderBox).not.toBeNull();
+    console.log(
+      `[QA-DIAG] ${vpName} | middleScroll=${middleScroll} middleTarget=${middleTarget} | middleHeaderY=${middleHeaderBox?.y} initialHeaderY=${initialHeaderBox?.y}`,
+    );
     if (middleHeaderBox && initialHeaderBox) {
       expect(
         Math.abs(middleHeaderBox.y - initialHeaderBox.y),
