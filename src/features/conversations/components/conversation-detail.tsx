@@ -37,6 +37,7 @@ import {
   SendIcon,
   UserRoundIcon,
   UsersRoundIcon,
+  XIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -337,9 +338,15 @@ export function ConversationDetail({
   const isNearBottomRef = useRef(true);
   const savedScrollTopRef = useRef<number>(0);
 
-  const effectiveBusinessId =
-    propBusinessId ?? initialData.businessId ?? "default_biz";
-  const effectiveUserId = initialData.currentUserId ?? "default_user";
+  const draftRevisionRef = useRef(0);
+  const activeSubmissionRef = useRef<{
+    rawDraft: string;
+    revision: number;
+  } | null>(null);
+  const [failedSubmission, setFailedSubmission] = useState<string | null>(null);
+
+  const effectiveBusinessId = propBusinessId ?? initialData.businessId;
+  const effectiveUserId = initialData.currentUserId;
 
   // Track scroll position and proximity to bottom
   const handleLogScroll = () => {
@@ -357,6 +364,7 @@ export function ConversationDetail({
 
   // Restore unsent draft across details toggle and Back navigation
   useEffect(() => {
+    if (!effectiveBusinessId || !effectiveUserId) return;
     const savedDraft = getStoredDraft(
       effectiveBusinessId,
       effectiveUserId,
@@ -370,8 +378,11 @@ export function ConversationDetail({
   }, [effectiveBusinessId, effectiveUserId, data.id]);
 
   const handleReplyTextChange = (text: string) => {
+    draftRevisionRef.current += 1;
     setReply(text);
-    setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
+    }
   };
   // Initial scroll to bottom on mount
   useEffect(() => {
@@ -485,7 +496,7 @@ export function ConversationDetail({
   function handleReply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = reply.trim();
-    if (!content) return;
+    if (!content || isPending) return;
 
     ownSendPendingRef.current = true;
 
@@ -493,10 +504,16 @@ export function ConversationDetail({
     const pendingId = crypto.randomUUID();
     setPendingMessageId(pendingId);
 
-    // Keep recoverable draft in storage until confirmed success (or reload).
-    // Clear input for immediate operator typing affordance.
-    const submittedDraft = content;
+    // Keep recoverable raw draft snapshot and revision until confirmed success.
+    const rawDraftSnapshot = reply;
+    const submittedRevision = draftRevisionRef.current;
+    activeSubmissionRef.current = {
+      rawDraft: rawDraftSnapshot,
+      revision: submittedRevision,
+    };
+
     setReply("");
+    setFailedSubmission(null);
 
     setData((current) => ({
       ...current,
@@ -516,6 +533,10 @@ export function ConversationDetail({
         sendStaffReply({ id: data.id, content }),
       );
       setPendingMessageId(null);
+
+      const submission = activeSubmissionRef.current;
+      activeSubmissionRef.current = null;
+
       if (!success) {
         // Rollback optimistic message
         setData((current) => ({
@@ -525,35 +546,42 @@ export function ConversationDetail({
           ),
         }));
 
-        // Failure handling: preserve submitted text without overwriting newer text typed while pending
-        setReply((current) => {
-          if (!current || !current.trim()) {
+        // Failure handling:
+        // Did operator type newer text while pending?
+        const hasNewerText =
+          draftRevisionRef.current > (submission?.revision ?? 0) ||
+          reply.trim().length > 0;
+
+        if (!hasNewerText && submission?.rawDraft) {
+          // If no newer text was typed, restore the failed submission directly
+          setReply(submission.rawDraft);
+          if (effectiveBusinessId && effectiveUserId) {
             setStoredDraft(
               effectiveBusinessId,
               effectiveUserId,
               data.id,
-              submittedDraft,
+              submission.rawDraft,
             );
-            return submittedDraft;
           }
-          const merged = current.includes(submittedDraft)
-            ? current
-            : `${submittedDraft}\n${current}`;
-          setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, merged);
-          return merged;
-        });
+        } else if (submission?.rawDraft) {
+          // Newer text typed while pending:
+          // Keep current newer draft UNCHANGED (no automatic concatenation!).
+          // Preserve failed submission separately with explicit recovery affordance.
+          setFailedSubmission(submission.rawDraft);
+        }
         return;
       }
 
-      // Success handling: remove only if not superseded by newer operator text
-      const currentStored = getStoredDraft(
-        effectiveBusinessId,
-        effectiveUserId,
-        data.id,
-      );
-      if (currentStored === submittedDraft) {
+      // Success handling:
+      // Remove only if not superseded by newer operator text
+      const hasNewerText =
+        draftRevisionRef.current > (submission?.revision ?? 0) ||
+        reply.trim().length > 0;
+
+      if (!hasNewerText && effectiveBusinessId && effectiveUserId) {
         removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
       }
+
       setData((current) => ({
         ...current,
         status: "NEED_HUMAN",
@@ -729,6 +757,52 @@ export function ConversationDetail({
           </div>
 
           <form onSubmit={handleReply} className="border-t bg-card p-3 sm:p-4">
+            {failedSubmission ? (
+              <div
+                role="alert"
+                aria-label="تنبيه تعذر إرسال الرد"
+                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0" />
+                  <span className="truncate">
+                    تعذر إرسال: &ldquo;{failedSubmission.trim()}&rdquo;
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      setReply(failedSubmission);
+                      if (effectiveBusinessId && effectiveUserId) {
+                        setStoredDraft(
+                          effectiveBusinessId,
+                          effectiveUserId,
+                          data.id,
+                          failedSubmission,
+                        );
+                      }
+                      setFailedSubmission(null);
+                    }}
+                  >
+                    استعادة الرد
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    aria-label="تجاهل الرد المتعثر"
+                    onClick={() => setFailedSubmission(null)}
+                  >
+                    <XIcon className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <div className="flex items-end gap-2">
               <Textarea
                 value={reply}

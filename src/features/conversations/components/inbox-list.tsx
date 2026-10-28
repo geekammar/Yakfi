@@ -83,8 +83,8 @@ function initials(name: string) {
 export function InboxList({
   conversations,
   team,
-  businessId = "default_biz",
-  currentUserId = "default_user",
+  businessId,
+  currentUserId,
   conversationHrefPrefix = "/conversations",
 }: {
   conversations: InboxConversation[];
@@ -103,6 +103,12 @@ export function InboxList({
 
   // Restore inbox search, filters, and scroll position across Back/Forward navigation
   useEffect(() => {
+    if (!businessId || !currentUserId) {
+      queueMicrotask(() => {
+        setIsRestored(true);
+      });
+      return;
+    }
     const savedState = getStoredInboxState(businessId, currentUserId);
     const savedScroll = getStoredInboxScroll(businessId, currentUserId);
     if (savedScroll && savedScroll > 0) {
@@ -137,6 +143,7 @@ export function InboxList({
       isInitialMount.current = false;
       return;
     }
+    if (!businessId || !currentUserId) return;
     setStoredInboxState(businessId, currentUserId, {
       search,
       status,
@@ -195,8 +202,10 @@ export function InboxList({
     setSearch("");
     setStatus("ALL");
     setAssignee("ALL");
-    clearStoredInboxState(businessId, currentUserId);
-    clearStoredInboxScroll(businessId, currentUserId);
+    if (businessId && currentUserId) {
+      clearStoredInboxState(businessId, currentUserId);
+      clearStoredInboxScroll(businessId, currentUserId);
+    }
   }
 
   return (
@@ -289,11 +298,13 @@ export function InboxList({
               }
               scroll={false}
               onClick={() => {
-                setStoredInboxScroll(
-                  businessId,
-                  currentUserId,
-                  window.scrollY || document.documentElement.scrollTop,
-                );
+                if (businessId && currentUserId) {
+                  setStoredInboxScroll(
+                    businessId,
+                    currentUserId,
+                    window.scrollY || document.documentElement.scrollTop,
+                  );
+                }
               }}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
             >

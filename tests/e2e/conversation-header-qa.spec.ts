@@ -588,6 +588,7 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     const statusSelect = page.locator('button[aria-label="تصفية حسب الحالة"]');
     await statusSelect.click();
     await page.getByRole("option", { name: "تحتاج تدخلاً" }).click();
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
 
     // Verify filtered items rendered
     const conversationLinks = page.locator('a[href*="view=conversation"]');
@@ -600,7 +601,7 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     const initialScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
-    expect(initialScrollY).toBeGreaterThan(0);
+    expect(initialScrollY).toBeGreaterThanOrEqual(150);
 
     // Open first filtered conversation
     await conversationLinks.first().click();
@@ -626,23 +627,23 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     const testDraft = "مسودة اختبار استعادة الفلاتر والتمرير";
     await replyTextarea.fill(testDraft);
 
-    // If mobile, test details screen toggle preserves draft
+    // If mobile, test details screen toggle preserves draft (strictly asserted, never silently skipped)
     if (isMobile) {
       const detailsToggle = page.locator(
         'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
       );
-      if (await detailsToggle.isVisible()) {
-        await detailsToggle.click();
-        await expect(
-          page.getByRole("heading", { name: "سياق العميل" }).first(),
-        ).toBeVisible();
+      await expect(detailsToggle).toBeVisible();
+      await detailsToggle.click();
+      await expect(
+        page.getByRole("heading", { name: "سياق العميل" }).first(),
+      ).toBeVisible();
 
-        const backToggle = page.locator(
-          'button[aria-label="العودة إلى المحادثة"]',
-        );
-        await backToggle.click();
-        await expect(replyTextarea).toHaveValue(testDraft);
-      }
+      const backToggle = page.locator(
+        'button[aria-label="العودة إلى المحادثة"]',
+      );
+      await expect(backToggle).toBeVisible();
+      await backToggle.click();
+      await expect(replyTextarea).toHaveValue(testDraft);
     }
 
     // 2. Return using in-app Back button
@@ -652,16 +653,17 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     // Verify restored search and filter
     await expect(searchInput).toBeVisible();
     await expect(searchInput).toHaveValue("سارة");
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
 
-    // Verify restored scroll position
+    // Verify restored scroll position matches initial position within justified 15px tolerance
     await expect
-      .poll(
-        async () =>
-          await page.evaluate(
-            () => window.scrollY || document.documentElement.scrollTop,
-          ),
-      )
-      .toBeGreaterThan(0);
+      .poll(async () => {
+        const current = await page.evaluate(
+          () => window.scrollY || document.documentElement.scrollTop,
+        );
+        return Math.abs(current - initialScrollY);
+      })
+      .toBeLessThanOrEqual(15);
 
     // Reopen the conversation and verify draft intact
     await conversationLinks.first().click();
@@ -672,14 +674,15 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await page.goBack();
     await expect(searchInput).toBeVisible();
     await expect(searchInput).toHaveValue("سارة");
+    await expect(statusSelect).toContainText("تحتاج تدخلاً");
     await expect
-      .poll(
-        async () =>
-          await page.evaluate(
-            () => window.scrollY || document.documentElement.scrollTop,
-          ),
-      )
-      .toBeGreaterThan(0);
+      .poll(async () => {
+        const current = await page.evaluate(
+          () => window.scrollY || document.documentElement.scrollTop,
+        );
+        return Math.abs(current - initialScrollY);
+      })
+      .toBeLessThanOrEqual(15);
 
     await page.goForward();
     await expect(replyTextarea).toBeVisible();
