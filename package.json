@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.76.2",
+  "version": "0.76.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -70,6 +70,7 @@
     "check:conv-ui-01": "tsx scripts/check-conv-ui-01.ts",
     "check:appointment-calendar-dates": "tsx scripts/check-appointment-calendar-dates.ts",
     "check:qa-harness": "tsx scripts/check-qa-harness.ts",
+    "check:ui-accessibility": "tsx scripts/check-ui-accessibility.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",

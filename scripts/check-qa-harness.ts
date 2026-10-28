@@ -16,6 +16,7 @@
  */
 
 import {
+  QA_ACCESSIBILITY_REPAIRS_PATH,
   QA_CONVERSATION_HEADER_PATH,
   isPublicPath,
 } from "../src/lib/public-paths";
@@ -37,6 +38,10 @@ check(
   "isPublicPath(/qa/conversation-header, {}) === false (المسار غير عام افتراضياً)",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {}) === false,
 );
+check(
+  "isPublicPath(/qa/accessibility-repairs, {}) === false (المسار غير عام افتراضياً)",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {}) === false,
+);
 
 // 2. Fixture is UNAVAILABLE in production configuration (even if flag enabled)
 check(
@@ -54,6 +59,13 @@ check(
   }) === false,
 );
 check(
+  "isPublicPath(/qa/accessibility-repairs) === false في إنتاج فيرسيل حتى مع تفعيل الراية",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
+    VERCEL_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === false,
+);
+check(
   "isQaHarnessAllowed({ NEXT_PUBLIC_VERCEL_ENV: 'production', FLOWPILOT_ENABLE_QA_HARNESS: 'true' }) === false",
   isQaHarnessAllowed({
     NEXT_PUBLIC_VERCEL_ENV: "production",
@@ -63,6 +75,13 @@ check(
 check(
   "isPublicPath(/qa/conversation-header) === false مع NEXT_PUBLIC_VERCEL_ENV=production",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    NEXT_PUBLIC_VERCEL_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === false,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs) === false مع NEXT_PUBLIC_VERCEL_ENV=production",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
     NEXT_PUBLIC_VERCEL_ENV: "production",
     FLOWPILOT_ENABLE_QA_HARNESS: "true",
   }) === false,
@@ -84,6 +103,13 @@ check(
   }) === true,
 );
 check(
+  "isPublicPath(/qa/accessibility-repairs) === true في بيئة اختبار الـ CI",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
+    NODE_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === true,
+);
+check(
   "isQaHarnessAllowed with FLOWPILOT_ENABLE_QA_HARNESS='1' === true",
   isQaHarnessAllowed({
     FLOWPILOT_ENABLE_QA_HARNESS: "1",
@@ -98,6 +124,12 @@ check(
 check(
   "isPublicPath(/qa/conversation-header) === true في بيئات معاينة فيرسيل",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    VERCEL_ENV: "preview",
+  }) === true,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs) === true في بيئات معاينة فيرسيل",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
     VERCEL_ENV: "preview",
   }) === true,
 );

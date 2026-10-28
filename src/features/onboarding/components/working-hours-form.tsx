@@ -79,20 +79,42 @@ export function WorkingHoursForm({
                 <Label htmlFor={`day-${day.key}`}>{day.label}</Label>
               </div>
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">من</span>
+                <Label
+                  htmlFor={`working-hours-${day.key}-open`}
+                  className="text-xs text-muted-foreground"
+                >
+                  من
+                  <span className="sr-only">
+                    {" "}
+                    (بداية العمل يوم {day.label})
+                  </span>
+                </Label>
                 <Input
+                  id={`working-hours-${day.key}-open`}
                   type="time"
                   dir="ltr"
                   disabled={closed}
+                  aria-label={`بداية العمل يوم ${day.label}`}
                   {...form.register(`workingHours.${day.key}.open`)}
                 />
               </div>
               <div className="space-y-1">
-                <span className="text-xs text-muted-foreground">إلى</span>
+                <Label
+                  htmlFor={`working-hours-${day.key}-close`}
+                  className="text-xs text-muted-foreground"
+                >
+                  إلى
+                  <span className="sr-only">
+                    {" "}
+                    (نهاية العمل يوم {day.label})
+                  </span>
+                </Label>
                 <Input
+                  id={`working-hours-${day.key}-close`}
                   type="time"
                   dir="ltr"
                   disabled={closed}
+                  aria-label={`نهاية العمل يوم ${day.label}`}
                   aria-invalid={Boolean(
                     form.formState.errors.workingHours?.[day.key]?.close,
                   )}
