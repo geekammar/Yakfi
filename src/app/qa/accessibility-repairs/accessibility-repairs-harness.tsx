@@ -231,7 +231,7 @@ export function AccessibilityRepairsHarness() {
       {/* ─── 3. Team Screen Section ─── */}
       {activeTab === "team" && (
         <div className="space-y-6" data-testid="section-team">
-          <div className="flex items-center gap-2 border p-3 rounded-lg bg-card">
+          <div className="flex flex-wrap items-center gap-2 border p-3 rounded-lg bg-card">
             <span className="text-sm font-medium">اختر حالة الفريق:</span>
             <Button
               variant={teamFixture === "admin" ? "default" : "outline"}

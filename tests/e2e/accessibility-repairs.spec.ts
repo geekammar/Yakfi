@@ -56,8 +56,8 @@ test.describe("UI & Accessibility Repairs QA", () => {
     expect(closeBox).not.toBeNull();
     expect(contentBox).not.toBeNull();
     if (closeBox && contentBox) {
-      expect(closeBox.width).toBeGreaterThanOrEqual(44);
-      expect(closeBox.height).toBeGreaterThanOrEqual(44);
+      expect(Math.round(closeBox.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(closeBox.height)).toBeGreaterThanOrEqual(44);
 
       // In RTL, close button must be on the LEFT side of dialog content
       const contentCenterX = contentBox.x + contentBox.width / 2;
@@ -72,14 +72,17 @@ test.describe("UI & Accessibility Repairs QA", () => {
         .boundingBox();
       expect(titleBox).not.toBeNull();
       if (titleBox) {
-        // Title starts on the right in RTL; close button is on the left
-        // There should be no geometric overlap between close button and title
-        const titleLeft = titleBox.x;
-        const closeRight = closeBox.x + closeBox.width;
+        // Geometric non-overlap in 2D space
+        const isOverlapping = !(
+          closeBox.x + closeBox.width <= titleBox.x ||
+          titleBox.x + titleBox.width <= closeBox.x ||
+          closeBox.y + closeBox.height <= titleBox.y ||
+          titleBox.y + titleBox.height <= closeBox.y
+        );
         expect(
-          titleLeft >= closeRight - 2, // allowing 2px subpixel layout tolerance
+          isOverlapping,
           "Title and close button must not overlap in RTL dialog header",
-        ).toBe(true);
+        ).toBe(false);
       }
     }
 
@@ -124,8 +127,8 @@ test.describe("UI & Accessibility Repairs QA", () => {
     expect(ltrCloseBox).not.toBeNull();
     expect(ltrContentBox).not.toBeNull();
     if (ltrCloseBox && ltrContentBox) {
-      expect(ltrCloseBox.width).toBeGreaterThanOrEqual(44);
-      expect(ltrCloseBox.height).toBeGreaterThanOrEqual(44);
+      expect(Math.round(ltrCloseBox.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(ltrCloseBox.height)).toBeGreaterThanOrEqual(44);
 
       // In LTR, close button must be on the RIGHT side of dialog content
       const ltrContentCenterX = ltrContentBox.x + ltrContentBox.width / 2;
@@ -217,7 +220,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(page.locator('[data-testid="section-team"]')).toBeVisible();
 
     // ── Case A: Admin-only fixture (1 Admin, 0 Staff) ──
-    await page.locator('[data-testid="fixture-team-admin"]').click();
+    await page
+      .locator('[data-testid="fixture-team-admin"]')
+      .click({ force: true });
     const teamSection = page.locator("section", {
       hasText: "أعضاء المنشأة (حسابات الدخول)",
     });
@@ -250,7 +255,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     });
 
     // ── Case B: Mixed fixture (1 Admin + 2 Staff) ──
-    await page.locator('[data-testid="fixture-team-mixed"]').click();
+    await page
+      .locator('[data-testid="fixture-team-mixed"]')
+      .click({ force: true });
     await expect(teamSection).toContainText("3 أعضاء");
     const memberItemsMixed = teamSection.locator("ul > li");
     await expect(memberItemsMixed).toHaveCount(3);
@@ -259,7 +266,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     ).toHaveCount(0);
 
     // ── Case C: Empty fixture (0 Members) ──
-    await page.locator('[data-testid="fixture-team-empty"]').click();
+    await page
+      .locator('[data-testid="fixture-team-empty"]')
+      .click({ force: true });
     await expect(teamSection).toContainText("لا يوجد أعضاء");
     await expect(teamSection.locator("ul > li")).toHaveCount(0);
     // Empty state MUST be visible

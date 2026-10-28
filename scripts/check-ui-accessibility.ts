@@ -43,8 +43,9 @@ const dialogPath = resolve(root, "src/components/ui/dialog.tsx");
 const dialogSrc = readFileSync(dialogPath, "utf8");
 
 check(
-  "1.1 DialogHeader reserves space with pe-12 to prevent title/icon collision",
-  dialogSrc.includes("pe-12") && dialogSrc.includes("DialogHeader"),
+  "1.1 DialogHeader reserves space with pe-14/pe-12 to prevent title/icon collision",
+  (dialogSrc.includes("pe-14") || dialogSrc.includes("pe-12")) &&
+    dialogSrc.includes("DialogHeader"),
 );
 
 check(
