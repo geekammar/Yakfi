@@ -324,10 +324,10 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
     // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
-    await page.evaluate(
-      (y) => window.scrollTo(0, y),
-      preInboxScreenshotScrollY,
-    );
+    await page.evaluate((y) => {
+      window.scrollTo({ top: y, behavior: "instant" });
+      document.documentElement.scrollTop = y;
+    }, preInboxScreenshotScrollY);
 
     // Inspect conversation items in inbox — deterministic long thread requirement
     const conversationLinks = page.locator('a[href^="/conversations/"]');
@@ -437,7 +437,10 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
     // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
-    await page.evaluate((y) => window.scrollTo(0, y), preTopScreenshotScrollY);
+    await page.evaluate((y) => {
+      window.scrollTo({ top: y, behavior: "instant" });
+      document.documentElement.scrollTop = y;
+    }, preTopScreenshotScrollY);
 
     const postTopScreenshotScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,

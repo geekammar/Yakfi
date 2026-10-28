@@ -519,7 +519,7 @@ export function ConversationDetail({
       >
         <header
           data-testid="conversation-persistent-header"
-          className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur-xs px-3 py-1.5 sm:px-4 sm:py-2.5 space-y-1 sm:space-y-2"
+          className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur-xs px-3 py-1 sm:px-4 sm:py-2.5 space-y-0.5 sm:space-y-2"
         >
           {/* Identity & Direct Actions Area */}
           <div className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-1 sm:gap-2">
@@ -539,13 +539,10 @@ export function ConversationDetail({
                 {data.customer.name.slice(0, 2)}
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="truncate line-clamp-2 whitespace-normal break-words font-semibold text-sm sm:text-base leading-snug">
+                <h1 className="truncate line-clamp-2 whitespace-normal break-words font-semibold text-sm sm:text-base leading-tight sm:leading-snug">
                   {data.customer.name}
                 </h1>
-                <p
-                  className="truncate text-xs leading-none text-muted-foreground mt-0.5"
-                  dir="ltr"
-                >
+                <p className="truncate text-xs text-muted-foreground" dir="ltr">
                   {data.customer.phone}
                 </p>
               </div>
@@ -564,7 +561,7 @@ export function ConversationDetail({
           </div>
 
           {/* Status, responder/assignee, and optional attention cause wrapping area */}
-          <div className="flex flex-wrap items-center gap-1 pt-0.5 border-t border-border/40 text-xs sm:gap-1.5 sm:pt-1.5">
+          <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 pt-0.5 border-t border-border/40 text-xs sm:gap-1.5 sm:pt-1.5">
             <ConversationStatusBadge status={data.status} compact />
             {data.attentionReason ? (
               <AttentionReasonChip
