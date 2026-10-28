@@ -450,4 +450,30 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     });
     expect(hasHorizontalOverflow).toBe(false);
   });
+
+  test("QA harness route boundaries: fixture available in intended CI test configuration & broad /qa/ closed", async ({
+    page,
+  }) => {
+    // 1. Fixture route is available in the intended CI test configuration
+    const res = await page.goto(
+      "/qa/conversation-header?fixture=need_human_unassigned",
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
+    expect(res?.status()).toBe(200);
+    await expect(
+      page.locator('header[data-testid="conversation-persistent-header"]'),
+    ).toBeVisible();
+
+    // 2. Broad /qa/ path and unknown subpaths are not public (redirected to /sign-in or 404)
+    const unauthorizedRes = await page.goto("/qa/unauthorized-subroute", {
+      waitUntil: "domcontentloaded",
+    });
+    // Proxy redirects unauthenticated non-public paths to /sign-in, or server returns 404
+    expect(page.url()).toMatch(/\/sign-in|\/qa\/unauthorized-subroute/);
+    if (!page.url().includes("/sign-in")) {
+      expect(unauthorizedRes?.status()).toBe(404);
+    }
+  });
 });

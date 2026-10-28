@@ -1,3 +1,5 @@
+import { isQaHarnessAllowed } from "@/lib/qa-harness";
+
 /**
  * Public-path policy for the route proxy (tier 1 of the two-tier
  * protection model — see `src/proxy.ts` and `docs/DECISIONS.md` #13).
@@ -42,11 +44,23 @@ const PUBLIC_PATH_PREFIXES = [
   // Scheduled cron endpoints (BOOK-REM-01). Authenticated via CRON_SECRET
   // bearer token / header; answering 401 if missing or unauthorized.
   "/api/cron",
-  // Automated UX QA test harness for viewport and responsive layout acceptance
-  "/qa/",
 ] as const;
 
-export function isPublicPath(pathname: string): boolean {
+export const QA_CONVERSATION_HEADER_PATH = "/qa/conversation-header";
+
+export function isPublicPath(
+  pathname: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  // QA fixture harness: only the exact fixture route and only under test-only conditions
+  if (
+    (pathname === QA_CONVERSATION_HEADER_PATH ||
+      pathname === `${QA_CONVERSATION_HEADER_PATH}/`) &&
+    isQaHarnessAllowed(env)
+  ) {
+    return true;
+  }
+
   // /api/health is the public liveness probe (deployment validation).
   return (
     PUBLIC_PATHS.includes(pathname as (typeof PUBLIC_PATHS)[number]) ||

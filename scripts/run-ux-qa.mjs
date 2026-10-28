@@ -46,6 +46,8 @@ const result = spawnSync("pnpm", [...playwrightArgs, ...extraArgs], {
   env: {
     ...process.env,
     PORT: process.env.PORT || "3099",
+    FLOWPILOT_ENABLE_QA_HARNESS:
+      process.env.FLOWPILOT_ENABLE_QA_HARNESS || "true",
   },
 });
 

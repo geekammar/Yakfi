@@ -2,8 +2,10 @@ import { ConversationDetail } from "@/features/conversations/components/conversa
 import type { ConversationDetailData } from "@/features/conversations/types";
 import { AppShell } from "@/components/shared/layout/app-shell";
 import { APP_NAV_ITEMS } from "@/lib/app-config";
+import { isQaHarnessAllowed } from "@/lib/qa-harness";
 
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "QA — ترويسة المحادثة المتجاوبة",
@@ -206,6 +208,9 @@ async function handleQaTransition(_payload: {
   transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
 }) {
   "use server";
+  if (!isQaHarnessAllowed()) {
+    throw new Error("QA harness is disabled in this environment.");
+  }
   return { success: true, message: undefined };
 }
 
@@ -214,6 +219,10 @@ export default async function QaConversationHeaderPage({
 }: {
   searchParams: Promise<{ fixture?: string }>;
 }) {
+  if (!isQaHarnessAllowed()) {
+    notFound();
+  }
+
   const { fixture = "need_human_unassigned" } = await searchParams;
   const data = buildFixture(fixture);
 

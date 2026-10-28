@@ -68,6 +68,7 @@
     "eval:jev": "tsx scripts/eval-jev-benchmark.ts",
     "check:conversation-ux": "tsx scripts/check-conversation-ux.ts",
     "check:conv-ui-01": "tsx scripts/check-conv-ui-01.ts",
+    "check:qa-harness": "tsx scripts/check-qa-harness.ts",
     "check:operator-attention": "tsx scripts/check-operator-attention.ts",
     "check:simulate-conversation-control": "tsx scripts/simulate-conversation-control.ts",
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",

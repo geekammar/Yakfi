@@ -88,5 +88,9 @@ export default defineConfig({
         url: `http://localhost:${PORT}/api/health`,
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
+        env: {
+          ...process.env,
+          FLOWPILOT_ENABLE_QA_HARNESS: "true",
+        },
       },
 });
