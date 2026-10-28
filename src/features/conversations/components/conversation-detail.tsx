@@ -355,7 +355,9 @@ export function ConversationDetail({
     try {
       const savedDraft = sessionStorage.getItem(draftKey);
       if (savedDraft) {
-        setReply(savedDraft);
+        queueMicrotask(() => {
+          setReply(savedDraft);
+        });
       }
     } catch {
       // ignore

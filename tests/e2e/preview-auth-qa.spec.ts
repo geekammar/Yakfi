@@ -366,7 +366,9 @@ test.describe("Authenticated Preview QA", () => {
     expect(postNavScrollY).toBeLessThanOrEqual(10);
 
     // Suppress install prompt on conversation detail route (no composer / content obstruction)
-    const installPromptOnConv = page.locator('aside[aria-label="تثبيت التطبيق"]');
+    const installPromptOnConv = page.locator(
+      'aside[aria-label="تثبيت التطبيق"]',
+    );
     await expect(installPromptOnConv).not.toBeVisible();
 
     // U02: Real customer identity with truncation

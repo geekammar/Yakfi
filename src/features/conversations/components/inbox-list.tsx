@@ -94,14 +94,16 @@ export function InboxList({
       const savedState = sessionStorage.getItem(INBOX_STATE_KEY);
       if (savedState) {
         const parsed = JSON.parse(savedState);
-        if (typeof parsed.search === "string") setSearch(parsed.search);
-        if (
-          typeof parsed.status === "string" &&
-          STATUS_FILTERS.some((f) => f.value === parsed.status)
-        ) {
-          setStatus(parsed.status as (typeof STATUS_FILTERS)[number]["value"]);
-        }
-        if (typeof parsed.assignee === "string") setAssignee(parsed.assignee);
+        queueMicrotask(() => {
+          if (typeof parsed.search === "string") setSearch(parsed.search);
+          if (
+            typeof parsed.status === "string" &&
+            STATUS_FILTERS.some((f) => f.value === parsed.status)
+          ) {
+            setStatus(parsed.status as (typeof STATUS_FILTERS)[number]["value"]);
+          }
+          if (typeof parsed.assignee === "string") setAssignee(parsed.assignee);
+        });
       }
       const savedScroll = sessionStorage.getItem(INBOX_SCROLL_KEY);
       if (savedScroll) {
@@ -258,7 +260,9 @@ export function InboxList({
                 try {
                   sessionStorage.setItem(
                     INBOX_SCROLL_KEY,
-                    String(window.scrollY || document.documentElement.scrollTop),
+                    String(
+                      window.scrollY || document.documentElement.scrollTop,
+                    ),
                   );
                 } catch {
                   // ignore

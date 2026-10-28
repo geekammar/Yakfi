@@ -64,7 +64,12 @@ export function InstallPrompt() {
     pathname === "/staff" ||
     (pathname?.startsWith("/settings") ?? false);
 
-  if (!promptEvent || isConversationDetail || isBookingTaskRoute || !isHomeOrSettings) {
+  if (
+    !promptEvent ||
+    isConversationDetail ||
+    isBookingTaskRoute ||
+    !isHomeOrSettings
+  ) {
     return null;
   }
 
