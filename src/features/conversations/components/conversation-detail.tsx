@@ -836,7 +836,14 @@ export function ConversationDetail({
         </div>
       </section>
 
-      <aside className="hidden lg:block space-y-4">
+      <aside
+        style={{
+          maxHeight: "var(--conversation-height, calc(100dvh - 8.5rem))",
+          minHeight: 0,
+          overflowY: "auto",
+        }}
+        className="hidden lg:block space-y-4"
+      >
         <ContextCards
           data={data}
           summary={summary}

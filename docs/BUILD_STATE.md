@@ -9,11 +9,11 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.75.1 (feature branch; candidate PR)** — `Bounded OpenRouter Attempt Timeout Adjustment (12s -> 18s)`. Baseline: v0.75.0 (PR #45 merged baseline, commit `b1e665d8b1b320d3c4694be7d2d9f95807490cf1`).
+**Product version: v0.75.2 (feature branch; candidate PR)** — `Bounded OpenRouter Attempt Timeout Adjustment (12s -> 18s)`. Baseline: v0.75.1 (PR #47 merged baseline, commit `9e4c0073d4bc7d52806b47d388b0ca57d0799e89`).
 
 1. **OpenRouter Per-Attempt Timeout Adjustment**: Raised `OPENROUTER_TIMEOUT_MS` from 12,000 ms to 18,000 ms in `src/server/integrations/ai/openrouter.ts` to accommodate slower, structured generative completions without exceeding the client-side attempt abort timer.
 2. **Whole-Turn / Attempt Timeout Separation**: Maintained strict separation between per-attempt timeout and whole-turn serving budget. Default factory composition leaves `servingTimeoutMs` unset, preserving the ~280s serving session deadline. Shorter explicit timeout overrides and shared serving deadlines remain fully authoritative and win over the 18s attempt default.
-3. **Acceptance Verification**: Verified across 176/176 automated checks in `scripts/check-core-04b.ts` (including new Group S covering 13s response acceptance, 18s completion boundary, delayed body reads, explicit shorter overrides, shared serving deadline precedence, two-timeout retry exhaustion to NEED_HUMAN, and shadow isolation) and 166/166 in `scripts/check-exact-time-requests.ts`.
+3. **Acceptance Verification**: Verified across 177/177 automated checks in `scripts/check-core-04b.ts` (including Group S covering 13s response acceptance, 18s completion boundary, delayed body reads, explicit shorter overrides, shared serving deadline precedence, two-timeout retry exhaustion to NEED_HUMAN, and shadow isolation) and 166/166 in `scripts/check-exact-time-requests.ts`.
 
 **Product version: v0.72.2 (feature branch; candidate PR)** — `Focused UX Clarity Fixes F01–F04`. Baseline: v0.72.1 (PR #38 merged baseline, commit `94116e98003c8488e572c596d238676879c52ec4`). Resolves four focused UX clarity items:
 
