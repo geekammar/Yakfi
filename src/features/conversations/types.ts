@@ -32,6 +32,7 @@ export type InboxConversation = {
 
 export type ConversationDetailData = {
   id: string;
+  businessId?: string;
   status: ConversationStatus;
   aiSummary: string;
   /**

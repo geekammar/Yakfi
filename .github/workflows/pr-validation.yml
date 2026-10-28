@@ -53,6 +53,9 @@ jobs:
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
+      - name: Verify PWA icon generation and committed assets
+        run: node scripts/generate-pwa-icons.mjs --check
+
       - name: Release Guard Threat Model & Cutover verification
         run: pnpm check:release-guard
 

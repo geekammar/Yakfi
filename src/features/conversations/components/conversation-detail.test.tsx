@@ -10,6 +10,12 @@ import type { ConversationDetailData } from "@/features/conversations/types";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearConversationStorage,
+  getDraftStorageKey,
+  getStoredDraft,
+  setStoredDraft,
+} from "@/features/conversations/lib/storage";
 
 const {
   assignConversation,
@@ -429,6 +435,247 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     expect(transitionConversation).toHaveBeenCalledWith({
       id: "conv-test-1",
       transition: "RETURN_TO_AI",
+    });
+  });
+
+  describe("Draft lifecycle and operator state isolation", () => {
+    const testBiz = "biz-test-1";
+    const userA = "user-alice";
+    const userB = "user-bob";
+
+    beforeEach(() => {
+      window.sessionStorage.clear();
+      vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+      window.sessionStorage.clear();
+    });
+
+    it("Draft persists until confirmed success (recoverable until server confirms)", async () => {
+      let resolveReply: (value: { success: boolean }) => void = () => {};
+      const replyPromise = new Promise<{ success: boolean }>((res) => {
+        resolveReply = res;
+      });
+      sendStaffReply.mockReturnValue(replyPromise);
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea).not.toBeNull();
+
+      // 1. Operator types draft
+      await act(async () => {
+        textarea.value = "مسودة تحتاج تأكيد الإرسال";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "مسودة تحتاج تأكيد الإرسال",
+      );
+
+      // 2. Submit form — send is pending
+      const form = container.querySelector("form");
+      await act(async () => {
+        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+
+      // Draft remains in storage while pending for safety/reload recovery
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "مسودة تحتاج تأكيد الإرسال",
+      );
+
+      // 3. Server confirms success
+      await act(async () => {
+        resolveReply({ success: true });
+        await replyPromise;
+      });
+
+      // Now draft is removed upon confirmed success
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBeNull();
+    });
+
+    it("Draft is preserved in input and storage on send failure without loss", async () => {
+      sendStaffReply.mockResolvedValue({
+        success: false,
+        message: "Network timeout",
+      });
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+
+      await act(async () => {
+        textarea.value = "رسالة فشل إرسالها";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      const form = container.querySelector("form");
+      await act(async () => {
+        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+
+      // On failure, draft is preserved in storage and restored in textarea
+      expect(textarea.value).toBe("رسالة فشل إرسالها");
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "رسالة فشل إرسالها",
+      );
+    });
+
+    it("Preserves newer text typed during a pending request without overwriting", async () => {
+      let resolveReply: (value: { success: boolean }) => void = () => {};
+      const replyPromise = new Promise<{ success: boolean }>((res) => {
+        resolveReply = res;
+      });
+      sendStaffReply.mockReturnValue(replyPromise);
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+
+      // 1. Submit first message
+      await act(async () => {
+        textarea.value = "الرسالة الأولى";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const form = container.querySelector("form");
+      await act(async () => {
+        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+
+      // 2. Operator types second draft while first send is pending
+      await act(async () => {
+        textarea.value = "الرسالة الثانية أثناء الانتظار";
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "الرسالة الثانية أثناء الانتظار",
+      );
+
+      // 3. First request completes successfully — should NOT delete the newer draft
+      await act(async () => {
+        resolveReply({ success: true });
+        await replyPromise;
+      });
+
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "الرسالة الثانية أثناء الانتظار",
+      );
+      expect(textarea.value).toBe("الرسالة الثانية أثناء الانتظار");
+    });
+
+    it("Draft remains recoverable from storage if component remounts while pending", async () => {
+      // Simulate draft already in storage when opening/remounting the conversation
+      setStoredDraft(testBiz, userA, mockData.id, "مسودة مسترجعة بعد إعادة التحميل");
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      // Wait microtask for draft hydration
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe("مسودة مسترجعة بعد إعادة التحميل");
+    });
+
+    it("Two operators in the same tab cannot restore each other's drafts or leak state", async () => {
+      // Operator A writes a draft
+      setStoredDraft(testBiz, userA, mockData.id, "مسودة خاصة بالمشغل أ");
+
+      // Operator B opens the same conversation in the same browser tab
+      const rootB = createRoot(container);
+      await act(async () => {
+        rootB.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userB }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+
+      const textareaB = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      // Operator B must NOT see Operator A's draft
+      expect(textareaB.value).toBe("");
+
+      // Operator B types their own draft
+      await act(async () => {
+        textareaB.value = "مسودة خاصة بالمشغل ب";
+        textareaB.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      // Verify both drafts exist under their distinct scoped keys
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        "مسودة خاصة بالمشغل أ",
+      );
+      expect(getStoredDraft(testBiz, userB, mockData.id)).toBe(
+        "مسودة خاصة بالمشغل ب",
+      );
+
+      // Logging out clears both feature drafts
+      clearConversationStorage();
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBeNull();
+      expect(getStoredDraft(testBiz, userB, mockData.id)).toBeNull();
+    });
+
+    it("Gracefully handles disabled or malformed storage without crashing UI", async () => {
+      // Corrupt the key with non-string data
+      const key = getDraftStorageKey(testBiz, userA, mockData.id);
+      window.sessionStorage.setItem(key, "{}");
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea).not.toBeNull();
     });
   });
 });

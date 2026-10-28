@@ -12,15 +12,20 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-const DISMISS_KEY = "flowpilot-install-dismissed-at";
-const DISMISS_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 7; // one week
+export const DISMISS_KEY = "flowpilot-install-dismissed-at";
+export const DISMISS_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 7; // one week
 
 /**
  * Non-intrusive install banner driven by `beforeinstallprompt`.
  * Respects a dismissal cooldown stored in localStorage.
  */
-export function InstallPrompt() {
-  const pathname = usePathname();
+export function InstallPrompt({
+  forcedPathname,
+}: {
+  forcedPathname?: string;
+} = {}) {
+  const currentPathname = usePathname();
+  const pathname = forcedPathname ?? currentPathname;
   const [promptEvent, setPromptEvent] =
     useState<BeforeInstallPromptEvent | null>(null);
 

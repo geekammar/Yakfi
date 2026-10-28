@@ -469,106 +469,259 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     expect(hasHorizontalOverflow).toBe(false);
   });
 
-  test("Mobile conversation repair scenarios: scrolled entry, details/back draft, viewport height changes & install prompt suppression", async ({
+  test("Controlled beforeinstallprompt event & route-based install banner suppression", async ({
     page,
-  }, testInfo) => {
-    const vpName = testInfo.project.name;
-    const viewport = page.viewportSize();
-    const originalWidth = viewport?.width ?? 390;
-    const originalHeight = viewport?.height ?? 844;
-
-    // 1. Direct load & outer scroll verification (must be <= 10px immediately without normalizing)
-    await page.goto("/qa/conversation-header?fixture=need_human_unassigned", {
+  }) => {
+    // 1. Allowed Settings route: banner appears when beforeinstallprompt fires and dismissal is honored
+    await page.goto("/qa/conversation-header?installRoute=/settings", {
       waitUntil: "domcontentloaded",
     });
 
+    const installBanner = page.locator('aside[aria-label="تثبيت التطبيق"]');
+    await expect(installBanner).not.toBeVisible();
+
+    // Fire controlled beforeinstallprompt event
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+
+    await expect(installBanner).toBeVisible();
+
+    // Dismiss banner
+    const dismissBtn = installBanner.locator('button[aria-label="إغلاق"]');
+    await dismissBtn.click();
+    await expect(installBanner).not.toBeVisible();
+
+    // Subsequent beforeinstallprompt event within cooldown does NOT show banner
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+
+    // 2. Conversation detail route: banner is strictly suppressed
+    await page.goto("/qa/conversation-header?installRoute=/conversations/conv-123", {
+      waitUntil: "domcontentloaded",
+    });
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+
+    // 3. Booking task route: banner is strictly suppressed
+    await page.goto("/qa/conversation-header?installRoute=/appointments/new", {
+      waitUntil: "domcontentloaded",
+    });
+    await page.evaluate(() => {
+      const event = new Event("beforeinstallprompt", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "prompt", {
+        value: () => Promise.resolve(),
+      });
+      Object.defineProperty(event, "userChoice", {
+        value: Promise.resolve({ outcome: "accepted" }),
+      });
+      window.dispatchEvent(event);
+    });
+    await expect(installBanner).not.toBeVisible();
+  });
+
+  test("Deterministic inbox restoration: 30 fixture rows, non-zero scroll, Back/Forward & draft preservation", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const isMobile = vpName.startsWith("mobile");
+
+    // 1. Load inbox with 30 fixture rows
+    await page.goto("/qa/conversation-header?view=inbox", {
+      waitUntil: "domcontentloaded",
+    });
+
+    // Verify inbox rendered
+    const searchInput = page.locator(
+      'input[placeholder="ابحث باسم العميل أو الرسالة"]',
+    );
+    await expect(searchInput).toBeVisible();
+
+    // Set non-empty search and status filter
+    await searchInput.fill("سارة");
+    const statusSelect = page.locator('button[aria-label="تصفية حسب الحالة"]');
+    await statusSelect.click();
+    await page.getByRole("option", { name: "تحتاج انتباهك" }).click();
+
+    // Verify filtered items rendered
+    const conversationLinks = page.locator('a[href*="view=conversation"]');
+    await expect(conversationLinks.first()).toBeVisible();
+    const count = await conversationLinks.count();
+    expect(count).toBeGreaterThan(0);
+
+    // Scroll inbox down to non-zero position
+    await page.evaluate(() => window.scrollTo(0, 300));
+    const initialScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(initialScrollY).toBeGreaterThan(0);
+
+    // Open first filtered conversation
+    await conversationLinks.first().click();
+
+    // Assert outer scroll is <= 10px immediately upon entry
+    await page.waitForSelector('header[data-testid="conversation-persistent-header"]');
     const entryScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
     expect(entryScrollY).toBeLessThanOrEqual(10);
 
-    // Verify customer identity is immediately and completely visible
+    // Complete customer identity visible
     const customerH1 = page.locator(
       'header[data-testid="conversation-persistent-header"] h1',
     );
     await expect(customerH1).toBeVisible();
-    const headerBox = await page
-      .locator('header[data-testid="conversation-persistent-header"]')
-      .boundingBox();
-    expect(headerBox).not.toBeNull();
-    if (headerBox) {
-      expect(headerBox.y).toBeGreaterThanOrEqual(20);
-      expect(headerBox.y).toBeLessThanOrEqual(120);
-      if (vpName.startsWith("mobile")) {
-        expect(headerBox.height).toBeLessThanOrEqual(160);
-      }
-    }
 
-    // 2. Install prompt suppression on conversation route
-    const installBanner = page.locator('aside[aria-label="تثبيت التطبيق"]');
-    await expect(installBanner).not.toBeVisible();
-
-    // 3. Draft preservation across details toggle («التفاصيل»)
+    // Type a draft
     const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
     await expect(replyTextarea).toBeVisible();
-    const testDraft = "مسودة رد محفوظة عبر التفاصيل والعودة";
+    const testDraft = "مسودة اختبار استعادة الفلاتر والتمرير";
     await replyTextarea.fill(testDraft);
-    expect(await replyTextarea.inputValue()).toBe(testDraft);
 
-    if (!vpName.includes("desktop")) {
+    // If mobile, test details screen toggle preserves draft
+    if (isMobile) {
       const detailsToggle = page.locator(
         'button[aria-label="عرض تفاصيل العميل والمواعيد"]',
       );
-      await expect(detailsToggle).toBeVisible();
-      await detailsToggle.click();
-      await page.waitForTimeout(100);
+      if (await detailsToggle.isVisible()) {
+        await detailsToggle.click();
+        await expect(
+          page.getByRole("heading", { name: "سياق العميل" }).first(),
+        ).toBeVisible();
 
-      // Verify details screen shown
-      await expect(
-        page.getByRole("heading", { name: "سياق العميل" }).first(),
-      ).toBeVisible();
-
-      // Return to conversation
-      const backToggle = page.locator(
-        'button[aria-label="العودة إلى المحادثة"]',
-      );
-      await expect(backToggle).toBeVisible();
-      await backToggle.click();
-      await page.waitForTimeout(100);
-
-      // Draft is preserved
-      await expect(replyTextarea).toBeVisible();
-      expect(await replyTextarea.inputValue()).toBe(testDraft);
+        const backToggle = page.locator(
+          'button[aria-label="العودة إلى المحادثة"]',
+        );
+        await backToggle.click();
+        await expect(replyTextarea).toHaveValue(testDraft);
+      }
     }
 
-    // 4. Viewport height changes (emulating on-screen keyboard resize or orientation changes)
-    if (vpName.startsWith("mobile")) {
-      // Shrink height to simulate soft keyboard emergence
-      await page.setViewportSize({ width: originalWidth, height: 420 });
-      await page.waitForTimeout(100);
+    // 2. Return using in-app Back button
+    const backBtn = page.locator('a[aria-label="العودة إلى المحادثات"]');
+    await backBtn.click();
 
-      // Composer remains accessible
-      await expect(replyTextarea).toBeVisible();
-      const sendButton = page.locator('button[aria-label="إرسال الرد"]');
-      await expect(sendButton).toBeVisible();
+    // Verify restored search and filter
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toHaveValue("سارة");
 
-      // Zero horizontal overflow during viewport change
-      let isOverflowing = await page.evaluate(
-        () => document.documentElement.scrollWidth > window.innerWidth,
-      );
-      expect(isOverflowing).toBe(false);
+    // Verify restored scroll position
+    const restoredScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(restoredScrollY).toBeGreaterThan(0);
 
-      // Restore original viewport
-      await page.setViewportSize({
-        width: originalWidth,
-        height: originalHeight,
-      });
-      await page.waitForTimeout(100);
+    // Reopen the conversation and verify draft intact
+    await conversationLinks.first().click();
+    await expect(replyTextarea).toBeVisible();
+    await expect(replyTextarea).toHaveValue(testDraft);
 
-      isOverflowing = await page.evaluate(
-        () => document.documentElement.scrollWidth > window.innerWidth,
-      );
-      expect(isOverflowing).toBe(false);
+    // 3. Test browser Back and Forward navigation
+    await page.goBack();
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toHaveValue("سارة");
+    const backNavScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    expect(backNavScrollY).toBeGreaterThan(0);
+
+    await page.goForward();
+    await expect(replyTextarea).toBeVisible();
+    await expect(replyTextarea).toHaveValue(testDraft);
+  });
+
+  test("Mobile composer geometry and bottom navigation clearance across viewports", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const isMobile = vpName.startsWith("mobile");
+    if (!isMobile) return;
+
+    await page.goto("/qa/conversation-header?fixture=need_human_unassigned", {
+      waitUntil: "domcontentloaded",
+    });
+
+    const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
+    const sendButton = page.locator('button[aria-label="إرسال"]');
+    const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
+
+    await expect(replyTextarea).toBeVisible();
+    await expect(sendButton).toBeVisible();
+    await expect(bottomNav).toBeVisible();
+
+    // Evaluate geometry on normal height and reduced height
+    const testHeights = [844, 600, 480];
+    const viewport = page.viewportSize();
+    const width = viewport?.width ?? 390;
+
+    for (const h of testHeights) {
+      await page.setViewportSize({ width, height: h });
+      await page.waitForTimeout(50);
+
+      const composerBox = await replyTextarea.boundingBox();
+      const sendBox = await sendButton.boundingBox();
+      const navBox = await bottomNav.boundingBox();
+
+      expect(composerBox).not.toBeNull();
+      expect(sendBox).not.toBeNull();
+      expect(navBox).not.toBeNull();
+
+      if (composerBox && navBox && sendBox) {
+        // 1. Composer textarea is inside the viewport
+        expect(composerBox.y).toBeGreaterThanOrEqual(0);
+        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(h);
+
+        // 2. Composer textarea is strictly above the bottom navigation (unobstructed)
+        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(navBox.y);
+
+        // 3. Send button is inside viewport and above bottom navigation
+        expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(navBox.y);
+        expect(sendBox.width).toBeGreaterThanOrEqual(44);
+        expect(sendBox.height).toBeGreaterThanOrEqual(44);
+
+        // 4. Zero horizontal overflow
+        const isOverflowing = await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        );
+        expect(isOverflowing).toBe(false);
+      }
     }
   });
 

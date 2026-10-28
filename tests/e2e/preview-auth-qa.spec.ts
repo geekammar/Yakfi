@@ -54,7 +54,7 @@ test.describe("Authenticated Preview QA", () => {
       }
     });
 
-    // 1. Health check verification on deployed target
+    // 1. Health check verification on deployed target & establish intended deployment identity
     const healthRes = await page.request.get("/api/health");
     expect(healthRes.status()).toBe(200);
     const healthData = await healthRes.json();
@@ -62,10 +62,56 @@ test.describe("Authenticated Preview QA", () => {
     expect(healthData.deploymentReady).toBe(true);
     expect(healthData.database).toBe("connected");
     expect(healthData.missingEnvVars).toEqual([]);
+    expect(
+      healthData.version,
+      "Target deployment must match candidate version v0.76.1",
+    ).toBe("0.76.1");
+
+    // Establish candidate identity preconditions on deployed Preview
+    const manifestRes = await page.request.get("/manifest.webmanifest");
+    expect(manifestRes.status()).toBe(200);
+    const manifestData = await manifestRes.json();
+    expect(manifestData.name).toBe("يكفي — إدارة المحادثات والمواعيد");
+    expect(manifestData.short_name).toBe("يكفي");
+    expect(manifestData.theme_color).toBe("#173B63");
+    expect(manifestData.background_color).toBe("#F4F7FB");
+    expect(manifestData.icons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          src: "/icons/icon-192.png",
+          sizes: "192x192",
+        }),
+        expect.objectContaining({
+          src: "/icons/icon-512.png",
+          sizes: "512x512",
+        }),
+        expect.objectContaining({
+          src: "/icons/maskable-512.png",
+          purpose: "maskable",
+        }),
+      ]),
+    );
+
+    // Verify canonical PWA icons resolve to valid assets (200 OK)
+    for (const iconPath of [
+      "/icon.svg",
+      "/icons/icon-192.png",
+      "/icons/icon-512.png",
+      "/icons/maskable-512.png",
+    ]) {
+      const iconRes = await page.request.get(iconPath);
+      expect(iconRes.status(), `Icon ${iconPath} must return 200`).toBe(200);
+    }
 
     // 2. Sign-in page
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/تسجيل الدخول \| يكفي/);
+
+    // Verify rendered candidate identity
+    await expect(page.locator("body")).toContainText("يكفي");
+    await expect(
+      page.locator('svg[data-testid="yakfi-symbol"]:visible'),
+    ).toBeVisible();
 
     // Verify RTL on sign-in
     const htmlDir = await page.locator("html").getAttribute("dir");
@@ -128,8 +174,11 @@ test.describe("Authenticated Preview QA", () => {
 
     // 3. Admin Dashboard
     await page.goto("/admin", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/لوحة الإدارة.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
+    await expect(
+      page.locator('svg[data-testid="yakfi-symbol"]:visible'),
+    ).toBeVisible();
 
     // Verify RTL
     expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
@@ -148,7 +197,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 4. /admin/team page — Provider Management
     await page.goto("/admin/team", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/إدارة الفريق.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify page content: header, actions
@@ -230,7 +279,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 6. Visual Staff Calendar (/appointments)
     await page.goto("/appointments", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/المواعيد|FlowPilot/);
+    await expect(page).toHaveTitle(/المواعيد.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify RTL
@@ -256,7 +305,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 7. Settings Screen with Discoverable Provider Management Link (/settings)
     await page.goto("/settings", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/الإعدادات|FlowPilot/);
+    await expect(page).toHaveTitle(/الإعدادات.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify discoverable provider management link exists and has expected text
@@ -305,7 +354,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 9. Conversations Inbox & Persistent Header QA (CONV-UI-01 / U01–U10)
     await page.goto("/conversations", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/المحادثات|FlowPilot/);
+    await expect(page).toHaveTitle(/المحادثات.*يكفي/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify RTL & zero horizontal overflow on inbox

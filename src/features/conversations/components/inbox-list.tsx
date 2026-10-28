@@ -25,9 +25,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-
-const INBOX_STATE_KEY = "flowpilot-inbox-state";
-const INBOX_SCROLL_KEY = "flowpilot-inbox-scroll";
+import {
+  clearStoredInboxScroll,
+  clearStoredInboxState,
+  getStoredInboxScroll,
+  getStoredInboxState,
+  setStoredInboxScroll,
+  setStoredInboxState,
+} from "@/features/conversations/lib/storage";
 
 /**
  * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
@@ -78,64 +83,64 @@ function initials(name: string) {
 export function InboxList({
   conversations,
   team,
+  businessId = "default_biz",
+  currentUserId = "default_user",
+  conversationHrefPrefix = "/conversations",
 }: {
   conversations: InboxConversation[];
   team: InboxUser[];
+  businessId?: string;
+  currentUserId?: string;
+  conversationHrefPrefix?: string;
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] =
     useState<(typeof STATUS_FILTERS)[number]["value"]>("ALL");
   const [assignee, setAssignee] = useState("ALL");
+  const [isRestored, setIsRestored] = useState(false);
   const isInitialMount = useRef(true);
+  const restoredScrollTargetRef = useRef<number | null>(null);
 
   // Restore inbox search, filters, and scroll position across Back/Forward navigation
   useEffect(() => {
-    try {
-      const savedState = sessionStorage.getItem(INBOX_STATE_KEY);
-      if (savedState) {
-        const parsed = JSON.parse(savedState);
-        queueMicrotask(() => {
-          if (typeof parsed.search === "string") setSearch(parsed.search);
-          if (
-            typeof parsed.status === "string" &&
-            STATUS_FILTERS.some((f) => f.value === parsed.status)
-          ) {
-            setStatus(
-              parsed.status as (typeof STATUS_FILTERS)[number]["value"],
-            );
-          }
-          if (typeof parsed.assignee === "string") setAssignee(parsed.assignee);
-        });
-      }
-      const savedScroll = sessionStorage.getItem(INBOX_SCROLL_KEY);
-      if (savedScroll) {
-        const y = Number(savedScroll);
-        if (!Number.isNaN(y) && y > 0) {
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: y, behavior: "instant" });
-          });
-        }
-      }
-    } catch {
-      // ignore storage errors
+    const savedState = getStoredInboxState(businessId, currentUserId);
+    const savedScroll = getStoredInboxScroll(businessId, currentUserId);
+    if (savedScroll && savedScroll > 0) {
+      restoredScrollTargetRef.current = savedScroll;
     }
-  }, []);
+    if (savedState) {
+      queueMicrotask(() => {
+        if (typeof savedState.search === "string") setSearch(savedState.search);
+        if (
+          typeof savedState.status === "string" &&
+          STATUS_FILTERS.some((f) => f.value === savedState.status)
+        ) {
+          setStatus(
+            savedState.status as (typeof STATUS_FILTERS)[number]["value"],
+          );
+        }
+        if (typeof savedState.assignee === "string") {
+          setAssignee(savedState.assignee);
+        }
+        setIsRestored(true);
+      });
+    } else {
+      setIsRestored(true);
+    }
+  }, [businessId, currentUserId]);
 
-  // Sync active filters to sessionStorage for Back restoration
+  // Sync active filters to scoped storage for Back restoration
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
-    try {
-      sessionStorage.setItem(
-        INBOX_STATE_KEY,
-        JSON.stringify({ search, status, assignee }),
-      );
-    } catch {
-      // ignore
-    }
-  }, [search, status, assignee]);
+    setStoredInboxState(businessId, currentUserId, {
+      search,
+      status,
+      assignee,
+    });
+  }, [search, status, assignee, businessId, currentUserId]);
 
   const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase());
   const hasActiveFilters =
@@ -161,16 +166,35 @@ export function InboxList({
     });
   }, [assignee, conversations, deferredSearch, status]);
 
+  // Restore scroll position once the filtered list is rendered and ready
+  useEffect(() => {
+    if (!isRestored) return;
+    const target = restoredScrollTargetRef.current;
+    if (target !== null && target > 0) {
+      const maxScroll =
+        document.documentElement.scrollHeight - window.innerHeight;
+      if (
+        maxScroll >= target ||
+        document.documentElement.scrollHeight > window.innerHeight
+      ) {
+        window.scrollTo({ top: target, behavior: "instant" });
+        if (
+          Math.abs(
+            (window.scrollY || document.documentElement.scrollTop) - target,
+          ) <= 5
+        ) {
+          restoredScrollTargetRef.current = null;
+        }
+      }
+    }
+  }, [filtered, isRestored]);
+
   function clearFilters() {
     setSearch("");
     setStatus("ALL");
     setAssignee("ALL");
-    try {
-      sessionStorage.removeItem(INBOX_STATE_KEY);
-      sessionStorage.removeItem(INBOX_SCROLL_KEY);
-    } catch {
-      // ignore
-    }
+    clearStoredInboxState(businessId, currentUserId);
+    clearStoredInboxScroll(businessId, currentUserId);
   }
 
   return (
@@ -256,19 +280,18 @@ export function InboxList({
           {filtered.map((conversation) => (
             <Link
               key={conversation.id}
-              href={`/conversations/${conversation.id}`}
+              href={
+                conversationHrefPrefix.includes("?")
+                  ? `${conversationHrefPrefix}&id=${conversation.id}`
+                  : `${conversationHrefPrefix}/${conversation.id}`
+              }
               scroll={false}
               onClick={() => {
-                try {
-                  sessionStorage.setItem(
-                    INBOX_SCROLL_KEY,
-                    String(
-                      window.scrollY || document.documentElement.scrollTop,
-                    ),
-                  );
-                } catch {
-                  // ignore
-                }
+                setStoredInboxScroll(
+                  businessId,
+                  currentUserId,
+                  window.scrollY || document.documentElement.scrollTop,
+                );
               }}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
             >

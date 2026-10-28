@@ -1,5 +1,6 @@
 import { BottomNav } from "@/components/shared/layout/bottom-nav";
 import { SidebarNav } from "@/components/shared/layout/sidebar-nav";
+import { YakfiSymbol } from "@/components/shared/yakfi-symbol";
 import { APP_NAME, type NavItem } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
@@ -44,9 +45,10 @@ export function AppShell({
         <div className="flex h-14 items-center px-6">
           <Link
             href={homeHref}
-            className="text-sm font-semibold tracking-tight transition-colors hover:text-primary"
+            className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary"
           >
-            {APP_NAME}
+            <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
+            <span>{APP_NAME}</span>
           </Link>
         </div>
         <SidebarNav items={navItems} />
@@ -58,9 +60,10 @@ export function AppShell({
           <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
             <Link
               href={homeHref}
-              className="text-sm font-semibold tracking-tight transition-colors hover:text-primary md:hidden"
+              className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary md:hidden"
             >
-              {APP_NAME}
+              <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
+              <span>{APP_NAME}</span>
             </Link>
             <div className="ms-auto flex items-center gap-2">{header}</div>
           </div>

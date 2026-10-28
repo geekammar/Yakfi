@@ -21,6 +21,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ATTENTION_REASON_LABELS } from "@/lib/validation/operator-attention";
+import {
+  getStoredDraft,
+  removeStoredDraft,
+  setStoredDraft,
+} from "@/features/conversations/lib/storage";
 
 import {
   AlertCircleIcon,
@@ -303,11 +308,15 @@ export type ConversationDetailProps = {
     id: string;
     transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
   }) => Promise<{ success: boolean; message?: string }>;
+  backHref?: string;
+  businessId?: string;
 };
 
 export function ConversationDetail({
   data: initialData,
   onTransition,
+  backHref,
+  businessId: propBusinessId,
 }: ConversationDetailProps) {
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
@@ -326,7 +335,10 @@ export function ConversationDetail({
   const ownSendPendingRef = useRef(false);
   const isNearBottomRef = useRef(true);
   const savedScrollTopRef = useRef<number>(0);
-  const draftKey = `flowpilot-draft-${data.id}`;
+
+  const effectiveBusinessId =
+    propBusinessId ?? initialData.businessId ?? "default_biz";
+  const effectiveUserId = initialData.currentUserId ?? "default_user";
 
   // Track scroll position and proximity to bottom
   const handleLogScroll = () => {
@@ -337,46 +349,29 @@ export function ConversationDetail({
     isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
   };
 
-  // Ensure window scroll is at top so sticky top bar and persistent header align without masking
+  // Ensure window scroll is at top so sticky header and persistent header are properly aligned
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-    const rafId = requestAnimationFrame(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-    });
-    return () => cancelAnimationFrame(rafId);
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
   // Restore unsent draft across details toggle and Back navigation
   useEffect(() => {
-    try {
-      const savedDraft = sessionStorage.getItem(draftKey);
-      if (savedDraft) {
-        queueMicrotask(() => {
-          setReply(savedDraft);
-        });
-      }
-    } catch {
-      // ignore
+    const savedDraft = getStoredDraft(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+    if (savedDraft) {
+      queueMicrotask(() => {
+        setReply(savedDraft);
+      });
     }
-  }, [draftKey]);
+  }, [effectiveBusinessId, effectiveUserId, data.id]);
 
   const handleReplyTextChange = (text: string) => {
     setReply(text);
-    try {
-      if (text.trim()) {
-        sessionStorage.setItem(draftKey, text);
-      } else {
-        sessionStorage.removeItem(draftKey);
-      }
-    } catch {
-      // ignore
-    }
+    setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
   };
-
   // Initial scroll to bottom on mount
   useEffect(() => {
     const el = messageLogRef.current;
@@ -496,12 +491,12 @@ export function ConversationDetail({
     // Optimistic append — rolled back if the server rejects the reply.
     const pendingId = crypto.randomUUID();
     setPendingMessageId(pendingId);
+
+    // Keep recoverable draft in storage until confirmed success (or reload).
+    // Clear input for immediate operator typing affordance.
+    const submittedDraft = content;
     setReply("");
-    try {
-      sessionStorage.removeItem(draftKey);
-    } catch {
-      // ignore
-    }
+
     setData((current) => ({
       ...current,
       messages: [
@@ -521,19 +516,51 @@ export function ConversationDetail({
       );
       setPendingMessageId(null);
       if (!success) {
+        // Rollback optimistic message
         setData((current) => ({
           ...current,
           messages: current.messages.filter(
             (message) => message.id !== pendingId,
           ),
         }));
-        setReply(content);
-        try {
-          sessionStorage.setItem(draftKey, content);
-        } catch {
-          // ignore
-        }
+
+        // Failure handling: preserve submitted text without overwriting newer text typed while pending
+        setReply((current) => {
+          if (!current || !current.trim()) {
+            setStoredDraft(
+              effectiveBusinessId,
+              effectiveUserId,
+              data.id,
+              submittedDraft,
+            );
+            return submittedDraft;
+          }
+          const merged = current.includes(submittedDraft)
+            ? current
+            : `${submittedDraft}\n${current}`;
+          setStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            merged,
+          );
+          return merged;
+        });
         return;
+      }
+
+      // Success handling: remove only if not superseded by newer operator text
+      const currentStored = getStoredDraft(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+      );
+      if (currentStored === submittedDraft) {
+        removeStoredDraft(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+        );
       }
       setData((current) => ({
         ...current,
@@ -568,7 +595,7 @@ export function ConversationDetail({
             "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
           minHeight: 0,
         }}
-        className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
+        className="flex h-[calc(100dvh-11rem)] min-h-0 sm:min-h-[20rem] lg:min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
       >
         <header
           data-testid="conversation-persistent-header"
@@ -584,7 +611,10 @@ export function ConversationDetail({
                 size="icon-sm"
                 className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden shrink-0"
               >
-                <Link href="/conversations" aria-label="العودة إلى المحادثات">
+                <Link
+                  href={backHref ?? "/conversations"}
+                  aria-label="العودة إلى المحادثات"
+                >
                   <ArrowRightIcon />
                 </Link>
               </Button>

@@ -5,9 +5,9 @@
 
 import type { UserRole } from "@/types/domain";
 
-export const APP_NAME = "FlowPilot";
-export const APP_DESCRIPTION =
-  "نظام تحويل المواعيد عبر واتساب. حجز أكثر، متابعة أقل.";
+export const APP_NAME = "يكفي";
+export const APP_NAME_LATIN = "yakfi";
+export const APP_DESCRIPTION = "إدارة المحادثات وحجز المواعيد ومتابعتها.";
 
 export const HTML_LANG = "ar";
 export const HTML_DIR = "rtl" as const;

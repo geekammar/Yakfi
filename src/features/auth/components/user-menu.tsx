@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
+import { clearConversationStorage } from "@/features/conversations/lib/storage";
 
 import { ChevronDownIcon, LoaderCircleIcon, LogOutIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -82,6 +83,7 @@ export function UserMenu() {
         ) : null}
         <DropdownMenuItem
           onClick={async () => {
+            clearConversationStorage();
             await authClient.signOut();
             refetch();
             router.replace("/sign-in");
