@@ -100,7 +100,9 @@ export function InboxList({
             typeof parsed.status === "string" &&
             STATUS_FILTERS.some((f) => f.value === parsed.status)
           ) {
-            setStatus(parsed.status as (typeof STATUS_FILTERS)[number]["value"]);
+            setStatus(
+              parsed.status as (typeof STATUS_FILTERS)[number]["value"],
+            );
           }
           if (typeof parsed.assignee === "string") setAssignee(parsed.assignee);
         });
