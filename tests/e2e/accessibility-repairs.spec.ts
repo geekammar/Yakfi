@@ -377,18 +377,16 @@ test.describe("UI & Accessibility Repairs QA", () => {
     const calendarDotInitial = calendarViewButton.locator("span.rounded-full");
     await expect(calendarDotInitial).toHaveCount(0);
 
-    // Assert content reflects List View: list quick filter & follow-up action are visible, calendar timeline section is not
-    const listFilterButton = page.locator("button", {
-      hasText: "جميع الحالات",
-    });
-    const listFollowUpLink = page.locator("a", {
-      hasText: "إضافة متابعة",
-    });
+    // Assert content reflects List View: status filter select & timeline ol are visible, calendar timeline section is not
+    const listStatusFilter = page.locator(
+      'button[aria-label="تصفية حسب الحالة"]',
+    );
+    const listAppointmentsList = page.locator("ol");
     const calendarTimelineSection = page.locator(
       'section[aria-label="الجدول الزمني لليوم"]',
     );
-    await expect(listFilterButton).toBeVisible();
-    await expect(listFollowUpLink.first()).toBeVisible();
+    await expect(listStatusFilter).toBeVisible();
+    await expect(listAppointmentsList).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
 
     // Screenshot List View
@@ -415,8 +413,8 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(
       calendarTimelineSection.locator("text=الجدول الزمني والفترات المتاحة"),
     ).toBeVisible();
-    await expect(listFilterButton).toHaveCount(0);
-    await expect(listFollowUpLink).toHaveCount(0);
+    await expect(listStatusFilter).toHaveCount(0);
+    await expect(listAppointmentsList).toHaveCount(0);
 
     // Screenshot Calendar View
     await page.screenshot({
@@ -433,8 +431,8 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(calendarViewButton).toHaveAttribute("aria-pressed", "false");
 
     // Content changes back: List controls return and timeline section is removed
-    await expect(listFilterButton).toBeVisible();
-    await expect(listFollowUpLink.first()).toBeVisible();
+    await expect(listStatusFilter).toBeVisible();
+    await expect(listAppointmentsList).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
   });
 });
