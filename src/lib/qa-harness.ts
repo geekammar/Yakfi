@@ -13,7 +13,7 @@
  */
 
 export function isQaHarnessAllowed(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): boolean {
   // Reject in Vercel production even if flag is accidentally enabled
   if (

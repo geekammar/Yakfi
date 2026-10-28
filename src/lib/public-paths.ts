@@ -50,7 +50,7 @@ export const QA_CONVERSATION_HEADER_PATH = "/qa/conversation-header";
 
 export function isPublicPath(
   pathname: string,
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
 ): boolean {
   // QA fixture harness: only the exact fixture route and only under test-only conditions
   if (

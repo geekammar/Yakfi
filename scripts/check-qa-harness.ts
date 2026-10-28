@@ -91,7 +91,9 @@ check(
 );
 
 // 4. Broad /qa/ prefix and unknown subroutes are NOT public
-const ciEnv = { FLOWPILOT_ENABLE_QA_HARNESS: "true" };
+const ciEnv: Record<string, string | undefined> = {
+  FLOWPILOT_ENABLE_QA_HARNESS: "true",
+};
 check("المسار العام /qa/ غير متاح", isPublicPath("/qa/", ciEnv) === false);
 check("المسار العام /qa غير متاح", isPublicPath("/qa", ciEnv) === false);
 check(
