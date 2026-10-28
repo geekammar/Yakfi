@@ -62,9 +62,7 @@ describe("InstallPrompt route suppression & dismissal", () => {
       fireBeforeInstallPrompt();
     });
 
-    const banner = container.querySelector(
-      'aside[aria-label="تثبيت التطبيق"]',
-    );
+    const banner = container.querySelector('aside[aria-label="تثبيت التطبيق"]');
     expect(banner).not.toBeNull();
     expect(banner?.textContent).toContain("ثبّت يكفي على جهازك");
   });
@@ -79,9 +77,7 @@ describe("InstallPrompt route suppression & dismissal", () => {
       fireBeforeInstallPrompt();
     });
 
-    const banner = container.querySelector(
-      'aside[aria-label="تثبيت التطبيق"]',
-    );
+    const banner = container.querySelector('aside[aria-label="تثبيت التطبيق"]');
     expect(banner).not.toBeNull();
   });
 
@@ -97,18 +93,14 @@ describe("InstallPrompt route suppression & dismissal", () => {
       fireBeforeInstallPrompt();
     });
 
-    const banner = container.querySelector(
-      'aside[aria-label="تثبيت التطبيق"]',
-    );
+    const banner = container.querySelector('aside[aria-label="تثبيت التطبيق"]');
     expect(banner).toBeNull();
   });
 
   it("is completely suppressed on booking task routes (/appointments/new and /appointments/123)", async () => {
     const root = createRoot(container);
     await act(async () => {
-      root.render(
-        <InstallPrompt forcedPathname="/appointments/new" />,
-      );
+      root.render(<InstallPrompt forcedPathname="/appointments/new" />);
     });
 
     await act(async () => {
@@ -121,9 +113,7 @@ describe("InstallPrompt route suppression & dismissal", () => {
 
     // Booking detail route
     await act(async () => {
-      root.render(
-        <InstallPrompt forcedPathname="/appointments/apt-456" />,
-      );
+      root.render(<InstallPrompt forcedPathname="/appointments/apt-456" />);
     });
 
     await act(async () => {
@@ -145,9 +135,7 @@ describe("InstallPrompt route suppression & dismissal", () => {
       fireBeforeInstallPrompt();
     });
 
-    const dismissBtn = container.querySelector(
-      'button[aria-label="إغلاق"]',
-    );
+    const dismissBtn = container.querySelector('button[aria-label="إغلاق"]');
     expect(dismissBtn).not.toBeNull();
 
     await act(async () => {

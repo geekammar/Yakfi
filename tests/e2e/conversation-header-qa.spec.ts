@@ -519,9 +519,12 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await expect(installBanner).not.toBeVisible();
 
     // 2. Conversation detail route: banner is strictly suppressed
-    await page.goto("/qa/conversation-header?installRoute=/conversations/conv-123", {
-      waitUntil: "domcontentloaded",
-    });
+    await page.goto(
+      "/qa/conversation-header?installRoute=/conversations/conv-123",
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
     await page.evaluate(() => {
       const event = new Event("beforeinstallprompt", {
         bubbles: true,
@@ -597,7 +600,9 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await conversationLinks.first().click();
 
     // Assert outer scroll is <= 10px immediately upon entry
-    await page.waitForSelector('header[data-testid="conversation-persistent-header"]');
+    await page.waitForSelector(
+      'header[data-testid="conversation-persistent-header"]',
+    );
     const entryScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
@@ -709,7 +714,9 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
         expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(h);
 
         // 2. Composer textarea is strictly above the bottom navigation (unobstructed)
-        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(navBox.y);
+        expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(
+          navBox.y,
+        );
 
         // 3. Send button is inside viewport and above bottom navigation
         expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(navBox.y);

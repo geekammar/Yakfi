@@ -8,6 +8,11 @@ import {
 } from "@/features/conversations/actions/conversation-actions";
 import { ConversationActions } from "@/features/conversations/components/conversation-actions";
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import {
+  getStoredDraft,
+  removeStoredDraft,
+  setStoredDraft,
+} from "@/features/conversations/lib/storage";
 import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
 import type { ConversationDetailData } from "@/features/conversations/types";
 import { Button } from "@/components/ui/button";
@@ -21,11 +26,6 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ATTENTION_REASON_LABELS } from "@/lib/validation/operator-attention";
-import {
-  getStoredDraft,
-  removeStoredDraft,
-  setStoredDraft,
-} from "@/features/conversations/lib/storage";
 
 import {
   AlertCircleIcon,
@@ -538,12 +538,7 @@ export function ConversationDetail({
           const merged = current.includes(submittedDraft)
             ? current
             : `${submittedDraft}\n${current}`;
-          setStoredDraft(
-            effectiveBusinessId,
-            effectiveUserId,
-            data.id,
-            merged,
-          );
+          setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, merged);
           return merged;
         });
         return;
@@ -556,11 +551,7 @@ export function ConversationDetail({
         data.id,
       );
       if (currentStored === submittedDraft) {
-        removeStoredDraft(
-          effectiveBusinessId,
-          effectiveUserId,
-          data.id,
-        );
+        removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
       }
       setData((current) => ({
         ...current,

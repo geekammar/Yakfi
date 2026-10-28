@@ -115,7 +115,8 @@ export function getStoredInboxState(
     return {
       search: typeof parsed.search === "string" ? parsed.search : undefined,
       status: typeof parsed.status === "string" ? parsed.status : undefined,
-      assignee: typeof parsed.assignee === "string" ? parsed.assignee : undefined,
+      assignee:
+        typeof parsed.assignee === "string" ? parsed.assignee : undefined,
     };
   } catch {
     return null;

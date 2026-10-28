@@ -1,6 +1,14 @@
 "use client";
 
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import {
+  clearStoredInboxScroll,
+  clearStoredInboxState,
+  getStoredInboxScroll,
+  getStoredInboxState,
+  setStoredInboxScroll,
+  setStoredInboxState,
+} from "@/features/conversations/lib/storage";
 import type {
   InboxConversation,
   InboxUser,
@@ -25,14 +33,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import {
-  clearStoredInboxScroll,
-  clearStoredInboxState,
-  getStoredInboxScroll,
-  getStoredInboxState,
-  setStoredInboxScroll,
-  setStoredInboxState,
-} from "@/features/conversations/lib/storage";
 
 /**
  * PROMPT-B04 — the unacknowledged-attention dot: a thread carrying an
@@ -125,7 +125,9 @@ export function InboxList({
         setIsRestored(true);
       });
     } else {
-      setIsRestored(true);
+      queueMicrotask(() => {
+        setIsRestored(true);
+      });
     }
   }, [businessId, currentUserId]);
 

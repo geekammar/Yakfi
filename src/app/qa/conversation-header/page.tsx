@@ -217,11 +217,7 @@ const INBOX_FIXTURES: InboxConversation[] = Array.from(
     const isSarah = num % 3 === 0;
     const isAhmed = num % 3 === 1;
     const status =
-      num % 4 === 0
-        ? "BOOKED"
-        : num % 4 === 1
-          ? "NEED_HUMAN"
-          : "AI_ACTIVE";
+      num % 4 === 0 ? "BOOKED" : num % 4 === 1 ? "NEED_HUMAN" : "AI_ACTIVE";
     return {
       id: `conv-qa-${num}`,
       status,

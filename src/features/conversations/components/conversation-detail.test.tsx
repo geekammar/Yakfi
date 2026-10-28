@@ -5,17 +5,17 @@
  * resolution, mobile context tab switching, and transition actions in JSDOM.
  */
 import { ConversationDetail } from "@/features/conversations/components/conversation-detail";
-import type { ConversationDetailData } from "@/features/conversations/types";
-
-import { createRoot } from "react-dom/client";
-import { act } from "react-dom/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearConversationStorage,
   getDraftStorageKey,
   getStoredDraft,
   setStoredDraft,
 } from "@/features/conversations/lib/storage";
+import type { ConversationDetailData } from "@/features/conversations/types";
+
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   assignConversation,
@@ -485,7 +485,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       // 2. Submit form — send is pending
       const form = container.querySelector("form");
       await act(async () => {
-        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        form?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
       });
 
       // Draft remains in storage while pending for safety/reload recovery
@@ -529,7 +531,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       const form = container.querySelector("form");
       await act(async () => {
-        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        form?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
       });
 
       // On failure, draft is preserved in storage and restored in textarea
@@ -566,7 +570,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       });
       const form = container.querySelector("form");
       await act(async () => {
-        form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        form?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
       });
 
       // 2. Operator types second draft while first send is pending
@@ -592,7 +598,12 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
     it("Draft remains recoverable from storage if component remounts while pending", async () => {
       // Simulate draft already in storage when opening/remounting the conversation
-      setStoredDraft(testBiz, userA, mockData.id, "مسودة مسترجعة بعد إعادة التحميل");
+      setStoredDraft(
+        testBiz,
+        userA,
+        mockData.id,
+        "مسودة مسترجعة بعد إعادة التحميل",
+      );
 
       const root = createRoot(container);
       await act(async () => {
