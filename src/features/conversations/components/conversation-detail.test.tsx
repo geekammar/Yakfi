@@ -12,6 +12,7 @@ import {
   clearConversationStorage,
   getDraftStorageKey,
   getStoredDraft,
+  removeStoredDraft,
   setStoredDraft,
 } from "@/features/conversations/lib/storage";
 import type { ConversationDetailData } from "@/features/conversations/types";
