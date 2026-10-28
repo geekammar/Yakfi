@@ -234,7 +234,11 @@ const INBOX_FIXTURES: InboxConversation[] = Array.from(
             : `عميل تجريبي ${num} — استشارة عامة`,
         phone: `+96650111${String(num).padStart(4, "0")}`,
       },
-      assignedUser: isAhmed ? TEAM_MEMBERS[0] : isSarah ? TEAM_MEMBERS[1] : null,
+      assignedUser: isAhmed
+        ? (TEAM_MEMBERS[0] ?? null)
+        : isSarah
+          ? (TEAM_MEMBERS[1] ?? null)
+          : null,
       lastMessage: {
         content:
           num === 1
