@@ -30,6 +30,9 @@ export function InstallPrompt({
     useState<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.installPromptReady = "true";
+    }
     const handler = (event: Event) => {
       event.preventDefault();
       const dismissedAt = Number(
@@ -41,7 +44,12 @@ export function InstallPrompt({
     };
 
     window.addEventListener("beforeinstallprompt", handler);
-    return () => window.removeEventListener("beforeinstallprompt", handler);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      if (typeof document !== "undefined") {
+        delete document.documentElement.dataset.installPromptReady;
+      }
+    };
   }, []);
 
   const dismiss = useCallback(() => {

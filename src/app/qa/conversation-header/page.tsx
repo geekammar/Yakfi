@@ -214,10 +214,9 @@ const INBOX_FIXTURES: InboxConversation[] = Array.from(
   { length: 30 },
   (_, index) => {
     const num = index + 1;
-    const isSarah = num % 3 === 0;
-    const isAhmed = num % 3 === 1;
-    const status =
-      num % 4 === 0 ? "BOOKED" : num % 4 === 1 ? "NEED_HUMAN" : "AI_ACTIVE";
+    const isSarah = num % 2 === 0;
+    const isAhmed = num % 2 === 1;
+    const status = num % 2 === 0 ? "NEED_HUMAN" : "AI_ACTIVE";
     return {
       id: `conv-qa-${num}`,
       status,
@@ -225,9 +224,7 @@ const INBOX_FIXTURES: InboxConversation[] = Array.from(
         id: `cust-${num}`,
         name: isSarah
           ? `سارة ${num} — استفسار متابعة`
-          : isAhmed
-            ? `أحمد ${num} — حجز موعد عيادة`
-            : `عميل تجريبي ${num} — استشارة عامة`,
+          : `أحمد ${num} — حجز موعد عيادة`,
         phone: `+96650111${String(num).padStart(4, "0")}`,
       },
       assignedUser: isAhmed

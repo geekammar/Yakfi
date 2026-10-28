@@ -476,6 +476,8 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await page.goto("/qa/conversation-header?installRoute=/settings", {
       waitUntil: "domcontentloaded",
     });
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
 
     const installBanner = page.locator('aside[aria-label="تثبيت التطبيق"]');
     await expect(installBanner).not.toBeVisible();
@@ -518,13 +520,15 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     });
     await expect(installBanner).not.toBeVisible();
 
-    // 2. Conversation detail route: banner is strictly suppressed
+    // 2. Conversation detail route: banner is strictly suppressed (even without dismissal cooldown)
     await page.goto(
       "/qa/conversation-header?installRoute=/conversations/conv-123",
       {
         waitUntil: "domcontentloaded",
       },
     );
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
     await page.evaluate(() => {
       const event = new Event("beforeinstallprompt", {
         bubbles: true,
@@ -540,10 +544,12 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     });
     await expect(installBanner).not.toBeVisible();
 
-    // 3. Booking task route: banner is strictly suppressed
+    // 3. Booking task route: banner is strictly suppressed (even without dismissal cooldown)
     await page.goto("/qa/conversation-header?installRoute=/appointments/new", {
       waitUntil: "domcontentloaded",
     });
+    await page.evaluate(() => window.localStorage.clear());
+    await page.waitForSelector('html[data-install-prompt-ready="true"]');
     await page.evaluate(() => {
       const event = new Event("beforeinstallprompt", {
         bubbles: true,
@@ -581,7 +587,7 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await searchInput.fill("سارة");
     const statusSelect = page.locator('button[aria-label="تصفية حسب الحالة"]');
     await statusSelect.click();
-    await page.getByRole("option", { name: "تحتاج انتباهك" }).click();
+    await page.getByRole("option", { name: "تحتاج تدخلاً" }).click();
 
     // Verify filtered items rendered
     const conversationLinks = page.locator('a[href*="view=conversation"]');
@@ -590,7 +596,7 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     expect(count).toBeGreaterThan(0);
 
     // Scroll inbox down to non-zero position
-    await page.evaluate(() => window.scrollTo(0, 300));
+    await page.evaluate(() => window.scrollTo(0, 200));
     const initialScrollY = await page.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
@@ -648,10 +654,14 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await expect(searchInput).toHaveValue("سارة");
 
     // Verify restored scroll position
-    const restoredScrollY = await page.evaluate(
-      () => window.scrollY || document.documentElement.scrollTop,
-    );
-    expect(restoredScrollY).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(
+            () => window.scrollY || document.documentElement.scrollTop,
+          ),
+      )
+      .toBeGreaterThan(0);
 
     // Reopen the conversation and verify draft intact
     await conversationLinks.first().click();
@@ -662,10 +672,14 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await page.goBack();
     await expect(searchInput).toBeVisible();
     await expect(searchInput).toHaveValue("سارة");
-    const backNavScrollY = await page.evaluate(
-      () => window.scrollY || document.documentElement.scrollTop,
-    );
-    expect(backNavScrollY).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(
+            () => window.scrollY || document.documentElement.scrollTop,
+          ),
+      )
+      .toBeGreaterThan(0);
 
     await page.goForward();
     await expect(replyTextarea).toBeVisible();
@@ -684,7 +698,7 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     });
 
     const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
-    const sendButton = page.locator('button[aria-label="إرسال"]');
+    const sendButton = page.locator('button[aria-label="إرسال الرد"]');
     const bottomNav = page.locator('nav[aria-label="التنقل الرئيسي"]');
 
     await expect(replyTextarea).toBeVisible();
