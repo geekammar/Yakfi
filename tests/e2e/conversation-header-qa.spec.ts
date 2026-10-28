@@ -305,11 +305,9 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await expect(menuContent).not.toBeVisible();
 
     // Verify transition payload sent by client contains exact transition identifier and id
-    expect(interceptedPostData).not.toBeNull();
-    if (interceptedPostData) {
-      expect(interceptedPostData).toContain("MARK_BOOKED");
-      expect(interceptedPostData).toContain("conv-qa-fixture-01");
-    }
+    const postDataStr = String(interceptedPostData ?? "");
+    expect(postDataStr).toContain("MARK_BOOKED");
+    expect(postDataStr).toContain("conv-qa-fixture-01");
 
     // Verify UI state transition completed to BOOKED (status badge reflects «تم الحجز»)
     const bookedBadge = persistentHeader.locator(

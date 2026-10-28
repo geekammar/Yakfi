@@ -126,7 +126,7 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
     aiSummary:
       "العميل يرغب في استفسار حول التغطية التأمينية وتأكيد موعد الكشف الأولي.",
     attentionReason: "AI_HANDOFF",
-    attentionCause: "CUSTOMER_REQUEST",
+    attentionCause: "CUSTOMER_REQUESTED_HUMAN",
     customer: {
       id: "cust-long-name-01",
       name: LONG_ARABIC_NAME,
@@ -144,10 +144,8 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
         status: "CONFIRMED",
         notes: "موعد استشارة ومتابعة",
         service: {
-          id: "srv-01",
           name: "استشارة عامة",
-          duration: 30,
-          price: 150,
+          durationMinutes: 30,
         },
       },
     ],
@@ -170,7 +168,7 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
         status: "NEED_HUMAN",
         attentionReason: null,
         attentionCause: null,
-        assignedUser: TEAM_MEMBERS[0], // current operator
+        assignedUser: TEAM_MEMBERS[0] ?? null, // current operator
       };
 
     case "assigned_other":
@@ -179,7 +177,7 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
         status: "NEED_HUMAN",
         attentionReason: null,
         attentionCause: null,
-        assignedUser: TEAM_MEMBERS[1], // another operator
+        assignedUser: TEAM_MEMBERS[1] ?? null, // another operator
       };
 
     case "booked":
@@ -197,13 +195,13 @@ function buildFixture(fixtureKey: string): ConversationDetailData {
         ...base,
         status: "NEED_HUMAN",
         attentionReason: "AI_HANDOFF",
-        attentionCause: "CUSTOMER_REQUEST",
+        attentionCause: "CUSTOMER_REQUESTED_HUMAN",
         assignedUser: null,
       };
   }
 }
 
-async function handleQaTransition(payload: {
+async function handleQaTransition(_payload: {
   id: string;
   transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
 }) {
