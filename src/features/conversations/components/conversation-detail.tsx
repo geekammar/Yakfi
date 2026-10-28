@@ -549,7 +549,7 @@ export function ConversationDetail({
             </div>
 
             {/* Direct Actions: wraps to its own row on mobile so customer name is never squeezed */}
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
               <ConversationActions
                 data={data}
                 isPending={isPending}

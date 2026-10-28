@@ -56,7 +56,7 @@ const FIXTURES = [
   {
     key: "booked",
     label: "BOOKED terminal state",
-    expectedStatusText: "تم الحجز",
+    expectedStatusText: "محجوز",
     expectedAssigneeText: "غير معينة",
     expectedPrimaryActionLabel: "إعادة للمساعد",
     hasAttentionChip: false,
@@ -309,11 +309,11 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     expect(postDataStr).toContain("MARK_BOOKED");
     expect(postDataStr).toContain("conv-qa-fixture-01");
 
-    // Verify UI state transition completed to BOOKED (status badge reflects «تم الحجز»)
+    // Verify UI state transition completed to BOOKED (status badge reflects «محجوز»)
     const bookedBadge = persistentHeader.locator(
       '[aria-label^="حالة المحادثة:"]',
     );
-    await expect(bookedBadge).toContainText("تم الحجز");
+    await expect(bookedBadge).toContainText("محجوز");
   });
 
   test("Preserve shell invariants: scroll thresholds, pinned header, composer clearance, draft & reading position", async ({

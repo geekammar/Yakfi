@@ -52,7 +52,7 @@ export function ConversationActions({
   handleTransition,
   mobileTab,
   setMobileTab,
-  className = "flex flex-wrap items-center gap-1.5 sm:gap-2",
+  className = "flex flex-wrap items-center gap-1 sm:gap-1.5",
 }: ConversationActionsProps) {
   const isTakeOver =
     data.status === "AI_ACTIVE" ||
@@ -67,7 +67,7 @@ export function ConversationActions({
         <Button
           type="button"
           size="sm"
-          className="min-h-11 md:min-h-8 px-2 sm:px-2.5 gap-1.5"
+          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() => handleTransition("TAKE_OVER")}
           disabled={isPending}
           aria-label="تولّي المحادثة"
@@ -81,7 +81,7 @@ export function ConversationActions({
           type="button"
           size="sm"
           variant="outline"
-          className="min-h-11 md:min-h-8 px-2 sm:px-2.5 gap-1.5"
+          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() => handleTransition("RETURN_TO_AI")}
           disabled={isPending}
           aria-label="إعادة للمساعد"
@@ -97,7 +97,7 @@ export function ConversationActions({
         asChild
         variant="outline"
         size="sm"
-        className="min-h-11 md:min-h-8 px-2 sm:px-2.5 gap-1.5"
+        className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
       >
         <Link
           href={`/appointments/new?customerId=${data.customer.id}`}
@@ -115,7 +115,7 @@ export function ConversationActions({
           type="button"
           variant={mobileTab === "context" ? "secondary" : "outline"}
           size="sm"
-          className="min-h-11 md:min-h-8 px-2 sm:px-2.5 lg:hidden gap-1.5"
+          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 lg:hidden gap-1 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() =>
             setMobileTab((current) =>
               current === "messages" ? "context" : "messages",
@@ -149,7 +149,7 @@ export function ConversationActions({
               type="button"
               variant="outline"
               size="sm"
-              className="min-h-11 md:min-h-8 px-2 sm:px-2.5 gap-1"
+              className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 text-xs"
               aria-label="المزيد من الإجراءات"
               disabled={isPending}
             >
