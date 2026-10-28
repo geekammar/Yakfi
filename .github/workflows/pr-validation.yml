@@ -117,6 +117,7 @@ jobs:
           pnpm check:compare-handoff-cause-test
           pnpm check:economics-contract
           pnpm check:exact-time-requests
+          pnpm check:scarce-availability
           pnpm check:conversation-ux
           pnpm check:conv-ui-01
           pnpm test:conversation-detail
