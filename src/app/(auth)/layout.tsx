@@ -1,5 +1,6 @@
+import { YakfiBrandText } from "@/components/shared/yakfi-brand-text";
 import { YakfiSymbol } from "@/components/shared/yakfi-symbol";
-import { APP_DESCRIPTION, APP_NAME } from "@/lib/app-config";
+import { APP_DESCRIPTION } from "@/lib/app-config";
 
 import Link from "next/link";
 
@@ -24,7 +25,7 @@ export default function AuthLayout({
             className="inline-flex items-center gap-2 text-lg font-semibold tracking-tight transition-colors hover:text-primary"
           >
             <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
-            <span>{APP_NAME}</span>
+            <YakfiBrandText />
           </Link>
           <p className="text-muted-foreground text-sm">{APP_DESCRIPTION}</p>
         </div>

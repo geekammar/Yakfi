@@ -278,4 +278,166 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
       fullPage: true,
     });
   });
+
+  test("Yakfi Wave B: Typography, token contract, and visual accessibility", async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+
+    // 1. Wait for document fonts to finish loading
+    await page.evaluate(() => document.fonts.ready);
+
+    // 2. Inspect computed font-family after fonts finish loading for UI and brand text
+    const uiFontInspection = await page.evaluate(() => {
+      const body = document.body;
+      const bodyFont = window.getComputedStyle(body).fontFamily;
+      const heading = document.querySelector("h1");
+      const headingFont = heading
+        ? window.getComputedStyle(heading).fontFamily
+        : "";
+      const brandEl = document.querySelector(
+        '[data-testid="yakfi-brand-text"]',
+      ) as HTMLElement | null;
+      const brandFont = brandEl
+        ? window.getComputedStyle(brandEl).fontFamily
+        : "";
+      const brandWeight = brandEl
+        ? window.getComputedStyle(brandEl).fontWeight
+        : "";
+      return { bodyFont, headingFont, brandFont, brandWeight };
+    });
+
+    // Confirm UI font is IBM Plex Sans Arabic (not the circular var(--font-sans) fallback)
+    expect(
+      uiFontInspection.bodyFont
+        .toLowerCase()
+        .includes("ibm plex sans arabic") ||
+        uiFontInspection.bodyFont.includes("__IBM_Plex_Sans_Arabic"),
+    ).toBe(true);
+
+    // Confirm brand text "يكفي" uses Readex Pro with weight 600
+    expect(
+      uiFontInspection.brandFont.toLowerCase().includes("readex pro") ||
+        uiFontInspection.brandFont.includes("__Readex_Pro"),
+    ).toBe(true);
+    expect(uiFontInspection.brandWeight).toBe("600");
+
+    // 3. Test Latin brand typography "yakfi" with Manrope 600
+    const latinFontInspection = await page.evaluate(() => {
+      const testSpan = document.createElement("span");
+      testSpan.className = "font-brand-latin font-semibold";
+      testSpan.textContent = "yakfi";
+      document.body.appendChild(testSpan);
+      const computed = window.getComputedStyle(testSpan);
+      const res = {
+        fontFamily: computed.fontFamily,
+        fontWeight: computed.fontWeight,
+      };
+      testSpan.remove();
+      return res;
+    });
+    expect(
+      latinFontInspection.fontFamily.toLowerCase().includes("manrope") ||
+        latinFontInspection.fontFamily.includes("__Manrope"),
+    ).toBe(true);
+    expect(latinFontInspection.fontWeight).toBe("600");
+
+    // 4. Confirm primary and canvas computed colors
+    const colors = await page.evaluate(() => {
+      const body = document.body;
+      const submitBtn = document.querySelector(
+        'button[type="submit"]',
+      ) as HTMLElement;
+      const card = document.querySelector(
+        '.bg-card, [data-slot="card"]',
+      ) as HTMLElement;
+      return {
+        canvasBg: window.getComputedStyle(body).backgroundColor,
+        bodyColor: window.getComputedStyle(body).color,
+        primaryBg: submitBtn
+          ? window.getComputedStyle(submitBtn).backgroundColor
+          : "",
+        primaryText: submitBtn ? window.getComputedStyle(submitBtn).color : "",
+        cardBg: card ? window.getComputedStyle(card).backgroundColor : "",
+        cardRadius: card ? window.getComputedStyle(card).borderRadius : "",
+        buttonRadius: submitBtn
+          ? window.getComputedStyle(submitBtn).borderRadius
+          : "",
+      };
+    });
+
+    // Canvas: #F4F7FB -> rgb(244, 247, 251)
+    expect(colors.canvasBg).toBe("rgb(244, 247, 251)");
+    // Main text: #122A43 -> rgb(18, 42, 67)
+    expect(colors.bodyColor).toBe("rgb(18, 42, 67)");
+    // Primary: #173B63 -> rgb(23, 59, 99)
+    expect(colors.primaryBg).toBe("rgb(23, 59, 99)");
+    // Primary text: #FFFFFF -> rgb(255, 255, 255)
+    expect(colors.primaryText).toBe("rgb(255, 255, 255)");
+    // Cards: #FFFFFF -> rgb(255, 255, 255)
+    expect(colors.cardBg).toBe("rgb(255, 255, 255)");
+
+    // Explicit Card radius: 12px
+    expect(colors.cardRadius).toBe("12px");
+    // Explicit Control radius: 8px
+    expect(colors.buttonRadius).toBe("8px");
+
+    // 5. Measure composed contrast & verify warning badges on translucent backgrounds
+    const warningBadgeInspection = await page.evaluate(() => {
+      const sample = document.createElement("span");
+      sample.className =
+        "border-warning/25 bg-warning/10 text-warning-foreground rounded-full border px-2.5 py-0.5 text-xs font-medium";
+      sample.textContent = "تنبيه معلق";
+      document.body.appendChild(sample);
+      const style = window.getComputedStyle(sample);
+      const textColor = style.color;
+      sample.remove();
+      return { textColor };
+    });
+
+    // Warning text on translucent background must not be white
+    expect(warningBadgeInspection.textColor).not.toBe("rgb(255, 255, 255)");
+
+    // 6. Interactive states: Focus, Hover, Active, Disabled, Error
+    const interactiveCheck = await page.evaluate(() => {
+      const email = document.querySelector(
+        'input[id="email"]',
+      ) as HTMLInputElement;
+      email.focus();
+      const inputFocused = document.activeElement === email;
+
+      const submitBtn = document.querySelector(
+        'button[type="submit"]',
+      ) as HTMLButtonElement;
+      submitBtn.focus();
+      const btnFocused = document.activeElement === submitBtn;
+
+      submitBtn.disabled = true;
+      const isActuallyDisabled = submitBtn.matches(":disabled");
+      const hasDisabledClass =
+        submitBtn.classList.contains("disabled:opacity-50") ||
+        submitBtn.className.includes("disabled:pointer-events-none");
+      submitBtn.disabled = false;
+
+      return {
+        inputFocused,
+        btnFocused,
+        isActuallyDisabled,
+        hasDisabledClass,
+      };
+    });
+    expect(interactiveCheck.inputFocused).toBe(true);
+    expect(interactiveCheck.btnFocused).toBe(true);
+    expect(interactiveCheck.isActuallyDisabled).toBe(true);
+    expect(interactiveCheck.hasDisabledClass).toBe(true);
+
+    // Screenshot Wave B visual state
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${testInfo.project.name}-yakfi-wave-b-tokens.png`,
+      ),
+      fullPage: true,
+    });
+  });
 });

@@ -9,7 +9,15 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.76.0 (feature branch; candidate PR)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Platform identity transition and PWA/browser asset update:
+**Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.1 (PR #52 merged baseline, commit `4077f98b6ae412ea6d7c54b253c6502837aa30cc`). Design system typography and token implementation:
+
+1. **Circular Font-Sans Fix**: Repaired the circular `--font-sans: var(--font-sans)` mapping in `src/app/globals.css` to properly map to loaded `IBM Plex Sans Arabic` (`var(--font-arabic)`), restoring intended typography across all UI text, headings, controls, and body elements.
+2. **Brand Typography (Arabic & Latin)**: Added Google fonts `Readex_Pro` and `Manrope` via `next/font/google` in `src/app/layout.tsx`. Implemented `<YakfiBrandText />` (`src/components/shared/yakfi-brand-text.tsx`) rendering Arabic brand text "يكفي" with Readex Pro 600, and Latin "yakfi" with Manrope 600 where displayed. Preserved customer names, business names, and assistant names.
+3. **Approved Light Design System Tokens**: Applied approved light tokens: Canvas `#F4F7FB`, Cards `#FFFFFF`, Primary `#173B63`, Primary text `#FFFFFF`, Main text `#122A43`, Muted text `#52677B`, Borders `#D9E2EB`, and Selection `#E5F3F7`. Preserved semantic status distinctions (success, warning, error, info).
+4. **Explicit Radius Token Mapping**: Explicitly mapped card radius `--radius-card` to `12px` and control radius `--radius-control` to `8px` in `@theme inline` and `:root`. Mapped `--radius-xl` to card radius and `--radius-md` to control radius.
+5. **Semantic Foreground & Contrast Safety**: Ensured warning badges and notices on translucent light backgrounds (`bg-warning/10`) use dark warning foreground (`oklch(0.28 0.06 70)`), avoiding white-on-light contrast degradation. Left dark mode activation and colors unchanged.
+
+**Product version: v0.76.0 (main)** — `Yakfi Wave A: Platform Identity and App Assets`. Baseline: v0.75.5 (PR #50 merged baseline, commit `a029763bacfa7154e1569878d59f3dedef10c81d`). Platform identity transition and PWA/browser asset update:
 
 1. **Platform Identity Definition**: Updated `APP_NAME` to `يكفي` and `APP_DESCRIPTION` to `إدارة المحادثات وحجز المواعيد ومتابعتها.` in `src/lib/app-config.ts` (with `APP_NAME_LATIN = "yakfi"`). Preserved business, customer, bot identity, and infrastructure identifiers.
 2. **Accessible Brand Headers & Links**: Embedded `<YakfiSymbol />` (`src/components/shared/yakfi-symbol.tsx`) with 24px size and 8px gap alongside Arabic name `يكفي` in `app-shell.tsx` (desktop sidebar and mobile topbar), `(auth)/layout.tsx`, and `onboarding-shell.tsx`. Kept existing text sizing, `h-14` toolbar height, and single-row action geometry.

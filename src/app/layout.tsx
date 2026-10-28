@@ -3,7 +3,12 @@ import { QueryProvider } from "@/components/shared/query-provider";
 import { APP_DESCRIPTION, APP_NAME } from "@/lib/app-config";
 
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, IBM_Plex_Sans_Arabic } from "next/font/google";
+import {
+  Geist_Mono,
+  IBM_Plex_Sans_Arabic,
+  Manrope,
+  Readex_Pro,
+} from "next/font/google";
 
 import "./globals.css";
 
@@ -17,6 +22,20 @@ const arabicSans = IBM_Plex_Sans_Arabic({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const readexPro = Readex_Pro({
+  variable: "--font-readex-pro",
+  subsets: ["arabic", "latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const manrope = Manrope({
+  variable: "--font-manrope",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -57,7 +76,7 @@ export default function RootLayout({
     <html
       lang="ar"
       dir="rtl"
-      className={`${arabicSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${arabicSans.variable} ${geistMono.variable} ${readexPro.variable} ${manrope.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
         <a

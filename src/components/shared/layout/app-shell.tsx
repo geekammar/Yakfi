@@ -1,7 +1,8 @@
 import { BottomNav } from "@/components/shared/layout/bottom-nav";
 import { SidebarNav } from "@/components/shared/layout/sidebar-nav";
+import { YakfiBrandText } from "@/components/shared/yakfi-brand-text";
 import { YakfiSymbol } from "@/components/shared/yakfi-symbol";
-import { APP_NAME, type NavItem } from "@/lib/app-config";
+import type { NavItem } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
 import Link from "next/link";
@@ -48,7 +49,7 @@ export function AppShell({
             className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary"
           >
             <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
-            <span>{APP_NAME}</span>
+            <YakfiBrandText />
           </Link>
         </div>
         <SidebarNav items={navItems} />
@@ -63,7 +64,7 @@ export function AppShell({
               className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary md:hidden"
             >
               <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
-              <span>{APP_NAME}</span>
+              <YakfiBrandText />
             </Link>
             <div className="ms-auto flex items-center gap-2">{header}</div>
           </div>
