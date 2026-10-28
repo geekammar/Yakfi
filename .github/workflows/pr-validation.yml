@@ -123,8 +123,9 @@ jobs:
           pnpm check:scarce-availability
           pnpm check:conversation-ux
           pnpm check:conv-ui-01
-          pnpm check:qa-harness
+          pnpm check:appointment-calendar-dates
           pnpm test:conversation-detail
+          pnpm check:qa-harness
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause
