@@ -277,6 +277,7 @@ export function AccessibilityRepairsHarness() {
             initialItems={FIXTURE_APPOINTMENTS}
             date="2026-10-28"
             today="2026-10-28"
+            workingHours={INITIAL_WORKING_HOURS.workingHours}
             slotDurationMinutes={30}
           />
         </div>

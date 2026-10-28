@@ -71,7 +71,7 @@ function DialogContent({
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-3 end-3 min-h-[44px] min-w-[44px] size-11 rounded-lg sm:top-4 sm:end-4"
+              className="absolute top-3 end-3 min-h-[44px] min-w-[44px] size-11 shrink-0 rounded-lg sm:top-4 sm:end-4"
               size="icon"
               aria-label="إغلاق"
             >

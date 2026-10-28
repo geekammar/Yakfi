@@ -34,6 +34,7 @@ test.describe("UI & Accessibility Repairs QA", () => {
 
     const rtlContent = page.locator('[data-testid="dialog-rtl-content"]');
     await expect(rtlContent).toBeVisible();
+    await page.waitForTimeout(150);
 
     // Check close button properties
     const rtlCloseButton = rtlContent.locator(
@@ -158,6 +159,7 @@ test.describe("UI & Accessibility Repairs QA", () => {
 
     const ltrContent = page.locator('[data-testid="dialog-ltr-content"]');
     await expect(ltrContent).toBeVisible();
+    await page.waitForTimeout(150);
 
     const ltrCloseButton = ltrContent.locator(
       'button[data-slot="dialog-close"]',
