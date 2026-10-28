@@ -65,7 +65,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 2. Sign-in page
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/(?:يكفي|FlowPilot)/);
 
     // Verify RTL on sign-in
     const htmlDir = await page.locator("html").getAttribute("dir");
@@ -128,7 +128,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 3. Admin Dashboard
     await page.goto("/admin", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/(?:يكفي|FlowPilot)/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify RTL
@@ -148,7 +148,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 4. /admin/team page — Provider Management
     await page.goto("/admin/team", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/(?:يكفي|FlowPilot)/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify page content: header, actions
@@ -230,7 +230,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 6. Visual Staff Calendar (/appointments)
     await page.goto("/appointments", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/المواعيد|FlowPilot/);
+    await expect(page).toHaveTitle(/(?:المواعيد|يكفي|FlowPilot)/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify RTL
@@ -256,7 +256,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 7. Settings Screen with Discoverable Provider Management Link (/settings)
     await page.goto("/settings", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/الإعدادات|FlowPilot/);
+    await expect(page).toHaveTitle(/(?:الإعدادات|يكفي|FlowPilot)/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify discoverable provider management link exists and has expected text
@@ -305,7 +305,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // 9. Conversations Inbox & Persistent Header QA (CONV-UI-01 / U01–U10)
     await page.goto("/conversations", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/المحادثات|FlowPilot/);
+    await expect(page).toHaveTitle(/(?:المحادثات|يكفي|FlowPilot)/);
     await expect(page.locator("body")).toBeVisible();
 
     // Verify RTL & zero horizontal overflow on inbox

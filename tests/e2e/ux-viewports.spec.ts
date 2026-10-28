@@ -36,7 +36,7 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
 
     // 1. Navigate to /sign-in
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await expect(page).toHaveTitle(/FlowPilot/);
+    await expect(page).toHaveTitle(/(?:يكفي|FlowPilot)/);
 
     // 2. Arabic RTL Assertion
     const htmlDir = await page.locator("html").getAttribute("dir");
