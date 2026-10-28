@@ -42,6 +42,8 @@ const PUBLIC_PATH_PREFIXES = [
   // Scheduled cron endpoints (BOOK-REM-01). Authenticated via CRON_SECRET
   // bearer token / header; answering 401 if missing or unauthorized.
   "/api/cron",
+  // Automated UX QA test harness for viewport and responsive layout acceptance
+  "/qa/",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {
