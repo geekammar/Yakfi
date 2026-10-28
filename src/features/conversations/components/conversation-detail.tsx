@@ -297,11 +297,18 @@ function ContextCards({
   );
 }
 
+export type ConversationDetailProps = {
+  data: ConversationDetailData;
+  onTransition?: (payload: {
+    id: string;
+    transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF";
+  }) => Promise<{ success: boolean; message?: string }>;
+};
+
 export function ConversationDetail({
   data: initialData,
-}: {
-  data: ConversationDetailData;
-}) {
+  onTransition,
+}: ConversationDetailProps) {
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
   const [summary, setSummary] = useState(initialData.aiSummary);
@@ -393,7 +400,9 @@ export function ConversationDetail({
   ) {
     startTransition(async () => {
       const success = await runAction(() =>
-        transitionConversation({ id: data.id, transition }),
+        onTransition
+          ? onTransition({ id: data.id, transition })
+          : transitionConversation({ id: data.id, transition }),
       );
       if (!success) return;
       const nextStatus = {
@@ -540,7 +549,7 @@ export function ConversationDetail({
             </div>
 
             {/* Direct Actions: wraps to its own row on mobile so customer name is never squeezed */}
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <ConversationActions
                 data={data}
                 isPending={isPending}

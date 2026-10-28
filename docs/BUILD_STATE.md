@@ -20,7 +20,7 @@
    - Mobile context view toggle («التفاصيل» / «المحادثة», `aria-label="عرض تفاصيل العميل والمواعيد"`).
    - Secondary actions in an accessible «المزيد» `DropdownMenu` (`MARK_BOOKED` «تحديد كمحجوز», `HANDOFF` «تحويل للفريق») when available.
 5. **Preserved Shell, Scroll & Safety Invariants**: Kept pinned conversation header (`sticky top-0 z-20`), internally scrolling message transcript (`div[role="log"]`), PR47 sidebar constraints (`maxHeight: "var(--conversation-height, calc(100dvh - 8.5rem))"`), composer clearance above bottom navigation (`pb-24`), draft preservation across view switches, reading position stability, and zero DB migrations or backend logic alterations.
-6. **Acceptance Verification**: Verified by unit and interaction tests in `conversation-detail.test.tsx`, `scripts/check-conv-ui-01.ts`, `scripts/check-conversation-ux.ts`, `pnpm check:version` (v0.75.4 strictly incremented), and automated browser UX QA in Playwright.
+6. **Acceptance Verification**: Verified by unit and interaction tests in `conversation-detail.test.tsx`, `scripts/check-conv-ui-01.ts`, `scripts/check-conversation-ux.ts`, `pnpm check:version` (v0.75.4 strictly incremented), and automated browser UX QA in Playwright across 320/360/390/768/1280 viewports using controlled fixtures (`tests/e2e/conversation-header-qa.spec.ts`) measuring real geometry, wrapping, touch targets, elementFromPoint clipping isolation, and keyboard navigation.
 
 **Product version: v0.75.3 (main)** — `Scarce Availability, Duration, and Navigation Regression Suite`. Baseline: v0.75.2 (origin/main at commit `ed49e018ca94969af359985ef9bff1479b07c2be`).
 

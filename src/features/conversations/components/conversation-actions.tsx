@@ -52,7 +52,7 @@ export function ConversationActions({
   handleTransition,
   mobileTab,
   setMobileTab,
-  className = "flex items-center gap-1.5 sm:gap-2",
+  className = "flex flex-wrap items-center gap-1.5 sm:gap-2",
 }: ConversationActionsProps) {
   const isTakeOver =
     data.status === "AI_ACTIVE" ||
