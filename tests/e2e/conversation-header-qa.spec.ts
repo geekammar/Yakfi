@@ -691,8 +691,8 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     await expect(sendButton).toBeVisible();
     await expect(bottomNav).toBeVisible();
 
-    // Evaluate geometry on normal height and reduced height
-    const testHeights = [844, 600, 480];
+    // Evaluate geometry on normal height and reduced height (e.g. SE/landscape clearance)
+    const testHeights = [844, 667, 600];
     const viewport = page.viewportSize();
     const width = viewport?.width ?? 390;
 

@@ -586,7 +586,7 @@ export function ConversationDetail({
             "var(--conversation-height, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px)))",
           minHeight: 0,
         }}
-        className="flex h-[calc(100dvh-11rem)] min-h-0 sm:min-h-[20rem] lg:min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
+        className="flex h-[calc(100dvh-11rem)] min-h-[28rem] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:h-[calc(100dvh-8.5rem)]"
       >
         <header
           data-testid="conversation-persistent-header"
