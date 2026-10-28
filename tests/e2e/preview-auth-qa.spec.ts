@@ -334,6 +334,10 @@ test.describe("Authenticated Preview QA", () => {
       waitUntil: "domcontentloaded",
     });
 
+    // Ensure document window scroll is at top so initialHeaderBox is captured at canonical offset
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(50);
+
     // U01 & U08: Persistent Header presence & initial geometry
     const persistentHeader = page.locator(
       'header[data-testid="conversation-persistent-header"]',
