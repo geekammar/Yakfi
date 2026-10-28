@@ -189,8 +189,6 @@ export function TeamScreen({
     });
   }
 
-  const hasStaff = members.some((member) => member.role === "STAFF");
-
   return (
     <div className="animate-fade-in-up space-y-8">
       <PageHeader
@@ -413,16 +411,16 @@ export function TeamScreen({
           </Button>
         </div>
 
-        {!hasStaff && invitations.length === 0 ? (
+        {members.length === 0 ? (
           <EmptyState
             className="bg-card min-h-44 border"
             icon={UsersRoundIcon}
-            title="لم تُضف موظفين بعد"
-            description="أنت مدير المنشأة. يمكنك دعوة موظفيك عبر البريد الإلكتروني ليشاركونك إدارة المواعيد والمحادثات."
+            title="لم يتم إضافة أعضاء بعد"
+            description="يمكنك دعوة أعضاء الفريق عبر البريد الإلكتروني ليشاركونك إدارة المواعيد والمحادثات."
             action={
               <Button size="sm" onClick={openInvite}>
                 <UserRoundPlusIcon aria-hidden className="size-4" />
-                دعوة موظف
+                دعوة عضو
               </Button>
             }
           />

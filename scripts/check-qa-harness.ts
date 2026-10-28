@@ -16,6 +16,7 @@
  */
 
 import {
+  QA_ACCESSIBILITY_REPAIRS_PATH,
   QA_CONVERSATION_HEADER_PATH,
   isPublicPath,
 } from "../src/lib/public-paths";
@@ -36,6 +37,10 @@ check(
 check(
   "isPublicPath(/qa/conversation-header, {}) === false (المسار غير عام افتراضياً)",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {}) === false,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs, {}) === false (المسار غير عام افتراضياً)",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {}) === false,
 );
 
 // 2. Fixture is UNAVAILABLE in production configuration (even if flag enabled)
@@ -79,6 +84,13 @@ check(
 check(
   "isPublicPath(/qa/conversation-header) === true في بيئة اختبار الـ CI",
   isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    NODE_ENV: "production",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  }) === true,
+);
+check(
+  "isPublicPath(/qa/accessibility-repairs) === true في بيئة اختبار الـ CI",
+  isPublicPath(QA_ACCESSIBILITY_REPAIRS_PATH, {
     NODE_ENV: "production",
     FLOWPILOT_ENABLE_QA_HARNESS: "true",
   }) === true,

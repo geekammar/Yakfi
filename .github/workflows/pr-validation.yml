@@ -124,6 +124,7 @@ jobs:
           pnpm check:conversation-ux
           pnpm check:conv-ui-01
           pnpm check:qa-harness
+          pnpm check:ui-accessibility
           pnpm test:conversation-detail
 
       - name: Base-versus-HEAD handoff-cause reconciliation
