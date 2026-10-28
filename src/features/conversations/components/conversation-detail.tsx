@@ -510,12 +510,12 @@ export function ConversationDetail({
       >
         <header
           data-testid="conversation-persistent-header"
-          className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-2.5 space-y-2 sm:space-y-2.5"
+          className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur-xs px-3 py-2 sm:px-4 sm:py-2.5 space-y-1.5 sm:space-y-2"
         >
           {/* Identity & Direct Actions Area */}
-          <div className="flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-1.5 sm:gap-2">
             {/* Customer Identity: independent layout area allowing up to 2 lines on narrow screens */}
-            <div className="flex min-w-0 items-center gap-2 sm:gap-3 flex-1">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3 w-full md:w-auto md:flex-1">
               <Button
                 asChild
                 variant="ghost"
@@ -539,7 +539,7 @@ export function ConversationDetail({
               </div>
             </div>
 
-            {/* Direct Actions: Shared component accessible on both mobile and desktop without opening context */}
+            {/* Direct Actions: wraps to its own row on mobile so customer name is never squeezed */}
             <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
               <ConversationActions
                 data={data}
