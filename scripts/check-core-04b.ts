@@ -2834,9 +2834,9 @@ async function run() {
       emittedEvidenceS7[0]?.providerAttempts === 2,
     );
     check(
-      "S7_d. Safe handoff triggered with handoffReason or NEED_HUMAN",
+      "S7_d. Safe handoff triggered with handoffCause RETRY_EXHAUSTED",
       emittedEvidenceS7[0]?.finalOutcome === "NEED_HUMAN" ||
-        emittedEvidenceS7[0]?.handoffReason !== null,
+        emittedEvidenceS7[0]?.handoffCause === "RETRY_EXHAUSTED",
     );
     check(
       "S7_e. Zero appointments created on timeout exhaustion",
