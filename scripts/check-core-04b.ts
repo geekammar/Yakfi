@@ -2688,14 +2688,18 @@ async function run() {
       verdictCancelled.ok === false && verdictCancelled.reason === "ABORTED",
     );
 
-    // Delayed response-body exceeding 18s
+    // Delayed response-body exceeding 18s (headers return first, body delayed past 18s)
     let clockS4b = 1000;
     const slowBodyFetch18s: typeof fetch = async () => {
-      clockS4b += 18050; // body read delays past 18s
-      return new Response(
+      const resp = new Response(
         JSON.stringify(openAiEnvelope(validAiResponseJson())),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
+      resp.text = async () => {
+        clockS4b += 18050; // body read delays past 18s
+        return JSON.stringify(openAiEnvelope(validAiResponseJson()));
+      };
+      return resp;
     };
     const adapterSlowBody18s = createOpenRouterAdapter({
       model: "openrouter/auto",
@@ -2834,30 +2838,147 @@ async function run() {
       emittedEvidenceS7[0]?.providerAttempts === 2,
     );
     check(
-      "S7_d. Safe handoff triggered with handoffCause RETRY_EXHAUSTED",
-      emittedEvidenceS7[0]?.finalOutcome === "NEED_HUMAN" ||
-        emittedEvidenceS7[0]?.handoffCause === "RETRY_EXHAUSTED",
+      "S7_d. Safe handoff triggered with handoff outcome AI_HANDOFF, status NEED_HUMAN, and cause RETRY_EXHAUSTED",
+      emittedEvidenceS7[0]?.finalOutcome === "AI_HANDOFF" &&
+        emittedEvidenceS7[0]?.conversationStatus === "NEED_HUMAN" &&
+        emittedEvidenceS7[0]?.handoffCause === "RETRY_EXHAUSTED" &&
+        harnessS7.conversation.status === "NEED_HUMAN",
     );
     check(
-      "S7_e. Zero appointments created on timeout exhaustion",
-      harnessS7.appointments.length === 0,
+      "S7_e. Zero appointments created and captured appointment writes remain empty on timeout exhaustion",
+      harnessS7.appointments.length === 0 &&
+        harnessS7.capturedAppointmentWrites.length === 0,
     );
 
     // S8. Factory composition separation: logical turn deadline is NOT 18 seconds
-    const clockS8 = 1000;
-    const defaultTurnSession = createServingExecutionSession({
-      getNow: () => clockS8,
-      // timeoutMs left undefined as in default conversation-engine composition
+    // Exercise default factory composition path without timeoutMs
+    const mockGetAiPolicyS8 = async () => ({
+      success: true as const,
+      data: {
+        policy: {
+          id: "policy-test-s8",
+          primaryProvider: "openrouter",
+          primaryModel: "openrouter/auto",
+          secondaryProvider: null,
+          secondaryModel: null,
+          fallbackEnabled: false,
+          openRouterProviderOnly: null,
+          primarySecretRef: "OPENROUTER_API_KEY",
+          secondarySecretRef: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        effective: {
+          primaryProvider: "openrouter" as const,
+          primaryModel: "openrouter/auto",
+          secondary: null,
+          openRouterProviderOnly: null,
+        },
+      },
     });
+
+    const envS8 = (name: string) => {
+      if (name === "OPENROUTER_API_KEY") return "valid-key";
+      if (name === FLOWPILOT_AI_GLOBAL_STOP_FLAG) return "0";
+      if (name === "FLOWPILOT_JEV_SEMANTIC_ENABLED") return "0";
+      return undefined;
+    };
+
+    const realDateNowS8 = Date.now;
+    let mockNowS8 = 1_000_000;
+    Date.now = () => mockNowS8;
+
+    let wireAttemptsS8 = 0;
+    const fetchS8: typeof fetch = async () => {
+      wireAttemptsS8++;
+      if (wireAttemptsS8 === 1) {
+        mockNowS8 += 14000; // Attempt 1 takes 14s (<= 18s adapter timeout)
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      mockNowS8 += 10000; // Attempt 2 takes 10s (<= 18s adapter timeout)
+      return new Response(
+        JSON.stringify(openAiEnvelope(validAiResponseJson())),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    let resS8: any = null;
+    let teleS8: any = null;
+    try {
+      const factoryAiS8 = await createPolicyBackedAi({
+        getAiPolicyImpl: mockGetAiPolicyS8 as any,
+        getEnvVar: envS8,
+        fetchImpl: fetchS8,
+        // timeoutMs intentionally omitted to exercise default factory composition
+      });
+      resS8 = await factoryAiS8.respond(sampleRequest());
+      teleS8 = (factoryAiS8 as any).getLastTelemetry();
+    } finally {
+      Date.now = realDateNowS8;
+    }
+
     check(
-      "S8. Default factory composition preserves whole-turn budget (deadline >= 200s, not 18s)",
-      defaultTurnSession.deadlineMs - clockS8 >= 200_000,
+      "S8_a. Default factory composition allows two attempts collectively taking 24s (> 18s)",
+      resS8 !== null &&
+        resS8.action === "reply" &&
+        wireAttemptsS8 === 2 &&
+        teleS8?.totalHttpAttempts === 2 &&
+        mockNowS8 - 1_000_000 === 24000,
+    );
+    check(
+      "S8_b. Logical turn budget is not accidentally limited to 18 seconds",
+      mockNowS8 - 1_000_000 > 18000,
     );
 
-    // S9. Existing shorter shadow budgets remain effective
+    // S9. Existing shorter shadow budgets remain effective (exercising shadow execution path)
+    const envShadowS9 = (k: string) => {
+      if (k === "FLOWPILOT_JEV_SHADOW_ENABLED") return "true";
+      if (k === "SHADOW_SAMPLE_RATE") return "1.0";
+      if (k === "OPENROUTER_API_KEY") return "valid-key";
+      return undefined;
+    };
+
+    const realDateNowS9 = Date.now;
+    let mockNowS9 = 2_000_000;
+    Date.now = () => mockNowS9;
+
+    const slowShadowFetch: typeof fetch = async () => {
+      mockNowS9 += 7000; // 7s delays past 6s shadow deadline, but within 18s adapter timeout
+      return new Response(
+        JSON.stringify({
+          id: "dec-s9",
+          choices: [{ message: { content: JSON.stringify({ answers: {} }) } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    let evidenceS9: any = null;
+    try {
+      const shadowProviderS9 = createJevDecisionsProvider({
+        getEnvVar: envShadowS9,
+        fetchImpl: slowShadowFetch,
+        timeoutMs: JEV_SHADOW_TIMEOUT_MS, // 6000ms
+      });
+      const shadowStrategyS9 = createShadowJevStrategy({
+        provider: shadowProviderS9,
+        sampler: createShadowSampler({ getEnvVar: envShadowS9 }),
+        timeoutMs: JEV_SHADOW_TIMEOUT_MS,
+      });
+
+      evidenceS9 = await shadowStrategyS9.evaluate(
+        sampleRequest("عايز موعد كشف أسنان"),
+      );
+    } finally {
+      Date.now = realDateNowS9;
+    }
+
     check(
-      "S9. Shadow JEV default timeout remains 6000ms (not inflated to 18000ms)",
-      JEV_SHADOW_TIMEOUT_MS === 6000,
+      "S9. Shadow execution path stops delayed work past 6000ms as TIMEOUT despite 18s adapter default",
+      evidenceS9 !== null &&
+        evidenceS9.failureCode === "TIMEOUT" &&
+        evidenceS9.evidenceRole === "SHADOW" &&
+        evidenceS9.latencyMs === 7000,
     );
   }
 
