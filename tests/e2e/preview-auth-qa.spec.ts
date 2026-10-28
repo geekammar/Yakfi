@@ -64,8 +64,8 @@ test.describe("Authenticated Preview QA", () => {
     expect(healthData.missingEnvVars).toEqual([]);
     expect(
       healthData.version,
-      "Target deployment must match candidate version v0.76.1",
-    ).toBe("0.76.1");
+      "Target deployment must match candidate version v0.76.2",
+    ).toBe("0.76.2");
 
     // Establish candidate identity preconditions on deployed Preview
     const manifestRes = await page.request.get("/manifest.webmanifest");

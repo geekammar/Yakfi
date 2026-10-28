@@ -157,13 +157,13 @@ export function AccessibilityRepairsHarness() {
                   <DialogHeader data-testid="dialog-rtl-header">
                     <DialogTitle
                       data-testid="dialog-rtl-title"
-                      className="flex items-center gap-2 text-base"
+                      className="flex items-center gap-2 text-base min-w-0"
                     >
                       <SparklesIcon
                         data-testid="dialog-rtl-icon"
                         className="size-5 text-primary shrink-0"
                       />
-                      <span className="truncate">
+                      <span className="truncate min-w-0">
                         تأكيد تفاصيل الموعد والخدمات الاستشارية الطبية الشاملة
                       </span>
                     </DialogTitle>
