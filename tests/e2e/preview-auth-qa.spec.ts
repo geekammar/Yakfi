@@ -419,9 +419,17 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
 
+    // Restore pre-screenshot window scroll if Playwright fullPage altered it
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(50);
+
     // Check Middle: Scroll to middle reading position
+    const currentLogMetrics = await messageLog.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
     const middleTarget = Math.floor(
-      (initialMetrics.scrollHeight - initialMetrics.clientHeight) / 2,
+      (currentLogMetrics.scrollHeight - currentLogMetrics.clientHeight) / 2,
     );
     await messageLog.evaluate((el, target) => {
       el.scrollTop = target;
