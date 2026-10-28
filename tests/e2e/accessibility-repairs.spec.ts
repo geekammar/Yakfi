@@ -377,14 +377,18 @@ test.describe("UI & Accessibility Repairs QA", () => {
     const calendarDotInitial = calendarViewButton.locator("span.rounded-full");
     await expect(calendarDotInitial).toHaveCount(0);
 
-    // Assert content reflects List View: appointment card is visible, timeline section is not
-    const listAppointmentCard = page.locator("article", {
-      hasText: "خالد بن فهد",
+    // Assert content reflects List View: list quick filter & follow-up action are visible, calendar timeline section is not
+    const listFilterButton = page.locator("button", {
+      hasText: "جميع الحالات",
     });
-    await expect(listAppointmentCard).toBeVisible();
+    const listFollowUpLink = page.locator("a", {
+      hasText: "إضافة متابعة",
+    });
     const calendarTimelineSection = page.locator(
       'section[aria-label="الجدول الزمني لليوم"]',
     );
+    await expect(listFilterButton).toBeVisible();
+    await expect(listFollowUpLink.first()).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
 
     // Screenshot List View
@@ -406,12 +410,13 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(calendarDot).toBeVisible();
     await expect(listViewButton.locator("span.rounded-full")).toHaveCount(0);
 
-    // Assert content reflects Calendar View: timeline section is rendered, list card is hidden
+    // Assert content reflects Calendar View: timeline section is rendered, list controls are hidden
     await expect(calendarTimelineSection).toBeVisible();
     await expect(
       calendarTimelineSection.locator("text=الجدول الزمني والفترات المتاحة"),
     ).toBeVisible();
-    await expect(listAppointmentCard).toHaveCount(0);
+    await expect(listFilterButton).toHaveCount(0);
+    await expect(listFollowUpLink).toHaveCount(0);
 
     // Screenshot Calendar View
     await page.screenshot({
@@ -427,8 +432,9 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(listViewButton).toHaveAttribute("aria-pressed", "true");
     await expect(calendarViewButton).toHaveAttribute("aria-pressed", "false");
 
-    // Content changes back: List card returns and timeline section is removed
-    await expect(listAppointmentCard).toBeVisible();
+    // Content changes back: List controls return and timeline section is removed
+    await expect(listFilterButton).toBeVisible();
+    await expect(listFollowUpLink.first()).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
   });
 });
