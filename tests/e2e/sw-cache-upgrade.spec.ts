@@ -62,10 +62,13 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
       await navigator.serviceWorker.ready;
     });
 
-    // Wait until the new v3 cache has been created by sw precache/activation
+    // Wait until activation has completed and old v2 cache has been evicted
     await page.waitForFunction(async () => {
       const keys = await caches.keys();
-      return keys.includes("flowpilot-static-v3");
+      return (
+        keys.includes("flowpilot-static-v3") &&
+        !keys.includes("flowpilot-static-v2")
+      );
     });
 
     // 4. Verify old-cache eviction and new icon in flowpilot-static-v3
