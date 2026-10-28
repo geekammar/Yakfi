@@ -89,6 +89,18 @@ check(
     FLOWPILOT_ENABLE_QA_HARNESS: "1",
   }) === true,
 );
+check(
+  "isQaHarnessAllowed with VERCEL_ENV='preview' === true (متاح في بيئات معاينة فيرسيل لاختبارات المتصفح)",
+  isQaHarnessAllowed({
+    VERCEL_ENV: "preview",
+  }) === true,
+);
+check(
+  "isPublicPath(/qa/conversation-header) === true في بيئات معاينة فيرسيل",
+  isPublicPath(QA_CONVERSATION_HEADER_PATH, {
+    VERCEL_ENV: "preview",
+  }) === true,
+);
 
 // 4. Broad /qa/ prefix and unknown subroutes are NOT public
 const ciEnv: Record<string, string | undefined> = {

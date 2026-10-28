@@ -15,7 +15,7 @@
 export function isQaHarnessAllowed(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  // Reject in Vercel production even if flag is accidentally enabled
+  // 1. Vercel production MUST reject the fixture route even if the flag is enabled
   if (
     env.VERCEL_ENV === "production" ||
     env.NEXT_PUBLIC_VERCEL_ENV === "production"
@@ -23,7 +23,12 @@ export function isQaHarnessAllowed(
     return false;
   }
 
-  // Unavailable by default; must be explicitly enabled
+  // 2. Allowed in verified Vercel preview environments (where automated browser QA runs)
+  if (env.VERCEL_ENV === "preview") {
+    return true;
+  }
+
+  // 3. Unavailable by default; allowed when explicit server-side test flag is enabled
   const flag = env.FLOWPILOT_ENABLE_QA_HARNESS ?? env.ENABLE_QA_HARNESS;
   return flag === "true" || flag === "1";
 }
