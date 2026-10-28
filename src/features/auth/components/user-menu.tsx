@@ -1,5 +1,6 @@
 "use client";
 
+import { clearConversationStorage } from "@/features/conversations/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,6 +83,7 @@ export function UserMenu() {
         ) : null}
         <DropdownMenuItem
           onClick={async () => {
+            clearConversationStorage();
             await authClient.signOut();
             refetch();
             router.replace("/sign-in");
