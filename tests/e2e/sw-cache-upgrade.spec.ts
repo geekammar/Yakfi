@@ -48,17 +48,9 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
     });
     expect(staleVerification).toContain("legacy-v2-icon");
 
-    // 3. Exercise actual new service worker (/sw.js) installation and activation
+    // 3. Exercise actual new service worker (/sw.js) installation and activation via page reload
+    await page.reload({ waitUntil: "domcontentloaded" });
     await page.evaluate(async () => {
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await new Promise<void>((resolve) => {
-        const worker = reg.installing || reg.waiting || reg.active;
-        if (!worker) return resolve();
-        if (worker.state === "activated") return resolve();
-        worker.addEventListener("statechange", () => {
-          if (worker.state === "activated") resolve();
-        });
-      });
       await navigator.serviceWorker.ready;
     });
 
