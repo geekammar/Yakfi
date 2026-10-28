@@ -183,6 +183,8 @@ jobs:
 
       - name: Build Next.js application
         if: steps.change-check.outputs.should_run == 'true'
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: pnpm build
 
       - name: Resolve dynamic Vercel Preview URL
