@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.75.2",
+  "version": "0.75.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -86,6 +86,7 @@
     "check:conv-core-03d2": "tsx scripts/check-conv-core-03d2.ts",
     "check:conv-core-03d3": "tsx scripts/check-conv-core-03d3.ts",
     "check:exact-time-requests": "tsx scripts/check-exact-time-requests.ts",
+    "check:scarce-availability": "tsx scripts/check-scarce-availability-regressions.ts",
     "check:core-04a": "tsx scripts/check-core-04a.ts",
     "check:core-04b": "tsx scripts/check-core-04b.ts",
     "check:ctx-01": "tsx scripts/check-ctx-01-message-dedup.ts",
