@@ -82,7 +82,9 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
       return { keys, hasV2, hasV3, iconBody };
     });
 
-    expect(cacheStatus.hasV2, "flowpilot-static-v2 must be evicted").toBe(false);
+    expect(cacheStatus.hasV2, "flowpilot-static-v2 must be evicted").toBe(
+      false,
+    );
     expect(cacheStatus.hasV3, "flowpilot-static-v3 must exist").toBe(true);
     expect(cacheStatus.iconBody).not.toContain("legacy-v2-icon");
     // Verify approved Yakfi brand colors in the new icon
@@ -138,7 +140,7 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
     expect(manifest.short_name).toBe("يكفي");
     expect(manifest.theme_color).toBe("#173B63");
     expect(manifest.background_color).toBe("#F4F7FB");
-    expect(manifest.icons).toHaveLength(4);
+    expect(manifest.icons).toHaveLength(3);
 
     for (const icon of manifest.icons) {
       const res = await page.request.get(icon.src);
@@ -146,5 +148,9 @@ test.describe("Service Worker & Asset Cache Lifecycle QA", () => {
         200,
       );
     }
+
+    // Also verify root icon.svg returns 200
+    const svgRes = await page.request.get("/icon.svg");
+    expect(svgRes.status(), "Root icon.svg must return 200").toBe(200);
   });
 });

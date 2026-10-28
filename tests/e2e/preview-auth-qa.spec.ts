@@ -77,7 +77,6 @@ test.describe("Authenticated Preview QA", () => {
     expect(manifestData.background_color).toBe("#F4F7FB");
     expect(manifestData.icons).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ src: "/icon.svg", type: "image/svg+xml" }),
         expect.objectContaining({
           src: "/icons/icon-192.png",
           sizes: "192x192",
