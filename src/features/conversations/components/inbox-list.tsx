@@ -197,6 +197,7 @@ export function InboxList({
             <Link
               key={conversation.id}
               href={`/conversations/${conversation.id}`}
+              scroll={false}
               className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60"
             >
               <div className="flex size-10 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">

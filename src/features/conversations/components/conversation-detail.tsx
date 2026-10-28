@@ -337,6 +337,11 @@ export function ConversationDetail({
     isNearBottomRef.current = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX;
   };
 
+  // Ensure window scroll is at top so sticky header and persistent header are properly aligned
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
+
   // Initial scroll to bottom on mount
   useEffect(() => {
     const el = messageLogRef.current;
@@ -604,7 +609,7 @@ export function ConversationDetail({
             aria-label="رسائل المحادثة"
             tabIndex={0}
             onScroll={handleLogScroll}
-            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5"
+            className="flex-1 min-h-0 space-y-3 overflow-y-auto bg-muted/30 px-3 py-5 sm:px-5 [overflow-anchor:none]"
           >
             {data.messages.length === 0 ? (
               <div className="flex h-full min-h-48 items-center justify-center text-sm text-muted-foreground">

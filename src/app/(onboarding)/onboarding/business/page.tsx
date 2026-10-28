@@ -1,5 +1,6 @@
 import { BusinessSetupForm } from "@/features/onboarding/components/business-setup-form";
 import { StepHeader } from "@/features/onboarding/components/step-header";
+import { APP_NAME } from "@/lib/app-config";
 import { verticalSchema } from "@/lib/validation";
 import { requireUser } from "@/server/auth/guards";
 import { businessRepository } from "@/server/repositories";
@@ -15,7 +16,7 @@ export default async function OnboardingBusinessPage() {
     <div className="animate-fade-in-up space-y-8">
       <StepHeader
         title="بيانات المنشأة"
-        description="مرحباً بك في FlowPilot! نجهز حسابك في خطوات بسيطة — ابدأ ببيانات منشأتك الأساسية."
+        description={`مرحباً بك في ${APP_NAME}! نجهز حسابك في خطوات بسيطة — ابدأ ببيانات منشأتك الأساسية.`}
       />
       <BusinessSetupForm
         defaultValues={{

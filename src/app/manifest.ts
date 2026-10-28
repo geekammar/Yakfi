@@ -10,7 +10,7 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: `${APP_NAME} — نظام مواعيد واتساب`,
+    name: `${APP_NAME} — إدارة المحادثات والمواعيد`,
     short_name: APP_NAME,
     description: APP_DESCRIPTION,
     lang: HTML_LANG,
@@ -19,8 +19,8 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait-primary",
-    background_color: "#fafafa",
-    theme_color: "#0a0a0a",
+    background_color: "#F4F7FB",
+    theme_color: "#173B63",
     categories: ["business", "productivity"],
     icons: [
       {
