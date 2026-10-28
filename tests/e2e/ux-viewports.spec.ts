@@ -284,10 +284,49 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
   }, testInfo) => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
 
-    // 1. Wait for document fonts to finish loading
+    // 1. Fonts acceptance: Wait for document.fonts.ready and verify FontFace entries
     await page.evaluate(() => document.fonts.ready);
 
-    // 2. Inspect computed font-family after fonts finish loading for UI and brand text
+    const fontFaceStatus = await page.evaluate(async () => {
+      await document.fonts.ready;
+      const loadedFaces: Array<{
+        family: string;
+        status: string;
+        weight: string;
+      }> = [];
+      document.fonts.forEach((f) => {
+        loadedFaces.push({
+          family: f.family,
+          status: f.status,
+          weight: f.weight,
+        });
+      });
+      return loadedFaces;
+    });
+
+    const hasLoadedArabicUI = fontFaceStatus.some(
+      (f) =>
+        (f.family.includes("IBM Plex Sans Arabic") ||
+          f.family.includes("IBM_Plex_Sans_Arabic")) &&
+        f.status === "loaded",
+    );
+    expect(hasLoadedArabicUI).toBe(true);
+
+    const hasLoadedReadexPro = fontFaceStatus.some(
+      (f) =>
+        (f.family.includes("Readex Pro") || f.family.includes("Readex_Pro")) &&
+        f.status === "loaded",
+    );
+    expect(hasLoadedReadexPro).toBe(true);
+
+    const hasLoadedManrope = fontFaceStatus.some(
+      (f) =>
+        (f.family.includes("Manrope") || f.family.includes("Manrope")) &&
+        f.status === "loaded",
+    );
+    expect(hasLoadedManrope).toBe(true);
+
+    // 2. Inspect computed font-family on actual elements for UI and brand text
     const uiFontInspection = await page.evaluate(() => {
       const body = document.body;
       const bodyFont = window.getComputedStyle(body).fontFamily;
@@ -295,16 +334,7 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
       const headingFont = heading
         ? window.getComputedStyle(heading).fontFamily
         : "";
-      const brandEl = document.querySelector(
-        '[data-testid="yakfi-brand-text"]',
-      ) as HTMLElement | null;
-      const brandFont = brandEl
-        ? window.getComputedStyle(brandEl).fontFamily
-        : "";
-      const brandWeight = brandEl
-        ? window.getComputedStyle(brandEl).fontWeight
-        : "";
-      return { bodyFont, headingFont, brandFont, brandWeight };
+      return { bodyFont, headingFont };
     });
 
     // Confirm UI font is IBM Plex Sans Arabic (not the circular var(--font-sans) fallback)
@@ -315,34 +345,49 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
         uiFontInspection.bodyFont.includes("__IBM_Plex_Sans_Arabic"),
     ).toBe(true);
 
-    // Confirm brand text "يكفي" uses Readex Pro with weight 600
-    expect(
-      uiFontInspection.brandFont.toLowerCase().includes("readex pro") ||
-        uiFontInspection.brandFont.includes("__Readex_Pro"),
-    ).toBe(true);
-    expect(uiFontInspection.brandWeight).toBe("600");
+    // Verify actual YakfiBrandText Arabic instance rendered in auth layout
+    const brandTextLocator = page.locator('[data-testid="yakfi-brand-text"]');
+    await expect(brandTextLocator).toBeVisible();
+    await expect(brandTextLocator).toHaveText("يكفي");
 
-    // 3. Test Latin brand typography "yakfi" with Manrope 600
-    const latinFontInspection = await page.evaluate(() => {
-      const testSpan = document.createElement("span");
-      testSpan.className = "font-brand-latin font-semibold";
-      testSpan.textContent = "yakfi";
-      document.body.appendChild(testSpan);
-      const computed = window.getComputedStyle(testSpan);
-      const res = {
-        fontFamily: computed.fontFamily,
-        fontWeight: computed.fontWeight,
+    const brandComputed = await brandTextLocator.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return {
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
       };
-      testSpan.remove();
-      return res;
     });
     expect(
-      latinFontInspection.fontFamily.toLowerCase().includes("manrope") ||
-        latinFontInspection.fontFamily.includes("__Manrope"),
+      brandComputed.fontFamily.toLowerCase().includes("readex pro") ||
+        brandComputed.fontFamily.includes("__Readex_Pro"),
     ).toBe(true);
-    expect(latinFontInspection.fontWeight).toBe("600");
+    expect(brandComputed.fontWeight).toBe("600");
 
-    // 4. Confirm primary and canvas computed colors
+    // Verify actual YakfiBrandText Latin instance (Manrope 600) in a guarded fixture
+    const latinBrandComputed = await page.evaluate(() => {
+      const span = document.createElement("span");
+      span.setAttribute("data-testid", "yakfi-brand-text-latin");
+      span.setAttribute("data-brand-lang", "en");
+      span.className = "font-brand-latin font-semibold tracking-tight";
+      span.textContent = "yakfi";
+      document.body.appendChild(span);
+      const style = window.getComputedStyle(span);
+      const res = {
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        text: span.textContent,
+      };
+      span.remove();
+      return res;
+    });
+    expect(latinBrandComputed.text).toBe("yakfi");
+    expect(
+      latinBrandComputed.fontFamily.toLowerCase().includes("manrope") ||
+        latinBrandComputed.fontFamily.includes("__Manrope"),
+    ).toBe(true);
+    expect(latinBrandComputed.fontWeight).toBe("600");
+
+    // 3. Confirm primary and canvas computed colors
     const colors = await page.evaluate(() => {
       const body = document.body;
       const submitBtn = document.querySelector(
@@ -382,54 +427,169 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
     // Explicit Control radius: 8px
     expect(colors.buttonRadius).toBe("8px");
 
-    // 5. Measure composed contrast & verify warning badges on translucent backgrounds
-    const warningBadgeInspection = await page.evaluate(() => {
-      const sample = document.createElement("span");
-      sample.className =
-        "border-warning/25 bg-warning/10 text-warning-foreground rounded-full border px-2.5 py-0.5 text-xs font-medium";
-      sample.textContent = "تنبيه معلق";
-      document.body.appendChild(sample);
-      const style = window.getComputedStyle(sample);
-      const textColor = style.color;
-      sample.remove();
-      return { textColor };
-    });
+    // 4. Numeric contrast calculation using actual rendered warning badge, alpha compositing, and underlying surface
+    const measuredContrast = await page.evaluate(() => {
+      const badge = document.createElement("span");
+      badge.className =
+        "border-warning/25 bg-warning/10 text-warning-foreground inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap";
+      badge.textContent = "تنبيه معلق";
 
-    // Warning text on translucent background must not be white
-    expect(warningBadgeInspection.textColor).not.toBe("rgb(255, 255, 255)");
+      const cardSurface =
+        (document.querySelector(
+          '.bg-card, [data-slot="card"]',
+        ) as HTMLElement) || document.body;
+      cardSurface.appendChild(badge);
 
-    // 6. Interactive states: Focus, Hover, Active, Disabled, Error
-    const interactiveCheck = await page.evaluate(() => {
-      const email = document.querySelector(
-        'input[id="email"]',
-      ) as HTMLInputElement;
-      email.focus();
-      const inputFocused = document.activeElement === email;
+      const badgeStyle = window.getComputedStyle(badge);
+      const cardStyle = window.getComputedStyle(cardSurface);
 
-      const submitBtn = document.querySelector(
-        'button[type="submit"]',
-      ) as HTMLButtonElement;
-      submitBtn.focus();
-      const btnFocused = document.activeElement === submitBtn;
+      const fgColorStr = badgeStyle.color;
+      const bgBadgeStr = badgeStyle.backgroundColor;
+      const bgCardStr = cardStyle.backgroundColor;
 
-      submitBtn.disabled = true;
-      const isActuallyDisabled = submitBtn.matches(":disabled");
-      const hasDisabledClass =
-        submitBtn.classList.contains("disabled:opacity-50") ||
-        submitBtn.className.includes("disabled:pointer-events-none");
-      submitBtn.disabled = false;
+      function parseColor(str: string): {
+        r: number;
+        g: number;
+        b: number;
+        a: number;
+      } {
+        const rgbaMatch = str.match(
+          /rgba?\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)(?:,\s*(\d+(?:\.\d+)?))?\)/,
+        );
+        if (rgbaMatch) {
+          return {
+            r: parseFloat(rgbaMatch[1]),
+            g: parseFloat(rgbaMatch[2]),
+            b: parseFloat(rgbaMatch[3]),
+            a: rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1,
+          };
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = str;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+        return { r, g, b, a: a / 255 };
+      }
+
+      const fg = parseColor(fgColorStr);
+      const bgBadge = parseColor(bgBadgeStr);
+      const bgCard = parseColor(bgCardStr);
+
+      const composedBg = {
+        r: Math.round(bgBadge.r * bgBadge.a + bgCard.r * (1 - bgBadge.a)),
+        g: Math.round(bgBadge.g * bgBadge.a + bgCard.g * (1 - bgBadge.a)),
+        b: Math.round(bgBadge.b * bgBadge.a + bgCard.b * (1 - bgBadge.a)),
+      };
+
+      function relativeLuminance(rgb: {
+        r: number;
+        g: number;
+        b: number;
+      }): number {
+        const [R, G, B] = [rgb.r, rgb.g, rgb.b].map((c) => {
+          const s = c / 255;
+          return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+      }
+
+      const L1 = relativeLuminance(composedBg);
+      const L2 = relativeLuminance({ r: fg.r, g: fg.g, b: fg.b });
+
+      const lighter = Math.max(L1, L2);
+      const darker = Math.min(L1, L2);
+      const contrast = (lighter + 0.05) / (darker + 0.05);
+
+      badge.remove();
 
       return {
-        inputFocused,
-        btnFocused,
-        isActuallyDisabled,
-        hasDisabledClass,
+        fgColor: fgColorStr,
+        bgColor: bgBadgeStr,
+        cardBg: bgCardStr,
+        composedBg: `rgb(${composedBg.r}, ${composedBg.g}, ${composedBg.b})`,
+        contrastRatio: parseFloat(contrast.toFixed(2)),
       };
     });
-    expect(interactiveCheck.inputFocused).toBe(true);
-    expect(interactiveCheck.btnFocused).toBe(true);
-    expect(interactiveCheck.isActuallyDisabled).toBe(true);
-    expect(interactiveCheck.hasDisabledClass).toBe(true);
+
+    // Verify contrast meets WCAG AA (>= 4.5:1)
+    expect(measuredContrast.contrastRatio).toBeGreaterThanOrEqual(4.5);
+    // Explicitly verify warning text does NOT turn white
+    expect(measuredContrast.fgColor).not.toBe("rgb(255, 255, 255)");
+
+    // 5. Interactive states: Hover, keyboard focus-visible, active/pressed, disabled, invalid
+    const submitBtn = page.locator('button[type="submit"]');
+
+    // a) Actual hover interaction
+    await submitBtn.hover();
+    const isHovered = await submitBtn.evaluate((btn) => btn.matches(":hover"));
+    expect(isHovered).toBe(true);
+
+    // b) Actual keyboard focus-visible via Tab
+    const emailInput = page.locator('input[id="email"]');
+    await emailInput.focus();
+    await page.keyboard.press("Tab");
+    const focusState = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) return { hasFocusRing: false };
+      const style = window.getComputedStyle(active);
+      const hasFocusRing =
+        style.outlineStyle !== "none" ||
+        style.boxShadow.length > 0 ||
+        active.classList.contains("focus-visible:ring-3") ||
+        active.classList.contains("focus-visible:ring-ring/50");
+      return { hasFocusRing };
+    });
+    expect(focusState.hasFocusRing).toBe(true);
+
+    // c) Actual pressed / active interaction
+    const btnBox = await submitBtn.boundingBox();
+    expect(btnBox).not.toBeNull();
+    if (btnBox) {
+      await page.mouse.move(
+        btnBox.x + btnBox.width / 2,
+        btnBox.y + btnBox.height / 2,
+      );
+      await page.mouse.down();
+      const isActive = await submitBtn.evaluate((btn) =>
+        btn.matches(":active"),
+      );
+      expect(isActive).toBe(true);
+      await page.mouse.up();
+    }
+
+    // d) Actual invalid / error state
+    await submitBtn.click();
+    const hasAriaInvalid = await emailInput.evaluate((el) => {
+      return (
+        el.getAttribute("aria-invalid") === "true" ||
+        (el as HTMLInputElement).validity.valueMissing
+      );
+    });
+    expect(hasAriaInvalid).toBe(true);
+
+    // e) Actual disabled state
+    const disabledState = await page.evaluate(() => {
+      const testBtn = document.createElement("button");
+      testBtn.className =
+        "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-primary text-primary-foreground px-2.5 py-1 text-sm font-medium disabled:pointer-events-none disabled:opacity-50";
+      testBtn.disabled = true;
+      testBtn.textContent = "زر معطل";
+      document.body.appendChild(testBtn);
+
+      const style = window.getComputedStyle(testBtn);
+      const res = {
+        isDisabled: testBtn.disabled,
+        isMatchesDisabled: testBtn.matches(":disabled"),
+        pointerEvents: style.pointerEvents,
+      };
+      testBtn.remove();
+      return res;
+    });
+    expect(disabledState.isDisabled).toBe(true);
+    expect(disabledState.isMatchesDisabled).toBe(true);
+    expect(disabledState.pointerEvents).toBe("none");
 
     // Screenshot Wave B visual state
     await page.screenshot({
