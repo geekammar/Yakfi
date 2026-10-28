@@ -9,12 +9,13 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.75.5 (feature branch; candidate PR)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Focused responsive UI enhancement in `conversation-actions.tsx`:
+**Product version: v0.75.5 (feature branch; candidate PR)** — `Full Conversation Action Labels Without Layout Regression`. Baseline: v0.75.4 (PR #49 merged baseline, commit `679171195c4848594668b9b35537b71caeef1c06`). Focused responsive UI enhancement in `conversation-actions.tsx` and `conversation-detail.tsx`:
 
 1. **Full Visible Action Labels**: Render complete visible Arabic labels across all viewports (mobile and desktop): «تولّي المحادثة» for `TAKE_OVER` and «حجز موعد» for booking shortcut.
 2. **Width Recovery via Responsive Icon Hiding**: Recover narrow-screen width by hiding decorative icons beside clearly labeled actions below the `sm` breakpoint (`hidden sm:inline` on `UserRoundIcon`, `CalendarDaysIcon`, `BotIcon`, and Details `UserRoundIcon`/`MessageCircleIcon`). Kept More icon (`MoreHorizontalIcon`) visible.
-3. **Preserved Geometry & Safety Bounds**: All actions fit without wrapping on 320px viewport, preserving minimum 44px touch targets on mobile, header height limit (<= 160px), customer identity width, and zero horizontal document overflow.
-4. **Verification**: Verified by updated unit tests in `conversation-detail.test.tsx` and automated browser UX QA in Playwright across 320/360/390/768/1280 viewports using controlled fixtures (`tests/e2e/conversation-header-qa.spec.ts`) measuring real geometry, wrapping, touch targets, elementFromPoint clipping isolation, and keyboard navigation.
+3. **Enforced Mobile Header Ceiling (<= 160px)**: Tightened mobile padding (`py-1.5`, `space-y-1`, `pt-0.5`) and leading in `conversation-detail.tsx` to strictly enforce the `<= 160px` mobile header height limit across all five fixtures (including `need_human_unassigned` with long Arabic customer name and attention cause).
+4. **Preserved Geometry & Safety Bounds**: All actions fit without wrapping on 320px viewport, preserving minimum 44px touch targets on mobile, customer identity width, and zero horizontal document overflow.
+5. **Trustworthy Verification & Diagnostic Logging**: Enforced `<= 160px` assertion across all five fixtures in `tests/e2e/conversation-header-qa.spec.ts`. Restored pre-screenshot scroll offsets in `tests/e2e/preview-auth-qa.spec.ts` with diagnostic logging of exact geometry without unconditional zero resets.
 
 **Product version: v0.75.4 (main)** — `Responsive Conversation Header and Direct Actions Repair`. Baseline: v0.75.3 (PR #48 merged baseline, commit `fc0e5fc503ae40b49206d20fbb27e7ca4509e563`). Merged via PR #49 (commit `679171195c4848594668b9b35537b71caeef1c06`). Focused responsive UI repair in `conversation-detail.tsx` and directly related presentation components:
 

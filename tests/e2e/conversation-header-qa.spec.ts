@@ -99,6 +99,11 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
         viewportWidth + 1,
       );
 
+      // Enforce <=160px mobile header height ceiling across all five fixtures
+      if (vpName.startsWith("mobile")) {
+        expect(headerBox.height).toBeLessThanOrEqual(160);
+      }
+
       // 2. Customer Identity measurements (independent layout area, long Arabic name)
       const customerH1 = persistentHeader.locator("h1");
       await expect(customerH1).toBeVisible();
@@ -341,6 +346,11 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     const initialHeaderBox = await persistentHeader.boundingBox();
     expect(initialHeaderBox).not.toBeNull();
     if (!initialHeaderBox) return;
+
+    // Enforce <=160px mobile header height ceiling
+    if (vpName.startsWith("mobile")) {
+      expect(initialHeaderBox.height).toBeLessThanOrEqual(160);
+    }
 
     // 1. Message log scrollability threshold assertion
     const messageLog = page.locator('div[role="log"]');

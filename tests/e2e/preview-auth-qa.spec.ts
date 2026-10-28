@@ -316,10 +316,18 @@ test.describe("Authenticated Preview QA", () => {
     expect(isOverflowing).toBe(false);
 
     // Screenshot Inbox
+    const preInboxScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, `${vpName}-07-conversations-inbox.png`),
       fullPage: true,
     });
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate(
+      (y) => window.scrollTo(0, y),
+      preInboxScreenshotScrollY,
+    );
 
     // Inspect conversation items in inbox — deterministic long thread requirement
     const conversationLinks = page.locator('a[href^="/conversations/"]');
@@ -334,10 +342,6 @@ test.describe("Authenticated Preview QA", () => {
       waitUntil: "domcontentloaded",
     });
 
-    // Ensure document window scroll is at top so initialHeaderBox is captured at canonical offset
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.waitForTimeout(50);
-
     // U01 & U08: Persistent Header presence & initial geometry
     const persistentHeader = page.locator(
       'header[data-testid="conversation-persistent-header"]',
@@ -351,6 +355,13 @@ test.describe("Authenticated Preview QA", () => {
       expect(initialHeaderBox.y).toBeGreaterThanOrEqual(20);
       expect(initialHeaderBox.y).toBeLessThanOrEqual(120);
     }
+
+    const postNavScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    console.log(
+      `[QA-DIAG] ${vpName} | preInboxScrollY=${preInboxScreenshotScrollY} | postNavScrollY=${postNavScrollY} | initialHeaderY=${initialHeaderBox?.y} initialHeaderH=${initialHeaderBox?.height}`,
+    );
 
     // U02: Real customer identity with truncation
     const customerH1 = persistentHeader.locator("h1");
@@ -415,6 +426,9 @@ test.describe("Authenticated Preview QA", () => {
     }
 
     // Screenshot Conversation Detail Top
+    const preTopScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
     await page.screenshot({
       path: path.join(
         SCREENSHOT_DIR,
@@ -422,18 +436,19 @@ test.describe("Authenticated Preview QA", () => {
       ),
       fullPage: true,
     });
+    // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
+    await page.evaluate((y) => window.scrollTo(0, y), preTopScreenshotScrollY);
 
-    // Restore pre-screenshot window scroll if Playwright fullPage altered it
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.waitForTimeout(50);
+    const postTopScreenshotScrollY = await page.evaluate(
+      () => window.scrollY || document.documentElement.scrollTop,
+    );
+    console.log(
+      `[QA-DIAG] ${vpName} | preTopScrollY=${preTopScreenshotScrollY} postTopScrollY=${postTopScreenshotScrollY} | topHeaderY=${topHeaderBox?.y}`,
+    );
 
     // Check Middle: Scroll to middle reading position
-    const currentLogMetrics = await messageLog.evaluate((el) => ({
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-    }));
     const middleTarget = Math.floor(
-      (currentLogMetrics.scrollHeight - currentLogMetrics.clientHeight) / 2,
+      (initialMetrics.scrollHeight - initialMetrics.clientHeight) / 2,
     );
     await messageLog.evaluate((el, target) => {
       el.scrollTop = target;
@@ -445,6 +460,9 @@ test.describe("Authenticated Preview QA", () => {
     // Verify Persistent Header remains pinned
     const middleHeaderBox = await persistentHeader.boundingBox();
     expect(middleHeaderBox).not.toBeNull();
+    console.log(
+      `[QA-DIAG] ${vpName} | middleScroll=${middleScroll} middleTarget=${middleTarget} | middleHeaderY=${middleHeaderBox?.y} initialHeaderY=${initialHeaderBox?.y}`,
+    );
     if (middleHeaderBox && initialHeaderBox) {
       expect(
         Math.abs(middleHeaderBox.y - initialHeaderBox.y),
