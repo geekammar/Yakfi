@@ -29,12 +29,7 @@
  *
  * Run: pnpm check:appointment-calendar-dates
  */
-import { spawnSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
-
-import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
-import { formatAppointmentDate } from "@/features/conversations/components/conversation-detail";
+export {};
 
 type Check = { label: string; pass: boolean; detail?: string };
 
@@ -43,30 +38,41 @@ function check(label: string, pass: boolean, detail?: string): void {
   checks.push({ label, pass, detail });
 }
 
-// Subprocess runner evaluating formatting under designated TZ env variable.
-function evalInTimezone(
-  tz: string,
-  code: string,
-): { stdout: string; stderr: string; status: number } {
-  const result = spawnSync(process.execPath, ["-e", code], {
-    cwd: process.cwd(),
-    env: { ...process.env, TZ: tz },
-    encoding: "utf8",
-  });
-  return {
-    stdout: (result.stdout ?? "").trim(),
-    stderr: (result.stderr ?? "").trim(),
-    status: result.status ?? 1,
-  };
-}
-
 async function main(): Promise<void> {
+  const { spawnSync } = await import("node:child_process");
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  const { formatArabicDate } = await import(
+    "../src/features/appointments/components/smart-create/date-format"
+  );
+  const { formatAppointmentDate } = await import(
+    "../src/features/conversations/components/conversation-detail"
+  );
+
   const root = process.cwd();
   const convDetailPath = path.join(
     root,
     "src/features/conversations/components/conversation-detail.tsx",
   );
   const convDetailSource = fs.readFileSync(convDetailPath, "utf8");
+
+  // Subprocess runner evaluating formatting under designated TZ env variable.
+  function evalInTimezone(
+    tz: string,
+    code: string,
+  ): { stdout: string; stderr: string; status: number } {
+    const result = spawnSync(process.execPath, ["-e", code], {
+      cwd: process.cwd(),
+      env: { ...process.env, TZ: tz },
+      encoding: "utf8",
+    });
+    return {
+      stdout: (result.stdout ?? "").trim(),
+      stderr: (result.stderr ?? "").trim(),
+      status: result.status ?? 1,
+    };
+  }
 
   // ── 1. Source Contract Verification ───────────────────────────────────────
   check(
@@ -258,7 +264,9 @@ async function main(): Promise<void> {
     console.error(`\nفشل ${failed} من ${checks.length} فحص.`);
     process.exit(1);
   }
-  console.log(`\nثوابت تطابق تواريخ التقويم صحيحة: ${checks.length}/${checks.length} فحص ناجح.`);
+  console.log(
+    `\nثوابت تطابق تواريخ التقويم صحيحة: ${checks.length}/${checks.length} فحص ناجح.`,
+  );
 }
 
 main().catch((error: Error) => {
