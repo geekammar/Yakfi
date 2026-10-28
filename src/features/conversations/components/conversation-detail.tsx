@@ -601,7 +601,7 @@ export function ConversationDetail({
                 asChild
                 variant="ghost"
                 size="icon-sm"
-                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 lg:hidden shrink-0"
+                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8 shrink-0"
               >
                 <Link
                   href={backHref ?? "/conversations"}
