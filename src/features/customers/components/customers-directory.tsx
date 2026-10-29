@@ -25,7 +25,7 @@ import {
   UsersRoundIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 function initials(name: string) {
   return name.trim().slice(0, 2);
@@ -57,18 +57,22 @@ function formatActivity(date: string) {
  */
 export function CustomersDirectory({
   initialCustomers,
+  queryKeyPrefix = "customers-directory",
 }: {
   /** Most recent customers, preloaded by the page (empty query). */
   initialCustomers: CustomerListItem[];
+  queryKeyPrefix?: string;
 }) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query);
   const [createOpen, setCreateOpen] = useState(false);
   const [dialogSession, setDialogSession] = useState(0);
   const queryClient = useQueryClient();
+  const primaryActionRef = useRef<HTMLButtonElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   const search = useQuery({
-    queryKey: ["customers-directory", debouncedQuery],
+    queryKey: [queryKeyPrefix, debouncedQuery],
     queryFn: () => searchCustomersAction({ query: debouncedQuery }),
     placeholderData: keepPreviousData,
     initialData:
@@ -77,7 +81,23 @@ export function CustomersDirectory({
         : undefined,
   });
 
-  function openCreate() {
+  function openCreate(
+    eventOrElement?: React.MouseEvent<HTMLElement> | HTMLElement,
+  ) {
+    if (
+      eventOrElement &&
+      "currentTarget" in eventOrElement &&
+      eventOrElement.currentTarget instanceof HTMLElement
+    ) {
+      openerRef.current = eventOrElement.currentTarget;
+    } else if (eventOrElement instanceof HTMLElement) {
+      openerRef.current = eventOrElement;
+    } else if (
+      typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+    ) {
+      openerRef.current = document.activeElement;
+    }
     setDialogSession((count) => count + 1);
     setCreateOpen(true);
   }
@@ -87,7 +107,7 @@ export function CustomersDirectory({
   function handleCreated() {
     setQuery("");
     void queryClient.invalidateQueries({
-      queryKey: ["customers-directory"],
+      queryKey: [queryKeyPrefix],
     });
   }
 
@@ -103,7 +123,11 @@ export function CustomersDirectory({
         title="العملاء"
         description="عملاؤك وما آخر تعامل مع كل منهم — المحادثة الأخيرة والموعد الأخير."
         actions={
-          <Button onClick={openCreate}>
+          <Button
+            ref={primaryActionRef}
+            onClick={openCreate}
+            data-testid="customers-primary-create-btn"
+          >
             <PlusIcon />
             إضافة عميل
           </Button>
@@ -147,7 +171,11 @@ export function CustomersDirectory({
               title="لا يوجد عملاء بعد"
               description="يُضاف العملاء تلقائياً من المحادثات، أو أضف عميلاً يدوياً لتحجز له موعداً."
               action={
-                <Button size="sm" onClick={openCreate}>
+                <Button
+                  size="sm"
+                  onClick={openCreate}
+                  data-testid="customers-empty-create-btn"
+                >
                   <PlusIcon aria-hidden className="size-4" />
                   إضافة عميل
                 </Button>
@@ -160,7 +188,12 @@ export function CustomersDirectory({
               title="لا توجد نتائج مطابقة"
               description="جرّب البحث بجزء من الاسم أو برقم الهاتف، أو أضفه كعميل جديد."
               action={
-                <Button variant="outline" size="sm" onClick={openCreate}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openCreate}
+                  data-testid="customers-search-empty-create-btn"
+                >
                   <PlusIcon aria-hidden className="size-4" />
                   إضافة عميل جديد
                 </Button>
@@ -247,6 +280,8 @@ export function CustomersDirectory({
         onOpenChange={setCreateOpen}
         onCreated={handleCreated}
         prefill={deriveCustomerFormDefaults(query)}
+        returnFocusRef={openerRef}
+        fallbackFocusRef={primaryActionRef}
       />
     </div>
   );

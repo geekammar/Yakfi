@@ -19,7 +19,7 @@ import {
   UserRoundPlusIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 /**
  * Step 1 — العميل. Focused customer selection: search by name or phone
@@ -39,6 +39,10 @@ export type CustomerCreateDialogComponent = React.ComponentType<{
    * the parent remounts the dialog via `key`.
    */
   prefill?: { name?: string; phone?: string };
+  /** Explicit control to restore focus to on dialog closure. */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
+  /** Fallback focus target if the opener control has unmounted. */
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
 }>;
 
 export function CustomerStep({
@@ -67,8 +71,25 @@ export function CustomerStep({
   // pattern as the customers directory.
   const [dialogSession, setDialogSession] = useState(0);
   const debouncedQuery = useDebouncedValue(query);
+  const openerRef = useRef<HTMLElement | null>(null);
 
-  function openCreate() {
+  function openCreate(
+    eventOrElement?: React.MouseEvent<HTMLElement> | HTMLElement,
+  ) {
+    if (
+      eventOrElement &&
+      "currentTarget" in eventOrElement &&
+      eventOrElement.currentTarget instanceof HTMLElement
+    ) {
+      openerRef.current = eventOrElement.currentTarget;
+    } else if (eventOrElement instanceof HTMLElement) {
+      openerRef.current = eventOrElement;
+    } else if (
+      typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+    ) {
+      openerRef.current = document.activeElement;
+    }
     setDialogSession((count) => count + 1);
     setCreateOpen(true);
   }
@@ -259,6 +280,7 @@ export function CustomerStep({
           open={createOpen}
           onOpenChange={setCreateOpen}
           prefill={deriveCustomerFormDefaults(query)}
+          returnFocusRef={openerRef}
           onCreated={(customer) => {
             // A server-confirmed creation selects the customer right
             // away — the flow continues exactly as with a search pick.
