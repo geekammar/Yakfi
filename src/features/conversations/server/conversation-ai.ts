@@ -760,6 +760,7 @@ export function resolveTurnControlSignals(
     // Contradiction detection: a safe top-level assessment cannot downgrade a required handoff
     const hasSensitiveContradiction =
       (decision.handoffReason as string) === "SENSITIVE" ||
+      (decision.intent as string) === "SENSITIVE" ||
       (decision.goals != null &&
         decision.goals.some(
           (g) =>
@@ -786,11 +787,12 @@ export function resolveTurnControlSignals(
       sensitive = true;
     }
 
-    // Semantic intent ownership (CORE-CHOICE-02):
-    // On structured turns with a valid decision, explicit human request and
-    // non-committal state are owned by the structured decision rather than
-    // lexical regex/keyword matching.
-    const explicitHuman =
+    // Semantic intent ownership (CORE-CHOICE-02 & E12b signal authority reconciliation):
+    // On structured turns with a valid decision, a model-derived human request
+    // proposal cannot masquerade as a higher-authority explicit customer request
+    // when effective sensitivity is active (which would otherwise bypass server-authoritative
+    // safety precedence in TurnPlanner). When safe, semantic human request ownership is preserved.
+    const hasModelHumanRequest =
       decision.intent === "HUMAN_REQUEST" ||
       decision.handoffReason === "HUMAN_REQUEST" ||
       (decision.goals != null &&
@@ -800,6 +802,8 @@ export function resolveTurnControlSignals(
             (g.intent === "HUMAN_REQUEST" ||
               g.requiredKnowledge === "HUMAN_REQUEST"),
         ));
+
+    const explicitHuman = !sensitive && hasModelHumanRequest;
 
     const hasAnyExtractionFact = Boolean(
       decision.extraction?.service ||
