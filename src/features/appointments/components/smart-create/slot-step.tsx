@@ -68,6 +68,12 @@ const NO_SLOTS_CONTENT = {
       "تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل قبل استقبال المواعيد.",
     showServiceAction: true,
   },
+  NO_REMAINING_TIMES: {
+    icon: CalendarXIcon,
+    title: "انتهت أوقات اليوم المتاحة",
+    description: "انتهت جميع أوقات الحجز المتاحة لهذا اليوم. اختر يوماً آخر.",
+    showServiceAction: false,
+  },
 } as const;
 
 /** The only label an unselectable candidate ever gets — never a reason. */
@@ -598,7 +604,11 @@ export function SlotStep({
 
           {availableCount === 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 px-4 py-3">
-              <p className="text-sm">لا توجد مواعيد مناسبة في هذا اليوم.</p>
+              <p className="text-sm">
+                {emptyReason === "NO_REMAINING_TIMES"
+                  ? "انتهت أوقات الحجز المتاحة لهذا اليوم. اختر يوماً آخر."
+                  : "لا توجد مواعيد مناسبة في هذا اليوم."}
+              </p>
               <Button
                 type="button"
                 variant="outline"

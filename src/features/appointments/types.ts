@@ -312,7 +312,8 @@ export type AvailabilityNoSlotsReason =
   | "BUSINESS_CLOSED"
   | "SERVICE_TOO_LONG"
   | "FULLY_BOOKED"
-  | "NO_ELIGIBLE_PROVIDERS";
+  | "NO_ELIGIBLE_PROVIDERS"
+  | "NO_REMAINING_TIMES";
 
 export type AvailabilityErrorCode =
   | "INVALID_INPUT"
