@@ -827,7 +827,7 @@ async function run(): Promise<void> {
 
   try {
     // 6.1 getConversationInbox read path
-    conversationRepository.listInbox = async (bizId: string) => {
+    conversationRepository.listInbox = (async (bizId: string) => {
       if (bizId !== "biz_read_test") return [];
       return fixtureMessages.map((msg, index) => ({
         id: `conv_inbox_${index + 1}`,
@@ -852,7 +852,7 @@ async function run(): Promise<void> {
           },
         ],
       }));
-    };
+    }) as any;
 
     userRepository.listByBusiness = async () => [
       {
@@ -875,41 +875,41 @@ async function run(): Promise<void> {
 
     check(
       "6.2 Inbox: Validated interaction projects readable snapshot 'اختيار موعد: 10:00 ص' and forwards metadata",
-      inboxResult.items[0].lastMessage?.displayText ===
+      inboxResult.items[0]?.lastMessage?.displayText ===
         "اختيار موعد: 10:00 ص" &&
-        inboxResult.items[0].lastMessage?.content === "fp:tok_val_123:1" &&
-        (inboxResult.items[0].lastMessage?.metadata as any)?.provenance ===
+        inboxResult.items[0]?.lastMessage?.content === "fp:tok_val_123:1" &&
+        (inboxResult.items[0]?.lastMessage?.metadata as any)?.provenance ===
           "CALLBACK",
     );
 
     check(
       "6.3 Inbox: Exact fp-shaped ordinary TEXT projects null displayText (verbatim display, never fallback)",
-      inboxResult.items[1].lastMessage?.displayText === null &&
-        inboxResult.items[1].lastMessage?.content === "fp:tok_val_123:1" &&
-        (inboxResult.items[1].lastMessage?.metadata as any)?.provenance ===
+      inboxResult.items[1]?.lastMessage?.displayText === null &&
+        inboxResult.items[1]?.lastMessage?.content === "fp:tok_val_123:1" &&
+        (inboxResult.items[1]?.lastMessage?.metadata as any)?.provenance ===
           "TEXT",
     );
 
     check(
       "6.4 Inbox: Historical protocol message with absent metadata projects neutral fallback",
-      inboxResult.items[2].lastMessage?.displayText ===
+      inboxResult.items[2]?.lastMessage?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        inboxResult.items[2].lastMessage?.content === "fp:de392742:3" &&
-        inboxResult.items[2].lastMessage?.metadata === null,
+        inboxResult.items[2]?.lastMessage?.content === "fp:de392742:3" &&
+        inboxResult.items[2]?.lastMessage?.metadata === null,
     );
 
     check(
       "6.5 Inbox: Normal Arabic prose projects null displayText (rendered directly)",
-      inboxResult.items[3].lastMessage?.displayText === null &&
-        inboxResult.items[3].lastMessage?.content ===
+      inboxResult.items[3]?.lastMessage?.displayText === null &&
+        inboxResult.items[3]?.lastMessage?.content ===
           "السلام عليكم، أريد الاستفسار عن كشف الأسنان",
     );
 
     check(
       "6.6 Inbox: Malformed metadata does not crash the inbox read path",
-      inboxResult.items[4].lastMessage?.displayText ===
+      inboxResult.items[4]?.lastMessage?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        inboxResult.items[4].lastMessage?.content === "fp:tok_corrupt:99",
+        inboxResult.items[4]?.lastMessage?.content === "fp:tok_corrupt:99",
     );
 
     // 6.2 getConversationDetail read path
@@ -961,29 +961,29 @@ async function run(): Promise<void> {
 
     check(
       "6.8 Detail: Validated interaction has displayText and forwards metadata",
-      detailResult?.messages[0].displayText === "اختيار موعد: 10:00 ص" &&
-        (detailResult?.messages[0].metadata as any)?.provenance === "CALLBACK",
+      detailResult?.messages[0]?.displayText === "اختيار موعد: 10:00 ص" &&
+        (detailResult?.messages[0]?.metadata as any)?.provenance === "CALLBACK",
     );
 
     check(
       "6.9 Detail: Typed fp-shaped text has null displayText (renders original text, not fallback)",
-      detailResult?.messages[1].displayText === null &&
-        detailResult?.messages[1].content === "fp:tok_val_123:1" &&
-        (detailResult?.messages[1].metadata as any)?.provenance === "TEXT",
+      detailResult?.messages[1]?.displayText === null &&
+        detailResult?.messages[1]?.content === "fp:tok_val_123:1" &&
+        (detailResult?.messages[1]?.metadata as any)?.provenance === "TEXT",
     );
 
     check(
       "6.10 Detail: Historical protocol message has neutral fallback",
-      detailResult?.messages[2].displayText ===
+      detailResult?.messages[2]?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        detailResult?.messages[2].content === "fp:de392742:3",
+        detailResult?.messages[2]?.content === "fp:de392742:3",
     );
 
     check(
       "6.11 Detail: Malformed metadata does not crash getConversationDetail",
-      detailResult?.messages[4].displayText ===
+      detailResult?.messages[4]?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        detailResult?.messages[4].content === "fp:tok_corrupt:99",
+        detailResult?.messages[4]?.content === "fp:tok_corrupt:99",
     );
 
     // Tenant scoping check
@@ -1050,28 +1050,28 @@ async function run(): Promise<void> {
     const queue = (staffResult as any).queue;
     check(
       "6.14 Staff Workspace: Validated interaction displays readable text 'اختيار موعد: 10:00 ص'",
-      queue?.[0].lastMessage?.displayText === "اختيار موعد: 10:00 ص" &&
-        queue?.[0].lastMessage?.content === "fp:tok_val_123:1",
+      queue?.[0]?.lastMessage?.displayText === "اختيار موعد: 10:00 ص" &&
+        queue?.[0]?.lastMessage?.content === "fp:tok_val_123:1",
     );
 
     check(
       "6.15 Staff Workspace: Typed fp-shaped text displays null (verbatim original text)",
-      queue?.[1].lastMessage?.displayText === null &&
-        queue?.[1].lastMessage?.content === "fp:tok_val_123:1",
+      queue?.[1]?.lastMessage?.displayText === null &&
+        queue?.[1]?.lastMessage?.content === "fp:tok_val_123:1",
     );
 
     check(
       "6.16 Staff Workspace: Historical message displays neutral fallback",
-      queue?.[2].lastMessage?.displayText ===
+      queue?.[2]?.lastMessage?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        queue?.[2].lastMessage?.content === "fp:de392742:3",
+        queue?.[2]?.lastMessage?.content === "fp:de392742:3",
     );
 
     check(
       "6.17 Staff Workspace: Malformed metadata does not crash staff queue projection",
-      queue?.[4].lastMessage?.displayText ===
+      queue?.[4]?.lastMessage?.displayText ===
         HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
-        queue?.[4].lastMessage?.content === "fp:tok_corrupt:99",
+        queue?.[4]?.lastMessage?.content === "fp:tok_corrupt:99",
     );
 
     // Authorization check
