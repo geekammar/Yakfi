@@ -126,6 +126,7 @@ jobs:
           pnpm check:appointment-calendar-dates
           pnpm check:ui-accessibility
           pnpm test:conversation-detail
+          pnpm test:staff-workspace
           pnpm test:install-prompt
           pnpm test:customers-dialog
           pnpm check:qa-harness

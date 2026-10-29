@@ -4,6 +4,7 @@ import {
   HANDOFF_CAUSE_PRESENTATIONS,
   type HandoffCause,
 } from "@/features/conversations/server/handoff-cause";
+import { formatArabicDayMonth } from "@/features/appointments/components/smart-create/date-format";
 import type {
   StaffAssignedItem,
   StaffQueueItem,
@@ -65,12 +66,9 @@ function formatActivity(date: string) {
   }).format(new Date(date));
 }
 
-function formatAppointmentDate(date: string) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    timeZone: "UTC",
-    day: "numeric",
-    month: "short",
-  }).format(new Date(`${date}T00:00:00`));
+export function formatAppointmentDate(date: string) {
+  const dateOnly = date.slice(0, 10);
+  return formatArabicDayMonth(dateOnly);
 }
 
 function formatAppointmentTime(time: string) {
