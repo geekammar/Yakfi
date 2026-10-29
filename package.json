@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.77.4",
+  "version": "0.77.5",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -181,6 +181,7 @@
     "test:staff-workspace": "vitest run --config vitest.config.ts src/features/staff/components/staff-workspace.test.tsx",
     "test:install-prompt": "vitest run --config vitest.config.ts src/components/shared/pwa/install-prompt.test.tsx",
     "test:customers-dialog": "vitest run --config vitest.config.ts src/features/customers/components/customers-dialog-focus.test.tsx",
+    "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
     "test:e2e": "playwright test",
     "test:e2e:local": "playwright test tests/e2e/booking-flows.spec.ts tests/e2e/ux-viewports.spec.ts",

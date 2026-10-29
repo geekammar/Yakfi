@@ -1,6 +1,7 @@
 "use client";
 
 import { updateAppointmentStatus } from "@/features/appointments/actions/appointment-actions";
+import { AppointmentCancelDialog } from "@/features/appointments/components/appointment-cancel-dialog";
 import { AppointmentStatusBadge } from "@/features/appointments/components/appointment-status";
 import { FollowUpList } from "@/features/appointments/components/follow-up-list";
 import { FollowUpModal } from "@/features/appointments/components/follow-up-modal";
@@ -29,7 +30,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore, useTransition } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 
 /** Stored epoch-anchored time → the ONE shared business-local formatter
  * (the value's "HH:mm" IS the business-local wall clock, so slicing and
@@ -73,6 +74,9 @@ export function AppointmentDetail({
   );
   const [followUpOpen, setFollowUpOpen] = useState(initialFollowUpOpen);
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const cancelOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const followUpButtonRef = useRef<HTMLButtonElement | null>(null);
   const [followUps] =
     useState<FollowUpRequestWithRelations[]>(initialFollowUps);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +103,10 @@ export function AppointmentDetail({
   function changeStatus(
     status: "CONFIRMED" | "CANCELLED" | "COMPLETED" | "NO_SHOW",
   ) {
+    if (status === "CANCELLED") {
+      setCancelDialogOpen(true);
+      return;
+    }
     const previousStatus = data.status;
     setError(null);
     // Optimistic transition — rolled back if the server rejects it.
@@ -307,9 +315,11 @@ export function AppointmentDetail({
                   </Button>
                 ) : null}
                 <Button
+                  ref={followUpButtonRef}
                   variant="outline"
                   onClick={() => setFollowUpOpen(true)}
                   disabled={isPending}
+                  data-testid="appointment-follow-up-btn"
                 >
                   <CalendarPlusIcon />
                   إضافة متابعة
@@ -336,9 +346,12 @@ export function AppointmentDetail({
                 ) : null}
                 {active ? (
                   <Button
+                    ref={cancelOpenerRef}
                     variant="destructive"
-                    onClick={() => changeStatus("CANCELLED")}
+                    className="min-h-[44px]"
+                    onClick={() => setCancelDialogOpen(true)}
                     disabled={isPending}
+                    data-testid="appointment-cancel-opener-btn"
                   >
                     <CircleXIcon />
                     إلغاء الموعد
@@ -383,6 +396,19 @@ export function AppointmentDetail({
         providers={providers}
         workingHours={workingHours}
         onSuccess={() => {
+          router.refresh();
+        }}
+      />
+
+      <AppointmentCancelDialog
+        open={cancelDialogOpen}
+        onOpenChange={setCancelDialogOpen}
+        appointment={data}
+        returnFocusRef={cancelOpenerRef}
+        fallbackFocusRef={followUpButtonRef}
+        onCancelled={() => {
+          setData((current) => ({ ...current, status: "CANCELLED" }));
+          setError(null);
           router.refresh();
         }}
       />
