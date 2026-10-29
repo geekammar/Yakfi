@@ -289,6 +289,7 @@ export function AccessibilityRepairsHarness() {
             </div>
             <CustomersDirectory
               key={customerDirectoryMode}
+              queryKeyPrefix={`qa-customers-${customerDirectoryMode}`}
               initialCustomers={
                 customerDirectoryMode === "populated" ? FIXTURE_CUSTOMERS : []
               }

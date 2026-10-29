@@ -29,6 +29,17 @@ vi.mock("@/features/customers/actions/customer-actions", () => ({
     .mockResolvedValue({ success: false, message: "not-called" }),
 }));
 
+vi.mock("@/features/appointments/actions/booking-flow-actions", () => ({
+  searchBookingCustomersAction: vi
+    .fn()
+    .mockResolvedValue({ success: true, customers: [] }),
+}));
+
+vi.mock("@/server/auth/guards", () => ({
+  requireUser: vi.fn(),
+  requireAdmin: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/customers",

@@ -57,9 +57,11 @@ function formatActivity(date: string) {
  */
 export function CustomersDirectory({
   initialCustomers,
+  queryKeyPrefix = "customers-directory",
 }: {
   /** Most recent customers, preloaded by the page (empty query). */
   initialCustomers: CustomerListItem[];
+  queryKeyPrefix?: string;
 }) {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query);
@@ -70,7 +72,7 @@ export function CustomersDirectory({
   const openerRef = useRef<HTMLElement | null>(null);
 
   const search = useQuery({
-    queryKey: ["customers-directory", debouncedQuery],
+    queryKey: [queryKeyPrefix, debouncedQuery],
     queryFn: () => searchCustomersAction({ query: debouncedQuery }),
     placeholderData: keepPreviousData,
     initialData:
@@ -105,7 +107,7 @@ export function CustomersDirectory({
   function handleCreated() {
     setQuery("");
     void queryClient.invalidateQueries({
-      queryKey: ["customers-directory"],
+      queryKey: [queryKeyPrefix],
     });
   }
 
