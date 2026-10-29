@@ -1,3 +1,5 @@
+import { Prisma } from "@/generated/prisma/client";
+
 import type {
   CreateConversationDto,
   CreateMessageDto,
@@ -73,7 +75,13 @@ export class ConversationRepository {
         messages: {
           orderBy: { createdAt: "desc" },
           take: 1,
-          select: { content: true, senderType: true, createdAt: true },
+          select: {
+            content: true,
+            displayText: true,
+            metadata: true,
+            senderType: true,
+            createdAt: true,
+          },
         },
       },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
@@ -188,7 +196,17 @@ export class ConversationRepository {
   ): Promise<Message> {
     return db.$transaction(async (tx) => {
       const message = await tx.message.create({
-        data: { ...input },
+        data: {
+          conversationId: input.conversationId,
+          senderType: input.senderType,
+          content: input.content,
+          displayText: input.displayText,
+          metadata:
+            input.metadata === null
+              ? Prisma.JsonNull
+              : (input.metadata as Prisma.InputJsonValue | undefined),
+          createdAt: input.createdAt,
+        },
       });
       await tx.conversation.update({
         where: { id: input.conversationId },

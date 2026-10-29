@@ -201,6 +201,7 @@ export function parseMetaWebhookPayload(raw: unknown): ParsedMetaInbound {
           recipientExternalId: recipientNumber || meta.from,
           timestamp: isoTimestamp,
           kind,
+          transportOrigin: meta.type === "interactive" ? "INTERACTIVE" : "TEXT",
         };
         if (recipientProviderId) {
           normalizedInput.recipientProviderId = recipientProviderId;

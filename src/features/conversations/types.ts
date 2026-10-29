@@ -18,6 +18,8 @@ export type InboxConversation = {
   assignedUser: InboxUser | null;
   lastMessage: {
     content: string;
+    displayText?: string | null;
+    metadata?: unknown;
     senderType: MessageSenderType;
     createdAt: string;
   } | null;
@@ -65,6 +67,8 @@ export type ConversationDetailData = {
     id: string;
     senderType: MessageSenderType;
     content: string;
+    displayText?: string | null;
+    metadata?: unknown;
     createdAt: string;
   }>;
   appointments: Array<{

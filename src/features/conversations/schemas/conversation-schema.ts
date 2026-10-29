@@ -61,6 +61,8 @@ export const inboundMessageSchema = z.object({
   receivedAt: z.iso.datetime(),
   /** Provider message id when available — accepted, not yet persisted. */
   externalId: z.string().trim().min(1).max(256).optional(),
+  /** Transport origin (TEXT vs genuine interaction: CALLBACK / INTERACTIVE). */
+  transportOrigin: z.enum(["TEXT", "CALLBACK", "INTERACTIVE"]).optional(),
 });
 
 export type InboundMessageInput = z.infer<typeof inboundMessageSchema>;

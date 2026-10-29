@@ -183,6 +183,7 @@ import {
   eligibilityFailureCodeToCause,
   type HandoffCause,
 } from "@/features/conversations/server/handoff-cause";
+import { resolveInteractionDisplay } from "@/features/conversations/server/interaction-display";
 import { deriveKnowledgeGapObservation } from "@/features/conversations/server/knowledge-gap";
 import {
   filterElapsedSlots,
@@ -3525,6 +3526,21 @@ async function runInboundTurn(
         status: "AI_ACTIVE",
       };
     }
+
+    const now = new Date(inbound.receivedAt);
+    const turnSession = await openTurnStateSession(
+      deps.conversationStateRepository,
+      { businessId: business.id, conversationId: conversation.id },
+      now,
+    );
+
+    const interactionResolution = resolveInteractionDisplay({
+      rawText: inbound.text,
+      transportOrigin: inbound.transportOrigin,
+      currentOffer: turnSession.state?.offer ?? null,
+      now,
+    });
+
     let customerMessage;
     try {
       customerMessage = await deps.conversationRepository.addMessage(
@@ -3532,7 +3548,9 @@ async function runInboundTurn(
           conversationId: conversation.id,
           senderType: "CUSTOMER",
           content: inbound.text,
-          createdAt: new Date(inbound.receivedAt),
+          displayText: interactionResolution.displayText,
+          metadata: interactionResolution.metadata,
+          createdAt: now,
         },
         // A thread that is not AI-eligible needs staff attention; the
         // assignment is preserved, only the status routes to the queue.
@@ -3618,12 +3636,6 @@ async function runInboundTurn(
         senderType: message.senderType,
         content: message.content,
       }));
-    const now = new Date(inbound.receivedAt);
-    const turnSession = await openTurnStateSession(
-      deps.conversationStateRepository,
-      { businessId: business.id, conversationId: conversation.id },
-      now,
-    );
 
     const selectionScope: BookingSelectionScope = {
       business,

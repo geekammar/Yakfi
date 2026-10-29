@@ -165,8 +165,9 @@ function MessagePreview({
 }: {
   lastMessage: StaffQueueItem["lastMessage"];
 }) {
+  const text = lastMessage?.displayText ?? lastMessage?.content;
   const content = lastMessage
-    ? `${previewPrefix(lastMessage.senderType)}${lastMessage.content}`
+    ? `${previewPrefix(lastMessage.senderType)}${text}`
     : "لا توجد رسائل";
   return <p className="text-muted-foreground truncate text-xs">{content}</p>;
 }

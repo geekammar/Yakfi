@@ -936,5 +936,32 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(container.textContent).not.toContain("الجمعة، ٦ نوفمبر");
       expect(container.textContent).not.toContain("الجمعة، 6 نوفمبر");
     });
+
+    it("renders human-readable displayText with collapsed technical details summary", async () => {
+      const root = createRoot(container);
+      const dataWithInteraction: ConversationDetailData = {
+        ...mockData,
+        messages: [
+          {
+            id: "msg-int-1",
+            senderType: "CUSTOMER",
+            content: "fp:tok123:1",
+            displayText: "اختيار موعد: 10:00 ص",
+            createdAt: "2026-10-27T10:00:00Z",
+          },
+        ],
+      };
+
+      await act(async () => {
+        root.render(<ConversationDetail data={dataWithInteraction} />);
+      });
+
+      expect(container.textContent).toContain("اختيار موعد: 10:00 ص");
+      expect(container.textContent).toContain("عرض التفاصيل التقنية");
+      const summaryEl = container.querySelector("summary");
+      expect(summaryEl?.textContent?.trim()).toBe("عرض التفاصيل التقنية");
+      const rawSpan = container.querySelector("details span");
+      expect(rawSpan?.textContent?.trim()).toBe("fp:tok123:1");
+    });
   });
 });

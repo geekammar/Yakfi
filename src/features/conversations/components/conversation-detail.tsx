@@ -747,9 +747,25 @@ export function ConversationDetail({
                           </time>
                         )}
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-7">
-                        {message.content}
-                      </p>
+                      {message.displayText ? (
+                        <div className="mt-1 space-y-1.5">
+                          <p className="whitespace-pre-wrap text-sm font-medium leading-7">
+                            {message.displayText}
+                          </p>
+                          <details className="text-[11px] opacity-75 cursor-pointer">
+                            <summary className="hover:underline select-none">
+                              عرض التفاصيل التقنية
+                            </summary>
+                            <span className="mt-1 block font-mono text-[10px] break-all rounded bg-background/30 px-1.5 py-0.5">
+                              {message.content}
+                            </span>
+                          </details>
+                        </div>
+                      ) : (
+                        <p className="whitespace-pre-wrap text-sm leading-7">
+                          {message.content}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );

@@ -37,6 +37,8 @@ const createMessageSchema = z.object({
   conversationId: uuidSchema,
   senderType: z.enum(messageSenderTypeValues),
   content: z.string().trim().min(1, "الرسالة فارغة").max(4096),
+  displayText: z.string().trim().max(4096).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
   /**
    * Transport-owned receive timestamp (PROMPT-19): an inbound message may
    * carry the time it actually arrived on WhatsApp so threads keep true

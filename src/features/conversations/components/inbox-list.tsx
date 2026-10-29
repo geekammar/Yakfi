@@ -159,7 +159,9 @@ export function InboxList({
       const searchable = [
         conversation.customer.name,
         conversation.customer.phone,
-        conversation.lastMessage?.content ?? "",
+        conversation.lastMessage?.displayText ??
+          conversation.lastMessage?.content ??
+          "",
       ]
         .join(" ")
         .toLocaleLowerCase();
@@ -327,7 +329,9 @@ export function InboxList({
                 <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                   <MessageCircleIcon aria-hidden className="size-3 shrink-0" />
                   <span className="truncate">
-                    {conversation.lastMessage?.content ?? "لا توجد رسائل"}
+                    {conversation.lastMessage?.displayText ??
+                      conversation.lastMessage?.content ??
+                      "لا توجد رسائل"}
                   </span>
                 </p>
                 <p className="truncate text-[11px] text-muted-foreground">

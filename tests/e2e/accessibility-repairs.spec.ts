@@ -511,4 +511,123 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(listAppointmentsList).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
   });
+
+  test("6. Readable Interaction History: summary visible, raw token hidden until expanded, keyboard expansion, no horizontal overflow at narrow viewports", async ({
+    page,
+  }, testInfo) => {
+    // Navigate to interaction history tab
+    const interactionsTab = page.locator('[data-testid="tab-interactions"]');
+    await expect(interactionsTab).toBeVisible();
+    await interactionsTab.click();
+
+    const section = page.locator('[data-testid="section-interactions"]');
+    await expect(section).toBeVisible();
+
+    const container = page.locator(
+      '[data-testid="qa-interaction-component-container"]',
+    );
+    await expect(container).toBeVisible();
+
+    // 1. Validated button interaction: readable text visible, long raw token hidden while collapsed
+    const validatedText = container.getByText(
+      "اختيار موعد: 10:00 ص (د. هاني شاكر)",
+    );
+    await expect(validatedText).toBeVisible();
+
+    const longTechnicalToken =
+      "fp:tok_9f8b2c41d607e3a5:appointment_slot_20261030_1000_provider_hani_shaker_long_identifier_suffix_audit_record";
+    const rawLongToken = container.getByText(longTechnicalToken);
+    await expect(rawLongToken).not.toBeVisible();
+
+    // 2. Historical protocol message: neutral fallback visible, raw token hidden while collapsed
+    const historicalText = container.getByText(
+      "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة",
+    );
+    await expect(historicalText).toBeVisible();
+
+    const historicalRaw = container.getByText("fp:de392742:3");
+    await expect(historicalRaw).not.toBeVisible();
+
+    // 3. Known TEXT with exact fp shape: remains verbatim and is NOT wrapped in technical details
+    const exactFpText = container.getByText(
+      "fp:tok_manual_exact_token_typed_by_customer:3",
+    );
+    await expect(exactFpText).toBeVisible();
+    const exactFpDetails = container.locator(
+      'details:has-text("fp:tok_manual_exact_token_typed_by_customer:3")',
+    );
+    await expect(exactFpDetails).toHaveCount(0);
+
+    // 4. Normal Arabic prose: rendered directly
+    const proseText = container.getByText(
+      "السلام عليكم ورحمة الله، أود الاستفسار عن تفاصيل موعد تنظيف الأسنان والأسعار.",
+    );
+    await expect(proseText).toBeVisible();
+
+    // 5. Technical summaries contain ONLY neutral text
+    const summaries = container.locator("summary");
+    const summaryCount = await summaries.count();
+    expect(summaryCount).toBeGreaterThan(0);
+    for (let i = 0; i < summaryCount; i++) {
+      const summaryContent = await summaries.nth(i).textContent();
+      expect(summaryContent?.trim()).toBe("عرض التفاصيل التقنية");
+    }
+
+    // 6. Keyboard expansion (Enter) and collapse on the actual production component
+    const firstSummary = summaries.first();
+    await firstSummary.focus();
+    await page.keyboard.press("Enter");
+
+    // Raw long token is now revealed
+    await expect(rawLongToken).toBeVisible();
+
+    // Measure horizontal overflow while EXPANDED (verifying break-all prevents viewport overflow)
+    const expandedOverflow = await page.evaluate(() => ({
+      windowInnerWidth: window.innerWidth,
+      docScrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(
+      expandedOverflow.docScrollWidth,
+      `Horizontal overflow detected while expanded: ${expandedOverflow.docScrollWidth} > ${expandedOverflow.windowInnerWidth}`,
+    ).toBeLessThanOrEqual(expandedOverflow.windowInnerWidth);
+
+    // Press Enter again to collapse
+    await page.keyboard.press("Enter");
+    await expect(rawLongToken).not.toBeVisible();
+
+    // Measure horizontal overflow while COLLAPSED
+    const collapsedOverflow = await page.evaluate(() => ({
+      windowInnerWidth: window.innerWidth,
+      docScrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(
+      collapsedOverflow.docScrollWidth,
+      `Horizontal overflow detected while collapsed: ${collapsedOverflow.docScrollWidth} > ${collapsedOverflow.windowInnerWidth}`,
+    ).toBeLessThanOrEqual(collapsedOverflow.windowInnerWidth);
+
+    // 7. Reload preserves the displayed result from the same fixture source
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const reloadedTab = page.locator('[data-testid="tab-interactions"]');
+    await expect(reloadedTab).toBeVisible();
+    await reloadedTab.click();
+    await expect(section).toBeVisible();
+    await expect(
+      container.getByText("اختيار موعد: 10:00 ص (د. هاني شاكر)"),
+    ).toBeVisible();
+    await expect(
+      container.getByText("محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة"),
+    ).toBeVisible();
+    await expect(
+      container.getByText("fp:tok_manual_exact_token_typed_by_customer:3"),
+    ).toBeVisible();
+
+    // Screenshot for visual evidence across viewports
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${testInfo.project.name}-interaction-history.png`,
+      ),
+      fullPage: false,
+    });
+  });
 });
