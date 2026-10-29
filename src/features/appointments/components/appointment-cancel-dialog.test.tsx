@@ -14,6 +14,10 @@
  * 8. AppointmentDetail integration:
  *    - Clicking "إلغاء الموعد" opens the confirmation dialog without mutating immediately.
  *    - Confirmed cancellation updates appointment status to CANCELLED only after server confirmation.
+ * 9. Error lifecycle & controlled parent reopening:
+ *    - Server failure persists across normal re-renders while open.
+ *    - Target appointment change resets previous unrelated error.
+ *    - Dismissing and reopening via actual opener resets stale error; causes 0 additional mutations; allows working retry.
  */
 
 import {
@@ -438,6 +442,64 @@ describe("AppointmentCancelDialog component & boundaries", () => {
 
     document.body.removeChild(fallback);
   });
+
+  it("9. error lifecycle: active failure persists across normal re-renders while open, and resets when appointment target changes", async () => {
+    updateAppointmentStatus.mockResolvedValueOnce({
+      success: false,
+      message: "خطأ مؤقت بالخادم",
+    });
+
+    const onCancelled = vi.fn();
+    const onOpenChange = vi.fn();
+
+    const currentAppointment = FIXTURE_APPOINTMENT;
+    const { rerender } = (() => {
+      root = createRoot(container);
+      const renderComp = (apt: AppointmentCancelTarget) => {
+        act(() => {
+          root?.render(
+            <AppointmentCancelDialog
+              open={true}
+              onOpenChange={onOpenChange}
+              appointment={apt}
+              onCancelled={onCancelled}
+            />,
+          );
+        });
+      };
+      renderComp(currentAppointment);
+      return { rerender: renderComp };
+    })();
+
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="cancel-dialog-confirm-btn"]',
+    );
+
+    // Fail first attempt
+    await act(async () => {
+      confirmBtn?.click();
+    });
+
+    expect(updateAppointmentStatus).toHaveBeenCalledTimes(1);
+    let alertEl = document.body.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).toContain("خطأ مؤقت بالخادم");
+
+    // Normal re-render with identical appointment target while open MUST NOT clear error
+    rerender(currentAppointment);
+    alertEl = document.body.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).toContain("خطأ مؤقت بالخادم");
+
+    // Changing the appointment target to a different appointment MUST reset the unrelated error
+    const SECOND_APPOINTMENT: AppointmentCancelTarget = {
+      ...FIXTURE_APPOINTMENT,
+      id: "apt-456",
+      customer: { name: "أحمد سامي" },
+    };
+    rerender(SECOND_APPOINTMENT);
+
+    alertEl = document.body.querySelector('[role="alert"]');
+    expect(alertEl).toBeNull();
+  });
 });
 
 describe("AppointmentDetail cancel confirmation integration", () => {
@@ -521,5 +583,103 @@ describe("AppointmentDetail cancel confirmation integration", () => {
       '[data-testid="appointment-cancel-opener-btn"]',
     );
     expect(unmountedOpenerBtn).toBeNull();
+  });
+
+  it("resets stale cancellation error on dismiss and reopening through actual opener, with working retry", async () => {
+    // 1. Server returns failure on first attempt, then succeeds on retry
+    updateAppointmentStatus
+      .mockResolvedValueOnce({
+        success: false,
+        message: "فشل الإلغاء: تعذر الاتصال بالخادم",
+      })
+      .mockResolvedValueOnce({
+        success: true,
+      });
+
+    render(
+      <AppointmentDetail
+        initialData={FIXTURE_DETAIL_DATA}
+        today="2026-11-04"
+        timezone="Africa/Cairo"
+      />,
+    );
+
+    const cancelOpenerBtn = container.querySelector<HTMLButtonElement>(
+      '[data-testid="appointment-cancel-opener-btn"]',
+    );
+    expect(cancelOpenerBtn).toBeTruthy();
+
+    // 2. Open dialog via the actual opener button
+    act(() => {
+      cancelOpenerBtn?.click();
+    });
+
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="cancel-dialog-confirm-btn"]',
+    );
+    expect(confirmBtn).toBeTruthy();
+
+    // 3. Click confirm -> server returns failure -> error visible in role="alert"
+    await act(async () => {
+      confirmBtn?.click();
+    });
+
+    expect(updateAppointmentStatus).toHaveBeenCalledTimes(1);
+    let alertEl = document.body.querySelector('[role="alert"]');
+    expect(alertEl).toBeTruthy();
+    expect(alertEl?.textContent).toContain("فشل الإلغاء: تعذر الاتصال بالخادم");
+
+    // 4. Dismiss through decline button "تراجع"
+    const declineBtn = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="cancel-dialog-decline-btn"]',
+    );
+    expect(declineBtn).toBeTruthy();
+
+    act(() => {
+      declineBtn?.click();
+    });
+
+    // Dialog is now dismissed
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]'),
+    ).toBeNull();
+
+    // 5. Reopen through the actual opener in the controlled parent
+    act(() => {
+      cancelOpenerBtn?.click();
+    });
+
+    // Dialog is reopened
+    expect(
+      document.body.querySelector('[data-slot="dialog-content"]'),
+    ).toBeTruthy();
+
+    // 6. Verify previous error is absent
+    alertEl = document.body.querySelector('[role="alert"]');
+    expect(alertEl).toBeNull();
+
+    // 7. Reopening caused zero additional mutation calls
+    expect(updateAppointmentStatus).toHaveBeenCalledTimes(1);
+
+    // 8. Subsequent explicit retry still works
+    const retryConfirmBtn = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="cancel-dialog-confirm-btn"]',
+    );
+    expect(retryConfirmBtn).toBeTruthy();
+
+    await act(async () => {
+      retryConfirmBtn?.click();
+    });
+
+    expect(updateAppointmentStatus).toHaveBeenCalledTimes(2);
+    expect(updateAppointmentStatus).toHaveBeenLastCalledWith({
+      id: "apt-123",
+      status: "CANCELLED",
+    });
+
+    // Successful cancellation updates status and unmounts the cancel opener
+    expect(
+      container.querySelector('[data-testid="appointment-cancel-opener-btn"]'),
+    ).toBeNull();
   });
 });

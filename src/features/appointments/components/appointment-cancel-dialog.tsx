@@ -79,6 +79,25 @@ export function AppointmentCancelDialog({
   const [submitting, setSubmitting] = useState(false);
   const capturedOpenerRef = useRef<HTMLElement | null>(null);
 
+  // Error lifecycle management:
+  // 1. Reset stale error on actual closed-to-open transitions (e.g. reopening via opener button).
+  // 2. Reset error if target appointment changes, preventing exposure of an unrelated previous failure.
+  // 3. Preserve active failures across normal re-renders while open without weakening pending guards.
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevAppointmentId, setPrevAppointmentId] = useState(appointment?.id);
+
+  if (!prevOpen && open) {
+    setPrevOpen(true);
+    setError(null);
+  } else if (prevOpen && !open) {
+    setPrevOpen(false);
+  }
+
+  if (appointment?.id !== prevAppointmentId) {
+    setPrevAppointmentId(appointment?.id);
+    setError(null);
+  }
+
   // Capture active element when dialog opens as opener fallback
   useEffect(() => {
     if (open) {
