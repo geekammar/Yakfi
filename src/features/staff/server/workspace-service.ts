@@ -12,6 +12,7 @@
  * stay in the conversations feature's existing write paths.
  */
 
+import { resolveDisplayForMessage } from "@/features/conversations/server/interaction-display";
 import type {
   StaffAssignedItem,
   StaffQueueItem,
@@ -167,6 +168,13 @@ export async function getStaffWorkspace(
           lastMessage: row.messages[0]
             ? {
                 content: row.messages[0].content,
+                displayText: resolveDisplayForMessage({
+                  senderType: row.messages[0].senderType,
+                  content: row.messages[0].content,
+                  displayText: (
+                    row.messages[0] as { displayText?: string | null }
+                  ).displayText,
+                }),
                 senderType: row.messages[0].senderType,
                 createdAt: row.messages[0].createdAt.toISOString(),
               }
@@ -190,6 +198,12 @@ export async function getStaffWorkspace(
       lastMessage: row.messages[0]
         ? {
             content: row.messages[0].content,
+            displayText: resolveDisplayForMessage({
+              senderType: row.messages[0].senderType,
+              content: row.messages[0].content,
+              displayText: (row.messages[0] as { displayText?: string | null })
+                .displayText,
+            }),
             senderType: row.messages[0].senderType,
             createdAt: row.messages[0].createdAt.toISOString(),
           }

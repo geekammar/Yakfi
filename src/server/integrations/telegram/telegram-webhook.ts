@@ -272,6 +272,7 @@ export function parseTelegramUpdate(
       timestamp,
       kind: "TEXT",
       text: data,
+      transportOrigin: "CALLBACK",
     });
     if (!result.ok) {
       return { status: "malformed", error: result.error };
@@ -365,6 +366,7 @@ export function parseTelegramUpdate(
     timestamp,
     kind: "TEXT",
     text,
+    transportOrigin: "TEXT",
   });
   if (!result.ok) {
     return { status: "malformed", error: result.error };

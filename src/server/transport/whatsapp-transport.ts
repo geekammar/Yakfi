@@ -107,6 +107,16 @@ export const inboundTransportKindValues = [
 
 export type InboundTransportKind = (typeof inboundTransportKindValues)[number];
 
+/** Normalized transport origin (distinguishes text vs button interaction). */
+export const inboundTransportOriginValues = [
+  "TEXT",
+  "CALLBACK",
+  "INTERACTIVE",
+] as const;
+
+export type InboundTransportOrigin =
+  (typeof inboundTransportOriginValues)[number];
+
 /**
  * Minimal media REFERENCE contract — the provider payload is never
  * copied into Core and media is never downloaded here (a later
@@ -148,6 +158,8 @@ const normalizedInboundTransportSchema = z
     /** Transport-owned receive timestamp. */
     timestamp: z.iso.datetime(),
     kind: z.enum(inboundTransportKindValues).default("TEXT"),
+    /** Transport-level origin (TEXT vs CALLBACK vs INTERACTIVE). */
+    transportOrigin: z.enum(inboundTransportOriginValues).optional(),
     /** Text payload — required for TEXT, forbidden otherwise. */
     text: z.string().trim().min(1).max(4096).optional(),
     /** Media reference — required for MEDIA, forbidden otherwise. */
@@ -245,6 +257,7 @@ export type EngineInboundMessage = {
   text: string;
   receivedAt: string;
   externalId?: string;
+  transportOrigin?: InboundTransportOrigin;
 };
 
 /**
@@ -268,6 +281,7 @@ export function toEngineInboundMessage(
     text: resolved.text,
     receivedAt: resolved.timestamp,
     externalId: resolved.externalMessageId,
+    transportOrigin: resolved.transportOrigin,
   };
 }
 
