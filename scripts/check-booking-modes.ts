@@ -479,6 +479,7 @@ async function main(): Promise<void> {
     serviceRepository: fakeServiceRepo,
     appointmentRepository: fakeAppointmentRepo,
     providerRepository: fakeProviderRepo,
+    now: () => new Date("2026-10-16T10:00:00.000Z"),
   };
 
   const bookingOptionsDeps = {

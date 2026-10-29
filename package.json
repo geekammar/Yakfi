@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.77.4",
+  "version": "0.77.5",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -104,6 +104,7 @@
     "check:reminders": "tsx scripts/check-appointment-reminders.ts",
     "check:staff-provider-01": "tsx scripts/check-staff-provider-01.ts",
     "check:appointments-day-view": "tsx scripts/check-appointments-day-view.ts",
+    "check:elapsed-booking-slots": "tsx scripts/check-elapsed-booking-slots.ts",
     "check:ux001-r2": "tsx scripts/check-ux001-r2.ts",
     "check:ux001-r3": "tsx scripts/check-booking-intervals.ts",
     "check:ux001-r4": "tsx scripts/check-ux001-r4.ts",

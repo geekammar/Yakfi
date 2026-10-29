@@ -88,6 +88,7 @@ jobs:
           pnpm check:staff-provider-01
           pnpm check:eligibility
           pnpm check:appointments-day-view
+          pnpm check:elapsed-booking-slots
           pnpm check:assistant-settings
           pnpm test:assistant-settings
           pnpm check:conv-core-01

@@ -298,6 +298,7 @@ async function main(): Promise<void> {
             endTime: row.endTime,
           })),
     },
+    now: () => new Date("2026-09-19T08:00:00.000Z"),
   };
 
   // A create call the fake can attribute to a real customer+service.
