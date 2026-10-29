@@ -446,6 +446,8 @@ export function createPlaygroundHarness(
           conversationId: conversation.id,
           senderType: input.senderType,
           content: input.content,
+          displayText: input.displayText ?? null,
+          metadata: input.metadata ?? null,
           sentAt: virtualNow,
           createdAt: virtualNow,
         } as any;

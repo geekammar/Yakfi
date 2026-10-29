@@ -332,6 +332,8 @@ async function run(): Promise<void> {
             conversationId: conversation.id,
             senderType: msg.senderType,
             content: msg.content,
+            displayText: msg.displayText ?? null,
+            metadata: msg.metadata ?? null,
             createdAt: new Date(),
             updatedAt: new Date(),
           };

@@ -10,6 +10,8 @@ import {
   userRepository,
 } from "@/server/repositories";
 
+import { resolveDisplayForMessage } from "./interaction-display";
+
 export async function getConversationInbox(businessId: string) {
   const [conversations, users] = await Promise.all([
     conversationRepository.listInbox(businessId),
@@ -37,7 +39,15 @@ export async function getConversationInbox(businessId: string) {
       assignedUser: conversation.assignedTo,
       lastMessage: lastMessage
         ? {
-            ...lastMessage,
+            content: lastMessage.content,
+            displayText: resolveDisplayForMessage({
+              senderType: lastMessage.senderType,
+              content: lastMessage.content,
+              displayText: lastMessage.displayText,
+              metadata: lastMessage.metadata,
+            }),
+            metadata: lastMessage.metadata ?? null,
+            senderType: lastMessage.senderType,
             createdAt: lastMessage.createdAt.toISOString(),
           }
         : null,
@@ -108,6 +118,13 @@ export async function getConversationDetail(
       id: message.id,
       senderType: message.senderType,
       content: message.content,
+      displayText: resolveDisplayForMessage({
+        senderType: message.senderType,
+        content: message.content,
+        displayText: message.displayText,
+        metadata: message.metadata,
+      }),
+      metadata: message.metadata ?? null,
       createdAt: message.createdAt.toISOString(),
     })),
     appointments: appointments.map((appointment) => ({

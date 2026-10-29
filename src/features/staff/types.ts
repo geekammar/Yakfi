@@ -133,6 +133,7 @@ export type StaffQueueItem = {
   customer: WorkspaceCustomer;
   lastMessage: {
     content: string;
+    displayText?: string | null;
     senderType: MessageSenderType;
     createdAt: string;
   } | null;
@@ -165,6 +166,7 @@ export type StaffAssignedItem = {
   customer: WorkspaceCustomer;
   lastMessage: {
     content: string;
+    displayText?: string | null;
     senderType: MessageSenderType;
     createdAt: string;
   } | null;
