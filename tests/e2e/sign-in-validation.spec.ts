@@ -145,7 +145,7 @@ test.describe("Sign-in validation and recovery UX", () => {
     await expect(passwordInput).toBeFocused();
 
     // Typing into password clears password error
-    await passwordInput.fill("Password123!");
+    await passwordInput.fill("example-password");
     await expect(passwordError).toHaveCount(0);
     await expect(passwordInput).not.toHaveAttribute("aria-invalid", "true");
   });
@@ -153,18 +153,7 @@ test.describe("Sign-in validation and recovery UX", () => {
   test("4. Deterministic auth failure (401) shows generic alert, preserves values, supports explicit rememberMe", async ({
     page,
   }, testInfo) => {
-    let capturedPayload: {
-      email?: string;
-      password?: string;
-      rememberMe?: boolean;
-    } | null = null;
-
     await page.route("**/api/auth/**", async (route) => {
-      try {
-        capturedPayload = route.request().postDataJSON();
-      } catch {
-        capturedPayload = null;
-      }
       await route.fulfill({
         status: 401,
         contentType: "application/json",
@@ -181,15 +170,17 @@ test.describe("Sign-in validation and recovery UX", () => {
     const submitBtn = page.locator('button[type="submit"]');
 
     await emailInput.fill("unregistered@flowpilot.app");
-    await passwordInput.fill("WrongPass123!");
+    await passwordInput.fill("example-wrong-pass");
 
     // Submit with remember-me unchecked
+    const reqPromise1 = page.waitForRequest("**/api/auth/**");
     await submitBtn.click();
+    const req1 = await reqPromise1;
+    const payload1 = (req1.postDataJSON() as Record<string, unknown> | null) ?? {};
 
     // Check payload sent rememberMe: false
     await expect(submitBtn).toBeEnabled();
-    expect(capturedPayload).not.toBeNull();
-    expect(capturedPayload?.rememberMe).toBe(false);
+    expect(payload1["rememberMe"]).toBe(false);
 
     // Form-level error is generic and does not disclose account existence
     const formError = page.locator("#login-form-error");
@@ -201,7 +192,7 @@ test.describe("Sign-in validation and recovery UX", () => {
 
     // Entered values remain intact after failure
     await expect(emailInput).toHaveValue("unregistered@flowpilot.app");
-    await expect(passwordInput).toHaveValue("WrongPass123!");
+    await expect(passwordInput).toHaveValue("example-wrong-pass");
 
     // Capture 401 screenshot
     await page.screenshot({
@@ -218,9 +209,12 @@ test.describe("Sign-in validation and recovery UX", () => {
     await expect(rememberMe).toHaveAttribute("data-state", "checked");
 
     // Resubmit and verify rememberMe: true in payload
+    const reqPromise2 = page.waitForRequest("**/api/auth/**");
     await submitBtn.click();
+    const req2 = await reqPromise2;
+    const payload2 = (req2.postDataJSON() as Record<string, unknown> | null) ?? {};
     await expect(submitBtn).toBeEnabled();
-    expect(capturedPayload?.rememberMe).toBe(true);
+    expect(payload2["rememberMe"]).toBe(true);
   });
 
   test("5. Network/connection failure shows concise Arabic message and recovers on retry", async ({
@@ -247,7 +241,7 @@ test.describe("Sign-in validation and recovery UX", () => {
     const submitBtn = page.locator('button[type="submit"]');
 
     await emailInput.fill("user@flowpilot.app");
-    await passwordInput.fill("Password123!");
+    await passwordInput.fill("example-password");
 
     // First attempt -> drops connection
     await submitBtn.click();

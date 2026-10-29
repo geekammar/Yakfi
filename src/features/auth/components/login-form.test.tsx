@@ -225,7 +225,7 @@ describe("LoginForm Component Contract", () => {
     const checkbox = container.querySelector<HTMLButtonElement>("#rememberMe")!;
 
     setInputValue(emailInput, "staff@flowpilot.app");
-    setInputValue(passwordInput, "Password123!");
+    setInputValue(passwordInput, "example-password");
 
     // Unchecked submit
     await submitFormAsync();
@@ -233,7 +233,7 @@ describe("LoginForm Component Contract", () => {
     expect(mockSignInEmail).toHaveBeenCalledTimes(1);
     expect(mockSignInEmail).toHaveBeenCalledWith({
       email: "staff@flowpilot.app",
-      password: "Password123!",
+      password: "example-password",
       rememberMe: false,
     });
 
@@ -248,7 +248,7 @@ describe("LoginForm Component Contract", () => {
     expect(mockSignInEmail).toHaveBeenCalledTimes(2);
     expect(mockSignInEmail).toHaveBeenLastCalledWith({
       email: "staff@flowpilot.app",
-      password: "Password123!",
+      password: "example-password",
       rememberMe: true,
     });
   });
@@ -264,7 +264,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "unknown@flowpilot.app");
-    setInputValue(passwordInput, "WrongPassword123!");
+    setInputValue(passwordInput, "example-wrong-password");
 
     await submitFormAsync();
 
@@ -277,7 +277,7 @@ describe("LoginForm Component Contract", () => {
 
     // Inputs remain intact
     expect(emailInput.value).toBe("unknown@flowpilot.app");
-    expect(passwordInput.value).toBe("WrongPassword123!");
+    expect(passwordInput.value).toBe("example-wrong-password");
 
     // Button is not disabled (submitting state is cleared)
     const submitBtn =
@@ -294,7 +294,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "user@flowpilot.app");
-    setInputValue(passwordInput, "ValidPassword123!");
+    setInputValue(passwordInput, "example-password");
 
     await submitFormAsync();
 
@@ -322,7 +322,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "user@flowpilot.app");
-    setInputValue(passwordInput, "ValidPassword123!");
+    setInputValue(passwordInput, "example-password");
 
     // First attempt fails
     await submitFormAsync();
@@ -349,7 +349,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "user@flowpilot.app");
-    setInputValue(passwordInput, "ValidPassword123!");
+    setInputValue(passwordInput, "example-password");
 
     // Fire two submits synchronously before the first resolves
     act(() => {
@@ -375,7 +375,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "admin@flowpilot.app");
-    setInputValue(passwordInput, "AdminPassword123!");
+    setInputValue(passwordInput, "example-password");
 
     await submitFormAsync();
 
@@ -394,7 +394,7 @@ describe("LoginForm Component Contract", () => {
       container.querySelector<HTMLInputElement>("#password")!;
 
     setInputValue(emailInput, "wrong@flowpilot.app");
-    setInputValue(passwordInput, "wrongpass123");
+    setInputValue(passwordInput, "example-wrong-password");
 
     await submitFormAsync();
     expect(container.querySelector("#login-form-error")).not.toBeNull();
