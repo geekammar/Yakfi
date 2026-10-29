@@ -467,7 +467,6 @@ export function resolveDisplayForMessage(message: {
   }
 
   if (
-    message.metadata == null &&
     message.senderType === "CUSTOMER" &&
     isOfferProtocolText(message.content)
   ) {
