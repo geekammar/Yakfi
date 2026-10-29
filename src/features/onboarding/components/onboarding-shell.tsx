@@ -1,7 +1,7 @@
 "use client";
 
+import { YakfiBrandText } from "@/components/shared/yakfi-brand-text";
 import { YakfiSymbol } from "@/components/shared/yakfi-symbol";
-import { APP_NAME } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
 import { CheckIcon } from "lucide-react";
@@ -32,7 +32,7 @@ export function OnboardingShell({ children }: { children: React.ReactNode }) {
             className="flex items-center gap-2 text-sm font-semibold tracking-tight transition-colors hover:text-primary"
           >
             <YakfiSymbol className="size-6 shrink-0" aria-hidden="true" />
-            <span>{APP_NAME}</span>
+            <YakfiBrandText />
           </Link>
           <span className="ms-auto text-xs text-muted-foreground">
             الخطوة {currentIndex + 1} من {STEPS.length}
