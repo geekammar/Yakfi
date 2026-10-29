@@ -313,35 +313,32 @@ async function run(): Promise<void> {
   );
 
   // Parity verification against appointment-create-service
-  const createServiceDeps: AppointmentCreateServiceDeps = {
+  const createServiceDeps = {
     customerRepository: {
-      findById: async () =>
-        ({
-          id: CUSTOMER_ID,
-          businessId: BUSINESS_ID,
-          name: "علي",
-          phone: "+966500000000",
-        }) as any,
+      findById: async () => ({
+        id: CUSTOMER_ID,
+        businessId: BUSINESS_ID,
+        name: "علي",
+        phone: "+966500000000",
+      }),
     },
     serviceRepository: { findById: async () => service30m },
     businessRepository: { findById: async () => riyadhBusiness },
     branchRepository: {
-      findDefaultByBusiness: async () =>
-        ({
-          id: "66666666-6666-4666-8666-666666666666",
-          businessId: BUSINESS_ID,
-        }) as any,
+      findDefaultByBusiness: async () => ({
+        id: "66666666-6666-4666-8666-666666666666",
+        businessId: BUSINESS_ID,
+      }),
     },
     appointmentRepository: {
-      createWithConflictCheck: async (payload: any) =>
-        ({
-          id: "77777777-7777-4777-8777-777777777777",
-          businessId: payload.businessId,
-          status: "CONFIRMED",
-        }) as any,
+      createWithConflictCheck: async (payload: { businessId: string }) => ({
+        id: "77777777-7777-4777-8777-777777777777",
+        businessId: payload.businessId,
+        status: "CONFIRMED",
+      }),
     },
     now: () => exact1000,
-  };
+  } as unknown as Parameters<typeof createAppointmentRecord>[0];
 
   const createElapsedAttempt = await createAppointmentRecord(
     createServiceDeps,
@@ -389,10 +386,10 @@ async function run(): Promise<void> {
     ...createBaseDeps(() => now1400),
     providerRepository: {
       listEligibleForService: async () => [
-        { id: PROVIDER_1, name: "د. أحمد", displayName: "د. أحمد" } as any,
+        { id: PROVIDER_1, name: "د. أحمد", displayName: "د. أحمد" },
       ],
       listAssignmentSeams: async () => [
-        { providerId: PROVIDER_1, userId: USER_1 } as any,
+        { providerId: PROVIDER_1, userId: USER_1 },
       ],
     },
     appointmentRepository: {
@@ -405,7 +402,7 @@ async function run(): Promise<void> {
           assignedUserId: USER_1,
           startTime: "15:00",
           endTime: "15:30",
-        } as any,
+        },
       ],
     },
     now: () => now1400,
@@ -431,12 +428,12 @@ async function run(): Promise<void> {
     ...createBaseDeps(() => now1400),
     providerRepository: {
       listEligibleForService: async () => [
-        { id: PROVIDER_1, name: "د. أحمد", displayName: "د. أحمد" } as any,
-        { id: PROVIDER_2, name: "د. منى", displayName: "د. منى" } as any,
+        { id: PROVIDER_1, name: "د. أحمد", displayName: "د. أحمد" },
+        { id: PROVIDER_2, name: "د. منى", displayName: "د. منى" },
       ],
       listAssignmentSeams: async () => [
-        { providerId: PROVIDER_1, userId: USER_1 } as any,
-        { providerId: PROVIDER_2, userId: USER_2 } as any,
+        { providerId: PROVIDER_1, userId: USER_1 },
+        { providerId: PROVIDER_2, userId: USER_2 },
       ],
     },
     appointmentRepository: {
@@ -449,20 +446,20 @@ async function run(): Promise<void> {
           assignedUserId: USER_1,
           startTime: "14:00",
           endTime: "14:30",
-        } as any,
+        },
         // Both blocked at 14:30
         {
           id: "b2",
           assignedUserId: USER_1,
           startTime: "14:30",
           endTime: "15:00",
-        } as any,
+        },
         {
           id: "b3",
           assignedUserId: USER_2,
           startTime: "14:30",
           endTime: "15:00",
-        } as any,
+        },
       ],
     },
     now: () => now1400,
