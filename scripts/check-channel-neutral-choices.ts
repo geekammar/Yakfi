@@ -737,9 +737,7 @@ async function run(): Promise<void> {
       timePreference: null,
     },
     handoffReason: "HUMAN_REQUEST",
-    goals: [
-      { kind: "HANDOFF", intent: "SENSITIVE", priority: 0 },
-    ],
+    goals: [{ kind: "HANDOFF", intent: "SENSITIVE", priority: 0 }],
     summary: "Customer mentioned emergency symptoms",
   };
   const resolvedContradictoryGoalHuman = resolveTurnControlSignals({

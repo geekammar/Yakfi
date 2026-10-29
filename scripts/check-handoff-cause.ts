@@ -84,9 +84,8 @@ async function main(): Promise<void> {
   const cause =
     await import("../src/features/conversations/server/handoff-cause");
   const { operatorAttentionValidation } = await import("../src/lib/validation");
-  const { deriveLocalDate, addDaysToIso } = await import(
-    "../src/features/conversations/server/temporal-context"
-  );
+  const { deriveLocalDate, addDaysToIso } =
+    await import("../src/features/conversations/server/temporal-context");
 
   type AiResponse =
     import("../src/features/conversations/server/ai-contract").AiResponse;
