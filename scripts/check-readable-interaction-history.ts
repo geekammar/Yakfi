@@ -78,10 +78,22 @@ async function run(): Promise<void> {
     now,
   });
   check(
-    "1.3 Customer text starting with 'fp:' is never treated as interaction when transportOrigin is TEXT",
+    "1.3 Customer text starting with 'fp:' is never treated as interaction when transportOrigin is TEXT, has TEXT provenance",
     !typedCustomerTextWithPrefix.isInteraction &&
       typedCustomerTextWithPrefix.displayText === null &&
-      typedCustomerTextWithPrefix.metadata === null,
+      (typedCustomerTextWithPrefix.metadata as any)?.provenance === "TEXT" &&
+      (typedCustomerTextWithPrefix.metadata as any)?.v === 1,
+  );
+
+  const typedFpResolved = resolveDisplayForMessage({
+    senderType: "CUSTOMER",
+    content: "fp:toktest12:1",
+    displayText: null,
+    metadata: { v: 1, provenance: "TEXT" },
+  });
+  check(
+    "1.5 Manually typed exact fp:... with TEXT provenance resolves to null (rendered as original text, NOT fallback)",
+    typedFpResolved === null,
   );
 
   const malformedInteraction = resolveInteractionDisplay({
@@ -515,6 +527,68 @@ async function run(): Promise<void> {
     aiMessageDisplay === null,
   );
 
+  // 4.7 Inbox, Detail, and Staff Workspace projection agreement across all message categories
+  const projectionCases = [
+    {
+      label: "Genuine validated interaction",
+      message: {
+        senderType: "CUSTOMER",
+        content: "fp:tok123:1",
+        displayText: "اختيار موعد: 10:00 ص",
+        metadata: { v: 1, provenance: "CALLBACK", status: "VALIDATED" },
+      },
+      expected: "اختيار موعد: 10:00 ص",
+    },
+    {
+      label: "Typed exact fp:... with TEXT provenance",
+      message: {
+        senderType: "CUSTOMER",
+        content: "fp:tok123:1",
+        displayText: null,
+        metadata: { v: 1, provenance: "TEXT" },
+      },
+      expected: null,
+    },
+    {
+      label: "Historical protocol message with absent metadata",
+      message: {
+        senderType: "CUSTOMER",
+        content: "fp:historical:1",
+        displayText: null,
+        metadata: null,
+      },
+      expected: HISTORICAL_PROTOCOL_FALLBACK_TEXT,
+    },
+    {
+      label: "Normal prose text",
+      message: {
+        senderType: "CUSTOMER",
+        content: "أريد الاستفسار عن كشف الأسنان",
+        displayText: null,
+        metadata: { v: 1, provenance: "TEXT" },
+      },
+      expected: null,
+    },
+    {
+      label: "Malformed lookalike text with absent metadata",
+      message: {
+        senderType: "CUSTOMER",
+        content: "fp:invalid",
+        displayText: null,
+        metadata: null,
+      },
+      expected: null,
+    },
+  ];
+
+  for (const tc of projectionCases) {
+    const resolved = resolveDisplayForMessage(tc.message);
+    check(
+      `4.7 Projection agreement for '${tc.label}': resolves to ${tc.expected === null ? "null (original content)" : `"${tc.expected}"`}`,
+      resolved === tc.expected,
+    );
+  }
+
   // ── Area 5: End-to-End Engine Integration ──────────────────────────────────
   console.log("\nArea 5: End-to-End engine & message persistence");
 
@@ -608,8 +682,21 @@ async function run(): Promise<void> {
   const typedMsg = updatedMessages.find((m) => m.content === typedCallbackText);
 
   check(
-    "5.7 Manually typed text with 'fp:' prefix has NULL displayText in database",
-    typedMsg?.displayText === null || typedMsg?.displayText === undefined,
+    "5.7 Manually typed text with 'fp:' prefix has NULL displayText and TEXT provenance in database",
+    (typedMsg?.displayText === null || typedMsg?.displayText === undefined) &&
+      (typedMsg?.metadata as any)?.provenance === "TEXT" &&
+      (typedMsg?.metadata as any)?.v === 1,
+  );
+
+  const typedMsgProjected = resolveDisplayForMessage({
+    senderType: typedMsg!.senderType,
+    content: typedMsg!.content,
+    displayText: typedMsg!.displayText,
+    metadata: typedMsg!.metadata,
+  });
+  check(
+    "5.8 Manually typed exact fp:... with TEXT provenance projects to null (renders original text, NOT fallback)",
+    typedMsgProjected === null,
   );
 
   // Step 4: Stale callback with unknown token preserves rejection behaviour and stores truthful neutral label
@@ -621,7 +708,7 @@ async function run(): Promise<void> {
     text: staleCallbackText,
     transportOrigin: "CALLBACK",
   });
-  check("5.8 Stale callback executed through engine", staleResult.ok);
+  check("5.9 Stale callback executed through engine", staleResult.ok);
 
   const staleMessages = await harness.deps.conversationRepository.getMessages(
     startResult.ok && "conversationId" in startResult
@@ -632,9 +719,21 @@ async function run(): Promise<void> {
 
   const staleMeta = staleMsg?.metadata as any;
   check(
-    "5.9 Stale callback persists truthful neutral wording 'خيار تفاعلي منتهي الصلاحية أو غير متاح'",
+    "5.10 Stale callback persists truthful neutral wording 'خيار تفاعلي منتهي الصلاحية أو غير متاح'",
     staleMsg?.displayText === "خيار تفاعلي منتهي الصلاحية أو غير متاح" &&
       staleMeta?.status === "UNKNOWN_TOKEN",
+  );
+
+  // Step 5: Snapshot immutability check
+  // Verify that previous validated callback snapshot remains unchanged after subsequent turns
+  const frozenCallbackMsg = (
+    await harness.deps.conversationRepository.getMessages(convId)
+  ).find((m) => m.content === callbackText);
+  check(
+    "5.11 Persisted interaction snapshot remains strictly immutable after subsequent turns/status changes",
+    frozenCallbackMsg?.displayText === "حجز موعد" &&
+      (frozenCallbackMsg?.metadata as any)?.snapshot?.action === "book" &&
+      (frozenCallbackMsg?.metadata as any)?.status === "VALIDATED",
   );
 
   // ── Total Summary ──────────────────────────────────────────────────────────

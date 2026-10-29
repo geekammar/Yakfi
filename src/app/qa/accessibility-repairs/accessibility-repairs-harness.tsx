@@ -86,7 +86,12 @@ const FIXTURE_CUSTOMERS: CustomerListItem[] = [
 
 export function AccessibilityRepairsHarness() {
   const [activeTab, setActiveTab] = useState<
-    "dialogs" | "working-hours" | "team" | "appointments" | "wave-b"
+    | "dialogs"
+    | "working-hours"
+    | "team"
+    | "appointments"
+    | "wave-b"
+    | "interactions"
   >("dialogs");
 
   const [customerDirectoryMode, setCustomerDirectoryMode] = useState<
@@ -160,6 +165,14 @@ export function AccessibilityRepairsHarness() {
             data-testid="tab-wave-b"
           >
             5. Yakfi Wave B
+          </Button>
+          <Button
+            variant={activeTab === "interactions" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveTab("interactions")}
+            data-testid="tab-interactions"
+          >
+            6. Readable Interactions
           </Button>
         </div>
       </div>
@@ -464,6 +477,113 @@ export function AccessibilityRepairsHarness() {
                   </p>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 6. Readable Interactions Section ─── */}
+      {activeTab === "interactions" && (
+        <div className="space-y-6" data-testid="section-interactions" dir="rtl">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              سجل تفاعلات الأزرار القابلة للقراءة (Interaction History)
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              عرض الاختيارات المؤكدة كنصوص واضحة وإخفاء رمز البروتوكول داخل تفاصيل قابلة للطي.
+            </p>
+          </div>
+
+          <div className="space-y-4 max-w-md p-4 rounded-xl border bg-card/50">
+            {/* 1. Confirmed button selection */}
+            <div
+              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
+              data-testid="qa-interaction-item-confirmed"
+            >
+              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
+                <span>العميل</span>
+                <time dateTime="2026-10-30T10:00:00.000Z">10:00 ص</time>
+              </div>
+              <div className="space-y-1.5" data-testid="qa-interaction-display-box">
+                <p
+                  className="whitespace-pre-wrap text-sm font-medium leading-7 text-foreground"
+                  data-testid="qa-interaction-display-text"
+                >
+                  اختيار موعد: 10:00 ص
+                </p>
+                <details
+                  className="text-[11px] opacity-75 cursor-pointer"
+                  data-testid="qa-interaction-details"
+                >
+                  <summary
+                    className="hover:underline select-none"
+                    data-testid="qa-interaction-summary"
+                    tabIndex={0}
+                  >
+                    عرض التفاصيل التقنية
+                  </summary>
+                  <span
+                    className="mt-1 block font-mono text-[10px] break-all rounded bg-muted/60 p-1.5 text-muted-foreground"
+                    data-testid="qa-interaction-raw-token"
+                  >
+                    fp:tok123:1
+                  </span>
+                </details>
+              </div>
+            </div>
+
+            {/* 2. Historical fallback message without snapshot */}
+            <div
+              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
+              data-testid="qa-interaction-item-historical"
+            >
+              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
+                <span>العميل</span>
+                <time dateTime="2026-10-28T09:00:00.000Z">09:00 ص</time>
+              </div>
+              <div className="space-y-1.5">
+                <p
+                  className="whitespace-pre-wrap text-sm font-medium leading-7 text-muted-foreground"
+                  data-testid="qa-interaction-historical-text"
+                >
+                  محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة
+                </p>
+                <details
+                  className="text-[11px] opacity-75 cursor-pointer"
+                  data-testid="qa-interaction-historical-details"
+                >
+                  <summary
+                    className="hover:underline select-none"
+                    data-testid="qa-interaction-historical-summary"
+                    tabIndex={0}
+                  >
+                    عرض التفاصيل التقنية
+                  </summary>
+                  <span
+                    className="mt-1 block font-mono text-[10px] break-all rounded bg-muted/60 p-1.5 text-muted-foreground"
+                    data-testid="qa-interaction-historical-raw-token"
+                  >
+                    fp:de392742:3
+                  </span>
+                </details>
+              </div>
+            </div>
+
+            {/* 3. Plain ordinary customer text */}
+            <div
+              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
+              data-testid="qa-plain-message-item"
+            >
+              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
+                <span>العميل</span>
+                <time dateTime="2026-10-30T10:05:00.000Z">10:05 ص</time>
+              </div>
+              <p
+                className="whitespace-pre-wrap text-sm leading-7 text-foreground"
+                data-testid="qa-plain-message-text"
+              >
+                السلام عليكم، أريد الاستفسار عن كشف الأسنان
+              </p>
             </div>
           </div>
         </div>

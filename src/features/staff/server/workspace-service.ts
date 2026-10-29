@@ -174,6 +174,7 @@ export async function getStaffWorkspace(
                   displayText: (
                     row.messages[0] as { displayText?: string | null }
                   ).displayText,
+                  metadata: (row.messages[0] as { metadata?: unknown }).metadata,
                 }),
                 senderType: row.messages[0].senderType,
                 createdAt: row.messages[0].createdAt.toISOString(),
@@ -203,6 +204,7 @@ export async function getStaffWorkspace(
               content: row.messages[0].content,
               displayText: (row.messages[0] as { displayText?: string | null })
                 .displayText,
+              metadata: (row.messages[0] as { metadata?: unknown }).metadata,
             }),
             senderType: row.messages[0].senderType,
             createdAt: row.messages[0].createdAt.toISOString(),

@@ -754,7 +754,7 @@ export function ConversationDetail({
                           </p>
                           <details className="text-[11px] opacity-75 cursor-pointer">
                             <summary className="hover:underline select-none">
-                              رمز البروتوكول ({message.content})
+                              عرض التفاصيل التقنية
                             </summary>
                             <span className="mt-1 block font-mono text-[10px] break-all rounded bg-background/30 px-1.5 py-0.5">
                               {message.content}

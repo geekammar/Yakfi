@@ -511,4 +511,80 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(listAppointmentsList).toBeVisible();
     await expect(calendarTimelineSection).toHaveCount(0);
   });
+
+  test("6. Readable Interaction History: summary visible, raw token hidden until expanded, keyboard expansion, no horizontal overflow at narrow viewports", async ({
+    page,
+  }, testInfo) => {
+    // Navigate to interaction history tab
+    const interactionsTab = page.locator('[data-testid="tab-interactions"]');
+    await expect(interactionsTab).toBeVisible();
+    await interactionsTab.click();
+
+    const section = page.locator('[data-testid="section-interactions"]');
+    await expect(section).toBeVisible();
+
+    // 1. Confirmed choice readable text visible
+    const confirmedText = page.locator(
+      '[data-testid="qa-interaction-display-text"]',
+    );
+    await expect(confirmedText).toBeVisible();
+    await expect(confirmedText).toHaveText("اختيار موعد: 10:00 ص");
+
+    // 2. Neutral summary "عرض التفاصيل التقنية" is visible
+    const summary = page.locator('[data-testid="qa-interaction-summary"]');
+    await expect(summary).toBeVisible();
+    await expect(summary).toHaveText("عرض التفاصيل التقنية");
+
+    // 3. Raw token is hidden while details is collapsed
+    const rawToken = page.locator('[data-testid="qa-interaction-raw-token"]');
+    await expect(rawToken).not.toBeVisible();
+
+    // 4. Keyboard expansion: focus summary and press Enter
+    await summary.focus();
+    await page.keyboard.press("Enter");
+
+    // Now raw token is revealed
+    await expect(rawToken).toBeVisible();
+    await expect(rawToken).toHaveText("fp:tok123:1");
+
+    // Press Enter again to collapse
+    await page.keyboard.press("Enter");
+    await expect(rawToken).not.toBeVisible();
+
+    // 5. Historical message has neutral fallback and collapsed raw details
+    const historicalText = page.locator(
+      '[data-testid="qa-interaction-historical-text"]',
+    );
+    await expect(historicalText).toBeVisible();
+    await expect(historicalText).toHaveText(
+      "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة",
+    );
+
+    const historicalRaw = page.locator(
+      '[data-testid="qa-interaction-historical-raw-token"]',
+    );
+    await expect(historicalRaw).not.toBeVisible();
+
+    // 6. No horizontal overflow in viewport
+    const overflow = await page.evaluate(() => {
+      return {
+        bodyScrollWidth: document.body.scrollWidth,
+        windowInnerWidth: window.innerWidth,
+        docScrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+    expect(
+      overflow.docScrollWidth,
+      `Horizontal overflow detected: doc scrollWidth ${overflow.docScrollWidth} > innerWidth ${overflow.windowInnerWidth}`,
+    ).toBeLessThanOrEqual(overflow.windowInnerWidth);
+
+    // Screenshot for visual evidence
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `${testInfo.project.name}-interaction-history.png`,
+      ),
+      fullPage: false,
+    });
+  });
 });

@@ -30,24 +30,36 @@ export const HISTORICAL_PROTOCOL_FALLBACK_TEXT =
   "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة";
 
 export type InteractionStatus =
-  "VALIDATED" | "STALE" | "MALFORMED" | "UNKNOWN_TOKEN" | "INVALID_ACTION";
+  | "VALIDATED"
+  | "STALE"
+  | "MALFORMED"
+  | "UNKNOWN_TOKEN"
+  | "INVALID_ACTION";
 
-export type InteractionSnapshotMetadata = {
-  provenance: InboundTransportOrigin;
-  status: InteractionStatus;
-  offerToken?: string;
-  offerKind?: BookingOffer["kind"];
-  action?: string | number;
-  displayText?: string;
-  snapshot?: Record<string, unknown>;
-  rawText?: string;
-  reason?: string;
-};
+export type MessageProvenanceMetadata =
+  | {
+      v: 1;
+      provenance: "TEXT";
+    }
+  | {
+      v: 1;
+      provenance: "CALLBACK" | "INTERACTIVE";
+      status: InteractionStatus;
+      offerToken?: string;
+      offerKind?: BookingOffer["kind"];
+      action?: string | number;
+      displayText?: string;
+      snapshot?: Record<string, unknown>;
+      rawText?: string;
+      reason?: string;
+    };
+
+export type InteractionSnapshotMetadata = MessageProvenanceMetadata;
 
 export type InteractionResolutionResult = {
   isInteraction: boolean;
   displayText: string | null;
-  metadata: InteractionSnapshotMetadata | null;
+  metadata: MessageProvenanceMetadata | null;
 };
 
 /**
@@ -355,6 +367,20 @@ export function resolveInteractionDisplay(params: {
   currentOffer: BookingOffer | null;
   now: Date;
 }): InteractionResolutionResult {
+  // Preserve known TEXT provenance through persistence and read models.
+  // When an inbound message is known to be ordinary customer text (typed),
+  // persist a small typed/versioned provenance record.
+  if (params.transportOrigin === "TEXT") {
+    return {
+      isInteraction: false,
+      displayText: null,
+      metadata: {
+        v: 1,
+        provenance: "TEXT",
+      },
+    };
+  }
+
   const isInteraction = isTransportInteraction(params.transportOrigin);
   if (!isInteraction) {
     return {
@@ -370,6 +396,7 @@ export function resolveInteractionDisplay(params: {
       isInteraction: true,
       displayText: "خيار تفاعلي غير صالح",
       metadata: {
+        v: 1,
         provenance: params.transportOrigin!,
         status: "MALFORMED",
         rawText: params.rawText,
@@ -382,6 +409,7 @@ export function resolveInteractionDisplay(params: {
       isInteraction: true,
       displayText: "خيار تفاعلي منتهي الصلاحية أو غير متاح",
       metadata: {
+        v: 1,
         provenance: params.transportOrigin!,
         status: "UNKNOWN_TOKEN",
         offerToken: callback.token,
@@ -406,6 +434,7 @@ export function resolveInteractionDisplay(params: {
     isInteraction: true,
     displayText: result.displayText,
     metadata: {
+      v: 1,
       provenance: params.transportOrigin!,
       status: result.status,
       offerToken: params.currentOffer.token,
@@ -420,21 +449,34 @@ export function resolveInteractionDisplay(params: {
 /**
  * Resolves customer message display content for presentation in queries & UI:
  * - If displayText exists (new interactions), returns it.
- * - If historical customer message contains protocol format (fp:token:action) without
- *   proven snapshot, returns neutral fallback:
+ * - If metadata indicates known ordinary customer TEXT (provenance === "TEXT"),
+ *   returns null to preserve original verbatim text display (even if the customer typed
+ *   an exact `fp:...` shaped protocol token).
+ * - If provenance/snapshot evidence is absent (null/undefined metadata, e.g. historical rows)
+ *   and customer message matches exact protocol format `fp:<token>:<action>`,
+ *   returns neutral fallback:
  *   "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة"
- * - Ordinary text returns null (UI displays message.content directly).
+ * - Ordinary prose and malformed/lookalike strings return null (rendered directly).
  */
 export function resolveDisplayForMessage(message: {
   senderType: string;
   content: string;
   displayText?: string | null;
+  metadata?: unknown;
 }): string | null {
   if (message.displayText && message.displayText.trim().length > 0) {
     return message.displayText.trim();
   }
 
+  if (message.metadata && typeof message.metadata === "object") {
+    const meta = message.metadata as Record<string, unknown>;
+    if (meta.provenance === "TEXT") {
+      return null;
+    }
+  }
+
   if (
+    message.metadata == null &&
     message.senderType === "CUSTOMER" &&
     isOfferProtocolText(message.content)
   ) {
