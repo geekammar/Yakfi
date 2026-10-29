@@ -6,6 +6,8 @@ import { WorkingHoursForm } from "@/features/onboarding/components/working-hours
 import type { WorkingHoursStepInput } from "@/features/onboarding/schemas/onboarding-schema";
 import { TeamScreen } from "@/features/staff/components/team-screen";
 import type { TeamMemberItem } from "@/features/staff/types";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { YakfiBrandText } from "@/components/shared/yakfi-brand-text";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 import { SparklesIcon } from "lucide-react";
 import { useState } from "react";
@@ -71,7 +74,7 @@ const FIXTURE_APPOINTMENTS: AppointmentAgendaItem[] = [
 
 export function AccessibilityRepairsHarness() {
   const [activeTab, setActiveTab] = useState<
-    "dialogs" | "working-hours" | "team" | "appointments"
+    "dialogs" | "working-hours" | "team" | "appointments" | "wave-b"
   >("dialogs");
 
   const [teamFixture, setTeamFixture] = useState<"admin" | "mixed" | "empty">(
@@ -133,6 +136,14 @@ export function AccessibilityRepairsHarness() {
             data-testid="tab-appointments"
           >
             4. Appointment View Switch
+          </Button>
+          <Button
+            variant={activeTab === "wave-b" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setActiveTab("wave-b")}
+            data-testid="tab-wave-b"
+          >
+            5. Yakfi Wave B
           </Button>
         </div>
       </div>
@@ -280,6 +291,115 @@ export function AccessibilityRepairsHarness() {
             workingHours={INITIAL_WORKING_HOURS.workingHours}
             slotDurationMinutes={30}
           />
+        </div>
+      )}
+
+      {/* ─── 5. Yakfi Wave B Tokens & Real Components Section ─── */}
+      {activeTab === "wave-b" && (
+        <div className="space-y-6" data-testid="section-wave-b">
+          <div
+            className="bg-card shadow-sm rounded-xl border p-6 space-y-6"
+            data-testid="wave-b-card"
+          >
+            <div className="space-y-2">
+              <h2
+                className="text-xl font-bold tracking-tight text-foreground"
+                data-testid="wave-b-heading"
+              >
+                هوية يكفي ورموز التصميم المرئي
+              </h2>
+              <p className="text-muted-foreground text-sm">
+                مكونات حقيقية لاختبار الخطوط، الألوان، التباين، والحالات
+                التفاعلية.
+              </p>
+            </div>
+
+            {/* Real YakfiBrandText instances (Arabic & English) */}
+            <div className="flex flex-wrap items-center gap-6 p-4 rounded-lg border bg-background">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground block">
+                  العلامة بالعربية:
+                </span>
+                <div data-testid="qa-brand-text-ar">
+                  <YakfiBrandText lang="ar" className="text-2xl" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground block">
+                  العلامة بالإنجليزية:
+                </span>
+                <div data-testid="qa-brand-text-en">
+                  <YakfiBrandText lang="en" className="text-2xl" />
+                </div>
+              </div>
+            </div>
+
+            {/* Real Warning StatusBadge on Card Surface */}
+            <div
+              className="p-4 rounded-lg border bg-card"
+              data-testid="qa-status-badge-container"
+            >
+              <span className="text-xs text-muted-foreground block mb-2">
+                شارة الحالة التحذيرية:
+              </span>
+              <StatusBadge status="warning" data-testid="qa-warning-badge" />
+            </div>
+
+            {/* Real Shared Controls for Interactive States */}
+            <div className="space-y-4 p-4 rounded-lg border bg-background">
+              <h3 className="text-sm font-semibold text-foreground">
+                الحالات التفاعلية للتحكم المشترك
+              </h3>
+              <div className="flex flex-wrap items-center gap-4">
+                <Button type="button" data-testid="qa-interactive-button">
+                  زر تفاعلي أساسي
+                </Button>
+                <Button type="button" disabled data-testid="qa-disabled-button">
+                  زر معطل
+                </Button>
+              </div>
+
+              <form
+                onSubmit={(e) => e.preventDefault()}
+                className="space-y-3 max-w-sm"
+              >
+                <div>
+                  <label
+                    htmlFor="qa-interactive-input"
+                    className="text-xs text-muted-foreground block mb-1"
+                  >
+                    حقل إدخال تفاعلي:
+                  </label>
+                  <Input
+                    id="qa-interactive-input"
+                    data-testid="qa-interactive-input"
+                    placeholder="اكتب هنا..."
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="qa-invalid-input"
+                    className="text-xs text-muted-foreground block mb-1"
+                  >
+                    حقل إدخال به خطأ:
+                  </label>
+                  <Input
+                    id="qa-invalid-input"
+                    data-testid="qa-invalid-input"
+                    aria-invalid="true"
+                    placeholder="قيمة غير صالحة"
+                    defaultValue="قيمة خاطئة"
+                  />
+                  <p
+                    className="text-xs text-destructive mt-1"
+                    data-testid="qa-input-error-msg"
+                  >
+                    يرجى إدخال قيمة صحيحة
+                  </p>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
     </div>
