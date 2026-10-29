@@ -144,11 +144,15 @@ async function main(): Promise<void> {
 
   check(
     "2f. formatStaffAppointmentDate('2026-11-07') contains day 7 and November and never 6",
-    staffNov7.includes("نوفمبر") && /[7٧]/.test(staffNov7) && !/[6٦]/.test(staffNov7),
+    staffNov7.includes("نوفمبر") &&
+      /[7٧]/.test(staffNov7) &&
+      !/[6٦]/.test(staffNov7),
   );
   check(
     "2g. formatStaffAppointmentDate('2026-11-08') contains day 8 and November and never 7",
-    staffNov8.includes("نوفمبر") && /[8٨]/.test(staffNov8) && !/[7٧]/.test(staffNov8),
+    staffNov8.includes("نوفمبر") &&
+      /[8٨]/.test(staffNov8) &&
+      !/[7٧]/.test(staffNov8),
   );
 
   const dayMonth7 = formatArabicDayMonth("2026-11-07");
@@ -393,10 +397,16 @@ async function main(): Promise<void> {
         shiftedToDay6,
       );
     } catch {
-      check("4b. Regression proof for staff workspace parsed successfully", false);
+      check(
+        "4b. Regression proof for staff workspace parsed successfully",
+        false,
+      );
     }
   } else {
-    check("4b. Regression proof subprocess for staff workspace succeeded", false);
+    check(
+      "4b. Regression proof subprocess for staff workspace succeeded",
+      false,
+    );
   }
 
   // ── 5. Staff Workspace Rendered Test Suite Contract Verification ─────────

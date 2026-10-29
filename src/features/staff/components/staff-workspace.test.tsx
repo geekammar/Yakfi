@@ -14,10 +14,7 @@ import {
   StaffWorkspace,
   formatAppointmentDate,
 } from "@/features/staff/components/staff-workspace";
-import type {
-  StaffAssignedItem,
-  StaffQueueItem,
-} from "@/features/staff/types";
+import type { StaffAssignedItem, StaffQueueItem } from "@/features/staff/types";
 
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
