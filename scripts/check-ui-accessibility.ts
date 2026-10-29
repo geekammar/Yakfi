@@ -76,6 +76,58 @@ check(
     dialogSrc.includes("DialogPrimitive.Title"),
 );
 
+// ─── 1B. Customer Dialog Focus Restoration ───
+const customerFormDialogPath = resolve(
+  root,
+  "src/features/customers/components/customer-form-dialog.tsx",
+);
+const customerFormDialogSrc = readFileSync(customerFormDialogPath, "utf8");
+
+const customersDirectoryPath = resolve(
+  root,
+  "src/features/customers/components/customers-directory.tsx",
+);
+const customersDirectorySrc = readFileSync(customersDirectoryPath, "utf8");
+
+const customerStepPath = resolve(
+  root,
+  "src/features/appointments/components/smart-create/customer-step.tsx",
+);
+const customerStepSrc = readFileSync(customerStepPath, "utf8");
+
+check(
+  "1.6 CustomerFormDialog intercepts onCloseAutoFocus to restore focus to opener",
+  customerFormDialogSrc.includes("onCloseAutoFocus={handleCloseAutoFocus}") &&
+    customerFormDialogSrc.includes(
+      "returnFocusRef?.current ?? capturedOpenerRef.current",
+    ) &&
+    customerFormDialogSrc.includes("opener.focus()"),
+);
+
+check(
+  "1.7 CustomerFormDialog falls back to surviving focus target when opener is disconnected",
+  customerFormDialogSrc.includes("fallbackFocusRef?.current") &&
+    customerFormDialogSrc.includes("opener.isConnected") &&
+    customerFormDialogSrc.includes("main button:not([disabled])"),
+);
+
+check(
+  "1.8 CustomersDirectory captures opening controls across primary and empty-state entries and binds returnFocusRef",
+  customersDirectorySrc.includes(
+    "openerRef.current = eventOrElement.currentTarget",
+  ) &&
+    customersDirectorySrc.includes("returnFocusRef={openerRef}") &&
+    customersDirectorySrc.includes("fallbackFocusRef={primaryActionRef}"),
+);
+
+check(
+  "1.9 CustomerStep preserves CustomerCreateDialog focus restoration contract in Smart Create",
+  customerStepSrc.includes("returnFocusRef={openerRef}") &&
+    customerStepSrc.includes(
+      "returnFocusRef?: React.RefObject<HTMLElement | null>",
+    ),
+);
+
 // ─── 2. Working Hours Inputs (src/features/onboarding/components/working-hours-form.tsx) ───
 const workingHoursPath = resolve(
   root,

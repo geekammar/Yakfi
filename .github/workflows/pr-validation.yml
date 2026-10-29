@@ -127,6 +127,7 @@ jobs:
           pnpm check:ui-accessibility
           pnpm test:conversation-detail
           pnpm test:install-prompt
+          pnpm test:customers-dialog
           pnpm check:qa-harness
 
       - name: Base-versus-HEAD handoff-cause reconciliation

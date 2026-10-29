@@ -21,8 +21,31 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { LoaderCircleIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+
+export type CustomerFormDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Called with the created customer after a server-confirmed success. */
+  onCreated: (customer: CustomerCreated) => void;
+  /**
+   * Optional initial values (e.g. the text the user already typed into a
+   * customer search). Applied as form defaults only — every value is
+   * re-validated on submit by the same schema the server enforces, so
+   * prefilling can never bypass validation.
+   */
+  prefill?: { name?: string; phone?: string };
+  /**
+   * Explicit control to restore focus to on dialog closure.
+   * If omitted, falls back to the element that had focus when the dialog opened.
+   */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * Fallback focus target if the opener control has unmounted or disappeared.
+   */
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
+};
 
 /**
  * Small create-customer form: name, phone, optional notes. The ONE
@@ -37,21 +60,49 @@ export function CustomerFormDialog({
   onOpenChange,
   onCreated,
   prefill,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Called with the created customer after a server-confirmed success. */
-  onCreated: (customer: CustomerCreated) => void;
-  /**
-   * Optional initial values (e.g. the text the user already typed into a
-   * customer search). Applied as form defaults only — every value is
-   * re-validated on submit by the same schema the server enforces, so
-   * prefilling can never bypass validation.
-   */
-  prefill?: { name?: string; phone?: string };
-}) {
+  returnFocusRef,
+  fallbackFocusRef,
+}: CustomerFormDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const capturedOpenerRef = useRef<HTMLElement | null>(null);
+
+  // Capture active element when dialog opens as fallback if returnFocusRef is omitted
+  useEffect(() => {
+    if (open) {
+      if (capturedOpenerRef.current == null) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active !== document.body) {
+          capturedOpenerRef.current = active;
+        }
+      }
+    } else {
+      capturedOpenerRef.current = null;
+    }
+  }, [open]);
+
+  function handleCloseAutoFocus(event: Event) {
+    event.preventDefault();
+    const opener = returnFocusRef?.current ?? capturedOpenerRef.current;
+    if (opener && opener.isConnected && typeof opener.focus === "function") {
+      opener.focus();
+      return;
+    }
+    if (
+      fallbackFocusRef?.current &&
+      fallbackFocusRef.current.isConnected &&
+      typeof fallbackFocusRef.current.focus === "function"
+    ) {
+      fallbackFocusRef.current.focus();
+      return;
+    }
+    if (typeof document !== "undefined") {
+      const fallback = document.querySelector<HTMLElement>(
+        'main button:not([disabled]), main [href], main input:not([disabled]), [tabindex="0"]',
+      );
+      fallback?.focus();
+    }
+  }
   const form = useForm<CustomerFormInput>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: {
@@ -80,7 +131,7 @@ export function CustomerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onCloseAutoFocus={handleCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>إضافة عميل</DialogTitle>
           <DialogDescription>

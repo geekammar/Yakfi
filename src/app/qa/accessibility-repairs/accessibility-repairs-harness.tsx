@@ -2,6 +2,8 @@
 
 import { AppointmentAgenda } from "@/features/appointments/components/appointment-agenda";
 import type { AppointmentAgendaItem } from "@/features/appointments/types";
+import { CustomersDirectory } from "@/features/customers/components/customers-directory";
+import type { CustomerListItem } from "@/features/customers/types";
 import { WorkingHoursForm } from "@/features/onboarding/components/working-hours-form";
 import type { WorkingHoursStepInput } from "@/features/onboarding/schemas/onboarding-schema";
 import { TeamScreen } from "@/features/staff/components/team-screen";
@@ -72,10 +74,24 @@ const FIXTURE_APPOINTMENTS: AppointmentAgendaItem[] = [
   },
 ];
 
+const FIXTURE_CUSTOMERS: CustomerListItem[] = [
+  {
+    id: "cust-qa-1",
+    name: "سارة عبد الله أحمد",
+    phone: "+201012345678",
+    lastConversationAt: "2026-10-28T14:30:00.000Z",
+    lastAppointmentAt: "2026-10-29T10:00:00.000Z",
+  },
+];
+
 export function AccessibilityRepairsHarness() {
   const [activeTab, setActiveTab] = useState<
     "dialogs" | "working-hours" | "team" | "appointments" | "wave-b"
   >("dialogs");
+
+  const [customerDirectoryMode, setCustomerDirectoryMode] = useState<
+    "populated" | "empty"
+  >("populated");
 
   const [teamFixture, setTeamFixture] = useState<"admin" | "mixed" | "empty">(
     "admin",
@@ -228,6 +244,55 @@ export function AccessibilityRepairsHarness() {
                 </DialogContent>
               </Dialog>
             </div>
+          </div>
+
+          {/* ─── Real CustomersDirectory → CustomerFormDialog Composition ─── */}
+          <div
+            className="border-t pt-6 space-y-4"
+            data-testid="section-customers-composition"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-semibold">
+                  تركيبة دليل العملاء الحقيقية (CustomersDirectory →
+                  CustomerFormDialog)
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  التحقق من استعادة التركيز لعنصر الفتح الحقيقي (الزر الرئيسي
+                  وحالات الدليل الفارغ).
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant={
+                    customerDirectoryMode === "populated"
+                      ? "default"
+                      : "outline"
+                  }
+                  size="sm"
+                  onClick={() => setCustomerDirectoryMode("populated")}
+                  data-testid="toggle-customers-populated"
+                >
+                  قائمة تحتوي عملاء
+                </Button>
+                <Button
+                  variant={
+                    customerDirectoryMode === "empty" ? "default" : "outline"
+                  }
+                  size="sm"
+                  onClick={() => setCustomerDirectoryMode("empty")}
+                  data-testid="toggle-customers-empty"
+                >
+                  حالة فارغة
+                </Button>
+              </div>
+            </div>
+            <CustomersDirectory
+              key={customerDirectoryMode}
+              initialCustomers={
+                customerDirectoryMode === "populated" ? FIXTURE_CUSTOMERS : []
+              }
+            />
           </div>
         </div>
       )}

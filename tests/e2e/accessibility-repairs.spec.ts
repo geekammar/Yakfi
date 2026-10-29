@@ -212,6 +212,82 @@ test.describe("UI & Accessibility Repairs QA", () => {
     await expect(ltrTrigger).toBeFocused();
   });
 
+  test("1b. CustomersDirectory → CustomerFormDialog: focus restoration to actual opener on Escape, Close button, and Cancel across primary and empty-state entries", async ({
+    page,
+  }) => {
+    await page.locator('[data-testid="tab-dialogs"]').click();
+    const section = page.locator(
+      '[data-testid="section-customers-composition"]',
+    );
+    await expect(section).toBeVisible();
+
+    // ── 1. Primary Create Button: Escape key ──
+    const primaryBtn = page.locator(
+      '[data-testid="customers-primary-create-btn"]',
+    );
+    await expect(primaryBtn).toBeVisible();
+    await primaryBtn.focus();
+    await expect(primaryBtn).toBeFocused();
+    await primaryBtn.click();
+
+    const dialogContent = page.locator('[data-slot="dialog-content"]');
+    await expect(dialogContent).toBeVisible();
+    await page.waitForTimeout(100);
+
+    // Escape closes dialog and restores focus to primary button
+    await page.keyboard.press("Escape");
+    await expect(dialogContent).not.toBeVisible();
+    await expect(primaryBtn).toBeFocused();
+
+    // ── 2. Primary Create Button: Reopening & Close Button (X) ──
+    await primaryBtn.click();
+    await expect(dialogContent).toBeVisible();
+    await page.waitForTimeout(100);
+
+    const closeBtn = dialogContent.locator('button[data-slot="dialog-close"]');
+    await expect(closeBtn).toBeVisible();
+    await closeBtn.click();
+    await expect(dialogContent).not.toBeVisible();
+    await expect(primaryBtn).toBeFocused();
+
+    // ── 3. Primary Create Button: Reopening & Cancel Button ("إلغاء") ──
+    await primaryBtn.click();
+    await expect(dialogContent).toBeVisible();
+    await page.waitForTimeout(100);
+
+    const cancelBtn = dialogContent.getByRole("button", { name: "إلغاء" });
+    await expect(cancelBtn).toBeVisible();
+    await cancelBtn.click();
+    await expect(dialogContent).not.toBeVisible();
+    await expect(primaryBtn).toBeFocused();
+
+    // ── 4. Empty State Create Button: Escape and Cancel ──
+    await page.locator('[data-testid="toggle-customers-empty"]').click();
+    const emptyBtn = page.locator('[data-testid="customers-empty-create-btn"]');
+    await expect(emptyBtn).toBeVisible();
+    await emptyBtn.focus();
+    await expect(emptyBtn).toBeFocused();
+    await emptyBtn.click();
+
+    await expect(dialogContent).toBeVisible();
+    await page.waitForTimeout(100);
+
+    await page.keyboard.press("Escape");
+    await expect(dialogContent).not.toBeVisible();
+    await expect(emptyBtn).toBeFocused();
+
+    // Reopen from empty state and close via Cancel
+    await emptyBtn.click();
+    await expect(dialogContent).toBeVisible();
+    await page.waitForTimeout(100);
+
+    const emptyCancelBtn = dialogContent.getByRole("button", { name: "إلغاء" });
+    await expect(emptyCancelBtn).toBeVisible();
+    await emptyCancelBtn.click();
+    await expect(dialogContent).not.toBeVisible();
+    await expect(emptyBtn).toBeFocused();
+  });
+
   test("2. Working Hours Inputs: Unique day-specific labels and bindings", async ({
     page,
   }, testInfo) => {
