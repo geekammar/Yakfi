@@ -2,6 +2,8 @@
 
 import { AppointmentAgenda } from "@/features/appointments/components/appointment-agenda";
 import type { AppointmentAgendaItem } from "@/features/appointments/types";
+import { ConversationDetail } from "@/features/conversations/components/conversation-detail";
+import type { ConversationDetailData } from "@/features/conversations/types";
 import { CustomersDirectory } from "@/features/customers/components/customers-directory";
 import type { CustomerListItem } from "@/features/customers/types";
 import { WorkingHoursForm } from "@/features/onboarding/components/working-hours-form";
@@ -83,6 +85,76 @@ const FIXTURE_CUSTOMERS: CustomerListItem[] = [
     lastAppointmentAt: "2026-10-29T10:00:00.000Z",
   },
 ];
+
+const INTERACTION_HISTORY_DETAIL_FIXTURE: ConversationDetailData = {
+  id: "conv-qa-interaction-history",
+  businessId: "biz-qa",
+  status: "AI_ACTIVE",
+  aiSummary: "محادثة اختبار عرض سجل تفاعلات الأزرار والرسائل النصية",
+  attentionReason: null,
+  attentionCause: null,
+  customer: {
+    id: "cust-qa-int",
+    name: "سارة عبد الله أحمد",
+    phone: "+966501234567",
+    notes: "عميل تجريبي للتحقق من واجهة سجل التفاعلات",
+  },
+  assignedUser: null,
+  currentUserId: "user-admin-1",
+  appointments: [],
+  team: [ADMIN_MEMBER],
+  messages: [
+    // 1. Validated button interaction with stored readable text and realistic long technical token
+    {
+      id: "msg-qa-val-1",
+      senderType: "CUSTOMER",
+      content:
+        "fp:tok_9f8b2c41d607e3a5:appointment_slot_20261030_1000_provider_hani_shaker_long_identifier_suffix_audit_record",
+      displayText: "اختيار موعد: 10:00 ص (د. هاني شاكر)",
+      metadata: {
+        v: 1,
+        provenance: "CALLBACK",
+        status: "VALIDATED",
+        offerToken: "tok_9f8b2c41d607e3a5",
+      },
+      createdAt: "2026-10-29T10:00:00.000Z",
+    },
+    // 2. Known TEXT provenance whose content is an exact valid-shaped fp token
+    {
+      id: "msg-qa-text-exact",
+      senderType: "CUSTOMER",
+      content: "fp:tok_manual_exact_token_typed_by_customer:3",
+      displayText: null,
+      metadata: {
+        v: 1,
+        provenance: "TEXT",
+      },
+      createdAt: "2026-10-29T10:01:00.000Z",
+    },
+    // 3. Historical protocol content without provenance or display snapshot
+    {
+      id: "msg-qa-hist-1",
+      senderType: "CUSTOMER",
+      content: "fp:de392742:3",
+      displayText: "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة",
+      metadata: null,
+      createdAt: "2026-10-29T10:02:00.000Z",
+    },
+    // 4. Normal Arabic prose
+    {
+      id: "msg-qa-prose-1",
+      senderType: "CUSTOMER",
+      content:
+        "السلام عليكم ورحمة الله، أود الاستفسار عن تفاصيل موعد تنظيف الأسنان والأسعار.",
+      displayText: null,
+      metadata: {
+        v: 1,
+        provenance: "TEXT",
+      },
+      createdAt: "2026-10-29T10:03:00.000Z",
+    },
+  ],
+};
 
 export function AccessibilityRepairsHarness() {
   const [activeTab, setActiveTab] = useState<
@@ -490,105 +562,19 @@ export function AccessibilityRepairsHarness() {
               سجل تفاعلات الأزرار القابلة للقراءة (Interaction History)
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
-              عرض الاختيارات المؤكدة كنصوص واضحة وإخفاء رمز البروتوكول داخل
-              تفاصيل قابلة للطي.
+              اختبار مكون المحادثة الفعلي (ConversationDetail) مع فئات التفاعل
+              المختلفة.
             </p>
           </div>
 
-          <div className="space-y-4 max-w-md p-4 rounded-xl border bg-card/50">
-            {/* 1. Confirmed button selection */}
-            <div
-              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
-              data-testid="qa-interaction-item-confirmed"
-            >
-              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
-                <span>العميل</span>
-                <time dateTime="2026-10-30T10:00:00.000Z">10:00 ص</time>
-              </div>
-              <div
-                className="space-y-1.5"
-                data-testid="qa-interaction-display-box"
-              >
-                <p
-                  className="whitespace-pre-wrap text-sm font-medium leading-7 text-foreground"
-                  data-testid="qa-interaction-display-text"
-                >
-                  اختيار موعد: 10:00 ص
-                </p>
-                <details
-                  className="text-[11px] opacity-75 cursor-pointer"
-                  data-testid="qa-interaction-details"
-                >
-                  <summary
-                    className="hover:underline select-none"
-                    data-testid="qa-interaction-summary"
-                    tabIndex={0}
-                  >
-                    عرض التفاصيل التقنية
-                  </summary>
-                  <span
-                    className="mt-1 block font-mono text-[10px] break-all rounded bg-muted/60 p-1.5 text-muted-foreground"
-                    data-testid="qa-interaction-raw-token"
-                  >
-                    fp:tok123:1
-                  </span>
-                </details>
-              </div>
-            </div>
-
-            {/* 2. Historical fallback message without snapshot */}
-            <div
-              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
-              data-testid="qa-interaction-item-historical"
-            >
-              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
-                <span>العميل</span>
-                <time dateTime="2026-10-28T09:00:00.000Z">09:00 ص</time>
-              </div>
-              <div className="space-y-1.5">
-                <p
-                  className="whitespace-pre-wrap text-sm font-medium leading-7 text-muted-foreground"
-                  data-testid="qa-interaction-historical-text"
-                >
-                  محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة
-                </p>
-                <details
-                  className="text-[11px] opacity-75 cursor-pointer"
-                  data-testid="qa-interaction-historical-details"
-                >
-                  <summary
-                    className="hover:underline select-none"
-                    data-testid="qa-interaction-historical-summary"
-                    tabIndex={0}
-                  >
-                    عرض التفاصيل التقنية
-                  </summary>
-                  <span
-                    className="mt-1 block font-mono text-[10px] break-all rounded bg-muted/60 p-1.5 text-muted-foreground"
-                    data-testid="qa-interaction-historical-raw-token"
-                  >
-                    fp:de392742:3
-                  </span>
-                </details>
-              </div>
-            </div>
-
-            {/* 3. Plain ordinary customer text */}
-            <div
-              className="rounded-e-xl rounded-es-xl bg-card p-3.5 shadow-xs border"
-              data-testid="qa-plain-message-item"
-            >
-              <div className="flex items-center gap-2 text-[11px] opacity-70 mb-1">
-                <span>العميل</span>
-                <time dateTime="2026-10-30T10:05:00.000Z">10:05 ص</time>
-              </div>
-              <p
-                className="whitespace-pre-wrap text-sm leading-7 text-foreground"
-                data-testid="qa-plain-message-text"
-              >
-                السلام عليكم، أريد الاستفسار عن كشف الأسنان
-              </p>
-            </div>
+          <div
+            className="rounded-xl border bg-background overflow-hidden min-h-[480px]"
+            data-testid="qa-interaction-component-container"
+          >
+            <ConversationDetail
+              data={INTERACTION_HISTORY_DETAIL_FIXTURE}
+              businessId="biz-qa"
+            />
           </div>
         </div>
       )}

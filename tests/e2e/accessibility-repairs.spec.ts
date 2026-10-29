@@ -523,62 +523,105 @@ test.describe("UI & Accessibility Repairs QA", () => {
     const section = page.locator('[data-testid="section-interactions"]');
     await expect(section).toBeVisible();
 
-    // 1. Confirmed choice readable text visible
-    const confirmedText = page.locator(
-      '[data-testid="qa-interaction-display-text"]',
+    const container = page.locator(
+      '[data-testid="qa-interaction-component-container"]',
     );
-    await expect(confirmedText).toBeVisible();
-    await expect(confirmedText).toHaveText("اختيار موعد: 10:00 ص");
+    await expect(container).toBeVisible();
 
-    // 2. Neutral summary "عرض التفاصيل التقنية" is visible
-    const summary = page.locator('[data-testid="qa-interaction-summary"]');
-    await expect(summary).toBeVisible();
-    await expect(summary).toHaveText("عرض التفاصيل التقنية");
+    // 1. Validated button interaction: readable text visible, long raw token hidden while collapsed
+    const validatedText = container.getByText(
+      "اختيار موعد: 10:00 ص (د. هاني شاكر)",
+    );
+    await expect(validatedText).toBeVisible();
 
-    // 3. Raw token is hidden while details is collapsed
-    const rawToken = page.locator('[data-testid="qa-interaction-raw-token"]');
-    await expect(rawToken).not.toBeVisible();
+    const longTechnicalToken =
+      "fp:tok_9f8b2c41d607e3a5:appointment_slot_20261030_1000_provider_hani_shaker_long_identifier_suffix_audit_record";
+    const rawLongToken = container.getByText(longTechnicalToken);
+    await expect(rawLongToken).not.toBeVisible();
 
-    // 4. Keyboard expansion: focus summary and press Enter
-    await summary.focus();
+    // 2. Historical protocol message: neutral fallback visible, raw token hidden while collapsed
+    const historicalText = container.getByText(
+      "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة",
+    );
+    await expect(historicalText).toBeVisible();
+
+    const historicalRaw = container.getByText("fp:de392742:3");
+    await expect(historicalRaw).not.toBeVisible();
+
+    // 3. Known TEXT with exact fp shape: remains verbatim and is NOT wrapped in technical details
+    const exactFpText = container.getByText(
+      "fp:tok_manual_exact_token_typed_by_customer:3",
+    );
+    await expect(exactFpText).toBeVisible();
+    const exactFpDetails = container.locator(
+      'details:has-text("fp:tok_manual_exact_token_typed_by_customer:3")',
+    );
+    await expect(exactFpDetails).toHaveCount(0);
+
+    // 4. Normal Arabic prose: rendered directly
+    const proseText = container.getByText(
+      "السلام عليكم ورحمة الله، أود الاستفسار عن تفاصيل موعد تنظيف الأسنان والأسعار.",
+    );
+    await expect(proseText).toBeVisible();
+
+    // 5. Technical summaries contain ONLY neutral text
+    const summaries = container.locator("summary");
+    const summaryCount = await summaries.count();
+    expect(summaryCount).toBeGreaterThan(0);
+    for (let i = 0; i < summaryCount; i++) {
+      const summaryContent = await summaries.nth(i).textContent();
+      expect(summaryContent?.trim()).toBe("عرض التفاصيل التقنية");
+    }
+
+    // 6. Keyboard expansion (Enter) and collapse on the actual production component
+    const firstSummary = summaries.first();
+    await firstSummary.focus();
     await page.keyboard.press("Enter");
 
-    // Now raw token is revealed
-    await expect(rawToken).toBeVisible();
-    await expect(rawToken).toHaveText("fp:tok123:1");
+    // Raw long token is now revealed
+    await expect(rawLongToken).toBeVisible();
+
+    // Measure horizontal overflow while EXPANDED (verifying break-all prevents viewport overflow)
+    const expandedOverflow = await page.evaluate(() => ({
+      windowInnerWidth: window.innerWidth,
+      docScrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(
+      expandedOverflow.docScrollWidth,
+      `Horizontal overflow detected while expanded: ${expandedOverflow.docScrollWidth} > ${expandedOverflow.windowInnerWidth}`,
+    ).toBeLessThanOrEqual(expandedOverflow.windowInnerWidth);
 
     // Press Enter again to collapse
     await page.keyboard.press("Enter");
-    await expect(rawToken).not.toBeVisible();
+    await expect(rawLongToken).not.toBeVisible();
 
-    // 5. Historical message has neutral fallback and collapsed raw details
-    const historicalText = page.locator(
-      '[data-testid="qa-interaction-historical-text"]',
-    );
-    await expect(historicalText).toBeVisible();
-    await expect(historicalText).toHaveText(
-      "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة",
-    );
-
-    const historicalRaw = page.locator(
-      '[data-testid="qa-interaction-historical-raw-token"]',
-    );
-    await expect(historicalRaw).not.toBeVisible();
-
-    // 6. No horizontal overflow in viewport
-    const overflow = await page.evaluate(() => {
-      return {
-        bodyScrollWidth: document.body.scrollWidth,
-        windowInnerWidth: window.innerWidth,
-        docScrollWidth: document.documentElement.scrollWidth,
-      };
-    });
+    // Measure horizontal overflow while COLLAPSED
+    const collapsedOverflow = await page.evaluate(() => ({
+      windowInnerWidth: window.innerWidth,
+      docScrollWidth: document.documentElement.scrollWidth,
+    }));
     expect(
-      overflow.docScrollWidth,
-      `Horizontal overflow detected: doc scrollWidth ${overflow.docScrollWidth} > innerWidth ${overflow.windowInnerWidth}`,
-    ).toBeLessThanOrEqual(overflow.windowInnerWidth);
+      collapsedOverflow.docScrollWidth,
+      `Horizontal overflow detected while collapsed: ${collapsedOverflow.docScrollWidth} > ${collapsedOverflow.windowInnerWidth}`,
+    ).toBeLessThanOrEqual(collapsedOverflow.windowInnerWidth);
 
-    // Screenshot for visual evidence
+    // 7. Reload preserves the displayed result from the same fixture source
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const reloadedTab = page.locator('[data-testid="tab-interactions"]');
+    await expect(reloadedTab).toBeVisible();
+    await reloadedTab.click();
+    await expect(section).toBeVisible();
+    await expect(
+      container.getByText("اختيار موعد: 10:00 ص (د. هاني شاكر)"),
+    ).toBeVisible();
+    await expect(
+      container.getByText("محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة"),
+    ).toBeVisible();
+    await expect(
+      container.getByText("fp:tok_manual_exact_token_typed_by_customer:3"),
+    ).toBeVisible();
+
+    // Screenshot for visual evidence across viewports
     await page.screenshot({
       path: path.join(
         SCREENSHOT_DIR,

@@ -13,12 +13,26 @@ import type {
 } from "../src/features/conversations/server/booking-offer";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
+  getConversationDetail,
+  getConversationInbox,
+} from "../src/features/conversations/server/conversation-queries";
+import {
   HISTORICAL_PROTOCOL_FALLBACK_TEXT,
   isOfferProtocolText,
   isTransportInteraction,
   resolveDisplayForMessage,
   resolveInteractionDisplay,
 } from "../src/features/conversations/server/interaction-display";
+import {
+  getStaffWorkspace,
+  type StaffWorkspaceDeps,
+} from "../src/features/staff/server/workspace-service";
+import {
+  appointmentRepository,
+  conversationRepository,
+  operatorAttentionRepository,
+  userRepository,
+} from "../src/server/repositories";
 
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
@@ -735,6 +749,351 @@ async function run(): Promise<void> {
       (frozenCallbackMsg?.metadata as any)?.snapshot?.action === "book" &&
       (frozenCallbackMsg?.metadata as any)?.status === "VALIDATED",
   );
+
+  // ── Area 6: Actual Read Path Projections (Inbox, Detail, Staff Workspace) ──
+  console.log(
+    "\nArea 6: Actual read path projections (inbox, detail, staff workspace)",
+  );
+
+  const fixtureMessages = [
+    // 1. Validated button selection
+    {
+      id: "msg_val_1",
+      senderType: "CUSTOMER" as const,
+      content: "fp:tok_val_123:1",
+      displayText: "اختيار موعد: 10:00 ص",
+      metadata: {
+        v: 1,
+        provenance: "CALLBACK",
+        status: "VALIDATED",
+        offerToken: "tok_val_123",
+        snapshot: { action: 1, label: "10:00 ص" },
+      },
+      createdAt: new Date("2026-10-29T10:00:00.000Z"),
+    },
+    // 2. Known TEXT provenance whose content is an exact valid-shaped fp token
+    {
+      id: "msg_text_exact_1",
+      senderType: "CUSTOMER" as const,
+      content: "fp:tok_val_123:1",
+      displayText: null,
+      metadata: {
+        v: 1,
+        provenance: "TEXT",
+      },
+      createdAt: new Date("2026-10-29T10:01:00.000Z"),
+    },
+    // 3. Historical protocol message with absent metadata
+    {
+      id: "msg_hist_1",
+      senderType: "CUSTOMER" as const,
+      content: "fp:de392742:3",
+      displayText: null,
+      metadata: null,
+      createdAt: new Date("2026-10-29T10:02:00.000Z"),
+    },
+    // 4. Normal Arabic prose
+    {
+      id: "msg_prose_1",
+      senderType: "CUSTOMER" as const,
+      content: "السلام عليكم، أريد الاستفسار عن كشف الأسنان",
+      displayText: null,
+      metadata: {
+        v: 1,
+        provenance: "TEXT",
+      },
+      createdAt: new Date("2026-10-29T10:03:00.000Z"),
+    },
+    // 5. Malformed metadata
+    {
+      id: "msg_malformed_1",
+      senderType: "CUSTOMER" as const,
+      content: "fp:tok_corrupt:99",
+      displayText: null,
+      metadata: "CORRUPTED_NON_OBJECT_METADATA",
+      createdAt: new Date("2026-10-29T10:04:00.000Z"),
+    },
+  ];
+
+  // Save original repository methods
+  const origListInbox = conversationRepository.listInbox;
+  const origFindDetail = conversationRepository.findDetailByBusiness;
+  const origListUsers = userRepository.listByBusiness;
+  const origFindOpenByConv =
+    operatorAttentionRepository.findOpenByConversations;
+  const origFindOpen = operatorAttentionRepository.findOpen;
+  const origResolve = operatorAttentionRepository.resolve;
+  const origListRecentAppointments = appointmentRepository.listRecentByCustomer;
+
+  try {
+    // 6.1 getConversationInbox read path
+    conversationRepository.listInbox = async (bizId: string) => {
+      if (bizId !== "biz_read_test") return [];
+      return fixtureMessages.map((msg, index) => ({
+        id: `conv_inbox_${index + 1}`,
+        businessId: "biz_read_test",
+        status: "NEED_HUMAN" as const,
+        createdAt: msg.createdAt,
+        lastMessageAt: msg.createdAt,
+        customerId: `cust_${index + 1}`,
+        customer: {
+          id: `cust_${index + 1}`,
+          name: `عميل ${index + 1}`,
+          phone: `+96650000000${index + 1}`,
+        },
+        assignedTo: null,
+        messages: [
+          {
+            content: msg.content,
+            displayText: msg.displayText,
+            metadata: msg.metadata,
+            senderType: msg.senderType,
+            createdAt: msg.createdAt,
+          },
+        ],
+      }));
+    };
+
+    userRepository.listByBusiness = async () => [
+      {
+        id: "user_staff_1",
+        name: "الموظف المشرف",
+        email: "staff@example.com",
+        isActive: true,
+        image: null,
+      } as any,
+    ];
+
+    operatorAttentionRepository.findOpenByConversations = async () => new Map();
+
+    const inboxResult = await getConversationInbox("biz_read_test");
+
+    check(
+      "6.1 getConversationInbox executes and returns 5 projected items",
+      inboxResult.items.length === 5,
+    );
+
+    check(
+      "6.2 Inbox: Validated interaction projects readable snapshot 'اختيار موعد: 10:00 ص' and forwards metadata",
+      inboxResult.items[0].lastMessage?.displayText ===
+        "اختيار موعد: 10:00 ص" &&
+        inboxResult.items[0].lastMessage?.content === "fp:tok_val_123:1" &&
+        (inboxResult.items[0].lastMessage?.metadata as any)?.provenance ===
+          "CALLBACK",
+    );
+
+    check(
+      "6.3 Inbox: Exact fp-shaped ordinary TEXT projects null displayText (verbatim display, never fallback)",
+      inboxResult.items[1].lastMessage?.displayText === null &&
+        inboxResult.items[1].lastMessage?.content === "fp:tok_val_123:1" &&
+        (inboxResult.items[1].lastMessage?.metadata as any)?.provenance ===
+          "TEXT",
+    );
+
+    check(
+      "6.4 Inbox: Historical protocol message with absent metadata projects neutral fallback",
+      inboxResult.items[2].lastMessage?.displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        inboxResult.items[2].lastMessage?.content === "fp:de392742:3" &&
+        inboxResult.items[2].lastMessage?.metadata === null,
+    );
+
+    check(
+      "6.5 Inbox: Normal Arabic prose projects null displayText (rendered directly)",
+      inboxResult.items[3].lastMessage?.displayText === null &&
+        inboxResult.items[3].lastMessage?.content ===
+          "السلام عليكم، أريد الاستفسار عن كشف الأسنان",
+    );
+
+    check(
+      "6.6 Inbox: Malformed metadata does not crash the inbox read path",
+      inboxResult.items[4].lastMessage?.displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        inboxResult.items[4].lastMessage?.content === "fp:tok_corrupt:99",
+    );
+
+    // 6.2 getConversationDetail read path
+    conversationRepository.findDetailByBusiness = async (
+      convId: string,
+      bizId: string,
+    ) => {
+      if (bizId !== "biz_read_test" || convId !== "conv_detail_all") {
+        return null;
+      }
+      return {
+        id: "conv_detail_all",
+        businessId: "biz_read_test",
+        status: "AI_ACTIVE" as const,
+        aiSummary: "ملخص المحادثة",
+        customerId: "cust_detail_1",
+        customer: {
+          id: "cust_detail_1",
+          name: "سارة عبد الله",
+          phone: "+966501112233",
+          notes: null,
+        },
+        assignedTo: null,
+        messages: fixtureMessages.map((msg) => ({
+          id: msg.id,
+          senderType: msg.senderType,
+          content: msg.content,
+          displayText: msg.displayText,
+          metadata: msg.metadata,
+          createdAt: msg.createdAt,
+        })),
+      } as any;
+    };
+
+    operatorAttentionRepository.findOpen = async () => null;
+    operatorAttentionRepository.resolve = async () => {};
+    appointmentRepository.listRecentByCustomer = async () => [];
+
+    const detailResult = await getConversationDetail(
+      "biz_read_test",
+      "conv_detail_all",
+      "user_staff_1",
+    );
+
+    check(
+      "6.7 getConversationDetail executes and returns projected messages array",
+      detailResult !== null && detailResult.messages.length === 5,
+    );
+
+    check(
+      "6.8 Detail: Validated interaction has displayText and forwards metadata",
+      detailResult?.messages[0].displayText === "اختيار موعد: 10:00 ص" &&
+        (detailResult?.messages[0].metadata as any)?.provenance === "CALLBACK",
+    );
+
+    check(
+      "6.9 Detail: Typed fp-shaped text has null displayText (renders original text, not fallback)",
+      detailResult?.messages[1].displayText === null &&
+        detailResult?.messages[1].content === "fp:tok_val_123:1" &&
+        (detailResult?.messages[1].metadata as any)?.provenance === "TEXT",
+    );
+
+    check(
+      "6.10 Detail: Historical protocol message has neutral fallback",
+      detailResult?.messages[2].displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        detailResult?.messages[2].content === "fp:de392742:3",
+    );
+
+    check(
+      "6.11 Detail: Malformed metadata does not crash getConversationDetail",
+      detailResult?.messages[4].displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        detailResult?.messages[4].content === "fp:tok_corrupt:99",
+    );
+
+    // Tenant scoping check
+    const wrongTenantDetail = await getConversationDetail(
+      "biz_unauthorized_other",
+      "conv_detail_all",
+      "user_staff_1",
+    );
+    check(
+      "6.12 Detail: Tenant scoping enforced (accessing thread from wrong business returns null)",
+      wrongTenantDetail === null,
+    );
+
+    // 6.3 getStaffWorkspace read path
+    const mockStaffDeps: StaffWorkspaceDeps = {
+      conversations: {
+        listInbox: async (bizId: string) => {
+          if (bizId !== "biz_read_test") return [];
+          return fixtureMessages.map((msg, index) => ({
+            id: `conv_staff_${index + 1}`,
+            businessId: "biz_read_test",
+            status: "NEED_HUMAN" as const,
+            createdAt: msg.createdAt,
+            lastMessageAt: msg.createdAt,
+            customerId: `cust_${index + 1}`,
+            customer: {
+              id: `cust_${index + 1}`,
+              name: `عميل ${index + 1}`,
+              phone: `+96650000000${index + 1}`,
+            },
+            assignedUserId: null,
+            assignedTo: null,
+            messages: [
+              {
+                content: msg.content,
+                displayText: msg.displayText,
+                metadata: msg.metadata,
+                senderType: msg.senderType,
+                createdAt: msg.createdAt,
+              },
+            ],
+          })) as any;
+        },
+      },
+      appointments: {
+        listLatestByCustomers: async () => [],
+      },
+      attention: {
+        findOpenByConversations: async () => new Map(),
+      },
+    };
+
+    const staffResult = await getStaffWorkspace(mockStaffDeps, {
+      userId: "user_staff_1",
+      businessId: "biz_read_test",
+      role: "STAFF",
+    });
+
+    check(
+      "6.13 getStaffWorkspace executes and returns populated queue",
+      staffResult.success && (staffResult as any).queue?.length === 5,
+    );
+
+    const queue = (staffResult as any).queue;
+    check(
+      "6.14 Staff Workspace: Validated interaction displays readable text 'اختيار موعد: 10:00 ص'",
+      queue?.[0].lastMessage?.displayText === "اختيار موعد: 10:00 ص" &&
+        queue?.[0].lastMessage?.content === "fp:tok_val_123:1",
+    );
+
+    check(
+      "6.15 Staff Workspace: Typed fp-shaped text displays null (verbatim original text)",
+      queue?.[1].lastMessage?.displayText === null &&
+        queue?.[1].lastMessage?.content === "fp:tok_val_123:1",
+    );
+
+    check(
+      "6.16 Staff Workspace: Historical message displays neutral fallback",
+      queue?.[2].lastMessage?.displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        queue?.[2].lastMessage?.content === "fp:de392742:3",
+    );
+
+    check(
+      "6.17 Staff Workspace: Malformed metadata does not crash staff queue projection",
+      queue?.[4].lastMessage?.displayText ===
+        HISTORICAL_PROTOCOL_FALLBACK_TEXT &&
+        queue?.[4].lastMessage?.content === "fp:tok_corrupt:99",
+    );
+
+    // Authorization check
+    const unauthorizedStaff = await getStaffWorkspace(mockStaffDeps, {
+      userId: "user_cust_1",
+      businessId: "biz_read_test",
+      role: "CUSTOMER" as any,
+    });
+    check(
+      "6.18 Staff Workspace: Role authorization enforced (non-staff role rejected with success=false)",
+      unauthorizedStaff.success === false,
+    );
+  } finally {
+    // Restore original repository methods
+    conversationRepository.listInbox = origListInbox;
+    conversationRepository.findDetailByBusiness = origFindDetail;
+    userRepository.listByBusiness = origListUsers;
+    operatorAttentionRepository.findOpenByConversations = origFindOpenByConv;
+    operatorAttentionRepository.findOpen = origFindOpen;
+    operatorAttentionRepository.resolve = origResolve;
+    appointmentRepository.listRecentByCustomer = origListRecentAppointments;
+  }
 
   // ── Total Summary ──────────────────────────────────────────────────────────
   const failed = checks.filter((c) => !c.pass);
