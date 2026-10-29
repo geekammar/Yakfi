@@ -36,23 +36,18 @@ export type InteractionStatus =
   | "UNKNOWN_TOKEN"
   | "INVALID_ACTION";
 
-export type MessageProvenanceMetadata =
-  | {
-      v: 1;
-      provenance: "TEXT";
-    }
-  | {
-      v: 1;
-      provenance: "CALLBACK" | "INTERACTIVE";
-      status: InteractionStatus;
-      offerToken?: string;
-      offerKind?: BookingOffer["kind"];
-      action?: string | number;
-      displayText?: string;
-      snapshot?: Record<string, unknown>;
-      rawText?: string;
-      reason?: string;
-    };
+export type MessageProvenanceMetadata = {
+  v: 1;
+  provenance: "TEXT" | "CALLBACK" | "INTERACTIVE";
+  status?: InteractionStatus;
+  offerToken?: string;
+  offerKind?: BookingOffer["kind"];
+  action?: string | number;
+  displayText?: string;
+  snapshot?: Record<string, unknown>;
+  rawText?: string;
+  reason?: string;
+};
 
 export type InteractionSnapshotMetadata = MessageProvenanceMetadata;
 
