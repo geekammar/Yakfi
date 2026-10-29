@@ -753,7 +753,8 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     page,
   }, testInfo) => {
     const vpName = testInfo.project.name;
-    const testMessage = "تعذر إرسال هذا الرد التجريبي بسبب انقطاع مؤقت في الاتصال";
+    const testMessage =
+      "تعذر إرسال هذا الرد التجريبي بسبب انقطاع مؤقت في الاتصال";
 
     await page.goto(
       `/qa/conversation-header?fixture=need_human_unassigned&failedReply=${encodeURIComponent(testMessage)}`,
@@ -762,12 +763,16 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       },
     );
 
-    const alert = page.locator('div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]');
+    const alert = page.locator(
+      'div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]',
+    );
     await expect(alert).toBeVisible();
     await expect(alert).toContainText("تعذر إرسال:");
 
     const restoreButton = alert.locator('button:has-text("استعادة الرد")');
-    const discardButton = alert.locator('button[aria-label="تجاهل الرد المتعثر"]');
+    const discardButton = alert.locator(
+      'button[aria-label="تجاهل الرد المتعثر"]',
+    );
 
     await expect(restoreButton).toBeVisible();
     await expect(discardButton).toBeVisible();
