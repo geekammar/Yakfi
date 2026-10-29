@@ -47,15 +47,18 @@ const PUBLIC_PATH_PREFIXES = [
 ] as const;
 
 export const QA_CONVERSATION_HEADER_PATH = "/qa/conversation-header";
+export const QA_ACCESSIBILITY_REPAIRS_PATH = "/qa/accessibility-repairs";
 
 export function isPublicPath(
   pathname: string,
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  // QA fixture harness: only the exact fixture route and only under test-only conditions
+  // QA fixture harness: only exact fixture routes and only under test-only conditions
   if (
     (pathname === QA_CONVERSATION_HEADER_PATH ||
-      pathname === `${QA_CONVERSATION_HEADER_PATH}/`) &&
+      pathname === `${QA_CONVERSATION_HEADER_PATH}/` ||
+      pathname === QA_ACCESSIBILITY_REPAIRS_PATH ||
+      pathname === `${QA_ACCESSIBILITY_REPAIRS_PATH}/`) &&
     isQaHarnessAllowed(env)
   ) {
     return true;

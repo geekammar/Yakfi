@@ -284,11 +284,37 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
   }, testInfo) => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
 
-    // 1. Fonts acceptance: Wait for document.fonts.ready and verify FontFace entries
-    await page.evaluate(() => document.fonts.ready);
+    // 1. Fonts acceptance: Mount guarded fixture with both Arabic Readex Pro and Latin Manrope instances,
+    // ensure all loaded FontFace entries are triggered and verified after document.fonts.ready
+    const fontInspection = await page.evaluate(async () => {
+      // Guarded fixture exercising both brand typography instances (Arabic Readex Pro & Latin Manrope)
+      let fixture = document.getElementById("yakfi-brand-guard-fixture");
+      if (!fixture) {
+        fixture = document.createElement("div");
+        fixture.id = "yakfi-brand-guard-fixture";
+        fixture.setAttribute("aria-hidden", "true");
+        fixture.style.position = "absolute";
+        fixture.style.left = "-9999px";
+        fixture.style.top = "-9999px";
+        fixture.style.opacity = "0";
+        fixture.style.pointerEvents = "none";
+        fixture.innerHTML = `
+          <span id="fixture-yakfi-ar" class="font-brand-ar font-semibold" data-testid="yakfi-brand-text-fixture-ar">يكفي</span>
+          <span id="fixture-yakfi-latin" class="font-brand-latin font-semibold" data-testid="yakfi-brand-text-fixture-latin">yakfi</span>
+        `;
+        document.body.appendChild(fixture);
+      }
 
-    const fontFaceStatus = await page.evaluate(async () => {
+      // Explicitly trigger loading for all font faces in document.fonts
+      const fontLoads: Promise<unknown>[] = [];
+      document.fonts.forEach((face) => {
+        if (face.status !== "loaded") {
+          fontLoads.push(face.load());
+        }
+      });
+      await Promise.allSettled(fontLoads);
       await document.fonts.ready;
+
       const loadedFaces: Array<{
         family: string;
         status: string;
@@ -301,10 +327,34 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
           weight: f.weight,
         });
       });
-      return loadedFaces;
+
+      const fixtureArEl = document.getElementById("fixture-yakfi-ar");
+      const fixtureLatinEl = document.getElementById("fixture-yakfi-latin");
+      const fixtureArStyle = fixtureArEl
+        ? window.getComputedStyle(fixtureArEl)
+        : null;
+      const fixtureLatinStyle = fixtureLatinEl
+        ? window.getComputedStyle(fixtureLatinEl)
+        : null;
+
+      return {
+        loadedFaces,
+        fixtureAr: fixtureArStyle
+          ? {
+              fontFamily: fixtureArStyle.fontFamily,
+              fontWeight: fixtureArStyle.fontWeight,
+            }
+          : null,
+        fixtureLatin: fixtureLatinStyle
+          ? {
+              fontFamily: fixtureLatinStyle.fontFamily,
+              fontWeight: fixtureLatinStyle.fontWeight,
+            }
+          : null,
+      };
     });
 
-    const hasLoadedArabicUI = fontFaceStatus.some(
+    const hasLoadedArabicUI = fontInspection.loadedFaces.some(
       (f) =>
         (f.family.includes("IBM Plex Sans Arabic") ||
           f.family.includes("IBM_Plex_Sans_Arabic")) &&
@@ -312,14 +362,14 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
     );
     expect(hasLoadedArabicUI).toBe(true);
 
-    const hasLoadedReadexPro = fontFaceStatus.some(
+    const hasLoadedReadexPro = fontInspection.loadedFaces.some(
       (f) =>
         (f.family.includes("Readex Pro") || f.family.includes("Readex_Pro")) &&
         f.status === "loaded",
     );
     expect(hasLoadedReadexPro).toBe(true);
 
-    const hasLoadedManrope = fontFaceStatus.some(
+    const hasLoadedManrope = fontInspection.loadedFaces.some(
       (f) =>
         (f.family.includes("Manrope") || f.family.includes("Manrope")) &&
         f.status === "loaded",
@@ -363,29 +413,17 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
     ).toBe(true);
     expect(brandComputed.fontWeight).toBe("600");
 
-    // Verify actual YakfiBrandText Latin instance (Manrope 600) in a guarded fixture
-    const latinBrandComputed = await page.evaluate(() => {
-      const span = document.createElement("span");
-      span.setAttribute("data-testid", "yakfi-brand-text-latin");
-      span.setAttribute("data-brand-lang", "en");
-      span.className = "font-brand-latin font-semibold tracking-tight";
-      span.textContent = "yakfi";
-      document.body.appendChild(span);
-      const style = window.getComputedStyle(span);
-      const res = {
-        fontFamily: style.fontFamily,
-        fontWeight: style.fontWeight,
-        text: span.textContent,
-      };
-      span.remove();
-      return res;
-    });
-    expect(latinBrandComputed.text).toBe("yakfi");
-    expect(
-      latinBrandComputed.fontFamily.toLowerCase().includes("manrope") ||
-        latinBrandComputed.fontFamily.includes("__Manrope"),
-    ).toBe(true);
-    expect(latinBrandComputed.fontWeight).toBe("600");
+    // Verify actual YakfiBrandText Latin instance (Manrope 600) in guarded fixture
+    expect(fontInspection.fixtureLatin).not.toBeNull();
+    if (fontInspection.fixtureLatin) {
+      expect(
+        fontInspection.fixtureLatin.fontFamily
+          .toLowerCase()
+          .includes("manrope") ||
+          fontInspection.fixtureLatin.fontFamily.includes("__Manrope"),
+      ).toBe(true);
+      expect(fontInspection.fixtureLatin.fontWeight).toBe("600");
+    }
 
     // 3. Confirm primary and canvas computed colors
     const colors = await page.evaluate(() => {

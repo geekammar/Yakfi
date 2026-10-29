@@ -162,32 +162,50 @@ export function AppointmentAgenda({
           className="w-full sm:w-80"
         />
 
-        <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 self-start sm:self-auto">
+        <div
+          role="group"
+          aria-label="طريقة عرض المواعيد"
+          className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1 self-start sm:self-auto"
+        >
           <button
             type="button"
+            aria-pressed={viewMode === "list"}
             onClick={() => setViewMode("list")}
             className={cn(
-              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-colors",
+              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               viewMode === "list"
-                ? "bg-background text-foreground shadow-xs font-semibold"
+                ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             <CalendarDaysIcon className="size-3.5" />
             <span>قائمة المواعيد</span>
+            {viewMode === "list" ? (
+              <span
+                className="size-1.5 rounded-full bg-primary shrink-0"
+                aria-hidden="true"
+              />
+            ) : null}
           </button>
           <button
             type="button"
+            aria-pressed={viewMode === "calendar"}
             onClick={() => setViewMode("calendar")}
             className={cn(
-              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-colors",
+              "flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               viewMode === "calendar"
-                ? "bg-background text-foreground shadow-xs font-semibold"
+                ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Clock3Icon className="size-3.5" />
             <span>الجدول الزمني</span>
+            {viewMode === "calendar" ? (
+              <span
+                className="size-1.5 rounded-full bg-primary shrink-0"
+                aria-hidden="true"
+              />
+            ) : null}
           </button>
         </div>
       </div>
