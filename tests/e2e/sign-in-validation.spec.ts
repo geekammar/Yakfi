@@ -176,7 +176,8 @@ test.describe("Sign-in validation and recovery UX", () => {
     const reqPromise1 = page.waitForRequest("**/api/auth/**");
     await submitBtn.click();
     const req1 = await reqPromise1;
-    const payload1 = (req1.postDataJSON() as Record<string, unknown> | null) ?? {};
+    const payload1 =
+      (req1.postDataJSON() as Record<string, unknown> | null) ?? {};
 
     // Check payload sent rememberMe: false
     await expect(submitBtn).toBeEnabled();
@@ -212,7 +213,8 @@ test.describe("Sign-in validation and recovery UX", () => {
     const reqPromise2 = page.waitForRequest("**/api/auth/**");
     await submitBtn.click();
     const req2 = await reqPromise2;
-    const payload2 = (req2.postDataJSON() as Record<string, unknown> | null) ?? {};
+    const payload2 =
+      (req2.postDataJSON() as Record<string, unknown> | null) ?? {};
     await expect(submitBtn).toBeEnabled();
     expect(payload2["rememberMe"]).toBe(true);
   });

@@ -280,8 +280,9 @@ describe("LoginForm Component Contract", () => {
     expect(passwordInput.value).toBe("example-wrong-password");
 
     // Button is not disabled (submitting state is cleared)
-    const submitBtn =
-      container.querySelector<HTMLButtonElement>("button[type='submit']")!;
+    const submitBtn = container.querySelector<HTMLButtonElement>(
+      "button[type='submit']",
+    )!;
     expect(submitBtn.disabled).toBe(false);
   });
 
@@ -301,12 +302,11 @@ describe("LoginForm Component Contract", () => {
     const formError = container.querySelector("#login-form-error");
     expect(formError).not.toBeNull();
     expect(formError?.getAttribute("role")).toBe("alert");
-    expect(formError?.textContent).toBe(
-      "تعذر الاتصال بالخادم، حاول مرة أخرى",
-    );
+    expect(formError?.textContent).toBe("تعذر الاتصال بالخادم، حاول مرة أخرى");
 
-    const submitBtn =
-      container.querySelector<HTMLButtonElement>("button[type='submit']")!;
+    const submitBtn = container.querySelector<HTMLButtonElement>(
+      "button[type='submit']",
+    )!;
     expect(submitBtn.disabled).toBe(false);
   });
 
