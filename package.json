@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.77.1",
+  "version": "0.77.2",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -155,7 +155,6 @@
     "bootstrap:admin": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-production-admin.ts",
     "bootstrap:operator": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-platform-operator.ts",
     "bootstrap:test-business": "dotenv -e .env.local -e .env -- tsx scripts/bootstrap-test-business.ts",
-    "icons": "node scripts/generate-pwa-icons.mjs",
     "context": "node scripts/context.mjs",
     "context:check": "node scripts/context-check.mjs",
     "check:context": "node scripts/check-context.mjs",
@@ -179,6 +178,7 @@
     "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx",
     "test:assistant-settings": "vitest run --config vitest.config.ts src/features/assistant/components/assistant-settings-screen.test.tsx",
     "test:conversation-detail": "vitest run --config vitest.config.ts src/features/conversations/components/conversation-detail.test.tsx",
+    "test:staff-workspace": "vitest run --config vitest.config.ts src/features/staff/components/staff-workspace.test.tsx",
     "test:install-prompt": "vitest run --config vitest.config.ts src/components/shared/pwa/install-prompt.test.tsx",
     "test:customers-dialog": "vitest run --config vitest.config.ts src/features/customers/components/customers-dialog-focus.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",

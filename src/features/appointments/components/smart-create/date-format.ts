@@ -249,11 +249,12 @@ export function formatArabicMonth(date: string): string {
 
 /** Compact Arabic day + month for a relative-choice caption (e.g. "٤ سبتمبر"). */
 export function formatArabicDayMonth(date: string): string {
+  const dateOnly = date.slice(0, 10);
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     day: "numeric",
     month: "short",
-  }).format(new Date(`${date}T00:00:00.000Z`));
+  }).format(new Date(`${dateOnly}T00:00:00.000Z`));
 }
 
 /**
