@@ -300,6 +300,7 @@ async function main(): Promise<void> {
     },
     appointmentRepository: appointmentRepo,
     providerRepository: providerRepo,
+    now: () => new Date("2026-10-16T08:00:00.000Z"),
   };
 
   const receptionistActor = {

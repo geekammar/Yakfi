@@ -88,6 +88,7 @@ jobs:
           pnpm check:staff-provider-01
           pnpm check:eligibility
           pnpm check:appointments-day-view
+          pnpm check:elapsed-booking-slots
           pnpm check:assistant-settings
           pnpm test:assistant-settings
           pnpm check:conv-core-01
@@ -130,6 +131,7 @@ jobs:
           pnpm test:staff-workspace
           pnpm test:install-prompt
           pnpm test:customers-dialog
+          pnpm test:appointment-cancel
           pnpm check:qa-harness
 
       - name: Base-versus-HEAD handoff-cause reconciliation

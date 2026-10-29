@@ -45,11 +45,13 @@ import type {
 } from "@/features/appointments/types";
 import {
   generateCandidateSlots,
+  nowTimeInTimeZone,
   resolveWorkingHoursForWeekday,
   toMinutes,
+  todayInTimeZone,
   weekdayOfDate,
 } from "@/lib/scheduling/slot-grid";
-import type { Weekday } from "@/lib/scheduling/slot-grid";
+import type { CandidateSlot, Weekday } from "@/lib/scheduling/slot-grid";
 import type {
   AppointmentRepository,
   BusinessRepository,
@@ -96,6 +98,7 @@ export type AvailabilityServiceDeps = {
     ProviderRepository,
     "listEligibleForService" | "listAssignmentSeams"
   >;
+  now?: () => Date;
 };
 
 /** Production dependencies (app singletons). */
@@ -104,6 +107,7 @@ export const defaultAvailabilityServiceDeps: AvailabilityServiceDeps = {
   serviceRepository,
   appointmentRepository,
   providerRepository,
+  now: () => new Date(),
 };
 
 const NO_BUSINESS_MESSAGE = "أكمل إعداد المنشأة أولاً";
@@ -152,6 +156,41 @@ export function filterConflictingSlots(
       overlaps(start, end, block.start, block.end),
     );
   });
+}
+
+/**
+ * Derive explicit no-slots reason when bookable slots are empty.
+ * Distinguishes truthfully between elapsed times (NO_REMAINING_TIMES)
+ * and genuinely full schedules (FULLY_BOOKED).
+ */
+export function deriveNoSlotsReason(params: {
+  candidates: ReadonlyArray<{ startTime: string }>;
+  unblockedCandidates: ReadonlyArray<{ startTime: string }>;
+  isPastDate: boolean;
+  isToday: boolean;
+  currentTime: string;
+}): AvailabilityNoSlotsReason {
+  const { candidates, unblockedCandidates, isPastDate, isToday, currentTime } =
+    params;
+  if (isPastDate) {
+    return "NO_REMAINING_TIMES";
+  }
+  if (isToday) {
+    const futureCandidates = candidates.filter(
+      (c) => c.startTime >= currentTime,
+    );
+    if (futureCandidates.length === 0) {
+      return "NO_REMAINING_TIMES";
+    }
+    const futureUnblocked = unblockedCandidates.filter(
+      (c) => c.startTime >= currentTime,
+    );
+    if (futureUnblocked.length === 0) {
+      return "FULLY_BOOKED";
+    }
+    return "NO_REMAINING_TIMES";
+  }
+  return "FULLY_BOOKED";
 }
 
 /**
@@ -282,6 +321,13 @@ export async function getAvailability(
 
   const { date, providerId } = parsed.data;
 
+  // Server-authoritative reference clock & timezone filtering
+  const now = deps.now ? deps.now() : new Date();
+  const todayIso = todayInTimeZone(now, business.timezone);
+  const currentTime = nowTimeInTimeZone(now, business.timezone);
+  const isPastDate = date < todayIso;
+  const isToday = date === todayIso;
+
   // Provider-scoped availability if providerId is requested
   if (providerId) {
     if (!deps.providerRepository) {
@@ -333,13 +379,26 @@ export async function getAvailability(
         excludeAppointmentId ?? undefined,
       );
     }
-    const filteredSlots = filterConflictingSlots(candidates, blocking);
-    const slots: AvailabilitySlot[] = filteredSlots.map((slot) => ({
+    const unblockedCandidates = filterConflictingSlots(candidates, blocking);
+    const nonElapsedSlots = unblockedCandidates.filter((slot) => {
+      if (isPastDate) return false;
+      if (isToday && slot.startTime < currentTime) return false;
+      return true;
+    });
+    const slots: AvailabilitySlot[] = nonElapsedSlots.map((slot) => ({
       ...slot,
       availableProviderIds: [providerId],
     }));
     const reason: AvailabilityNoSlotsReason | null =
-      slots.length > 0 ? null : "FULLY_BOOKED";
+      slots.length > 0
+        ? null
+        : deriveNoSlotsReason({
+            candidates,
+            unblockedCandidates,
+            isPastDate,
+            isToday,
+            currentTime,
+          });
 
     return {
       success: true,
@@ -431,6 +490,7 @@ export async function getAvailability(
       providerIdByAssigneeId.set(assigneeId, list);
     }
 
+    const unblockedCandidates: CandidateSlot[] = [];
     const slots: AvailabilitySlot[] = [];
     for (const candidate of candidates) {
       const candidateSlot = [candidate];
@@ -443,15 +503,28 @@ export async function getAvailability(
         }
       }
       if (availableProviderIds.length > 0) {
-        slots.push({
-          startTime: candidate.startTime,
-          endTime: candidate.endTime,
-          availableProviderIds: [...new Set(availableProviderIds)],
-        });
+        unblockedCandidates.push(candidate);
+        const isElapsed =
+          isPastDate || (isToday && candidate.startTime < currentTime);
+        if (!isElapsed) {
+          slots.push({
+            startTime: candidate.startTime,
+            endTime: candidate.endTime,
+            availableProviderIds: [...new Set(availableProviderIds)],
+          });
+        }
       }
     }
     const reason: AvailabilityNoSlotsReason | null =
-      slots.length > 0 ? null : "FULLY_BOOKED";
+      slots.length > 0
+        ? null
+        : deriveNoSlotsReason({
+            candidates,
+            unblockedCandidates,
+            isPastDate,
+            isToday,
+            currentTime,
+          });
     return {
       success: true,
       data: {
@@ -493,10 +566,23 @@ export async function getAvailability(
     // treated as unauthorized and excluded from nothing.
     excludeAppointmentId ?? undefined,
   );
-  const slots = filterConflictingSlots(candidates, blocking);
+  const unblockedCandidates = filterConflictingSlots(candidates, blocking);
+  const slots = unblockedCandidates.filter((slot) => {
+    if (isPastDate) return false;
+    if (isToday && slot.startTime < currentTime) return false;
+    return true;
+  });
 
   const reason: AvailabilityNoSlotsReason | null =
-    slots.length > 0 ? null : "FULLY_BOOKED";
+    slots.length > 0
+      ? null
+      : deriveNoSlotsReason({
+          candidates,
+          unblockedCandidates,
+          isPastDate,
+          isToday,
+          currentTime,
+        });
 
   return {
     success: true,

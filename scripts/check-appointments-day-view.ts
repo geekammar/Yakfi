@@ -374,6 +374,7 @@ async function main(): Promise<void> {
             endTime: row.endTime,
           })),
     },
+    now: () => new Date("2026-09-19T00:00:00.000Z"),
   } as unknown as Parameters<typeof getAvailability>[0];
 
   const actor = {
