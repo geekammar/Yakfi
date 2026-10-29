@@ -10,7 +10,7 @@ import { authClient } from "@/lib/auth-client";
 import { EyeIcon, EyeOffIcon, LoaderCircleIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 
 function safeInternalPath(value: string | null): string {
   return value && value.startsWith("/") && !value.startsWith("//")
@@ -23,47 +23,87 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    email?: string;
+    password?: string;
+  }>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const isSubmittingRef = useRef(false);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
 
-    const formData = new FormData(event.currentTarget);
+    if (isSubmittingRef.current || submitting || isPending) {
+      return;
+    }
+
+    setFormError(null);
+
     const parsed = loginSchema.safeParse({
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-      rememberMe: formData.get("rememberMe") === "on",
+      email,
+      password,
+      rememberMe,
     });
 
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "بيانات غير صالحة");
+      const nextFieldErrors: { email?: string; password?: string } = {};
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0];
+        if (field === "email" && !nextFieldErrors.email) {
+          nextFieldErrors.email = issue.message;
+        } else if (field === "password" && !nextFieldErrors.password) {
+          nextFieldErrors.password = issue.message;
+        }
+      }
+
+      setFieldErrors(nextFieldErrors);
+
+      if (nextFieldErrors.email) {
+        emailInputRef.current?.focus();
+      } else if (nextFieldErrors.password) {
+        passwordInputRef.current?.focus();
+      }
       return;
     }
 
+    setFieldErrors({});
     setSubmitting(true);
-    const { error: signInError } = await authClient.signIn.email({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      rememberMe: parsed.data.rememberMe,
-    });
-    setSubmitting(false);
+    isSubmittingRef.current = true;
 
-    if (signInError) {
-      setError(
-        signInError.status === 401
-          ? "البريد الإلكتروني أو كلمة المرور غير صحيحة"
-          : "تعذر تسجيل الدخول، حاول مرة أخرى",
-      );
-      return;
+    try {
+      const { error: signInError } = await authClient.signIn.email({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        rememberMe: parsed.data.rememberMe,
+      });
+
+      if (signInError) {
+        setFormError(
+          signInError.status === 401
+            ? "البريد الإلكتروني أو كلمة المرور غير صحيحة"
+            : "تعذر تسجيل الدخول، حاول مرة أخرى",
+        );
+        return;
+      }
+
+      const target = safeInternalPath(searchParams.get("redirect"));
+      startTransition(() => {
+        router.replace(target);
+        router.refresh();
+      });
+    } catch {
+      setFormError("تعذر الاتصال بالخادم، حاول مرة أخرى");
+    } finally {
+      setSubmitting(false);
+      isSubmittingRef.current = false;
     }
-
-    const target = safeInternalPath(searchParams.get("redirect"));
-    startTransition(() => {
-      router.replace(target);
-      router.refresh();
-    });
   }
 
   const busy = submitting || isPending;
@@ -73,6 +113,7 @@ export function LoginForm() {
       <div className="space-y-2">
         <Label htmlFor="email">البريد الإلكتروني</Label>
         <Input
+          ref={emailInputRef}
           id="email"
           name="email"
           type="email"
@@ -81,7 +122,24 @@ export function LoginForm() {
           placeholder="name@example.com"
           required
           className="text-start"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (fieldErrors.email) {
+              setFieldErrors((prev) => ({ ...prev, email: undefined }));
+            }
+            if (formError) {
+              setFormError(null);
+            }
+          }}
+          aria-invalid={fieldErrors.email ? true : undefined}
+          aria-describedby={fieldErrors.email ? "email-error" : undefined}
         />
+        {fieldErrors.email ? (
+          <p id="email-error" className="text-xs text-destructive">
+            {fieldErrors.email}
+          </p>
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -98,6 +156,7 @@ export function LoginForm() {
         </div>
         <div className="relative">
           <Input
+            ref={passwordInputRef}
             id="password"
             name="password"
             type={showPassword ? "text" : "password"}
@@ -106,6 +165,20 @@ export function LoginForm() {
             placeholder="••••••••"
             required
             className="text-start pe-10"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (fieldErrors.password) {
+                setFieldErrors((prev) => ({ ...prev, password: undefined }));
+              }
+              if (formError) {
+                setFormError(null);
+              }
+            }}
+            aria-invalid={fieldErrors.password ? true : undefined}
+            aria-describedby={
+              fieldErrors.password ? "password-error" : undefined
+            }
           />
           <button
             type="button"
@@ -122,18 +195,35 @@ export function LoginForm() {
             )}
           </button>
         </div>
+        {fieldErrors.password ? (
+          <p id="password-error" className="text-xs text-destructive">
+            {fieldErrors.password}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2">
-        <Checkbox id="rememberMe" name="rememberMe" defaultChecked />
-        <Label htmlFor="rememberMe" className="text-sm font-normal">
+        <Checkbox
+          id="rememberMe"
+          name="rememberMe"
+          checked={rememberMe}
+          onCheckedChange={(checked) => setRememberMe(checked === true)}
+        />
+        <Label
+          htmlFor="rememberMe"
+          className="text-sm font-normal cursor-pointer"
+        >
           تذكرني
         </Label>
       </div>
 
-      {error ? (
-        <p role="alert" className="text-destructive text-center text-sm">
-          {error}
+      {formError ? (
+        <p
+          id="login-form-error"
+          role="alert"
+          className="text-destructive text-center text-sm"
+        >
+          {formError}
         </p>
       ) : null}
 
