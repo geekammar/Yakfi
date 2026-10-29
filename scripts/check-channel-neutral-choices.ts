@@ -670,6 +670,156 @@ async function run(): Promise<void> {
     resolvedContradiction.sensitive === true,
   );
 
+  // 5.5 E12b: Sensitive model HUMAN_REQUEST suppresses explicitHuman signal
+  const sensitiveHumanDecision: AiResponse = {
+    intent: "HUMAN_REQUEST",
+    action: "handoff",
+    content: "سيتواصل معك أحد أعضاء الفريق.",
+    safetyAssessment: "sensitive",
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: "SENSITIVE",
+    summary: "Customer reports severe dental pain",
+  };
+  const resolvedSensitiveHuman = resolveTurnControlSignals({
+    currentMessage: "عندي ألم شديد جداً في أسناني",
+    routing: "LLM",
+    decision: sensitiveHumanDecision,
+    isStructuredSemanticTurn: true,
+  });
+  check(
+    "5.5 Sensitive model HUMAN_REQUEST enforces sensitive and suppresses explicitHuman",
+    resolvedSensitiveHuman.sensitive === true &&
+      resolvedSensitiveHuman.explicitHuman === false,
+  );
+
+  // 5.6 Contradictory sensitive output with model HUMAN_REQUEST
+  const contradictoryHumanDecision: AiResponse = {
+    intent: "HUMAN_REQUEST",
+    action: "handoff",
+    content: "تحويل لطبيب الطوارئ",
+    safetyAssessment: "safe",
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: "SENSITIVE",
+    summary: "Customer mentioned acute chest pain",
+  };
+  const resolvedContradictoryHuman = resolveTurnControlSignals({
+    currentMessage: "عندي وجع شديد في صدري وعايز موظف",
+    routing: "LLM",
+    decision: contradictoryHumanDecision,
+    isStructuredSemanticTurn: true,
+  });
+  check(
+    "5.6 Contradictory sensitive handoffReason suppresses model explicitHuman claim",
+    resolvedContradictoryHuman.sensitive === true &&
+      resolvedContradictoryHuman.explicitHuman === false,
+  );
+
+  // 5.6b Contradictory sensitive HANDOFF goal with model HUMAN_REQUEST
+  const contradictoryGoalHumanDecision: AiResponse = {
+    intent: "HUMAN_REQUEST",
+    action: "handoff",
+    content: "تحويل لطبيب الطوارئ",
+    safetyAssessment: "safe",
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: "HUMAN_REQUEST",
+    goals: [
+      { kind: "HANDOFF", intent: "SENSITIVE", priority: 0 },
+    ],
+    summary: "Customer mentioned emergency symptoms",
+  };
+  const resolvedContradictoryGoalHuman = resolveTurnControlSignals({
+    currentMessage: "عايز موظف فوراً لحالة طارئة",
+    routing: "LLM",
+    decision: contradictoryGoalHumanDecision,
+    isStructuredSemanticTurn: true,
+  });
+  check(
+    "5.6b Contradictory sensitive HANDOFF goal suppresses model explicitHuman claim",
+    resolvedContradictoryGoalHuman.sensitive === true &&
+      resolvedContradictoryGoalHuman.explicitHuman === false,
+  );
+
+  // 5.7 Uncertain safety assessment with model HUMAN_REQUEST
+  const uncertainHumanDecision: AiResponse = {
+    intent: "HUMAN_REQUEST",
+    action: "handoff",
+    content: "سأقوم بتحويلك.",
+    safetyAssessment: "uncertain",
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: "HUMAN_REQUEST",
+    summary: null,
+  };
+  const resolvedUncertainHuman = resolveTurnControlSignals({
+    currentMessage: "مش متأكد من الحالة",
+    routing: "LLM",
+    decision: uncertainHumanDecision,
+    isStructuredSemanticTurn: true,
+  });
+  check(
+    "5.7 Uncertain assessment forces sensitive and suppresses model explicitHuman",
+    resolvedUncertainHuman.sensitive === true &&
+      resolvedUncertainHuman.explicitHuman === false,
+  );
+
+  // 5.7b Missing/unrecognized safety assessment with model HUMAN_REQUEST
+  const missingAssessmentHumanDecision: AiResponse = {
+    intent: "HUMAN_REQUEST",
+    action: "handoff",
+    content: "سأقوم بتحويلك.",
+    safetyAssessment: undefined as any,
+    extraction: {
+      service: null,
+      provider: null,
+      date: null,
+      timePreference: null,
+    },
+    handoffReason: "HUMAN_REQUEST",
+    summary: null,
+  };
+  const resolvedMissingAssessmentHuman = resolveTurnControlSignals({
+    currentMessage: "عايز دكتور",
+    routing: "LLM",
+    decision: missingAssessmentHumanDecision,
+    isStructuredSemanticTurn: true,
+  });
+  check(
+    "5.7b Missing safety assessment forces sensitive and suppresses model explicitHuman",
+    resolvedMissingAssessmentHuman.sensitive === true &&
+      resolvedMissingAssessmentHuman.explicitHuman === false,
+  );
+
+  // 5.8 Trusted explicit-customer legacy precedence
+  const legacyCustomerSignal = resolveTurnControlSignals({
+    currentMessage: "عايز موظف لو سمحت",
+    routing: "LLM",
+    decision: null,
+    isStructuredSemanticTurn: false,
+  });
+  check(
+    "5.8 Legacy/unstructured turn preserves lexical explicitHuman detector",
+    legacyCustomerSignal.explicitHuman === true,
+  );
+
   // ── Area 6: Mechanical Execution & Regressions ───────────────────────────────
   console.log("\nArea 6: Mechanical zero-model execution & regressions");
 

@@ -84,6 +84,9 @@ async function main(): Promise<void> {
   const cause =
     await import("../src/features/conversations/server/handoff-cause");
   const { operatorAttentionValidation } = await import("../src/lib/validation");
+  const { deriveLocalDate, addDaysToIso } = await import(
+    "../src/features/conversations/server/temporal-context"
+  );
 
   type AiResponse =
     import("../src/features/conversations/server/ai-contract").AiResponse;
@@ -824,8 +827,10 @@ async function main(): Promise<void> {
 
   // E10 — tenant misconfiguration: the service exists but is INACTIVE, so the
   //       deterministic domain (CORE-01) blocks the task with a fixable setup
-  //       cause.
+  //       cause. The future date is anchored dynamically to harness clock + Cairo timezone.
   {
+    const todayIso = deriveLocalDate(now, "Africa/Cairo");
+    const targetFutureDate = addDaysToIso(todayIso, 5);
     const h = makeHarness({
       responders: [
         async () =>
@@ -837,7 +842,7 @@ async function main(): Promise<void> {
             extraction: {
               ...emptyExtraction,
               service: "تنظيف الأسنان",
-              date: "2026-10-05",
+              date: targetFutureDate,
             },
             handoffReason: null,
             summary: null,
@@ -863,7 +868,7 @@ async function main(): Promise<void> {
       ],
     });
     const result = await h.run(
-      "أريد حجز موعد لتنظيف الأسنان يوم 5 أكتوبر",
+      `أريد حجز موعد لتنظيف الأسنان بتاريخ ${targetFutureDate}`,
       "e10",
     );
     const row = h.attention.get(h.conversation!.id);

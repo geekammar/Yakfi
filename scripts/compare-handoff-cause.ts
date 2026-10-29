@@ -406,6 +406,24 @@ async function main() {
 
     if (process.env.GITHUB_STEP_SUMMARY) {
       try {
+        const observations =
+          h.failedChecks.length > 0
+            ? `\n**Contract Observation (Unresolved Upstream Items)**:\n` +
+              h.failedChecks
+                .map((c) => {
+                  const code = extractCheckCode(c);
+                  if (code === "E10") {
+                    return `- \`E10\` (Tenant configuration): Inactive service triggers clarification inquiry in mock rather than direct tenant misconfiguration handoff.`;
+                  }
+                  if (code === "E12b") {
+                    return `- \`E12b\` (Safety precedence): Model \`HUMAN_REQUEST\` intent resolved as \`CUSTOMER_REQUESTED_HUMAN\` rather than \`SENSITIVE_OR_RESTRICTED\`.`;
+                  }
+                  return `- \`${code}\`: ${c}`;
+                })
+                .join("\n") +
+              "\n"
+            : `\n**Contract Observation**: All ${h.passed}/${h.total} handoff-cause contract checks resolved and passing on HEAD.\n`;
+
         const summaryMd = `
 ### 🔍 Base-versus-HEAD Handoff-Cause Reconciliation
 
@@ -416,11 +434,7 @@ async function main() {
 
 **Reconciliation Verdict**: \`${evalResult.classification ?? (evalResult.pass ? "PASS" : "FAIL")}\`
 ${evalResult.message || evalResult.error}
-
-**Contract Observation (Unresolved Upstream Items)**:
-- \`E10\` (Tenant configuration): Inactive service triggers clarification inquiry in mock rather than direct tenant misconfiguration handoff.
-- \`E12b\` (Safety precedence): Model \`HUMAN_REQUEST\` intent resolved as \`CUSTOMER_REQUESTED_HUMAN\` rather than \`SENSITIVE_OR_RESTRICTED\`.
-`;
+${observations}`;
         appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryMd, "utf8");
       } catch (e) {
         console.warn("Could not write GITHUB_STEP_SUMMARY:", e);

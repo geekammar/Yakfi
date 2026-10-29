@@ -1034,6 +1034,43 @@ async function main(): Promise<void> {
         (resF4 as any).conversationStatus === "NEED_HUMAN" &&
         (resF4 as any).handoffCause === "POLICY_REFUSED",
     );
+
+    // F5: E12b Model HUMAN_REQUEST with sensitive assessment yields SENSITIVE_OR_RESTRICTED
+    const harnessF5 = createPlaygroundHarness({
+      businessConfig: { workingHours: longHours },
+      todayRef: "2026-10-20",
+    });
+    let aiCallsF5 = 0;
+    harnessF5.deps.ai = {
+      providerName: "mock-controlled-ai",
+      async respond(_req: AiRequest): Promise<AiResponse> {
+        aiCallsF5++;
+        return mockResponse({
+          intent: "HUMAN_REQUEST",
+          action: "handoff",
+          handoffReason: "SENSITIVE",
+          content: "سيتواصل معك أحد أعضاء الفريق.",
+          safetyAssessment: "sensitive",
+        });
+      },
+    };
+    const resF5 = await receiveInboundMessage(harnessF5.deps, {
+      to: harnessF5.business.whatsappNumber,
+      from: harnessF5.customer.phone,
+      text: "عندي ألم شديد جداً في أسناني",
+      receivedAt: harnessF5.getVirtualNow().toISOString(),
+      externalId: "msg-f-5",
+    });
+    check(
+      "F5a. Sensitive model HUMAN_REQUEST hands off with SENSITIVE_OR_RESTRICTED cause",
+      (resF5 as any).assistantAction === "AI_HANDOFF" &&
+        (resF5 as any).conversationStatus === "NEED_HUMAN" &&
+        (resF5 as any).handoffCause === "SENSITIVE_OR_RESTRICTED",
+    );
+    check(
+      "F5b. Sensitive model HUMAN_REQUEST preserves appointment and call invariants (0 appointments, exactly 1 AI call)",
+      harnessF5.capturedAppointmentWrites.length === 0 && aiCallsF5 === 1,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
