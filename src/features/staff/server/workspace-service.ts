@@ -174,7 +174,8 @@ export async function getStaffWorkspace(
                   displayText: (
                     row.messages[0] as { displayText?: string | null }
                   ).displayText,
-                  metadata: (row.messages[0] as { metadata?: unknown }).metadata,
+                  metadata: (row.messages[0] as { metadata?: unknown })
+                    .metadata,
                 }),
                 senderType: row.messages[0].senderType,
                 createdAt: row.messages[0].createdAt.toISOString(),

@@ -30,11 +30,7 @@ export const HISTORICAL_PROTOCOL_FALLBACK_TEXT =
   "محتوى تقني محفوظ؛ تفاصيل الاختيار غير متاحة";
 
 export type InteractionStatus =
-  | "VALIDATED"
-  | "STALE"
-  | "MALFORMED"
-  | "UNKNOWN_TOKEN"
-  | "INVALID_ACTION";
+  "VALIDATED" | "STALE" | "MALFORMED" | "UNKNOWN_TOKEN" | "INVALID_ACTION";
 
 export type MessageProvenanceMetadata = {
   v: 1;

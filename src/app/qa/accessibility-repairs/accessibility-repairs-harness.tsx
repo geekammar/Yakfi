@@ -490,7 +490,8 @@ export function AccessibilityRepairsHarness() {
               سجل تفاعلات الأزرار القابلة للقراءة (Interaction History)
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
-              عرض الاختيارات المؤكدة كنصوص واضحة وإخفاء رمز البروتوكول داخل تفاصيل قابلة للطي.
+              عرض الاختيارات المؤكدة كنصوص واضحة وإخفاء رمز البروتوكول داخل
+              تفاصيل قابلة للطي.
             </p>
           </div>
 
@@ -504,7 +505,10 @@ export function AccessibilityRepairsHarness() {
                 <span>العميل</span>
                 <time dateTime="2026-10-30T10:00:00.000Z">10:00 ص</time>
               </div>
-              <div className="space-y-1.5" data-testid="qa-interaction-display-box">
+              <div
+                className="space-y-1.5"
+                data-testid="qa-interaction-display-box"
+              >
                 <p
                   className="whitespace-pre-wrap text-sm font-medium leading-7 text-foreground"
                   data-testid="qa-interaction-display-text"
