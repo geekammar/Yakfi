@@ -131,6 +131,7 @@ jobs:
           pnpm test:staff-workspace
           pnpm test:install-prompt
           pnpm test:customers-dialog
+          pnpm test:appointment-cancel
           pnpm check:qa-harness
 
       - name: Base-versus-HEAD handoff-cause reconciliation
