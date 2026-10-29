@@ -374,6 +374,7 @@ async function run() {
       listAssignmentSeams: async (_bizId: string, providerIds: string[]) =>
         providerIds.map((id) => ({ providerId: id, userId: id })),
     },
+    now: () => new Date("2026-10-16T08:00:00.000Z"),
   };
 
   const availResult45 = await getAvailability(

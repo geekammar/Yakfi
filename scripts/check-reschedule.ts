@@ -258,6 +258,7 @@ async function main(): Promise<void> {
             endTime: row.endTime,
           })),
     },
+    now: () => new Date("2026-09-19T08:00:00.000Z"),
   };
 
   /** The domain write (conflict-checked) as the repository would do it. */
