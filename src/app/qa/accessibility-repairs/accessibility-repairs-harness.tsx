@@ -102,7 +102,13 @@ const INTERACTION_HISTORY_DETAIL_FIXTURE: ConversationDetailData = {
   assignedUser: null,
   currentUserId: "user-admin-1",
   appointments: [],
-  team: [ADMIN_MEMBER],
+  team: [
+    {
+      id: "user-admin-1",
+      name: "أحمد المشرف",
+      image: null,
+    },
+  ],
   messages: [
     // 1. Validated button interaction with stored readable text and realistic long technical token
     {
