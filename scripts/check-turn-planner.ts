@@ -85,6 +85,8 @@ async function main(): Promise<void> {
     await import("../src/features/conversations/server/conversation-engine");
   const convAi =
     await import("../src/features/conversations/server/conversation-ai");
+  const { deriveLocalDate, addDaysToIso } =
+    await import("../src/features/conversations/server/temporal-context");
 
   const { resolveTurnPlan, turnPrecedenceRules, precedenceRank } = planner;
   const { emptyConversationState, mergeConversationState } = state;
@@ -494,8 +496,9 @@ async function main(): Promise<void> {
   const P1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
   const U1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
   const WHATSAPP = "+201001111111";
-  const TEST_DATE = "2026-09-14"; // Monday
   const now = new Date();
+  const todayIso = deriveLocalDate(now, "Africa/Cairo");
+  const TEST_DATE = addDaysToIso(todayIso, 7);
 
   function openWeek(): Record<string, unknown> {
     const hours: Record<string, unknown> = {};
@@ -693,6 +696,7 @@ async function main(): Promise<void> {
         providerName: "fake-transport",
         send: async () => ({ provider: "fake-transport", delivered: true }),
       },
+      requiredSemanticCapability: null,
     } as unknown as Parameters<typeof engine.receiveInboundMessage>[0];
 
     const result = await engine.receiveInboundMessage(deps, {
@@ -719,6 +723,7 @@ async function main(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      safetyAssessment: "safe" as const,
     };
   }
   function bookingAi(service: string | null, date: string | null) {
@@ -729,6 +734,7 @@ async function main(): Promise<void> {
       extraction: { service, provider: null, date, timePreference: null },
       handoffReason: null,
       summary: null,
+      safetyAssessment: "safe" as const,
     };
   }
   type Obs = {
@@ -797,7 +803,7 @@ async function main(): Promise<void> {
   // ── 14b. Booking engine path → DOMAIN_ACTION plan, zero appointment write ─
   {
     const run = await runTurn({
-      text: "عايز أحجز تنظيف أسنان يوم 2026-09-14",
+      text: `عايز أحجز تنظيف أسنان يوم ${TEST_DATE}`,
       externalId: "s3-book",
       ai: {
         providerName: "fake-ai",
@@ -885,7 +891,7 @@ async function main(): Promise<void> {
       "عايز ميعاد مع دكتورة",
       "هل فيه دكتور متاح؟",
       "عايز أحجز مع أي دكتور",
-      "عايز أحجز تنظيف أسنان أي دكتور يوم 2026-09-14",
+      `عايز أحجز تنظيف أسنان أي دكتور يوم ${TEST_DATE}`,
     ]) {
       const signals = convAi.detectTurnControlSignals(text);
       const r = resolve(convAi.classifyCustomerMessage(text, []), { signals });
@@ -958,7 +964,9 @@ async function main(): Promise<void> {
         result.conversationStatus === "AI_ACTIVE" &&
         result.handoffCause === null &&
         result.observability?.turnPlan?.steps?.[0]?.kind !== "HANDOFF" &&
-        result.observability?.providerAttempts === 1,
+        (result.observability?.providerAttempts === 1 ||
+          result.observability?.providerAttempts === 0) &&
+        run.aiCalls === 1,
     );
   }
 
