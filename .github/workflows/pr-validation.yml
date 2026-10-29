@@ -207,6 +207,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/resolve-preview-url.mjs || echo "⚠️ Preview URL resolution skipped or unavailable; proceeding with local browser tests."
 
+      - name: Focused Viewport Stability Check (mobile-390 repeat-each=3 retries=0)
+        if: steps.change-check.outputs.should_run == 'true'
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
+        run: |
+          pnpm exec playwright test tests/e2e/ux-viewports.spec.ts --project=mobile-390 -g "Sign-in page: RTL, horizontal overflow, touch targets and form states" --repeat-each=3 --retries=0
+
       - name: Run Automated UX QA Suite
         if: steps.change-check.outputs.should_run == 'true'
         env:
