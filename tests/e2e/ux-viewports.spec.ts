@@ -601,23 +601,42 @@ test.describe("UX Viewport, RTL & Responsiveness QA", () => {
         btnBox.x + btnBox.width / 2,
         btnBox.y + btnBox.height / 2,
       );
-      const preActiveTransform = await interactiveBtn.evaluate(
-        (btn) => window.getComputedStyle(btn).transform,
-      );
+      const preActive = await interactiveBtn.evaluate((btn) => {
+        const style = window.getComputedStyle(btn);
+        const rect = btn.getBoundingClientRect();
+        return {
+          transform: style.transform,
+          translate: style.translate,
+          top: rect.top,
+          y: rect.y,
+        };
+      });
       await page.mouse.down();
       const activeState = await interactiveBtn.evaluate((btn) => {
         const style = window.getComputedStyle(btn);
+        const rect = btn.getBoundingClientRect();
         return {
           isActive: btn.matches(":active"),
           transform: style.transform,
+          translate: style.translate,
+          top: rect.top,
+          y: rect.y,
         };
       });
       expect(activeState.isActive).toBe(true);
-      // Button uses active:not-aria-[haspopup]:translate-y-px -> transform difference
-      expect(
-        activeState.transform.includes("matrix(1, 0, 0, 1, 0, 1)") ||
-          activeState.transform !== preActiveTransform,
-      ).toBe(true);
+      // Button uses active:not-aria-[haspopup]:translate-y-px
+      // In CSS, this manifests via the modern CSS translate property, transform matrix,
+      // or a downward displacement in rendered bounding client rect geometry.
+      const hasVisualShift =
+        (Boolean(activeState.translate) &&
+          activeState.translate !== "none" &&
+          activeState.translate !== preActive.translate) ||
+        (Boolean(activeState.transform) &&
+          activeState.transform !== "none" &&
+          activeState.transform !== preActive.transform) ||
+        activeState.top >= preActive.top + 0.5 ||
+        activeState.y >= preActive.y + 0.5;
+      expect(hasVisualShift).toBe(true);
       await page.mouse.up();
     }
 
