@@ -312,6 +312,7 @@ export type ConversationDetailProps = {
   }) => Promise<{ success: boolean; message?: string }>;
   backHref?: string;
   businessId?: string;
+  initialFailedSubmission?: string | null;
 };
 
 export function ConversationDetail({
@@ -319,6 +320,7 @@ export function ConversationDetail({
   onTransition,
   backHref,
   businessId: propBusinessId,
+  initialFailedSubmission = null,
 }: ConversationDetailProps) {
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
@@ -343,7 +345,9 @@ export function ConversationDetail({
     rawDraft: string;
     revision: number;
   } | null>(null);
-  const [failedSubmission, setFailedSubmission] = useState<string | null>(null);
+  const [failedSubmission, setFailedSubmission] = useState<string | null>(
+    initialFailedSubmission,
+  );
 
   const effectiveBusinessId = propBusinessId ?? initialData.businessId;
   const effectiveUserId = initialData.currentUserId;
@@ -759,20 +763,20 @@ export function ConversationDetail({
               <div
                 role="alert"
                 aria-label="تنبيه تعذر إرسال الرد"
-                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                className="mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
               >
-                <div className="flex min-w-0 items-center gap-1.5">
+                <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
                   <AlertCircleIcon className="size-4 shrink-0" />
                   <span className="truncate">
                     تعذر إرسال: &ldquo;{failedSubmission.trim()}&rdquo;
                   </span>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1.5 ms-auto">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-7 px-2 text-xs"
+                    className="h-11 min-h-[44px] min-w-[44px] px-3 text-xs"
                     onClick={() => {
                       setReply(failedSubmission);
                       if (effectiveBusinessId && effectiveUserId) {
@@ -792,11 +796,11 @@ export function ConversationDetail({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0"
+                    className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                     aria-label="تجاهل الرد المتعثر"
                     onClick={() => setFailedSubmission(null)}
                   >
-                    <XIcon className="size-3.5" />
+                    <XIcon className="size-4" />
                   </Button>
                 </div>
               </div>

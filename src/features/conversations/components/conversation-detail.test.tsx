@@ -795,6 +795,101 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       ) as HTMLTextAreaElement;
       expect(textarea).not.toBeNull();
     });
+
+    it("Failed-reply recovery alert: Restore button restores failed text to textarea and storage", async () => {
+      const failedText = "رسالة تجريبية متعثرة";
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+            initialFailedSubmission={failedText}
+          />,
+        );
+      });
+
+      const alert = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]',
+      );
+      expect(alert).not.toBeNull();
+      expect(alert?.textContent).toContain(failedText);
+
+      // Find Restore button
+      const restoreBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("استعادة الرد"),
+      );
+      expect(restoreBtn).not.toBeNull();
+
+      // Click restore button
+      await act(async () => {
+        restoreBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      // Textarea now contains the restored failed submission
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe(failedText);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(failedText);
+
+      // Alert is dismissed
+      expect(
+        container.querySelector(
+          'div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]',
+        ),
+      ).toBeNull();
+    });
+
+    it("Failed-reply recovery alert: Discard button clears alert without overwriting newer draft", async () => {
+      const failedText = "رسالة تجريبية متعثرة";
+      const currentDraft = "مسودة حالية لم يتم إرسالها";
+      setStoredDraft(testBiz, userA, mockData.id, currentDraft);
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+            initialFailedSubmission={failedText}
+          />,
+        );
+      });
+
+      // Hydrate initial draft
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+
+      const alert = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]',
+      );
+      expect(alert).not.toBeNull();
+
+      // Find Discard button with accessible name
+      const discardBtn = container.querySelector(
+        'button[aria-label="تجاهل الرد المتعثر"]',
+      );
+      expect(discardBtn).not.toBeNull();
+
+      // Click discard button
+      await act(async () => {
+        discardBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      // Alert is dismissed
+      expect(
+        container.querySelector(
+          'div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]',
+        ),
+      ).toBeNull();
+
+      // Textarea still has the current draft
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe(currentDraft);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(currentDraft);
+    });
   });
 
   describe("Appointment calendar date formatting consistency", () => {

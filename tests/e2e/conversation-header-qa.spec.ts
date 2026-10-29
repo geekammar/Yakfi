@@ -749,6 +749,61 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
     }
   });
 
+  test("Failed-reply recovery touch targets, responsive layout, accessible names and interactions", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const testMessage = "تعذر إرسال هذا الرد التجريبي بسبب انقطاع مؤقت في الاتصال";
+
+    await page.goto(
+      `/qa/conversation-header?fixture=need_human_unassigned&failedReply=${encodeURIComponent(testMessage)}`,
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
+
+    const alert = page.locator('div[role="alert"][aria-label="تنبيه تعذر إرسال الرد"]');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText("تعذر إرسال:");
+
+    const restoreButton = alert.locator('button:has-text("استعادة الرد")');
+    const discardButton = alert.locator('button[aria-label="تجاهل الرد المتعثر"]');
+
+    await expect(restoreButton).toBeVisible();
+    await expect(discardButton).toBeVisible();
+
+    // 1. Interactive touch target dimensions verification (>= 44 CSS pixels)
+    const restoreBox = await restoreButton.boundingBox();
+    const discardBox = await discardButton.boundingBox();
+
+    expect(restoreBox).not.toBeNull();
+    expect(discardBox).not.toBeNull();
+
+    if (restoreBox && discardBox) {
+      expect(Math.round(restoreBox.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(restoreBox.height)).toBeGreaterThanOrEqual(44);
+
+      expect(Math.round(discardBox.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(discardBox.height)).toBeGreaterThanOrEqual(44);
+    }
+
+    // 2. Responsive layout: verify zero horizontal overflow
+    const isOverflowing = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(isOverflowing).toBe(false);
+
+    // 3. Capture visual audit screenshot for project viewport (e.g. mobile-320, mobile-360)
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `${vpName}-failed-recovery-alert.png`),
+      fullPage: false,
+    });
+
+    // 4. Interactive behavior: Discard button clears the recovery alert
+    await discardButton.click();
+    await expect(alert).not.toBeVisible();
+  });
+
   test("QA harness route boundaries: fixture available in intended CI test configuration & broad /qa/ closed", async ({
     page,
   }) => {

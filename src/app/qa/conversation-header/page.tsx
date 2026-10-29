@@ -267,6 +267,7 @@ export default async function QaConversationHeaderPage({
     view?: string;
     installRoute?: string;
     id?: string;
+    failedReply?: string;
   }>;
 }) {
   if (!isQaHarnessAllowed()) {
@@ -278,6 +279,7 @@ export default async function QaConversationHeaderPage({
     view = "conversation",
     installRoute,
     id,
+    failedReply,
   } = await searchParams;
   const data = buildFixture(fixture);
   if (id) {
@@ -303,6 +305,7 @@ export default async function QaConversationHeaderPage({
           businessId="biz-qa"
           backHref="/qa/conversation-header?view=inbox"
           onTransition={handleQaTransition}
+          initialFailedSubmission={failedReply ?? null}
         />
       )}
       <InstallPrompt forcedPathname={installRoute} />
