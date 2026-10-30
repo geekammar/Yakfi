@@ -979,7 +979,6 @@ function resolveFinishedTurn(
       priorState ??
       deriveConversationStateFromHistory(recentChronological, {
         timezone,
-        referenceDate: now,
       });
     // Reconstruct a pending clarification from history (migration-safe §9) so
     // the resumed state reflects what the engine actually asked last turn.
@@ -5644,7 +5643,6 @@ async function runInboundTurn(
           ? null
           : tryParseBookingSelection(inbound.text, recentChronological, {
               timezone: business.timezone ?? "Africa/Cairo",
-              referenceDate: now,
             });
       if (selectionAttempt) {
         const selectionResult = await completeBookingSelection(

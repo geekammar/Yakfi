@@ -945,7 +945,7 @@ async function runTests() {
       fullParsed.options[0]?.endTime === "10:45",
   );
 
-  // 6.15 Engine fallback call site: legacy parsing fails closed when date is unresolvable
+  // 6.15 Selection parser helper: tryParseBookingSelection fails closed (null) on impossible historical offer date
   const engineFallbackScope = {
     business: createMockBusiness({ id: "biz_fb", timezone: "Africa/Cairo" }),
   };
@@ -961,11 +961,11 @@ async function runTests() {
     unresolvableOfferHistory,
     {
       timezone: engineFallbackScope.business.timezone,
-      referenceDate: new Date("2026-11-01"),
+      provenanceDate: new Date("2026-11-01"),
     },
   );
   check(
-    "6.15 Engine fallback call site: tryParseBookingSelection fails closed (null) on impossible historical offer date",
+    "6.15 Selection parser helper: tryParseBookingSelection fails closed (null) on impossible historical offer date",
     fallbackSelAttempt === null,
   );
 
@@ -1292,6 +1292,412 @@ async function runTests() {
     check(
       "8.3b Mid-flight selection executes with strictly 0 additional model calls",
       modelCalls === callsBefore,
+    );
+  }
+
+  // ── 8.4 Yearless Historical Offer without Timestamp: Current Turn Clock Must Not Supply Year
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return {
+          intent: "FAQ",
+          action: "direct_reply",
+          content: "يرجى تحديد التاريخ بالكامل لإتمام الحجز.",
+          summary: "استفسار",
+          handoffReason: null,
+          safetyAssessment: "safe",
+          extraction: {
+            service: null,
+            date: null,
+            provider: null,
+            timePreference: null,
+          },
+          factUpdates: [],
+        };
+      },
+    };
+
+    // Prepopulate historical message: valid yearless offer format, but missing sentAt/createdAt
+    (harness.messages as any[]).push({
+      id: "msg-yearless-no-time",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم الأحد، 1 نوفمبر:\n' +
+        "1. 9:00 ص إلى 9:30 ص\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: null,
+      sentAt: null,
+    });
+
+    // Customer sends "1" at current turn clock 2026-11-04
+    const turnResult = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "1",
+        receivedAt: new Date("2026-11-04T10:00:00Z").toISOString(),
+        externalId: "ext-yearless-no-time",
+      },
+      identity,
+    );
+
+    check(
+      "8.4a Yearless historical offer without timestamp fails closed and falls through to AI turn without supplying current turn year",
+      turnResult.ok === true && modelCalls === 1,
+      `modelCalls: ${modelCalls}`,
+    );
+
+    check(
+      "8.4b Yearless historical offer without timestamp produces strictly 0 appointment writes",
+      harness.appointments.length === 0,
+      `appointments count: ${harness.appointments.length}`,
+    );
+  }
+
+  // ── 8.5 Older Valid Offer Followed by Newer Unresolvable Offer: Never Reactivate Superseded Offer
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return {
+          intent: "INQUIRY",
+          action: "direct_reply",
+          content:
+            "لم أتمكن من استرجاع الموعد، يرجى طلب المواعيد المتاحة مجدداً.",
+          summary: "استفسار",
+          handoffReason: null,
+          safetyAssessment: "safe",
+          extraction: {
+            service: null,
+            date: null,
+            provider: null,
+            timePreference: null,
+          },
+          factUpdates: [],
+        };
+      },
+    };
+
+    // Message 1 (older, valid offer)
+    (harness.messages as any[]).push({
+      id: "msg-older-valid",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم 2026-11-04:\n' +
+        "1. 9:00 ص إلى 9:30 ص\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: new Date("2026-11-01T09:00:00Z"),
+      sentAt: new Date("2026-11-01T09:00:00Z"),
+    });
+
+    // Message 2 (newer, unresolvable offer with impossible date Feb 31)
+    (harness.messages as any[]).push({
+      id: "msg-newer-unresolvable",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم الأحد، 31 فبراير 2026:\n' +
+        "1. 11:00 ص إلى 11:30 ص\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: new Date("2026-11-01T10:00:00Z"),
+      sentAt: new Date("2026-11-01T10:00:00Z"),
+    });
+
+    // Customer sends "1"
+    const turnResult = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "1",
+        receivedAt: new Date("2026-11-01T10:05:00Z").toISOString(),
+        externalId: "ext-superseded-unresolvable",
+      },
+      identity,
+    );
+
+    check(
+      "8.5a Newer unresolvable offer bounds recovery and never reactivates older superseded offer",
+      turnResult.ok === true && modelCalls === 1,
+      `modelCalls: ${modelCalls}`,
+    );
+
+    check(
+      "8.5b Newer unresolvable offer produces strictly 0 appointment writes against superseded offer",
+      harness.appointments.length === 0,
+    );
+  }
+
+  // ── 8.6 Older Valid Offer Followed by Newer Invalid-Options Offer
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return {
+          intent: "INQUIRY",
+          action: "direct_reply",
+          content: "يرجى اختيار موعد صالح.",
+          summary: "استفسار",
+          handoffReason: null,
+          safetyAssessment: "safe",
+          extraction: {
+            service: null,
+            date: null,
+            provider: null,
+            timePreference: null,
+          },
+          factUpdates: [],
+        };
+      },
+    };
+
+    // Message 1 (older, valid offer)
+    (harness.messages as any[]).push({
+      id: "msg-older-valid-2",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم 2026-11-04:\n' +
+        "1. 9:00 ص إلى 9:30 ص\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: new Date("2026-11-01T09:00:00Z"),
+      sentAt: new Date("2026-11-01T09:00:00Z"),
+    });
+
+    // Message 2 (newer offer with invalid option times 25:00)
+    (harness.messages as any[]).push({
+      id: "msg-newer-invalid-options",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم 2026-11-04:\n' +
+        "1. 25:00\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: new Date("2026-11-01T10:00:00Z"),
+      sentAt: new Date("2026-11-01T10:00:00Z"),
+    });
+
+    // Customer sends "1"
+    const turnResult = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "1",
+        receivedAt: new Date("2026-11-01T10:05:00Z").toISOString(),
+        externalId: "ext-superseded-invalid-options",
+      },
+      identity,
+    );
+
+    check(
+      "8.6a Newer offer with invalid options bounds recovery and never reactivates older superseded offer",
+      turnResult.ok === true && modelCalls === 1,
+      `modelCalls: ${modelCalls}`,
+    );
+
+    check(
+      "8.6b Newer offer with invalid options produces strictly 0 appointment writes against superseded offer",
+      harness.appointments.length === 0,
+    );
+  }
+
+  // ── 8.7 Trusted Historical Timestamp with Delayed Customer Reply
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return {
+          intent: "INQUIRY",
+          action: "direct_reply",
+          content: "هذا الموعد قد مضى، يرجى طلب مواعيد جديدة.",
+          summary: "استفسار",
+          handoffReason: null,
+          safetyAssessment: "safe",
+          extraction: {
+            service: null,
+            date: null,
+            provider: null,
+            timePreference: null,
+          },
+          factUpdates: [],
+        };
+      },
+    };
+
+    // Offer sent on 2026-11-01 offering 2026-11-01 (Sunday, 1 Nov)
+    const offerTime = new Date("2026-11-01T08:00:00Z");
+    (harness.messages as any[]).push({
+      id: "msg-delayed-trusted",
+      conversationId: harness.conversation.id,
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم الأحد، 1 نوفمبر:\n' +
+        "1. 9:00 ص إلى 9:30 ص\n" +
+        "يرجى اختيار أحد الخيارات.",
+      createdAt: offerTime,
+      sentAt: offerTime,
+    });
+
+    // Customer sends "1" 4 months later on 2027-03-15
+    const turnResult = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "1",
+        receivedAt: new Date("2027-03-15T14:00:00Z").toISOString(),
+        externalId: "ext-delayed-reply",
+      },
+      identity,
+    );
+
+    check(
+      "8.7a Delayed customer reply recovers exact historical offer date without booking elapsed slot",
+      turnResult.ok === true,
+    );
+
+    check(
+      "8.7b Delayed customer reply produces strictly 0 appointment writes for elapsed slot",
+      harness.appointments.length === 0,
+    );
+  }
+
+  // ── 8.8 Structured Typed-Offer Authority Invariant
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "FULL_RANGE",
+        confirmationMode: "automatic",
+      },
+    });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return createMockAiBookingResponse({
+          service: "كشف أسنان",
+          date: "2026-11-04",
+        });
+      },
+    };
+
+    // Step 1: Inbound message presents a structured typed slot offer into session state
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 2026-11-04",
+        receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+        externalId: "ext-typed-1",
+      },
+      identity,
+    );
+
+    const offerOutbound = harness.deliveredOutbound[0];
+    const callbackData =
+      offerOutbound?.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data;
+
+    // Step 2: Mechanical callback selection on typed offer
+    const callsBefore = modelCalls;
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: callbackData!,
+        receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
+        externalId: "ext-typed-2",
+      },
+      identity,
+    );
+
+    check(
+      "8.8 Structured typed-offer authority and token routing remain completely unchanged",
+      turn1.ok === true &&
+        turn2.ok === true &&
+        modelCalls === callsBefore &&
+        harness.appointments.length === 1 &&
+        harness.appointments[0]?.startTime === "09:00" &&
+        harness.appointments[0]?.endTime === "09:30",
     );
   }
 

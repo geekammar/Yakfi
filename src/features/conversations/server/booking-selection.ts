@@ -153,7 +153,6 @@ export function isValidCalendarDate(
 
 export type ParseOfferDateOptions = {
   provenanceDate?: string | Date | null;
-  referenceDate?: string | Date | null;
   timezone?: string | null;
 };
 
@@ -281,8 +280,7 @@ export function parseOfferDate(
         provenanceOrOptions &&
         typeof provenanceOrOptions === "object" &&
         !(provenanceOrOptions instanceof Date)
-          ? (provenanceOrOptions.provenanceDate ??
-            provenanceOrOptions.referenceDate)
+          ? provenanceOrOptions.provenanceDate
           : provenanceOrOptions;
       const tz =
         provenanceOrOptions &&
@@ -357,15 +355,19 @@ export function extractLastBookingOffer(
       return null;
     }
     const header = msg.content.match(OFFER_HEADER);
-    if (!header || !header[1] || !header[3]) continue;
+    if (!header) continue;
 
-    const msgProvenance = msg.sentAt ?? msg.createdAt;
+    // The newest recognized offer must bound recovery. If it cannot be
+    // recovered safely, return null; do not fall back to an older offer.
+    if (!header[1] || !header[3]) return null;
+
+    const msgProvenance =
+      msg.sentAt ?? msg.createdAt ?? options?.provenanceDate;
     const resolvedDate = parseOfferDate(header[3], {
-      provenanceDate:
-        msgProvenance ?? options?.provenanceDate ?? options?.referenceDate,
+      provenanceDate: msgProvenance,
       timezone: options?.timezone ?? "Africa/Cairo",
     });
-    if (!resolvedDate) continue;
+    if (!resolvedDate) return null;
 
     const headerProviderName = header[2] ? header[2].trim() : undefined;
     const followUpMatch = msg.content.match(FOLLOW_UP_TAG);
@@ -395,7 +397,7 @@ export function extractLastBookingOffer(
         ...(endNorm ? { endTime: endNorm } : {}),
       });
     }
-    if (slotOptions.length === 0) continue;
+    if (slotOptions.length === 0) return null;
     return {
       serviceName: header[1],
       date: resolvedDate,
