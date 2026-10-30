@@ -97,9 +97,9 @@ describe("SettingsScreen — Customer Appointment Time Display Preference", () =
 
     expect(container.textContent).toContain("طريقة عرض وقت الموعد للعميل");
     expect(container.textContent).toContain("البداية فقط");
-    expect(container.textContent).toContain("مثل: 2:00 م");
+    expect(container.textContent).toContain("مثال: 2:00 م");
     expect(container.textContent).toContain("الفترة كاملة");
-    expect(container.textContent).toContain("مثل: 2:00 م إلى 2:40 م");
+    expect(container.textContent).toContain("مثال: 2:00 م إلى 2:40 م");
   });
 
   it("allows switching to FULL_RANGE and submits the preference in the form payload", async () => {
