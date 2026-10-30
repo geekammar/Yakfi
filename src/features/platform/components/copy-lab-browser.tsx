@@ -183,7 +183,7 @@ function CopyEntryCard({
 }) {
   const isProtected = entry.classification === "PROTECTED_COPY";
   const isTemplate = entry.classification === "EDITABLE_TEMPLATE";
-  const coverage = getCopyRuntimeCoverage(entry.key);
+  const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
 
   return (
     <li>

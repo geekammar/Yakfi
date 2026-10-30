@@ -30,7 +30,10 @@ import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
-import { getPublishFeedbackText } from "@/features/platform/components/copy-lab-logic";
+import {
+  getMutationFeedbackText,
+  getPublishFeedbackText,
+} from "@/features/platform/components/copy-lab-logic";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
 import type { BusinessSettingsView } from "@/features/settings/types";
 
@@ -145,6 +148,45 @@ function forbiddenState(): GetCopyLabEntryStateResult {
   };
 }
 
+/** A successful read carrying one restorable history row. */
+function successWithHistoryItem(
+  entry: CopyRegistryEntry,
+  historyId: string,
+  resultText: string,
+): GetCopyLabEntryStateResult {
+  return {
+    success: true,
+    data: {
+      resolution: {
+        ok: true,
+        key: entry.key,
+        text: EFFECTIVE_TEXT,
+        source: "CODE_DEFAULT",
+      },
+      published: { success: true, data: { override: null } },
+      history: {
+        success: true,
+        data: {
+          items: [
+            {
+              id: historyId,
+              copyKey: entry.key,
+              action: "PUBLISH",
+              actionLabel: "نشر",
+              previousText: null,
+              resultText,
+              actorId: "platform-operator-1",
+              createdAt: "2026-10-09T10:00:00.000Z",
+              createdAtLabel: "2026-10-09 10:00",
+              restorable: true,
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
 // ── Minimal render harness (no testing-library dependency) ────────────────────
 
 /** The Arabic labels the component renders; asserted by tests. */
@@ -198,6 +240,23 @@ function loadingBlock(): Element | null {
 
 function editorTextarea(): HTMLTextAreaElement | null {
   return document.querySelector("textarea");
+}
+
+function typeInEditor(textarea: HTMLTextAreaElement, value: string): void {
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  nativeSetter?.call(textarea, value);
+  textarea.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function findButton(textMatch: string): HTMLButtonElement | null {
+  return (
+    (Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes(textMatch),
+    ) as HTMLButtonElement | undefined) ?? null
+  );
 }
 
 beforeEach(() => {
@@ -579,6 +638,235 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     expect(welcome).toContain("لا يعني ذلك التحقق من تسليم المزود");
     expect(unwired).toContain("غير متصل بالمحادثة الحية بعد");
     expect(unwired).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+});
+
+describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR66 Review)", () => {
+  it("protected guidance contains no promise of editing/restoring and no mutation controls", async () => {
+    const entry = findEntry("handoff.human_request");
+    expect(entry.classification).toBe("PROTECTED_COPY");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content).toContain("هذا النص محمي لحماية مسارات التحويل الآمن");
+    expect(content).toContain(
+      "ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة",
+    );
+    expect(content).not.toContain("تظل إمكانية التعديل");
+    expect(content).not.toContain(PUBLISH_LABEL);
+    expect(content).not.toContain(RESET_LABEL);
+    expect(content).not.toContain(RESTORE_LABEL);
+    expect(editorTextarea()).toBeNull();
+  });
+
+  it("editable unwired guidance still explains available authoring features", async () => {
+    const entry = findEntry("greeting.invite");
+    expect(entry.classification).toBe("EDITABLE_COPY");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content).toContain("غير متصل بعد");
+    expect(content).toContain(
+      "الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء",
+    );
+    expect(content).toContain(
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة لمشغلي المنصة",
+    );
+    expect(editorTextarea()).not.toBeNull();
+    expect(findButton(PUBLISH_LABEL)).not.toBeNull();
+  });
+
+  it("successful publish feedback survives completed readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل جديد للترحيب");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: "ov-test",
+        copyKey: entry.key,
+        text: "تعديل جديد للترحيب",
+        actorId: "operator",
+        updatedAt: "2026-10-30T12:00:00.000Z",
+      },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain("تم حفظ التجاوز في مخزن المنصة");
+    expect(content).toContain("تجاوز المنصة");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+
+    // Clearing stale feedback on subsequent draft edit
+    act(() => {
+      typeInEditor(textarea!, "تعديل إضافي بعد النشر");
+    });
+    expect(text()).not.toContain("تم حفظ التجاوز في مخزن المنصة");
+  });
+
+  it("reset feedback is operation-correct and survives readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+    renderDetail(entry);
+    await settle();
+
+    const resetBtn = findButton(RESET_LABEL);
+    expect(resetBtn).not.toBeNull();
+    await act(async () => {
+      resetBtn!.click();
+    });
+
+    const confirmBtn = findButton("تأكيد الحذف");
+    expect(confirmBtn).not.toBeNull();
+
+    resetCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: { reset: true },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+
+    await act(async () => {
+      confirmBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain("تمت إعادة التعيين في مخزن المنصة وحذف التجاوز");
+    expect(content).toContain(
+      "يعود النص المعتمد في المخزن إلى الافتراضي في الكود",
+    );
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+
+  it("restore feedback is operation-correct and survives readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(
+      successWithHistoryItem(entry, "hist-123", "نص مسترجع من السجل"),
+    );
+    renderDetail(entry);
+    await settle();
+
+    const restoreBtn = findButton(RESTORE_LABEL);
+    expect(restoreBtn).not.toBeNull();
+
+    restoreCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: { restored: true },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+
+    await act(async () => {
+      restoreBtn!.click();
+    });
+    await settle();
+
+    expect(restoreCopyOverrideAction).toHaveBeenCalledWith({
+      historyId: "hist-123",
+    });
+    const content = text();
+    expect(content).toContain("تم استرجاع النسخة المحددة في مخزن المنصة");
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+
+  it("mutation failure does not display success", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل سيفشل");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: false,
+      error: {
+        code: "PERSISTENCE_FAILED",
+        message: "فشلت كتابة التجاوز في قاعدة البيانات",
+      },
+    });
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    expect(content).toContain("تعذر حفظ التعديل في مخزن المنصة");
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).not.toContain("بنجاح");
+  });
+
+  it("successful mutation followed by failed readback displays an honest, distinct result", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل ينجح مع فشل القراءة الراجعة");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: "ov-ok",
+        copyKey: entry.key,
+        text: "تعديل ينجح مع فشل القراءة الراجعة",
+        actorId: "operator",
+        updatedAt: "2026-10-30T12:00:00.000Z",
+      },
+    });
+    getCopyLabEntryStateAction.mockRejectedValue(
+      new Error("readback network down"),
+    );
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain(
+      "تم حفظ التعديل بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً",
+    );
+    expect(content).toContain("دون إثبات قراءة راجعة");
   });
 });
 

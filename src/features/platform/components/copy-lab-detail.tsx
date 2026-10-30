@@ -51,12 +51,15 @@ import {
   collectPreviewValues,
   demoPlaceholderValues,
   getCopyRuntimeCoverage,
+  getMutationFeedbackText,
   getPublishFeedbackText,
   mapEffectiveCopyState,
   mapHistoryItems,
   overrideErrorGuidance,
+  type EffectiveCopySource,
   type EffectiveCopyState,
   type HistoryItemView,
+  type MutationKind,
 } from "@/features/platform/components/copy-lab-logic";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -163,7 +166,11 @@ export function CopyLabDetail({
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<MutationKind | null>(null);
   const [error, setError] = useState<MutationError | null>(null);
-  const [published, setPublished] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    readonly kind: MutationKind;
+    readonly readbackSuccess: boolean;
+    readonly message: string;
+  } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const applyResult = useCallback(
@@ -192,24 +199,37 @@ export function CopyLabDetail({
       // Initialize the editor from the effective/published state. The registry
       // is never mutated — this is local draft state seeded from what is stored.
       setDraft(mapped.editorSeed);
-      setPublished(false);
     },
     [entry],
   );
 
   // Post-mutation refresh (an event-handler path, so setState is fine here).
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<{
+    ok: boolean;
+    source?: EffectiveCopySource;
+  }> => {
     setLoading(true);
     setError(null);
     try {
       const result = await getCopyLabEntryStateAction(entry.key);
-      applyResult(result);
+      if (result.success) {
+        applyResult(result);
+        return {
+          ok: true,
+          source: result.data.resolution.source,
+        };
+      }
+      setLoadFailed(true);
+      setEffective(null);
+      setHistory(null);
+      return { ok: false };
     } catch {
       // Never let a thrown boundary call crash the drawer: keep the safe
       // registry default and explain the state.
       setLoadFailed(true);
       setEffective(null);
       setHistory(null);
+      return { ok: false };
     } finally {
       setLoading(false);
     }
@@ -227,6 +247,9 @@ export function CopyLabDetail({
   // otherwise the drawer stays stuck on the loading branch and neither the
   // effective state nor the editor ever renders.
   useEffect(() => {
+    setFeedback(null);
+    setError(null);
+    setConfirmingReset(false);
     if (!open) return;
     let active = true;
     void (async () => {
@@ -272,7 +295,7 @@ export function CopyLabDetail({
   ): Promise<void> {
     setPending(kind);
     setError(null);
-    setPublished(false);
+    setFeedback(null);
     let result: ActionResult;
     try {
       // The action returns the service's typed envelope; a non-success is a
@@ -289,9 +312,30 @@ export function CopyLabDetail({
     }
     setPending(null);
     if (result.success) {
-      setPublished(true);
       setConfirmingReset(false);
-      await refresh();
+      const refreshResult = await refresh();
+      if (refreshResult.ok) {
+        setFeedback({
+          kind,
+          readbackSuccess: true,
+          message: getMutationFeedbackText({
+            kind,
+            key: entry.key,
+            readbackSuccess: true,
+            source: refreshResult.source,
+          }),
+        });
+      } else {
+        setFeedback({
+          kind,
+          readbackSuccess: false,
+          message: getMutationFeedbackText({
+            kind,
+            key: entry.key,
+            readbackSuccess: false,
+          }),
+        });
+      }
       return;
     }
     setError(toMutationError(result.error));
@@ -344,7 +388,7 @@ export function CopyLabDetail({
                   draft={draft}
                   onDraftChange={(value) => {
                     setDraft(value);
-                    setPublished(false);
+                    setFeedback(null);
                     setError(null);
                   }}
                   characters={[...draft].length}
@@ -401,9 +445,16 @@ export function CopyLabDetail({
 
         <DrawerFooter className="space-y-2">
           {error ? <MutationErrorAlert error={error} /> : null}
-          {published && effective !== null ? (
-            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-500 leading-relaxed">
-              {getPublishFeedbackText(entry.key, effective.source)}
+          {feedback !== null ? (
+            <p
+              className={cn(
+                "text-xs font-medium leading-relaxed",
+                feedback.readbackSuccess
+                  ? "text-emerald-600 dark:text-emerald-500"
+                  : "text-amber-600 dark:text-amber-500",
+              )}
+            >
+              {feedback.message}
             </p>
           ) : null}
 
@@ -482,7 +533,10 @@ export function CopyLabDetail({
                     variant="outline"
                     className="h-11 w-full"
                     disabled={pending !== null}
-                    onClick={() => setConfirmingReset(true)}
+                    onClick={() => {
+                      setFeedback(null);
+                      setConfirmingReset(true);
+                    }}
                   >
                     <RotateCcwIcon aria-hidden className="size-4" />
                     إعادة التعيين للنص الافتراضي
@@ -541,8 +595,8 @@ function LoadFailedNotice() {
 }
 
 /** The explicit runtime coverage block showing whether the engine consumes this key. */
-function RuntimeCoverageBlock({ copyKey }: { copyKey: string }) {
-  const coverage = getCopyRuntimeCoverage(copyKey);
+function RuntimeCoverageBlock({ entry }: { entry: CopyRegistryEntry }) {
+  const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
 
   if (coverage.isConnected) {
     return (
@@ -610,7 +664,7 @@ function EffectiveStateBlock({
         </span>
       </div>
 
-      <RuntimeCoverageBlock copyKey={entry.key} />
+      <RuntimeCoverageBlock entry={entry} />
 
       <p className="text-muted-foreground text-xs leading-relaxed">
         {PLATFORM_OVERRIDE_SCOPE_NOTE}

@@ -3353,6 +3353,7 @@ async function main(): Promise<void> {
   const {
     getCopyRuntimeCoverage,
     isKeyConnectedToRuntime,
+    getMutationFeedbackText,
     getPublishFeedbackText,
     PLATFORM_OVERRIDE_SCOPE_NOTE: SCOPE_NOTE,
   } = await import("../src/features/platform/components/copy-lab-logic");
@@ -3362,7 +3363,10 @@ async function main(): Promise<void> {
     isKeyConnectedToRuntime(e.key),
   ).map((e) => e.key);
   const coverageMap = new Map(
-    COPY_REGISTRY.map((e) => [e.key, getCopyRuntimeCoverage(e.key)]),
+    COPY_REGISTRY.map((e) => [
+      e.key,
+      getCopyRuntimeCoverage(e.key, e.classification),
+    ]),
   );
   check(
     "Q1. مفتاح welcome.intro فقط متصل بالمحادثة الحية وجميع المفاتيح الـ47 الأخرى غير متصلة",
@@ -3414,13 +3418,20 @@ async function main(): Promise<void> {
     (e) => e.classification === "PROTECTED_COPY",
   );
   check(
-    "Q4. التصنيف المحمي مستقل تماماً عن حالة التوصيل بالمحادثة (المحمي محمي بصرف النظر عن الربط)",
+    "Q4. التصنيف المحمي مستقل تماماً عن حالة التوصيل بالمحادثة، وإرشاداته تؤكد أنه للقراءة فقط دون وعود تعديل أو استرجاع",
     protectedEntries.length === 4 &&
-      protectedEntries.every(
-        (e) =>
+      protectedEntries.every((e) => {
+        const cov = coverageMap.get(e.key);
+        return (
           canEditCopy(e) === false &&
-          coverageMap.get(e.key)?.isConnected === false,
-      ),
+          cov?.isConnected === false &&
+          cov?.scopeSummary.includes("محمي ومخصص للقراءة فقط") &&
+          cov?.operationalNote.includes(
+            "ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع",
+          ) &&
+          !cov?.operationalNote.includes("تظل إمكانية التعديل")
+        );
+      }),
   );
 
   // Q5: Platform override scope explained as platform-wide
@@ -3430,7 +3441,7 @@ async function main(): Promise<void> {
       SCOPE_NOTE.includes("وليست مخصصة لمنشأة بعينها"),
   );
 
-  // Q6: Honest publish feedback text
+  // Q6: Mutation feedback distinguishes publish, reset, restore, and failed readback honestly
   const welcomePublishFeedback = getPublishFeedbackText(
     "welcome.intro",
     "PLATFORM_OVERRIDE",
@@ -3439,12 +3450,33 @@ async function main(): Promise<void> {
     "greeting.invite",
     "PLATFORM_OVERRIDE",
   );
+  const resetFeedback = getMutationFeedbackText({
+    kind: "reset",
+    key: "greeting.invite",
+    readbackSuccess: true,
+  });
+  const restoreFeedback = getMutationFeedbackText({
+    kind: "restore",
+    key: "greeting.invite",
+    readbackSuccess: true,
+    source: "PLATFORM_OVERRIDE",
+  });
+  const failedReadbackFeedback = getMutationFeedbackText({
+    kind: "publish",
+    key: "greeting.invite",
+    readbackSuccess: false,
+  });
   check(
-    "Q6. رسائل تأكيد النشر صريحة: تفرق بين المفتاح المتصل وغير المتصل وتوضح دقة الحالة المخزنة",
+    "Q6. رسائل تأكيد العمليات صريحة: تفرق بين النشر وإعادة التعيين والاسترجاع وفشل القراءة الراجعة وتصف دقة الحالة المخزنة",
     welcomePublishFeedback.includes("مسار /start") &&
       welcomePublishFeedback.includes("لا يعني ذلك التحقق من تسليم المزود") &&
       unwiredPublishFeedback.includes("غير متصل بالمحادثة الحية بعد") &&
-      unwiredPublishFeedback.includes("لن تتغير ردود العملاء الحية حالياً"),
+      unwiredPublishFeedback.includes("لن تتغير ردود العملاء الحية حالياً") &&
+      resetFeedback.includes("حذف التجاوز") &&
+      resetFeedback.includes("يعود النص المعتمد في المخزن إلى الافتراضي") &&
+      restoreFeedback.includes("استرجاع النسخة المحددة") &&
+      failedReadbackFeedback.includes("تم حفظ التعديل بنجاح") &&
+      failedReadbackFeedback.includes("دون إثبات قراءة راجعة"),
   );
 
   // ── Report ───────────────────────────────────────────────────────────────
