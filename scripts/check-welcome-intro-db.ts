@@ -154,6 +154,21 @@ async function main(): Promise<void> {
     },
   });
 
+  const branchId = `${TEST_BUSINESS_ID}-branch`;
+  await db.branch.create({
+    data: {
+      id: branchId,
+      businessId: TEST_BUSINESS_ID,
+      name: "الفرع الرئيسي",
+      isActive: true,
+    },
+  });
+
+  await db.business.update({
+    where: { id: TEST_BUSINESS_ID },
+    data: { defaultBranchId: branchId },
+  });
+
   const engineDeps = {
     businessRepository,
     branchRepository,
@@ -316,6 +331,13 @@ async function main(): Promise<void> {
       where: { businessId: TEST_BUSINESS_ID },
     });
     await db.customer.deleteMany({
+      where: { businessId: TEST_BUSINESS_ID },
+    });
+    await db.business.updateMany({
+      where: { id: TEST_BUSINESS_ID },
+      data: { defaultBranchId: null },
+    });
+    await db.branch.deleteMany({
       where: { businessId: TEST_BUSINESS_ID },
     });
     await db.business.deleteMany({
