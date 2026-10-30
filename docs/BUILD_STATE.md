@@ -9,7 +9,7 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.5 (commit `18c383a88c87596879eb9b6344db98a6c90ec2aa`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `a067b6b255798717682cd6ee050776b4fcd6331d`.
+**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.5 (commit `18c383a88c87596879eb9b6344db98a6c90ec2aa`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `087d9476bc300903777ea2b9e3263e67a6b1402d`.
 
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).
@@ -18,7 +18,8 @@
 - **Centralized Presentation & Formatter Output Recovery**: Centralized in `presentation-formatters.ts` (`formatAppointmentTimeSpan`, `formatConfirmationTime`, `formatSlotChoiceLabel`, `formatBookingOptionsCopy`). Normalizes customer surfaces (buttons and textual copy) from previous mixed presentation. Defines safe fallback for missing/unavailable end time to start time without inventing end times.
 - **Fail-Closed Legacy Offer Recovery & Concurrency Hardening**:
   - `parseOfferDate` strictly validates Gregorian calendar dates (rejects Feb 31, Apr 31, non-leap Feb 29) and checks weekday consistency (Arabic weekday must match candidate date).
-  - Yearless labels fail closed to `null` unless anchored by deterministic message provenance (`msg.sentAt ?? msg.createdAt` or business reference timestamp) evaluated in business timezone (`Africa/Cairo`).
+  - Yearless labels fail closed to `null` unless anchored by deterministic message provenance (`msg.sentAt ?? msg.createdAt` or explicit provenance date) evaluated in business timezone (`Africa/Cairo`). Current turn clock never becomes historical offer provenance.
+  - Newest recognized offer bounds recovery: `extractLastBookingOffer` never reactivates older superseded offers if the newest offer header fails date parsing or lacks valid slot options.
   - Strict time validation in `normalizeTimeTo24h` validates 0..23 24h, 1..12 12h, and 0..59 min, rejecting invalid inputs (`25:00`, `14:00 ص`).
   - No end-time fabrication on start-only offers (`OfferedBookingOption.endTime` remains undefined).
   - Serialized test DB migrations (`test-db-migration-shared-singleton` with `cancel-in-progress: false`) and direct connection stripping `-pooler.` from Neon database URL to eliminate P1002 advisory-lock collisions.
@@ -33,12 +34,12 @@
   7. Automatic Vercel production deployment triggered by merge to `main`.
   8. Authenticated post-deployment operational health and live customer acceptance verification.
 - **Verification Suite Evidence**:
-  - Offline domain suite `scripts/check-customer-time-display.ts` (66/66 automated checks across 8 groups passing).
+  - Offline domain suite `scripts/check-customer-time-display.ts` (75/75 automated checks across 8 groups passing).
   - Mounted component test `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`, 3/3 checks passing in jsdom).
   - Real disposable PostgreSQL integration suite `scripts/check-customer-time-display-db.ts` (`pnpm check:customer-time-display-db`, 10/10 checks passing in CI).
   - Browser tests in Playwright reporting 172 passed, 8 skipped separately from green CI check passes.
-  - Test DB Migration Validation (run 41122722875): SUCCESS in 34s.
-  - PR Quality Gates & Regression Suite (run 41122723175, job 124292984820): SUCCESS in 5m27s.
+  - Test DB Migration Validation (run 41131506477): SUCCESS in 33s.
+  - PR Quality Gates & Regression Suite (run 41131506536): SUCCESS in 5m37s.
 
 **Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.3 (PR #54 merged baseline, commit `c6eacd7`). Design system typography and token implementation:
 
