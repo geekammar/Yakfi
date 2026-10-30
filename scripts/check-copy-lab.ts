@@ -287,7 +287,7 @@ async function main(): Promise<void> {
    */
   const clauseSplit = (value: string): string[] =>
     value
-      .split(/ — |\. |\\n/)
+      .split(/ — |\. |\\n|"/)
       .map((clause) => clause.trim())
       .filter((clause) => clause.length > 0);
   const needleFound = (source: string, needle: string): boolean =>
