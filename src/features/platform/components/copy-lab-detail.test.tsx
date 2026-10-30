@@ -31,6 +31,7 @@ import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/cop
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
 import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
+import type { BusinessSettingsView } from "@/features/settings/types";
 
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -655,24 +656,28 @@ describe("Muse Spacing Observations Real Component Verification", () => {
   });
 
   it("renders DOM whitespace around خدمة and selected service name in SettingsScreen booking preview (NOT REPRODUCED)", async () => {
-    const initialSettings = {
+    const initialSettings: BusinessSettingsView = {
       name: "عيادة الأمل",
-      vertical: "clinic" as const,
+      vertical: "clinic",
       city: "القاهرة",
       whatsappNumber: "+201000000000",
       timezone: "Africa/Cairo",
-      about: null,
-      address: null,
-      workingHours: null,
+      about: "",
+      address: "",
       slotDurationMinutes: 30,
-      confirmationMode: "automatic" as const,
-      faqs: null,
-      cancellationPolicy: null,
+      confirmationMode: "automatic",
+      cancellationPolicy: "",
       defaultServiceBookingEnabled: true,
       defaultBookingServiceId: "srv-1",
       reminderEnabled: false,
       reminderLeadHours: 24,
-      reminderTemplateId: "standard" as const,
+      reminderTemplateId: "standard",
+      remindersOperational: false,
+      channelReadiness: {
+        whatsapp: false,
+        telegram: false,
+        hasActiveChannel: false,
+      },
     };
     const services = [{ id: "srv-1", name: "كشف واستشارة", isActive: true }];
 
