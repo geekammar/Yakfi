@@ -97,6 +97,22 @@ function classifyTarget(
   }
 }
 
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Timeout waiting for ${label} after ${ms}ms`));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * Creates a deterministic proxy around db to hook into transactions
  * at verified database operation boundaries.
@@ -104,6 +120,7 @@ function classifyTarget(
 function createControlledDb(hooks: {
   onAfterFollowUpCheck?: (followUpId: string) => Promise<void>;
   onBeforeFollowUpUpdate?: (followUpId: string) => Promise<void>;
+  onAfterFollowUpUpdate?: (followUpId: string) => Promise<void>;
 }): typeof db {
   return new Proxy(db, {
     get(target, prop, receiver) {
@@ -127,16 +144,17 @@ function createControlledDb(hooks: {
                           return result;
                         };
                       }
-                      if (
-                        fuProp === "updateMany" &&
-                        hooks.onBeforeFollowUpUpdate
-                      ) {
+                      if (fuProp === "updateMany") {
                         return async (...args: any[]) => {
                           const whereId = args[0]?.where?.id;
-                          if (whereId) {
-                            await hooks.onBeforeFollowUpUpdate!(whereId);
+                          if (whereId && hooks.onBeforeFollowUpUpdate) {
+                            await hooks.onBeforeFollowUpUpdate(whereId);
                           }
-                          return fuTarget.updateMany(...args);
+                          const result = await fuTarget.updateMany(...args);
+                          if (whereId && hooks.onAfterFollowUpUpdate) {
+                            await hooks.onAfterFollowUpUpdate(whereId);
+                          }
+                          return result;
                         };
                       }
                       return Reflect.get(fuTarget, fuProp, fuReceiver);
@@ -178,6 +196,13 @@ async function main(): Promise<void> {
   const CUST_A = crypto.randomUUID();
   const SRV_A = crypto.randomUUID();
   const PROV_A = crypto.randomUUID();
+
+  let schedulingUpdatedResolve: () => void = () => {};
+  let releaseSchedulingResolve: () => void = () => {};
+  let cancelReachedBoundaryResolve: () => void = () => {};
+  let attempt1ReadPendingResolve: () => void = () => {};
+  let attempt2ReadPendingResolve: () => void = () => {};
+  let releaseAttempt2Resolve: () => void = () => {};
 
   const sessionTenantA = async () => ({
     user: { id: USER_A, businessId: BIZ_A, role: "ADMIN" as const },
@@ -464,8 +489,47 @@ async function main(): Promise<void> {
 
     const checkpointsCaseB: string[] = [];
 
-    // Schedule successfully first
-    const schedOutcomeCaseB = await convertFollowUpToAppointmentAction(
+    const schedulingUpdatedPromise = new Promise<void>((r) => {
+      schedulingUpdatedResolve = r;
+    });
+
+    const releaseSchedulingPromise = new Promise<void>((r) => {
+      releaseSchedulingResolve = r;
+    });
+
+    const cancelReachedBoundaryPromise = new Promise<void>((r) => {
+      cancelReachedBoundaryResolve = r;
+    });
+
+    // Client wrapper for scheduling: pauses after updating the follow-up to SCHEDULED,
+    // while the transaction is still uncommitted.
+    const controlledSchedClientCaseB = createControlledDb({
+      onAfterFollowUpUpdate: async (id) => {
+        if (id === fuCaseB.id) {
+          checkpointsCaseB.push("1_scheduling_updated_uncommitted");
+          schedulingUpdatedResolve();
+          await withTimeout(
+            releaseSchedulingPromise,
+            10000,
+            "release scheduling in Case B",
+          );
+        }
+      },
+    });
+
+    // Client wrapper for cancellation: records reaching the conditional update boundary
+    // before the database update query executes.
+    const controlledCancelClientCaseB = createControlledDb({
+      onBeforeFollowUpUpdate: async (id) => {
+        if (id === fuCaseB.id) {
+          checkpointsCaseB.push("2_cancellation_reached_update_boundary");
+          cancelReachedBoundaryResolve();
+        }
+      },
+    });
+
+    // 1. Start scheduling in the background (unawaited)
+    const schedPromiseCaseB = convertFollowUpToAppointmentAction(
       {
         followUpId: fuCaseB.id,
         serviceId: SRV_A,
@@ -475,36 +539,105 @@ async function main(): Promise<void> {
       {
         followUpRequestRepository,
         userRepository,
-        appointmentCreateServiceDeps: createDeps,
+        appointmentCreateServiceDeps: {
+          ...createDeps,
+          appointmentRepository: new AppointmentRepository(
+            controlledSchedClientCaseB,
+          ),
+        },
         getSession: sessionTenantA,
       },
     );
-    checkpointsCaseB.push("1_scheduling_committed");
 
-    // Competing cancellation runs against the now-SCHEDULED record
-    const cancelOutcomeCaseB = await cancelFollowUpRequest(
-      { id: fuCaseB.id },
-      { followUpRequestRepository, getSession: sessionTenantA },
+    // 2. Wait until scheduling creates the appointment and updates follow-up to SCHEDULED (uncommitted)
+    await withTimeout(
+      schedulingUpdatedPromise,
+      10000,
+      "scheduling update in Case B",
     );
-    checkpointsCaseB.push("2_cancellation_refused_honest");
+
+    // 3. Start cancellation while scheduling is still uncommitted
+    const cancelRepoCaseB = new FollowUpRequestRepository(
+      controlledCancelClientCaseB,
+    );
+    const cancelPromiseCaseB = cancelFollowUpRequest(
+      { id: fuCaseB.id },
+      { followUpRequestRepository: cancelRepoCaseB, getSession: sessionTenantA },
+    );
+
+    // 4. Await cancellation reaching its conditional database update boundary before scheduling is released
+    await withTimeout(
+      cancelReachedBoundaryPromise,
+      10000,
+      "cancellation reaching update boundary in Case B",
+    );
+
+    // 5. Release scheduling to commit
+    checkpointsCaseB.push("3_releasing_scheduling_commit");
+    releaseSchedulingResolve();
+
+    // 6. Await both operations
+    const [schedOutcomeCaseB, cancelOutcomeCaseB] = await Promise.all([
+      schedPromiseCaseB,
+      cancelPromiseCaseB,
+    ]);
+
+    if (schedOutcomeCaseB.success) {
+      checkpointsCaseB.push("4_scheduling_committed");
+    }
+    if (!cancelOutcomeCaseB.success) {
+      checkpointsCaseB.push("5_cancellation_refused_honest");
+    }
 
     const fuCaseBInDb = await db.followUpRequest.findUnique({
       where: { id: fuCaseB.id },
     });
+
+    const allAppsCaseB = await db.appointment.findMany({
+      where: {
+        businessId: BIZ_A,
+        customerId: CUST_A,
+        date: new Date("2026-11-08T00:00:00.000Z"),
+      },
+    });
+
+    const committedAppB = allAppsCaseB[0];
+
+    const c1 = checkpointsCaseB.indexOf("1_scheduling_updated_uncommitted");
+    const c2 = checkpointsCaseB.indexOf(
+      "2_cancellation_reached_update_boundary",
+    );
+    const c3 = checkpointsCaseB.indexOf("3_releasing_scheduling_commit");
+    const c4 = checkpointsCaseB.indexOf("4_scheduling_committed");
+    const c5 = checkpointsCaseB.indexOf("5_cancellation_refused_honest");
+
+    const checkpointOrderValid =
+      c1 !== -1 &&
+      c2 !== -1 &&
+      c3 !== -1 &&
+      c4 !== -1 &&
+      c5 !== -1 &&
+      c1 < c2 &&
+      c2 < c3 &&
+      c3 < c4 &&
+      c4 < c5;
 
     const caseBValid =
       schedOutcomeCaseB.success === true &&
       cancelOutcomeCaseB.success === false &&
       cancelOutcomeCaseB.message.includes("تم حجز موعد له مسبقاً") &&
       fuCaseBInDb?.status === "SCHEDULED" &&
-      fuCaseBInDb.scheduledAppointmentId ===
-        (schedOutcomeCaseB as any).appointmentId;
+      committedAppB !== undefined &&
+      fuCaseBInDb.scheduledAppointmentId === committedAppB.id &&
+      committedAppB.id === (schedOutcomeCaseB as any).appointmentId &&
+      allAppsCaseB.length === 1 &&
+      checkpointOrderValid;
 
     check(
       4,
-      "Controlled Case B: Scheduling wins and cancellation is honestly refused without overwrite",
+      "Controlled Case B: Scheduling wins while cancellation competes at DB boundary without overwrite",
       caseBValid,
-      `checkpoints=${checkpointsCaseB.join("->")}, schedAppId=${(schedOutcomeCaseB as any).appointmentId}, cancelMsg=${cancelOutcomeCaseB.message}`,
+      `checkpoints=${checkpointsCaseB.join("->")}, schedAppId=${(schedOutcomeCaseB as any).appointmentId}, cancelMsg=${cancelOutcomeCaseB.message}, appsCount=${allAppsCaseB.length}`,
     );
 
     // =========================================================================
@@ -520,17 +653,14 @@ async function main(): Promise<void> {
     });
 
     const checkpointsCaseC: string[] = [];
-    let attempt1ReadPendingResolve: () => void;
     const attempt1ReadPendingPromise = new Promise<void>((r) => {
       attempt1ReadPendingResolve = r;
     });
 
-    let attempt2ReadPendingResolve: () => void;
     const attempt2ReadPendingPromise = new Promise<void>((r) => {
       attempt2ReadPendingResolve = r;
     });
 
-    let releaseAttempt2Resolve: () => void;
     const releaseAttempt2Promise = new Promise<void>((r) => {
       releaseAttempt2Resolve = r;
     });
@@ -541,7 +671,11 @@ async function main(): Promise<void> {
         if (id === fuCaseC.id) {
           checkpointsCaseC.push("attempt1_read_pending");
           attempt1ReadPendingResolve();
-          await attempt2ReadPendingPromise;
+          await withTimeout(
+            attempt2ReadPendingPromise,
+            10000,
+            "attempt2 read pending in Case C",
+          );
         }
       },
       onBeforeFollowUpUpdate: async (id) => {
@@ -555,10 +689,18 @@ async function main(): Promise<void> {
     const clientAttempt2 = createControlledDb({
       onAfterFollowUpCheck: async (id) => {
         if (id === fuCaseC.id) {
-          await attempt1ReadPendingPromise;
+          await withTimeout(
+            attempt1ReadPendingPromise,
+            10000,
+            "attempt1 read pending in Case C",
+          );
           checkpointsCaseC.push("attempt2_read_pending");
           attempt2ReadPendingResolve();
-          await releaseAttempt2Promise;
+          await withTimeout(
+            releaseAttempt2Promise,
+            10000,
+            "release attempt2 in Case C",
+          );
         }
       },
       onBeforeFollowUpUpdate: async (id) => {
@@ -786,6 +928,14 @@ async function main(): Promise<void> {
       `notesMatch=${notesPreserved}, notDeleted=${deletedAtUntouched}`,
     );
   } finally {
+    // Release any lingering synchronization barriers to prevent hanging on errors
+    schedulingUpdatedResolve();
+    releaseSchedulingResolve();
+    cancelReachedBoundaryResolve();
+    attempt1ReadPendingResolve();
+    attempt2ReadPendingResolve();
+    releaseAttempt2Resolve();
+
     // Clean up test fixtures in reverse dependency order
     console.log("\n🧹 Cleaning up test fixtures from disposable DB...");
     await db.appointment.deleteMany({
