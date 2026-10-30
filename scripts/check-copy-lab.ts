@@ -71,6 +71,11 @@ import type {
  *                               left byte-for-byte unchanged, the production
  *                               reply paths still unwired, and the preview
  *                               still provider/network/send-free
+ *   P  COMPONENT LIFECYCLE     — mounted React lifecycle test in jsdom against
+ *                               mocked server boundary
+ *   Q  RUNTIME COVERAGE        — explicit distinction between copy store resolution
+ *                               and conversation engine consumption (welcome.intro
+ *                               only; honest stored resolution wording)
  *
  * Run: pnpm check:copy-lab
  */
@@ -3343,6 +3348,98 @@ async function main(): Promise<void> {
       (lifecycle.stdout ?? "").trim() || (lifecycle.stderr ?? "").trim(),
     );
   }
+
+  // ── Q — Runtime coverage presentation & honest stored resolution ─────────
+  const {
+    getCopyRuntimeCoverage,
+    isKeyConnectedToRuntime,
+    getPublishFeedbackText,
+    PLATFORM_OVERRIDE_SCOPE_NOTE: SCOPE_NOTE,
+  } = await import("../src/features/platform/components/copy-lab-logic");
+
+  // Q1: Exactly welcome.intro is connected; all other 47 keys are NOT connected
+  const connectedKeys = COPY_REGISTRY.filter((e) =>
+    isKeyConnectedToRuntime(e.key),
+  ).map((e) => e.key);
+  const coverageMap = new Map(
+    COPY_REGISTRY.map((e) => [e.key, getCopyRuntimeCoverage(e.key)]),
+  );
+  check(
+    "Q1. مفتاح welcome.intro فقط متصل بالمحادثة الحية وجميع المفاتيح الـ47 الأخرى غير متصلة",
+    connectedKeys.length === 1 &&
+      connectedKeys[0] === "welcome.intro" &&
+      coverageMap.get("welcome.intro")?.isConnected === true &&
+      coverageMap.get("welcome.intro")?.status === "CONNECTED" &&
+      COPY_REGISTRY.every((e) =>
+        e.key === "welcome.intro"
+          ? coverageMap.get(e.key)?.isConnected === true
+          : coverageMap.get(e.key)?.isConnected === false &&
+            coverageMap.get(e.key)?.status === "NOT_CONNECTED",
+      ),
+  );
+
+  // Q2: Arabic scope explanation for welcome.intro
+  const welcomeCoverage = coverageMap.get("welcome.intro")!;
+  const welcomeScopeOk =
+    welcomeCoverage.scopeSummary.includes("/start") &&
+    welcomeCoverage.scopeSummary.includes("مقدمة الترحيب") &&
+    welcomeCoverage.scopeSummary.includes("لا يغيّر أزرار الخيارات") &&
+    welcomeCoverage.scopeSummary.includes("استئناف الحجز النشط") &&
+    welcomeCoverage.operationalNote.includes("الرجوع التلقائي للنص الافتراضي") &&
+    welcomeCoverage.operationalNote.includes("لا يضمن ولا يثبت تسليم مزود الرسائل");
+  check(
+    "Q2. نطاق welcome.intro موضح بالعربية: مسار /start خامل/جديد فقط، لا يغير الأزرار ولا استئناف الحجز، وله بديل آمن دون ادعاء تسليم المزود",
+    welcomeScopeOk,
+  );
+
+  // Q3: Arabic explanation for unwired keys
+  const unwiredSample = coverageMap.get("greeting.invite")!;
+  const unwiredScopeOk =
+    unwiredSample.scopeSummary.includes("غير متصل بمحرك المحادثة الحية بعد") &&
+    unwiredSample.scopeSummary.includes("لا يغيّر الردود الحية للعملاء") &&
+    unwiredSample.operationalNote.includes("التعديل والمعاينة وسجل التعديلات والاسترجاع");
+  check(
+    "Q3. المفاتيح غير المربوطة توضح صراحة أن الحفظ/النشر لا يغير الردود الحية مع الحفاظ على التحرير والمعاينة والسجل",
+    unwiredScopeOk,
+  );
+
+  // Q4: Protection classification remains independent of runtime coverage
+  const protectedEntries = COPY_REGISTRY.filter(
+    (e) => e.classification === "PROTECTED_COPY",
+  );
+  check(
+    "Q4. التصنيف المحمي مستقل تماماً عن حالة التوصيل بالمحادثة (المحمي محمي بصرف النظر عن الربط)",
+    protectedEntries.length === 4 &&
+      protectedEntries.every(
+        (e) =>
+          canEditCopy(e) === false &&
+          coverageMap.get(e.key)?.isConnected === false,
+      ),
+  );
+
+  // Q5: Platform override scope explained as platform-wide
+  check(
+    "Q5. توضيح أن تجاوزات المنصة تسري على مستوى كافة المنشآت وليست مخصصة لمنشأة فردية",
+    SCOPE_NOTE.includes("على مستوى كافة المنشآت في المنصة ككل") &&
+      SCOPE_NOTE.includes("وليست مخصصة لمنشأة بعينها"),
+  );
+
+  // Q6: Honest publish feedback text
+  const welcomePublishFeedback = getPublishFeedbackText(
+    "welcome.intro",
+    "PLATFORM_OVERRIDE",
+  );
+  const unwiredPublishFeedback = getPublishFeedbackText(
+    "greeting.invite",
+    "PLATFORM_OVERRIDE",
+  );
+  check(
+    "Q6. رسائل تأكيد النشر صريحة: تفرق بين المفتاح المتصل وغير المتصل وتوضح دقة الحالة المخزنة",
+    welcomePublishFeedback.includes("مسار /start") &&
+      welcomePublishFeedback.includes("لا يعني ذلك التحقق من تسليم المزود") &&
+      unwiredPublishFeedback.includes("غير متصل بالمحادثة الحية بعد") &&
+      unwiredPublishFeedback.includes("لن تتغير ردود العملاء الحية حالياً"),
+  );
 
   // ── Report ───────────────────────────────────────────────────────────────
   let failed = 0;

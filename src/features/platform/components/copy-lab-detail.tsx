@@ -49,9 +49,12 @@ import {
   EFFECTIVE_SOURCE_LABELS,
   collectPreviewValues,
   demoPlaceholderValues,
+  getCopyRuntimeCoverage,
+  getPublishFeedbackText,
   mapEffectiveCopyState,
   mapHistoryItems,
   overrideErrorGuidance,
+  PLATFORM_OVERRIDE_SCOPE_NOTE,
   type EffectiveCopyState,
   type HistoryItemView,
 } from "@/features/platform/components/copy-lab-logic";
@@ -75,6 +78,7 @@ import {
   CircleAlertIcon,
   HistoryIcon,
   LockIcon,
+  RadioIcon,
   RotateCcwIcon,
   SparklesIcon,
   UploadIcon,
@@ -332,7 +336,7 @@ export function CopyLabDetail({
           ) : (
             <>
               {/* ── EFFECTIVE STATE (product-first) ───────────────────── */}
-              <EffectiveStateBlock state={effective} />
+              <EffectiveStateBlock entry={entry} state={effective} />
 
               {canMutate ? (
                 <CopyEditor
@@ -398,9 +402,8 @@ export function CopyLabDetail({
         <DrawerFooter className="space-y-2">
           {error ? <MutationErrorAlert error={error} /> : null}
           {published && effective !== null ? (
-            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-500">
-              تم النشر — النص الفعلي الآن من{" "}
-              {EFFECTIVE_SOURCE_LABELS[effective.source]}.
+            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-500 leading-relaxed">
+              {getPublishFeedbackText(entry.key, effective.source)}
             </p>
           ) : null}
 
@@ -427,16 +430,16 @@ export function CopyLabDetail({
               </Button>
               {unchanged ? (
                 <p className="text-muted-foreground text-center text-xs">
-                  النص الحالي مطابق للنص الفعلي — لا يوجد تغيير للنشر.
+                  النص الحالي مطابق للمخزن — لا يوجد تغيير للنشر.
                 </p>
               ) : null}
 
               {effective.publishedText !== null ? (
                 confirmingReset ? (
                   <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-2.5">
-                    <p className="text-sm font-medium">تأكيد إعادة التعيين؟</p>
+                    <p className="text-sm font-medium">تأكيد إعادة التعيين في المخزن؟</p>
                     <p className="text-muted-foreground text-xs leading-relaxed">
-                      يُحذف التجاوز المنشور ويعود النص الافتراضي للكود.
+                      يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى الافتراضي في الكود.
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -505,7 +508,7 @@ function LoadingState() {
     >
       <div className="bg-muted h-3 w-1/3 animate-pulse rounded" />
       <div className="bg-muted h-12 w-full animate-pulse rounded" />
-      <p className="text-muted-foreground text-xs">يُقرأ النص الفعلي…</p>
+      <p className="text-muted-foreground text-xs">يُقرأ النص من المخزن…</p>
     </div>
   );
 }
@@ -534,11 +537,81 @@ function LoadFailedNotice() {
   );
 }
 
+/** The explicit runtime coverage block showing whether the engine consumes this key. */
+function RuntimeCoverageBlock({ copyKey }: { copyKey: string }) {
+  const coverage = getCopyRuntimeCoverage(copyKey);
+
+  if (coverage.isConnected) {
+    return (
+      <div className="space-y-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-start">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+            <RadioIcon aria-hidden className="size-3.5" />
+            حالة الربط بمحرك المحادثة: متصل
+          </span>
+          <Badge
+            variant="outline"
+            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-normal"
+          >
+            {coverage.badgeLabel}
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-foreground">
+          {coverage.scopeSummary}
+        </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          {coverage.operationalNote}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-xl border border-muted bg-muted/20 p-3 text-start">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+          <RadioIcon aria-hidden className="size-3.5" />
+          حالة الربط بمحرك المحادثة: غير متصل بعد
+        </span>
+        <Badge
+          variant="outline"
+          className="text-muted-foreground border-dashed text-xs font-normal"
+        >
+          {coverage.badgeLabel}
+        </Badge>
+      </div>
+      <p className="text-xs leading-relaxed text-foreground">
+        {coverage.scopeSummary}
+      </p>
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        {coverage.operationalNote}
+      </p>
+    </div>
+  );
+}
+
 /** The effective text + source, the code default, and the published override. */
-function EffectiveStateBlock({ state }: { state: EffectiveCopyState }) {
+function EffectiveStateBlock({
+  entry,
+  state,
+}: {
+  entry: CopyRegistryEntry;
+  state: EffectiveCopyState;
+}) {
   return (
     <section className="space-y-3">
-      <h3 className="text-sm font-semibold">النص الفعلي</h3>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">النص الفعلي في المخزن</h3>
+        <span className="text-muted-foreground text-xs">
+          دقة الحالة المخزنة
+        </span>
+      </div>
+
+      <RuntimeCoverageBlock copyKey={entry.key} />
+
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        {PLATFORM_OVERRIDE_SCOPE_NOTE}
+      </p>
 
       {!state.persistenceAvailable ? (
         <div

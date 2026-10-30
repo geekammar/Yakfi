@@ -35,7 +35,7 @@ export default async function ConversationLabPage() {
     <div className="animate-fade-in-up space-y-6">
       <PageHeader
         title="مختبر نصوص المحادثة"
-        description="تصفّح نصوص المحادثة، عاّنها محلياً، وانشر تعديلاتك على مستوى المنصة — لا يُرسل أي شيء للعملاء."
+        description="تصفّح نصوص المحادثة، عاينها محلياً، وأدِر التجاوزات على مستوى كافة منشآت المنصة — المعاينة لا تُرسل أي شيء للعملاء، والتعديلات المخزنة تسري على مستوى كافة المنشآت."
       />
       <CopyLabBrowser entries={COPY_REGISTRY} />
     </div>

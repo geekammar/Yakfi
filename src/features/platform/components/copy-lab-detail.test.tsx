@@ -29,6 +29,8 @@ import { COPY_REGISTRY } from "@/features/conversation-copy/index";
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
+import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
+import { SettingsScreen } from "@/features/settings/components/settings-screen";
 
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -63,6 +65,10 @@ vi.mock("@/features/platform/actions/copy-lab-actions", () => ({
   publishCopyOverrideAction,
   resetCopyOverrideAction,
   restoreCopyOverrideAction,
+}));
+
+vi.mock("@/features/settings/actions/settings-actions", () => ({
+  updateBusinessSettingsAction: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 /** A non-registry effective text, so the test proves the READ data lands. */
@@ -492,5 +498,204 @@ describe("CopyLabDetail drawer touch contract (UX-LAB-01D-P1 / B3)", () => {
     // The gesture was a tap attempt, not a swipe past the close threshold, so
     // the drawer must not have closed on its own.
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
+  it("shows connected runtime coverage badge and scope for welcome.intro", async () => {
+    const entry = findEntry("welcome.intro");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "connected badge must render").toContain("متصل بالمحادثة");
+    expect(content, "connected scope must explain /start turn").toContain(
+      "مقدمة الترحيب عند بدء محادثة جديدة أو خاملة عبر أمر /start",
+    );
+    expect(
+      content,
+      "connected scope must clarify button and continuation isolation",
+    ).toContain(
+      "لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط",
+    );
+    expect(content, "must state platform overrides are platform-wide").toContain(
+      "تعديلات وتجاوزات المنصة تسري على مستوى كافة المنشآت",
+    );
+  });
+
+  it("shows unwired coverage badge and honest stored-resolution guidance for unwired keys", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "unwired badge must render").toContain("غير متصل بعد");
+    expect(
+      content,
+      "must clarify publishing does not change live replies",
+    ).toContain("حفظ النص أو نشره في مخزن المنصة لا يغيّر الردود الحية للعملاء");
+    expect(
+      content,
+      "authoring, preview, history and restore remain available",
+    ).toContain("تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة");
+  });
+
+  it("maintains strict independence of PROTECTED_COPY from runtime connection", async () => {
+    const entry = findEntry("handoff.human_request");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "renders unwired badge").toContain("غير متصل بعد");
+    expect(content, "renders protected notice").toContain("نص محمي — غير قابل للتعديل");
+    expect(editorTextarea(), "never renders editor for protected entry").toBeNull();
+    expect(content, "no publish button for protected entry").not.toContain("نشر النص");
+  });
+
+  it("honest publish feedback distinguishes connected vs unwired stored resolution", async () => {
+    const welcomeEntry = findEntry("welcome.intro");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(welcomeEntry));
+    publishCopyOverrideAction.mockResolvedValue({ success: true });
+    renderDetail(welcomeEntry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    await act(async () => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeSetter?.call(
+        textarea,
+        "أهلاً بك في {businessName}! كيف يمكننا مساعدتك اليوم؟",
+      );
+      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const publishBtn = Array.from(document.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("نشر النص"),
+    );
+    expect(publishBtn).not.toBeNull();
+    await act(async () => {
+      publishBtn?.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain("مسار /start للمحادثة الجديدة/الخاملة");
+    expect(content).toContain("لا يعني ذلك التحقق من تسليم المزود");
+  });
+});
+
+describe("Muse Spacing Observations Real Component Verification", () => {
+  it("renders DOM whitespace around assistantName and استقبال in AiReadinessCard (NOT REPRODUCED)", async () => {
+    const readyItems = [
+      {
+        key: "about",
+        label: "نبذة عن النشاط",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/settings",
+      },
+      {
+        key: "hours",
+        label: "أوقات العمل",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/onboarding/hours",
+      },
+      {
+        key: "services",
+        label: "الخدمات",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/services",
+      },
+    ];
+
+    // Case 1: with named assistant "سارة"
+    const c1 = document.createElement("div");
+    document.body.appendChild(c1);
+    const r1 = createRoot(c1);
+    act(() => {
+      r1.render(<AiReadinessCard items={readyItems} assistantName="سارة" />);
+    });
+    await settle();
+
+    const text1 = c1.textContent ?? "";
+    expect(text1).toContain("ويمكن لـسارة استقبال العملاء.");
+    expect(text1).toMatch(/لـسارة استقبال/);
+    act(() => {
+      r1.unmount();
+    });
+    c1.remove();
+
+    // Case 2: fallback assistant name "المساعد الذكي"
+    const c2 = document.createElement("div");
+    document.body.appendChild(c2);
+    const r2 = createRoot(c2);
+    act(() => {
+      r2.render(<AiReadinessCard items={readyItems} assistantName={null} />);
+    });
+    await settle();
+
+    const text2 = c2.textContent ?? "";
+    expect(text2).toContain("ويمكن لـالمساعد الذكي استقبال العملاء.");
+    expect(text2).toMatch(/المساعد الذكي استقبال/);
+    act(() => {
+      r2.unmount();
+    });
+    c2.remove();
+  });
+
+  it("renders DOM whitespace around خدمة and selected service name in SettingsScreen booking preview (NOT REPRODUCED)", async () => {
+    const initialSettings = {
+      name: "عيادة الأمل",
+      vertical: "clinic" as const,
+      city: "القاهرة",
+      whatsappNumber: "+201000000000",
+      timezone: "Africa/Cairo",
+      about: null,
+      address: null,
+      workingHours: null,
+      slotDurationMinutes: 30,
+      confirmationMode: "automatic" as const,
+      faqs: null,
+      cancellationPolicy: null,
+      defaultServiceBookingEnabled: true,
+      defaultBookingServiceId: "srv-1",
+      reminderEnabled: false,
+      reminderLeadHours: 24,
+      reminderTemplateId: "standard" as const,
+    };
+    const services = [{ id: "srv-1", name: "كشف واستشارة", isActive: true }];
+
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    const r = createRoot(c);
+    act(() => {
+      r.render(
+        <SettingsScreen
+          initialSettings={initialSettings}
+          services={services}
+        />,
+      );
+    });
+    await settle();
+
+    const rendered = c.textContent ?? "";
+    expect(rendered).toContain("على خدمة كشف واستشارة.");
+    expect(rendered).toMatch(/على خدمة كشف واستشارة\.\s*تقدر/);
+
+    act(() => {
+      r.unmount();
+    });
+    c.remove();
   });
 });
