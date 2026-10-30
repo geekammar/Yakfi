@@ -668,7 +668,7 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
       "الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء",
     );
     expect(content).toContain(
-      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة لمشغلي المنصة",
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",
     );
     expect(editorTextarea()).not.toBeNull();
     expect(findButton(PUBLISH_LABEL)).not.toBeNull();
@@ -816,7 +816,8 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
 
     const content = text();
     expect(document.querySelector('[role="alert"]')).not.toBeNull();
-    expect(content).toContain("تعذر حفظ التعديل في مخزن المنصة");
+    expect(content).toContain("تعذر الاتصال بمخزن النصوص الآن");
+    expect(content).toContain("PERSISTENCE_FAILED");
     expect(content).not.toContain("تم حفظ التجاوز");
     expect(content).not.toContain("تم نشر التجاوز");
     expect(content).not.toContain("بنجاح");
