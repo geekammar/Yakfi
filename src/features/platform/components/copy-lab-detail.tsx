@@ -52,7 +52,6 @@ import {
   demoPlaceholderValues,
   getCopyRuntimeCoverage,
   getMutationFeedbackText,
-  getPublishFeedbackText,
   mapEffectiveCopyState,
   mapHistoryItems,
   overrideErrorGuidance,
@@ -100,8 +99,6 @@ const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
 
 const PROTECTED_BADGE = "محمي — للقراءة فقط";
 const MAX_COPY_LENGTH = 400;
-
-type MutationKind = "publish" | "reset" | "restore";
 
 /**
  * The service error shape the actions return, mirrored structurally so this
@@ -216,7 +213,9 @@ export function CopyLabDetail({
         applyResult(result);
         return {
           ok: true,
-          source: result.data.resolution.source,
+          source: result.data.resolution.ok
+            ? result.data.resolution.source
+            : undefined,
         };
       }
       setLoadFailed(true);

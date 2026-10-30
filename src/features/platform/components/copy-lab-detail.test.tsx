@@ -30,10 +30,7 @@ import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
-import {
-  getMutationFeedbackText,
-  getPublishFeedbackText,
-} from "@/features/platform/components/copy-lab-logic";
+import { getPublishFeedbackText } from "@/features/platform/components/copy-lab-logic";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
 import type { BusinessSettingsView } from "@/features/settings/types";
 
@@ -172,13 +169,10 @@ function successWithHistoryItem(
               id: historyId,
               copyKey: entry.key,
               action: "PUBLISH",
-              actionLabel: "نشر",
               previousText: null,
               resultText,
               actorId: "platform-operator-1",
               createdAt: "2026-10-09T10:00:00.000Z",
-              createdAtLabel: "2026-10-09 10:00",
-              restorable: true,
             },
           ],
         },
