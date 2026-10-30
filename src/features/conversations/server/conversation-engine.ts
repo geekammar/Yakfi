@@ -70,6 +70,8 @@ import {
   evaluateExactTimeAvailability,
 } from "@/features/appointments/server/exact-time-service";
 import { resolveEligibleProviders } from "@/features/appointments/server/provider-eligibility-service";
+import { resolveStoredCopy } from "@/features/conversation-copy/override-service";
+import { renderCopyText } from "@/features/conversation-copy/render";
 import {
   inboundMessageSchema,
   type InboundMessageInput,
@@ -233,8 +235,6 @@ import type {
   AiTelemetry,
   AiTelemetryAttempt,
 } from "@/server/integrations/ai/types";
-import { resolveStoredCopy } from "@/features/conversation-copy/override-service";
-import { renderCopyText } from "@/features/conversation-copy/render";
 import type {
   AppointmentRepository,
   BranchRepository,

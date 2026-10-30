@@ -24,6 +24,11 @@
  */
 
 import {
+  PLAYGROUND_IDS,
+  createPlaygroundHarness,
+} from "@/features/conversations/playground/harness";
+import { buildSlotOffer } from "@/features/conversations/server/booking-offer";
+import {
   DEFAULT_WELCOME_INTRO_TEMPLATE,
   FIXED_WELCOME_CHOICES_BODY,
   receiveInboundMessage,
@@ -34,11 +39,6 @@ import {
   emptyConversationState,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
-import { buildSlotOffer } from "@/features/conversations/server/booking-offer";
-import {
-  createPlaygroundHarness,
-  PLAYGROUND_IDS,
-} from "@/features/conversations/playground/harness";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import type { CopyOverrideRecord } from "@/server/repositories/copy-override.repository";
 
@@ -150,7 +150,9 @@ function createTestHarness(initialOverrides: Record<string, string> = {}) {
 }
 
 async function main(): Promise<void> {
-  console.log("▶ Running Conversation Lab welcome.intro Runtime Wiring Tests...");
+  console.log(
+    "▶ Running Conversation Lab welcome.intro Runtime Wiring Tests...",
+  );
 
   // ── 1. Default Output on Fresh /start ──────────────────────────────────────
   {
@@ -172,15 +174,23 @@ async function main(): Promise<void> {
     const sent = harness.sentMessages[0];
     const persisted = harness.messages.find((m) => m.senderType === "AI");
 
-    check("1a. نتيجة المعالجة ناجحة وبحالة AI_ACTIVE", result.ok && (result as any).conversationStatus === "AI_ACTIVE");
-    check("1b. نوع النية هو GREETING", result.ok && (result as any).intent === "GREETING");
+    check(
+      "1a. نتيجة المعالجة ناجحة وبحالة AI_ACTIVE",
+      result.ok && (result as any).conversationStatus === "AI_ACTIVE",
+    );
+    check(
+      "1b. نوع النية هو GREETING",
+      result.ok && (result as any).intent === "GREETING",
+    );
     check(
       "1c. نص الرسالة المرسل يطابق النص الافتراضي حرفاً بحرف",
       sent !== undefined && sent.content === expectedFullMessage,
     );
     check(
       "1d. نص الرسالة المخزن في قاعدة البيانات يطابق نص الإرسال حرفياً",
-      persisted !== undefined && sent !== undefined && persisted.content === sent.content,
+      persisted !== undefined &&
+        sent !== undefined &&
+        persisted.content === sent.content,
     );
     check(
       "1e. اسم المنشأة مشتق من سياق السيرفر الموثوق",
@@ -199,7 +209,8 @@ async function main(): Promise<void> {
   // ── 2. Changed Intro on Published Override ─────────────────────────────────
   {
     const harness = createTestHarness();
-    const CUSTOM_INTRO = "أهلاً ومرحباً بك في {businessName}! فريقنا في خدمتك دائماً:";
+    const CUSTOM_INTRO =
+      "أهلاً ومرحباً بك في {businessName}! فريقنا في خدمتك دائماً:";
     harness.setOverride("welcome.intro", CUSTOM_INTRO);
 
     const result = await receiveInboundMessage(harness.deps, {
@@ -218,7 +229,9 @@ async function main(): Promise<void> {
 
     check(
       "2a. نص الترحيب يتغير مع وجود تعديل منشور في المختبر",
-      result.ok && sent !== undefined && sent.content.startsWith(expectedCustomIntro),
+      result.ok &&
+        sent !== undefined &&
+        sent.content.startsWith(expectedCustomIntro),
     );
     check(
       "2b. الخيارات الثابتة وتعليمات الأزرار تظل سليمة بعد التعديل",
@@ -226,7 +239,9 @@ async function main(): Promise<void> {
     );
     check(
       "2c. النص المخزن يطابق تماماً النص المرسل عبر وسيط القناة",
-      persisted !== undefined && sent !== undefined && persisted.content === sent.content,
+      persisted !== undefined &&
+        sent !== undefined &&
+        persisted.content === sent.content,
     );
   }
 
@@ -325,8 +340,14 @@ async function main(): Promise<void> {
     const first = await receiveInboundMessage(harness.deps, payload);
     const second = await receiveInboundMessage(harness.deps, payload);
 
-    check("6a. الإرسال الأول ناجح وغير مكرر", first.ok && !(first as any).duplicate);
-    check("6b. الإرسال الثاني يتم رصده كمكرر", second.ok && (second as any).duplicate === true);
+    check(
+      "6a. الإرسال الأول ناجح وغير مكرر",
+      first.ok && !(first as any).duplicate,
+    );
+    check(
+      "6b. الإرسال الثاني يتم رصده كمكرر",
+      second.ok && (second as any).duplicate === true,
+    );
     check(
       "6c. لم يتم إرسال سوى رسالة رد واحدة فقط عبر القناة",
       harness.sentMessages.length === 1,
@@ -362,7 +383,10 @@ async function main(): Promise<void> {
     );
 
     if (!activeOffer) throw new Error("Failed to build active offer in test");
-    const initialState = withPresentedOffer(emptyConversationState(), activeOffer);
+    const initialState = withPresentedOffer(
+      emptyConversationState(),
+      activeOffer,
+    );
     await harness.stateStore.save(
       BUSINESS_ID,
       conversationId,
@@ -382,7 +406,8 @@ async function main(): Promise<void> {
     check("7a. المعالجة ناجحة بوجود عرض نشط", result.ok);
     check(
       "7b. يتم استئناف العرض النشط ولا يتم استبداله بالترحيب الأولي",
-      sent !== undefined && sent.content.includes("ما زالت المواعيد المقترحة متاحة لاختيارك"),
+      sent !== undefined &&
+        sent.content.includes("ما زالت المواعيد المقترحة متاحة لاختيارك"),
     );
   }
 
@@ -424,7 +449,8 @@ async function main(): Promise<void> {
     check("8a. المعالجة ناجحة بوجود مهمة حجز نشطة", result.ok);
     check(
       "8b. يتم طلب تحديد التاريخ لمتابعة الحجز ولا يتم إرسال الترحيب الأولي",
-      sent !== undefined && (sent.content.includes("التاريخ") || sent.content.includes("اليوم")),
+      sent !== undefined &&
+        (sent.content.includes("التاريخ") || sent.content.includes("اليوم")),
     );
   }
 
@@ -432,7 +458,9 @@ async function main(): Promise<void> {
   const passed = checks.filter((c) => c.pass).length;
   const failed = checks.filter((c) => !c.pass).length;
 
-  console.log(`\nResults: ${passed} passed, ${failed} failed out of ${checks.length} checks.\n`);
+  console.log(
+    `\nResults: ${passed} passed, ${failed} failed out of ${checks.length} checks.\n`,
+  );
 
   for (const c of checks) {
     if (!c.pass) {

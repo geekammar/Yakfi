@@ -23,15 +23,16 @@
  */
 
 import {
+  resetPublishedOverride,
+  savePublishedOverride,
+} from "@/features/conversation-copy/override-service";
+import {
   DEFAULT_WELCOME_INTRO_TEMPLATE,
   FIXED_WELCOME_CHOICES_BODY,
   receiveInboundMessage,
 } from "@/features/conversations/server/conversation-engine";
-import {
-  resetPublishedOverride,
-  savePublishedOverride,
-} from "@/features/conversation-copy/override-service";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
+import { db } from "@/server/db";
 import {
   appointmentRepository,
   branchRepository,
@@ -48,7 +49,6 @@ import {
   serviceRepository,
   usageRepository,
 } from "@/server/repositories";
-import { db } from "@/server/db";
 
 type Check = { label: string; pass: boolean };
 
@@ -60,15 +60,23 @@ function check(label: string, pass: boolean): void {
 const RUN_ID = `dbcheck-${Date.now()}`;
 const TEST_OPERATOR_ID = `op-${RUN_ID}`;
 const TEST_BUSINESS_ACTOR_ID = `biz-op-${RUN_ID}`;
-const PLATFORM_ACTOR = { userId: TEST_OPERATOR_ID, accountType: "PLATFORM" as const };
-const BUSINESS_ACTOR = { userId: TEST_BUSINESS_ACTOR_ID, accountType: "BUSINESS" as const };
+const PLATFORM_ACTOR = {
+  userId: TEST_OPERATOR_ID,
+  accountType: "PLATFORM" as const,
+};
+const BUSINESS_ACTOR = {
+  userId: TEST_BUSINESS_ACTOR_ID,
+  accountType: "BUSINESS" as const,
+};
 
 const TEST_BUSINESS_ID = `biz-${RUN_ID}`;
 const TEST_BUSINESS_NAME = "مركز الأمل الطبي";
 const TEST_PHONE = `+2010${Math.floor(10000000 + Math.random() * 90000000)}`;
 const CUSTOMER_PHONE = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
 
-function classifyTarget(url: string): { host: string; local: boolean; reason: string } | null {
+function classifyTarget(
+  url: string,
+): { host: string; local: boolean; reason: string } | null {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname;
@@ -81,7 +89,9 @@ function classifyTarget(url: string): { host: string; local: boolean; reason: st
     return {
       host,
       local: isLocal,
-      reason: isLocal ? "local / disposable test database" : "remote host rejected",
+      reason: isLocal
+        ? "local / disposable test database"
+        : "remote host rejected",
     };
   } catch {
     return null;
@@ -89,7 +99,9 @@ function classifyTarget(url: string): { host: string; local: boolean; reason: st
 }
 
 async function main(): Promise<void> {
-  console.log("▶ Running Conversation Lab welcome.intro Real-DB Integration Check...");
+  console.log(
+    "▶ Running Conversation Lab welcome.intro Real-DB Integration Check...",
+  );
 
   const url = process.env.DATABASE_URL ?? "";
   const target = classifyTarget(url);
@@ -210,16 +222,21 @@ async function main(): Promise<void> {
       "2b. رفض تعديل النصوص المحمية (handoff.sensitive) حتى لمشغل المنصة",
       !protectedSave.success &&
         protectedSave.error.code === "INVALID_COPY" &&
-        protectedSave.error.validationFailure?.code === "PROTECTED_COPY_NOT_EDITABLE",
+        protectedSave.error.validationFailure?.code ===
+          "PROTECTED_COPY_NOT_EDITABLE",
     );
 
     const protectedRow = await db.platformCopyOverride.findUnique({
       where: { copyKey: "handoff.sensitive" },
     });
-    check("2c. لم يتم كتابة أي صف في قاعدة البيانات للنصوص المحمية", protectedRow === null);
+    check(
+      "2c. لم يتم كتابة أي صف في قاعدة البيانات للنصوص المحمية",
+      protectedRow === null,
+    );
 
     // ── 3. Publish Override to Real PostgreSQL ───────────────────────────────
-    const CUSTOM_INTRO = "أهلاً وسهلاً بك في {businessName}! سعداء بتشريفك ومستعدون لخدمتك:";
+    const CUSTOM_INTRO =
+      "أهلاً وسهلاً بك في {businessName}! سعداء بتشريفك ومستعدون لخدمتك:";
     const publishRes = await savePublishedOverride(
       PLATFORM_ACTOR,
       "welcome.intro",
@@ -255,7 +272,10 @@ async function main(): Promise<void> {
     );
 
     // ── 5. Reset Override in Real PostgreSQL ─────────────────────────────────
-    const resetRes = await resetPublishedOverride(PLATFORM_ACTOR, "welcome.intro");
+    const resetRes = await resetPublishedOverride(
+      PLATFORM_ACTOR,
+      "welcome.intro",
+    );
     check("5a. عملية إعادة الضبط (reset) ناجحة", resetRes.success);
 
     const dbRowAfterReset = await db.platformCopyOverride.findUnique({
@@ -310,7 +330,9 @@ async function main(): Promise<void> {
   const passed = checks.filter((c) => c.pass).length;
   const failed = checks.filter((c) => !c.pass).length;
 
-  console.log(`\nResults: ${passed} passed, ${failed} failed out of ${checks.length} checks.\n`);
+  console.log(
+    `\nResults: ${passed} passed, ${failed} failed out of ${checks.length} checks.\n`,
+  );
 
   for (const c of checks) {
     if (!c.pass) {
