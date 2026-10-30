@@ -1607,41 +1607,44 @@ async function runTests() {
       },
     };
 
-    // Offer sent on 2026-11-01 offering 2026-11-01 (Sunday, 1 Nov)
+    // Offer sent on 2026-11-01 offering yearless date "الأربعاء، 4 نوفمبر"
     const offerTime = new Date("2026-11-01T08:00:00Z");
     injectHistoricalMessage(harness.messages, {
       id: "msg-delayed-trusted",
       conversationId: harness.conversation.id,
       senderType: "AI",
       content:
-        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم الأحد، 1 نوفمبر:\n' +
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" مع د. أحمد سامي يوم الأربعاء، 4 نوفمبر:\n' +
         "1. 9:00 ص إلى 9:30 ص\n" +
         "يرجى اختيار أحد الخيارات.",
       createdAt: offerTime,
       sentAt: offerTime,
     });
 
-    // Customer sends "1" 4 months later on 2027-03-15
+    // Customer sends delayed reply "1" on 2026-11-02 (28 hours later)
     const turnResult = await receiveInboundMessage(
       harness.deps,
       {
         to: "123456789",
         from: "998877",
         text: "1",
-        receivedAt: new Date("2027-03-15T14:00:00Z").toISOString(),
+        receivedAt: new Date("2026-11-02T12:00:00Z").toISOString(),
         externalId: "ext-delayed-reply",
       },
       identity,
     );
 
     check(
-      "8.7a Delayed customer reply recovers exact historical offer date without booking elapsed slot",
-      turnResult.ok === true && modelCalls === 1,
+      "8.7a Delayed customer reply recovers exact historical offer date using trusted message timestamp with strictly 0 model calls",
+      turnResult.ok === true && modelCalls === 0,
+      `modelCalls: ${modelCalls}`,
     );
 
     check(
-      "8.7b Delayed customer reply produces strictly 0 appointment writes for elapsed slot",
-      harness.appointments.length === 0,
+      "8.7b Delayed customer reply books offered slot using recovered historical date",
+      harness.appointments.length === 1 &&
+        harness.appointments[0]?.startTime === "09:00" &&
+        harness.appointments[0]?.endTime === "09:30",
     );
   }
 

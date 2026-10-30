@@ -2887,12 +2887,6 @@ async function completeBookingSelection(
   // 4. CORE-02 — fresh options (reuses CORE-01 + the availability layer).
   const tz = resolveValidTimeZone(scope.business.timezone);
   const todayIso = todayIsoInTimeZone(now, tz);
-  if (date < todayIso) {
-    if (turnSession?.enabled) {
-      await turnSession.invalidateOffer();
-    }
-    return null;
-  }
   const isToday = date === todayIso;
   const currentTime = nowTimeInTimeZone(now, tz);
 
