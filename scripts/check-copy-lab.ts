@@ -3385,8 +3385,12 @@ async function main(): Promise<void> {
     welcomeCoverage.scopeSummary.includes("مقدمة الترحيب") &&
     welcomeCoverage.scopeSummary.includes("لا يغيّر أزرار الخيارات") &&
     welcomeCoverage.scopeSummary.includes("استئناف الحجز النشط") &&
-    welcomeCoverage.operationalNote.includes("الرجوع التلقائي للنص الافتراضي") &&
-    welcomeCoverage.operationalNote.includes("لا يضمن ولا يثبت تسليم مزود الرسائل");
+    welcomeCoverage.operationalNote.includes(
+      "الرجوع التلقائي للنص الافتراضي",
+    ) &&
+    welcomeCoverage.operationalNote.includes(
+      "لا يضمن ولا يثبت تسليم مزود الرسائل",
+    );
   check(
     "Q2. نطاق welcome.intro موضح بالعربية: مسار /start خامل/جديد فقط، لا يغير الأزرار ولا استئناف الحجز، وله بديل آمن دون ادعاء تسليم المزود",
     welcomeScopeOk,
@@ -3397,7 +3401,9 @@ async function main(): Promise<void> {
   const unwiredScopeOk =
     unwiredSample.scopeSummary.includes("غير متصل بمحرك المحادثة الحية بعد") &&
     unwiredSample.scopeSummary.includes("لا يغيّر الردود الحية للعملاء") &&
-    unwiredSample.operationalNote.includes("التعديل والمعاينة وسجل التعديلات والاسترجاع");
+    unwiredSample.operationalNote.includes(
+      "التعديل والمعاينة وسجل التعديلات والاسترجاع",
+    );
   check(
     "Q3. المفاتيح غير المربوطة توضح صراحة أن الحفظ/النشر لا يغير الردود الحية مع الحفاظ على التحرير والمعاينة والسجل",
     unwiredScopeOk,

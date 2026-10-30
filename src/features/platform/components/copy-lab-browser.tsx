@@ -20,11 +20,11 @@
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
 import {
+  PLATFORM_OVERRIDE_SCOPE_NOTE,
   buildClassificationChips,
   filterCopyEntries,
   getCopyRuntimeCoverage,
   groupCopyEntriesByCategory,
-  PLATFORM_OVERRIDE_SCOPE_NOTE,
   type CopyClassificationFilter,
 } from "@/features/platform/components/copy-lab-logic";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -72,11 +72,15 @@ export function CopyLabBrowser({
           <span>حالة الربط بمحرك المحادثة الحية</span>
         </div>
         <p className="leading-relaxed">
-          مفتاح واحد فقط (<span dir="ltr" className="font-mono font-semibold text-foreground">welcome.intro</span>) متصل حالياً بمحرك المحادثة الحية (ضمن مسار /start للمحادثات الجديدة أو الخاملة). بقية المفاتيح تُحفظ وتُدار في مخزن نصوص المنصة دون التأثير على ردود العملاء الحية بعد.
+          مفتاح واحد فقط (
+          <span dir="ltr" className="font-mono font-semibold text-foreground">
+            welcome.intro
+          </span>
+          ) متصل حالياً بمحرك المحادثة الحية (ضمن مسار /start للمحادثات الجديدة
+          أو الخاملة). بقية المفاتيح تُحفظ وتُدار في مخزن نصوص المنصة دون
+          التأثير على ردود العملاء الحية بعد.
         </p>
-        <p className="leading-relaxed">
-          {PLATFORM_OVERRIDE_SCOPE_NOTE}
-        </p>
+        <p className="leading-relaxed">{PLATFORM_OVERRIDE_SCOPE_NOTE}</p>
       </div>
       {/* ── Controls (mobile-first, no page-level horizontal scroll) ──── */}
       <div className="space-y-3">

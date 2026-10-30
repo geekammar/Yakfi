@@ -27,9 +27,9 @@
  */
 import { COPY_REGISTRY } from "@/features/conversation-copy/index";
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
+import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
-import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
 import type { BusinessSettingsView } from "@/features/settings/types";
 
@@ -517,12 +517,11 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     expect(
       content,
       "connected scope must clarify button and continuation isolation",
-    ).toContain(
-      "لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط",
-    );
-    expect(content, "must state platform overrides are platform-wide").toContain(
-      "تعديلات وتجاوزات المنصة تسري على مستوى كافة المنشآت",
-    );
+    ).toContain("لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط");
+    expect(
+      content,
+      "must state platform overrides are platform-wide",
+    ).toContain("تعديلات وتجاوزات المنصة تسري على مستوى كافة المنشآت");
   });
 
   it("shows unwired coverage badge and honest stored-resolution guidance for unwired keys", async () => {
@@ -536,11 +535,15 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     expect(
       content,
       "must clarify publishing does not change live replies",
-    ).toContain("حفظ النص أو نشره في مخزن المنصة لا يغيّر الردود الحية للعملاء");
+    ).toContain(
+      "حفظ النص أو نشره في مخزن المنصة لا يغيّر الردود الحية للعملاء",
+    );
     expect(
       content,
       "authoring, preview, history and restore remain available",
-    ).toContain("تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة");
+    ).toContain(
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",
+    );
   });
 
   it("maintains strict independence of PROTECTED_COPY from runtime connection", async () => {
@@ -551,9 +554,16 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
 
     const content = text();
     expect(content, "renders unwired badge").toContain("غير متصل بعد");
-    expect(content, "renders protected notice").toContain("نص محمي — غير قابل للتعديل");
-    expect(editorTextarea(), "never renders editor for protected entry").toBeNull();
-    expect(content, "no publish button for protected entry").not.toContain("نشر النص");
+    expect(content, "renders protected notice").toContain(
+      "نص محمي — غير قابل للتعديل",
+    );
+    expect(
+      editorTextarea(),
+      "never renders editor for protected entry",
+    ).toBeNull();
+    expect(content, "no publish button for protected entry").not.toContain(
+      "نشر النص",
+    );
   });
 
   it("honest publish feedback distinguishes connected vs unwired stored resolution", async () => {
@@ -576,8 +586,8 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
       );
       textarea?.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    const publishBtn = Array.from(document.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("نشر النص"),
+    const publishBtn = Array.from(document.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("نشر النص"),
     );
     expect(publishBtn).not.toBeNull();
     await act(async () => {
