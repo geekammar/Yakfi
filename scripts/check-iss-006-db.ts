@@ -48,6 +48,7 @@ import {
 import { db } from "@/server/db";
 import {
   AppointmentRepository,
+  FollowUpRequestRepository,
   branchRepository,
   businessRepository,
   customerRepository,
