@@ -117,6 +117,20 @@ describe("ProviderDialog interaction and policy upgrade tests (ISS-003)", () => 
     });
   }
 
+  function setInputValue(input: HTMLInputElement, value: string) {
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    if (nativeInputValueSetter) {
+      nativeInputValueSetter.call(input, value);
+    } else {
+      input.value = value;
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   it("1. renders SPECIFIC_SERVICES with localized label and no raw enum tokens", async () => {
     await renderComponent(
       <ProviderDialog
@@ -321,9 +335,7 @@ describe("ProviderDialog interaction and policy upgrade tests (ISS-003)", () => 
 
     await act(async () => {
       if (nameInput) {
-        nameInput.value = "د. خالد السعيد المحدث";
-        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-        nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+        setInputValue(nameInput, "د. خالد السعيد المحدث");
       }
     });
 
