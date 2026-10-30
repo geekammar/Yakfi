@@ -110,7 +110,7 @@ export function SlotStep({
   eligibleProviders = [],
   selectedProviderId = null,
   onSelectProvider,
-  isEligibleProvidersLoading: _isEligibleProvidersLoading = false,
+  isEligibleProvidersLoading = false,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -131,7 +131,6 @@ export function SlotStep({
   onSelectProvider?: (providerId: string | null) => void;
   isEligibleProvidersLoading?: boolean;
 }) {
-  void _isEligibleProvidersLoading;
   const [showAllTimes, setShowAllTimes] = useState(false);
   const [alternativePrompt, setAlternativePrompt] = useState<{
     startTime: string;
@@ -140,7 +139,8 @@ export function SlotStep({
     nearbyTime?: string;
   } | null>(null);
 
-  const isMultipleProviders = eligibleProviders.length >= 2;
+  const isMultipleProviders =
+    Boolean(onSelectProvider) && eligibleProviders.length >= 2;
 
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
 
@@ -278,8 +278,8 @@ export function SlotStep({
 
   // When server determines no eligible providers exist for a provider-aware service:
   if (
-    emptyReason === "NO_ELIGIBLE_PROVIDERS" ||
-    eligibleProviders.length === 0
+    !isEligibleProvidersLoading &&
+    (emptyReason === "NO_ELIGIBLE_PROVIDERS" || eligibleProviders.length === 0)
   ) {
     return (
       <EmptyState
@@ -318,7 +318,7 @@ export function SlotStep({
     }
 
     // Candidate is not available with current provider. Check if another provider is free at same time.
-    if (selectedProviderId && rawSlots) {
+    if (Boolean(onSelectProvider) && selectedProviderId && rawSlots) {
       const altMatch = rawSlots.find(
         (s) => s.startTime === candidate.startTime,
       );
@@ -479,7 +479,7 @@ export function SlotStep({
         </div>
       ) : null}
 
-      {availability.isPending ? (
+      {isEligibleProvidersLoading || availability.isPending ? (
         <div className="space-y-5" aria-busy="true">
           <p role="status" className="sr-only">
             جارٍ تحميل الأوقات المتاحة…

@@ -24,6 +24,7 @@ import {
   ChevronUpIcon,
   Loader2Icon,
   ShieldAlertIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   UserCheckIcon,
 } from "lucide-react";
@@ -67,6 +68,10 @@ export function ProviderDialog({
   const [userId, setUserId] = useState<string>(
     mode === "edit" && provider ? (provider.userId ?? "") : "",
   );
+  const [servicePolicy, setServicePolicy] = useState<
+    "ALL_SERVICES" | "SPECIFIC_SERVICES"
+  >(mode === "edit" && provider ? provider.servicePolicy : "ALL_SERVICES");
+  const [explicitPolicyUpgrade, setExplicitPolicyUpgrade] = useState(false);
   const [excludedServiceIds, setExcludedServiceIds] = useState<string[]>(
     mode === "edit" && provider ? (provider.excludedServiceIds ?? []) : [],
   );
@@ -115,13 +120,21 @@ export function ProviderDialog({
           setError(result.message);
         }
       } else if (mode === "edit" && provider) {
+        const isUpgradingPolicy =
+          provider.servicePolicy === "SPECIFIC_SERVICES" &&
+          servicePolicy === "ALL_SERVICES" &&
+          explicitPolicyUpgrade;
+
         const result = await updateProviderAction({
           providerId: provider.id,
           name: trimmedName,
           displayName: displayName.trim() || null,
           isActive,
           branchId: branchId || null,
-          excludedServiceIds,
+          ...(isUpgradingPolicy ? { servicePolicy: "ALL_SERVICES" } : {}),
+          ...(servicePolicy === "ALL_SERVICES"
+            ? { excludedServiceIds }
+            : {}),
         });
 
         if (result.success) {
@@ -260,70 +273,137 @@ export function ProviderDialog({
             </div>
           ) : null}
 
-          {/* Service coverage policy (Decision B: Default ALL_SERVICES with explicit exclusions) */}
-          <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-            <div className="flex items-start gap-2">
-              <SparklesIcon className="size-4 shrink-0 text-primary mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-sm font-semibold">سياسة الخدمات التلقائية</p>
-                <p className="text-xs text-muted-foreground">
-                  مقدم الخدمة مؤهل تلقائياً لجميع الخدمات الحالية وأي خدمات
-                  جديدة تُضاف لاحقاً.
-                </p>
+          {/* Service coverage policy (Decision B: Default ALL_SERVICES with explicit exclusions, and preserved SPECIFIC_SERVICES) */}
+          {servicePolicy === "SPECIFIC_SERVICES" ? (
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+              <div className="flex items-start gap-2">
+                <ShieldCheckIcon className="size-4 shrink-0 text-amber-700 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-amber-950">
+                      سياسة الخدمات المحددة (مخصصة)
+                    </p>
+                    <span className="text-[10px] font-medium bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
+                      SPECIFIC_SERVICES
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900">
+                    مقدم الخدمة مؤهل فقط للخدمات المحددة له بشكل صريح (
+                    {provider?.includedServiceIds.length ?? 0} خدمة). لن تتم إضافة الخدمات الجديدة مستقبلاً تلقائياً.
+                  </p>
+                </div>
+              </div>
+
+              {provider && provider.includedServiceNames.length > 0 ? (
+                <div className="rounded-md border bg-background/90 p-2.5 text-xs space-y-1">
+                  <p className="font-medium text-foreground">
+                    الخدمات المتاحة حالياً:
+                  </p>
+                  <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
+                    {provider.includedServiceNames.map((srvName, idx) => (
+                      <li key={idx}>{srvName}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {/* Explicit, authorized policy conversion */}
+              <div className="border-t border-amber-200/80 pt-2.5">
+                <label className="flex items-start gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    id="upgrade-to-all-services"
+                    checked={explicitPolicyUpgrade}
+                    onCheckedChange={(checked) => {
+                      const willUpgrade = checked === true;
+                      setExplicitPolicyUpgrade(willUpgrade);
+                      if (willUpgrade) {
+                        setServicePolicy("ALL_SERVICES");
+                      } else {
+                        setServicePolicy("SPECIFIC_SERVICES");
+                      }
+                    }}
+                  />
+                  <div className="space-y-0.5">
+                    <span className="font-semibold text-amber-950">
+                      الترقية إلى سياسة جميع الخدمات التلقائية
+                    </span>
+                    <p className="text-[11px] text-muted-foreground">
+                      تفعيل هذا الخيار سيجعل مقدم الخدمة مؤهلاً فوراً لجميع الخدمات الحالية والمستقبلية، مع إمكانية استثناء خدمات محددة.
+                    </p>
+                  </div>
+                </label>
               </div>
             </div>
-
-            {services.length > 0 ? (
-              <div className="border-t pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowExclusions((prev) => !prev)}
-                  className="flex w-full items-center justify-between text-xs font-medium text-primary hover:underline"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <ShieldAlertIcon className="size-3.5" />
-                    استثناء خدمات معينة ({excludedServiceIds.length} مستثناة)
-                  </span>
-                  {showExclusions ? (
-                    <ChevronUpIcon className="size-4" />
-                  ) : (
-                    <ChevronDownIcon className="size-4" />
-                  )}
-                </button>
-
-                {showExclusions ? (
-                  <div className="mt-3 space-y-2 border-t pt-2">
-                    <p className="text-xs text-muted-foreground">
-                      حدد الخدمات التي <strong>لا يقدمها</strong> هذا الشخص:
-                    </p>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto">
-                      {services.map((s) => {
-                        const isExcluded = excludedServiceIds.includes(s.id);
-                        return (
-                          <label
-                            key={s.id}
-                            className={`flex items-center gap-2 rounded-md border p-2 text-xs cursor-pointer transition-colors ${
-                              isExcluded
-                                ? "border-destructive/40 bg-destructive/5 text-destructive"
-                                : "hover:bg-muted"
-                            }`}
-                          >
-                            <Checkbox
-                              checked={isExcluded}
-                              onCheckedChange={() =>
-                                toggleServiceExclusion(s.id)
-                              }
-                            />
-                            <span className="truncate">{s.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
+          ) : (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+              <div className="flex items-start gap-2">
+                <SparklesIcon className="size-4 shrink-0 text-primary mt-0.5" />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold">سياسة الخدمات التلقائية</p>
+                    <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">
+                      ALL_SERVICES
+                    </span>
                   </div>
-                ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    مقدم الخدمة مؤهل تلقائياً لجميع الخدمات الحالية وأي خدمات
+                    جديدة تُضاف لاحقاً.
+                  </p>
+                </div>
               </div>
-            ) : null}
-          </div>
+
+              {services.length > 0 ? (
+                <div className="border-t pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowExclusions((prev) => !prev)}
+                    className="flex w-full items-center justify-between text-xs font-medium text-primary hover:underline"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <ShieldAlertIcon className="size-3.5" />
+                      استثناء خدمات معينة ({excludedServiceIds.length} مستثناة)
+                    </span>
+                    {showExclusions ? (
+                      <ChevronUpIcon className="size-4" />
+                    ) : (
+                      <ChevronDownIcon className="size-4" />
+                    )}
+                  </button>
+
+                  {showExclusions ? (
+                    <div className="mt-3 space-y-2 border-t pt-2">
+                      <p className="text-xs text-muted-foreground">
+                        حدد الخدمات التي <strong>لا يقدمها</strong> هذا الشخص:
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto">
+                        {services.map((s) => {
+                          const isExcluded = excludedServiceIds.includes(s.id);
+                          return (
+                            <label
+                              key={s.id}
+                              className={`flex items-center gap-2 rounded-md border p-2 text-xs cursor-pointer transition-colors ${
+                                isExcluded
+                                  ? "border-destructive/40 bg-destructive/5 text-destructive"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              <Checkbox
+                                checked={isExcluded}
+                                onCheckedChange={() =>
+                                  toggleServiceExclusion(s.id)
+                                }
+                              />
+                              <span className="truncate">{s.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          )}
 
           <DialogFooter className="gap-2 sm:gap-0 pt-2">
             <Button

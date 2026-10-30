@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.78.5",
+  "version": "0.78.6",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -79,6 +79,7 @@
     "check:copy-lab-db": "tsx scripts/check-copy-lab-db.ts",
     "check:welcome-intro-runtime": "tsx scripts/check-welcome-intro-runtime.ts",
     "check:welcome-intro-db": "tsx scripts/check-welcome-intro-db.ts",
+    "check:booking-acceptance-db": "tsx scripts/check-booking-acceptance-db.ts",
     "check:conversation-state": "tsx scripts/check-conversation-state.ts",
     "check:conv-core-01": "tsx scripts/check-conv-core-01.ts",
     "check:conv-core-02": "tsx scripts/check-conv-core-02.ts",
@@ -186,6 +187,7 @@
     "test:install-prompt": "vitest run --config vitest.config.ts src/components/shared/pwa/install-prompt.test.tsx",
     "test:customers-dialog": "vitest run --config vitest.config.ts src/features/customers/components/customers-dialog-focus.test.tsx",
     "test:customer-detail": "vitest run --config vitest.config.ts src/features/customers/components/customer-detail-screen.test.tsx",
+    "test:reschedule-panel": "vitest run --config vitest.config.ts src/features/appointments/components/reschedule-panel.test.tsx",
     "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:login-form": "vitest run --config vitest.config.ts src/features/auth/components/login-form.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
