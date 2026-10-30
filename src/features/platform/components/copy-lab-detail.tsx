@@ -246,20 +246,25 @@ export function CopyLabDetail({
   // otherwise the drawer stays stuck on the loading branch and neither the
   // effective state nor the editor ever renders.
   useEffect(() => {
-    setFeedback(null);
-    setError(null);
-    setConfirmingReset(false);
     if (!open) return;
     let active = true;
     void (async () => {
       try {
         const result = await getCopyLabEntryStateAction(entry.key);
-        if (active) applyResult(result);
+        if (active) {
+          applyResult(result);
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
+        }
       } catch {
         if (active) {
           setLoadFailed(true);
           setEffective(null);
           setHistory(null);
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
         }
       } finally {
         if (active) setLoading(false);
@@ -349,7 +354,18 @@ export function CopyLabDetail({
     // steals the gesture, and the button's click never fires. Footer buttons
     // stay plain tappable controls; body scrolling and swipe-to-close (via the
     // handle) keep working. Scoped to the Lab only.
-    <Drawer open={open} onOpenChange={onOpenChange} handleOnly>
+    <Drawer
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
+        }
+        onOpenChange(nextOpen);
+      }}
+      handleOnly
+    >
       <DrawerContent className="max-h-[88vh]" handle>
         <DrawerHeader className="text-start">
           <div className="flex items-start justify-between gap-3">
