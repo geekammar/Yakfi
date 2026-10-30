@@ -51,7 +51,7 @@ import type {
  *   N  FOUNDER LAB UI (01D-1) — the read-only Platform Lab surface over the
  *                               registry: the platform route + authorization,
  *                               derivation from COPY_REGISTRY (no duplicated
- *                               entry list), all 47 entries represented,
+ *                               entry list), all 48 entries represented,
  *                               PROTECTED_COPY visibly read-only, search/
  *                               filter purity, preview through renderCopy,
  *                               template placeholders exercised, missing
@@ -176,13 +176,29 @@ function isLabServerBoundary(rel: string): boolean {
 }
 
 /**
- * Files that may legitimately import the registry / render contract without
- * being a production reply path: the persistence layer's own home, the Lab UI,
- * and the Lab's platform server boundary. Used by the I1 / L2 anti-wiring
- * walks only.
+ * The sanctioned runtime wiring for the first safe slice: the Conversation Engine
+ * resolves `welcome.intro` via `resolveStoredCopy` and renders it via `renderCopyText`.
+ */
+const SANCTIONED_RUNTIME_FILES = [
+  "src/features/conversations/server/conversation-engine.ts",
+];
+
+function isSanctionedRuntimeConsumer(rel: string): boolean {
+  return SANCTIONED_RUNTIME_FILES.includes(rel);
+}
+
+/**
+ * Files that may legitimately import the registry / render contract: the
+ * persistence layer's own home, the Lab UI, the Lab's platform server
+ * boundary, and the approved first runtime implementation slice.
  */
 function isSanctionedRegistryConsumer(rel: string): boolean {
-  return isPersistenceLayer(rel) || isLabUi(rel) || isLabServerBoundary(rel);
+  return (
+    isPersistenceLayer(rel) ||
+    isLabUi(rel) ||
+    isLabServerBoundary(rel) ||
+    isSanctionedRuntimeConsumer(rel)
+  );
 }
 
 async function main(): Promise<void> {
@@ -271,7 +287,7 @@ async function main(): Promise<void> {
    */
   const clauseSplit = (value: string): string[] =>
     value
-      .split(/ — |\. |\\n/)
+      .split(/ — |\. |\\n|"/)
       .map((clause) => clause.trim())
       .filter((clause) => clause.length > 0);
   const needleFound = (source: string, needle: string): boolean =>
@@ -296,8 +312,8 @@ async function main(): Promise<void> {
     ),
   );
   check(
-    "A3. عدد المدخلات Canonical محدد وثابت (47)",
-    COPY_REGISTRY.length === 47,
+    "A3. عدد المدخلات Canonical محدد وثابت (48)",
+    COPY_REGISTRY.length === 48,
   );
   check(
     "A4. مفتاح قناة تيليجرام الجديد موجود مرة واحدة فقط (channel.telegram.start_welcome)",
@@ -752,8 +768,8 @@ async function main(): Promise<void> {
   // key must be refused, and each documented failure class must be provably
   // rejected — deterministic, and never by throwing.
   check(
-    "J0. كل النصوص الافتراضية الـ47 تُتحقق حسب تصنيفها (31 عادي + 12 قالب مقبول، 4 محمي مرفوع)",
-    COPY_REGISTRY.length === 47 &&
+    "J0. كل النصوص الافتراضية الـ48 تُتحقق حسب تصنيفها (31 عادي + 13 قالب مقبول، 4 محمي مرفوع)",
+    COPY_REGISTRY.length === 48 &&
       COPY_REGISTRY.every((e) => {
         const result = validateCopyCandidate(e.key, e.defaultText);
         return e.classification === "PROTECTED_COPY" ? !result.ok : result.ok;
@@ -781,7 +797,7 @@ async function main(): Promise<void> {
   }
   check(
     "J2. كل نص EDITABLE_TEMPLATE افتراضي يُقبل كتعديل قانوني",
-    templates.length === 12 && templateValidationFailures.length === 0,
+    templates.length === 13 && templateValidationFailures.length === 0,
   );
   if (templateValidationFailures.length > 0) {
     for (const failure of templateValidationFailures)
@@ -1945,7 +1961,7 @@ async function main(): Promise<void> {
   );
 
   // M15 (N) — the persistence layer never alters COPY_REGISTRY: defaults are
-  // still the exact fallback target for all 47 keys, and the pure runtime
+  // still the exact fallback target for all 48 keys, and the pure runtime
   // files are untouched by the persistence additions.
   const codeDefaultFailures: string[] = [];
   for (const e of COPY_REGISTRY) {
@@ -1954,20 +1970,102 @@ async function main(): Promise<void> {
   }
   const unknownDefault = codeDefaultFor("handoff.does_not_exist");
   check(
-    "M15. الطبقة الجديدة لا تغيّر COPY_REGISTRY: الافتراضي يبقى هدف التراجع لكل المفاتيح الـ47",
+    "M15. الطبقة الجديدة لا تغيّر COPY_REGISTRY: الافتراضي يبقى هدف التراجع لكل المفاتيح الـ48",
     codeDefaultFailures.length === 0 &&
       unknownDefault === null &&
-      COPY_REGISTRY.length === 47,
+      COPY_REGISTRY.length === 48,
   );
   if (codeDefaultFailures.length > 0) {
     for (const key of codeDefaultFailures) console.error(`   drift: ${key}`);
   }
 
-  // M16 (O) — RUNTIME ISOLATION: no production reply path imports or uses the
-  // new override resolver/service. The persistence layer may be imported only
-  // by its own offline checks and (later) the Lab UI + runtime wiring slices.
+  // M16 (O) — RUNTIME ISOLATION & APPROVED SLICE WIRING:
+  // The persistence layer may be imported only by its own offline checks, the Lab UI,
+  // the Lab management boundary, and the approved first runtime implementation slice
+  // (conversation-engine.ts, which is restricted strictly to read-only resolution).
   const OVERRIDE_SYMBOLS =
     /\b(?:resolveStoredCopy|savePublishedOverride|resetPublishedOverride|restoreOverride|getPublishedOverride|listOverrideHistory|copyOverrideRepository|PlatformCopyOverride)\b/;
+  const MUTATING_OVERRIDE_SYMBOLS =
+    /\b(?:savePublishedOverride|resetPublishedOverride|restoreOverride|getPublishedOverride|listOverrideHistory|PlatformCopyOverride)\b/;
+
+  // Structural validator for the conversation engine's approved runtime wiring:
+  // Strictly enforces that ONLY literal "welcome.intro" may be resolved via resolveStoredCopy,
+  // dynamic keys, unrelated keys, and extra wiring are rejected, and mutating symbols or Lab UI
+  // imports remain strictly forbidden.
+  function validateEngineCopyWiring(source: string): {
+    valid: boolean;
+    errors: string[];
+    callCount: number;
+    approvedCount: number;
+  } {
+    const errors: string[] = [];
+
+    // 1. Management and mutating symbols are strictly forbidden
+    const MUTATING_SYMBOLS = [
+      "savePublishedOverride",
+      "resetPublishedOverride",
+      "restoreOverride",
+      "getPublishedOverride",
+      "listOverrideHistory",
+      "PlatformCopyOverride",
+    ];
+    for (const sym of MUTATING_SYMBOLS) {
+      if (new RegExp(`\\b${sym}\\b`).test(source)) {
+        errors.push(
+          `Mutating or management symbol forbidden in runtime engine: ${sym}`,
+        );
+      }
+    }
+
+    // 2. Lab UI imports and actions are strictly forbidden
+    if (
+      /copy-lab-actions|CopyLabBrowser|CopyLabDetail|conversation-lab|copy-lab-logic/.test(
+        source,
+      )
+    ) {
+      errors.push(
+        "Conversation Lab UI modules and actions are forbidden in runtime engine",
+      );
+    }
+
+    // 3. Find and inspect all resolveStoredCopy invocations
+    const resolveRegex = /\bresolveStoredCopy\s*\(\s*([^,\)]+)/g;
+    let match: RegExpExecArray | null;
+    let callCount = 0;
+    let approvedCount = 0;
+
+    while ((match = resolveRegex.exec(source)) !== null) {
+      callCount += 1;
+      const rawArg = (match[1] ?? "").trim();
+      const isApproved =
+        rawArg === '"welcome.intro"' || rawArg === "'welcome.intro'";
+      if (isApproved) {
+        approvedCount += 1;
+      } else {
+        errors.push(
+          `Disallowed resolver key at call site: ${rawArg} (only literal "welcome.intro" is approved)`,
+        );
+      }
+    }
+
+    if (callCount === 0) {
+      errors.push(
+        'Missing approved runtime resolver call site: resolveStoredCopy("welcome.intro", ...)',
+      );
+    } else if (callCount > 1) {
+      errors.push(
+        `Extra resolver wiring detected: expected exactly 1 call site for welcome.intro, found ${callCount}`,
+      );
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      callCount,
+      approvedCount,
+    };
+  }
+
   const overrideWired: string[] = [];
   for (const file of walkTs(path.join(process.cwd(), "src"))) {
     const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
@@ -1978,6 +2076,20 @@ async function main(): Promise<void> {
     // service. It is not a production reply path; the reply paths themselves
     // are still scanned unconditionally below (M16b).
     if (isLabServerBoundary(rel)) continue;
+    if (rel === "src/features/conversations/server/conversation-engine.ts") {
+      // In the approved runtime slice, the engine may ONLY call resolveStoredCopy
+      // with literal "welcome.intro" (and inject copyOverrideRepository).
+      // Mutating/management symbols, Lab UI modules, unrelated keys, and extra
+      // wiring remain strictly forbidden.
+      const engSrc = read(rel);
+      const validation = validateEngineCopyWiring(engSrc);
+      if (!validation.valid) {
+        for (const err of validation.errors) {
+          overrideWired.push(`${rel} (${err})`);
+        }
+      }
+      continue;
+    }
     const source = read(rel);
     if (
       /import\s[\s\S]*?conversation-copy\/(?:override|override-service|override-types)/.test(
@@ -1988,15 +2100,15 @@ async function main(): Promise<void> {
       overrideWired.push(rel);
   }
   check(
-    "M16. لا يوجد مسار رد إنتاجي يستورد أو يستخدم محلل التجاوز الجديد (التركيب لاحقاً)",
+    "M16. مسار الرد الإنتاجي المعتمد (المحرك) محصور في قراءة welcome.intro فقط، وباقي المسارات خالية",
     overrideWired.length === 0,
   );
   if (overrideWired.length > 0) {
     for (const rel of overrideWired) console.error(`   override-wired: ${rel}`);
   }
-  // The reply paths themselves stay byte-for-byte free of the override layer.
+  // The remaining reply paths themselves stay byte-for-byte free of the override layer.
   check(
-    "M16b. مسارات الرد الأساسية خالية تماماً من طبقة التجاوز",
+    "M16b. مسارات الرد الأساسية غير المعتمدة خالية تماماً من طبقة التجاوز",
     ![
       AI_FILE,
       CLARIFY_FILE,
@@ -2005,7 +2117,6 @@ async function main(): Promise<void> {
       TELEGRAM_MANAGER_FILE,
       HANDOFF_POLICY_FILE,
       WHATSAPP_TRANSPORT_FILE,
-      "src/features/conversations/server/conversation-engine.ts",
       "src/features/conversations/server/booking-mapper.ts",
     ].some((f) => OVERRIDE_SYMBOLS.test(read(f))),
   );
@@ -2018,6 +2129,64 @@ async function main(): Promise<void> {
     !COPY_RUNTIME_FILES.some((rel) =>
       /@\/server\/(?:repositories|db)|@prisma|prisma/.test(read(rel)),
     ),
+  );
+
+  // M16d — STRUCTURAL RUNTIME GUARD & NEGATIVE FIXTURES:
+  // Proves that validateEngineCopyWiring deterministically rejects:
+  //  1. Unapproved static copy key (e.g. "greeting.invite")
+  //  2. Dynamic key variable (e.g. dynamicKey)
+  //  3. Template literal key (e.g. `welcome.${sub}`)
+  //  4. Extra wiring (more than 1 resolveStoredCopy call site)
+  //  5. Mutating override management symbols
+  //  6. Lab UI module/action imports
+  // And accepts ONLY the approved single welcome.intro call site.
+  const fixtureDisallowedKey = validateEngineCopyWiring(
+    'async function turn() { await resolveStoredCopy("greeting.invite", deps); }',
+  );
+  const fixtureDynamicKey = validateEngineCopyWiring(
+    "async function turn() { await resolveStoredCopy(dynamicKey, deps); }",
+  );
+  const fixtureTemplateLiteralKey = validateEngineCopyWiring(
+    "async function turn() { await resolveStoredCopy(`welcome.${sub}`, deps); }",
+  );
+  const fixtureExtraWiring = validateEngineCopyWiring(
+    'async function turn() {\n  await resolveStoredCopy("welcome.intro", deps);\n  await resolveStoredCopy("welcome.intro", deps);\n}',
+  );
+  const fixtureMutatingSymbol = validateEngineCopyWiring(
+    'async function turn() {\n  await resolveStoredCopy("welcome.intro", deps);\n  await savePublishedOverride(actor, "welcome.intro", text, deps);\n}',
+  );
+  const fixtureLabUiImport = validateEngineCopyWiring(
+    'import { copyLabAction } from "@/features/platform/actions/copy-lab-actions";\nasync function turn() { await resolveStoredCopy("welcome.intro", deps); }',
+  );
+  const fixtureValid = validateEngineCopyWiring(
+    'async function turn() { await resolveStoredCopy("welcome.intro", deps); }',
+  );
+
+  const fixturesPass =
+    !fixtureDisallowedKey.valid &&
+    fixtureDisallowedKey.errors.some((e) => e.includes("greeting.invite")) &&
+    !fixtureDynamicKey.valid &&
+    fixtureDynamicKey.errors.some((e) => e.includes("dynamicKey")) &&
+    !fixtureTemplateLiteralKey.valid &&
+    fixtureTemplateLiteralKey.errors.some((e) =>
+      e.includes("welcome.${sub}"),
+    ) &&
+    !fixtureExtraWiring.valid &&
+    fixtureExtraWiring.errors.some((e) =>
+      e.includes("Extra resolver wiring"),
+    ) &&
+    !fixtureMutatingSymbol.valid &&
+    fixtureMutatingSymbol.errors.some((e) =>
+      e.includes("Mutating or management"),
+    ) &&
+    !fixtureLabUiImport.valid &&
+    fixtureLabUiImport.errors.some((e) => e.includes("Lab UI modules")) &&
+    fixtureValid.valid &&
+    fixtureValid.approvedCount === 1;
+
+  check(
+    "M16d. الحارس البنيوي يرفض بدقة المفاتيح غير المعتمدة والديناميكية والربط الزائد ورموز الإدارة (Negative Fixtures)",
+    fixturesPass,
   );
 
   // M17 — the fallback boundary stays explicit and TESTABLE: only the
@@ -2195,7 +2364,7 @@ async function main(): Promise<void> {
   //
   // The read-only Founder/superadmin Lab surface over COPY_REGISTRY + the pure
   // render contract. Proven OFFLINE: the platform route + authorization, the
-  // browser deriving from the registry (never a duplicated entry list), all 47
+  // browser deriving from the registry (never a duplicated entry list), all 48
   // entries represented, PROTECTED_COPY visibly read-only, search/filter
   // purity, the preview going through renderCopy, template placeholders
   // exercised, missing required values failing safely, and no provider /
@@ -2245,30 +2414,30 @@ async function main(): Promise<void> {
       labUiSources.every((src) => !/defaultText\s*:/.test(src)),
   );
 
-  // N3 — the default view represents ALL 47 entries, in registry order, with
+  // N3 — the default view represents ALL 48 entries, in registry order, with
   // no key lost, added, or reordered by the projection.
   const labAll = filterCopyEntries(COPY_REGISTRY, {
     search: "",
     classification: "ALL",
   });
   check(
-    "N3. العرض الافتراضي يمثّل كل المفاتيح الـ47 بنفس ترتيب السجل (بدون فقد أو إضافة)",
+    "N3. العرض الافتراضي يمثّل كل المفاتيح الـ48 بنفس ترتيب السجل (بدون فقد أو إضافة)",
     labAll.length === COPY_REGISTRY.length &&
-      COPY_REGISTRY.length === 47 &&
+      COPY_REGISTRY.length === 48 &&
       labAll.every((entry, i) => entry.key === COPY_REGISTRY[i]!.key),
   );
 
   // N4 — classification counts are derived from the registry, never a
-  // hand-maintained tally (ALL 47 / 31 editable / 12 template / 4 protected).
+  // hand-maintained tally (ALL 48 / 31 editable / 13 template / 4 protected).
   const chips = buildClassificationChips(COPY_REGISTRY);
   const chipCount = (value: string): number | undefined =>
     chips.find((c) => c.value === value)?.count;
   check(
-    "N4. عدّادات تصنيفات المختبر مشتقة من السجل: الكل 47، عادي 31، قالب 12، محمي 4",
+    "N4. عدّادات تصنيفات المختبر مشتقة من السجل: الكل 48، عادي 31، قالب 13، محمي 4",
     chips.length === 4 &&
-      chipCount("ALL") === 47 &&
+      chipCount("ALL") === 48 &&
       chipCount("EDITABLE_COPY") === 31 &&
-      chipCount("EDITABLE_TEMPLATE") === 12 &&
+      chipCount("EDITABLE_TEMPLATE") === 13 &&
       chipCount("PROTECTED_COPY") === 4,
   );
 
@@ -2286,10 +2455,10 @@ async function main(): Promise<void> {
   check(
     "N5. البحث/التصفية نقي: مصفوفة جديدة ولا يغيّر السجل (الطول والترتيب والمرجع)، ونتيجته مجموعة جزئية",
     labAll !== beforeFilter &&
-      beforeFilter.length === 47 &&
+      beforeFilter.length === 48 &&
       labAll.every((entry, i) => entry === beforeFilter[i]) &&
       labSearch.length > 0 &&
-      labSearch.length < 47 &&
+      labSearch.length < 48 &&
       labSearch.every((e) => e.key.includes("booking")) &&
       labProtectedOnly.length === 4 &&
       labProtectedOnly.every((e) => e.classification === "PROTECTED_COPY"),
@@ -2304,8 +2473,8 @@ async function main(): Promise<void> {
   const groupIndexByKey = new Map(labAll.map((e, i) => [e.key, i]));
   const regroupedSet = new Set(regrouped.map((e) => e.key));
   const lossless =
-    regrouped.length === 47 &&
-    regroupedSet.size === 47 &&
+    regrouped.length === 48 &&
+    regroupedSet.size === 48 &&
     [...regroupedSet].every((key) => groupIndexByKey.has(key));
   const relativeOrderOk = labGroups.every((g) => {
     const indices = g.items.map((e) => groupIndexByKey.get(e.key)!);
@@ -2359,8 +2528,8 @@ async function main(): Promise<void> {
     }
   }
   check(
-    "N8. معاينة القوالب تشغّل الحقول المُصرَّح بها فقط (12 قالب): قيم العرض لا تخترع حقولاً، وكل قالب يُعرض كاملاً عبر renderCopy",
-    templatesForLab.length === 12 && templatePreviewFailures.length === 0,
+    "N8. معاينة القوالب تشغّل الحقول المُصرَّح بها فقط (13 قالب): قيم العرض لا تخترع حقولاً، وكل قالب يُعرض كاملاً عبر renderCopy",
+    templatesForLab.length === 13 && templatePreviewFailures.length === 0,
   );
   if (templatePreviewFailures.length > 0) {
     for (const failure of templatePreviewFailures)
@@ -2997,9 +3166,9 @@ async function main(): Promise<void> {
   // renderCopyText core renders the DEFAULT identically to renderCopy for
   // every key (the candidate-preview refactor changed no default render).
   const registryStable =
-    COPY_REGISTRY.length === 47 &&
+    COPY_REGISTRY.length === 48 &&
     count(COPY_REGISTRY, "EDITABLE_COPY") === 31 &&
-    count(COPY_REGISTRY, "EDITABLE_TEMPLATE") === 12 &&
+    count(COPY_REGISTRY, "EDITABLE_TEMPLATE") === 13 &&
     count(COPY_REGISTRY, "PROTECTED_COPY") === 4;
   const renderEquivalenceFailures: string[] = [];
   for (const e of COPY_REGISTRY) {
@@ -3015,16 +3184,16 @@ async function main(): Promise<void> {
       renderEquivalenceFailures.push(`${e.key}: render ≠ renderCopyText`);
   }
   check(
-    "O17 (Q). السجل لم يتغير: 47 مفتاحاً (31/12/4)، الافتراضي هدف التراجع، وعرض الافتراضي عبر renderCopyText يطابق renderCopy حرفياً",
+    "O17 (Q). السجل لم يتغير: 48 مفتاحاً (31/13/4)، الافتراضي هدف التراجع، وعرض الافتراضي عبر renderCopyText يطابق renderCopy حرفياً",
     registryStable && renderEquivalenceFailures.length === 0,
   );
   if (renderEquivalenceFailures.length > 0)
     for (const f of renderEquivalenceFailures) console.error(`   ${f}`);
 
-  // O18 (R) — no production reply path imports/invokes override resolution
-  // OR the new Lab management boundary (extends I2 / L2 / M16 / N12 to the
-  // 01D-2 surface: the reply paths know nothing about the Lab).
-  const REPLY_PATHS = [
+  // O18 (R) — no unapproved reply path imports/invokes override resolution,
+  // the engine is restricted strictly to read-only resolution, and no reply path
+  // ever touches the Lab management boundary.
+  const OTHER_REPLY_PATHS = [
     AI_FILE,
     CLARIFY_FILE,
     SELECTION_FILE,
@@ -3032,17 +3201,27 @@ async function main(): Promise<void> {
     TELEGRAM_MANAGER_FILE,
     HANDOFF_POLICY_FILE,
     WHATSAPP_TRANSPORT_FILE,
-    "src/features/conversations/server/conversation-engine.ts",
     "src/features/conversations/server/booking-mapper.ts",
   ];
   const replyWired: string[] = [];
-  for (const f of REPLY_PATHS) {
+  for (const f of OTHER_REPLY_PATHS) {
     const src = read(f);
     if (
       OVERRIDE_SYMBOLS.test(src) ||
       /copy-lab-actions|CopyLabBrowser|CopyLabDetail|conversation-lab/.test(src)
     )
       replyWired.push(f);
+  }
+  const engineSource = read(
+    "src/features/conversations/server/conversation-engine.ts",
+  );
+  if (
+    MUTATING_OVERRIDE_SYMBOLS.test(engineSource) ||
+    /copy-lab-actions|CopyLabBrowser|CopyLabDetail|conversation-lab/.test(
+      engineSource,
+    )
+  ) {
+    replyWired.push("src/features/conversations/server/conversation-engine.ts");
   }
   // Conversely the Lab boundary reaches ONLY the override service for data —
   // never a reply path, a transport, or a provider.
@@ -3051,7 +3230,7 @@ async function main(): Promise<void> {
       labActionsSource,
     );
   check(
-    "O18 (R). مسارات رد العميل لا تستورد/تستخدم محلل التجاوز أو حدّ المختبر، وحدّ المختبر لا يصل لأي مسار رد",
+    "O18 (R). مسارات رد العميل محصورة: المحرك للقراءة فقط، البقية خالية تماماً، وحدّ المختبر لا يصل لأي مسار رد",
     replyWired.length === 0 && !labTouchesReply,
   );
   if (replyWired.length > 0)

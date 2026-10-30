@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.78.2",
+  "version": "0.78.3",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -77,6 +77,8 @@
     "check:conversation-booking": "tsx scripts/check-conversation-booking.ts",
     "check:copy-lab": "tsx scripts/check-copy-lab.ts",
     "check:copy-lab-db": "tsx scripts/check-copy-lab-db.ts",
+    "check:welcome-intro-runtime": "tsx scripts/check-welcome-intro-runtime.ts",
+    "check:welcome-intro-db": "tsx scripts/check-welcome-intro-db.ts",
     "check:conversation-state": "tsx scripts/check-conversation-state.ts",
     "check:conv-core-01": "tsx scripts/check-conv-core-01.ts",
     "check:conv-core-02": "tsx scripts/check-conv-core-02.ts",

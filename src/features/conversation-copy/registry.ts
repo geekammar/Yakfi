@@ -36,6 +36,8 @@ const AI = "src/features/conversations/server/conversation-ai.ts";
 const CLARIFY = "src/features/conversations/server/clarification.ts";
 const MAPPER = "src/features/conversations/server/booking-mapper.ts";
 const ENGINE = "src/features/conversations/server/conversation-engine.ts";
+const FORMATTERS =
+  "src/features/conversations/server/presentation-formatters.ts";
 const TELEGRAM_WEBHOOK =
   "src/server/integrations/telegram/telegram-webhook-handler.ts";
 
@@ -178,6 +180,24 @@ export const COPY_REGISTRY = [
     placeholders: [],
     requiredPlaceholders: [],
     source: { file: AI, symbol: "GREETING_INVITE", exported: false },
+  },
+
+  // ── welcome.* — the fresh/idle conversation welcome introduction ─────────
+
+  {
+    key: "welcome.intro",
+    category: "greeting",
+    humanLabel: "مقدمة الترحيب عند بدء المحادثة",
+    defaultText:
+      "أهلاً بك في {businessName}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:",
+    classification: "EDITABLE_TEMPLATE",
+    placeholders: ["businessName"],
+    requiredPlaceholders: ["businessName"],
+    source: {
+      file: ENGINE,
+      symbol: "DEFAULT_WELCOME_INTRO_TEMPLATE",
+      exported: true,
+    },
   },
 
   // ── identity.* — the deterministic business-identity confirmation ────────
@@ -359,7 +379,7 @@ export const COPY_REGISTRY = [
     category: "booking",
     humanLabel: "عرض المواعيد المتاحة",
     defaultText:
-      'تتوفر المواعيد التالية لخدمة "{serviceName}" يوم {date}:\n{offer}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.',
+      'تتوفر المواعيد التالية لخدمة "{serviceName}" يوم {date}:\n{offer}\nيرجى اختيار الموعد المناسب لإتمام الحجز.',
     classification: "EDITABLE_TEMPLATE",
     placeholders: ["serviceName", "date", "offer"],
     requiredPlaceholders: ["serviceName", "date", "offer"],
@@ -373,9 +393,9 @@ export const COPY_REGISTRY = [
       },
     ],
     source: {
-      file: ENGINE,
-      symbol: "formatBookingOptionsMessage",
-      exported: false,
+      file: FORMATTERS,
+      symbol: "formatBookingOptionsCopy",
+      exported: true,
     },
   },
   {
