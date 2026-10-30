@@ -47,6 +47,7 @@ import {
   COPY_CLASSIFICATION_HINTS,
   COPY_VALIDATION_FAILURE_GUIDANCE,
   EFFECTIVE_SOURCE_LABELS,
+  PLATFORM_OVERRIDE_SCOPE_NOTE,
   collectPreviewValues,
   demoPlaceholderValues,
   getCopyRuntimeCoverage,
@@ -54,7 +55,6 @@ import {
   mapEffectiveCopyState,
   mapHistoryItems,
   overrideErrorGuidance,
-  PLATFORM_OVERRIDE_SCOPE_NOTE,
   type EffectiveCopyState,
   type HistoryItemView,
 } from "@/features/platform/components/copy-lab-logic";
@@ -437,9 +437,12 @@ export function CopyLabDetail({
               {effective.publishedText !== null ? (
                 confirmingReset ? (
                   <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-2.5">
-                    <p className="text-sm font-medium">تأكيد إعادة التعيين في المخزن؟</p>
+                    <p className="text-sm font-medium">
+                      تأكيد إعادة التعيين في المخزن؟
+                    </p>
                     <p className="text-muted-foreground text-xs leading-relaxed">
-                      يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى الافتراضي في الكود.
+                      يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى
+                      الافتراضي في الكود.
                     </p>
                     <div className="flex gap-2">
                       <Button
