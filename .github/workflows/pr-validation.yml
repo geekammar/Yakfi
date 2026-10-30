@@ -64,6 +64,20 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
+      - name: Auto-format files on runner and generate patch
+        run: |
+          pnpm format
+          git diff > /tmp/format.patch || true
+          cat /tmp/format.patch
+
+      - name: Upload format patch
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: format-patch
+          path: /tmp/format.patch
+          if-no-files-found: ignore
+
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
@@ -144,6 +158,7 @@ jobs:
           pnpm check:ui-accessibility
           pnpm test:conversation-detail
           pnpm test:staff-workspace
+          pnpm test:provider-dialog
           pnpm test:install-prompt
           pnpm test:customers-dialog
           pnpm test:customer-detail

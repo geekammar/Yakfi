@@ -184,6 +184,7 @@
     "test:assistant-settings": "vitest run --config vitest.config.ts src/features/assistant/components/assistant-settings-screen.test.tsx",
     "test:conversation-detail": "vitest run --config vitest.config.ts src/features/conversations/components/conversation-detail.test.tsx",
     "test:staff-workspace": "vitest run --config vitest.config.ts src/features/staff/components/staff-workspace.test.tsx",
+    "test:provider-dialog": "vitest run --config vitest.config.ts src/features/staff/components/provider-dialog.test.tsx",
     "test:install-prompt": "vitest run --config vitest.config.ts src/components/shared/pwa/install-prompt.test.tsx",
     "test:customers-dialog": "vitest run --config vitest.config.ts src/features/customers/components/customers-dialog-focus.test.tsx",
     "test:customer-detail": "vitest run --config vitest.config.ts src/features/customers/components/customer-detail-screen.test.tsx",

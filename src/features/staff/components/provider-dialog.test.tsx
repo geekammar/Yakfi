@@ -108,9 +108,11 @@ describe("ProviderDialog interaction and policy upgrade tests (ISS-003)", () => 
   });
 
   async function renderComponent(ui: ReactElement) {
-    root = createRoot(container);
+    if (!root) {
+      root = createRoot(container);
+    }
     await act(async () => {
-      root?.render(ui);
+      root.render(ui);
     });
   }
 

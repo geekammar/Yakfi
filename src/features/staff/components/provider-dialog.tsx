@@ -83,6 +83,36 @@ export function ProviderDialog({
   const isStoredSpecificServices =
     mode === "edit" && provider?.servicePolicy === "SPECIFIC_SERVICES";
 
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (!open) {
+      setName(mode === "edit" && provider ? provider.name : "");
+      setDisplayName(
+        mode === "edit" && provider ? (provider.displayName ?? "") : "",
+      );
+      setIsActive(mode === "edit" && provider ? provider.isActive : true);
+      setBranchId(
+        mode === "edit" && provider
+          ? (provider.branchId ?? "")
+          : branches.length === 1 && branches[0]
+            ? branches[0].id
+            : "",
+      );
+      setUserId(mode === "edit" && provider ? (provider.userId ?? "") : "");
+      setExplicitPolicyUpgrade(false);
+      setExcludedServiceIds(
+        mode === "edit" && provider ? (provider.excludedServiceIds ?? []) : [],
+      );
+      setShowExclusions(
+        mode === "edit" && provider
+          ? (provider.excludedServiceIds ?? []).length > 0
+          : false,
+      );
+      setError(null);
+    }
+  }
+
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setExplicitPolicyUpgrade(false);
