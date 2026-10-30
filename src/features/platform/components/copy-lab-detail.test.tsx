@@ -30,6 +30,7 @@ import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
+import { getPublishFeedbackText } from "@/features/platform/components/copy-lab-logic";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
 import type { BusinessSettingsView } from "@/features/settings/types";
 
@@ -521,7 +522,7 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     expect(
       content,
       "must state platform overrides are platform-wide",
-    ).toContain("تعديلات وتجاوزات المنصة تسري على مستوى كافة المنشآت");
+    ).toContain("التجاوزات المنشورة تسري على مستوى كافة المنشآت");
   });
 
   it("shows unwired coverage badge and honest stored-resolution guidance for unwired keys", async () => {
@@ -535,9 +536,7 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     expect(
       content,
       "must clarify publishing does not change live replies",
-    ).toContain(
-      "حفظ النص أو نشره في مخزن المنصة لا يغيّر الردود الحية للعملاء",
-    );
+    ).toContain("الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء");
     expect(
       content,
       "authoring, preview, history and restore remain available",
@@ -566,38 +565,20 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     );
   });
 
-  it("honest publish feedback distinguishes connected vs unwired stored resolution", async () => {
-    const welcomeEntry = findEntry("welcome.intro");
-    getCopyLabEntryStateAction.mockResolvedValue(successState(welcomeEntry));
-    publishCopyOverrideAction.mockResolvedValue({ success: true });
-    renderDetail(welcomeEntry);
-    await settle();
-
-    const textarea = editorTextarea();
-    expect(textarea).not.toBeNull();
-    await act(async () => {
-      const nativeSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeSetter?.call(
-        textarea,
-        "أهلاً بك في {businessName}! كيف يمكننا مساعدتك اليوم؟",
-      );
-      textarea?.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const publishBtn = Array.from(document.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("نشر النص"),
+  it("honest publish feedback distinguishes connected vs unwired stored resolution", () => {
+    const welcome = getPublishFeedbackText(
+      "welcome.intro",
+      "PLATFORM_OVERRIDE",
     );
-    expect(publishBtn).not.toBeNull();
-    await act(async () => {
-      publishBtn?.click();
-    });
-    await settle();
+    const unwired = getPublishFeedbackText(
+      "greeting.invite",
+      "PLATFORM_OVERRIDE",
+    );
 
-    const content = text();
-    expect(content).toContain("مسار /start للمحادثة الجديدة/الخاملة");
-    expect(content).toContain("لا يعني ذلك التحقق من تسليم المزود");
+    expect(welcome).toContain("مسار /start للمحادثة الجديدة/الخاملة");
+    expect(welcome).toContain("لا يعني ذلك التحقق من تسليم المزود");
+    expect(unwired).toContain("غير متصل بالمحادثة الحية بعد");
+    expect(unwired).toContain("لن تتغير ردود العملاء الحية حالياً");
   });
 });
 
