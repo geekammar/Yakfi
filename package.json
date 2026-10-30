@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.78.0",
+  "version": "0.78.1",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -190,7 +190,7 @@
     "test:e2e:preview": "node scripts/run-ux-qa.mjs tests/e2e/preview-auth-qa.spec.ts"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": "22.x"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
