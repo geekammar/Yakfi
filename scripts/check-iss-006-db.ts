@@ -111,6 +111,7 @@ async function main(): Promise<void> {
   const USER_B = `usr-b-${RUN_ID}`;
   const CUST_A = `cust-a-${RUN_ID}`;
   const SRV_A = `srv-a-${RUN_ID}`;
+  const PROV_A = `prov-a-${RUN_ID}`;
 
   const sessionTenantA = async () => ({
     user: { id: USER_A, businessId: BIZ_A, role: "ADMIN" as const },
@@ -194,6 +195,25 @@ async function main(): Promise<void> {
       },
     });
 
+    await db.providerProfile.create({
+      data: {
+        id: PROV_A,
+        businessId: BIZ_A,
+        userId: USER_A,
+        name: "د. أحمد",
+        servicePolicy: "ALL_SERVICES",
+        isActive: true,
+      },
+    });
+
+    await db.providerBranch.create({
+      data: {
+        id: `pb-a-${RUN_ID}`,
+        providerId: PROV_A,
+        branchId: BRANCH_A,
+      },
+    });
+
     // =========================================================================
     // 1. Follow-up alone creates no appointment in DB
     // =========================================================================
@@ -274,7 +294,10 @@ async function main(): Promise<void> {
         fuAtomicInDb?.scheduledAppointmentId === convertRes.appointmentId &&
         linkedAppointmentInDb !== null &&
         linkedAppointmentInDb.date.toISOString().slice(0, 10) === "2026-11-05",
-      `success=${convertRes.success}, fuStatus=${fuAtomicInDb?.status}, linkedAppId=${fuAtomicInDb?.scheduledAppointmentId}`,
+      `success=${convertRes.success}, ` +
+        `msg=${(convertRes as any)?.message ?? ""}, ` +
+        `fuStatus=${fuAtomicInDb?.status}, ` +
+        `linkedAppId=${fuAtomicInDb?.scheduledAppointmentId}`,
     );
 
     // =========================================================================
@@ -554,6 +577,12 @@ async function main(): Promise<void> {
       where: { businessId: { in: [BIZ_A, BIZ_B] } },
     });
     await db.service.deleteMany({
+      where: { businessId: { in: [BIZ_A, BIZ_B] } },
+    });
+    await db.providerBranch.deleteMany({
+      where: { branchId: BRANCH_A },
+    });
+    await db.providerProfile.deleteMany({
       where: { businessId: { in: [BIZ_A, BIZ_B] } },
     });
     await db.business.updateMany({
