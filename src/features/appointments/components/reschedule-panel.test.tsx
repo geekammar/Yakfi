@@ -230,7 +230,7 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
 
     // Zero-provider empty state must NOT be rendered
     expect(container.textContent).not.toContain("أضف مقدم خدمة لبدء الحجز");
-    expect(container.textContent).toContain("الأوقات المتاحة");
+    expect(container.textContent).toContain("الوقت المتاح");
   });
 
   it("4. renders genuine zero-provider empty state when eligible providers are truly empty", async () => {
@@ -357,15 +357,13 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     });
 
     // Pick slot
-    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+    const slotBtn = Array.from(container.querySelectorAll("button")).find(
       (b) =>
-        b.getAttribute("aria-label")?.includes("حجز من") ||
-        b.getAttribute("aria-label")?.includes("الأبكر") ||
-        b.getAttribute("aria-label")?.includes("الأقرب"),
-    ) ??
-      Array.from(container.querySelectorAll("li button")).find(
-        (b) => !b.hasAttribute("disabled"),
-      )) as HTMLButtonElement | undefined;
+        b.textContent?.includes("١٢:٠٠") ||
+        b.textContent?.includes("12:00") ||
+        b.textContent?.includes("أقرب وقت") ||
+        b.textContent?.includes("متاح مع"),
+    ) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
@@ -406,15 +404,13 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+    const slotBtn = Array.from(container.querySelectorAll("button")).find(
       (b) =>
-        b.getAttribute("aria-label")?.includes("حجز من") ||
-        b.getAttribute("aria-label")?.includes("الأبكر") ||
-        b.getAttribute("aria-label")?.includes("الأقرب"),
-    ) ??
-      Array.from(container.querySelectorAll("li button")).find(
-        (b) => !b.hasAttribute("disabled"),
-      )) as HTMLButtonElement | undefined;
+        b.textContent?.includes("١٢:٠٠") ||
+        b.textContent?.includes("12:00") ||
+        b.textContent?.includes("أقرب وقت") ||
+        b.textContent?.includes("متاح مع"),
+    ) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
@@ -476,15 +472,13 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+    const slotBtn = Array.from(container.querySelectorAll("button")).find(
       (b) =>
-        b.getAttribute("aria-label")?.includes("حجز من") ||
-        b.getAttribute("aria-label")?.includes("الأبكر") ||
-        b.getAttribute("aria-label")?.includes("الأقرب"),
-    ) ??
-      Array.from(container.querySelectorAll("li button")).find(
-        (b) => !b.hasAttribute("disabled"),
-      )) as HTMLButtonElement | undefined;
+        b.textContent?.includes("١٢:٠٠") ||
+        b.textContent?.includes("12:00") ||
+        b.textContent?.includes("أقرب وقت") ||
+        b.textContent?.includes("متاح مع"),
+    ) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
