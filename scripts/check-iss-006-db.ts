@@ -103,15 +103,14 @@ async function main(): Promise<void> {
   }
   console.log(`🔒 Target database verified local: ${target.host}\n`);
 
-  const RUN_ID = `iss006-${Date.now()}`;
-  const BIZ_A = `biz-a-${RUN_ID}`;
-  const BIZ_B = `biz-b-${RUN_ID}`;
-  const BRANCH_A = `br-a-${RUN_ID}`;
-  const USER_A = `usr-a-${RUN_ID}`;
-  const USER_B = `usr-b-${RUN_ID}`;
-  const CUST_A = `cust-a-${RUN_ID}`;
-  const SRV_A = `srv-a-${RUN_ID}`;
-  const PROV_A = `prov-a-${RUN_ID}`;
+  const BIZ_A = crypto.randomUUID();
+  const BIZ_B = crypto.randomUUID();
+  const BRANCH_A = crypto.randomUUID();
+  const USER_A = crypto.randomUUID();
+  const USER_B = crypto.randomUUID();
+  const CUST_A = crypto.randomUUID();
+  const SRV_A = crypto.randomUUID();
+  const PROV_A = crypto.randomUUID();
 
   const sessionTenantA = async () => ({
     user: { id: USER_A, businessId: BIZ_A, role: "ADMIN" as const },
@@ -208,7 +207,7 @@ async function main(): Promise<void> {
 
     await db.providerBranch.create({
       data: {
-        id: `pb-a-${RUN_ID}`,
+        id: crypto.randomUUID(),
         providerId: PROV_A,
         branchId: BRANCH_A,
       },
