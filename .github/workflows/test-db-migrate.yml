@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: test-db-migrate-${{ github.ref }}
-  cancel-in-progress: true
+  group: test-db-migration-shared-singleton
+  cancel-in-progress: false
 
 jobs:
   validate-migrations:
@@ -54,7 +54,10 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
+          # Neon pooler endpoints use PgBouncer in transaction mode which does not support session advisory locks cleanly.
+          # Prisma Migrate documentation requires a direct connection: strip '-pooler.' to connect directly.
+          MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-pre.raw.txt > status-pre.txt
           echo "### Pre-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -73,8 +76,20 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm db:deploy > deploy.raw.txt 2>&1
-          code=$?
+          MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          for attempt in 1 2 3; do
+            DATABASE_URL="$MIGRATE_URL" pnpm db:deploy > deploy.raw.txt 2>&1
+            code=$?
+            if [ "$code" -eq 0 ]; then
+              break
+            fi
+            if grep -q 'P1002' deploy.raw.txt && [ "$attempt" -lt 3 ]; then
+              echo "Advisory lock contention detected (P1002). Retrying in 5s (attempt $attempt/3)..."
+              sleep 5
+              continue
+            fi
+            break
+          done
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' deploy.raw.txt > deploy.txt
           echo "### Migration deploy output (test DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -89,7 +104,8 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm exec prisma migrate status > status-post.raw.txt 2>&1
+          MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-post.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-post.raw.txt > status-post.txt
           echo "### Post-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

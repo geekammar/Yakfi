@@ -130,6 +130,7 @@ import {
 import type {
   BookingSelection,
   BookingSelectionContext,
+  ChronologicalMessage,
   OfferReply,
 } from "@/features/conversations/server/booking-selection";
 import {
@@ -875,7 +876,7 @@ function includedKnowledgeSources(
  * turn (same contract as usage telemetry).
  */
 function observeConversationStateTransition(
-  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  recentChronological: ReadonlyArray<ChronologicalMessage>,
   decision: AiResponse | null,
 ): TurnStateTransitionObservation | undefined {
   if (!decision) return undefined;
@@ -975,7 +976,11 @@ function resolveFinishedTurn(
     });
 
     const base =
-      priorState ?? deriveConversationStateFromHistory(recentChronological);
+      priorState ??
+      deriveConversationStateFromHistory(recentChronological, {
+        timezone,
+        referenceDate: now,
+      });
     // Reconstruct a pending clarification from history (migration-safe §9) so
     // the resumed state reflects what the engine actually asked last turn.
     const pending = derivePendingClarification(recentChronological);
@@ -3746,6 +3751,8 @@ async function runInboundTurn(
     const recentChronological = [...recent].reverse().map((message) => ({
       senderType: message.senderType,
       content: message.content,
+      createdAt: message.createdAt,
+      sentAt: message.sentAt,
     }));
     // CTX-01 (PERF-04) — the current customer message reaches the assistant
     // EXACTLY ONCE, through the CURRENT message slot (`sources.message`
@@ -3768,6 +3775,8 @@ async function runInboundTurn(
       .map((message) => ({
         senderType: message.senderType,
         content: message.content,
+        createdAt: message.createdAt,
+        sentAt: message.sentAt,
       }));
 
     const selectionScope: BookingSelectionScope = {
@@ -5635,7 +5644,10 @@ async function runInboundTurn(
       const selectionAttempt =
         wasBooked || (turnSession.enabled && turnSession.state?.offer)
           ? null
-          : tryParseBookingSelection(inbound.text, recentChronological);
+          : tryParseBookingSelection(inbound.text, recentChronological, {
+              timezone: business.timezone ?? "Africa/Cairo",
+              referenceDate: now,
+            });
       if (selectionAttempt) {
         const selectionResult = await completeBookingSelection(
           deps,

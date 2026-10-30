@@ -29,9 +29,16 @@ export type OfferedBookingOption = {
   index: number;
   displayName: string;
   startTime: string;
-  endTime: string;
+  endTime?: string;
   /** CONV-CORE-01 — the real provider id (typed offers only). */
   providerId?: string;
+};
+
+export type ChronologicalMessage = {
+  senderType: string;
+  content: string;
+  createdAt?: Date | string | null;
+  sentAt?: Date | string | null;
 };
 
 export type BookingSelection =
@@ -91,6 +98,123 @@ const ARABIC_MONTH_LOOKUP: Record<string, number> = {
   ديسمبر: 12,
 };
 
+export const ARABIC_WEEKDAY_LOOKUP: Record<string, number> = {
+  الأحد: 0,
+  الاحد: 0,
+  الإثنين: 1,
+  الاثنين: 1,
+  الثلاثاء: 2,
+  الأربعاء: 3,
+  الاربعاء: 3,
+  الخميس: 4,
+  الجمعة: 5,
+  الجمعه: 5,
+  السبت: 6,
+};
+
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+export function daysInMonth(year: number, month: number): number {
+  switch (month) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return isLeapYear(year) ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
+export function isValidCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
+  if (!Number.isInteger(year) || year < 1000 || year > 9999) return false;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return false;
+  if (!Number.isInteger(day) || day < 1 || day > daysInMonth(year, month)) {
+    return false;
+  }
+  return true;
+}
+
+export type ParseOfferDateOptions = {
+  provenanceDate?: string | Date | null;
+  referenceDate?: string | Date | null;
+  timezone?: string | null;
+};
+
+function getZonedProvenance(
+  provenance: Date | string,
+  timeZone: string = "Africa/Cairo",
+): { year: number; month: number; day: number } | null {
+  const d = typeof provenance === "string" ? new Date(provenance) : provenance;
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone || "Africa/Cairo",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    });
+    const parts = formatter.formatToParts(d);
+    let year = 0;
+    let month = 0;
+    let day = 0;
+    for (const p of parts) {
+      if (p.type === "year") year = parseInt(p.value, 10);
+      if (p.type === "month") month = parseInt(p.value, 10);
+      if (p.type === "day") day = parseInt(p.value, 10);
+    }
+    if (year && month && day) {
+      return { year, month, day };
+    }
+  } catch {
+    // If timezone is invalid, return null
+  }
+  return null;
+}
+
+/**
+ * Strict 24-hour time normalizer.
+ * Validates 0..23 for 24h, 1..12 for 12h with ص/م, 0..59 for minutes.
+ * Returns null on any invalid or out-of-range value.
+ */
+export function normalizeTimeTo24h(timeStr: string): string | null {
+  const trimmed = normalizeDigits(timeStr.trim());
+  const match = /^(\d{1,2}):(\d{2})(?:\s*([صم]))?$/.exec(trimmed);
+  if (!match || !match[1] || !match[2]) return null;
+  let h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const period = match[3];
+
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  if (m < 0 || m > 59) return null;
+
+  if (period) {
+    if (h < 1 || h > 12) return null;
+    if (period === "م" && h < 12) h += 12;
+    if (period === "ص" && h === 12) h = 0;
+  } else {
+    if (h < 0 || h > 23) return null;
+  }
+
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 /**
  * Deterministically parse an offer date string from header text.
  *
@@ -99,26 +223,44 @@ const ARABIC_MONTH_LOOKUP: Record<string, number> = {
  * - Arabic calendar format emitted by formatArabicDate:
  *   e.g. "الأحد، 1 نوفمبر 2026", "الأحد، 1 نوفمبر", "اليوم الأحد، 25 أكتوبر", "غدًا الإثنين، 26 أكتوبر"
  *
- * Falls back safely to null if ambiguous or unparseable. Never invents dates.
+ * Strict validation:
+ * - Real Gregorian calendar dates only (rejects Feb 31, Apr 31, Feb 29 on non-leap years).
+ * - Weekday consistency: if an Arabic weekday is present, the date must fall on that exact weekday.
+ * - Yearless labels FAIL CLOSED to null unless anchored by deterministic message provenance.
+ * - Timezone-aware provenance resolution (default: Africa/Cairo).
  */
 export function parseOfferDate(
   rawDate: string,
-  referenceDate?: string | Date,
+  provenanceOrOptions?: string | Date | null | ParseOfferDateOptions,
 ): string | null {
   const normalized = normalizeDigits(rawDate.trim());
 
-  // 1. Check direct ISO date format: YYYY-MM-DD
+  // Weekday consistency check (if a weekday is named in the text)
+  const weekdayMatch =
+    /(?:^|\s|[،,])(الأحد|الاحد|الإثنين|الاثنين|الثلاثاء|الأربعاء|الاربعاء|الخميس|الجمعة|الجمعه|السبت)(?:[،,\s]|$)/.exec(
+      normalized,
+    );
+  const expectedWeekday = weekdayMatch?.[1]
+    ? ARABIC_WEEKDAY_LOOKUP[weekdayMatch[1]]
+    : undefined;
+
+  // 1. Direct ISO date format: YYYY-MM-DD
   const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(normalized);
   if (isoMatch && isoMatch[1] && isoMatch[2] && isoMatch[3]) {
     const y = parseInt(isoMatch[1], 10);
     const m = parseInt(isoMatch[2], 10);
     const d = parseInt(isoMatch[3], 10);
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    if (!isValidCalendarDate(y, m, d)) return null;
+
+    if (expectedWeekday !== undefined) {
+      const actualWeekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      if (actualWeekday !== expectedWeekday) return null;
     }
+
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
 
-  // 2. Check Arabic calendar date: "[اليوم/غدًا] [السبت/الأحد...] [،] <day> <month_name> [<year>]"
+  // 2. Arabic calendar date: "[اليوم/غدًا] [السبت/الأحد...] [،] <day> <month_name> [<year>]"
   const arabicMatch =
     /(\d{1,2})\s*(?:من\s*)?(يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)(?:\s*(\d{4}))?/.exec(
       normalized,
@@ -127,32 +269,65 @@ export function parseOfferDate(
   if (arabicMatch && arabicMatch[1] && arabicMatch[2]) {
     const d = parseInt(arabicMatch[1], 10);
     const m = ARABIC_MONTH_LOOKUP[arabicMatch[2]];
-    if (!m || d < 1 || d > 31) return null;
+    if (!m) return null;
 
     let y: number;
     if (arabicMatch[3]) {
+      // Explicit 4-digit year in label
       y = parseInt(arabicMatch[3], 10);
     } else {
-      const ref = referenceDate
-        ? typeof referenceDate === "string"
-          ? new Date(referenceDate)
-          : referenceDate
-        : new Date();
-      const refYear = Number.isNaN(ref.getTime())
-        ? new Date().getFullYear()
-        : ref.getFullYear();
-      const refMonth = Number.isNaN(ref.getTime())
-        ? new Date().getMonth() + 1
-        : ref.getMonth() + 1;
+      // Yearless label: MUST have deterministic provenance to resolve exact date.
+      const provOption =
+        provenanceOrOptions &&
+        typeof provenanceOrOptions === "object" &&
+        !(provenanceOrOptions instanceof Date)
+          ? (provenanceOrOptions.provenanceDate ??
+            provenanceOrOptions.referenceDate)
+          : provenanceOrOptions;
+      const tz =
+        provenanceOrOptions &&
+        typeof provenanceOrOptions === "object" &&
+        !(provenanceOrOptions instanceof Date)
+          ? (provenanceOrOptions.timezone ?? "Africa/Cairo")
+          : "Africa/Cairo";
 
-      // Handle year wrap-around near year boundary (e.g. Dec -> Jan)
-      if (m < refMonth - 6) {
-        y = refYear + 1;
-      } else if (m > refMonth + 6) {
-        y = refYear - 1;
-      } else {
-        y = refYear;
+      if (!provOption) {
+        // Missing provenance: fail closed safely without guessing
+        return null;
       }
+
+      const zonedProv = getZonedProvenance(provOption, tz);
+      if (!zonedProv) return null;
+
+      // Determine candidate year relative to zoned provenance
+      if (m >= zonedProv.month) {
+        y = zonedProv.year;
+      } else if (zonedProv.month >= 10 && m <= 3) {
+        // Year boundary rollover (e.g. Dec/Nov offer for Jan/Feb)
+        y = zonedProv.year + 1;
+      } else {
+        // Historical date in the past without valid rollover: fail closed
+        return null;
+      }
+
+      // Verify that (y, m, d) is within a valid forward booking window relative to provenance date
+      const provUtc = Date.UTC(
+        zonedProv.year,
+        zonedProv.month - 1,
+        zonedProv.day,
+      );
+      const candUtc = Date.UTC(y, m - 1, d);
+      const diffDays = Math.round((candUtc - provUtc) / 86400000);
+      if (diffDays < 0 || diffDays > 120) {
+        return null;
+      }
+    }
+
+    if (!isValidCalendarDate(y, m, d)) return null;
+
+    if (expectedWeekday !== undefined) {
+      const actualWeekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      if (actualWeekday !== expectedWeekday) return null;
     }
 
     return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -161,26 +336,14 @@ export function parseOfferDate(
   return null;
 }
 
-function normalizeTimeTo24h(timeStr: string): string {
-  const trimmed = timeStr.trim();
-  const match = /^(\d{1,2}):(\d{2})(?:\s*([صم]))?$/.exec(trimmed);
-  if (!match) return trimmed.padStart(5, "0");
-  let h = parseInt(match[1]!, 10);
-  const m = match[2]!;
-  const period = match[3];
-  if (period === "م" && h < 12) h += 12;
-  if (period === "ص" && h === 12) h = 0;
-  return `${String(h).padStart(2, "0")}:${m}`;
-}
-
 /**
  * Extract the last canonical booking-options offer from recent history.
  * Returns null when no offer is present (the message is not a selection
  * context and must flow through the normal AI turn).
  */
 export function extractLastBookingOffer(
-  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
-  options?: { referenceDate?: string | Date },
+  recentChronological: ReadonlyArray<ChronologicalMessage>,
+  options?: ParseOfferDateOptions,
 ): BookingSelectionContext | null {
   for (let i = recentChronological.length - 1; i >= 0; i -= 1) {
     const msg = recentChronological[i];
@@ -195,7 +358,13 @@ export function extractLastBookingOffer(
     }
     const header = msg.content.match(OFFER_HEADER);
     if (!header || !header[1] || !header[3]) continue;
-    const resolvedDate = parseOfferDate(header[3], options?.referenceDate);
+
+    const msgProvenance = msg.sentAt ?? msg.createdAt;
+    const resolvedDate = parseOfferDate(header[3], {
+      provenanceDate:
+        msgProvenance ?? options?.provenanceDate ?? options?.referenceDate,
+      timezone: options?.timezone ?? "Africa/Cairo",
+    });
     if (!resolvedDate) continue;
 
     const headerProviderName = header[2] ? header[2].trim() : undefined;
@@ -208,12 +377,22 @@ export function extractLastBookingOffer(
         continue;
       }
       const rawStart = parsed[3];
-      const rawEnd = parsed[4] ?? parsed[3];
+      const startNorm = normalizeTimeTo24h(rawStart);
+      if (!startNorm) continue;
+
+      const rawEnd = parsed[4];
+      let endNorm: string | undefined;
+      if (rawEnd) {
+        const parsedEnd = normalizeTimeTo24h(rawEnd);
+        if (!parsedEnd) continue;
+        endNorm = parsedEnd;
+      }
+
       slotOptions.push({
         index: Number(parsed[1]),
         displayName: (parsed[2] ?? headerProviderName ?? "").trim(),
-        startTime: normalizeTimeTo24h(rawStart),
-        endTime: normalizeTimeTo24h(rawEnd),
+        startTime: startNorm,
+        ...(endNorm ? { endTime: endNorm } : {}),
       });
     }
     if (slotOptions.length === 0) continue;
@@ -289,8 +468,8 @@ export function parseBookingSelection(
  */
 export function tryParseBookingSelection(
   customerText: string,
-  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
-  options?: { referenceDate?: string | Date },
+  recentChronological: ReadonlyArray<ChronologicalMessage>,
+  options?: ParseOfferDateOptions,
 ): { context: BookingSelectionContext; selection: BookingSelection } | null {
   const context = extractLastBookingOffer(recentChronological, options);
   if (!context) return null;

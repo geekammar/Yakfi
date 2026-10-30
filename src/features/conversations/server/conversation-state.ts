@@ -44,7 +44,11 @@ import {
   bookingOfferSchema,
   isOfferLive,
 } from "@/features/conversations/server/booking-offer";
-import type { OfferedBookingOption } from "@/features/conversations/server/booking-selection";
+import type {
+  ChronologicalMessage,
+  OfferedBookingOption,
+  ParseOfferDateOptions,
+} from "@/features/conversations/server/booking-selection";
 import { extractLastBookingOffer } from "@/features/conversations/server/booking-selection";
 import {
   conversationFactKeys,
@@ -895,8 +899,8 @@ function pushTopic(
  * so the derived state can never diverge from what the domain presented.
  */
 export function deriveConversationStateFromHistory(
-  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
-  options?: { referenceDate?: string | Date },
+  recentChronological: ReadonlyArray<ChronologicalMessage>,
+  options?: ParseOfferDateOptions,
 ): ConversationState {
   const base = emptyConversationState();
   const offer = extractLastBookingOffer(recentChronological, options);

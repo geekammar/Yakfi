@@ -21,6 +21,8 @@ import {
 import {
   extractLastBookingOffer,
   interpretOfferReply,
+  isValidCalendarDate,
+  normalizeTimeTo24h,
   parseBookingSelection,
   parseOfferDate,
   selectionContextFromSlotOffer,
@@ -685,6 +687,7 @@ async function runTests() {
       realStartOnlyCtx.date === "2026-11-01" &&
       realStartOnlyCtx.options.length === 2 &&
       realStartOnlyCtx.options[0]?.startTime === "14:00" &&
+      realStartOnlyCtx.options[0]?.endTime === undefined &&
       realStartOnlyCtx.options[0]?.displayName === "د. أحمد",
     `received date: ${realStartOnlyCtx?.date}`,
   );
@@ -808,16 +811,161 @@ async function runTests() {
     corruptHeaderCtx === null,
   );
 
-  // Deterministic parseOfferDate standalone tests
+  // 6.7 Strict calendar date validation (rejecting impossible dates, leap year boundaries)
   check(
-    "6.7 parseOfferDate deterministically resolves ISO, Arabic month, and rejects invalid dates",
-    parseOfferDate("2026-11-01") === "2026-11-01" &&
-      parseOfferDate("الأحد، 1 نوفمبر 2026") === "2026-11-01" &&
-      parseOfferDate("الأحد، 1 نوفمبر", "2026-11-01") === "2026-11-01" &&
-      parseOfferDate("اليوم الأحد، 25 أكتوبر", "2026-10-25") === "2026-10-25" &&
-      parseOfferDate("غدًا الإثنين، 26 أكتوبر", "2026-10-25") ===
-        "2026-10-26" &&
-      parseOfferDate("يوم غير صالح") === null,
+    "6.7 Strict calendar date validation rejects impossible dates (Feb 31, Apr 31, non-leap Feb 29)",
+    isValidCalendarDate(2026, 2, 31) === false &&
+      isValidCalendarDate(2026, 4, 31) === false &&
+      isValidCalendarDate(2026, 2, 29) === false &&
+      isValidCalendarDate(2024, 2, 29) === true &&
+      isValidCalendarDate(2024, 2, 30) === false &&
+      parseOfferDate("2026-02-31") === null &&
+      parseOfferDate("2026-04-31") === null &&
+      parseOfferDate("2026-02-29") === null &&
+      parseOfferDate("2024-02-29") === "2024-02-29" &&
+      parseOfferDate("الأحد، 31 فبراير 2026") === null,
+  );
+
+  // 6.8 Weekday consistency: Arabic weekday must strictly match candidate date
+  check(
+    "6.8 Weekday consistency validation rejects weekday/date contradictions",
+    // 2026-11-01 was Sunday (الأحد)
+    parseOfferDate("الأحد، 1 نوفمبر 2026") === "2026-11-01" &&
+      // Contradiction: Wednesday Nov 1 2026 is impossible
+      parseOfferDate("الأربعاء، 1 نوفمبر 2026") === null &&
+      // 2026-10-31 was Saturday (السبت)
+      parseOfferDate("السبت، 31 أكتوبر 2026") === "2026-10-31" &&
+      parseOfferDate("الجمعة، 31 أكتوبر 2026") === null,
+  );
+
+  // 6.9 Missing provenance fails closed safely for yearless Arabic labels
+  check(
+    "6.9 Yearless Arabic date label without provenance fails closed to null",
+    parseOfferDate("الأحد، 1 نوفمبر") === null &&
+      parseOfferDate("اليوم الأحد، 25 أكتوبر") === null &&
+      extractLastBookingOffer([
+        {
+          senderType: "AI",
+          content:
+            'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم الأحد، 1 نوفمبر:\n1. 10:00 ص',
+        },
+      ]) === null,
+  );
+
+  // 6.10 Year boundary handling with deterministic provenance
+  check(
+    "6.10 Year boundary rollover (Dec offer for Jan date) resolves to next year with provenance",
+    // Offer authored on 2026-12-28 offering Jan 1
+    parseOfferDate("الجمعة، 1 يناير", {
+      provenanceDate: "2026-12-28T10:00:00Z",
+      timezone: "Africa/Cairo",
+    }) === "2027-01-01" &&
+      // But an offer in June offering March (in the past) fails closed
+      parseOfferDate("الأحد، 1 مارس", {
+        provenanceDate: "2026-06-01T10:00:00Z",
+        timezone: "Africa/Cairo",
+      }) === null,
+  );
+
+  // 6.11 Delayed historical reply uses offer provenance, not customer reply time
+  const delayedOfferTime = new Date("2026-11-01T09:00:00Z");
+  const delayedReplyTime = new Date("2027-03-15T14:00:00Z");
+  const delayedHistory = [
+    {
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم الأحد، 1 نوفمبر:\n1. 10:00 ص',
+      createdAt: delayedOfferTime,
+      sentAt: delayedOfferTime,
+    },
+    {
+      senderType: "CUSTOMER",
+      content: "1",
+      createdAt: delayedReplyTime,
+      sentAt: delayedReplyTime,
+    },
+  ];
+  const delayedCtx = extractLastBookingOffer(delayedHistory);
+  check(
+    "6.11 Delayed historical reply recovers offer date from AI message provenance (2026-11-01), not customer reply date (2027)",
+    delayedCtx !== null &&
+      delayedCtx.date === "2026-11-01" &&
+      delayedCtx.options[0]?.startTime === "10:00" &&
+      delayedCtx.options[0]?.endTime === undefined,
+  );
+
+  // 6.12 Host vs Business timezone boundary mapping
+  check(
+    "6.12 Host vs Business timezone: UTC midnight boundary resolves to correct business calendar date",
+    // At UTC 2026-10-31T22:30:00Z, host UTC date is Oct 31, but Cairo (UTC+2) is 2026-11-01 00:30 (Nov 1)
+    parseOfferDate("اليوم الأحد، 1 نوفمبر", {
+      provenanceDate: "2026-10-31T22:30:00Z",
+      timezone: "Africa/Cairo",
+    }) === "2026-11-01",
+  );
+
+  // 6.13 Strict time validation
+  check(
+    "6.13 Strict time validation validates 0..23 24h, 1..12 12h, 0..59 min, rejecting invalid inputs",
+    normalizeTimeTo24h("25:00") === null &&
+      normalizeTimeTo24h("14:00 ص") === null &&
+      normalizeTimeTo24h("10:75") === null &&
+      normalizeTimeTo24h("2:00 م") === "14:00" &&
+      normalizeTimeTo24h("12:00 م") === "12:00" &&
+      normalizeTimeTo24h("12:00 ص") === "00:00" &&
+      normalizeTimeTo24h("09:30") === "09:30" &&
+      normalizeTimeTo24h("invalid") === null,
+  );
+
+  // 6.14 No end-time fabrication on start-only vs full-range
+  const startOnlyLineOffer = [
+    {
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "تنظيف أسنان" يوم 2026-11-01:\n1. 10:00 ص',
+    },
+  ];
+  const fullRangeLineOffer = [
+    {
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "تنظيف أسنان" يوم 2026-11-01:\n1. 10:00 ص إلى 10:45 ص',
+    },
+  ];
+  const startParsed = extractLastBookingOffer(startOnlyLineOffer);
+  const fullParsed = extractLastBookingOffer(fullRangeLineOffer);
+  check(
+    "6.14 Formatter parsing preserves undefined endTime on START_ONLY without fabricating end time",
+    startParsed !== null &&
+      startParsed.options[0]?.startTime === "10:00" &&
+      startParsed.options[0]?.endTime === undefined &&
+      fullParsed !== null &&
+      fullParsed.options[0]?.startTime === "10:00" &&
+      fullParsed.options[0]?.endTime === "10:45",
+  );
+
+  // 6.15 Engine fallback call site: legacy parsing fails closed when date is unresolvable
+  const engineFallbackScope = {
+    business: createMockBusiness({ id: "biz_fb", timezone: "Africa/Cairo" }),
+  };
+  const unresolvableOfferHistory = [
+    {
+      senderType: "AI",
+      content:
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم الأحد، 31 فبراير:\n1. 10:00 ص',
+    },
+  ];
+  const fallbackSelAttempt = tryParseBookingSelection(
+    "1",
+    unresolvableOfferHistory,
+    {
+      timezone: engineFallbackScope.business.timezone,
+      referenceDate: new Date("2026-11-01"),
+    },
+  );
+  check(
+    "6.15 Engine fallback call site: tryParseBookingSelection fails closed (null) on impossible historical offer date",
+    fallbackSelAttempt === null,
   );
 
   // ───────────────────────────────────────────────────────────────────────────
