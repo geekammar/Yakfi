@@ -28,7 +28,7 @@ import {
   SparklesIcon,
   UserCheckIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function ProviderDialog({
   open,
@@ -68,9 +68,6 @@ export function ProviderDialog({
   const [userId, setUserId] = useState<string>(
     mode === "edit" && provider ? (provider.userId ?? "") : "",
   );
-  const [servicePolicy, setServicePolicy] = useState<
-    "ALL_SERVICES" | "SPECIFIC_SERVICES"
-  >(mode === "edit" && provider ? provider.servicePolicy : "ALL_SERVICES");
   const [explicitPolicyUpgrade, setExplicitPolicyUpgrade] = useState(false);
   const [excludedServiceIds, setExcludedServiceIds] = useState<string[]>(
     mode === "edit" && provider ? (provider.excludedServiceIds ?? []) : [],
@@ -82,6 +79,37 @@ export function ProviderDialog({
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isStoredSpecificServices =
+    mode === "edit" && provider?.servicePolicy === "SPECIFIC_SERVICES";
+
+  useEffect(() => {
+    if (open) {
+      setName(mode === "edit" && provider ? provider.name : "");
+      setDisplayName(
+        mode === "edit" && provider ? (provider.displayName ?? "") : "",
+      );
+      setIsActive(mode === "edit" && provider ? provider.isActive : true);
+      setBranchId(
+        mode === "edit" && provider
+          ? (provider.branchId ?? "")
+          : branches.length === 1 && branches[0]
+            ? branches[0].id
+            : "",
+      );
+      setUserId(mode === "edit" && provider ? (provider.userId ?? "") : "");
+      setExplicitPolicyUpgrade(false);
+      setExcludedServiceIds(
+        mode === "edit" && provider ? (provider.excludedServiceIds ?? []) : [],
+      );
+      setShowExclusions(
+        mode === "edit" && provider
+          ? (provider.excludedServiceIds ?? []).length > 0
+          : false,
+      );
+      setError(null);
+    }
+  }, [open, mode, provider, branches]);
 
   function toggleServiceExclusion(serviceId: string) {
     setExcludedServiceIds((current) =>
@@ -121,9 +149,7 @@ export function ProviderDialog({
         }
       } else if (mode === "edit" && provider) {
         const isUpgradingPolicy =
-          provider.servicePolicy === "SPECIFIC_SERVICES" &&
-          servicePolicy === "ALL_SERVICES" &&
-          explicitPolicyUpgrade;
+          isStoredSpecificServices && explicitPolicyUpgrade;
 
         const result = await updateProviderAction({
           providerId: provider.id,
@@ -132,7 +158,9 @@ export function ProviderDialog({
           isActive,
           branchId: branchId || null,
           ...(isUpgradingPolicy ? { servicePolicy: "ALL_SERVICES" } : {}),
-          ...(servicePolicy === "ALL_SERVICES" ? { excludedServiceIds } : {}),
+          ...(isUpgradingPolicy || provider.servicePolicy === "ALL_SERVICES"
+            ? { excludedServiceIds }
+            : {}),
         });
 
         if (result.success) {
@@ -272,7 +300,7 @@ export function ProviderDialog({
           ) : null}
 
           {/* Service coverage policy (Decision B: Default ALL_SERVICES with explicit exclusions, and preserved SPECIFIC_SERVICES) */}
-          {servicePolicy === "SPECIFIC_SERVICES" ? (
+          {isStoredSpecificServices ? (
             <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
               <div className="flex items-start gap-2">
                 <ShieldCheckIcon className="size-4 shrink-0 text-amber-700 mt-0.5" />
@@ -282,8 +310,13 @@ export function ProviderDialog({
                       سياسة الخدمات المحددة (مخصصة)
                     </p>
                     <span className="text-[10px] font-medium bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
-                      SPECIFIC_SERVICES
+                      خدمات محددة
                     </span>
+                    {explicitPolicyUpgrade ? (
+                      <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">
+                        ترقية معلقة
+                      </span>
+                    ) : null}
                   </div>
                   <p className="text-xs text-amber-900">
                     مقدم الخدمة مؤهل فقط للخدمات المحددة له بشكل صريح (
@@ -306,20 +339,14 @@ export function ProviderDialog({
                 </div>
               ) : null}
 
-              {/* Explicit, authorized policy conversion */}
-              <div className="border-t border-amber-200/80 pt-2.5">
+              {/* Explicit, authorized, reversible policy conversion */}
+              <div className="border-t border-amber-200/80 pt-2.5 space-y-2">
                 <label className="flex items-start gap-2 text-xs cursor-pointer">
                   <Checkbox
                     id="upgrade-to-all-services"
                     checked={explicitPolicyUpgrade}
                     onCheckedChange={(checked) => {
-                      const willUpgrade = checked === true;
-                      setExplicitPolicyUpgrade(willUpgrade);
-                      if (willUpgrade) {
-                        setServicePolicy("ALL_SERVICES");
-                      } else {
-                        setServicePolicy("SPECIFIC_SERVICES");
-                      }
+                      setExplicitPolicyUpgrade(checked === true);
                     }}
                   />
                   <div className="space-y-0.5">
@@ -328,11 +355,21 @@ export function ProviderDialog({
                     </span>
                     <p className="text-[11px] text-muted-foreground">
                       تفعيل هذا الخيار سيجعل مقدم الخدمة مؤهلاً فوراً لجميع
-                      الخدمات الحالية والمستقبلية، مع إمكانية استثناء خدمات
-                      محددة.
+                      الخدمات الحالية والمستقبلية.
                     </p>
                   </div>
                 </label>
+
+                {explicitPolicyUpgrade ? (
+                  <div className="rounded-md border border-emerald-300 bg-emerald-50/80 p-2.5 text-xs text-emerald-900 space-y-1">
+                    <p className="font-semibold text-emerald-950">
+                      سيتم تطبيق الترقية إلى جميع الخدمات تلقائياً عند الضغط على حفظ.
+                    </p>
+                    <p className="text-[11px] text-emerald-800">
+                      يمكنك إلغاء تحديد هذا الخيار في أي وقت قبل الحفظ للرجوع عن الترقية.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -345,7 +382,7 @@ export function ProviderDialog({
                       سياسة الخدمات التلقائية
                     </p>
                     <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">
-                      ALL_SERVICES
+                      جميع الخدمات تلقائياً
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">

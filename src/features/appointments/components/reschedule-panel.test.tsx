@@ -500,4 +500,141 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       endTime: "12:30",
     });
   });
+
+  it("10. ensures suggestions and selection strictly respect preserved provider when earliest slot is with another provider", async () => {
+    // 09:00 is available ONLY with Dr. Tarek (other provider)
+    // 14:00 is available with Dr. Heba (preserved appointment provider)
+    getAvailabilityActionMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        date: "2026-11-10",
+        timezone: "Africa/Cairo",
+        serviceId: FIXTURE_APPOINTMENT.service.id,
+        serviceDurationMinutes: 30,
+        slots: [
+          {
+            startTime: "09:00",
+            endTime: "09:30",
+            availableProviderIds: ["99999999-9999-4999-8999-999999999999"],
+          },
+          {
+            startTime: "14:00",
+            endTime: "14:30",
+            availableProviderIds: [FIXTURE_APPOINTMENT.provider!.id],
+          },
+        ],
+      },
+      reason: null,
+    });
+
+    await renderComponent(
+      <ReschedulePanel
+        appointment={FIXTURE_APPOINTMENT}
+        today="2026-11-10"
+        timezone="Africa/Cairo"
+        workingHours={FIXTURE_WORKING_HOURS}
+        slotDurationMinutes={30}
+        onDone={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
+    );
+    await act(async () => {
+      nextBtn?.click();
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // 09:00 belongs to the other provider (Dr. Tarek) and MUST NOT be suggested
+    expect(container.textContent).not.toContain("د. طارق");
+    expect(container.textContent).not.toContain("09:00");
+    expect(container.textContent).not.toContain("٩:٠٠");
+
+    // 14:00 (2:00 PM) belongs to Dr. Heba and SHOULD be present in suggestions
+    expect(container.textContent).toContain("د. هبة");
+    expect(container.textContent).toMatch(/02:00|2:00|٠٢:٠٠|٢:٠٠/);
+  });
+
+  it("11. renders honest error and retry state when eligibility query rejects", async () => {
+    resolveEligibleProvidersActionMock.mockRejectedValueOnce(
+      new Error("Network connection failure"),
+    );
+
+    await renderComponent(
+      <ReschedulePanel
+        appointment={FIXTURE_APPOINTMENT}
+        today="2026-11-10"
+        timezone="Africa/Cairo"
+        onDone={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
+    );
+    await act(async () => {
+      nextBtn?.click();
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Must NOT collapse to zero-provider empty state
+    expect(container.textContent).not.toContain("أضف مقدم خدمة لبدء الحجز");
+    // Must render honest error alert and retry button
+    expect(container.textContent).toContain("تعذر تحميل بيانات مقدمي الخدمة");
+    const retryBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("إعادة المحاولة"),
+    );
+    expect(retryBtn).toBeDefined();
+  });
+
+  it("12. renders honest error and retry state when eligibility returns typed failure", async () => {
+    resolveEligibleProvidersActionMock.mockResolvedValueOnce({
+      success: false,
+      error: {
+        code: "SERVICE_NOT_FOUND",
+        message: "الخدمة المطلوبة غير موجودة في هذا الفرع",
+      },
+    });
+
+    await renderComponent(
+      <ReschedulePanel
+        appointment={FIXTURE_APPOINTMENT}
+        today="2026-11-10"
+        timezone="Africa/Cairo"
+        onDone={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
+    );
+    await act(async () => {
+      nextBtn?.click();
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Must NOT collapse to zero-provider empty state
+    expect(container.textContent).not.toContain("أضف مقدم خدمة لبدء الحجز");
+    expect(container.textContent).toContain("تعذر تحميل بيانات مقدمي الخدمة");
+    expect(container.textContent).toContain(
+      "الخدمة المطلوبة غير موجودة في هذا الفرع",
+    );
+    const retryBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("إعادة المحاولة"),
+    );
+    expect(retryBtn).toBeDefined();
+  });
 });

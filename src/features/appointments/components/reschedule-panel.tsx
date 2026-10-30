@@ -47,6 +47,7 @@ import { appointmentDateSchema } from "@/lib/validation";
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertCircleIcon,
   CalendarClockIcon,
   CheckCircle2Icon,
   LoaderCircleIcon,
@@ -124,6 +125,28 @@ export function ReschedulePanel({
 
   const isEligibleProvidersLoading =
     eligibleProvidersProp === undefined && eligibleProvidersQuery.isPending;
+
+  const isEligibilityError =
+    eligibleProvidersProp === undefined &&
+    (eligibleProvidersQuery.isError ||
+      (eligibleProvidersQuery.data !== undefined &&
+        !eligibleProvidersQuery.data.success));
+
+  const eligibilityErrorMessage = useMemo(() => {
+    if (eligibleProvidersQuery.isError) {
+      return "تعذر تحميل بيانات مقدمي الخدمة حالياً. يرجى المحاولة مرة أخرى.";
+    }
+    if (
+      eligibleProvidersQuery.data &&
+      !eligibleProvidersQuery.data.success
+    ) {
+      return (
+        eligibleProvidersQuery.data.error.message ||
+        "تعذر التحقق من أهلية مقدمي الخدمة."
+      );
+    }
+    return null;
+  }, [eligibleProvidersQuery.isError, eligibleProvidersQuery.data]);
 
   const preservedProviderId = appointment.provider?.id ?? null;
   const isPreservedProviderIneligible = useMemo(() => {
@@ -300,7 +323,33 @@ export function ReschedulePanel({
               تغيير التاريخ
             </Button>
           </div>
-          {isPreservedProviderIneligible ? (
+          {isEligibilityError ? (
+            <div
+              role="alert"
+              className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold">تعذر تحميل بيانات مقدمي الخدمة</p>
+                  <p className="text-xs text-muted-foreground">
+                    {eligibilityErrorMessage}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void eligibleProvidersQuery.refetch()}
+                  disabled={eligibleProvidersQuery.isFetching}
+                >
+                  إعادة المحاولة
+                </Button>
+              </div>
+            </div>
+          ) : isPreservedProviderIneligible ? (
             <div
               role="alert"
               className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"
