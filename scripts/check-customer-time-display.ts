@@ -877,6 +877,12 @@ async function runTests() {
       },
     });
 
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
     let modelCalls = 0;
     harness.deps.ai = {
       providerName: "test-spying-ai",
@@ -890,13 +896,17 @@ async function runTests() {
     };
 
     // Customer initiates booking
-    const turn1 = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: "عايز كشف أسنان يوم 2026-11-04",
-      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
-      externalId: "ext-turn-1",
-    });
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 2026-11-04",
+        receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+        externalId: "ext-turn-1",
+      },
+      identity,
+    );
 
     const offerOutbound = harness.deliveredOutbound[0];
     check(
@@ -923,13 +933,17 @@ async function runTests() {
 
     // Mechanical selection via button callback data
     const callsBeforeSelection = modelCalls;
-    const turn2 = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: callbackData1!,
-      receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
-      externalId: "ext-turn-2",
-    });
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: callbackData1!,
+        receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
+        externalId: "ext-turn-2",
+      },
+      identity,
+    );
 
     check(
       "8.1d Mechanical button callback executes with strictly 0 additional model calls",
@@ -944,12 +958,12 @@ async function runTests() {
 
     const appt1 = harness.appointments[0];
     check(
-      "8.1f Appointment entity facts are complete and invariant (startAt, endAt, providerId, status)",
-      appt1?.startAt === "2026-11-04T09:00" &&
-        appt1?.endAt === "2026-11-04T09:30" &&
+      "8.1f Appointment entity facts are complete and invariant (startTime, endTime, providerId, status)",
+      appt1?.startTime === "09:00" &&
+        appt1?.endTime === "09:30" &&
         appt1?.providerId === PLAYGROUND_IDS.PROV_1 &&
         appt1?.status === "CONFIRMED",
-      `appt facts: start=${appt1?.startAt}, end=${appt1?.endAt}, status=${appt1?.status}`,
+      `appt facts: start=${appt1?.startTime}, end=${appt1?.endTime}, status=${appt1?.status}`,
     );
 
     const confirmationOutbound = harness.deliveredOutbound[1];
@@ -972,6 +986,12 @@ async function runTests() {
       },
     });
 
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
     let modelCalls = 0;
     harness.deps.ai = {
       providerName: "test-spying-ai",
@@ -985,13 +1005,17 @@ async function runTests() {
     };
 
     // Customer initiates booking
-    const turn1 = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: "عايز كشف أسنان يوم 2026-11-04",
-      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
-      externalId: "ext-full-1",
-    });
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 2026-11-04",
+        receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+        externalId: "ext-full-1",
+      },
+      identity,
+    );
 
     const offerOutbound = harness.deliveredOutbound[0];
     check(
@@ -1010,13 +1034,17 @@ async function runTests() {
 
     // Mechanical text selection "1"
     const callsBeforeSelection = modelCalls;
-    const turn2 = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: "1",
-      receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
-      externalId: "ext-full-2",
-    });
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "1",
+        receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
+        externalId: "ext-full-2",
+      },
+      identity,
+    );
 
     check(
       "8.2c Mechanical text selection '1' executes with strictly 0 additional model calls",
@@ -1027,8 +1055,8 @@ async function runTests() {
       "8.2d Booking under FULL_RANGE produces identical appointment start/end facts to START_ONLY",
       turn2.ok === true &&
         harness.appointments.length === 1 &&
-        harness.appointments[0]?.startAt === "2026-11-04T09:00" &&
-        harness.appointments[0]?.endAt === "2026-11-04T09:30",
+        harness.appointments[0]?.startTime === "09:00" &&
+        harness.appointments[0]?.endTime === "09:30",
     );
 
     const confirmationOutbound = harness.deliveredOutbound[1];
@@ -1049,6 +1077,12 @@ async function runTests() {
       },
     });
 
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
     let modelCalls = 0;
     harness.deps.ai = {
       providerName: "test-spying-ai",
@@ -1062,13 +1096,17 @@ async function runTests() {
     };
 
     // Render offer under START_ONLY
-    await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: "عايز كشف أسنان يوم 2026-11-04",
-      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
-      externalId: "ext-mid-1",
-    });
+    await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 2026-11-04",
+        receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+        externalId: "ext-mid-1",
+      },
+      identity,
+    );
 
     const offerOutbound = harness.deliveredOutbound[0];
     const originalCallback =
@@ -1082,19 +1120,23 @@ async function runTests() {
 
     // Customer clicks the button with the original callback token
     const callsBefore = modelCalls;
-    const turn2 = await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber,
-      from: harness.customer.phone,
-      text: originalCallback!,
-      receivedAt: new Date("2026-11-01T10:02:00Z").toISOString(),
-      externalId: "ext-mid-2",
-    });
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: originalCallback!,
+        receivedAt: new Date("2026-11-01T10:02:00Z").toISOString(),
+        externalId: "ext-mid-2",
+      },
+      identity,
+    );
 
     check(
       "8.3a Mid-flight preference change preserves valid callback-to-slot mapping and books successfully",
       turn2.ok === true &&
         harness.appointments.length === 1 &&
-        harness.appointments[0]?.startAt === "2026-11-04T09:00",
+        harness.appointments[0]?.startTime === "09:00",
     );
 
     check(
