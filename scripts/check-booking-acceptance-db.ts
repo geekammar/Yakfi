@@ -42,7 +42,6 @@ function check(label: string, pass: boolean, details?: string): void {
   checks.push({ label, pass, details });
 }
 
-const RUN_ID = `book-test-${Date.now()}`;
 const TEST_ADMIN_ID = randomUUID();
 const TEST_BUSINESS_ID = randomUUID();
 const TEST_CROSS_BIZ_ID = randomUUID();
