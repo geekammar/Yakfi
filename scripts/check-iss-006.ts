@@ -402,12 +402,18 @@ async function run() {
   ]);
 
   const mockDbForCancel = {
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDbForCancel),
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn(mockDbForCancel),
     followUpRequest: {
       findFirst: async ({
         where,
       }: {
-        where: { id: string; businessId?: string; status?: string; deletedAt?: null };
+        where: {
+          id: string;
+          businessId?: string;
+          status?: string;
+          deletedAt?: null;
+        };
       }) => {
         const item = stateStore.get(where.id);
         if (!item) return null;

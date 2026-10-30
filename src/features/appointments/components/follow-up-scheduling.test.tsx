@@ -18,17 +18,17 @@
  *    - AppointmentDetail propagates prop updates to FollowUpList on the same root without remounting or stale lock.
  */
 
-import type { ReactElement } from "react";
-import type { Root } from "react-dom/client";
-import { createRoot } from "react-dom/client";
-import { act } from "react-dom/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import { AppointmentDetail } from "@/features/appointments/components/appointment-detail";
 import { FollowUpList } from "@/features/appointments/components/follow-up-list";
 import { DateStep } from "@/features/appointments/components/smart-create/date-step";
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import type { FollowUpRequestWithRelations } from "@/types/domain";
+
+import type { ReactElement } from "react";
+import type { Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { cancelFollowUpRequestMock, routerRefreshMock } = vi.hoisted(() => ({
   cancelFollowUpRequestMock: vi.fn(),

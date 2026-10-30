@@ -378,7 +378,7 @@ async function main(): Promise<void> {
     });
 
     const checkpointsCaseA: string[] = [];
-    let cancelOutcomeCaseA: { success: boolean; message: string } | null = null;
+    let cancelOutcomeCaseA: any = null;
 
     const controlledClientCaseA = createControlledDb({
       onAfterFollowUpCheck: async (id) => {
@@ -555,6 +555,7 @@ async function main(): Promise<void> {
     const clientAttempt2 = createControlledDb({
       onAfterFollowUpCheck: async (id) => {
         if (id === fuCaseC.id) {
+          await attempt1ReadPendingPromise;
           checkpointsCaseC.push("attempt2_read_pending");
           attempt2ReadPendingResolve();
           await releaseAttempt2Promise;
@@ -624,14 +625,16 @@ async function main(): Promise<void> {
       },
     });
 
+    const committedApp = allAppsCaseC[0];
     const caseCValid =
       successes.length === 1 &&
       failures.length === 1 &&
       (failures[0] as any).code === "FOLLOW_UP_NOT_PENDING" &&
       allAppsCaseC.length === 1 &&
-      allAppsCaseC[0].startTime.toISOString().slice(11, 16) === "10:00" &&
+      committedApp !== undefined &&
+      committedApp.startTime.toISOString().slice(11, 16) === "10:00" &&
       fuCaseCInDb?.status === "SCHEDULED" &&
-      fuCaseCInDb.scheduledAppointmentId === allAppsCaseC[0].id &&
+      fuCaseCInDb.scheduledAppointmentId === committedApp.id &&
       checkpointsCaseC.includes("attempt1_read_pending") &&
       checkpointsCaseC.includes("attempt2_read_pending");
 
