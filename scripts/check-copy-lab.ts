@@ -2036,7 +2036,7 @@ async function main(): Promise<void> {
 
     while ((match = resolveRegex.exec(source)) !== null) {
       callCount += 1;
-      const rawArg = match[1].trim();
+      const rawArg = (match[1] ?? "").trim();
       const isApproved =
         rawArg === '"welcome.intro"' || rawArg === "'welcome.intro'";
       if (isApproved) {

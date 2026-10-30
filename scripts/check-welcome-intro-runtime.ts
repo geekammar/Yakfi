@@ -180,10 +180,11 @@ async function main(): Promise<void> {
 
     const sent = harness.sentMessages[0];
     const persisted = harness.messages.find((m) => m.senderType === "AI");
-    const persistedState = await harness.stateStore.load(
+    const persistedRow = await harness.stateStore.load(
       BUSINESS_ID,
       harness.conversation.id,
     );
+    const persistedState = persistedRow?.state as any;
     const offer = persistedState?.offer;
     const choices = sent?.choices as any;
 
@@ -467,10 +468,11 @@ async function main(): Promise<void> {
 
     const sent = harness.sentMessages[0];
     const persisted = harness.messages.find((m) => m.senderType === "AI");
-    const currentState = await harness.stateStore.load(
+    const currentPersistedRow = await harness.stateStore.load(
       BUSINESS_ID,
       conversationId,
     );
+    const currentState = currentPersistedRow?.state as any;
 
     check("7a. المعالجة ناجحة بوجود عرض نشط", result.ok);
     check(
@@ -537,10 +539,11 @@ async function main(): Promise<void> {
 
     const sent = harness.sentMessages[0];
     const persisted = harness.messages.find((m) => m.senderType === "AI");
-    const currentState = await harness.stateStore.load(
+    const currentPersistedRow = await harness.stateStore.load(
       BUSINESS_ID,
       conversationId,
     );
+    const currentState = currentPersistedRow?.state as any;
 
     check("8a. المعالجة ناجحة بوجود مهمة حجز نشطة", result.ok);
     check(
