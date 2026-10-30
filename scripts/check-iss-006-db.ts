@@ -563,7 +563,10 @@ async function main(): Promise<void> {
     );
     const cancelPromiseCaseB = cancelFollowUpRequest(
       { id: fuCaseB.id },
-      { followUpRequestRepository: cancelRepoCaseB, getSession: sessionTenantA },
+      {
+        followUpRequestRepository: cancelRepoCaseB,
+        getSession: sessionTenantA,
+      },
     );
 
     // 4. Await cancellation reaching its conditional database update boundary before scheduling is released
