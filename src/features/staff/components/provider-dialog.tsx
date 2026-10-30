@@ -28,7 +28,7 @@ import {
   SparklesIcon,
   UserCheckIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export function ProviderDialog({
   open,
@@ -83,33 +83,13 @@ export function ProviderDialog({
   const isStoredSpecificServices =
     mode === "edit" && provider?.servicePolicy === "SPECIFIC_SERVICES";
 
-  useEffect(() => {
-    if (open) {
-      setName(mode === "edit" && provider ? provider.name : "");
-      setDisplayName(
-        mode === "edit" && provider ? (provider.displayName ?? "") : "",
-      );
-      setIsActive(mode === "edit" && provider ? provider.isActive : true);
-      setBranchId(
-        mode === "edit" && provider
-          ? (provider.branchId ?? "")
-          : branches.length === 1 && branches[0]
-            ? branches[0].id
-            : "",
-      );
-      setUserId(mode === "edit" && provider ? (provider.userId ?? "") : "");
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
       setExplicitPolicyUpgrade(false);
-      setExcludedServiceIds(
-        mode === "edit" && provider ? (provider.excludedServiceIds ?? []) : [],
-      );
-      setShowExclusions(
-        mode === "edit" && provider
-          ? (provider.excludedServiceIds ?? []).length > 0
-          : false,
-      );
       setError(null);
     }
-  }, [open, mode, provider, branches]);
+    onOpenChange(nextOpen);
+  }
 
   function toggleServiceExclusion(serviceId: string) {
     setExcludedServiceIds((current) =>
@@ -178,7 +158,7 @@ export function ProviderDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -449,7 +429,7 @@ export function ProviderDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
               disabled={isSubmitting}
             >
               إلغاء
