@@ -146,6 +146,7 @@ jobs:
           pnpm test:staff-workspace
           pnpm test:install-prompt
           pnpm test:customers-dialog
+          pnpm test:customer-detail
           pnpm test:appointment-cancel
           pnpm test:login-form
           pnpm check:qa-harness
