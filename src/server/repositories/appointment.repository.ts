@@ -411,10 +411,24 @@ export class AppointmentRepository {
             if (!followUp || followUp.status !== "PENDING") {
               throw new Error("FOLLOW_UP_NOT_PENDING");
             }
-            if (followUp.startDate && toDate(date) < followUp.startDate) {
+            const startStr = followUp.startDate
+              ? typeof followUp.startDate === "string"
+                ? followUp.startDate
+                : followUp.startDate.toISOString().slice(0, 10)
+              : null;
+            const endStr = followUp.endDate
+              ? typeof followUp.endDate === "string"
+                ? followUp.endDate
+                : followUp.endDate.toISOString().slice(0, 10)
+              : null;
+
+            if (startStr && endStr && startStr > endStr) {
               throw new Error("FOLLOW_UP_DATE_OUT_OF_RANGE");
             }
-            if (followUp.endDate && toDate(date) > followUp.endDate) {
+            if (startStr && date < startStr) {
+              throw new Error("FOLLOW_UP_DATE_OUT_OF_RANGE");
+            }
+            if (endStr && date > endStr) {
               throw new Error("FOLLOW_UP_DATE_OUT_OF_RANGE");
             }
           }

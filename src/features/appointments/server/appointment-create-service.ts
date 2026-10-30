@@ -255,7 +255,12 @@ export async function createAppointmentRecord(
         return {
           success: false,
           code: "FOLLOW_UP_NOT_PENDING",
-          message: "طلب المتابعة غير متاح أو تم حجزه مسبقاً",
+          message:
+            followUp?.status === "CANCELLED"
+              ? "طلب المتابعة ملغى ولا يمكن حجز موعد له"
+              : followUp?.status === "SCHEDULED"
+                ? "تم حجز موعد لطلب المتابعة مسبقاً"
+                : "طلب المتابعة غير متاح أو تم حجزه مسبقاً",
         };
       }
       if (followUp.customerId !== customer.id) {
@@ -265,31 +270,37 @@ export async function createAppointmentRecord(
           message: "طلب المتابعة لا يطابق العميل المحدد",
         };
       }
-      if (followUp.startDate) {
-        const startStr =
-          typeof followUp.startDate === "string"
-            ? followUp.startDate
-            : followUp.startDate.toISOString().slice(0, 10);
-        if (parsed.data.date < startStr) {
-          return {
-            success: false,
-            code: "DATE_OUT_OF_RANGE",
-            message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
-          };
-        }
+      const startStr = followUp.startDate
+        ? typeof followUp.startDate === "string"
+          ? followUp.startDate
+          : followUp.startDate.toISOString().slice(0, 10)
+        : null;
+      const endStr = followUp.endDate
+        ? typeof followUp.endDate === "string"
+          ? followUp.endDate
+          : followUp.endDate.toISOString().slice(0, 10)
+        : null;
+
+      if (startStr && endStr && startStr > endStr) {
+        return {
+          success: false,
+          code: "DATE_OUT_OF_RANGE",
+          message: "فترة المتابعة غير صالحة",
+        };
       }
-      if (followUp.endDate) {
-        const endStr =
-          typeof followUp.endDate === "string"
-            ? followUp.endDate
-            : followUp.endDate.toISOString().slice(0, 10);
-        if (parsed.data.date > endStr) {
-          return {
-            success: false,
-            code: "DATE_OUT_OF_RANGE",
-            message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
-          };
-        }
+      if (startStr && parsed.data.date < startStr) {
+        return {
+          success: false,
+          code: "DATE_OUT_OF_RANGE",
+          message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
+        };
+      }
+      if (endStr && parsed.data.date > endStr) {
+        return {
+          success: false,
+          code: "DATE_OUT_OF_RANGE",
+          message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
+        };
       }
     }
   }
@@ -423,7 +434,23 @@ export async function createAppointmentRecord(
       appointmentId: appointment.id,
       status: appointment.status,
     };
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      if (err.message === "FOLLOW_UP_NOT_PENDING") {
+        return {
+          success: false,
+          code: "FOLLOW_UP_NOT_PENDING",
+          message: "طلب المتابعة غير متاح أو تم حجزه مسبقاً",
+        };
+      }
+      if (err.message === "FOLLOW_UP_DATE_OUT_OF_RANGE") {
+        return {
+          success: false,
+          code: "DATE_OUT_OF_RANGE",
+          message: "التاريخ المحدد خارج الفترة المحددة للمتابعة",
+        };
+      }
+    }
     return {
       success: false,
       code: "CREATE_FAILED",

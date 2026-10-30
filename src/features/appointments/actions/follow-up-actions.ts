@@ -125,6 +125,17 @@ export async function cancelFollowUpRequest(
     return { success: false, message: "طلب المتابعة غير موجود" };
   }
 
+  if (existing.status === "CANCELLED") {
+    return { success: true, message: "طلب المتابعة ملغى بالفعل" };
+  }
+
+  if (existing.status === "SCHEDULED") {
+    return {
+      success: false,
+      message: "لا يمكن إلغاء طلب متابعة تم حجز موعد له مسبقاً",
+    };
+  }
+
   if (existing.status !== "PENDING") {
     return { success: false, message: "لا يمكن إلغاء هذا الطلب" };
   }
@@ -169,7 +180,28 @@ export async function convertFollowUpToAppointmentAction(
     parsed.data.followUpId,
     user.businessId,
   );
-  if (!followUp || followUp.status !== "PENDING") {
+  if (!followUp) {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "طلب المتابعة غير موجود",
+    };
+  }
+  if (followUp.status === "CANCELLED") {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "طلب المتابعة ملغى ولا يمكن حجز موعد له",
+    };
+  }
+  if (followUp.status === "SCHEDULED") {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "تم حجز موعد لطلب المتابعة مسبقاً",
+    };
+  }
+  if (followUp.status !== "PENDING") {
     return {
       success: false,
       code: "FOLLOW_UP_NOT_PENDING",

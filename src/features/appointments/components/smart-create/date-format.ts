@@ -220,41 +220,56 @@ export function getPeriodDateRange(
   }
 }
 
+function parseIsoDateUtc(date?: string | null): Date | null {
+  if (!date || typeof date !== "string") return null;
+  const dateOnly = date.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null;
+  const d = new Date(`${dateOnly}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Long Arabic display for a "YYYY-MM-DD" date (e.g. "الجمعة، 4 سبتمبر 2026"). */
-export function formatArabicDate(date: string): string {
+export function formatArabicDate(date?: string | null): string {
+  const d = parseIsoDateUtc(date);
+  if (!d) return date || "";
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
-  }).format(new Date(`${date}T00:00:00.000Z`));
+  }).format(d);
 }
 
 /** Short Arabic weekday for a date chip (e.g. "الجمعة"). */
-export function formatArabicWeekday(date: string): string {
+export function formatArabicWeekday(date?: string | null): string {
+  const d = parseIsoDateUtc(date);
+  if (!d) return "";
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     weekday: "short",
-  }).format(new Date(`${date}T00:00:00.000Z`));
+  }).format(d);
 }
 
 /** Short Arabic month for a date chip (e.g. "سبتمبر"). */
-export function formatArabicMonth(date: string): string {
+export function formatArabicMonth(date?: string | null): string {
+  const d = parseIsoDateUtc(date);
+  if (!d) return "";
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     month: "short",
-  }).format(new Date(`${date}T00:00:00.000Z`));
+  }).format(d);
 }
 
 /** Compact Arabic day + month for a relative-choice caption (e.g. "٤ سبتمبر"). */
-export function formatArabicDayMonth(date: string): string {
-  const dateOnly = date.slice(0, 10);
+export function formatArabicDayMonth(date?: string | null): string {
+  const d = parseIsoDateUtc(date);
+  if (!d) return date || "";
   return new Intl.DateTimeFormat("ar-EG", {
     timeZone: "UTC",
     day: "numeric",
     month: "short",
-  }).format(new Date(`${dateOnly}T00:00:00.000Z`));
+  }).format(d);
 }
 
 /**
