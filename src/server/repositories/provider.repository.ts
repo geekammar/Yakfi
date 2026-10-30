@@ -368,20 +368,20 @@ export class ProviderRepository {
 
   /**
    * The assignment seam for already-resolved eligible Providers.
-   * Maps ProviderProfile.id → userId when present, or ProviderProfile.id as stable identity fallback.
+   * Maps ProviderProfile.id → userId when present, or null for independent providers.
    */
   async listAssignmentSeams(
     businessId: string,
     providerIds: string[],
-  ): Promise<Array<{ providerId: string; userId: string }>> {
+  ): Promise<Array<{ providerId: string; userId: string | null }>> {
     if (providerIds.length === 0) return [];
-    const rows = await db.providerProfile.findMany({
+    const rows = await (this.client ?? db).providerProfile.findMany({
       where: { businessId, id: { in: providerIds } },
       select: { id: true, userId: true },
     });
     return rows.map((row) => ({
       providerId: row.id,
-      userId: row.userId ?? row.id,
+      userId: row.userId ?? null,
     }));
   }
 

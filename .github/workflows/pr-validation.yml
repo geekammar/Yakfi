@@ -144,9 +144,11 @@ jobs:
           pnpm check:ui-accessibility
           pnpm test:conversation-detail
           pnpm test:staff-workspace
+          pnpm test:provider-dialog
           pnpm test:install-prompt
           pnpm test:customers-dialog
           pnpm test:customer-detail
+          pnpm test:reschedule-panel
           pnpm test:appointment-cancel
           pnpm test:login-form
           pnpm check:qa-harness
@@ -158,11 +160,12 @@ jobs:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         run: pnpm db:deploy
 
-      - name: Conversation Lab integration checks (real disposable DB)
+      - name: Conversation Lab & Booking integration checks (real disposable DB)
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         run: |
           pnpm check:welcome-intro-db
+          pnpm check:booking-acceptance-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

@@ -303,6 +303,18 @@ export async function updateProvider(
 
   try {
     const providersRepo = deps.providers ?? providerRepository;
+    const currentProfile = await providersRepo.findProfileWithinBusiness(
+      parsed.data.providerId,
+      scope.businessId,
+    );
+    if (!currentProfile) {
+      return { success: false, message: "مقدم الخدمة غير موجود" };
+    }
+
+    const effectivePolicy =
+      parsed.data.servicePolicy ??
+      (currentProfile.servicePolicy as "ALL_SERVICES" | "SPECIFIC_SERVICES");
+
     const profile = await providersRepo.updateProfile(
       parsed.data.providerId,
       scope.businessId,
@@ -318,7 +330,11 @@ export async function updateProvider(
       return { success: false, message: "مقدم الخدمة غير موجود" };
     }
 
-    if (parsed.data.excludedServiceIds !== undefined) {
+    // Only update exclusions when operating under ALL_SERVICES policy
+    if (
+      effectivePolicy === "ALL_SERVICES" &&
+      parsed.data.excludedServiceIds !== undefined
+    ) {
       await providersRepo.setServiceExclusions(
         scope.businessId,
         profile.id,

@@ -402,8 +402,8 @@ export async function createAppointmentRecord(
         branchId: defaultBranch
           ? defaultBranch.id
           : (null as unknown as string),
-        assignedUserId: assignedUserId ?? (null as unknown as string),
-        providerId: providerId ?? (null as unknown as string),
+        assignedUserId: assignedUserId ?? undefined,
+        providerId: providerId ?? undefined,
         date: parsed.data.date,
         startTime: parsed.data.startTime,
         endTime,
