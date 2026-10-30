@@ -357,16 +357,15 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     });
 
     // Pick slot
-    const slotBtn =
-      Array.from(container.querySelectorAll("button")).find(
-        (b) =>
-          b.getAttribute("aria-label")?.includes("حجز من") ||
-          b.getAttribute("aria-label")?.includes("الأبكر") ||
-          b.getAttribute("aria-label")?.includes("الأقرب"),
-      ) ??
+    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+      (b) =>
+        b.getAttribute("aria-label")?.includes("حجز من") ||
+        b.getAttribute("aria-label")?.includes("الأبكر") ||
+        b.getAttribute("aria-label")?.includes("الأقرب"),
+    ) ??
       Array.from(container.querySelectorAll("li button")).find(
         (b) => !b.hasAttribute("disabled"),
-      );
+      )) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
@@ -407,16 +406,15 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    const slotBtn =
-      Array.from(container.querySelectorAll("button")).find(
-        (b) =>
-          b.getAttribute("aria-label")?.includes("حجز من") ||
-          b.getAttribute("aria-label")?.includes("الأبكر") ||
-          b.getAttribute("aria-label")?.includes("الأقرب"),
-      ) ??
+    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+      (b) =>
+        b.getAttribute("aria-label")?.includes("حجز من") ||
+        b.getAttribute("aria-label")?.includes("الأبكر") ||
+        b.getAttribute("aria-label")?.includes("الأقرب"),
+    ) ??
       Array.from(container.querySelectorAll("li button")).find(
         (b) => !b.hasAttribute("disabled"),
-      );
+      )) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
@@ -478,16 +476,15 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    const slotBtn =
-      Array.from(container.querySelectorAll("button")).find(
-        (b) =>
-          b.getAttribute("aria-label")?.includes("حجز من") ||
-          b.getAttribute("aria-label")?.includes("الأبكر") ||
-          b.getAttribute("aria-label")?.includes("الأقرب"),
-      ) ??
+    const slotBtn = (Array.from(container.querySelectorAll("button")).find(
+      (b) =>
+        b.getAttribute("aria-label")?.includes("حجز من") ||
+        b.getAttribute("aria-label")?.includes("الأبكر") ||
+        b.getAttribute("aria-label")?.includes("الأقرب"),
+    ) ??
       Array.from(container.querySelectorAll("li button")).find(
         (b) => !b.hasAttribute("disabled"),
-      );
+      )) as HTMLButtonElement | undefined;
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
