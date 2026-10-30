@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * FlowPilot — Conversation Lab welcome.intro Real-DB Integration Check.
  *

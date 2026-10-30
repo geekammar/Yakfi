@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * FlowPilot — Conversation Lab welcome.intro Runtime Wiring Check (Offline).
  *
