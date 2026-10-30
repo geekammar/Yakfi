@@ -1,0 +1,53 @@
+name: Focused Viewport Stability Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stability-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stability:
+    name: Focused Sign-in Viewport Stability (mobile-390 repeat-each=3 retries=0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Setup local environment
+        run: node scripts/setup-env.mjs
+
+      - name: Build Next.js application
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
+        run: pnpm build
+
+      - name: Execute Focused Viewport Stability Check
+        env:
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
+        run: |
+          pnpm exec playwright test tests/e2e/ux-viewports.spec.ts --project=mobile-390 -g "Sign-in page: RTL, horizontal overflow, touch targets and form states" --repeat-each=3 --retries=0

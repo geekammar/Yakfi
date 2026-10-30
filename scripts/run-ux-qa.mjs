@@ -206,7 +206,7 @@ const mdSummaryLines = [
   "",
   `- **Status**: ${passed ? "✅ PASSED" : "❌ FAILED"} (exit code: ${result.status})`,
   `- **Execution Time**: ${elapsed}s`,
-  `- **Tests**: ${testStats.total} total (${testStats.expected} passed, ${testStats.unexpected} failed, ${testStats.skipped} skipped)`,
+  `- **Tests**: ${testStats.total} total (${testStats.expected} passed, ${testStats.flaky > 0 ? `${testStats.flaky} flaky, ` : ""}${testStats.unexpected} failed, ${testStats.skipped} skipped)`,
   `- **Arabic RTL Layout**: ${rtlContract.status}`,
   `- **Horizontal Overflow**: ${overflowContract.status}`,
   `- **Booking Provider Contracts**: ${bookingContract.status}`,
