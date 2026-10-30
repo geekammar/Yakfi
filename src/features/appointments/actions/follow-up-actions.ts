@@ -149,7 +149,9 @@ export async function cancelFollowUpRequest(
       try {
         revalidatePath("/appointments");
         if (result.followUp.sourceAppointmentId) {
-          revalidatePath(`/appointments/${result.followUp.sourceAppointmentId}`);
+          revalidatePath(
+            `/appointments/${result.followUp.sourceAppointmentId}`,
+          );
         }
       } catch {
         // Outside Next.js request context (e.g. test runner)

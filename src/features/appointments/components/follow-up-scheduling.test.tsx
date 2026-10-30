@@ -12,11 +12,13 @@
  * 2. FollowUpList & AppointmentDetail mounted tests:
  *    - Confirmed cancel clicks trigger cancelFollowUpRequest action.
  *    - Optimistic/synchronous state update to "ملغاة" badge upon successful cancellation.
- *    - Server prop refresh updates list without stale state lag.
+ *    - Server prop refresh updates list without stale state lag (same follow-up ID).
  *    - Already-cancelled item renders "ملغاة" badge without active cancel button.
- *    - Action failure displays error in role="alert".
+ *    - Action failure displays error in role="alert" and does NOT falsely mark as cancelled.
+ *    - AppointmentDetail propagates prop updates to FollowUpList on the same root without remounting or stale lock.
  */
 
+import type { ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -152,75 +154,79 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
     document.body.innerHTML = "";
   });
 
-  function render(ui: React.ReactElement) {
-    root = createRoot(container);
-    act(() => {
-      root?.render(ui);
+  async function render(ui: ReactElement) {
+    if (!root) {
+      root = createRoot(container);
+    }
+    const activeRoot = root;
+    await act(async () => {
+      activeRoot.render(ui);
     });
   }
 
   // --- 1. DateStep Mounted Tests ---
   describe("DateStep mounted range handling", () => {
-    it("1. undated follow-up request (startDate: null, endDate: null) renders without RangeError or crash", () => {
-      expect(() => {
-        render(
-          <DateStep
-            selectedDate={TODAY}
-            today={TODAY}
-            onSelect={vi.fn()}
-            allowedRange={{ startDate: null, endDate: null }}
-          />,
-        );
-      }).not.toThrow();
+    it("1. undated follow-up request (startDate: null, endDate: null) renders without RangeError or crash", async () => {
+      await render(
+        <DateStep
+          selectedDate={TODAY}
+          today={TODAY}
+          onSelect={vi.fn()}
+          allowedRange={{ startDate: null, endDate: null }}
+        />,
+      );
 
-      const banner = container.textContent;
-      expect(banner).toContain("طلب متابعة دون تاريخ محدد — يمكنك اختيار أي موعد متاح");
-      expect(banner).not.toContain("Invalid time value");
+      expect(container.textContent).toContain(
+        "طلب متابعة دون تاريخ محدد — يمكنك اختيار أي موعد متاح",
+      );
+      expect(container.textContent).not.toContain("فترة المتابعة غير صالحة");
     });
 
-    it("2. one-sided start date range renders explicit start notice", () => {
-      render(
+    it("2. one-sided start date range renders explicit start notice", async () => {
+      await render(
         <DateStep
-          selectedDate="2026-11-05"
+          selectedDate={TODAY}
           today={TODAY}
           onSelect={vi.fn()}
           allowedRange={{ startDate: "2026-11-05", endDate: null }}
         />,
       );
 
-      expect(container.textContent).toContain("ابتداءً من");
+      expect(container.textContent).toContain("الفترة المحددة ابتداءً من");
+      expect(container.textContent).not.toContain("فترة المتابعة غير صالحة");
     });
 
-    it("3. one-sided end date range renders explicit end notice", () => {
-      render(
+    it("3. one-sided end date range renders explicit end notice", async () => {
+      await render(
         <DateStep
-          selectedDate="2026-11-05"
+          selectedDate={TODAY}
           today={TODAY}
           onSelect={vi.fn()}
-          allowedRange={{ startDate: null, endDate: "2026-11-10" }}
+          allowedRange={{ startDate: null, endDate: "2026-11-15" }}
         />,
       );
 
-      expect(container.textContent).toContain("حتى");
+      expect(container.textContent).toContain("الفترة المحددة حتى");
+      expect(container.textContent).not.toContain("فترة المتابعة غير صالحة");
     });
 
-    it("4. inverted / invalid range (startDate > endDate) renders explicit invalid range banner", () => {
-      render(
+    it("4. inverted / invalid range (startDate > endDate) renders explicit invalid range banner", async () => {
+      await render(
         <DateStep
-          selectedDate="2026-11-05"
+          selectedDate={TODAY}
           today={TODAY}
           onSelect={vi.fn()}
-          allowedRange={{ startDate: "2026-11-10", endDate: "2026-11-05" }}
+          allowedRange={{ startDate: "2026-11-20", endDate: "2026-11-10" }}
         />,
       );
 
       expect(container.textContent).toContain("فترة المتابعة غير صالحة");
     });
 
-    it("5. valid continuous range renders date bounds and disables out-of-range days", () => {
-      render(
+    it("5. valid continuous range renders date bounds and disables out-of-range days", async () => {
+      await render(
         <DateStep
-          selectedDate="2026-11-05"
+          selectedDate="2026-11-06"
           today={TODAY}
           onSelect={vi.fn()}
           allowedRange={{ startDate: "2026-11-05", endDate: "2026-11-07" }}
@@ -241,7 +247,7 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
         message: "تم إلغاء طلب المتابعة بنجاح",
       });
 
-      render(
+      await render(
         <FollowUpList
           followUps={[FIXTURE_FOLLOW_UP_PENDING]}
           onRefresh={routerRefreshMock}
@@ -250,7 +256,7 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
 
       expect(container.textContent).toContain("بانتظار تحديد موعد");
       const cancelButton = container.querySelector(
-        'button:not([disabled])',
+        "button:not([disabled])",
       ) as HTMLButtonElement | null;
       expect(cancelButton).toBeTruthy();
       expect(cancelButton?.textContent).toContain("إلغاء المتابعة");
@@ -269,8 +275,8 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       expect(container.textContent).not.toContain("بانتظار تحديد موعد");
     });
 
-    it("7. already-cancelled request displays 'ملغاة' badge without active cancel button", () => {
-      render(
+    it("7. already-cancelled request displays 'ملغاة' badge without active cancel button", async () => {
+      await render(
         <FollowUpList
           followUps={[FIXTURE_FOLLOW_UP_CANCELLED]}
           onRefresh={routerRefreshMock}
@@ -281,8 +287,8 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       expect(container.textContent).not.toContain("إلغاء المتابعة");
     });
 
-    it("8. server prop updates re-render list immediately without stale state lock", () => {
-      render(
+    it("8. server prop updates re-render list immediately without stale state lock", async () => {
+      await render(
         <FollowUpList
           followUps={[FIXTURE_FOLLOW_UP_PENDING]}
           onRefresh={routerRefreshMock}
@@ -290,10 +296,15 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       );
       expect(container.textContent).toContain("بانتظار تحديد موعد");
 
-      // Simulate parent passing fresh prop
-      render(
+      // Update the EXACT same follow-up item to CANCELLED
+      const updatedItem: FollowUpRequestWithRelations = {
+        ...FIXTURE_FOLLOW_UP_PENDING,
+        status: "CANCELLED",
+      };
+
+      await render(
         <FollowUpList
-          followUps={[FIXTURE_FOLLOW_UP_CANCELLED]}
+          followUps={[updatedItem]}
           onRefresh={routerRefreshMock}
         />,
       );
@@ -301,13 +312,13 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       expect(container.textContent).not.toContain("بانتظار تحديد موعد");
     });
 
-    it("9. cancellation action failure renders error in role='alert'", async () => {
+    it("9. cancellation action failure renders error in role='alert' and does not falsely display cancelled", async () => {
       cancelFollowUpRequestMock.mockResolvedValueOnce({
         success: false,
         message: "تعذر إلغاء الطلب حالياً",
       });
 
-      render(
+      await render(
         <FollowUpList
           followUps={[FIXTURE_FOLLOW_UP_PENDING]}
           onRefresh={routerRefreshMock}
@@ -315,7 +326,7 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       );
 
       const cancelButton = container.querySelector(
-        'button:not([disabled])',
+        "button:not([disabled])",
       ) as HTMLButtonElement | null;
 
       await act(async () => {
@@ -325,6 +336,10 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       const alert = container.querySelector('[role="alert"]');
       expect(alert).toBeTruthy();
       expect(alert?.textContent).toContain("تعذر إلغاء الطلب حالياً");
+
+      // Failure must not falsely transition to cancelled state
+      expect(container.textContent).not.toContain("ملغاة");
+      expect(container.textContent).toContain("بانتظار تحديد موعد");
     });
 
     it("10. AppointmentDetail integrates follow-up list with live cancellation flow", async () => {
@@ -333,7 +348,7 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
         message: "تم إلغاء طلب المتابعة بنجاح",
       });
 
-      render(
+      await render(
         <AppointmentDetail
           initialData={FIXTURE_DETAIL_DATA}
           today={TODAY}
@@ -347,9 +362,9 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
       expect(container.textContent).toContain("المتابعات المرتبطة (1)");
       expect(container.textContent).toContain("بانتظار تحديد موعد");
 
-      const cancelButton = Array.from(container.querySelectorAll("button")).find(
-        (btn) => btn.textContent?.includes("إلغاء المتابعة"),
-      );
+      const cancelButton = Array.from(
+        container.querySelectorAll("button"),
+      ).find((btn) => btn.textContent?.includes("إلغاء المتابعة"));
       expect(cancelButton).toBeTruthy();
 
       await act(async () => {
@@ -360,6 +375,52 @@ describe("Follow-up Scheduling & DateStep Mounted Integration (ISS-006)", () => 
         id: FIXTURE_FOLLOW_UP_PENDING.id,
       });
       expect(container.textContent).toContain("ملغاة");
+    });
+
+    it("11. AppointmentDetail re-renders with fresh follow-up props on same root without stale state lock", async () => {
+      await render(
+        <AppointmentDetail
+          initialData={FIXTURE_DETAIL_DATA}
+          today={TODAY}
+          timezone="Africa/Cairo"
+          initialFollowUps={[FIXTURE_FOLLOW_UP_PENDING]}
+          services={[]}
+          providers={[]}
+        />,
+      );
+
+      expect(container.textContent).toContain("بانتظار تحديد موعد");
+      const activeCancelButton = Array.from(
+        container.querySelectorAll("button"),
+      ).find((btn) => btn.textContent?.includes("إلغاء المتابعة"));
+      expect(activeCancelButton).toBeTruthy();
+
+      // Re-render the same AppointmentDetail on the same root with the item updated to CANCELLED
+      const freshFollowUps: FollowUpRequestWithRelations[] = [
+        {
+          ...FIXTURE_FOLLOW_UP_PENDING,
+          status: "CANCELLED",
+        },
+      ];
+
+      await render(
+        <AppointmentDetail
+          initialData={FIXTURE_DETAIL_DATA}
+          today={TODAY}
+          timezone="Africa/Cairo"
+          initialFollowUps={freshFollowUps}
+          services={[]}
+          providers={[]}
+        />,
+      );
+
+      // Must display the cancelled badge and no active cancel button
+      expect(container.textContent).toContain("ملغاة");
+      expect(container.textContent).not.toContain("بانتظار تحديد موعد");
+      const noCancelButton = Array.from(
+        container.querySelectorAll("button"),
+      ).find((btn) => btn.textContent?.includes("إلغاء المتابعة"));
+      expect(noCancelButton).toBeFalsy();
     });
   });
 });

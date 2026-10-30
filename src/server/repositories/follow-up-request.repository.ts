@@ -7,28 +7,34 @@ import type {
 
 const notDeleted = { deletedAt: null } as const;
 
-const SERIALIZABLE_ATTEMPTS = 3;
+const TRANSACTION_RETRY_ATTEMPTS = 3;
 
 function isTransactionConflict(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    (error as { code?: unknown }).code === "P2034"
+    ((error as { code?: unknown }).code === "P2034" ||
+      (error as { code?: unknown }).code === "40P01")
   );
 }
 
-async function withSerializableRetry<T>(
+/**
+ * Executes a database operation with retry on concurrency / write-lock conflicts.
+ * Atomicity is enforced via SQL compare-and-set (UPDATE ... WHERE status = 'PENDING' AND businessId = ...)
+ * inside an interactive transaction under PostgreSQL's default ReadCommitted isolation.
+ */
+async function withTransactionRetry<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= TRANSACTION_RETRY_ATTEMPTS; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
       if (!isTransactionConflict(error)) throw error;
       lastError = error;
-      if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
+      if (attempt === TRANSACTION_RETRY_ATTEMPTS) throw error;
     }
   }
   throw lastError;
@@ -189,6 +195,8 @@ export class FollowUpRequestRepository {
 
   /**
    * Atomically transitions a follow-up request from PENDING to CANCELLED within the business boundary.
+   * Atomicity is enforced via SQL compare-and-set (UPDATE ... WHERE id = :id AND status = 'PENDING' AND businessId = :businessId)
+   * within an interactive transaction, preventing race conditions with concurrent scheduling.
    * If the record is already CANCELLED, reconciles honestly as ALREADY_CANCELLED.
    * If the record is already SCHEDULED, refuses transition as ALREADY_SCHEDULED.
    * Never overwrites a SCHEDULED appointment or cross-tenant record.
@@ -197,7 +205,7 @@ export class FollowUpRequestRepository {
     id: string,
     businessId: string,
   ): Promise<CancelFollowUpOutcome> {
-    return withSerializableRetry(async () => {
+    return withTransactionRetry(async () => {
       return (this.prisma as typeof db).$transaction(async (tx) => {
         const updateResult = await tx.followUpRequest.updateMany({
           where: {
