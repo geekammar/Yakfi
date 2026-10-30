@@ -889,7 +889,7 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return createMockAiBookingResponse({
-          service: "عيادة النور لطب الأسنان", // matches business default service
+          service: "كشف أسنان", // matches business default service
           date: "2026-11-04",
         });
       },
@@ -998,7 +998,7 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return createMockAiBookingResponse({
-          service: "عيادة النور لطب الأسنان",
+          service: "كشف أسنان",
           date: "2026-11-04",
         });
       },
@@ -1089,7 +1089,7 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return createMockAiBookingResponse({
-          service: "عيادة النور لطب الأسنان",
+          service: "كشف أسنان",
           date: "2026-11-04",
         });
       },
