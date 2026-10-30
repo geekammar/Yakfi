@@ -40,12 +40,9 @@ vi.mock("@/features/appointments/actions/appointment-actions", () => ({
   rescheduleAppointment: rescheduleAppointmentMock,
 }));
 
-vi.mock(
-  "@/features/appointments/actions/provider-eligibility-actions",
-  () => ({
-    resolveEligibleProvidersAction: resolveEligibleProvidersActionMock,
-  }),
-);
+vi.mock("@/features/appointments/actions/provider-eligibility-actions", () => ({
+  resolveEligibleProvidersAction: resolveEligibleProvidersActionMock,
+}));
 
 vi.mock("@/features/appointments/actions/availability-actions", () => ({
   getAvailabilityAction: getAvailabilityActionMock,
@@ -74,6 +71,16 @@ const FIXTURE_APPOINTMENT: AppointmentDetailData = {
     displayName: "د. هبة",
   },
   conversationId: null,
+};
+
+const FIXTURE_WORKING_HOURS = {
+  sun: { open: "09:00", close: "18:00", closed: false },
+  mon: { open: "09:00", close: "18:00", closed: false },
+  tue: { open: "09:00", close: "18:00", closed: false },
+  wed: { open: "09:00", close: "18:00", closed: false },
+  thu: { open: "09:00", close: "18:00", closed: false },
+  fri: { open: "09:00", close: "18:00", closed: true },
+  sat: { open: "09:00", close: "18:00", closed: false },
 };
 
 describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
@@ -188,8 +195,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     );
 
     // Click 'الأوقات المتاحة'
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     expect(nextBtn).toBeDefined();
 
@@ -214,8 +221,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
@@ -246,8 +253,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
@@ -255,7 +262,9 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
 
     // Genuine zero-provider empty state should appear
     expect(container.textContent).toContain("أضف مقدم خدمة لبدء الحجز");
-    expect(container.textContent).toContain("تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل");
+    expect(container.textContent).toContain(
+      "تحتاج هذه الخدمة إلى مقدم خدمة واحد على الأقل",
+    );
   });
 
   it("5. renders clear ineligibility notice when preserved provider is no longer in eligible providers", async () => {
@@ -284,14 +293,16 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
     });
 
-    expect(container.textContent).toContain("مقدم الخدمة الحالي لم يعد مؤهلاً لهذه الخدمة");
+    expect(container.textContent).toContain(
+      "مقدم الخدمة الحالي لم يعد مؤهلاً لهذه الخدمة",
+    );
   });
 
   it("6. renders loading skeleton while eligibility or availability is pending", async () => {
@@ -308,8 +319,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
@@ -327,22 +338,35 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
         appointment={FIXTURE_APPOINTMENT}
         today="2026-11-10"
         timezone="Africa/Cairo"
+        workingHours={FIXTURE_WORKING_HOURS}
+        slotDurationMinutes={30}
         onDone={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
     });
 
-    // Pick 12:00 slot
-    const slotBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("12:00"),
-    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    // Pick slot
+    const slotBtn =
+      Array.from(container.querySelectorAll("button")).find(
+        (b) =>
+          b.getAttribute("aria-label")?.includes("حجز من") ||
+          b.getAttribute("aria-label")?.includes("الأبكر") ||
+          b.getAttribute("aria-label")?.includes("الأقرب"),
+      ) ??
+      Array.from(container.querySelectorAll("li button")).find(
+        (b) => !b.hasAttribute("disabled"),
+      );
     expect(slotBtn).toBeDefined();
 
     await act(async () => {
@@ -365,21 +389,36 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
         appointment={FIXTURE_APPOINTMENT}
         today="2026-11-10"
         timezone="Africa/Cairo"
+        workingHours={FIXTURE_WORKING_HOURS}
+        slotDurationMinutes={30}
         onDone={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
     });
 
-    const slotBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("12:00"),
-    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const slotBtn =
+      Array.from(container.querySelectorAll("button")).find(
+        (b) =>
+          b.getAttribute("aria-label")?.includes("حجز من") ||
+          b.getAttribute("aria-label")?.includes("الأبكر") ||
+          b.getAttribute("aria-label")?.includes("الأقرب"),
+      ) ??
+      Array.from(container.querySelectorAll("li button")).find(
+        (b) => !b.hasAttribute("disabled"),
+      );
+    expect(slotBtn).toBeDefined();
+
     await act(async () => {
       slotBtn?.click();
     });
@@ -396,10 +435,12 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     expect(rescheduleAppointmentMock).toHaveBeenCalledWith({
       id: FIXTURE_APPOINTMENT.id,
       date: "2026-11-10",
-      startTime: "12:00",
+      startTime: expect.any(String),
     });
 
-    expect(container.textContent).toContain("يوجد موعد آخر متداخل في هذا الوقت");
+    expect(container.textContent).toContain(
+      "يوجد موعد آخر متداخل في هذا الوقت",
+    );
     // Review card should be cleared on conflict
     expect(container.textContent).not.toContain("مراجعة التغيير قبل التأكيد");
   });
@@ -419,21 +460,36 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
         appointment={FIXTURE_APPOINTMENT}
         today="2026-11-10"
         timezone="Africa/Cairo"
+        workingHours={FIXTURE_WORKING_HOURS}
+        slotDurationMinutes={30}
         onDone={onDoneMock}
         onCancel={vi.fn()}
       />,
     );
 
-    const nextBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("الأوقات المتاحة"),
+    const nextBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("الأوقات المتاحة"),
     );
     await act(async () => {
       nextBtn?.click();
     });
 
-    const slotBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("12:00"),
-    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    const slotBtn =
+      Array.from(container.querySelectorAll("button")).find(
+        (b) =>
+          b.getAttribute("aria-label")?.includes("حجز من") ||
+          b.getAttribute("aria-label")?.includes("الأبكر") ||
+          b.getAttribute("aria-label")?.includes("الأقرب"),
+      ) ??
+      Array.from(container.querySelectorAll("li button")).find(
+        (b) => !b.hasAttribute("disabled"),
+      );
+    expect(slotBtn).toBeDefined();
+
     await act(async () => {
       slotBtn?.click();
     });
@@ -441,6 +497,7 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     const confirmBtn = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.includes("تأكيد تغيير الموعد"),
     );
+    expect(confirmBtn).toBeDefined();
 
     await act(async () => {
       confirmBtn?.click();

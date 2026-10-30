@@ -132,9 +132,7 @@ export function ProviderDialog({
           isActive,
           branchId: branchId || null,
           ...(isUpgradingPolicy ? { servicePolicy: "ALL_SERVICES" } : {}),
-          ...(servicePolicy === "ALL_SERVICES"
-            ? { excludedServiceIds }
-            : {}),
+          ...(servicePolicy === "ALL_SERVICES" ? { excludedServiceIds } : {}),
         });
 
         if (result.success) {
@@ -289,7 +287,8 @@ export function ProviderDialog({
                   </div>
                   <p className="text-xs text-amber-900">
                     مقدم الخدمة مؤهل فقط للخدمات المحددة له بشكل صريح (
-                    {provider?.includedServiceIds.length ?? 0} خدمة). لن تتم إضافة الخدمات الجديدة مستقبلاً تلقائياً.
+                    {provider?.includedServiceIds.length ?? 0} خدمة). لن تتم
+                    إضافة الخدمات الجديدة مستقبلاً تلقائياً.
                   </p>
                 </div>
               </div>
@@ -328,7 +327,9 @@ export function ProviderDialog({
                       الترقية إلى سياسة جميع الخدمات التلقائية
                     </span>
                     <p className="text-[11px] text-muted-foreground">
-                      تفعيل هذا الخيار سيجعل مقدم الخدمة مؤهلاً فوراً لجميع الخدمات الحالية والمستقبلية، مع إمكانية استثناء خدمات محددة.
+                      تفعيل هذا الخيار سيجعل مقدم الخدمة مؤهلاً فوراً لجميع
+                      الخدمات الحالية والمستقبلية، مع إمكانية استثناء خدمات
+                      محددة.
                     </p>
                   </div>
                 </label>
@@ -340,7 +341,9 @@ export function ProviderDialog({
                 <SparklesIcon className="size-4 shrink-0 text-primary mt-0.5" />
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold">سياسة الخدمات التلقائية</p>
+                    <p className="text-sm font-semibold">
+                      سياسة الخدمات التلقائية
+                    </p>
                     <span className="text-[10px] font-medium bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">
                       ALL_SERVICES
                     </span>

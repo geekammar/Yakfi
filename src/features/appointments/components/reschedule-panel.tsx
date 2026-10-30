@@ -62,7 +62,7 @@ export function ReschedulePanel({
   today,
   timezone,
   workingHours,
-  slotDurationMinutes,
+  slotDurationMinutes = 30,
   eligibleProviders: eligibleProvidersProp,
   onDone,
   onCancel,
@@ -309,7 +309,8 @@ export function ReschedulePanel({
                 مقدم الخدمة الحالي لم يعد مؤهلاً لهذه الخدمة
               </p>
               <p className="text-xs text-muted-foreground">
-                وفقاً لسياسة الأهلية الحالية، لا يمكن إعادة جدولة الموعد بنفس مقدم الخدمة (
+                وفقاً لسياسة الأهلية الحالية، لا يمكن إعادة جدولة الموعد بنفس
+                مقدم الخدمة (
                 {appointment.provider?.displayName ||
                   appointment.provider?.name}
                 ).

@@ -22,7 +22,10 @@ import {
   createAppointmentRecord,
   defaultAppointmentCreateServiceDeps,
 } from "@/features/appointments/server/appointment-create-service";
-import { updateProvider, defaultTeamServiceDeps } from "@/features/staff/server/team-service";
+import {
+  defaultTeamServiceDeps,
+  updateProvider,
+} from "@/features/staff/server/team-service";
 import { db } from "@/server/db";
 import {
   appointmentRepository,
@@ -204,14 +207,16 @@ async function main(): Promise<void> {
 
     check(
       "1. Independent provider profile created without auth user account",
-      independentProvider.userId === null && independentProvider.servicePolicy === "ALL_SERVICES",
+      independentProvider.userId === null &&
+        independentProvider.servicePolicy === "ALL_SERVICES",
       `providerId=${independentProvider.id}, userId=${independentProvider.userId}`,
     );
 
     // Verify seam mapping reflects null userId without fabricating providerId as user
-    const seams = await providerRepository.listAssignmentSeams(TEST_BUSINESS_ID, [
-      independentProvider.id,
-    ]);
+    const seams = await providerRepository.listAssignmentSeams(
+      TEST_BUSINESS_ID,
+      [independentProvider.id],
+    );
     check(
       "2. listAssignmentSeams returns null userId for independent provider without user account",
       seams.length === 1 && seams[0]?.userId === null,
@@ -250,9 +255,9 @@ async function main(): Promise<void> {
         "4. Persisted appointment row links providerId while assignedUserId remains strictly null",
         Boolean(
           apptRow &&
-            apptRow.providerId === independentProvider.id &&
-            apptRow.assignedUserId === null &&
-            apptRow.status === "CONFIRMED",
+          apptRow.providerId === independentProvider.id &&
+          apptRow.assignedUserId === null &&
+          apptRow.status === "CONFIRMED",
         ),
         `providerId=${apptRow?.providerId}, assignedUserId=${apptRow?.assignedUserId}`,
       );
@@ -286,9 +291,9 @@ async function main(): Promise<void> {
       "6. Rescheduled row updates date/time while preserving providerId and null assignedUserId",
       Boolean(
         rescheduledRow &&
-          rescheduledRow.providerId === independentProvider.id &&
-          rescheduledRow.assignedUserId === null &&
-          rescheduledRow.startTime.toISOString().slice(11, 16) === rescheduleTime,
+        rescheduledRow.providerId === independentProvider.id &&
+        rescheduledRow.assignedUserId === null &&
+        rescheduledRow.startTime.toISOString().slice(11, 16) === rescheduleTime,
       ),
       `startTime=${rescheduledRow?.startTime.toISOString().slice(11, 16)}, providerId=${rescheduledRow?.providerId}`,
     );
@@ -338,7 +343,8 @@ async function main(): Promise<void> {
 
     check(
       "8. New rescheduled slot is occupied and rejects conflicting appointment with SLOT_CONFLICT",
-      !conflictingAttempt.success && conflictingAttempt.code === "SLOT_CONFLICT",
+      !conflictingAttempt.success &&
+        conflictingAttempt.code === "SLOT_CONFLICT",
       `code=${!conflictingAttempt.success ? conflictingAttempt.code : "SUCCESS"}`,
     );
 
@@ -355,10 +361,7 @@ async function main(): Promise<void> {
           },
         );
 
-      check(
-        "9. Reschedule conflict returns null",
-        conflictReschedule === null,
-      );
+      check("9. Reschedule conflict returns null", conflictReschedule === null);
 
       const unchangedRow = await db.appointment.findUnique({
         where: { id: secondBookingResult.appointmentId },
@@ -367,7 +370,7 @@ async function main(): Promise<void> {
         "10. Conflict failure leaves original appointment untouched in DB",
         Boolean(
           unchangedRow &&
-            unchangedRow.startTime.toISOString().slice(11, 16) === bookingTime,
+          unchangedRow.startTime.toISOString().slice(11, 16) === bookingTime,
         ),
         `actualStartTime=${unchangedRow?.startTime.toISOString().slice(11, 16)}`,
       );
@@ -431,11 +434,10 @@ async function main(): Promise<void> {
       !eligibleAfterExclusion.some((p) => p.id === independentProvider.id),
     );
 
-    const eligibleForServiceB =
-      await providerRepository.listEligibleForService(
-        TEST_BUSINESS_ID,
-        serviceB.id,
-      );
+    const eligibleForServiceB = await providerRepository.listEligibleForService(
+      TEST_BUSINESS_ID,
+      serviceB.id,
+    );
     check(
       "14. ALL_SERVICES provider remains eligible for non-excluded services",
       eligibleForServiceB.some((p) => p.id === independentProvider.id),
@@ -470,10 +472,11 @@ async function main(): Promise<void> {
       TEST_BUSINESS_ID,
       serviceB.id,
     );
-    const legacyEligibleFuture = await providerRepository.listEligibleForService(
-      TEST_BUSINESS_ID,
-      futureService.id,
-    );
+    const legacyEligibleFuture =
+      await providerRepository.listEligibleForService(
+        TEST_BUSINESS_ID,
+        futureService.id,
+      );
 
     check(
       "15. SPECIFIC_SERVICES provider is eligible only for explicitly assigned service",
@@ -550,11 +553,10 @@ async function main(): Promise<void> {
         TEST_BUSINESS_ID,
         futureService.id,
       );
-    const upgradedExcludedB =
-      await providerRepository.listEligibleForService(
-        TEST_BUSINESS_ID,
-        serviceB.id,
-      );
+    const upgradedExcludedB = await providerRepository.listEligibleForService(
+      TEST_BUSINESS_ID,
+      serviceB.id,
+    );
     check(
       "20. Upgraded provider now automatically covers new service while respecting exclusions",
       upgradedEligibleFuture.some((p) => p.id === legacyProvider.id) &&
@@ -616,6 +618,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("Booking acceptance DB verification failed with exception:", err);
+  console.error(
+    "Booking acceptance DB verification failed with exception:",
+    err,
+  );
   process.exit(1);
 });
