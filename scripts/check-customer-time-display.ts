@@ -10,6 +10,11 @@
  * slot identity, provider eligibility, booking conflicts, or confirmation state.
  */
 import {
+  PLAYGROUND_IDS,
+  createPlaygroundHarness,
+} from "../src/features/conversations/playground/harness";
+import type { AiResponse } from "../src/features/conversations/server/ai-contract";
+import {
   buildSlotOffer,
   slotOfferSchema,
 } from "../src/features/conversations/server/booking-offer";
@@ -17,12 +22,17 @@ import {
   extractLastBookingOffer,
   interpretOfferReply,
   parseBookingSelection,
+  parseOfferDate,
   selectionContextFromSlotOffer,
 } from "../src/features/conversations/server/booking-selection";
 import {
   buildChannelChoices,
   offerCallbackData,
 } from "../src/features/conversations/server/channel-choice";
+import {
+  formatBookingOptionsMessage,
+  receiveInboundMessage,
+} from "../src/features/conversations/server/conversation-engine";
 import { resolveOfferInteractionDisplay } from "../src/features/conversations/server/interaction-display";
 import {
   formatAppointmentTimeSpan,
@@ -610,9 +620,11 @@ async function runTests() {
   );
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 6. Legacy Offer Parsing Compatibility
+  // 6. Legacy Offer Parsing & Real Formatter Output Recovery
   // ───────────────────────────────────────────────────────────────────────────
-  console.log("\n▶ Group 6: Legacy Offer Parsing Compatibility");
+  console.log(
+    "\n▶ Group 6: Legacy Offer Parsing & Real Formatter Output Recovery",
+  );
 
   const legacyOfferText = [
     { senderType: "CUSTOMER", content: "عايز أحجز تنظيف أسنان" },
@@ -627,7 +639,7 @@ async function runTests() {
   ];
   const legacyCtx = extractLastBookingOffer(legacyOfferText);
   check(
-    "6.1 Legacy offer with '— 10:00 إلى 10:30' is parsed accurately",
+    "6.1 Legacy offer with ISO date header and '— 10:00 إلى 10:30' is parsed accurately",
     legacyCtx !== null &&
       legacyCtx.serviceName === "تنظيف أسنان" &&
       legacyCtx.date === "2026-11-01" &&
@@ -637,25 +649,175 @@ async function runTests() {
       legacyCtx.options[0]?.displayName === "د. سارة",
   );
 
-  const modernStartOnlyOfferText = [
-    { senderType: "CUSTOMER", content: "عايز أحجز كشف" },
+  // Real formatter output under START_ONLY (Arabic date & header provider mention)
+  const realStartOnlyOutput = formatBookingOptionsMessage(
+    "كشف أسنان",
+    "2026-11-01",
+    [
+      {
+        index: 1,
+        providerId: "prv_1",
+        displayName: "د. أحمد",
+        startAt: "2026-11-01T14:00",
+        endAt: "2026-11-01T14:30",
+      },
+      {
+        index: 2,
+        providerId: "prv_1",
+        displayName: "د. أحمد",
+        startAt: "2026-11-01T14:30",
+        endAt: "2026-11-01T15:00",
+      },
+    ],
+    null,
+    false,
+    "START_ONLY",
+  );
+
+  const realStartOnlyCtx = extractLastBookingOffer(
+    [{ senderType: "AI", content: realStartOnlyOutput }],
+    { referenceDate: "2026-11-01" },
+  );
+  check(
+    "6.2 Real formatter output under START_ONLY (Arabic date + header provider mention) recovers cleanly",
+    realStartOnlyCtx !== null &&
+      realStartOnlyCtx.serviceName === "كشف أسنان" &&
+      realStartOnlyCtx.date === "2026-11-01" &&
+      realStartOnlyCtx.options.length === 2 &&
+      realStartOnlyCtx.options[0]?.startTime === "14:00" &&
+      realStartOnlyCtx.options[0]?.displayName === "د. أحمد",
+    `received date: ${realStartOnlyCtx?.date}`,
+  );
+
+  // Real formatter output under FULL_RANGE (Arabic date & provider in header)
+  const realFullRangeOutput = formatBookingOptionsMessage(
+    "تنظيف أسنان",
+    "2026-11-01",
+    [
+      {
+        index: 1,
+        providerId: "prv_1",
+        displayName: "د. سارة",
+        startAt: "2026-11-01T10:00",
+        endAt: "2026-11-01T10:40",
+      },
+      {
+        index: 2,
+        providerId: "prv_1",
+        displayName: "د. سارة",
+        startAt: "2026-11-01T11:00",
+        endAt: "2026-11-01T11:40",
+      },
+    ],
+    null,
+    false,
+    "FULL_RANGE",
+  );
+
+  const realFullRangeCtx = extractLastBookingOffer(
+    [{ senderType: "AI", content: realFullRangeOutput }],
+    { referenceDate: "2026-11-01" },
+  );
+  check(
+    "6.3 Real formatter output under FULL_RANGE (Arabic date) recovers exact start and end times",
+    realFullRangeCtx !== null &&
+      realFullRangeCtx.serviceName === "تنظيف أسنان" &&
+      realFullRangeCtx.date === "2026-11-01" &&
+      realFullRangeCtx.options.length === 2 &&
+      realFullRangeCtx.options[0]?.startTime === "10:00" &&
+      realFullRangeCtx.options[0]?.endTime === "10:40" &&
+      realFullRangeCtx.options[0]?.displayName === "د. سارة",
+    `received: ${realFullRangeCtx?.options[0]?.startTime} to ${realFullRangeCtx?.options[0]?.endTime}`,
+  );
+
+  // Real formatter output with mixed providers under FULL_RANGE
+  const realMixedOutput = formatBookingOptionsMessage(
+    "كشف أسنان",
+    "2026-11-01",
+    [
+      {
+        index: 1,
+        providerId: "prv_1",
+        displayName: "د. سارة",
+        startAt: "2026-11-01T10:00",
+        endAt: "2026-11-01T10:30",
+      },
+      {
+        index: 2,
+        providerId: "prv_2",
+        displayName: "د. أحمد",
+        startAt: "2026-11-01T11:00",
+        endAt: "2026-11-01T11:30",
+      },
+    ],
+    null,
+    false,
+    "FULL_RANGE",
+  );
+
+  const realMixedCtx = extractLastBookingOffer(
+    [{ senderType: "AI", content: realMixedOutput }],
+    { referenceDate: "2026-11-01" },
+  );
+  check(
+    "6.4 Real formatter output with mixed providers recovers individual provider display names",
+    realMixedCtx !== null &&
+      realMixedCtx.options[0]?.displayName === "د. سارة" &&
+      realMixedCtx.options[1]?.displayName === "د. أحمد",
+  );
+
+  // Real formatter output with 'isMoreTimes' header
+  const moreTimesOutput = formatBookingOptionsMessage(
+    "كشف أسنان",
+    "2026-11-01",
+    [
+      {
+        index: 1,
+        providerId: "prv_1",
+        displayName: "د. أحمد",
+        startAt: "2026-11-01T16:00",
+        endAt: "2026-11-01T16:30",
+      },
+    ],
+    null,
+    true, // isMoreTimes
+    "FULL_RANGE",
+  );
+  const moreTimesCtx = extractLastBookingOffer(
+    [{ senderType: "AI", content: moreTimesOutput }],
+    { referenceDate: "2026-11-01" },
+  );
+  check(
+    "6.5 'isMoreTimes' header ('إليك أوقاتاً أخرى متاحة لخدمة...') is recovered accurately",
+    moreTimesCtx !== null &&
+      moreTimesCtx.serviceName === "كشف أسنان" &&
+      moreTimesCtx.options[0]?.startTime === "16:00" &&
+      moreTimesCtx.options[0]?.endTime === "16:30",
+  );
+
+  // Safe failure on ambiguous/corrupted date
+  const corruptHeaderCtx = extractLastBookingOffer([
     {
       senderType: "AI",
       content:
-        'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم 2026-11-01:\n' +
-        "1. 2:00 م\n" +
-        "2. 2:30 م\n" +
-        "يرجى اختيار الموعد المناسب لإتمام الحجز.",
+        'تتوفر المواعيد التالية لخدمة "كشف أسنان" يوم غير محدد في المستقبل:\n1. 10:00 ص',
     },
-  ];
-  const modernCtx = extractLastBookingOffer(modernStartOnlyOfferText);
+  ]);
   check(
-    "6.2 Modern START_ONLY offer with '1. 2:00 م' is parsed accurately",
-    modernCtx !== null &&
-      modernCtx.serviceName === "كشف أسنان" &&
-      modernCtx.date === "2026-11-01" &&
-      modernCtx.options.length === 2 &&
-      modernCtx.options[0]?.startTime === "14:00",
+    "6.6 Corrupted or ambiguous date in offer header fails safely to null without guessing",
+    corruptHeaderCtx === null,
+  );
+
+  // Deterministic parseOfferDate standalone tests
+  check(
+    "6.7 parseOfferDate deterministically resolves ISO, Arabic month, and rejects invalid dates",
+    parseOfferDate("2026-11-01") === "2026-11-01" &&
+      parseOfferDate("الأحد، 1 نوفمبر 2026") === "2026-11-01" &&
+      parseOfferDate("الأحد، 1 نوفمبر", "2026-11-01") === "2026-11-01" &&
+      parseOfferDate("اليوم الأحد، 25 أكتوبر", "2026-10-25") === "2026-10-25" &&
+      parseOfferDate("غدًا الإثنين، 26 أكتوبر", "2026-10-25") ===
+        "2026-10-26" &&
+      parseOfferDate("يوم غير صالح") === null,
   );
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -673,6 +835,271 @@ async function runTests() {
     "7.2 Time display preference is strictly presentation-level and preserves domain entities",
     slotOfferSchema.safeParse(offerStartOnly).success === true,
   );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 8. Full Conversation-Engine Integration via receiveInboundMessage
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log(
+    "\n▶ Group 8: Conversation Engine Entry-Point Execution (START_ONLY vs FULL_RANGE)",
+  );
+
+  function createMockAiBookingResponse(params: {
+    service: string;
+    date: string;
+  }): AiResponse {
+    return {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: `المواعيد المتاحة يوم ${params.date}:`,
+      summary: "طلب حجز كشف",
+      handoffReason: null,
+      safetyAssessment: "safe",
+      extraction: {
+        service: params.service,
+        date: params.date,
+        time: null,
+        provider: null,
+      },
+      factUpdates: [
+        { key: "service", operation: "set", value: params.service },
+        { key: "date", operation: "set", value: params.date },
+      ],
+    };
+  }
+
+  // ── 8.1 START_ONLY Engine Flow: Offer -> Selection -> Confirmation ──────────
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return createMockAiBookingResponse({
+          service: "عيادة النور لطب الأسنان", // matches business default service
+          date: "2026-11-04",
+        });
+      },
+    };
+
+    // Customer initiates booking
+    const turn1 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "عايز كشف أسنان يوم 2026-11-04",
+      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+      externalId: "ext-turn-1",
+    });
+
+    const offerOutbound = harness.deliveredOutbound[0];
+    check(
+      "8.1a Inbound booking turn under START_ONLY renders offer copy with start-only times",
+      turn1.ok === true &&
+        offerOutbound !== undefined &&
+        offerOutbound.body.includes("1. 9:00 ص") &&
+        !offerOutbound.body.includes("1. 9:00 ص إلى"),
+      `outbound body: ${offerOutbound?.body}`,
+    );
+
+    check(
+      "8.1b Channel choice button label under START_ONLY displays start-only time '1️⃣ 9:00 ص'",
+      offerOutbound?.choices?.groups?.[0]?.[0]?.label === "1️⃣ 9:00 ص",
+      `received label: ${offerOutbound?.choices?.groups?.[0]?.[0]?.label}`,
+    );
+
+    const callbackData1 =
+      offerOutbound?.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data;
+    check(
+      "8.1c Reply markup inline keyboard contains structured callback data",
+      typeof callbackData1 === "string" && callbackData1.startsWith("fp:"),
+    );
+
+    // Mechanical selection via button callback data
+    const callsBeforeSelection = modelCalls;
+    const turn2 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: callbackData1!,
+      receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
+      externalId: "ext-turn-2",
+    });
+
+    check(
+      "8.1d Mechanical button callback executes with strictly 0 additional model calls",
+      modelCalls === callsBeforeSelection,
+      `calls before: ${callsBeforeSelection}, calls after: ${modelCalls}`,
+    );
+
+    check(
+      "8.1e Booking confirmed mechanically in harness with exactly 1 appointment write",
+      turn2.ok === true && harness.appointments.length === 1,
+    );
+
+    const appt1 = harness.appointments[0];
+    check(
+      "8.1f Appointment entity facts are complete and invariant (startAt, endAt, providerId, status)",
+      appt1?.startAt === "2026-11-04T09:00" &&
+        appt1?.endAt === "2026-11-04T09:30" &&
+        appt1?.providerId === PLAYGROUND_IDS.PROV_1 &&
+        appt1?.status === "CONFIRMED",
+      `appt facts: start=${appt1?.startAt}, end=${appt1?.endAt}, status=${appt1?.status}`,
+    );
+
+    const confirmationOutbound = harness.deliveredOutbound[1];
+    check(
+      "8.1g Confirmation copy under START_ONLY uses 'الساعة 9:00 ص'",
+      confirmationOutbound !== undefined &&
+        confirmationOutbound.body.includes("الساعة 9:00 ص") &&
+        !confirmationOutbound.body.includes("من 9:00 ص إلى 9:30 ص"),
+      `confirmation: ${confirmationOutbound?.body}`,
+    );
+  }
+
+  // ── 8.2 FULL_RANGE Engine Flow: Offer -> Selection -> Confirmation ──────────
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "FULL_RANGE",
+        confirmationMode: "automatic",
+      },
+    });
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return createMockAiBookingResponse({
+          service: "عيادة النور لطب الأسنان",
+          date: "2026-11-04",
+        });
+      },
+    };
+
+    // Customer initiates booking
+    const turn1 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "عايز كشف أسنان يوم 2026-11-04",
+      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+      externalId: "ext-full-1",
+    });
+
+    const offerOutbound = harness.deliveredOutbound[0];
+    check(
+      "8.2a Inbound booking turn under FULL_RANGE renders offer copy with full interval '9:00 ص إلى 9:30 ص'",
+      turn1.ok === true &&
+        offerOutbound !== undefined &&
+        offerOutbound.body.includes("1. 9:00 ص إلى 9:30 ص"),
+      `outbound body: ${offerOutbound?.body}`,
+    );
+
+    check(
+      "8.2b Channel choice button label under FULL_RANGE displays full interval '1️⃣ 9:00 ص إلى 9:30 ص'",
+      offerOutbound?.choices?.groups?.[0]?.[0]?.label ===
+        "1️⃣ 9:00 ص إلى 9:30 ص",
+    );
+
+    // Mechanical text selection "1"
+    const callsBeforeSelection = modelCalls;
+    const turn2 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "1",
+      receivedAt: new Date("2026-11-01T10:01:00Z").toISOString(),
+      externalId: "ext-full-2",
+    });
+
+    check(
+      "8.2c Mechanical text selection '1' executes with strictly 0 additional model calls",
+      modelCalls === callsBeforeSelection,
+    );
+
+    check(
+      "8.2d Booking under FULL_RANGE produces identical appointment start/end facts to START_ONLY",
+      turn2.ok === true &&
+        harness.appointments.length === 1 &&
+        harness.appointments[0]?.startAt === "2026-11-04T09:00" &&
+        harness.appointments[0]?.endAt === "2026-11-04T09:30",
+    );
+
+    const confirmationOutbound = harness.deliveredOutbound[1];
+    check(
+      "8.2e Confirmation copy under FULL_RANGE uses 'من 9:00 ص إلى 9:30 ص'",
+      confirmationOutbound !== undefined &&
+        confirmationOutbound.body.includes("من 9:00 ص إلى 9:30 ص"),
+    );
+  }
+
+  // ── 8.3 Mid-Flight Business Preference Change with Outstanding Offer ───────
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY", // initially START_ONLY
+        confirmationMode: "automatic",
+      },
+    });
+
+    let modelCalls = 0;
+    harness.deps.ai = {
+      providerName: "test-spying-ai",
+      async respond(): Promise<AiResponse> {
+        modelCalls++;
+        return createMockAiBookingResponse({
+          service: "عيادة النور لطب الأسنان",
+          date: "2026-11-04",
+        });
+      },
+    };
+
+    // Render offer under START_ONLY
+    await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: "عايز كشف أسنان يوم 2026-11-04",
+      receivedAt: new Date("2026-11-01T10:00:00Z").toISOString(),
+      externalId: "ext-mid-1",
+    });
+
+    const offerOutbound = harness.deliveredOutbound[0];
+    const originalCallback =
+      offerOutbound?.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data;
+    if (!originalCallback) throw new Error("originalCallback missing");
+
+    // Operator changes business preference mid-flight to FULL_RANGE
+    (harness.business as any).appointmentTimeDisplay = "FULL_RANGE";
+
+    // Customer clicks the button with the original callback token
+    const callsBefore = modelCalls;
+    const turn2 = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber,
+      from: harness.customer.phone,
+      text: originalCallback!,
+      receivedAt: new Date("2026-11-01T10:02:00Z").toISOString(),
+      externalId: "ext-mid-2",
+    });
+
+    check(
+      "8.3a Mid-flight preference change preserves valid callback-to-slot mapping and books successfully",
+      turn2.ok === true &&
+        harness.appointments.length === 1 &&
+        harness.appointments[0]?.startAt === "2026-11-04T09:00",
+    );
+
+    check(
+      "8.3b Mid-flight selection executes with strictly 0 additional model calls",
+      modelCalls === callsBefore,
+    );
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // Summary

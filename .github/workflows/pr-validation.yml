@@ -105,6 +105,7 @@ jobs:
           pnpm check:elapsed-booking-slots
           pnpm check:assistant-settings
           pnpm test:assistant-settings
+          pnpm test:settings
           pnpm check:conv-core-01
           pnpm check:conv-core-02
           pnpm check:conv-core-03a
@@ -164,6 +165,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         run: |
           pnpm check:welcome-intro-db
+          pnpm check:customer-time-display-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

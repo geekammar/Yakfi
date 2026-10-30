@@ -68,10 +68,98 @@ function normalizeDigits(text: string): string {
 
 export const OFFER_HEADER_PHRASE = "تتوفر المواعيد التالية لخدمة";
 const OFFER_HEADER =
-  /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
+  /^(?:تتوفر المواعيد التالية ل(?:خدمة|متابعة)|إليك أوقات(?:اً|ا)? أخرى متاحة ل(?:خدمة|متابعة))\s*"([^"]+)"(?:\s*مع\s*([^"\n:]+?))?\s*يوم\s*([^\n:]+):?/m;
 const OFFER_LINE =
   /^(\d+)[.)]\s*(?:(.+?)\s*—\s*)?(\d{1,2}:\d{2}(?:\s*[صم])?)(?:\s*إلى\s*(\d{1,2}:\d{2}(?:\s*[صم])?))?\s*$/;
 const FOLLOW_UP_TAG = /\[متابعة:\s*([^\]]+)\]/;
+
+const ARABIC_MONTH_LOOKUP: Record<string, number> = {
+  يناير: 1,
+  فبراير: 2,
+  مارس: 3,
+  أبريل: 4,
+  ابريل: 4,
+  مايو: 5,
+  يونيو: 6,
+  يوليو: 7,
+  أغسطس: 8,
+  اغسطس: 8,
+  سبتمبر: 9,
+  أكتوبر: 10,
+  اكتوبر: 10,
+  نوفمبر: 11,
+  ديسمبر: 12,
+};
+
+/**
+ * Deterministically parse an offer date string from header text.
+ *
+ * Supported formats:
+ * - ISO format: "2026-11-01"
+ * - Arabic calendar format emitted by formatArabicDate:
+ *   e.g. "الأحد، 1 نوفمبر 2026", "الأحد، 1 نوفمبر", "اليوم الأحد، 25 أكتوبر", "غدًا الإثنين، 26 أكتوبر"
+ *
+ * Falls back safely to null if ambiguous or unparseable. Never invents dates.
+ */
+export function parseOfferDate(
+  rawDate: string,
+  referenceDate?: string | Date,
+): string | null {
+  const normalized = normalizeDigits(rawDate.trim());
+
+  // 1. Check direct ISO date format: YYYY-MM-DD
+  const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(normalized);
+  if (isoMatch && isoMatch[1] && isoMatch[2] && isoMatch[3]) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10);
+    const d = parseInt(isoMatch[3], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+
+  // 2. Check Arabic calendar date: "[اليوم/غدًا] [السبت/الأحد...] [،] <day> <month_name> [<year>]"
+  const arabicMatch =
+    /(\d{1,2})\s*(?:من\s*)?(يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)(?:\s*(\d{4}))?/.exec(
+      normalized,
+    );
+
+  if (arabicMatch && arabicMatch[1] && arabicMatch[2]) {
+    const d = parseInt(arabicMatch[1], 10);
+    const m = ARABIC_MONTH_LOOKUP[arabicMatch[2]];
+    if (!m || d < 1 || d > 31) return null;
+
+    let y: number;
+    if (arabicMatch[3]) {
+      y = parseInt(arabicMatch[3], 10);
+    } else {
+      const ref = referenceDate
+        ? typeof referenceDate === "string"
+          ? new Date(referenceDate)
+          : referenceDate
+        : new Date();
+      const refYear = Number.isNaN(ref.getTime())
+        ? new Date().getFullYear()
+        : ref.getFullYear();
+      const refMonth = Number.isNaN(ref.getTime())
+        ? new Date().getMonth() + 1
+        : ref.getMonth() + 1;
+
+      // Handle year wrap-around near year boundary (e.g. Dec -> Jan)
+      if (m < refMonth - 6) {
+        y = refYear + 1;
+      } else if (m > refMonth + 6) {
+        y = refYear - 1;
+      } else {
+        y = refYear;
+      }
+    }
+
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  return null;
+}
 
 function normalizeTimeTo24h(timeStr: string): string {
   const trimmed = timeStr.trim();
@@ -92,6 +180,7 @@ function normalizeTimeTo24h(timeStr: string): string {
  */
 export function extractLastBookingOffer(
   recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  options?: { referenceDate?: string | Date },
 ): BookingSelectionContext | null {
   for (let i = recentChronological.length - 1; i >= 0; i -= 1) {
     const msg = recentChronological[i];
@@ -105,10 +194,14 @@ export function extractLastBookingOffer(
       return null;
     }
     const header = msg.content.match(OFFER_HEADER);
-    if (!header || !header[1] || !header[2]) continue;
+    if (!header || !header[1] || !header[3]) continue;
+    const resolvedDate = parseOfferDate(header[3], options?.referenceDate);
+    if (!resolvedDate) continue;
+
+    const headerProviderName = header[2] ? header[2].trim() : undefined;
     const followUpMatch = msg.content.match(FOLLOW_UP_TAG);
     const followUpRequestId = followUpMatch ? followUpMatch[1]?.trim() : null;
-    const options: OfferedBookingOption[] = [];
+    const slotOptions: OfferedBookingOption[] = [];
     for (const line of msg.content.split("\n")) {
       const parsed = line.trim().match(OFFER_LINE);
       if (!parsed || !parsed[1] || !parsed[3]) {
@@ -116,17 +209,18 @@ export function extractLastBookingOffer(
       }
       const rawStart = parsed[3];
       const rawEnd = parsed[4] ?? parsed[3];
-      options.push({
+      slotOptions.push({
         index: Number(parsed[1]),
-        displayName: (parsed[2] ?? "").trim(),
+        displayName: (parsed[2] ?? headerProviderName ?? "").trim(),
         startTime: normalizeTimeTo24h(rawStart),
         endTime: normalizeTimeTo24h(rawEnd),
       });
     }
+    if (slotOptions.length === 0) continue;
     return {
       serviceName: header[1],
-      date: header[2],
-      options,
+      date: resolvedDate,
+      options: slotOptions,
       ...(followUpRequestId ? { followUpRequestId } : {}),
     };
   }
@@ -196,8 +290,9 @@ export function parseBookingSelection(
 export function tryParseBookingSelection(
   customerText: string,
   recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  options?: { referenceDate?: string | Date },
 ): { context: BookingSelectionContext; selection: BookingSelection } | null {
-  const context = extractLastBookingOffer(recentChronological);
+  const context = extractLastBookingOffer(recentChronological, options);
   if (!context) return null;
   const selection = parseBookingSelection(customerText);
   if (!selection) return null;

@@ -9,15 +9,26 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.5 (commit `18c383a45a337c7ce37719f560e980373dfce810`).
+**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.5 (commit `18c383a88c87596879eb9b6344db98a6c90ec2aa`).
 
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).
 - **Persistence & Validation**: Added additive column `appointment_time_display` (TEXT, NOT NULL, DEFAULT `'START_ONLY'`) to `businesses` via migration `20261030180000_business_appointment_time_display`. Validated at boundary via `appointmentTimeDisplaySchema` and `businessSettingsSchema`.
-- **Settings UX**: Arabic radio group control in booking settings («إعدادات الحجز») with two options («البداية فقط» with example «2:00 م», «الفترة كاملة» with example «2:00 م إلى 2:40 م»). Authorized server-side update boundary (`saveBusinessSettings`) strictly enforced; zero AI calls.
-- **Centralized Presentation**: Centralized in `presentation-formatters.ts` (`formatAppointmentTimeSpan`, `formatConfirmationTime`, `formatSlotChoiceLabel`, `formatBookingOptionsCopy`). Normalizes customer surfaces (buttons and textual copy) from previous mixed presentation. Defines safe fallback for missing/unavailable end time to start time without inventing end times.
-- **Protocol Stability & Compatibility**: Slot callback IDs (`fp:<token>:<index>`), choice IDs (`String(option.index)`), and slot values remain unchanged. Historical offer parsing (`extractLastBookingOffer`) retains compatibility with both legacy full intervals and start-only formats.
-- **Verification**: Verified by dedicated offline suite `scripts/check-customer-time-display.ts` (`pnpm check:customer-time-display`) wired into PR CI (`pr-validation.yml`).
+- **Settings UX**: Arabic radio group control in booking settings («إعدادات الحجز») with two options («البداية فقط» with example «2:00 م», «الفترة كاملة» with example «2:00 م إلى 2:40 م»). Authorized server-side update boundary (`updateBusinessSettings`) strictly enforced; zero AI calls. Mounted component lifecycle and save/reopen verified in `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`).
+- **Centralized Presentation & Formatter Output Recovery**: Centralized in `presentation-formatters.ts` (`formatAppointmentTimeSpan`, `formatConfirmationTime`, `formatSlotChoiceLabel`, `formatBookingOptionsCopy`). Normalizes customer surfaces (buttons and textual copy) from previous mixed presentation. Defines safe fallback for missing/unavailable end time to start time without inventing end times. Enhanced `extractLastBookingOffer` in `booking-selection.ts` with pure `parseOfferDate` supporting actual formatter output (Arabic dates and header provider mentions) as well as legacy ISO date headers, while ambiguous or malformed headers fail safely to `null` without regex intent guessing.
+- **Protocol Stability & Invariant Mapping**: Slot callback IDs (`fp:<token>:<index>`), choice IDs (`String(option.index)`), and slot values remain unchanged. Mid-flight preference changes while an offer is outstanding preserve valid callback-to-slot mapping and complete booking with 0 model calls.
+- **Reviewed Production Cutover Order**:
+  1. Pin final feature commit SHA on `feat/customer-time-display-preference`.
+  2. Operator triggers additive production database migration through `.github/workflows/production-db-migrate.yml` targeting the pinned SHA (executes `prisma migrate deploy` to add `appointment_time_display` column with safe `DEFAULT 'START_ONLY'`).
+  3. Verify database health and column presence on production Neon PostgreSQL before any code requiring the column is deployed.
+  4. Human code review and manual merge of PR #68 into `main`.
+  5. Automatic Vercel production deployment triggered by merge to `main`.
+  6. Authenticated post-deployment operational health and live customer acceptance verification.
+- **Verification Suite**:
+  - Offline domain suite `scripts/check-customer-time-display.ts` (61/61 automated checks across 8 groups, covering schemas, authorization boundaries, formatters, edge cases, stable tokens, legacy offer recovery, model call counting, and full `receiveInboundMessage` entry-point turns).
+  - Mounted component test `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`) verifying React Hook Form lifecycle, dirty state, and payload submission in jsdom.
+  - Real disposable PostgreSQL integration suite `scripts/check-customer-time-display-db.ts` (`pnpm check:customer-time-display-db`) verifying real column persistence, readback, and strict tenant isolation in CI.
+  - Browser tests in Playwright reporting skips separately from green CI check passes.
 
 **Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.3 (PR #54 merged baseline, commit `c6eacd7`). Design system typography and token implementation:
 

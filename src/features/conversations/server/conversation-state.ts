@@ -896,9 +896,10 @@ function pushTopic(
  */
 export function deriveConversationStateFromHistory(
   recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  options?: { referenceDate?: string | Date },
 ): ConversationState {
   const base = emptyConversationState();
-  const offer = extractLastBookingOffer(recentChronological);
+  const offer = extractLastBookingOffer(recentChronological, options);
   if (!offer) return base;
 
   const pendingOffer: ConversationPendingOffer = {
