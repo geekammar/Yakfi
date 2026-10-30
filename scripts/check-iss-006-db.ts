@@ -49,12 +49,17 @@ import {
 type Check = { id: number; label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
 
-function check(id: number, label: string, pass: boolean, details?: string): void {
+function check(
+  id: number,
+  label: string,
+  pass: boolean,
+  details?: string,
+): void {
   checks.push({ id, label, pass, details });
   const status = pass ? "✅ PASS" : "❌ FAIL";
-  console.log(
-    `${status} [DB-${String(id).padStart(2, "0")}/06]: ${label}${details ? ` (${details})` : ""}`,
-  );
+  const num = String(id).padStart(2, "0");
+  const detailStr = details ? ` (${details})` : "";
+  console.log(`${status} [DB-${num}/06]: ${label}${detailStr}`);
 }
 
 function classifyTarget(
@@ -338,15 +343,19 @@ async function main(): Promise<void> {
       where: { id: fuDupRace.id },
     });
 
+    const dupAppId = (successes[0] as any)?.appointmentId;
+    const dupValid =
+      successes.length === 1 &&
+      failures.length === 1 &&
+      appointmentsForDupRace === 1 &&
+      fuDupInDb?.status === "SCHEDULED" &&
+      fuDupInDb.scheduledAppointmentId === dupAppId;
+
     check(
       3,
-      "Controlled duplicate-conversion race yields exactly one appointment (no orphan)",
-      successes.length === 1 &&
-        failures.length === 1 &&
-        appointmentsForDupRace === 1 &&
-        fuDupInDb?.status === "SCHEDULED" &&
-        fuDupInDb.scheduledAppointmentId === (successes[0] as any).appointmentId,
-      `successes=${successes.length}, failures=${failures.length}, appCount=${appointmentsForDupRace}`,
+      "Controlled duplicate-conversion race yields exactly one appointment",
+      dupValid,
+      `successes=${successes.length}, appCount=${appointmentsForDupRace}`,
     );
 
     // =========================================================================
@@ -407,20 +416,22 @@ async function main(): Promise<void> {
         appsForRaceInDb === 0;
       raceOutcome = "Cancel won cleanly (0 appointments, CANCELLED)";
     } else if (!raceCancelRes.success && raceSchedRes.success) {
-      // Schedule won: request must be SCHEDULED, scheduledAppointmentId set, 1 appointment
+      // Schedule won: request must be SCHEDULED, scheduledAppointmentId set
+      const schedAppId = (raceSchedRes as any)?.appointmentId;
+      const refusalMsg = raceCancelRes.message.includes("تم حجز موعد له مسبقاً");
       raceValid =
         fuRaceInDb?.status === "SCHEDULED" &&
-        fuRaceInDb?.scheduledAppointmentId === (raceSchedRes as any).appointmentId &&
+        fuRaceInDb?.scheduledAppointmentId === schedAppId &&
         appsForRaceInDb === 1 &&
-        raceCancelRes.message.includes("تم حجز موعد له مسبقاً");
+        refusalMsg;
       raceOutcome = "Schedule won cleanly (1 appointment, SCHEDULED)";
     }
 
     check(
       4,
-      "Controlled cancel-vs-schedule race produces exactly one valid terminal state",
+      "Controlled cancel-vs-schedule race produces valid terminal state",
       raceValid,
-      `${raceOutcome}; cancelSuccess=${raceCancelRes.success}, schedSuccess=${raceSchedRes.success}`,
+      `${raceOutcome}; cancelSuccess=${raceCancelRes.success}`,
     );
 
     // =========================================================================
@@ -469,15 +480,16 @@ async function main(): Promise<void> {
 
     check(
       5,
-      "Terminal cancellation states reconcile honestly (PENDING, CANCELLED, SCHEDULED, Cross-tenant)",
+      "Terminal cancellation states reconcile honestly",
       terminalHonesty,
-      `cancelPending=${cancelPending.success}, cancelSecond=${cancelSecond.message}, cancelScheduled=${cancelScheduled.success}, foreign=${cancelForeign.message}`,
+      `pending=${cancelPending.success}, 2nd=${cancelSecond.message}, foreign=${cancelForeign.message}`,
     );
 
     // =========================================================================
     // 6. Historical records are preserved in real DB
     // =========================================================================
-    const HIST_NOTES = "Comprehensive post-operative follow-up: check surgical sutures, prescribe antibiotic course";
+    const HIST_NOTES =
+      "Comprehensive post-operative follow-up: check surgical sutures";
     const fuHist = await followUpRequestRepository.create({
       businessId: BIZ_A,
       customerId: CUST_A,
@@ -505,9 +517,12 @@ async function main(): Promise<void> {
     const custPreserved = snapshotAfter.customerId === snapshotBefore.customerId;
     const srvPreserved = snapshotAfter.serviceId === snapshotBefore.serviceId;
     const sourcePreserved = snapshotAfter.sourceAppointmentId === snapshotBefore.sourceAppointmentId;
-    const createdAtPreserved = snapshotAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
+    const createdAtPreserved =
+      snapshotAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
     const deletedAtUntouched = snapshotAfter.deletedAt === null;
-    const statusTransitioned = snapshotBefore.status === "PENDING" && snapshotAfter.status === "CANCELLED";
+    const statusTransitioned =
+      snapshotBefore.status === "PENDING" &&
+      snapshotAfter.status === "CANCELLED";
 
     const allPreserved =
       notesPreserved &&
@@ -520,9 +535,9 @@ async function main(): Promise<void> {
 
     check(
       6,
-      "Historical follow-up database record is preserved byte-for-byte on cancellation",
+      "Historical follow-up database record is preserved on cancellation",
       allPreserved,
-      `notesMatch=${notesPreserved}, notDeleted=${deletedAtUntouched}, status=${snapshotAfter.status}`,
+      `notesMatch=${notesPreserved}, notDeleted=${deletedAtUntouched}`,
     );
   } finally {
     // Clean up test fixtures in reverse dependency order

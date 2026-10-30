@@ -24,13 +24,13 @@
 
 import type { Prisma } from "@/generated/prisma/client";
 
+import { cancelFollowUpRequest } from "@/features/appointments/actions/follow-up-actions";
 import {
   formatArabicDate,
   formatArabicDayMonth,
   formatArabicMonth,
   formatArabicWeekday,
 } from "@/features/appointments/components/smart-create/date-format";
-import { cancelFollowUpRequest } from "@/features/appointments/actions/follow-up-actions";
 import { createFollowUpRequestSchema } from "@/features/appointments/schemas/follow-up-schema";
 import {
   createAppointmentRecord,
@@ -348,7 +348,19 @@ async function run() {
   );
 
   // --- 4. Pending cancellation works; terminal states reconcile honestly ---
-  const stateStore = new Map<string, { id: string; businessId: string; status: string; sourceAppointmentId: string | null; notes: string; customerId: string; serviceId: string; createdAt: Date; deletedAt: Date | null }>([
+  type FollowUpTestRecord = {
+    id: string;
+    businessId: string;
+    status: string;
+    sourceAppointmentId: string | null;
+    notes: string;
+    customerId: string;
+    serviceId: string;
+    createdAt: Date;
+    deletedAt: Date | null;
+  };
+
+  const stateStore = new Map<string, FollowUpTestRecord>([
     [
       FU_PENDING,
       {
@@ -776,12 +788,15 @@ async function run() {
   const recordAfter = stateStore.get(HIST_ID)!;
 
   const notesPreserved = recordAfter.notes === snapshotBefore.notes;
-  const sourceAppPreserved = recordAfter.sourceAppointmentId === snapshotBefore.sourceAppointmentId;
+  const sourceAppPreserved =
+    recordAfter.sourceAppointmentId === snapshotBefore.sourceAppointmentId;
   const custPreserved = recordAfter.customerId === snapshotBefore.customerId;
   const servicePreserved = recordAfter.serviceId === snapshotBefore.serviceId;
-  const createdAtPreserved = recordAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
+  const createdAtPreserved =
+    recordAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
   const notDeleted = recordAfter.deletedAt === null;
-  const onlyStatusChanged = recordAfter.status === "CANCELLED" && snapshotBefore.status === "PENDING";
+  const onlyStatusChanged =
+    recordAfter.status === "CANCELLED" && snapshotBefore.status === "PENDING";
 
   const allHistoricalPreserved =
     cancelOutcome.outcome === "CANCELLED" &&
@@ -795,9 +810,9 @@ async function run() {
 
   check(
     12,
-    "No historical follow-up record is silently deleted or rewritten (before/after preserved)",
+    "No historical follow-up record is silently deleted or rewritten",
     allHistoricalPreserved,
-    `outcome=${cancelOutcome.outcome}, notesPreserved=${notesPreserved}, notDeleted=${notDeleted}, status=${recordAfter.status}`,
+    `outcome=${cancelOutcome.outcome}, notDeleted=${notDeleted}, status=${recordAfter.status}`,
   );
 
   console.log("\n=======================================================");
