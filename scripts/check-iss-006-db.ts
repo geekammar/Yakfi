@@ -120,14 +120,14 @@ async function main(): Promise<void> {
         {
           id: BIZ_A,
           name: "عيادة الأمل (Tenant A)",
-          slug: `amal-a-${RUN_ID}`,
+          whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
           timezone: "Africa/Cairo",
           confirmationMode: "manual",
         },
         {
           id: BIZ_B,
           name: "عيادة النور (Tenant B)",
-          slug: `nour-b-${RUN_ID}`,
+          whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
           timezone: "Africa/Cairo",
           confirmationMode: "manual",
         },
@@ -139,9 +139,12 @@ async function main(): Promise<void> {
         id: BRANCH_A,
         businessId: BIZ_A,
         name: "الفرع الرئيسي",
-        slug: `main-${RUN_ID}`,
-        isDefault: true,
       },
+    });
+
+    await db.business.update({
+      where: { id: BIZ_A },
+      data: { defaultBranchId: BRANCH_A },
     });
 
     await db.user.createMany({
@@ -149,6 +152,7 @@ async function main(): Promise<void> {
         {
           id: USER_A,
           email: `${USER_A}@flowpilot.invalid`,
+          emailVerified: false,
           name: "مدير المنشأة أ",
           businessId: BIZ_A,
           role: "ADMIN",
@@ -156,6 +160,7 @@ async function main(): Promise<void> {
         {
           id: USER_B,
           email: `${USER_B}@flowpilot.invalid`,
+          emailVerified: false,
           name: "مدير المنشأة ب",
           businessId: BIZ_B,
           role: "ADMIN",
@@ -178,7 +183,6 @@ async function main(): Promise<void> {
         businessId: BIZ_A,
         name: "جلسة متابعة أسنان",
         durationMinutes: 30,
-        price: 150,
         isActive: true,
       },
     });
@@ -197,7 +201,7 @@ async function main(): Promise<void> {
       where: {
         businessId: BIZ_A,
         customerId: CUST_A,
-        followUpRequests: { some: { id: fuAlone.id } },
+        scheduledFollowUpRequest: { id: fuAlone.id },
       },
     });
 
@@ -326,7 +330,7 @@ async function main(): Promise<void> {
     const appointmentsForDupRace = await db.appointment.count({
       where: {
         businessId: BIZ_A,
-        followUpRequests: { some: { id: fuDupRace.id } },
+        scheduledFollowUpRequest: { id: fuDupRace.id },
       },
     });
 
@@ -388,7 +392,7 @@ async function main(): Promise<void> {
     const appsForRaceInDb = await db.appointment.count({
       where: {
         businessId: BIZ_A,
-        followUpRequests: { some: { id: fuRaceCS.id } },
+        scheduledFollowUpRequest: { id: fuRaceCS.id },
       },
     });
 
@@ -534,6 +538,10 @@ async function main(): Promise<void> {
     });
     await db.service.deleteMany({
       where: { businessId: { in: [BIZ_A, BIZ_B] } },
+    });
+    await db.business.updateMany({
+      where: { id: { in: [BIZ_A, BIZ_B] } },
+      data: { defaultBranchId: null },
     });
     await db.branch.deleteMany({
       where: { businessId: { in: [BIZ_A, BIZ_B] } },

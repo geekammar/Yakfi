@@ -9,6 +9,7 @@ import {
   createAppointmentRecord,
   defaultAppointmentCreateServiceDeps,
   type AppointmentCreateActor,
+  type AppointmentCreateServiceDeps,
 } from "@/features/appointments/server/appointment-create-service";
 import type { CreateAppointmentActionResult } from "@/features/appointments/types";
 import { requireUser } from "@/server/auth/guards";
@@ -18,8 +19,10 @@ import {
   providerRepository,
   serviceRepository,
   userRepository,
+  type FollowUpRequestRepository,
+  type UserRepository,
 } from "@/server/repositories";
-import type { FollowUpRequestWithRelations } from "@/types/domain";
+import type { FollowUpRequestWithRelations, UserRole } from "@/types/domain";
 
 import { revalidatePath } from "next/cache";
 

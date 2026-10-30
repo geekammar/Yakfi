@@ -20,10 +20,8 @@
 import { AppointmentDetail } from "@/features/appointments/components/appointment-detail";
 import { FollowUpList } from "@/features/appointments/components/follow-up-list";
 import { DateStep } from "@/features/appointments/components/smart-create/date-step";
-import type {
-  AppointmentDetailData,
-  FollowUpRequestWithRelations,
-} from "@/types/domain";
+import type { AppointmentDetailData } from "@/features/appointments/types";
+import type { FollowUpRequestWithRelations } from "@/types/domain";
 
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
