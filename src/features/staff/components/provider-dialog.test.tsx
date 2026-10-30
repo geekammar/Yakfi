@@ -21,10 +21,12 @@ import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createProviderActionMock, updateProviderActionMock } = vi.hoisted(() => ({
-  createProviderActionMock: vi.fn(),
-  updateProviderActionMock: vi.fn(),
-}));
+const { createProviderActionMock, updateProviderActionMock } = vi.hoisted(
+  () => ({
+    createProviderActionMock: vi.fn(),
+    updateProviderActionMock: vi.fn(),
+  }),
+);
 
 vi.mock("@/features/staff/actions/team-actions", () => ({
   createProviderAction: createProviderActionMock,

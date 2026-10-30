@@ -136,10 +136,7 @@ export function ReschedulePanel({
     if (eligibleProvidersQuery.isError) {
       return "تعذر تحميل بيانات مقدمي الخدمة حالياً. يرجى المحاولة مرة أخرى.";
     }
-    if (
-      eligibleProvidersQuery.data &&
-      !eligibleProvidersQuery.data.success
-    ) {
+    if (eligibleProvidersQuery.data && !eligibleProvidersQuery.data.success) {
       return (
         eligibleProvidersQuery.data.error.message ||
         "تعذر التحقق من أهلية مقدمي الخدمة."
@@ -331,7 +328,9 @@ export function ReschedulePanel({
               <div className="flex items-start gap-2">
                 <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <p className="font-semibold">تعذر تحميل بيانات مقدمي الخدمة</p>
+                  <p className="font-semibold">
+                    تعذر تحميل بيانات مقدمي الخدمة
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {eligibilityErrorMessage}
                   </p>

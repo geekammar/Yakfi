@@ -590,8 +590,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     expect(container.textContent).not.toContain("أضف مقدم خدمة لبدء الحجز");
     // Must render honest error alert and retry button
     expect(container.textContent).toContain("تعذر تحميل بيانات مقدمي الخدمة");
-    const retryBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("إعادة المحاولة"),
+    const retryBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("إعادة المحاولة"),
     );
     expect(retryBtn).toBeDefined();
   });
@@ -632,8 +632,8 @@ describe("ReschedulePanel mounted integration tests (ISS-005)", () => {
     expect(container.textContent).toContain(
       "الخدمة المطلوبة غير موجودة في هذا الفرع",
     );
-    const retryBtn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("إعادة المحاولة"),
+    const retryBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("إعادة المحاولة"),
     );
     expect(retryBtn).toBeDefined();
   });

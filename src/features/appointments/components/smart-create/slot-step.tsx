@@ -216,11 +216,17 @@ export function SlotStep({
   // e.g. rescheduling where the provider is preserved), suggestions must NEVER
   // suggest an alternative provider and must strictly operate on the preserved provider's slots.
   const allowAlternativeProviders = Boolean(onSelectProvider);
-  const candidateSlotsForSuggestions = allowAlternativeProviders ? rawSlots : slots;
+  const candidateSlotsForSuggestions = allowAlternativeProviders
+    ? rawSlots
+    : slots;
 
   // Smart suggestions derived from available slots
   const smartSuggestions = useMemo(() => {
-    if (!candidateSlotsForSuggestions || candidateSlotsForSuggestions.length === 0) return [];
+    if (
+      !candidateSlotsForSuggestions ||
+      candidateSlotsForSuggestions.length === 0
+    )
+      return [];
     return deriveSmartSuggestions({
       slots: candidateSlotsForSuggestions,
       eligibleProviders: allowAlternativeProviders

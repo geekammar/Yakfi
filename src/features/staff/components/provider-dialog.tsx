@@ -343,10 +343,12 @@ export function ProviderDialog({
                 {explicitPolicyUpgrade ? (
                   <div className="rounded-md border border-emerald-300 bg-emerald-50/80 p-2.5 text-xs text-emerald-900 space-y-1">
                     <p className="font-semibold text-emerald-950">
-                      سيتم تطبيق الترقية إلى جميع الخدمات تلقائياً عند الضغط على حفظ.
+                      سيتم تطبيق الترقية إلى جميع الخدمات تلقائياً عند الضغط على
+                      حفظ.
                     </p>
                     <p className="text-[11px] text-emerald-800">
-                      يمكنك إلغاء تحديد هذا الخيار في أي وقت قبل الحفظ للرجوع عن الترقية.
+                      يمكنك إلغاء تحديد هذا الخيار في أي وقت قبل الحفظ للرجوع عن
+                      الترقية.
                     </p>
                   </div>
                 ) : null}
