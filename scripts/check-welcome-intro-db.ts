@@ -72,7 +72,9 @@ const BUSINESS_ACTOR = {
 const TEST_BUSINESS_ID = `biz-${RUN_ID}`;
 const TEST_BUSINESS_NAME = "مركز الأمل الطبي";
 const TEST_PHONE = `+2010${Math.floor(10000000 + Math.random() * 90000000)}`;
-const CUSTOMER_PHONE = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
+const CUSTOMER_PHONE_1 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
+const CUSTOMER_PHONE_2 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
+const CUSTOMER_PHONE_3 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
 
 function classifyTarget(
   url: string,
@@ -199,7 +201,7 @@ async function main(): Promise<void> {
     sentMessages.length = 0;
     const initialResult = await receiveInboundMessage(engineDeps, {
       externalId: `${RUN_ID}-msg-1`,
-      from: CUSTOMER_PHONE,
+      from: CUSTOMER_PHONE_1,
       to: TEST_PHONE,
       text: "/start",
       receivedAt: new Date().toISOString(),
@@ -271,7 +273,7 @@ async function main(): Promise<void> {
     sentMessages.length = 0;
     const overriddenResult = await receiveInboundMessage(engineDeps, {
       externalId: `${RUN_ID}-msg-2`,
-      from: CUSTOMER_PHONE,
+      from: CUSTOMER_PHONE_2,
       to: TEST_PHONE,
       text: "/start",
       receivedAt: new Date().toISOString(),
@@ -305,7 +307,7 @@ async function main(): Promise<void> {
     sentMessages.length = 0;
     const finalResult = await receiveInboundMessage(engineDeps, {
       externalId: `${RUN_ID}-msg-3`,
-      from: CUSTOMER_PHONE,
+      from: CUSTOMER_PHONE_3,
       to: TEST_PHONE,
       text: "/start",
       receivedAt: new Date().toISOString(),
