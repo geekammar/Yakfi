@@ -3752,7 +3752,6 @@ async function runInboundTurn(
       senderType: message.senderType,
       content: message.content,
       createdAt: message.createdAt,
-      sentAt: message.sentAt,
     }));
     // CTX-01 (PERF-04) — the current customer message reaches the assistant
     // EXACTLY ONCE, through the CURRENT message slot (`sources.message`
@@ -3776,7 +3775,6 @@ async function runInboundTurn(
         senderType: message.senderType,
         content: message.content,
         createdAt: message.createdAt,
-        sentAt: message.sentAt,
       }));
 
     const selectionScope: BookingSelectionScope = {

@@ -26,6 +26,7 @@ import {
   parseBookingSelection,
   parseOfferDate,
   selectionContextFromSlotOffer,
+  tryParseBookingSelection,
 } from "../src/features/conversations/server/booking-selection";
 import {
   buildChannelChoices,
