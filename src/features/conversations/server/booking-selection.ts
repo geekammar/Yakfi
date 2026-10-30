@@ -70,8 +70,20 @@ export const OFFER_HEADER_PHRASE = "تتوفر المواعيد التالية �
 const OFFER_HEADER =
   /تتوفر المواعيد التالية ل(?:خدمة|متابعة)\s*"([^"]+)"\s*يوم\s*(\d{4}-\d{2}-\d{2})/;
 const OFFER_LINE =
-  /^(\d+)[.)]\s*(.+?)\s*—\s*(\d{1,2}:\d{2})\s*إلى\s*(\d{1,2}:\d{2})\s*$/;
+  /^(\d+)[.)]\s*(?:(.+?)\s*—\s*)?(\d{1,2}:\d{2}(?:\s*[صم])?)(?:\s*إلى\s*(\d{1,2}:\d{2}(?:\s*[صم])?))?\s*$/;
 const FOLLOW_UP_TAG = /\[متابعة:\s*([^\]]+)\]/;
+
+function normalizeTimeTo24h(timeStr: string): string {
+  const trimmed = timeStr.trim();
+  const match = /^(\d{1,2}):(\d{2})(?:\s*([صم]))?$/.exec(trimmed);
+  if (!match) return trimmed.padStart(5, "0");
+  let h = parseInt(match[1]!, 10);
+  const m = match[2]!;
+  const period = match[3];
+  if (period === "م" && h < 12) h += 12;
+  if (period === "ص" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}:${m}`;
+}
 
 /**
  * Extract the last canonical booking-options offer from recent history.
@@ -99,14 +111,16 @@ export function extractLastBookingOffer(
     const options: OfferedBookingOption[] = [];
     for (const line of msg.content.split("\n")) {
       const parsed = line.trim().match(OFFER_LINE);
-      if (!parsed || !parsed[1] || !parsed[2] || !parsed[3] || !parsed[4]) {
+      if (!parsed || !parsed[1] || !parsed[3]) {
         continue;
       }
+      const rawStart = parsed[3];
+      const rawEnd = parsed[4] ?? parsed[3];
       options.push({
         index: Number(parsed[1]),
-        displayName: parsed[2].trim(),
-        startTime: parsed[3].padStart(5, "0"),
-        endTime: parsed[4].padStart(5, "0"),
+        displayName: (parsed[2] ?? "").trim(),
+        startTime: normalizeTimeTo24h(rawStart),
+        endTime: normalizeTimeTo24h(rawEnd),
       });
     }
     return {

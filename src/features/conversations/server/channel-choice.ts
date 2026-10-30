@@ -14,6 +14,7 @@ import type { BookingOffer } from "./booking-offer";
 import {
   areSlotsSingleProvider,
   formatSlotChoiceLabel,
+  type AppointmentTimeDisplayPreference,
 } from "./presentation-formatters";
 
 export type ChannelChoiceItem = {
@@ -81,6 +82,9 @@ export function parseOfferCallback(text: string): OfferCallback | null {
  */
 export function buildChannelChoices(
   offer: BookingOffer,
+  options?: {
+    timeDisplayPreference?: AppointmentTimeDisplayPreference;
+  },
 ): ChannelChoicePresentation {
   switch (offer.kind) {
     case "WELCOME":
@@ -202,11 +206,15 @@ export function buildChannelChoices(
 
     case "SLOT": {
       const isSingleProvider = areSlotsSingleProvider(offer.options);
+      const pref =
+        options?.timeDisplayPreference ??
+        offer.timeDisplayPreference ??
+        "START_ONLY";
       const slotItems: ChannelChoiceItem[] = offer.options
         .slice(0, 4)
         .map((option) => ({
           id: String(option.index),
-          label: formatSlotChoiceLabel(option, isSingleProvider),
+          label: formatSlotChoiceLabel(option, isSingleProvider, pref),
           value: option.startAt,
           role: "option" as const,
         }));

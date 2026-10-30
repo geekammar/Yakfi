@@ -128,6 +128,7 @@ jobs:
           pnpm check:readable-interaction-history
           pnpm check:greeting-resume-flow
           pnpm check:unified-booking-choices
+          pnpm check:customer-time-display
           pnpm check:semantic-date-ranges
           pnpm check:ai-provider
           pnpm check:conversation-control

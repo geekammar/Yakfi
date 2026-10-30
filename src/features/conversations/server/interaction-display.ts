@@ -23,7 +23,8 @@ import { isOfferLive } from "./booking-offer";
 import { parseOfferCallback, type OfferCallback } from "./channel-choice";
 import {
   areSlotsSingleProvider,
-  formatArabicTime12h,
+  formatAppointmentTimeSpan,
+  type AppointmentTimeDisplayPreference,
 } from "./presentation-formatters";
 
 export const HISTORICAL_PROTOCOL_FALLBACK_TEXT =
@@ -321,7 +322,15 @@ export function resolveOfferInteractionDisplay(
         const actionIndex = callback.action.index;
         const option = offer.options.find((o) => o.index === actionIndex);
         if (option) {
-          const time = formatArabicTime12h(option.startAt);
+          const pref: AppointmentTimeDisplayPreference =
+            offer.timeDisplayPreference === "FULL_RANGE"
+              ? "FULL_RANGE"
+              : "START_ONLY";
+          const time = formatAppointmentTimeSpan(
+            option.startAt,
+            option.endAt,
+            pref,
+          );
           const isSingle = areSlotsSingleProvider(offer.options);
           const suffix =
             !isSingle && option.displayName ? ` (${option.displayName})` : "";

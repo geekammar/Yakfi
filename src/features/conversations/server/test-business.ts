@@ -58,6 +58,7 @@ export async function ensureTestBusiness(
         timezone: "Africa/Cairo",
         slotDurationMinutes: 30,
         confirmationMode: "automatic",
+        appointmentTimeDisplay: "START_ONLY",
         workingHours: {
           sun: { open: "10:00", close: "21:00", closed: false },
           mon: { open: "10:00", close: "21:00", closed: false },

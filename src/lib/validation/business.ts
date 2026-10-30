@@ -78,6 +78,55 @@ export const confirmationModeSchema = z.enum(
 );
 
 /**
+ * Customer-facing appointment time display preference:
+ * - START_ONLY: البداية فقط (e.g. "2:00 م") — default.
+ * - FULL_RANGE: الفترة كاملة (e.g. "2:00 م إلى 2:40 م").
+ * Presentation only: does not change appointment start/end, duration,
+ * availability, slot identity, provider eligibility, booking conflicts,
+ * or confirmation state.
+ */
+export const APPOINTMENT_TIME_DISPLAY_VALUES = [
+  "START_ONLY",
+  "FULL_RANGE",
+] as const;
+
+export type AppointmentTimeDisplayValue =
+  (typeof APPOINTMENT_TIME_DISPLAY_VALUES)[number];
+
+export const APPOINTMENT_TIME_DISPLAY_LABELS: Record<
+  AppointmentTimeDisplayValue,
+  string
+> = {
+  START_ONLY: "البداية فقط",
+  FULL_RANGE: "الفترة كاملة",
+};
+
+export const APPOINTMENT_TIME_DISPLAY_OPTIONS: ReadonlyArray<{
+  value: AppointmentTimeDisplayValue;
+  label: string;
+  hint: string;
+  example: string;
+}> = [
+  {
+    value: "START_ONLY",
+    label: APPOINTMENT_TIME_DISPLAY_LABELS.START_ONLY,
+    hint: "عرض وقت بداية الموعد فقط للعميل.",
+    example: "مثال: 2:00 م",
+  },
+  {
+    value: "FULL_RANGE",
+    label: APPOINTMENT_TIME_DISPLAY_LABELS.FULL_RANGE,
+    hint: "عرض وقت بداية ونهاية الموعد كاملاً للعميل.",
+    example: "مثال: 2:00 م إلى 2:40 م",
+  },
+];
+
+export const appointmentTimeDisplaySchema = z.enum(
+  APPOINTMENT_TIME_DISPLAY_VALUES,
+  "اختر طريقة عرض وقت الموعد للعميل",
+);
+
+/**
  * Supported timezones (promoted from the onboarding feature in PROMPT-09
  * so the settings surface shares the same list; onboarding re-exports for
  * backward compatibility within its own feature).
@@ -123,6 +172,7 @@ const createBusinessSchema = z.object({
   workingHours: workingHoursSchema.optional(),
   slotDurationMinutes: z.number().int().min(5).max(480).optional(),
   confirmationMode: confirmationModeSchema.optional(),
+  appointmentTimeDisplay: appointmentTimeDisplaySchema.optional(),
   faqs: z.array(faqEntrySchema).max(50, "الحد الأقصى ٥٠ معلومة").optional(),
   cancellationPolicy: z.string().trim().max(2000).optional(),
   // Assistant configuration (PROMPT-AI-UX-01): the repository layer carries

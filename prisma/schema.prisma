@@ -94,6 +94,11 @@ model Business {
   // extending the list needs no migration. Default preserves the
   // pre-existing behavior (PENDING).
   confirmationMode      String    @default("manual") @map("confirmation_mode")
+  // Customer-facing appointment time display preference:
+  // "START_ONLY" (البداية فقط — default) or "FULL_RANGE" (الفترة كاملة).
+  // Presentation only: does not alter start/end, duration, availability, slot identity,
+  // provider eligibility, booking conflicts, or confirmation state.
+  appointmentTimeDisplay String   @default("START_ONLY") @map("appointment_time_display")
   /// JSON FAQ entries: [{ "question": "...", "answer": "..." }]
   faqs                  Json?
   cancellationPolicy    String?

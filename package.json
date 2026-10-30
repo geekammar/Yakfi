@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.78.5",
+  "version": "0.79.0",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -40,6 +40,7 @@
     "check:channel-neutral-choices": "tsx scripts/check-channel-neutral-choices.ts",
     "check:readable-interaction-history": "tsx scripts/check-readable-interaction-history.ts",
     "check:unified-booking-choices": "tsx scripts/check-unified-booking-choices.ts",
+    "check:customer-time-display": "tsx scripts/check-customer-time-display.ts",
     "check:semantic-date-ranges": "tsx scripts/check-semantic-date-ranges.ts",
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
     "check:meta-embedded-signup": "tsx scripts/check-meta-embedded-signup.ts",

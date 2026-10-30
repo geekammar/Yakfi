@@ -49,6 +49,57 @@ export const ARABIC_MONTHS = [
   "ديسمبر",
 ] as const;
 
+export type AppointmentTimeDisplayPreference = "START_ONLY" | "FULL_RANGE";
+
+/**
+ * Format an appointment time span for customer display according to business preference.
+ *
+ * - START_ONLY: returns 12-hour Arabic start time, e.g. "2:00 م".
+ * - FULL_RANGE: returns 12-hour Arabic start time to end time, e.g. "2:00 م إلى 2:40 م".
+ * - Safe fallback: if preference is FULL_RANGE but end time is absent or invalid,
+ *   falls back to START_ONLY ("2:00 م") without inventing an unavailable end time.
+ * - Authoritative 12h Arabic formatting with explicit "ص" / "م".
+ *   Midnight 00:00 -> "12:00 ص", noon 12:00 -> "12:00 م".
+ */
+export function formatAppointmentTimeSpan(
+  startAt: string,
+  endAt?: string | null,
+  preference: AppointmentTimeDisplayPreference = "START_ONLY",
+): string {
+  const start12 = formatArabicTime12h(startAt);
+  if (preference !== "FULL_RANGE" || !endAt) {
+    return start12;
+  }
+  const end12 = formatArabicTime12h(endAt);
+  if (!end12 || end12 === start12) {
+    return start12;
+  }
+  return `${start12} إلى ${end12}`;
+}
+
+/**
+ * Format appointment confirmation time phrasing according to business preference.
+ *
+ * Example for a 14:00-14:40 appointment:
+ * - START_ONLY: "الساعة 2:00 م"
+ * - FULL_RANGE: "من 2:00 م إلى 2:40 م"
+ * - Fallback when endAt is missing/unavailable: "الساعة 2:00 م"
+ */
+export function formatConfirmationTime(
+  startAt: string,
+  endAt?: string | null,
+  preference: AppointmentTimeDisplayPreference = "START_ONLY",
+): string {
+  const start12 = formatArabicTime12h(startAt);
+  if (preference === "FULL_RANGE" && endAt) {
+    const end12 = formatArabicTime12h(endAt);
+    if (end12 && end12 !== start12) {
+      return `من ${start12} إلى ${end12}`;
+    }
+  }
+  return `الساعة ${start12}`;
+}
+
 /**
  * Format a 24-hour wall-clock time ("HH:mm" or "YYYY-MM-DDTHH:mm") into 12-hour
  * Arabic display with explicit "ص" / "م".
@@ -164,12 +215,19 @@ export function areSlotsSingleProvider(
  *
  * If `isSingleProvider` is true, omits provider name repetition.
  * If false (different providers), appends the provider's display name.
+ *
+ * Respects business `timeDisplayPreference` ("START_ONLY" vs "FULL_RANGE").
  */
 export function formatSlotChoiceLabel(
   slot: SlotOptionPresentation,
   isSingleProvider: boolean,
+  timeDisplayPreference: AppointmentTimeDisplayPreference = "START_ONLY",
 ): string {
-  const time = formatArabicTime12h(slot.startAt);
+  const time = formatAppointmentTimeSpan(
+    slot.startAt,
+    slot.endAt,
+    timeDisplayPreference,
+  );
   if (isSingleProvider || !slot.displayName) {
     return `${slot.index}️⃣ ${time}`;
   }
@@ -301,8 +359,16 @@ export function formatBookingOptionsCopy(params: {
   options: ReadonlyArray<SlotOptionPresentation>;
   followUpRequestId?: string | null;
   isMoreTimes?: boolean;
+  timeDisplayPreference?: AppointmentTimeDisplayPreference;
 }): string {
-  const { serviceName, date, options, followUpRequestId, isMoreTimes } = params;
+  const {
+    serviceName,
+    date,
+    options,
+    followUpRequestId,
+    isMoreTimes,
+    timeDisplayPreference = "START_ONLY",
+  } = params;
   const singleProvider = areSlotsSingleProvider(options);
   const providerName =
     singleProvider && options[0]?.displayName
@@ -322,9 +388,11 @@ export function formatBookingOptionsCopy(params: {
   }
 
   const lines = options.map((opt) => {
-    const start12 = formatArabicTime12h(opt.startAt);
-    const end12 = opt.endAt ? formatArabicTime12h(opt.endAt) : "";
-    const timeSpan = end12 ? `${start12} إلى ${end12}` : start12;
+    const timeSpan = formatAppointmentTimeSpan(
+      opt.startAt,
+      opt.endAt,
+      timeDisplayPreference,
+    );
 
     if (singleProvider || !opt.displayName) {
       return `${opt.index}. ${timeSpan}`;

@@ -9,6 +9,16 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
+**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.5 (commit `18c383a45a337c7ce37719f560e980373dfce810`).
+
+- **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
+- **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).
+- **Persistence & Validation**: Added additive column `appointment_time_display` (TEXT, NOT NULL, DEFAULT `'START_ONLY'`) to `businesses` via migration `20261030180000_business_appointment_time_display`. Validated at boundary via `appointmentTimeDisplaySchema` and `businessSettingsSchema`.
+- **Settings UX**: Arabic radio group control in booking settings («إعدادات الحجز») with two options («البداية فقط» with example «2:00 م», «الفترة كاملة» with example «2:00 م إلى 2:40 م»). Authorized server-side update boundary (`saveBusinessSettings`) strictly enforced; zero AI calls.
+- **Centralized Presentation**: Centralized in `presentation-formatters.ts` (`formatAppointmentTimeSpan`, `formatConfirmationTime`, `formatSlotChoiceLabel`, `formatBookingOptionsCopy`). Normalizes customer surfaces (buttons and textual copy) from previous mixed presentation. Defines safe fallback for missing/unavailable end time to start time without inventing end times.
+- **Protocol Stability & Compatibility**: Slot callback IDs (`fp:<token>:<index>`), choice IDs (`String(option.index)`), and slot values remain unchanged. Historical offer parsing (`extractLastBookingOffer`) retains compatibility with both legacy full intervals and start-only formats.
+- **Verification**: Verified by dedicated offline suite `scripts/check-customer-time-display.ts` (`pnpm check:customer-time-display`) wired into PR CI (`pr-validation.yml`).
+
 **Product version: v0.77.0 (feature branch; candidate PR)** — `Yakfi Wave B: Typography & Design System Tokens`. Baseline: v0.76.3 (PR #54 merged baseline, commit `c6eacd7`). Design system typography and token implementation:
 
 1. **Circular Font-Sans Fix**: Repaired the circular `--font-sans: var(--font-sans)` mapping in `src/app/globals.css` to properly map to loaded `IBM Plex Sans Arabic` (`var(--font-arabic)`), restoring intended typography across all UI text, headings, controls, and body elements.

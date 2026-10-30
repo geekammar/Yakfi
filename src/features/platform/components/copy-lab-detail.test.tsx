@@ -940,6 +940,7 @@ describe("Muse Spacing Observations Real Component Verification", () => {
       address: "",
       slotDurationMinutes: 30,
       confirmationMode: "automatic",
+      appointmentTimeDisplay: "START_ONLY",
       cancellationPolicy: "",
       defaultServiceBookingEnabled: true,
       defaultBookingServiceId: "srv-1",
