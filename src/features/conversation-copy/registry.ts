@@ -180,6 +180,24 @@ export const COPY_REGISTRY = [
     source: { file: AI, symbol: "GREETING_INVITE", exported: false },
   },
 
+  // ── welcome.* — the fresh/idle conversation welcome introduction ─────────
+
+  {
+    key: "welcome.intro",
+    category: "greeting",
+    humanLabel: "مقدمة الترحيب عند بدء المحادثة",
+    defaultText:
+      "أهلاً بك في {businessName}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:",
+    classification: "EDITABLE_TEMPLATE",
+    placeholders: ["businessName"],
+    requiredPlaceholders: ["businessName"],
+    source: {
+      file: ENGINE,
+      symbol: "DEFAULT_WELCOME_INTRO_TEMPLATE",
+      exported: true,
+    },
+  },
+
   // ── identity.* — the deterministic business-identity confirmation ────────
 
   {

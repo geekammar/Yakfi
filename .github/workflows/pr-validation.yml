@@ -21,6 +21,20 @@ jobs:
     name: PR Quality Gates & Regression Suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flowpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -135,6 +149,20 @@ jobs:
           pnpm test:appointment-cancel
           pnpm test:login-form
           pnpm check:qa-harness
+          pnpm check:copy-lab
+          pnpm check:welcome-intro-runtime
+
+      - name: Deploy Prisma schema to test PostgreSQL
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+        run: pnpm db:deploy
+
+      - name: Conversation Lab integration checks (real disposable DB)
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+        run: |
+          pnpm check:copy-lab-db
+          pnpm check:welcome-intro-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

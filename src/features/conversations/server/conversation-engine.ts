@@ -233,11 +233,14 @@ import type {
   AiTelemetry,
   AiTelemetryAttempt,
 } from "@/server/integrations/ai/types";
+import { resolveStoredCopy } from "@/features/conversation-copy/override-service";
+import { renderCopyText } from "@/features/conversation-copy/render";
 import type {
   AppointmentRepository,
   BranchRepository,
   BusinessRepository,
   ConversationRepository,
+  CopyOverrideRepository,
   CustomerRepository,
   FollowUpRequestRepository,
   InboundDedupeRepository,
@@ -253,6 +256,7 @@ import {
   businessRepository,
   conversationRepository,
   conversationStateRepository,
+  copyOverrideRepository,
   customerRepository,
   followUpRequestRepository,
   inboundDedupeRepository,
@@ -432,6 +436,7 @@ export type ConversationEngineDeps = {
     FollowUpRequestRepository,
     "getEligibleForChannel" | "findById" | "updateStatus"
   >;
+  copyOverrideRepository?: Pick<CopyOverrideRepository, "getPublished">;
   ai: ConversationAi;
   transport: MessageTransport;
   /**
@@ -458,6 +463,7 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   providerRepository,
   appointmentRepository,
   followUpRequestRepository,
+  copyOverrideRepository,
   ai: policyBackedAi,
   transport: offlineMessageTransport,
   requiredSemanticCapability: "structured_turn",
@@ -644,6 +650,65 @@ function bookingEmptyReasonMessage(
       return "لا تتوفر مواعيد حالياً — سيتواصل معك أحد أعضاء الفريق.";
   }
 }
+
+export const DEFAULT_WELCOME_INTRO_TEMPLATE =
+  "أهلاً بك في {businessName}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:";
+
+export const FIXED_WELCOME_CHOICES_BODY =
+  "\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة\n(يمكنك الاختيار من الخيارات أعلاه أو كتابة طلبك مباشرة في أي وقت)";
+
+/**
+ * Resolves the fresh/idle /start welcome message.
+ *
+ * It queries the Conversation Lab override repository for `welcome.intro` via
+ * `resolveStoredCopy`. If an override is present and passes the current validation
+ * contract, it renders the introduction with the server-derived `businessName`.
+ * If no override exists, or if reading the store fails, or if rendering fails,
+ * it safely falls back to the canonical code-default text.
+ *
+ * The final message is composed of the rendered introduction followed by the
+ * fixed numbered choices and instructions (`FIXED_WELCOME_CHOICES_BODY`), ensuring
+ * choice IDs, callback handlers, and state navigation remain 100% deterministic.
+ */
+export async function resolveWelcomeMessage(
+  deps: ConversationEngineDeps,
+  businessName: string,
+): Promise<string> {
+  const fallbackIntro = `أهلاً بك في ${businessName}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:`;
+
+  try {
+    const copyRepo = deps.copyOverrideRepository ?? copyOverrideRepository;
+    const resolution = await resolveStoredCopy("welcome.intro", {
+      getPublished: (k) => copyRepo.getPublished(k),
+      save: async () => {
+        throw new Error("read-only turn resolution");
+      },
+      remove: async () => {
+        throw new Error("read-only turn resolution");
+      },
+      recordHistory: async () => null,
+      listHistory: async () => [],
+      findHistoryById: async () => null,
+    });
+
+    if (!resolution.ok) {
+      return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
+    }
+
+    const renderResult = renderCopyText("welcome.intro", resolution.text, {
+      businessName,
+    });
+
+    if (!renderResult.ok) {
+      return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
+    }
+
+    return `${renderResult.text}${FIXED_WELCOME_CHOICES_BODY}`;
+  } catch {
+    return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
+  }
+}
+
 export function formatBookingOptionsMessage(
   serviceName: string,
   date: string,
@@ -5688,7 +5753,7 @@ async function runInboundTurn(
         }
       }
 
-      const welcomeMsg = `أهلاً بك في ${business.name}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة\n(يمكنك الاختيار من الخيارات أعلاه أو كتابة طلبك مباشرة في أي وقت)`;
+      const welcomeMsg = await resolveWelcomeMessage(deps, business.name);
       const choices = welcomeOffer
         ? buildChannelChoices(welcomeOffer)
         : undefined;
