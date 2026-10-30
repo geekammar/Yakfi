@@ -27,8 +27,12 @@
  */
 import { COPY_REGISTRY } from "@/features/conversation-copy/index";
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
+import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
+import { getPublishFeedbackText } from "@/features/platform/components/copy-lab-logic";
+import { SettingsScreen } from "@/features/settings/components/settings-screen";
+import type { BusinessSettingsView } from "@/features/settings/types";
 
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -63,6 +67,10 @@ vi.mock("@/features/platform/actions/copy-lab-actions", () => ({
   publishCopyOverrideAction,
   resetCopyOverrideAction,
   restoreCopyOverrideAction,
+}));
+
+vi.mock("@/features/settings/actions/settings-actions", () => ({
+  updateBusinessSettingsAction: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 /** A non-registry effective text, so the test proves the READ data lands. */
@@ -137,6 +145,42 @@ function forbiddenState(): GetCopyLabEntryStateResult {
   };
 }
 
+/** A successful read carrying one restorable history row. */
+function successWithHistoryItem(
+  entry: CopyRegistryEntry,
+  historyId: string,
+  resultText: string,
+): GetCopyLabEntryStateResult {
+  return {
+    success: true,
+    data: {
+      resolution: {
+        ok: true,
+        key: entry.key,
+        text: EFFECTIVE_TEXT,
+        source: "CODE_DEFAULT",
+      },
+      published: { success: true, data: { override: null } },
+      history: {
+        success: true,
+        data: {
+          items: [
+            {
+              id: historyId,
+              copyKey: entry.key,
+              action: "PUBLISH",
+              previousText: null,
+              resultText,
+              actorId: "platform-operator-1",
+              createdAt: "2026-10-09T10:00:00.000Z",
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
 // ── Minimal render harness (no testing-library dependency) ────────────────────
 
 /** The Arabic labels the component renders; asserted by tests. */
@@ -190,6 +234,23 @@ function loadingBlock(): Element | null {
 
 function editorTextarea(): HTMLTextAreaElement | null {
   return document.querySelector("textarea");
+}
+
+function typeInEditor(textarea: HTMLTextAreaElement, value: string): void {
+  const nativeSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  nativeSetter?.call(textarea, value);
+  textarea.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function findButton(textMatch: string): HTMLButtonElement | null {
+  return (
+    (Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes(textMatch),
+    ) as HTMLButtonElement | undefined) ?? null
+  );
 }
 
 beforeEach(() => {
@@ -492,5 +553,428 @@ describe("CopyLabDetail drawer touch contract (UX-LAB-01D-P1 / B3)", () => {
     // The gesture was a tap attempt, not a swipe past the close threshold, so
     // the drawer must not have closed on its own.
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
+  it("shows connected runtime coverage badge and scope for welcome.intro", async () => {
+    const entry = findEntry("welcome.intro");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "connected badge must render").toContain("متصل بالمحادثة");
+    expect(content, "connected scope must explain /start turn").toContain(
+      "مقدمة الترحيب عند بدء محادثة جديدة أو خاملة عبر أمر /start",
+    );
+    expect(
+      content,
+      "connected scope must clarify button and continuation isolation",
+    ).toContain("لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط");
+    expect(
+      content,
+      "must state platform overrides are platform-wide",
+    ).toContain("التجاوزات المنشورة تسري على مستوى كافة المنشآت");
+  });
+
+  it("shows unwired coverage badge and honest stored-resolution guidance for unwired keys", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "unwired badge must render").toContain("غير متصل بعد");
+    expect(
+      content,
+      "must clarify publishing does not change live replies",
+    ).toContain("الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء");
+    expect(
+      content,
+      "authoring, preview, history and restore remain available",
+    ).toContain(
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",
+    );
+  });
+
+  it("maintains strict independence of PROTECTED_COPY from runtime connection", async () => {
+    const entry = findEntry("handoff.human_request");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content, "renders unwired badge").toContain("غير متصل بعد");
+    expect(content, "renders protected notice").toContain(
+      "نص محمي — غير قابل للتعديل",
+    );
+    expect(
+      editorTextarea(),
+      "never renders editor for protected entry",
+    ).toBeNull();
+    expect(content, "no publish button for protected entry").not.toContain(
+      "نشر النص",
+    );
+  });
+
+  it("honest publish feedback distinguishes connected vs unwired stored resolution", () => {
+    const welcome = getPublishFeedbackText(
+      "welcome.intro",
+      "PLATFORM_OVERRIDE",
+    );
+    const unwired = getPublishFeedbackText(
+      "greeting.invite",
+      "PLATFORM_OVERRIDE",
+    );
+
+    expect(welcome).toContain("مسار /start للمحادثة الجديدة/الخاملة");
+    expect(welcome).toContain("لا يعني ذلك التحقق من تسليم المزود");
+    expect(unwired).toContain("غير متصل بالمحادثة الحية بعد");
+    expect(unwired).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+});
+
+describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR66 Review)", () => {
+  it("protected guidance contains no promise of editing/restoring and no mutation controls", async () => {
+    const entry = findEntry("handoff.human_request");
+    expect(entry.classification).toBe("PROTECTED_COPY");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content).toContain("هذا النص محمي لحماية مسارات التحويل الآمن");
+    expect(content).toContain(
+      "ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة",
+    );
+    expect(content).not.toContain("تظل إمكانية التعديل");
+    expect(content).not.toContain(PUBLISH_LABEL);
+    expect(content).not.toContain(RESET_LABEL);
+    expect(content).not.toContain(RESTORE_LABEL);
+    expect(editorTextarea()).toBeNull();
+  });
+
+  it("editable unwired guidance still explains available authoring features", async () => {
+    const entry = findEntry("greeting.invite");
+    expect(entry.classification).toBe("EDITABLE_COPY");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const content = text();
+    expect(content).toContain("غير متصل بعد");
+    expect(content).toContain(
+      "الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء",
+    );
+    expect(content).toContain(
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",
+    );
+    expect(editorTextarea()).not.toBeNull();
+    expect(findButton(PUBLISH_LABEL)).not.toBeNull();
+  });
+
+  it("successful publish feedback survives completed readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل جديد للترحيب");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: "ov-test",
+        copyKey: entry.key,
+        text: "تعديل جديد للترحيب",
+        actorId: "operator",
+        updatedAt: "2026-10-30T12:00:00.000Z",
+      },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain("تم حفظ التجاوز في مخزن المنصة");
+    expect(content).toContain("تجاوز المنصة");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+
+    // Clearing stale feedback on subsequent draft edit
+    act(() => {
+      typeInEditor(textarea!, "تعديل إضافي بعد النشر");
+    });
+    expect(text()).not.toContain("تم حفظ التجاوز في مخزن المنصة");
+  });
+
+  it("reset feedback is operation-correct and survives readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+    renderDetail(entry);
+    await settle();
+
+    const resetBtn = findButton(RESET_LABEL);
+    expect(resetBtn).not.toBeNull();
+    await act(async () => {
+      resetBtn!.click();
+    });
+
+    const confirmBtn = findButton("تأكيد الحذف");
+    expect(confirmBtn).not.toBeNull();
+
+    resetCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: { reset: true },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+
+    await act(async () => {
+      confirmBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain("تمت إعادة التعيين في مخزن المنصة وحذف التجاوز");
+    expect(content).toContain(
+      "يعود النص المعتمد في المخزن إلى الافتراضي في الكود",
+    );
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+
+  it("restore feedback is operation-correct and survives readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(
+      successWithHistoryItem(entry, "hist-123", "نص مسترجع من السجل"),
+    );
+    renderDetail(entry);
+    await settle();
+
+    const restoreBtn = findButton(RESTORE_LABEL);
+    expect(restoreBtn).not.toBeNull();
+
+    restoreCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: { restored: true },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+
+    await act(async () => {
+      restoreBtn!.click();
+    });
+    await settle();
+
+    expect(restoreCopyOverrideAction).toHaveBeenCalledWith({
+      historyId: "hist-123",
+    });
+    const content = text();
+    expect(content).toContain("تم استرجاع النسخة المحددة في مخزن المنصة");
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+  });
+
+  it("mutation failure does not display success", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل سيفشل");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: false,
+      error: {
+        code: "PERSISTENCE_FAILED",
+        message: "فشلت كتابة التجاوز في قاعدة البيانات",
+      },
+    });
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    expect(content).toContain("تعذر الاتصال بمخزن النصوص الآن");
+    expect(content).toContain("PERSISTENCE_FAILED");
+    expect(content).not.toContain("تم حفظ التجاوز");
+    expect(content).not.toContain("تم نشر التجاوز");
+    expect(content).not.toContain("بنجاح");
+  });
+
+  it("successful mutation followed by failed readback displays an honest, distinct result", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل ينجح مع فشل القراءة الراجعة");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: {
+        id: "ov-ok",
+        copyKey: entry.key,
+        text: "تعديل ينجح مع فشل القراءة الراجعة",
+        actorId: "operator",
+        updatedAt: "2026-10-30T12:00:00.000Z",
+      },
+    });
+    getCopyLabEntryStateAction.mockRejectedValue(
+      new Error("readback network down"),
+    );
+
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+
+    await act(async () => {
+      publishBtn!.click();
+    });
+    await settle();
+
+    const content = text();
+    expect(content).toContain(
+      "تم حفظ التعديل بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً",
+    );
+    expect(content).toContain("دون إثبات قراءة راجعة");
+  });
+});
+
+describe("Muse Spacing Observations Real Component Verification", () => {
+  it("renders DOM whitespace around assistantName and استقبال in AiReadinessCard (NOT REPRODUCED)", async () => {
+    const readyItems = [
+      {
+        key: "about",
+        label: "نبذة عن النشاط",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/settings",
+      },
+      {
+        key: "hours",
+        label: "أوقات العمل",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/onboarding/hours",
+      },
+      {
+        key: "services",
+        label: "الخدمات",
+        status: "complete" as const,
+        statusLabel: "مكتمل",
+        optional: false,
+        href: "/services",
+      },
+    ];
+
+    // Case 1: with named assistant "سارة"
+    const c1 = document.createElement("div");
+    document.body.appendChild(c1);
+    const r1 = createRoot(c1);
+    act(() => {
+      r1.render(<AiReadinessCard items={readyItems} assistantName="سارة" />);
+    });
+    await settle();
+
+    const text1 = c1.textContent ?? "";
+    expect(text1).toContain("ويمكن لـسارة استقبال العملاء.");
+    expect(text1).toMatch(/لـسارة استقبال/);
+    act(() => {
+      r1.unmount();
+    });
+    c1.remove();
+
+    // Case 2: fallback assistant name "المساعد الذكي"
+    const c2 = document.createElement("div");
+    document.body.appendChild(c2);
+    const r2 = createRoot(c2);
+    act(() => {
+      r2.render(<AiReadinessCard items={readyItems} assistantName={null} />);
+    });
+    await settle();
+
+    const text2 = c2.textContent ?? "";
+    expect(text2).toContain("ويمكن لـالمساعد الذكي استقبال العملاء.");
+    expect(text2).toMatch(/المساعد الذكي استقبال/);
+    act(() => {
+      r2.unmount();
+    });
+    c2.remove();
+  });
+
+  it("renders DOM whitespace around خدمة and selected service name in SettingsScreen booking preview (NOT REPRODUCED)", async () => {
+    const initialSettings: BusinessSettingsView = {
+      name: "عيادة الأمل",
+      vertical: "clinic",
+      city: "القاهرة",
+      whatsappNumber: "+201000000000",
+      timezone: "Africa/Cairo",
+      about: "",
+      address: "",
+      slotDurationMinutes: 30,
+      confirmationMode: "automatic",
+      cancellationPolicy: "",
+      defaultServiceBookingEnabled: true,
+      defaultBookingServiceId: "srv-1",
+      reminderEnabled: false,
+      reminderLeadHours: 24,
+      reminderTemplateId: "standard",
+      remindersOperational: false,
+      channelReadiness: {
+        whatsapp: false,
+        telegram: false,
+        hasActiveChannel: false,
+      },
+    };
+    const services = [{ id: "srv-1", name: "كشف واستشارة", isActive: true }];
+
+    const c = document.createElement("div");
+    document.body.appendChild(c);
+    const r = createRoot(c);
+    act(() => {
+      r.render(
+        <SettingsScreen
+          initialSettings={initialSettings}
+          services={services}
+        />,
+      );
+    });
+    await settle();
+
+    const rendered = c.textContent ?? "";
+    expect(rendered).toContain("على خدمة كشف واستشارة.");
+    expect(rendered).toMatch(/على خدمة كشف واستشارة\.\s*تقدر/);
+
+    act(() => {
+      r.unmount();
+    });
+    c.remove();
   });
 });

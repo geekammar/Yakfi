@@ -20,8 +20,10 @@
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
 import {
+  PLATFORM_OVERRIDE_SCOPE_NOTE,
   buildClassificationChips,
   filterCopyEntries,
+  getCopyRuntimeCoverage,
   groupCopyEntriesByCategory,
   type CopyClassificationFilter,
 } from "@/features/platform/components/copy-lab-logic";
@@ -30,7 +32,7 @@ import { SearchInput } from "@/components/shared/search-input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-import { ChevronLeftIcon, LockIcon, SearchIcon } from "lucide-react";
+import { ChevronLeftIcon, LockIcon, RadioIcon, SearchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export function CopyLabBrowser({
@@ -63,6 +65,23 @@ export function CopyLabBrowser({
 
   return (
     <div className="space-y-4">
+      {/* ── Operational Scope & Coverage Notice ──── */}
+      <div className="space-y-1.5 rounded-xl border border-muted bg-muted/20 p-3.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 font-medium text-foreground">
+          <RadioIcon aria-hidden className="size-3.5 text-primary" />
+          <span>حالة الربط بمحرك المحادثة الحية</span>
+        </div>
+        <p className="leading-relaxed">
+          مفتاح واحد فقط (
+          <span dir="ltr" className="font-mono font-semibold text-foreground">
+            welcome.intro
+          </span>
+          ) متصل حالياً بمحرك المحادثة الحية (ضمن مسار /start للمحادثات الجديدة
+          أو الخاملة). بقية المفاتيح تُحفظ وتُدار في مخزن نصوص المنصة دون
+          التأثير على ردود العملاء الحية بعد.
+        </p>
+        <p className="leading-relaxed">{PLATFORM_OVERRIDE_SCOPE_NOTE}</p>
+      </div>
       {/* ── Controls (mobile-first, no page-level horizontal scroll) ──── */}
       <div className="space-y-3">
         <SearchInput
@@ -164,6 +183,7 @@ function CopyEntryCard({
 }) {
   const isProtected = entry.classification === "PROTECTED_COPY";
   const isTemplate = entry.classification === "EDITABLE_TEMPLATE";
+  const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
 
   return (
     <li>
@@ -174,15 +194,30 @@ function CopyEntryCard({
         className="bg-card flex w-full min-h-14 items-center gap-3 rounded-xl border p-3.5 text-start transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         <span className="min-w-0 flex-1 space-y-1">
-          <span className="flex items-center gap-1.5">
+          <span className="flex flex-wrap items-center gap-1.5">
             <span className="truncate text-sm font-medium">
               {entry.humanLabel}
             </span>
             {isTemplate ? (
-              <Badge variant="secondary" className="shrink-0">
+              <Badge variant="secondary" className="shrink-0 text-xs">
                 قالب
               </Badge>
             ) : null}
+            {coverage.isConnected ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-normal"
+              >
+                {coverage.badgeLabel}
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="shrink-0 text-muted-foreground border-dashed text-xs font-normal"
+              >
+                {coverage.badgeLabel}
+              </Badge>
+            )}
           </span>
           <span
             dir="ltr"

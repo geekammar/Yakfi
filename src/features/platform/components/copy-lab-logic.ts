@@ -269,6 +269,130 @@ export const EFFECTIVE_SOURCE_LABELS: Readonly<
   PLATFORM_OVERRIDE: "تجاوز المنصة",
 };
 
+// ── Runtime Coverage (explicit wiring status & honest stored resolution) ──
+
+export type CopyRuntimeStatus = "CONNECTED" | "NOT_CONNECTED";
+
+export type CopyRuntimeCoverage = {
+  readonly status: CopyRuntimeStatus;
+  readonly isConnected: boolean;
+  /** Short badge label for list card and detail header */
+  readonly badgeLabel: string;
+  /** Full status label */
+  readonly statusLabel: string;
+  /** Arabic explanation of scope */
+  readonly scopeSummary: string;
+  /** Arabic operational detail (fallback behavior, delivery disclaimer, authoring utility) */
+  readonly operationalNote: string;
+};
+
+export const RUNTIME_CONNECTED_KEYS = ["welcome.intro"] as const;
+
+export function isKeyConnectedToRuntime(key: string): boolean {
+  return (RUNTIME_CONNECTED_KEYS as readonly string[]).includes(key);
+}
+
+export function getCopyRuntimeCoverage(
+  key: string,
+  classification?: CopyClassification,
+): CopyRuntimeCoverage {
+  if (isKeyConnectedToRuntime(key)) {
+    return {
+      status: "CONNECTED",
+      isConnected: true,
+      badgeLabel: "متصل بالمحادثة",
+      statusLabel: "متصل بمحرك المحادثة الحية",
+      scopeSummary:
+        "مقدمة الترحيب عند بدء محادثة جديدة أو خاملة عبر أمر /start؛ لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط.",
+      operationalNote:
+        "عند توفر قالب منشور وصالح في مخزن المنصة، يتم استخدامه ضمن المسار المتصل فقط مع الرجوع التلقائي للنص الافتراضي عند التعذر. هذا الربط لا يضمن ولا يثبت تسليم مزود الرسائل الخارجي.",
+    };
+  }
+
+  if (classification === "PROTECTED_COPY") {
+    return {
+      status: "NOT_CONNECTED",
+      isConnected: false,
+      badgeLabel: "غير متصل بعد",
+      statusLabel: "غير متصل بمحرك المحادثة الحية بعد",
+      scopeSummary:
+        "هذا المفتاح غير متصل بمحرك المحادثة الحية بعد — النص محمي ومخصص للقراءة فقط.",
+      operationalNote:
+        "هذا النص محمي لحماية مسارات التحويل الآمن؛ ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة.",
+    };
+  }
+
+  return {
+    status: "NOT_CONNECTED",
+    isConnected: false,
+    badgeLabel: "غير متصل بعد",
+    statusLabel: "غير متصل بمحرك المحادثة الحية بعد",
+    scopeSummary:
+      "هذا المفتاح غير متصل بمحرك المحادثة الحية بعد — الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء حالياً.",
+    operationalNote:
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة بالكامل للتحضير قبل الربط في إصدار لاحق دون أي تأثير على المحادثات الجارية.",
+  };
+}
+
+export const PLATFORM_OVERRIDE_SCOPE_NOTE =
+  "تنبيه: التجاوزات المنشورة تسري على مستوى كافة المنشآت في المنصة ككل وليست مخصصة لمنشأة بعينها.";
+
+export type MutationKind = "publish" | "reset" | "restore";
+
+export function getMutationFeedbackText(options: {
+  kind: MutationKind;
+  key: string;
+  readbackSuccess: boolean;
+  source?: EffectiveCopySource;
+}): string {
+  const { kind, key, readbackSuccess, source } = options;
+  const isConnected = isKeyConnectedToRuntime(key);
+
+  if (!readbackSuccess) {
+    if (kind === "publish") {
+      return "تم حفظ التعديل بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً (دون إثبات قراءة راجعة). يُرجى إغلاق النافذة وإعادة فتحها للتحقق.";
+    }
+    if (kind === "reset") {
+      return "تمت إعادة التعيين وحذف التجاوز بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً (دون إثبات قراءة راجعة). يُرجى إغلاق النافذة وإعادة فتحها للتحقق.";
+    }
+    return "تم استرجاع النسخة المحددة بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً (دون إثبات قراءة راجعة). يُرجى إغلاق النافذة وإعادة فتحها للتحقق.";
+  }
+
+  const sourceName = source ? (EFFECTIVE_SOURCE_LABELS[source] ?? source) : "";
+
+  if (kind === "publish") {
+    if (isConnected) {
+      return `تم نشر التجاوز في مخزن المنصة — يُعتمد القالب الآن من ${sourceName} في مسار /start للمحادثة الجديدة/الخاملة مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
+    }
+    return `تم حفظ التجاوز في مخزن المنصة — النص المعتمد في المخزن الآن من ${sourceName}. (تنبيه: هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).`;
+  }
+
+  if (kind === "reset") {
+    if (isConnected) {
+      return "تمت إعادة التعيين في مخزن المنصة وحذف التجاوز — يعود المحرك الآن إلى النص الافتراضي في الكود لمسار /start مع استمرار عمل البديل الآمن (لا يعني ذلك التحقق من تسليم المزود).";
+    }
+    return "تمت إعادة التعيين في مخزن المنصة وحذف التجاوز — يعود النص المعتمد في المخزن إلى الافتراضي في الكود. (هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).";
+  }
+
+  // kind === "restore"
+  if (isConnected) {
+    return `تم استرجاع النسخة المحددة في مخزن المنصة — يُعتمد القالب المسترجع الآن من ${sourceName} في مسار /start للمحادثة الجديدة/الخاملة مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
+  }
+  return `تم استرجاع النسخة المحددة في مخزن المنصة — أصبح النص المسترجع هو المعتمد في المخزن من ${sourceName}. (تنبيه: هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).`;
+}
+
+export function getPublishFeedbackText(
+  key: string,
+  source: EffectiveCopySource,
+): string {
+  return getMutationFeedbackText({
+    kind: "publish",
+    key,
+    readbackSuccess: true,
+    source,
+  });
+}
+
 /**
  * The resolution result the override service returns, mirrored STRUCTURALLY
  * so this UI-logic module stays free of any persistence-layer import. The

@@ -47,13 +47,18 @@ import {
   COPY_CLASSIFICATION_HINTS,
   COPY_VALIDATION_FAILURE_GUIDANCE,
   EFFECTIVE_SOURCE_LABELS,
+  PLATFORM_OVERRIDE_SCOPE_NOTE,
   collectPreviewValues,
   demoPlaceholderValues,
+  getCopyRuntimeCoverage,
+  getMutationFeedbackText,
   mapEffectiveCopyState,
   mapHistoryItems,
   overrideErrorGuidance,
+  type EffectiveCopySource,
   type EffectiveCopyState,
   type HistoryItemView,
+  type MutationKind,
 } from "@/features/platform/components/copy-lab-logic";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +80,7 @@ import {
   CircleAlertIcon,
   HistoryIcon,
   LockIcon,
+  RadioIcon,
   RotateCcwIcon,
   SparklesIcon,
   UploadIcon,
@@ -93,8 +99,6 @@ const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
 
 const PROTECTED_BADGE = "محمي — للقراءة فقط";
 const MAX_COPY_LENGTH = 400;
-
-type MutationKind = "publish" | "reset" | "restore";
 
 /**
  * The service error shape the actions return, mirrored structurally so this
@@ -159,7 +163,11 @@ export function CopyLabDetail({
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<MutationKind | null>(null);
   const [error, setError] = useState<MutationError | null>(null);
-  const [published, setPublished] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    readonly kind: MutationKind;
+    readonly readbackSuccess: boolean;
+    readonly message: string;
+  } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const applyResult = useCallback(
@@ -188,24 +196,39 @@ export function CopyLabDetail({
       // Initialize the editor from the effective/published state. The registry
       // is never mutated — this is local draft state seeded from what is stored.
       setDraft(mapped.editorSeed);
-      setPublished(false);
     },
     [entry],
   );
 
   // Post-mutation refresh (an event-handler path, so setState is fine here).
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<{
+    ok: boolean;
+    source?: EffectiveCopySource;
+  }> => {
     setLoading(true);
     setError(null);
     try {
       const result = await getCopyLabEntryStateAction(entry.key);
-      applyResult(result);
+      if (result.success) {
+        applyResult(result);
+        return {
+          ok: true,
+          source: result.data.resolution.ok
+            ? result.data.resolution.source
+            : undefined,
+        };
+      }
+      setLoadFailed(true);
+      setEffective(null);
+      setHistory(null);
+      return { ok: false };
     } catch {
       // Never let a thrown boundary call crash the drawer: keep the safe
       // registry default and explain the state.
       setLoadFailed(true);
       setEffective(null);
       setHistory(null);
+      return { ok: false };
     } finally {
       setLoading(false);
     }
@@ -228,12 +251,20 @@ export function CopyLabDetail({
     void (async () => {
       try {
         const result = await getCopyLabEntryStateAction(entry.key);
-        if (active) applyResult(result);
+        if (active) {
+          applyResult(result);
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
+        }
       } catch {
         if (active) {
           setLoadFailed(true);
           setEffective(null);
           setHistory(null);
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
         }
       } finally {
         if (active) setLoading(false);
@@ -268,7 +299,7 @@ export function CopyLabDetail({
   ): Promise<void> {
     setPending(kind);
     setError(null);
-    setPublished(false);
+    setFeedback(null);
     let result: ActionResult;
     try {
       // The action returns the service's typed envelope; a non-success is a
@@ -285,9 +316,30 @@ export function CopyLabDetail({
     }
     setPending(null);
     if (result.success) {
-      setPublished(true);
       setConfirmingReset(false);
-      await refresh();
+      const refreshResult = await refresh();
+      if (refreshResult.ok) {
+        setFeedback({
+          kind,
+          readbackSuccess: true,
+          message: getMutationFeedbackText({
+            kind,
+            key: entry.key,
+            readbackSuccess: true,
+            source: refreshResult.source,
+          }),
+        });
+      } else {
+        setFeedback({
+          kind,
+          readbackSuccess: false,
+          message: getMutationFeedbackText({
+            kind,
+            key: entry.key,
+            readbackSuccess: false,
+          }),
+        });
+      }
       return;
     }
     setError(toMutationError(result.error));
@@ -302,7 +354,18 @@ export function CopyLabDetail({
     // steals the gesture, and the button's click never fires. Footer buttons
     // stay plain tappable controls; body scrolling and swipe-to-close (via the
     // handle) keep working. Scoped to the Lab only.
-    <Drawer open={open} onOpenChange={onOpenChange} handleOnly>
+    <Drawer
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setFeedback(null);
+          setError(null);
+          setConfirmingReset(false);
+        }
+        onOpenChange(nextOpen);
+      }}
+      handleOnly
+    >
       <DrawerContent className="max-h-[88vh]" handle>
         <DrawerHeader className="text-start">
           <div className="flex items-start justify-between gap-3">
@@ -332,7 +395,7 @@ export function CopyLabDetail({
           ) : (
             <>
               {/* ── EFFECTIVE STATE (product-first) ───────────────────── */}
-              <EffectiveStateBlock state={effective} />
+              <EffectiveStateBlock entry={entry} state={effective} />
 
               {canMutate ? (
                 <CopyEditor
@@ -340,7 +403,7 @@ export function CopyLabDetail({
                   draft={draft}
                   onDraftChange={(value) => {
                     setDraft(value);
-                    setPublished(false);
+                    setFeedback(null);
                     setError(null);
                   }}
                   characters={[...draft].length}
@@ -397,10 +460,16 @@ export function CopyLabDetail({
 
         <DrawerFooter className="space-y-2">
           {error ? <MutationErrorAlert error={error} /> : null}
-          {published && effective !== null ? (
-            <p className="text-sm font-medium text-emerald-600 dark:text-emerald-500">
-              تم النشر — النص الفعلي الآن من{" "}
-              {EFFECTIVE_SOURCE_LABELS[effective.source]}.
+          {feedback !== null ? (
+            <p
+              className={cn(
+                "text-xs font-medium leading-relaxed",
+                feedback.readbackSuccess
+                  ? "text-emerald-600 dark:text-emerald-500"
+                  : "text-amber-600 dark:text-amber-500",
+              )}
+            >
+              {feedback.message}
             </p>
           ) : null}
 
@@ -427,16 +496,19 @@ export function CopyLabDetail({
               </Button>
               {unchanged ? (
                 <p className="text-muted-foreground text-center text-xs">
-                  النص الحالي مطابق للنص الفعلي — لا يوجد تغيير للنشر.
+                  النص الحالي مطابق للمخزن — لا يوجد تغيير للنشر.
                 </p>
               ) : null}
 
               {effective.publishedText !== null ? (
                 confirmingReset ? (
                   <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-2.5">
-                    <p className="text-sm font-medium">تأكيد إعادة التعيين؟</p>
+                    <p className="text-sm font-medium">
+                      تأكيد إعادة التعيين في المخزن؟
+                    </p>
                     <p className="text-muted-foreground text-xs leading-relaxed">
-                      يُحذف التجاوز المنشور ويعود النص الافتراضي للكود.
+                      يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى
+                      الافتراضي في الكود.
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -476,7 +548,10 @@ export function CopyLabDetail({
                     variant="outline"
                     className="h-11 w-full"
                     disabled={pending !== null}
-                    onClick={() => setConfirmingReset(true)}
+                    onClick={() => {
+                      setFeedback(null);
+                      setConfirmingReset(true);
+                    }}
                   >
                     <RotateCcwIcon aria-hidden className="size-4" />
                     إعادة التعيين للنص الافتراضي
@@ -505,7 +580,7 @@ function LoadingState() {
     >
       <div className="bg-muted h-3 w-1/3 animate-pulse rounded" />
       <div className="bg-muted h-12 w-full animate-pulse rounded" />
-      <p className="text-muted-foreground text-xs">يُقرأ النص الفعلي…</p>
+      <p className="text-muted-foreground text-xs">يُقرأ النص من المخزن…</p>
     </div>
   );
 }
@@ -534,11 +609,81 @@ function LoadFailedNotice() {
   );
 }
 
+/** The explicit runtime coverage block showing whether the engine consumes this key. */
+function RuntimeCoverageBlock({ entry }: { entry: CopyRegistryEntry }) {
+  const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
+
+  if (coverage.isConnected) {
+    return (
+      <div className="space-y-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-start">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+            <RadioIcon aria-hidden className="size-3.5" />
+            حالة الربط بمحرك المحادثة: متصل
+          </span>
+          <Badge
+            variant="outline"
+            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-normal"
+          >
+            {coverage.badgeLabel}
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-foreground">
+          {coverage.scopeSummary}
+        </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          {coverage.operationalNote}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-xl border border-muted bg-muted/20 p-3 text-start">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+          <RadioIcon aria-hidden className="size-3.5" />
+          حالة الربط بمحرك المحادثة: غير متصل بعد
+        </span>
+        <Badge
+          variant="outline"
+          className="text-muted-foreground border-dashed text-xs font-normal"
+        >
+          {coverage.badgeLabel}
+        </Badge>
+      </div>
+      <p className="text-xs leading-relaxed text-foreground">
+        {coverage.scopeSummary}
+      </p>
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        {coverage.operationalNote}
+      </p>
+    </div>
+  );
+}
+
 /** The effective text + source, the code default, and the published override. */
-function EffectiveStateBlock({ state }: { state: EffectiveCopyState }) {
+function EffectiveStateBlock({
+  entry,
+  state,
+}: {
+  entry: CopyRegistryEntry;
+  state: EffectiveCopyState;
+}) {
   return (
     <section className="space-y-3">
-      <h3 className="text-sm font-semibold">النص الفعلي</h3>
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">النص الفعلي في المخزن</h3>
+        <span className="text-muted-foreground text-xs">
+          دقة الحالة المخزنة
+        </span>
+      </div>
+
+      <RuntimeCoverageBlock entry={entry} />
+
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        {PLATFORM_OVERRIDE_SCOPE_NOTE}
+      </p>
 
       {!state.persistenceAvailable ? (
         <div
