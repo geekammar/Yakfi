@@ -10,6 +10,7 @@ import {
   CONVERSATION_NOUNS,
   arabicCount,
 } from "@/lib/arabic";
+import { resolveStatus } from "@/lib/status";
 
 import {
   ArrowRightIcon,
@@ -210,6 +211,9 @@ function AppointmentRowContent({
 }: {
   appointment: CustomerHistoryAppointment;
 }) {
+  const statusKey = APPOINTMENT_STATUS_VALUES[appointment.status];
+  const statusDef = resolveStatus(statusKey);
+
   return (
     <>
       <div className="min-w-0">
@@ -225,8 +229,8 @@ function AppointmentRowContent({
         </p>
       </div>
       <StatusBadge
-        status={APPOINTMENT_STATUS_VALUES[appointment.status]}
-        aria-label={`حالة الموعد: ${APPOINTMENT_STATUS_VALUES[appointment.status]}`}
+        status={statusKey}
+        aria-label={`حالة الموعد: ${statusDef.labelAr}`}
       />
     </>
   );
@@ -237,6 +241,9 @@ function ConversationRowContent({
 }: {
   conversation: CustomerHistoryConversation;
 }) {
+  const statusKey = CONVERSATION_STATUS_VALUES[conversation.status];
+  const statusDef = resolveStatus(statusKey);
+
   return (
     <>
       <div className="min-w-0">
@@ -249,8 +256,8 @@ function ConversationRowContent({
         </p>
       </div>
       <StatusBadge
-        status={CONVERSATION_STATUS_VALUES[conversation.status]}
-        aria-label={`حالة المحادثة: ${CONVERSATION_STATUS_VALUES[conversation.status]}`}
+        status={statusKey}
+        aria-label={`حالة المحادثة: ${statusDef.labelAr}`}
       />
     </>
   );
