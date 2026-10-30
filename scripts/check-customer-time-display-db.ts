@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * FlowPilot — Customer Appointment Time Display Preference Real Disposable DB Check.
  *
@@ -8,7 +7,7 @@
  *   3. Direct database read on biz_A confirms 'FULL_RANGE'.
  *   4. Readback via getBusinessSettings for biz_A confirms 'FULL_RANGE'.
  *   5. Tenant isolation: biz_B in database remains 'START_ONLY' and getBusinessSettings returns 'START_ONLY'.
- *   6. Unauthorized cross-tenant update rejection: Actor from biz_A cannot update biz_B.
+ *   6. Unauthorized cross-tenant update rejection: Actor without businessId cannot update business.
  *   7. Revert biz_A to 'START_ONLY' verifies clean update cycle.
  *   8. Zero residue: all created test records are deleted on completion.
  *
@@ -90,18 +89,18 @@ async function main(): Promise<void> {
         email: `${TEST_USER_A}@flowpilot.invalid`,
         emailVerified: false,
         accountType: "BUSINESS",
-        role: "OWNER",
+        role: "ADMIN",
         businessId: BIZ_A_ID,
-        name: "Owner A",
+        name: "Admin A",
       },
       {
         id: TEST_USER_B,
         email: `${TEST_USER_B}@flowpilot.invalid`,
         emailVerified: false,
         accountType: "BUSINESS",
-        role: "OWNER",
+        role: "ADMIN",
         businessId: BIZ_B_ID,
-        name: "Owner B",
+        name: "Admin B",
       },
     ],
   });
@@ -127,13 +126,13 @@ async function main(): Promise<void> {
 
   const actorA: SettingsActor = {
     userId: TEST_USER_A,
-    role: "OWNER",
+    role: "ADMIN",
     businessId: BIZ_A_ID,
   };
 
   const actorB: SettingsActor = {
     userId: TEST_USER_B,
-    role: "OWNER",
+    role: "ADMIN",
     businessId: BIZ_B_ID,
   };
 
@@ -166,8 +165,8 @@ async function main(): Promise<void> {
     );
     check(
       "1.3 getBusinessSettings for business A returns appointmentTimeDisplay = 'START_ONLY'",
-      settingsAResult.success &&
-        settingsAResult.data.appointmentTimeDisplay === "START_ONLY",
+      "appointmentTimeDisplay" in settingsAResult &&
+        settingsAResult.appointmentTimeDisplay === "START_ONLY",
     );
 
     // ── 2. Persist update on business A to FULL_RANGE ────────────────────────
@@ -188,7 +187,7 @@ async function main(): Promise<void> {
     );
 
     check(
-      "2.1 updateBusinessSettings succeeds for authorized Owner A with FULL_RANGE",
+      "2.1 updateBusinessSettings succeeds for authorized Admin A with FULL_RANGE",
       updateAResult.success === true,
     );
 
@@ -210,7 +209,8 @@ async function main(): Promise<void> {
     );
     check(
       "2.3 getBusinessSettings readback for business A reflects 'FULL_RANGE'",
-      reloadA.success && reloadA.data.appointmentTimeDisplay === "FULL_RANGE",
+      "appointmentTimeDisplay" in reloadA &&
+        reloadA.appointmentTimeDisplay === "FULL_RANGE",
     );
 
     // ── 3. Tenant Isolation: business B remains unchanged ───────────────────
@@ -230,22 +230,17 @@ async function main(): Promise<void> {
     );
     check(
       "3.2 getBusinessSettings readback for business B strictly retains 'START_ONLY'",
-      reloadB.success && reloadB.data.appointmentTimeDisplay === "START_ONLY",
+      "appointmentTimeDisplay" in reloadB &&
+        reloadB.appointmentTimeDisplay === "START_ONLY",
     );
 
     // ── 4. Cross-Tenant Authorization Boundary ──────────────────────────────
-    // Actor A attempts to pass BIZ_B_ID or touch business B
-    const actorAImpersonatingB: SettingsActor = {
-      userId: TEST_USER_A,
-      role: "OWNER",
-      businessId: BIZ_A_ID, // Bound to biz A
-    };
-    // The service derives the business solely from actor.businessId, so Actor A can never mutate Business B
+    // The service derives the business solely from actor.businessId, so Actor without businessId is rejected
     const updateBByA = await updateBusinessSettings(
       defaultSettingsServiceDeps,
       {
         userId: TEST_USER_A,
-        role: "OWNER",
+        role: "ADMIN",
         businessId: null, // Actor without businessId
       },
       {

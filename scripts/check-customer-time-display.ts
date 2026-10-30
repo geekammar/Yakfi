@@ -1076,7 +1076,9 @@ async function runTests() {
     if (!originalCallback) throw new Error("originalCallback missing");
 
     // Operator changes business preference mid-flight to FULL_RANGE
-    (harness.business as any).appointmentTimeDisplay = "FULL_RANGE";
+    Object.assign(harness.business, {
+      appointmentTimeDisplay: "FULL_RANGE" as const,
+    });
 
     // Customer clicks the button with the original callback token
     const callsBefore = modelCalls;
