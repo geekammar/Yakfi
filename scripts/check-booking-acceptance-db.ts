@@ -451,6 +451,10 @@ async function main(): Promise<void> {
       },
     );
 
+    if (!legacyProvider) {
+      throw new Error("Failed to create legacy provider profile");
+    }
+
     // Explicitly link to Service A only
     await providerRepository.addServiceEligibility(
       TEST_BUSINESS_ID,
