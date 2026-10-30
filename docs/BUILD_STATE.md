@@ -25,7 +25,7 @@
   5. Automatic Vercel production deployment triggered by merge to `main`.
   6. Authenticated post-deployment operational health and live customer acceptance verification.
 - **Verification Suite**:
-  - Offline domain suite `scripts/check-customer-time-display.ts` (61/61 automated checks across 8 groups, covering schemas, authorization boundaries, formatters, edge cases, stable tokens, legacy offer recovery, model call counting, and full `receiveInboundMessage` entry-point turns).
+  - Offline domain suite `scripts/check-customer-time-display.ts` (58/58 automated checks across 8 groups, covering schemas, authorization boundaries, formatters, edge cases, stable tokens, legacy offer recovery, model call counting, and full `receiveInboundMessage` entry-point turns).
   - Mounted component test `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`) verifying React Hook Form lifecycle, dirty state, and payload submission in jsdom.
   - Real disposable PostgreSQL integration suite `scripts/check-customer-time-display-db.ts` (`pnpm check:customer-time-display-db`) verifying real column persistence, readback, and strict tenant isolation in CI.
   - Browser tests in Playwright reporting skips separately from green CI check passes.

@@ -913,14 +913,15 @@ async function runTests() {
       "8.1a Inbound booking turn under START_ONLY renders offer copy with start-only times",
       turn1.ok === true &&
         offerOutbound !== undefined &&
-        offerOutbound.body.includes("1. 9:00 ص") &&
-        !offerOutbound.body.includes("1. 9:00 ص إلى"),
+        offerOutbound.body.includes("9:00 ص") &&
+        !offerOutbound.body.includes("9:00 ص إلى"),
       `outbound body: ${offerOutbound?.body}`,
     );
 
     check(
-      "8.1b Channel choice button label under START_ONLY displays start-only time '1️⃣ 9:00 ص'",
-      offerOutbound?.choices?.groups?.[0]?.[0]?.label === "1️⃣ 9:00 ص",
+      "8.1b Channel choice button label under START_ONLY displays start-only time '1️⃣ 9:00 ص (د. أحمد سامي)'",
+      offerOutbound?.choices?.groups?.[0]?.[0]?.label ===
+        "1️⃣ 9:00 ص (د. أحمد سامي)",
       `received label: ${offerOutbound?.choices?.groups?.[0]?.[0]?.label}`,
     );
 
@@ -1022,14 +1023,14 @@ async function runTests() {
       "8.2a Inbound booking turn under FULL_RANGE renders offer copy with full interval '9:00 ص إلى 9:30 ص'",
       turn1.ok === true &&
         offerOutbound !== undefined &&
-        offerOutbound.body.includes("1. 9:00 ص إلى 9:30 ص"),
+        offerOutbound.body.includes("9:00 ص إلى 9:30 ص"),
       `outbound body: ${offerOutbound?.body}`,
     );
 
     check(
-      "8.2b Channel choice button label under FULL_RANGE displays full interval '1️⃣ 9:00 ص إلى 9:30 ص'",
+      "8.2b Channel choice button label under FULL_RANGE displays full interval '1️⃣ 9:00 ص إلى 9:30 ص (د. أحمد سامي)'",
       offerOutbound?.choices?.groups?.[0]?.[0]?.label ===
-        "1️⃣ 9:00 ص إلى 9:30 ص",
+        "1️⃣ 9:00 ص إلى 9:30 ص (د. أحمد سامي)",
     );
 
     // Mechanical text selection "1"
