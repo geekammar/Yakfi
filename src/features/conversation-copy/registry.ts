@@ -36,6 +36,8 @@ const AI = "src/features/conversations/server/conversation-ai.ts";
 const CLARIFY = "src/features/conversations/server/clarification.ts";
 const MAPPER = "src/features/conversations/server/booking-mapper.ts";
 const ENGINE = "src/features/conversations/server/conversation-engine.ts";
+const FORMATTERS =
+  "src/features/conversations/server/presentation-formatters.ts";
 const TELEGRAM_WEBHOOK =
   "src/server/integrations/telegram/telegram-webhook-handler.ts";
 
@@ -377,7 +379,7 @@ export const COPY_REGISTRY = [
     category: "booking",
     humanLabel: "عرض المواعيد المتاحة",
     defaultText:
-      'تتوفر المواعيد التالية لخدمة "{serviceName}" يوم {date}:\n{offer}\nيرجى اختيار أحد الخيارات وسيتواصل معك الفريق لإتمام الحجز.',
+      'تتوفر المواعيد التالية لخدمة "{serviceName}" يوم {date}:\n{offer}\nيرجى اختيار الموعد المناسب لإتمام الحجز.',
     classification: "EDITABLE_TEMPLATE",
     placeholders: ["serviceName", "date", "offer"],
     requiredPlaceholders: ["serviceName", "date", "offer"],
@@ -391,9 +393,9 @@ export const COPY_REGISTRY = [
       },
     ],
     source: {
-      file: ENGINE,
-      symbol: "formatBookingOptionsMessage",
-      exported: false,
+      file: FORMATTERS,
+      symbol: "formatBookingOptionsCopy",
+      exported: true,
     },
   },
   {
