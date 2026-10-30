@@ -22,8 +22,6 @@
  * Run: tsx scripts/check-iss-006.ts
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
 
 import {
@@ -32,6 +30,7 @@ import {
   formatArabicMonth,
   formatArabicWeekday,
 } from "@/features/appointments/components/smart-create/date-format";
+import { cancelFollowUpRequest } from "@/features/appointments/actions/follow-up-actions";
 import { createFollowUpRequestSchema } from "@/features/appointments/schemas/follow-up-schema";
 import {
   createAppointmentRecord,
@@ -163,14 +162,14 @@ async function run() {
             startDate: new Date("2026-11-01T00:00:00.000Z"),
             endDate: new Date("2026-11-10T00:00:00.000Z"),
           }),
-          update: async ({
+          updateMany: async ({
             data,
           }: {
             data: { status: string; scheduledAppointmentId: string };
           }) => {
             linkedFollowUpStatus = data.status;
             linkedFollowUpAppointmentId = data.scheduledAppointmentId;
-            return { id: FU_ATOMIC, ...data };
+            return { count: 1 };
           },
         },
         appointment: {
@@ -349,49 +348,81 @@ async function run() {
   );
 
   // --- 4. Pending cancellation works; terminal states reconcile honestly ---
-  let statusUpdatedTo: string | null = null;
+  const stateStore = new Map<string, { id: string; businessId: string; status: string; sourceAppointmentId: string | null; notes: string; customerId: string; serviceId: string; createdAt: Date; deletedAt: Date | null }>([
+    [
+      FU_PENDING,
+      {
+        id: FU_PENDING,
+        businessId: BIZ_A,
+        status: "PENDING",
+        sourceAppointmentId: "app-src-01",
+        notes: "Clinical notes from doctor",
+        customerId: CUST_A,
+        serviceId: SRV_A,
+        createdAt: new Date("2026-10-01T10:00:00Z"),
+        deletedAt: null,
+      },
+    ],
+    [
+      FU_CANCELLED,
+      {
+        id: FU_CANCELLED,
+        businessId: BIZ_A,
+        status: "CANCELLED",
+        sourceAppointmentId: "app-src-01",
+        notes: "Already cancelled request notes",
+        customerId: CUST_A,
+        serviceId: SRV_A,
+        createdAt: new Date("2026-10-01T10:00:00Z"),
+        deletedAt: null,
+      },
+    ],
+    [
+      FU_SCHEDULED,
+      {
+        id: FU_SCHEDULED,
+        businessId: BIZ_A,
+        status: "SCHEDULED",
+        sourceAppointmentId: "app-src-01",
+        notes: "Scheduled follow-up notes",
+        customerId: CUST_A,
+        serviceId: SRV_A,
+        createdAt: new Date("2026-10-01T10:00:00Z"),
+        deletedAt: null,
+      },
+    ],
+  ]);
+
   const mockDbForCancel = {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDbForCancel),
     followUpRequest: {
       findFirst: async ({
         where,
       }: {
-        where: { id: string; status?: string };
+        where: { id: string; businessId?: string; status?: string; deletedAt?: null };
       }) => {
-        if (where.id === FU_PENDING) {
-          return {
-            id: FU_PENDING,
-            businessId: BIZ_A,
-            status: "PENDING",
-            sourceAppointmentId: "app-src-01",
-          };
-        }
-        if (where.id === FU_CANCELLED) {
-          return {
-            id: FU_CANCELLED,
-            businessId: BIZ_A,
-            status: "CANCELLED",
-            sourceAppointmentId: "app-src-01",
-          };
-        }
-        if (where.id === FU_SCHEDULED) {
-          return {
-            id: FU_SCHEDULED,
-            businessId: BIZ_A,
-            status: "SCHEDULED",
-            sourceAppointmentId: "app-src-01",
-          };
-        }
-        return null;
+        const item = stateStore.get(where.id);
+        if (!item) return null;
+        if (where.businessId && item.businessId !== where.businessId) return null;
+        if (where.status && item.status !== where.status) return null;
+        if (where.deletedAt === null && item.deletedAt !== null) return null;
+        return { ...item };
       },
-      update: async ({
+      updateMany: async ({
         where,
         data,
       }: {
-        where: { id: string };
+        where: { id: string; businessId?: string; status?: string; deletedAt?: null };
         data: { status: string };
       }) => {
-        statusUpdatedTo = data.status;
-        return { id: where.id, ...data };
+        const item = stateStore.get(where.id);
+        if (!item) return { count: 0 };
+        if (where.businessId && item.businessId !== where.businessId) return { count: 0 };
+        if (where.status && item.status !== where.status) return { count: 0 };
+        if (where.deletedAt === null && item.deletedAt !== null) return { count: 0 };
+
+        item.status = data.status;
+        return { count: 1 };
       },
     },
   };
@@ -400,45 +431,34 @@ async function run() {
     mockDbForCancel as unknown as typeof db,
   );
 
-  // Case A: PENDING -> CANCELLED
-  const updatePending = await cancelRepo.updateStatus(
-    FU_PENDING,
-    BIZ_A,
-    "CANCELLED",
+  const getTenantASession = async () => ({
+    user: { id: USER_A, businessId: BIZ_A, role: "STAFF" as const },
+  });
+
+  // Case A: PENDING -> CANCELLED via actual cancelFollowUpRequest action
+  const cancelPendingRes = await cancelFollowUpRequest(
+    { id: FU_PENDING },
+    {
+      followUpRequestRepository: cancelRepo,
+      getSession: getTenantASession,
+    },
   );
   check(
     4,
-    "Pending follow-up request can be cancelled successfully",
-    updatePending !== null && statusUpdatedTo === "CANCELLED",
-    `statusUpdatedTo=${statusUpdatedTo}`,
+    "Pending follow-up request can be cancelled successfully via production action",
+    cancelPendingRes.success === true &&
+      cancelPendingRes.message === "تم إلغاء طلب المتابعة بنجاح" &&
+      stateStore.get(FU_PENDING)?.status === "CANCELLED",
+    `success=${cancelPendingRes.success}, message=${cancelPendingRes.message}, dbStatus=${stateStore.get(FU_PENDING)?.status}`,
   );
 
   // Case B: Already CANCELLED request terminal reconciliation
-  // Simulate cancelFollowUpRequest action logic
-  async function simulateCancelAction(id: string, businessId: string) {
-    const existing = await cancelRepo.findById(id, businessId);
-    if (!existing) {
-      return { success: false, message: "طلب المتابعة غير موجود" };
-    }
-    if (existing.status === "CANCELLED") {
-      return { success: true, message: "طلب المتابعة ملغى بالفعل" };
-    }
-    if (existing.status === "SCHEDULED") {
-      return {
-        success: false,
-        message: "لا يمكن إلغاء طلب متابعة تم حجز موعد له مسبقاً",
-      };
-    }
-    if (existing.status !== "PENDING") {
-      return { success: false, message: "لا يمكن إلغاء هذا الطلب" };
-    }
-    await cancelRepo.updateStatus(existing.id, businessId, "CANCELLED");
-    return { success: true, message: "تم إلغاء طلب المتابعة بنجاح" };
-  }
-
-  const cancelAlreadyCancelledRes = await simulateCancelAction(
-    FU_CANCELLED,
-    BIZ_A,
+  const cancelAlreadyCancelledRes = await cancelFollowUpRequest(
+    { id: FU_CANCELLED },
+    {
+      followUpRequestRepository: cancelRepo,
+      getSession: getTenantASession,
+    },
   );
   check(
     5,
@@ -449,7 +469,13 @@ async function run() {
   );
 
   // Case C: SCHEDULED request cancellation refusal
-  const cancelScheduledRes = await simulateCancelAction(FU_SCHEDULED, BIZ_A);
+  const cancelScheduledRes = await cancelFollowUpRequest(
+    { id: FU_SCHEDULED },
+    {
+      followUpRequestRepository: cancelRepo,
+      getSession: getTenantASession,
+    },
+  );
   check(
     6,
     "Cancelling a SCHEDULED request fails with explicit honest explanation",
@@ -707,7 +733,15 @@ async function run() {
     { followUpId: FU_UNDATED }, // belongs to Tenant A
   );
 
-  const foreignCancelRes = await simulateCancelAction(FU_UNDATED, BIZ_B);
+  const foreignCancelRes = await cancelFollowUpRequest(
+    { id: FU_PENDING },
+    {
+      followUpRequestRepository: cancelRepo,
+      getSession: async () => ({
+        user: { id: "user-b", businessId: BIZ_B, role: "STAFF" as const },
+      }),
+    },
+  );
 
   check(
     11,
@@ -719,30 +753,51 @@ async function run() {
     `foreignFollowUpContext=${foreignPrefill.followUpContext}, foreignCancelSuccess=${foreignCancelRes.success}`,
   );
 
-  // --- 9. No historical record is silently rewritten ---
-  const readSrc = (relPath: string) =>
-    readFileSync(resolve(process.cwd(), relPath), "utf8");
+  // --- 9. No historical record is silently rewritten (Before/After record preservation) ---
+  const HIST_ID = "a0000000-0000-4000-8000-000000000095";
+  const originalRecord = {
+    id: HIST_ID,
+    businessId: BIZ_A,
+    customerId: CUST_A,
+    serviceId: SRV_A,
+    sourceAppointmentId: "app-hist-001",
+    status: "PENDING" as const,
+    notes: "Follow-up preservation test: clinical details, post-op instructions",
+    createdAt: new Date("2026-10-01T12:00:00.000Z"),
+    updatedAt: new Date("2026-10-01T12:00:00.000Z"),
+    deletedAt: null as Date | null,
+  };
 
-  const repoSrc = readSrc(
-    "src/server/repositories/follow-up-request.repository.ts",
-  );
-  const actionsSrc = readSrc(
-    "src/features/appointments/actions/follow-up-actions.ts",
-  );
+  stateStore.set(HIST_ID, { ...originalRecord });
+  const snapshotBefore = { ...stateStore.get(HIST_ID)! };
 
-  const updatesOnlyStatus =
-    repoSrc.includes("data: { status }") &&
-    !repoSrc.includes("deletedAt: new Date()");
-  const cancelPreservesAudit =
-    actionsSrc.includes("updateStatus") &&
-    !actionsSrc.includes("delete(") &&
-    !actionsSrc.includes("deleteMany(");
+  // Cancel via atomic cancelPending
+  const cancelOutcome = await cancelRepo.cancelPending(HIST_ID, BIZ_A);
+  const recordAfter = stateStore.get(HIST_ID)!;
+
+  const notesPreserved = recordAfter.notes === snapshotBefore.notes;
+  const sourceAppPreserved = recordAfter.sourceAppointmentId === snapshotBefore.sourceAppointmentId;
+  const custPreserved = recordAfter.customerId === snapshotBefore.customerId;
+  const servicePreserved = recordAfter.serviceId === snapshotBefore.serviceId;
+  const createdAtPreserved = recordAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
+  const notDeleted = recordAfter.deletedAt === null;
+  const onlyStatusChanged = recordAfter.status === "CANCELLED" && snapshotBefore.status === "PENDING";
+
+  const allHistoricalPreserved =
+    cancelOutcome.outcome === "CANCELLED" &&
+    notesPreserved &&
+    sourceAppPreserved &&
+    custPreserved &&
+    servicePreserved &&
+    createdAtPreserved &&
+    notDeleted &&
+    onlyStatusChanged;
 
   check(
     12,
-    "No historical follow-up record is silently deleted or rewritten",
-    updatesOnlyStatus && cancelPreservesAudit,
-    "updateStatus only mutates status field; no deletion or destructive overwrite",
+    "No historical follow-up record is silently deleted or rewritten (before/after preserved)",
+    allHistoricalPreserved,
+    `outcome=${cancelOutcome.outcome}, notesPreserved=${notesPreserved}, notDeleted=${notDeleted}, status=${recordAfter.status}`,
   );
 
   console.log("\n=======================================================");

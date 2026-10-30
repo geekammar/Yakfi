@@ -471,13 +471,21 @@ export class AppointmentRepository {
           });
 
           if (followUpRequestId) {
-            await tx.followUpRequest.update({
-              where: { id: followUpRequestId },
+            const updatedFollowUp = await tx.followUpRequest.updateMany({
+              where: {
+                id: followUpRequestId,
+                businessId: input.businessId,
+                status: "PENDING",
+                ...notDeleted,
+              },
               data: {
                 status: "SCHEDULED",
                 scheduledAppointmentId: appointment.id,
               },
             });
+            if (updatedFollowUp.count === 0) {
+              throw new Error("FOLLOW_UP_NOT_PENDING");
+            }
           }
 
           // Automated reminder scheduling (BOOK-REM-01)

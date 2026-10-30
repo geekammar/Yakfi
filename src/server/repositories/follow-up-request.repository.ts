@@ -7,9 +7,42 @@ import type {
 
 const notDeleted = { deletedAt: null } as const;
 
+const SERIALIZABLE_ATTEMPTS = 3;
+
+function isTransactionConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2034"
+  );
+}
+
+async function withSerializableRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isTransactionConflict(error)) throw error;
+      lastError = error;
+      if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
+    }
+  }
+  throw lastError;
+}
+
 function toDate(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
 }
+
+export type CancelFollowUpOutcome =
+  | { outcome: "CANCELLED"; followUp: FollowUpRequest }
+  | { outcome: "ALREADY_CANCELLED"; followUp: FollowUpRequest }
+  | { outcome: "ALREADY_SCHEDULED"; followUp: FollowUpRequest }
+  | { outcome: "NOT_FOUND" };
 
 export type CreateFollowUpRequestData = {
   businessId: string;
@@ -154,6 +187,60 @@ export class FollowUpRequestRepository {
     });
   }
 
+  /**
+   * Atomically transitions a follow-up request from PENDING to CANCELLED within the business boundary.
+   * If the record is already CANCELLED, reconciles honestly as ALREADY_CANCELLED.
+   * If the record is already SCHEDULED, refuses transition as ALREADY_SCHEDULED.
+   * Never overwrites a SCHEDULED appointment or cross-tenant record.
+   */
+  async cancelPending(
+    id: string,
+    businessId: string,
+  ): Promise<CancelFollowUpOutcome> {
+    return withSerializableRetry(async () => {
+      return (this.prisma as typeof db).$transaction(async (tx) => {
+        const updateResult = await tx.followUpRequest.updateMany({
+          where: {
+            id,
+            businessId,
+            status: "PENDING",
+            ...notDeleted,
+          },
+          data: {
+            status: "CANCELLED",
+          },
+        });
+
+        if (updateResult.count > 0) {
+          const followUp = await tx.followUpRequest.findFirst({
+            where: { id, businessId, ...notDeleted },
+          });
+          if (followUp) {
+            return { outcome: "CANCELLED", followUp };
+          }
+        }
+
+        const current = await tx.followUpRequest.findFirst({
+          where: { id, businessId, ...notDeleted },
+        });
+
+        if (!current) {
+          return { outcome: "NOT_FOUND" };
+        }
+
+        if (current.status === "CANCELLED") {
+          return { outcome: "ALREADY_CANCELLED", followUp: current };
+        }
+
+        if (current.status === "SCHEDULED") {
+          return { outcome: "ALREADY_SCHEDULED", followUp: current };
+        }
+
+        return { outcome: "NOT_FOUND" };
+      });
+    });
+  }
+
   async updateStatus(
     id: string,
     businessId: string,
@@ -163,10 +250,16 @@ export class FollowUpRequestRepository {
       where: { id, businessId, ...notDeleted },
     });
     if (!existing) return null;
+    if (existing.status === status) return existing;
 
-    return this.prisma.followUpRequest.update({
-      where: { id },
+    const result = await this.prisma.followUpRequest.updateMany({
+      where: { id, businessId, status: existing.status, ...notDeleted },
       data: { status },
+    });
+    if (result.count === 0) return null;
+
+    return this.prisma.followUpRequest.findFirst({
+      where: { id, businessId, ...notDeleted },
     });
   }
 
