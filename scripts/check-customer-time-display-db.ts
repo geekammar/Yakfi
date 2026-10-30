@@ -81,7 +81,26 @@ async function main(): Promise<void> {
   }
   console.log(`🔒 Target database verified local: ${target.host}`);
 
-  // Setup test users & businesses
+  // Setup test businesses & users (businesses first to satisfy User.businessId FK)
+  await db.business.createMany({
+    data: [
+      {
+        id: BIZ_A_ID,
+        name: "مركز الشفاء الطبي (A)",
+        whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        timezone: "Africa/Cairo",
+        isActive: true,
+      },
+      {
+        id: BIZ_B_ID,
+        name: "عيادة النور للأسنان (B)",
+        whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        timezone: "Africa/Cairo",
+        isActive: true,
+      },
+    ],
+  });
+
   await db.user.createMany({
     data: [
       {
@@ -101,25 +120,6 @@ async function main(): Promise<void> {
         role: "ADMIN",
         businessId: BIZ_B_ID,
         name: "Admin B",
-      },
-    ],
-  });
-
-  await db.business.createMany({
-    data: [
-      {
-        id: BIZ_A_ID,
-        name: "مركز الشفاء الطبي (A)",
-        whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
-        timezone: "Africa/Cairo",
-        isActive: true,
-      },
-      {
-        id: BIZ_B_ID,
-        name: "عيادة النور للأسنان (B)",
-        whatsappNumber: `+2010${Math.floor(10000000 + Math.random() * 90000000)}`,
-        timezone: "Africa/Cairo",
-        isActive: true,
       },
     ],
   });
