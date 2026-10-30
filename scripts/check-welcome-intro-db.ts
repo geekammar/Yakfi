@@ -115,6 +115,7 @@ async function main(): Promise<void> {
     data: {
       id: TEST_OPERATOR_ID,
       email: `${TEST_OPERATOR_ID}@flowpilot.invalid`,
+      emailVerified: false,
       accountType: "PLATFORM",
       name: "Test Platform Operator",
     },
@@ -124,12 +125,13 @@ async function main(): Promise<void> {
     data: {
       id: TEST_BUSINESS_ACTOR_ID,
       email: `${TEST_BUSINESS_ACTOR_ID}@flowpilot.invalid`,
+      emailVerified: false,
       accountType: "BUSINESS",
       name: "Test Business User",
     },
   });
 
-  const business = await db.business.create({
+  await db.business.create({
     data: {
       id: TEST_BUSINESS_ID,
       name: TEST_BUSINESS_NAME,
@@ -206,7 +208,8 @@ async function main(): Promise<void> {
     check(
       "2b. رفض تعديل النصوص المحمية (handoff.sensitive) حتى لمشغل المنصة",
       !protectedSave.success &&
-        protectedSave.error.code === "PROTECTED_COPY_NOT_EDITABLE",
+        protectedSave.error.code === "INVALID_COPY" &&
+        protectedSave.error.validationFailure?.code === "PROTECTED_COPY_NOT_EDITABLE",
     );
 
     const protectedRow = await db.platformCopyOverride.findUnique({

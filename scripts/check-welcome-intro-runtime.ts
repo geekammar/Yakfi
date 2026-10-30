@@ -29,12 +29,16 @@ import {
   type ConversationEngineDeps,
 } from "@/features/conversations/server/conversation-engine";
 import {
-  buildDateOffer,
-  buildSlotOffer,
+  dehydrateConversationState,
   emptyConversationState,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
-import { InMemoryConversationStateStore } from "@/features/conversations/server/conversation-state-store";
+import { buildSlotOffer } from "@/features/conversations/server/booking-offer";
+import {
+  createPlaygroundHarness,
+  InMemoryConversationStateStore,
+  PLAYGROUND_IDS,
+} from "@/features/conversations/playground/harness";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import type { CopyOverrideRecord } from "@/server/repositories/copy-override.repository";
 
@@ -71,15 +75,18 @@ type SentTransportMessage = {
 function createTestHarness(initialOverrides: Record<string, string> = {}) {
   const overrides = new Map<string, string>(Object.entries(initialOverrides));
   let failCopyRead = false;
-
-  const messages: StoredMessage[] = [];
-  const sentMessages: SentTransportMessage[] = [];
-  const processedExternalIds = new Set<string>();
-
   let aiCallsCount = 0;
 
-  const stateStore = new InMemoryConversationStateStore();
+  const harness = createPlaygroundHarness({
+    todayRef: "2026-10-30",
+    businessConfig: {
+      id: BUSINESS_ID,
+      name: BUSINESS_NAME,
+      whatsappNumber: BOT_PHONE,
+    },
+  });
 
+  const sentMessages: SentTransportMessage[] = [];
   const recordingTransport: MessageTransport = {
     providerName: "recording-offline-transport",
     async send(msg) {
@@ -110,113 +117,15 @@ function createTestHarness(initialOverrides: Record<string, string> = {}) {
         copyKey,
         text,
         actorId: "test-platform-actor",
-        createdAt: new Date("2026-10-30T10:00:00Z"),
-        updatedAt: new Date("2026-10-30T10:00:00Z"),
+        createdAt: "2026-10-30T10:00:00.000Z",
+        updatedAt: "2026-10-30T10:00:00.000Z",
       };
     },
   };
 
-  const businessRow = {
-    id: BUSINESS_ID,
-    name: BUSINESS_NAME,
-    whatsappNumber: BOT_PHONE,
-    isActive: true,
-    timezone: "Africa/Cairo",
-    confirmationMode: "automatic" as const,
-    defaultBranchId: "branch-01",
-    faqs: [],
-  };
-
-  const services = [
-    {
-      id: "srv-01",
-      businessId: BUSINESS_ID,
-      name: "كشف عام",
-      durationMinutes: 30,
-      price: 200,
-      isActive: true,
-    },
-  ];
-
   const deps: ConversationEngineDeps = {
-    businessRepository: {
-      findById: async (id: string) => (id === BUSINESS_ID ? businessRow : null),
-      findByWhatsappNumber: async (num: string) =>
-        num === BOT_PHONE ? businessRow : null,
-    } as any,
-    branchRepository: {
-      findDefaultByBusiness: async (id: string) => ({
-        id: "branch-01",
-        businessId: id,
-        name: "الفرع الرئيسي",
-      }),
-      findByIdWithinBusiness: async (id: string, bId: string) => ({
-        id,
-        businessId: bId,
-        name: "الفرع الرئيسي",
-      }),
-    } as any,
-    customerRepository: {
-      upsertByPhone: async () => ({
-        id: CUSTOMER_ID,
-        businessId: BUSINESS_ID,
-        phone: CUSTOMER_PHONE,
-        name: "عميل تجريبي",
-      }),
-      touchConversation: async () => {},
-    } as any,
-    conversationRepository: {
-      findLatestByCustomer: async () => null,
-      create: async (data: any) => ({
-        id: "conv-01",
-        businessId: data.businessId,
-        customerId: data.customerId,
-        status: "AI_ACTIVE",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }),
-      addMessage: async (data: any) => {
-        const msg: StoredMessage = {
-          id: `msg-${messages.length + 1}`,
-          conversationId: data.conversationId,
-          senderType: data.senderType,
-          content: data.content,
-          createdAt: data.createdAt ?? new Date(),
-        };
-        messages.push(msg);
-        return msg;
-      },
-      findById: async () => ({
-        id: "conv-01",
-        businessId: BUSINESS_ID,
-        customerId: CUSTOMER_ID,
-        status: "AI_ACTIVE",
-      }),
-      listRecentMessages: async () => messages,
-    } as any,
-    serviceRepository: {
-      listActiveByBusiness: async () => services,
-      findById: async (id: string) => services.find((s) => s.id === id) ?? null,
-    } as any,
-    inboundDedupeRepository: {
-      acquireClaim: async (key: string) => {
-        if (processedExternalIds.has(key)) {
-          return { status: "DUPLICATE", claimId: null };
-        }
-        processedExternalIds.add(key);
-        return { status: "CLAIMED", claimId: `claim-${key}` };
-      },
-      resolveClaim: async () => {},
-      releaseClaim: async () => {},
-    } as any,
-    usageRepository: {
-      recordUsage: async () => {},
-    } as any,
-    attentionRepository: {
-      createReviewRecord: async () => ({ id: "att-01" }),
-    } as any,
-    conversationStateRepository: stateStore as any,
-    copyOverrideRepository: copyRepo as any,
+    ...harness.deps,
+    copyOverrideRepository: copyOverrideRepo as any,
     ai: {
       providerName: "test-ai-gateway",
       async respond() {
@@ -230,9 +139,12 @@ function createTestHarness(initialOverrides: Record<string, string> = {}) {
 
   return {
     deps,
-    messages,
+    conversation: harness.conversation,
+    messages: harness.messages,
     sentMessages,
-    stateStore,
+    stateStore: harness.stateStore,
+    now: harness.getVirtualNow(),
+    nowIso: harness.getVirtualNow().toISOString(),
     setOverride(key: string, text: string) {
       overrides.set(key, text);
     },
@@ -315,7 +227,7 @@ async function main(): Promise<void> {
 
     check(
       "2a. نص الترحيب يتغير مع وجود تعديل منشور في المختبر",
-      sent !== undefined && sent.content.startsWith(expectedCustomIntro),
+      result.ok && sent !== undefined && sent.content.startsWith(expectedCustomIntro),
     );
     check(
       "2b. الخيارات الثابتة وتعليمات الأزرار تظل سليمة بعد التعديل",
@@ -433,40 +345,46 @@ async function main(): Promise<void> {
   // ── 7. Active Offer Continuation Preserved ────────────────────────────────
   {
     const harness = createTestHarness();
+    const conversationId = harness.conversation.id;
     // Seed conversation state with active slot offer
-    const futureDate = new Date(Date.now() + 3600 * 1000).toISOString();
     const activeOffer = buildSlotOffer(
-      { businessId: BUSINESS_ID, conversationId: "conv-01" },
+      { businessId: BUSINESS_ID, conversationId },
       "offer-01",
       {
-        serviceId: "srv-01",
-        serviceName: "كشف عام",
+        serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+        serviceName: "كشف أسنان",
         serviceSource: "CUSTOMER",
-        providerId: null,
+        providerId: PLAYGROUND_IDS.PROV_1,
         timePreference: null,
         date: "2026-11-01",
         shownCount: 1,
         options: [
           {
-            displayName: "طبيب 1",
-            startAt: "2026-11-01T10:00:00Z",
-            endAt: "2026-11-01T10:30:00Z",
+            providerId: PLAYGROUND_IDS.PROV_1,
+            displayName: "د. أحمد سامي",
+            startAt: "2026-11-01T10:00",
+            endAt: "2026-11-01T10:30",
           },
         ],
       },
-      new Date(),
-      new Date(futureDate),
+      harness.now,
     );
 
+    if (!activeOffer) throw new Error("Failed to build active offer in test");
     const initialState = withPresentedOffer(emptyConversationState(), activeOffer);
-    await harness.stateStore.saveState("conv-01", initialState, 0);
+    await harness.stateStore.save(
+      BUSINESS_ID,
+      conversationId,
+      null,
+      dehydrateConversationState(initialState),
+    );
 
     const result = await receiveInboundMessage(harness.deps, {
       externalId: "ext-start-active-offer",
       from: CUSTOMER_PHONE,
       to: BOT_PHONE,
       text: "/start",
-      receivedAt: new Date().toISOString(),
+      receivedAt: harness.nowIso,
     });
 
     const sent = harness.sentMessages[0];
@@ -480,26 +398,35 @@ async function main(): Promise<void> {
   // ── 8. Active Booking Task Continuation Preserved ─────────────────────────
   {
     const harness = createTestHarness();
+    const conversationId = harness.conversation.id;
     // Seed state with active booking task missing date
     const bookingTaskState = {
       ...emptyConversationState(),
+      currentGoal: "BOOKING",
+      bookingStage: "SERVICE_SUPPLIED" as const,
       activeTask: {
-        kind: "BOOKING" as const,
-        serviceId: "srv-01",
-        serviceName: "كشف عام",
-        startedAt: new Date().toISOString(),
+        kind: "BOOKING",
+        stage: "SERVICE_SUPPLIED" as const,
       },
-      selectedService: "كشف عام",
-      serviceId: "srv-01",
+      knownFacts: {
+        service: "كشف أسنان",
+      },
+      selectedService: "كشف أسنان",
+      serviceId: PLAYGROUND_IDS.SERV_DENTAL,
     };
-    await harness.stateStore.saveState("conv-01", bookingTaskState, 0);
+    await harness.stateStore.save(
+      BUSINESS_ID,
+      conversationId,
+      null,
+      dehydrateConversationState(bookingTaskState),
+    );
 
     const result = await receiveInboundMessage(harness.deps, {
       externalId: "ext-start-active-task",
       from: CUSTOMER_PHONE,
       to: BOT_PHONE,
       text: "/start",
-      receivedAt: new Date().toISOString(),
+      receivedAt: harness.nowIso,
     });
 
     const sent = harness.sentMessages[0];

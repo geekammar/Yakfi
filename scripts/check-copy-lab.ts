@@ -2393,8 +2393,8 @@ async function main(): Promise<void> {
     }
   }
   check(
-    "N8. معاينة القوالب تشغّل الحقول المُصرَّح بها فقط (12 قالب): قيم العرض لا تخترع حقولاً، وكل قالب يُعرض كاملاً عبر renderCopy",
-    templatesForLab.length === 12 && templatePreviewFailures.length === 0,
+    "N8. معاينة القوالب تشغّل الحقول المُصرَّح بها فقط (13 قالب): قيم العرض لا تخترع حقولاً، وكل قالب يُعرض كاملاً عبر renderCopy",
+    templatesForLab.length === 13 && templatePreviewFailures.length === 0,
   );
   if (templatePreviewFailures.length > 0) {
     for (const failure of templatePreviewFailures)
