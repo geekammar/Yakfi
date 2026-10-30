@@ -85,15 +85,15 @@ describe("SettingsScreen — Customer Appointment Time Display Preference", () =
 
     const startOnlyRadio = container.querySelector(
       "#time-display-START_ONLY",
-    ) as HTMLInputElement | null;
+    ) as HTMLElement | null;
     const fullRangeRadio = container.querySelector(
       "#time-display-FULL_RANGE",
-    ) as HTMLInputElement | null;
+    ) as HTMLElement | null;
 
     expect(startOnlyRadio).not.toBeNull();
     expect(fullRangeRadio).not.toBeNull();
-    expect(startOnlyRadio?.checked).toBe(true);
-    expect(fullRangeRadio?.checked).toBe(false);
+    expect(startOnlyRadio?.getAttribute("data-state")).toBe("checked");
+    expect(fullRangeRadio?.getAttribute("data-state")).toBe("unchecked");
 
     expect(container.textContent).toContain("طريقة عرض وقت الموعد للعميل");
     expect(container.textContent).toContain("البداية فقط");
@@ -107,24 +107,28 @@ describe("SettingsScreen — Customer Appointment Time Display Preference", () =
       root.render(<SettingsScreen initialSettings={baseSettings} />);
     });
 
+    const startOnlyRadio = container.querySelector(
+      "#time-display-START_ONLY",
+    ) as HTMLElement;
     const fullRangeRadio = container.querySelector(
       "#time-display-FULL_RANGE",
-    ) as HTMLInputElement;
+    ) as HTMLElement;
     expect(fullRangeRadio).not.toBeNull();
 
     await act(async () => {
       fullRangeRadio.click();
     });
 
-    expect(fullRangeRadio.checked).toBe(true);
+    expect(fullRangeRadio.getAttribute("data-state")).toBe("checked");
+    expect(startOnlyRadio.getAttribute("data-state")).toBe("unchecked");
 
-    const form = container.querySelector("form");
-    expect(form).not.toBeNull();
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الإعدادات"),
+    );
+    expect(saveButton).toBeDefined();
 
     await act(async () => {
-      form?.dispatchEvent(
-        new Event("submit", { bubbles: true, cancelable: true }),
-      );
+      saveButton?.click();
     });
 
     expect(updateBusinessSettingsAction).toHaveBeenCalledTimes(1);
@@ -147,12 +151,12 @@ describe("SettingsScreen — Customer Appointment Time Display Preference", () =
 
     const startOnlyRadio = container.querySelector(
       "#time-display-START_ONLY",
-    ) as HTMLInputElement;
+    ) as HTMLElement;
     const fullRangeRadio = container.querySelector(
       "#time-display-FULL_RANGE",
-    ) as HTMLInputElement;
+    ) as HTMLElement;
 
-    expect(startOnlyRadio.checked).toBe(false);
-    expect(fullRangeRadio.checked).toBe(true);
+    expect(startOnlyRadio.getAttribute("data-state")).toBe("unchecked");
+    expect(fullRangeRadio.getAttribute("data-state")).toBe("checked");
   });
 });
