@@ -18,6 +18,8 @@
  *     pnpm check:booking-acceptance-db
  */
 
+import { randomUUID } from "node:crypto";
+
 import {
   createAppointmentRecord,
   defaultAppointmentCreateServiceDeps,
@@ -41,9 +43,9 @@ function check(label: string, pass: boolean, details?: string): void {
 }
 
 const RUN_ID = `book-test-${Date.now()}`;
-const TEST_ADMIN_ID = `admin-${RUN_ID}`;
-const TEST_BUSINESS_ID = `biz-${RUN_ID}`;
-const TEST_CROSS_BIZ_ID = `cross-biz-${RUN_ID}`;
+const TEST_ADMIN_ID = randomUUID();
+const TEST_BUSINESS_ID = randomUUID();
+const TEST_CROSS_BIZ_ID = randomUUID();
 
 function classifyTarget(
   url: string,
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
     });
 
     // Default branch
-    const branchId = `branch-${RUN_ID}`;
+    const branchId = randomUUID();
     await db.branch.create({
       data: {
         id: branchId,
@@ -137,7 +139,7 @@ async function main(): Promise<void> {
         timezone: "Africa/Cairo",
       },
     });
-    const crossBranchId = `cross-branch-${RUN_ID}`;
+    const crossBranchId = randomUUID();
     await db.branch.create({
       data: {
         id: crossBranchId,
@@ -153,7 +155,7 @@ async function main(): Promise<void> {
     // Services
     const serviceA = await db.service.create({
       data: {
-        id: `srv-a-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_BUSINESS_ID,
         name: "كشف أولي",
         durationMinutes: 30,
@@ -163,7 +165,7 @@ async function main(): Promise<void> {
 
     const serviceB = await db.service.create({
       data: {
-        id: `srv-b-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_BUSINESS_ID,
         name: "متابعة دورية",
         durationMinutes: 30,
@@ -173,7 +175,7 @@ async function main(): Promise<void> {
 
     const crossService = await db.service.create({
       data: {
-        id: `cross-srv-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_CROSS_BIZ_ID,
         name: "خدمة منشأة أخرى",
         durationMinutes: 30,
@@ -184,7 +186,7 @@ async function main(): Promise<void> {
     // Customer
     const customer = await db.customer.create({
       data: {
-        id: `cust-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_BUSINESS_ID,
         name: "أحمد عبد الله",
         phone: `+2011${Math.floor(10000000 + Math.random() * 90000000)}`,
@@ -301,7 +303,7 @@ async function main(): Promise<void> {
     // Verify old slot (10:00) is released and bookable by a second appointment
     const customer2 = await db.customer.create({
       data: {
-        id: `cust2-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_BUSINESS_ID,
         name: "مروان كمال",
         phone: `+2011${Math.floor(10000000 + Math.random() * 90000000)}`,
@@ -399,7 +401,7 @@ async function main(): Promise<void> {
     // Add future Service C
     const futureService = await db.service.create({
       data: {
-        id: `srv-future-${RUN_ID}`,
+        id: randomUUID(),
         businessId: TEST_BUSINESS_ID,
         name: "خدمة جراحة ليزر مستقبلية",
         durationMinutes: 45,
@@ -582,6 +584,10 @@ async function main(): Promise<void> {
       });
       await db.service.deleteMany({
         where: { businessId: { in: [TEST_BUSINESS_ID, TEST_CROSS_BIZ_ID] } },
+      });
+      await db.business.updateMany({
+        where: { id: { in: [TEST_BUSINESS_ID, TEST_CROSS_BIZ_ID] } },
+        data: { defaultBranchId: null },
       });
       await db.branch.deleteMany({
         where: { businessId: { in: [TEST_BUSINESS_ID, TEST_CROSS_BIZ_ID] } },
