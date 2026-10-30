@@ -36,7 +36,6 @@ import {
 import { buildSlotOffer } from "@/features/conversations/server/booking-offer";
 import {
   createPlaygroundHarness,
-  InMemoryConversationStateStore,
   PLAYGROUND_IDS,
 } from "@/features/conversations/playground/harness";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
@@ -51,17 +50,8 @@ function check(label: string, pass: boolean): void {
 
 const BUSINESS_ID = "biz-welcome-intro-test-01";
 const BUSINESS_NAME = "عيادة النور التخصصية";
-const CUSTOMER_ID = "cust-welcome-intro-test-01";
 const CUSTOMER_PHONE = "+201099998888";
 const BOT_PHONE = "+201000001111";
-
-type StoredMessage = {
-  id: string;
-  conversationId: string;
-  senderType: "CUSTOMER" | "AI" | "STAFF";
-  content: string;
-  createdAt: Date;
-};
 
 type SentTransportMessage = {
   to: string;
