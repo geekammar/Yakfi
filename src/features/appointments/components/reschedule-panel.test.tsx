@@ -17,7 +17,7 @@
  */
 
 import { ReschedulePanel } from "@/features/appointments/components/reschedule-panel";
-import type { AppointmentDetailData, SelectedSlot } from "@/features/appointments/types";
+import type { AppointmentDetailData } from "@/features/appointments/types";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";

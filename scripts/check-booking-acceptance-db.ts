@@ -26,11 +26,7 @@ import { updateProvider, defaultTeamServiceDeps } from "@/features/staff/server/
 import { db } from "@/server/db";
 import {
   appointmentRepository,
-  branchRepository,
-  businessRepository,
-  customerRepository,
   providerRepository,
-  serviceRepository,
 } from "@/server/repositories";
 import type { UserRole } from "@/types/domain";
 
@@ -115,13 +111,17 @@ async function main(): Promise<void> {
     });
 
     // Default branch
-    const branch = await db.branch.create({
+    const branchId = `branch-${RUN_ID}`;
+    await db.branch.create({
       data: {
-        id: `branch-${RUN_ID}`,
+        id: branchId,
         businessId: TEST_BUSINESS_ID,
         name: "الفرع الرئيسي",
-        isDefault: true,
       },
+    });
+    await db.business.update({
+      where: { id: TEST_BUSINESS_ID },
+      data: { defaultBranchId: branchId },
     });
 
     // Cross-tenant business
@@ -134,13 +134,17 @@ async function main(): Promise<void> {
         timezone: "Africa/Cairo",
       },
     });
+    const crossBranchId = `cross-branch-${RUN_ID}`;
     await db.branch.create({
       data: {
-        id: `cross-branch-${RUN_ID}`,
+        id: crossBranchId,
         businessId: TEST_CROSS_BIZ_ID,
         name: "فرع المنشأة الأخرى",
-        isDefault: true,
       },
+    });
+    await db.business.update({
+      where: { id: TEST_CROSS_BIZ_ID },
+      data: { defaultBranchId: crossBranchId },
     });
 
     // Services
@@ -194,9 +198,13 @@ async function main(): Promise<void> {
       },
     );
 
+    if (!independentProvider) {
+      throw new Error("Failed to create independent provider profile");
+    }
+
     check(
       "1. Independent provider profile created without auth user account",
-      Boolean(independentProvider && independentProvider.userId === null && independentProvider.servicePolicy === "ALL_SERVICES"),
+      independentProvider.userId === null && independentProvider.servicePolicy === "ALL_SERVICES",
       `providerId=${independentProvider.id}, userId=${independentProvider.userId}`,
     );
 
