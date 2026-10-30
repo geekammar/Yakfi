@@ -417,7 +417,8 @@ async function run() {
       }) => {
         const item = stateStore.get(where.id);
         if (!item) return null;
-        if (where.businessId && item.businessId !== where.businessId) return null;
+        if (where.businessId && item.businessId !== where.businessId)
+          return null;
         if (where.status && item.status !== where.status) return null;
         if (where.deletedAt === null && item.deletedAt !== null) return null;
         return { ...item };
@@ -426,14 +427,21 @@ async function run() {
         where,
         data,
       }: {
-        where: { id: string; businessId?: string; status?: string; deletedAt?: null };
+        where: {
+          id: string;
+          businessId?: string;
+          status?: string;
+          deletedAt?: null;
+        };
         data: { status: string };
       }) => {
         const item = stateStore.get(where.id);
         if (!item) return { count: 0 };
-        if (where.businessId && item.businessId !== where.businessId) return { count: 0 };
+        if (where.businessId && item.businessId !== where.businessId)
+          return { count: 0 };
         if (where.status && item.status !== where.status) return { count: 0 };
-        if (where.deletedAt === null && item.deletedAt !== null) return { count: 0 };
+        if (where.deletedAt === null && item.deletedAt !== null)
+          return { count: 0 };
 
         item.status = data.status;
         return { count: 1 };
@@ -776,7 +784,8 @@ async function run() {
     serviceId: SRV_A,
     sourceAppointmentId: "app-hist-001",
     status: "PENDING" as const,
-    notes: "Follow-up preservation test: clinical details, post-op instructions",
+    notes:
+      "Follow-up preservation test: clinical details, post-op instructions",
     createdAt: new Date("2026-10-01T12:00:00.000Z"),
     updatedAt: new Date("2026-10-01T12:00:00.000Z"),
     deletedAt: null as Date | null,

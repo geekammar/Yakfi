@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import {
   cancelFollowUpRequestSchema,
   convertFollowUpToAppointmentSchema,
@@ -25,6 +23,8 @@ import {
   type UserRepository,
 } from "@/server/repositories";
 import type { FollowUpRequestWithRelations, UserRole } from "@/types/domain";
+
+import { revalidatePath } from "next/cache";
 
 export type FollowUpActionResult =
   | { success: true; followUpRequestId: string; message: string }

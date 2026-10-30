@@ -762,11 +762,9 @@ async function main(): Promise<void> {
       snapshotAfter.customerId === snapshotBefore.customerId;
     const srvPreserved = snapshotAfter.serviceId === snapshotBefore.serviceId;
     const sourcePreserved =
-      snapshotAfter.sourceAppointmentId ===
-      snapshotBefore.sourceAppointmentId;
+      snapshotAfter.sourceAppointmentId === snapshotBefore.sourceAppointmentId;
     const createdAtPreserved =
-      snapshotAfter.createdAt.getTime() ===
-      snapshotBefore.createdAt.getTime();
+      snapshotAfter.createdAt.getTime() === snapshotBefore.createdAt.getTime();
     const deletedAtUntouched = snapshotAfter.deletedAt === null;
     const statusTransitioned =
       snapshotBefore.status === "PENDING" &&
