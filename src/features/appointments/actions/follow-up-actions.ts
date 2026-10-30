@@ -9,6 +9,7 @@ import {
   createAppointmentRecord,
   defaultAppointmentCreateServiceDeps,
   type AppointmentCreateActor,
+  type AppointmentCreateServiceDeps,
 } from "@/features/appointments/server/appointment-create-service";
 import type { CreateAppointmentActionResult } from "@/features/appointments/types";
 import { requireUser } from "@/server/auth/guards";
@@ -18,8 +19,10 @@ import {
   providerRepository,
   serviceRepository,
   userRepository,
+  type FollowUpRequestRepository,
+  type UserRepository,
 } from "@/server/repositories";
-import type { FollowUpRequestWithRelations } from "@/types/domain";
+import type { FollowUpRequestWithRelations, UserRole } from "@/types/domain";
 
 import { revalidatePath } from "next/cache";
 
@@ -104,11 +107,30 @@ export async function createFollowUpRequest(
   };
 }
 
+export type CancelFollowUpSession = {
+  user: {
+    id: string;
+    businessId: string | null;
+    role?: UserRole | null;
+  };
+};
+
+export type CancelFollowUpDeps = {
+  followUpRequestRepository: Pick<
+    FollowUpRequestRepository,
+    "cancelPending" | "findById"
+  >;
+  getSession?: () => Promise<CancelFollowUpSession | null>;
+};
+
 export async function cancelFollowUpRequest(
   input: unknown,
+  deps: CancelFollowUpDeps = { followUpRequestRepository },
 ): Promise<{ success: boolean; message: string }> {
-  const session = await requireUser();
-  if (!session.user.businessId) {
+  const session = deps.getSession
+    ? await deps.getSession()
+    : await requireUser();
+  if (!session?.user?.businessId) {
     return { success: false, message: "غير مصرح" };
   }
 
@@ -117,37 +139,67 @@ export async function cancelFollowUpRequest(
     return { success: false, message: "معرف طلب المتابعة غير صالح" };
   }
 
-  const existing = await followUpRequestRepository.findById(
+  const result = await deps.followUpRequestRepository.cancelPending(
     parsed.data.id,
     session.user.businessId,
   );
-  if (!existing) {
-    return { success: false, message: "طلب المتابعة غير موجود" };
+
+  switch (result.outcome) {
+    case "CANCELLED": {
+      try {
+        revalidatePath("/appointments");
+        if (result.followUp.sourceAppointmentId) {
+          revalidatePath(
+            `/appointments/${result.followUp.sourceAppointmentId}`,
+          );
+        }
+      } catch {
+        // Outside Next.js request context (e.g. test runner)
+      }
+      return { success: true, message: "تم إلغاء طلب المتابعة بنجاح" };
+    }
+    case "ALREADY_CANCELLED": {
+      return { success: true, message: "طلب المتابعة ملغى بالفعل" };
+    }
+    case "ALREADY_SCHEDULED": {
+      return {
+        success: false,
+        message: "لا يمكن إلغاء طلب متابعة تم حجز موعد له مسبقاً",
+      };
+    }
+    case "NOT_FOUND":
+    default: {
+      return { success: false, message: "طلب المتابعة غير موجود" };
+    }
   }
-
-  if (existing.status !== "PENDING") {
-    return { success: false, message: "لا يمكن إلغاء هذا الطلب" };
-  }
-
-  await followUpRequestRepository.updateStatus(
-    existing.id,
-    session.user.businessId,
-    "CANCELLED",
-  );
-
-  revalidatePath("/appointments");
-  if (existing.sourceAppointmentId) {
-    revalidatePath(`/appointments/${existing.sourceAppointmentId}`);
-  }
-
-  return { success: true, message: "تم إلغاء طلب المتابعة بنجاح" };
 }
+
+export type ConvertFollowUpDeps = {
+  followUpRequestRepository: Pick<FollowUpRequestRepository, "findById">;
+  userRepository: Pick<UserRepository, "findById">;
+  appointmentCreateServiceDeps: AppointmentCreateServiceDeps;
+  getSession?: () => Promise<CancelFollowUpSession | null>;
+};
 
 export async function convertFollowUpToAppointmentAction(
   input: unknown,
+  deps: ConvertFollowUpDeps = {
+    followUpRequestRepository,
+    userRepository,
+    appointmentCreateServiceDeps: defaultAppointmentCreateServiceDeps,
+  },
 ): Promise<CreateAppointmentActionResult> {
-  const session = await requireUser();
-  const user = await userRepository.findById(session.user.id);
+  const session = deps.getSession
+    ? await deps.getSession()
+    : await requireUser();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      code: "NO_BUSINESS",
+      message: "أكمل إعداد المنشأة أولاً",
+    };
+  }
+  const user = await deps.userRepository.findById(session.user.id);
   if (!user?.businessId) {
     return {
       success: false,
@@ -165,11 +217,32 @@ export async function convertFollowUpToAppointmentAction(
     };
   }
 
-  const followUp = await followUpRequestRepository.findById(
+  const followUp = await deps.followUpRequestRepository.findById(
     parsed.data.followUpId,
     user.businessId,
   );
-  if (!followUp || followUp.status !== "PENDING") {
+  if (!followUp) {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "طلب المتابعة غير موجود",
+    };
+  }
+  if (followUp.status === "CANCELLED") {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "طلب المتابعة ملغى ولا يمكن حجز موعد له",
+    };
+  }
+  if (followUp.status === "SCHEDULED") {
+    return {
+      success: false,
+      code: "FOLLOW_UP_NOT_PENDING",
+      message: "تم حجز موعد لطلب المتابعة مسبقاً",
+    };
+  }
+  if (followUp.status !== "PENDING") {
     return {
       success: false,
       code: "FOLLOW_UP_NOT_PENDING",
@@ -204,16 +277,20 @@ export async function convertFollowUpToAppointmentAction(
   };
 
   const result = await createAppointmentRecord(
-    defaultAppointmentCreateServiceDeps,
+    deps.appointmentCreateServiceDeps,
     actor,
     createInput,
   );
 
   if (result.success) {
-    revalidatePath("/appointments");
-    revalidatePath(`/appointments/${result.appointmentId}`);
-    if (followUp.sourceAppointmentId) {
-      revalidatePath(`/appointments/${followUp.sourceAppointmentId}`);
+    try {
+      revalidatePath("/appointments");
+      revalidatePath(`/appointments/${result.appointmentId}`);
+      if (followUp.sourceAppointmentId) {
+        revalidatePath(`/appointments/${followUp.sourceAppointmentId}`);
+      }
+    } catch {
+      // Outside Next.js request context (e.g. test harness / standalone runner)
     }
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.78.6",
+  "version": "0.78.7",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -113,6 +113,8 @@
     "check:ux001-r3": "tsx scripts/check-booking-intervals.ts",
     "check:ux001-r4": "tsx scripts/check-ux001-r4.ts",
     "check:ux001-r5": "tsx scripts/check-ux001-r5.ts",
+    "check:iss-006": "tsx scripts/check-iss-006.ts",
+    "check:iss-006-db": "tsx scripts/check-iss-006-db.ts",
     "check:conversation-c1": "tsx scripts/check-conversation-c1.ts",
     "check:conversation-c2": "tsx scripts/check-conversation-c2.ts",
     "check:conversation-hotfix": "tsx scripts/check-conversation-hotfix.ts",
@@ -191,6 +193,7 @@
     "test:reschedule-panel": "vitest run --config vitest.config.ts src/features/appointments/components/reschedule-panel.test.tsx",
     "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:login-form": "vitest run --config vitest.config.ts src/features/auth/components/login-form.test.tsx",
+    "test:follow-up-scheduling": "vitest run --config vitest.config.ts src/features/appointments/components/follow-up-scheduling.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
     "test:e2e": "playwright test",
     "test:e2e:local": "playwright test tests/e2e/booking-flows.spec.ts tests/e2e/ux-viewports.spec.ts",

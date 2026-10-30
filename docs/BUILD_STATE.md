@@ -9,7 +9,20 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.78.6 (feature branch; candidate PR)** — `Fix Verified Booking Acceptance Blockers (ISS-002 -> ISS-005)`. Baseline: v0.78.5 (commit `18c383a88c87596879eb9b6344db98a6c90ec2aa`).
+**Product version: v0.78.7 (feature branch; candidate PR)** — `Follow-up Scheduling Wizard Crash & Atomic Cancellation Race Resolution (ISS-006)`. Baseline: v0.78.6 (PR #69 merged baseline, commit `39d6b18`).
+
+1. **DateStep Undated & Range Safety (ISS-006)**: Repaired crash when opening undated follow-ups (`startDate: null, endDate: null`) where formatting `null` dates caused an unhandled `RangeError: Invalid time value` reaching Next.js Error Boundary twice on production v0.78.5. Added defensive Arabic date formatters (`formatArabicDate`, `formatArabicWeekday`, `formatArabicMonth`, `formatArabicDayMonth`) returning safe fallbacks on invalid/null dates, and explicit DateStep UI handling for undated requests («طلب متابعة دون تاريخ محدد — يمكنك اختيار أي موعد متاح») and inverted ranges.
+2. **Atomic Cancellation vs Scheduling Race**: Replaced non-atomic read-then-write cancellation with tenant-scoped atomic `cancelPending` transition asserting `status: "PENDING"` in SQL `WHERE` clause with serializable conflict retries. Prevented concurrent scheduling transactions from being overwritten by cancellation.
+3. **Honest Terminal State Reconciliation**: Cancelling an already `CANCELLED` request reconciles honestly as success (`طلب المتابعة ملغى بالفعل`). Cancelling an already `SCHEDULED` request returns an explicit refusal (`لا يمكن إلغاء طلب متابعة تم حجز موعد له مسبقاً`). Overwriting scheduled appointments or cross-tenant records is strictly prohibited.
+4. **Reactive UI State Synchronization**: Decoupled stale local state in `AppointmentDetail` to allow initial server props to flow directly to `FollowUpList`. Tracked optimistic cancellation state in `FollowUpList` for immediate touch response while server revalidation proceeds.
+5. **Accurate Historical Diagnosis**: Stale UI explains a plausible user sequence for receiving false-alarm rejection messages on re-clicks, but does not prove who changed Muse's historical follow-up request. In accordance with evidence integrity rules, the historical cause remains UNKNOWN.
+6. **Automated Acceptance & Regression Test Coverage**:
+   - `scripts/check-iss-006-db.ts` (`pnpm check:iss-006-db`): 13 checks against real disposable PostgreSQL covering zero-appointment initial state, atomic conversion, controlled duplicate-conversion race (Promise.all), controlled cancel-vs-schedule race (Promise.all), honest terminal reconciliation, and byte-for-byte historical record preservation.
+   - `src/features/appointments/components/follow-up-scheduling.test.tsx` (`pnpm test:follow-up-scheduling`): 10 mounted integration tests covering DateStep undated/one-sided/inverted ranges and FollowUpList/AppointmentDetail cancellation handling.
+   - `scripts/check-iss-006.ts` (`pnpm check:iss-006`): 12 checks covering defensive date formatters, boundary conditions, and invariant rules.
+   - All three suites explicitly wired into `.github/workflows/pr-validation.yml`.
+
+**Product version: v0.78.6 (main baseline; merged PR #69)** — `Fix Verified Booking Acceptance Blockers (ISS-002 -> ISS-005)`. Baseline: v0.78.5 (commit `18c383a88c87596879eb9b6344db98a6c90ec2aa`).
 
 1. **Reschedule Panel Authoritative Eligibility & Preserved Provider (ISS-005)**: Wired `resolveEligibleProvidersAction` query and optional prop into `ReschedulePanel`, eliminating the false zero-provider empty state. Preserved existing appointment provider identity without silent switching or provider fabrication. Added loading skeleton states and ineligibility alerts for changed provider assignments.
 2. **Independent Provider Booking Exception (ISS-002)**: Repaired `ProviderRepository.listAssignmentSeams` to return `userId: row.userId ?? null` instead of fabricating `row.id` as `userId`. Eliminated foreign key constraint violation on `appointments.assigned_user_id` when booking independent providers with null login accounts.
