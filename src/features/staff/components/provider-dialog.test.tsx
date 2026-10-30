@@ -111,8 +111,9 @@ describe("ProviderDialog interaction and policy upgrade tests (ISS-003)", () => 
     if (!root) {
       root = createRoot(container);
     }
+    const activeRoot = root;
     await act(async () => {
-      root.render(ui);
+      activeRoot.render(ui);
     });
   }
 
