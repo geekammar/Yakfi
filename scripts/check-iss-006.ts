@@ -22,6 +22,8 @@
  * Run: tsx scripts/check-iss-006.ts
  */
 
+import "./setup-test-env";
+
 import type { Prisma } from "@/generated/prisma/client";
 
 import { cancelFollowUpRequest } from "@/features/appointments/actions/follow-up-actions";
@@ -69,12 +71,6 @@ function check(id: number, label: string, pass: boolean, details?: string) {
 }
 
 async function run() {
-  process.env.DATABASE_URL ??=
-    "postgresql://user:password@localhost:5432/placeholder";
-  process.env.BETTER_AUTH_SECRET ??= "0".repeat(32);
-  process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
-  process.env.NEXT_PUBLIC_APP_URL ??= "http://localhost:3000";
-
   console.log(
     "\n=== FlowPilot ISS-006 Follow-up Scheduling Diagnostic & Verification ===\n",
   );

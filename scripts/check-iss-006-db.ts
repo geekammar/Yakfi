@@ -30,6 +30,8 @@
  *     pnpm check:iss-006-db
  */
 
+import "./setup-test-env";
+
 import {
   cancelFollowUpRequest,
   convertFollowUpToAppointmentAction,
