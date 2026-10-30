@@ -153,6 +153,8 @@ export function isValidCalendarDate(
 
 export type ParseOfferDateOptions = {
   provenanceDate?: string | Date | null;
+  /** @deprecated Historical offer recovery provenance date. Use `provenanceDate`. */
+  referenceDate?: string | Date | null;
   timezone?: string | null;
 };
 
@@ -280,7 +282,8 @@ export function parseOfferDate(
         provenanceOrOptions &&
         typeof provenanceOrOptions === "object" &&
         !(provenanceOrOptions instanceof Date)
-          ? provenanceOrOptions.provenanceDate
+          ? (provenanceOrOptions.provenanceDate ??
+            provenanceOrOptions.referenceDate)
           : provenanceOrOptions;
       const tz =
         provenanceOrOptions &&
@@ -362,7 +365,10 @@ export function extractLastBookingOffer(
     if (!header[1] || !header[3]) return null;
 
     const msgProvenance =
-      msg.sentAt ?? msg.createdAt ?? options?.provenanceDate;
+      msg.sentAt ??
+      msg.createdAt ??
+      options?.provenanceDate ??
+      options?.referenceDate;
     const resolvedDate = parseOfferDate(header[3], {
       provenanceDate: msgProvenance,
       timezone: options?.timezone ?? "Africa/Cairo",

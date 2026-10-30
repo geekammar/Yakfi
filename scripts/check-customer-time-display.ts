@@ -679,7 +679,7 @@ async function runTests() {
 
   const realStartOnlyCtx = extractLastBookingOffer(
     [{ senderType: "AI", content: realStartOnlyOutput }],
-    { referenceDate: "2026-11-01" },
+    { provenanceDate: "2026-11-01" },
   );
   check(
     "6.2 Real formatter output under START_ONLY (Arabic date + header provider mention) recovers cleanly",
@@ -720,7 +720,7 @@ async function runTests() {
 
   const realFullRangeCtx = extractLastBookingOffer(
     [{ senderType: "AI", content: realFullRangeOutput }],
-    { referenceDate: "2026-11-01" },
+    { provenanceDate: "2026-11-01" },
   );
   check(
     "6.3 Real formatter output under FULL_RANGE (Arabic date) recovers exact start and end times",
@@ -761,7 +761,7 @@ async function runTests() {
 
   const realMixedCtx = extractLastBookingOffer(
     [{ senderType: "AI", content: realMixedOutput }],
-    { referenceDate: "2026-11-01" },
+    { provenanceDate: "2026-11-01" },
   );
   check(
     "6.4 Real formatter output with mixed providers recovers individual provider display names",
@@ -789,7 +789,7 @@ async function runTests() {
   );
   const moreTimesCtx = extractLastBookingOffer(
     [{ senderType: "AI", content: moreTimesOutput }],
-    { referenceDate: "2026-11-01" },
+    { provenanceDate: "2026-11-01" },
   );
   check(
     "6.5 'isMoreTimes' header ('إليك أوقاتاً أخرى متاحة لخدمة...') is recovered accurately",
@@ -1295,6 +1295,20 @@ async function runTests() {
     );
   }
 
+  function injectHistoricalMessage(
+    messages: unknown[],
+    msg: {
+      id: string;
+      conversationId: string;
+      senderType: "AI" | "CUSTOMER" | "SYSTEM";
+      content: string;
+      createdAt: Date | null;
+      sentAt: Date | null;
+    },
+  ): void {
+    messages.push(msg);
+  }
+
   // ── 8.4 Yearless Historical Offer without Timestamp: Current Turn Clock Must Not Supply Year
   {
     const harness = createPlaygroundHarness({
@@ -1318,7 +1332,7 @@ async function runTests() {
         modelCalls++;
         return {
           intent: "FAQ",
-          action: "direct_reply",
+          action: "reply",
           content: "يرجى تحديد التاريخ بالكامل لإتمام الحجز.",
           summary: "استفسار",
           handoffReason: null,
@@ -1335,7 +1349,7 @@ async function runTests() {
     };
 
     // Prepopulate historical message: valid yearless offer format, but missing sentAt/createdAt
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-yearless-no-time",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1395,8 +1409,8 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return {
-          intent: "INQUIRY",
-          action: "direct_reply",
+          intent: "FAQ",
+          action: "reply",
           content:
             "لم أتمكن من استرجاع الموعد، يرجى طلب المواعيد المتاحة مجدداً.",
           summary: "استفسار",
@@ -1414,7 +1428,7 @@ async function runTests() {
     };
 
     // Message 1 (older, valid offer)
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-older-valid",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1427,7 +1441,7 @@ async function runTests() {
     });
 
     // Message 2 (newer, unresolvable offer with impossible date Feb 31)
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-newer-unresolvable",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1486,8 +1500,8 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return {
-          intent: "INQUIRY",
-          action: "direct_reply",
+          intent: "FAQ",
+          action: "reply",
           content: "يرجى اختيار موعد صالح.",
           summary: "استفسار",
           handoffReason: null,
@@ -1504,7 +1518,7 @@ async function runTests() {
     };
 
     // Message 1 (older, valid offer)
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-older-valid-2",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1517,7 +1531,7 @@ async function runTests() {
     });
 
     // Message 2 (newer offer with invalid option times 25:00)
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-newer-invalid-options",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1576,8 +1590,8 @@ async function runTests() {
       async respond(): Promise<AiResponse> {
         modelCalls++;
         return {
-          intent: "INQUIRY",
-          action: "direct_reply",
+          intent: "FAQ",
+          action: "reply",
           content: "هذا الموعد قد مضى، يرجى طلب مواعيد جديدة.",
           summary: "استفسار",
           handoffReason: null,
@@ -1595,7 +1609,7 @@ async function runTests() {
 
     // Offer sent on 2026-11-01 offering 2026-11-01 (Sunday, 1 Nov)
     const offerTime = new Date("2026-11-01T08:00:00Z");
-    (harness.messages as any[]).push({
+    injectHistoricalMessage(harness.messages, {
       id: "msg-delayed-trusted",
       conversationId: harness.conversation.id,
       senderType: "AI",
@@ -1622,7 +1636,7 @@ async function runTests() {
 
     check(
       "8.7a Delayed customer reply recovers exact historical offer date without booking elapsed slot",
-      turnResult.ok === true,
+      turnResult.ok === true && modelCalls === 1,
     );
 
     check(
