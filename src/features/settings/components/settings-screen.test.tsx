@@ -68,8 +68,14 @@ describe("SettingsScreen — Customer Appointment Time Display Preference", () =
     reminderEnabled: false,
     reminderLeadHours: 24,
     reminderTemplateId: "standard",
+    remindersOperational: false,
     defaultServiceBookingEnabled: false,
     defaultBookingServiceId: null,
+    channelReadiness: {
+      whatsapp: false,
+      telegram: false,
+      hasActiveChannel: false,
+    },
   };
 
   it("renders START_ONLY selected by default with Arabic labels and local examples", async () => {

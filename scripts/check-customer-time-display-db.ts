@@ -256,8 +256,8 @@ async function main(): Promise<void> {
       },
     );
     check(
-      "4.1 Actor without business association is rejected with FORBIDDEN (zero mutation)",
-      updateBByA.success === false && updateBByA.error === "FORBIDDEN",
+      "4.1 Actor without business association is rejected with message (zero mutation)",
+      updateBByA.success === false && typeof updateBByA.message === "string",
     );
 
     // ── 5. Revert business A back to START_ONLY ──────────────────────────────

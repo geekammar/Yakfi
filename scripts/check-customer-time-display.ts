@@ -857,8 +857,8 @@ async function runTests() {
       extraction: {
         service: params.service,
         date: params.date,
-        time: null,
         provider: null,
+        timePreference: null,
       },
       factUpdates: [
         { key: "service", operation: "set", value: params.service },
