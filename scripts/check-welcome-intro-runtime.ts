@@ -7,18 +7,19 @@
  * recording offline message transport.
  *
  * Verifies:
- *  1. Default output on fresh /start — byte-for-byte matches canonical default.
+ *  1. Default output on fresh /start — byte-for-byte matches independent baseline.
  *  2. Persisted reply in repository equals delivered transport message.
  *  3. businessName is derived authoritatively from server business context.
- *  4. Choice IDs/options and welcome offer remain 100% intact.
- *  5. Zero model calls on formal /start command.
- *  6. Changed introduction when a valid override is present in copy repository.
- *  7. Immediate reversion to default output when override is reset.
- *  8. Failsafe fallback to canonical default when stored override is invalid.
- *  9. Failsafe fallback to canonical default when copy repository read fails.
- * 10. Duplicate inbound idempotency (no extra reply or transport send).
- * 11. Active offer continuation is preserved and not overwritten by /start.
- * 12. Active booking task continuation is preserved and not overwritten by /start.
+ *  4. Choice IDs/options, callback semantics, and welcome offer match persisted state.
+ *  5. Zero model calls and zero appointment writes on formal /start command.
+ *  6. Isolated dependency path without copy repository strictly uses canonical default.
+ *  7. Changed introduction when a valid override is present in copy repository.
+ *  8. Immediate reversion to default output when override is reset.
+ *  9. Failsafe fallback to canonical default when stored override is invalid.
+ * 10. Failsafe fallback to canonical default when copy repository read fails.
+ * 11. Duplicate inbound idempotency (no extra reply or transport send).
+ * 12. Active offer continuation is preserved, distinct override is unconsumed, offer identity preserved.
+ * 13. Active booking task continuation is preserved, distinct override is unconsumed, task identity preserved.
  *
  * Run: pnpm check:welcome-intro-runtime
  */
@@ -146,8 +147,14 @@ function createTestHarness(initialOverrides: Record<string, string> = {}) {
       failCopyRead = fail;
     },
     getAiCallsCount: () => aiCallsCount,
+    getAppointmentWritesCount: () => harness.capturedAppointmentWrites.length,
+    appointments: harness.appointments,
   };
 }
+
+const INDEPENDENT_BASELINE_WELCOME =
+  `أهلاً بك في ${BUSINESS_NAME}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:` +
+  `\n1️⃣ حجز موعد\n2️⃣ استفسار عن خدمة\n(يمكنك الاختيار من الخيارات أعلاه أو كتابة طلبك مباشرة في أي وقت)`;
 
 async function main(): Promise<void> {
   console.log(
@@ -173,6 +180,12 @@ async function main(): Promise<void> {
 
     const sent = harness.sentMessages[0];
     const persisted = harness.messages.find((m) => m.senderType === "AI");
+    const persistedState = await harness.stateStore.load(
+      BUSINESS_ID,
+      harness.conversation.id,
+    );
+    const offer = persistedState?.offer;
+    const choices = sent?.choices as any;
 
     check(
       "1a. نتيجة المعالجة ناجحة وبحالة AI_ACTIVE",
@@ -183,8 +196,10 @@ async function main(): Promise<void> {
       result.ok && (result as any).intent === "GREETING",
     );
     check(
-      "1c. نص الرسالة المرسل يطابق النص الافتراضي حرفاً بحرف",
-      sent !== undefined && sent.content === expectedFullMessage,
+      "1c. نص الرسالة المرسل يطابق التوقع الكنسي المستقل (ولا يعتمد فقط على ثوابت الملف)",
+      sent !== undefined &&
+        sent.content === INDEPENDENT_BASELINE_WELCOME &&
+        sent.content === expectedFullMessage,
     );
     check(
       "1d. نص الرسالة المخزن في قاعدة البيانات يطابق نص الإرسال حرفياً",
@@ -197,12 +212,56 @@ async function main(): Promise<void> {
       sent !== undefined && sent.content.includes(BUSINESS_NAME),
     );
     check(
-      "1f. خيارات القناة وبطاقات الأزرار موجودة وسليمة",
-      sent !== undefined && sent.choices !== undefined,
+      "1f. خيارات القناة وبطاقات الأزرار مطابقة لدلالات عرض الترحيب وحالة المحادثة المحفوظة",
+      choices !== undefined &&
+        choices.offerKind === "WELCOME" &&
+        offer !== null &&
+        offer?.kind === "WELCOME" &&
+        choices.offerId === offer?.id &&
+        choices.offerToken === offer?.token &&
+        Array.isArray(choices.groups) &&
+        choices.groups.length === 2 &&
+        choices.groups[0][0]?.id === "book" &&
+        choices.groups[0][0]?.label === "حجز موعد" &&
+        choices.groups[1][0]?.id === "inquire" &&
+        choices.groups[1][0]?.label === "استفسار عن خدمة",
     );
     check(
       "1g. لم يتم استدعاء أي نموذج ذكاء اصطناعي لأمر /start الصريح",
       harness.getAiCallsCount() === 0,
+    );
+    check(
+      "1h. لم يتم إنشاء أو تعديل أي موعد في مسار الترحيب الأولي",
+      harness.getAppointmentWritesCount() === 0,
+    );
+  }
+
+  // ── 1-bis. No Injected Copy Repository Path (Strict Isolation) ────────────
+  {
+    const harness = createTestHarness();
+    // Explicitly delete copyOverrideRepository to prove the isolated path uses
+    // the canonical default without consulting any repository singleton
+    delete (harness.deps as any).copyOverrideRepository;
+
+    const result = await receiveInboundMessage(harness.deps, {
+      externalId: "ext-start-no-repo",
+      from: "+201011112222",
+      to: BOT_PHONE,
+      text: "/start",
+      receivedAt: new Date().toISOString(),
+    });
+
+    const sent = harness.sentMessages[0];
+    const persisted = harness.messages.find((m) => m.senderType === "AI");
+
+    check(
+      "1i. غياب مستودع التجاوزات ينتج النص الكنسي الافتراضي مباشرة دون استدعاء أي قاعدة بيانات",
+      result.ok &&
+        sent !== undefined &&
+        sent.content === INDEPENDENT_BASELINE_WELCOME &&
+        persisted !== undefined &&
+        persisted.content === sent.content &&
+        harness.deps.copyOverrideRepository === undefined,
     );
   }
 
@@ -354,9 +413,13 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── 7. Active Offer Continuation Preserved ────────────────────────────────
+  // ── 7. Active Offer Continuation Preserved (With Distinctive Override Seeded) ──
   {
     const harness = createTestHarness();
+    const DISTINCTIVE_OVERRIDE =
+      "تجاوز ترحيبي مميز جداً {businessName} XYZ_OFFER_INTRUSION_GUARD";
+    harness.setOverride("welcome.intro", DISTINCTIVE_OVERRIDE);
+
     const conversationId = harness.conversation.id;
     // Seed conversation state with active slot offer
     const activeOffer = buildSlotOffer(
@@ -403,17 +466,44 @@ async function main(): Promise<void> {
     });
 
     const sent = harness.sentMessages[0];
+    const persisted = harness.messages.find((m) => m.senderType === "AI");
+    const currentState = await harness.stateStore.load(
+      BUSINESS_ID,
+      conversationId,
+    );
+
     check("7a. المعالجة ناجحة بوجود عرض نشط", result.ok);
     check(
-      "7b. يتم استئناف العرض النشط ولا يتم استبداله بالترحيب الأولي",
+      "7b. يتم استئناف العرض النشط ولا يتم استهلاك أو تسريب تجاوز الترحيب المميز",
       sent !== undefined &&
+        !sent.content.includes("XYZ_OFFER_INTRUSION_GUARD") &&
         sent.content.includes("ما زالت المواعيد المقترحة متاحة لاختيارك"),
+    );
+    check(
+      "7c. هوية العرض النشط وحالة المحادثة محفوظة تماماً",
+      currentState?.offer?.id === "offer-01" &&
+        currentState?.offer?.kind === "SLOT",
+    );
+    check(
+      "7d. نص الرسالة المخزن يطابق نص الإرسال حرفياً دون أي تعديل على المواعيد",
+      persisted !== undefined &&
+        sent !== undefined &&
+        persisted.content === sent.content &&
+        harness.getAppointmentWritesCount() === 0,
+    );
+    check(
+      "7e. لم يتم استدعاء أي نموذج ذكاء اصطناعي لأمر /start بوجود عرض نشط",
+      harness.getAiCallsCount() === 0,
     );
   }
 
-  // ── 8. Active Booking Task Continuation Preserved ─────────────────────────
+  // ── 8. Active Booking Task Continuation Preserved (With Distinctive Override Seeded) ──
   {
     const harness = createTestHarness();
+    const DISTINCTIVE_OVERRIDE =
+      "تجاوز ترحيبي مميز جداً {businessName} XYZ_BOOKING_TASK_INTRUSION_GUARD";
+    harness.setOverride("welcome.intro", DISTINCTIVE_OVERRIDE);
+
     const conversationId = harness.conversation.id;
     // Seed state with active booking task missing date
     const bookingTaskState = {
@@ -446,11 +536,35 @@ async function main(): Promise<void> {
     });
 
     const sent = harness.sentMessages[0];
+    const persisted = harness.messages.find((m) => m.senderType === "AI");
+    const currentState = await harness.stateStore.load(
+      BUSINESS_ID,
+      conversationId,
+    );
+
     check("8a. المعالجة ناجحة بوجود مهمة حجز نشطة", result.ok);
     check(
-      "8b. يتم طلب تحديد التاريخ لمتابعة الحجز ولا يتم إرسال الترحيب الأولي",
+      "8b. يتم طلب تحديد التاريخ ولا يتم استهلاك أو تسريب تجاوز الترحيب المميز",
       sent !== undefined &&
+        !sent.content.includes("XYZ_BOOKING_TASK_INTRUSION_GUARD") &&
         (sent.content.includes("التاريخ") || sent.content.includes("اليوم")),
+    );
+    check(
+      "8c. هوية مهمة الحجز ومرحلتها والخدمة المحددة محفوظة تماماً",
+      currentState?.activeTask?.kind === "BOOKING" &&
+        currentState?.bookingStage === "SERVICE_SUPPLIED" &&
+        currentState?.serviceId === PLAYGROUND_IDS.SERV_DENTAL,
+    );
+    check(
+      "8d. نص الرسالة المخزن يطابق نص الإرسال ولم يتم إنشاء أو تعديل أي موعد",
+      persisted !== undefined &&
+        sent !== undefined &&
+        persisted.content === sent.content &&
+        harness.getAppointmentWritesCount() === 0,
+    );
+    check(
+      "8e. لم يتم استدعاء أي نموذج ذكاء اصطناعي لأمر /start بوجود مهمة حجز نشطة",
+      harness.getAiCallsCount() === 0,
     );
   }
 

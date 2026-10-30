@@ -674,10 +674,19 @@ export async function resolveWelcomeMessage(
   deps: ConversationEngineDeps,
   businessName: string,
 ): Promise<string> {
-  const fallbackIntro = `أهلاً بك في ${businessName}!\nيسعدنا مساعدتك في حجز موعد أو الإجابة عن استفساراتك:`;
+  const fallbackIntro = DEFAULT_WELCOME_INTRO_TEMPLATE.replace(
+    "{businessName}",
+    businessName,
+  );
+
+  // If no copyOverrideRepository was injected, strictly use the canonical code default
+  // without consulting any global database repository or singleton.
+  if (!deps.copyOverrideRepository) {
+    return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
+  }
 
   try {
-    const copyRepo = deps.copyOverrideRepository ?? copyOverrideRepository;
+    const copyRepo = deps.copyOverrideRepository;
     const resolution = await resolveStoredCopy("welcome.intro", {
       getPublished: (k) => copyRepo.getPublished(k),
       save: async () => {
@@ -692,7 +701,22 @@ export async function resolveWelcomeMessage(
     });
 
     if (!resolution.ok) {
+      console.warn(
+        "[conversation-engine] abnormal copy resolution failure, using default template",
+        { key: "welcome.intro", code: resolution.code },
+      );
       return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
+    }
+
+    if (
+      resolution.source === "CODE_DEFAULT" &&
+      resolution.fallbackReason &&
+      resolution.fallbackReason !== "NO_OVERRIDE"
+    ) {
+      console.warn(
+        "[conversation-engine] copy override fallback applied, using default template",
+        { key: "welcome.intro", reason: resolution.fallbackReason },
+      );
     }
 
     const renderResult = renderCopyText("welcome.intro", resolution.text, {
@@ -700,11 +724,19 @@ export async function resolveWelcomeMessage(
     });
 
     if (!renderResult.ok) {
+      console.warn(
+        "[conversation-engine] copy render failure, using default template",
+        { key: "welcome.intro", code: renderResult.code },
+      );
       return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
     }
 
     return `${renderResult.text}${FIXED_WELCOME_CHOICES_BODY}`;
   } catch {
+    console.warn(
+      "[conversation-engine] unexpected error resolving welcome copy, using default template",
+      { key: "welcome.intro" },
+    );
     return `${fallbackIntro}${FIXED_WELCOME_CHOICES_BODY}`;
   }
 }

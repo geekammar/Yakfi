@@ -149,6 +149,7 @@ jobs:
           pnpm test:appointment-cancel
           pnpm test:login-form
           pnpm check:qa-harness
+          pnpm check:copy-lab
           pnpm check:welcome-intro-runtime
 
       - name: Deploy Prisma schema to test PostgreSQL

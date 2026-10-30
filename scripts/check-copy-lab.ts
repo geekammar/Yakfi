@@ -51,7 +51,7 @@ import type {
  *   N  FOUNDER LAB UI (01D-1) — the read-only Platform Lab surface over the
  *                               registry: the platform route + authorization,
  *                               derivation from COPY_REGISTRY (no duplicated
- *                               entry list), all 47 entries represented,
+ *                               entry list), all 48 entries represented,
  *                               PROTECTED_COPY visibly read-only, search/
  *                               filter purity, preview through renderCopy,
  *                               template placeholders exercised, missing
@@ -1987,6 +1987,85 @@ async function main(): Promise<void> {
     /\b(?:resolveStoredCopy|savePublishedOverride|resetPublishedOverride|restoreOverride|getPublishedOverride|listOverrideHistory|copyOverrideRepository|PlatformCopyOverride)\b/;
   const MUTATING_OVERRIDE_SYMBOLS =
     /\b(?:savePublishedOverride|resetPublishedOverride|restoreOverride|getPublishedOverride|listOverrideHistory|PlatformCopyOverride)\b/;
+
+  // Structural validator for the conversation engine's approved runtime wiring:
+  // Strictly enforces that ONLY literal "welcome.intro" may be resolved via resolveStoredCopy,
+  // dynamic keys, unrelated keys, and extra wiring are rejected, and mutating symbols or Lab UI
+  // imports remain strictly forbidden.
+  function validateEngineCopyWiring(source: string): {
+    valid: boolean;
+    errors: string[];
+    callCount: number;
+    approvedCount: number;
+  } {
+    const errors: string[] = [];
+
+    // 1. Management and mutating symbols are strictly forbidden
+    const MUTATING_SYMBOLS = [
+      "savePublishedOverride",
+      "resetPublishedOverride",
+      "restoreOverride",
+      "getPublishedOverride",
+      "listOverrideHistory",
+      "PlatformCopyOverride",
+    ];
+    for (const sym of MUTATING_SYMBOLS) {
+      if (new RegExp(`\\b${sym}\\b`).test(source)) {
+        errors.push(
+          `Mutating or management symbol forbidden in runtime engine: ${sym}`,
+        );
+      }
+    }
+
+    // 2. Lab UI imports and actions are strictly forbidden
+    if (
+      /copy-lab-actions|CopyLabBrowser|CopyLabDetail|conversation-lab|copy-lab-logic/.test(
+        source,
+      )
+    ) {
+      errors.push(
+        "Conversation Lab UI modules and actions are forbidden in runtime engine",
+      );
+    }
+
+    // 3. Find and inspect all resolveStoredCopy invocations
+    const resolveRegex = /\bresolveStoredCopy\s*\(\s*([^,\)]+)/g;
+    let match: RegExpExecArray | null;
+    let callCount = 0;
+    let approvedCount = 0;
+
+    while ((match = resolveRegex.exec(source)) !== null) {
+      callCount += 1;
+      const rawArg = match[1].trim();
+      const isApproved =
+        rawArg === '"welcome.intro"' || rawArg === "'welcome.intro'";
+      if (isApproved) {
+        approvedCount += 1;
+      } else {
+        errors.push(
+          `Disallowed resolver key at call site: ${rawArg} (only literal "welcome.intro" is approved)`,
+        );
+      }
+    }
+
+    if (callCount === 0) {
+      errors.push(
+        'Missing approved runtime resolver call site: resolveStoredCopy("welcome.intro", ...)',
+      );
+    } else if (callCount > 1) {
+      errors.push(
+        `Extra resolver wiring detected: expected exactly 1 call site for welcome.intro, found ${callCount}`,
+      );
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      callCount,
+      approvedCount,
+    };
+  }
+
   const overrideWired: string[] = [];
   for (const file of walkTs(path.join(process.cwd(), "src"))) {
     const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
@@ -1999,17 +2078,15 @@ async function main(): Promise<void> {
     if (isLabServerBoundary(rel)) continue;
     if (rel === "src/features/conversations/server/conversation-engine.ts") {
       // In the approved runtime slice, the engine may ONLY call resolveStoredCopy
-      // (and inject copyOverrideRepository). Mutating/management symbols remain forbidden.
+      // with literal "welcome.intro" (and inject copyOverrideRepository).
+      // Mutating/management symbols, Lab UI modules, unrelated keys, and extra
+      // wiring remain strictly forbidden.
       const engSrc = read(rel);
-      if (MUTATING_OVERRIDE_SYMBOLS.test(engSrc)) {
-        overrideWired.push(
-          `${rel} (mutating override symbols forbidden in engine)`,
-        );
-      }
-      if (!engSrc.includes('resolveStoredCopy("welcome.intro"')) {
-        overrideWired.push(
-          `${rel} (expected approved welcome.intro call site)`,
-        );
+      const validation = validateEngineCopyWiring(engSrc);
+      if (!validation.valid) {
+        for (const err of validation.errors) {
+          overrideWired.push(`${rel} (${err})`);
+        }
       }
       continue;
     }
@@ -2052,6 +2129,64 @@ async function main(): Promise<void> {
     !COPY_RUNTIME_FILES.some((rel) =>
       /@\/server\/(?:repositories|db)|@prisma|prisma/.test(read(rel)),
     ),
+  );
+
+  // M16d — STRUCTURAL RUNTIME GUARD & NEGATIVE FIXTURES:
+  // Proves that validateEngineCopyWiring deterministically rejects:
+  //  1. Unapproved static copy key (e.g. "greeting.invite")
+  //  2. Dynamic key variable (e.g. dynamicKey)
+  //  3. Template literal key (e.g. `welcome.${sub}`)
+  //  4. Extra wiring (more than 1 resolveStoredCopy call site)
+  //  5. Mutating override management symbols
+  //  6. Lab UI module/action imports
+  // And accepts ONLY the approved single welcome.intro call site.
+  const fixtureDisallowedKey = validateEngineCopyWiring(
+    'async function turn() { await resolveStoredCopy("greeting.invite", deps); }',
+  );
+  const fixtureDynamicKey = validateEngineCopyWiring(
+    "async function turn() { await resolveStoredCopy(dynamicKey, deps); }",
+  );
+  const fixtureTemplateLiteralKey = validateEngineCopyWiring(
+    "async function turn() { await resolveStoredCopy(`welcome.${sub}`, deps); }",
+  );
+  const fixtureExtraWiring = validateEngineCopyWiring(
+    'async function turn() {\n  await resolveStoredCopy("welcome.intro", deps);\n  await resolveStoredCopy("welcome.intro", deps);\n}',
+  );
+  const fixtureMutatingSymbol = validateEngineCopyWiring(
+    'async function turn() {\n  await resolveStoredCopy("welcome.intro", deps);\n  await savePublishedOverride(actor, "welcome.intro", text, deps);\n}',
+  );
+  const fixtureLabUiImport = validateEngineCopyWiring(
+    'import { copyLabAction } from "@/features/platform/actions/copy-lab-actions";\nasync function turn() { await resolveStoredCopy("welcome.intro", deps); }',
+  );
+  const fixtureValid = validateEngineCopyWiring(
+    'async function turn() { await resolveStoredCopy("welcome.intro", deps); }',
+  );
+
+  const fixturesPass =
+    !fixtureDisallowedKey.valid &&
+    fixtureDisallowedKey.errors.some((e) => e.includes("greeting.invite")) &&
+    !fixtureDynamicKey.valid &&
+    fixtureDynamicKey.errors.some((e) => e.includes("dynamicKey")) &&
+    !fixtureTemplateLiteralKey.valid &&
+    fixtureTemplateLiteralKey.errors.some((e) =>
+      e.includes("welcome.${sub}"),
+    ) &&
+    !fixtureExtraWiring.valid &&
+    fixtureExtraWiring.errors.some((e) =>
+      e.includes("Extra resolver wiring"),
+    ) &&
+    !fixtureMutatingSymbol.valid &&
+    fixtureMutatingSymbol.errors.some((e) =>
+      e.includes("Mutating or management"),
+    ) &&
+    !fixtureLabUiImport.valid &&
+    fixtureLabUiImport.errors.some((e) => e.includes("Lab UI modules")) &&
+    fixtureValid.valid &&
+    fixtureValid.approvedCount === 1;
+
+  check(
+    "M16d. الحارس البنيوي يرفض بدقة المفاتيح غير المعتمدة والديناميكية والربط الزائد ورموز الإدارة (Negative Fixtures)",
+    fixturesPass,
   );
 
   // M17 — the fallback boundary stays explicit and TESTABLE: only the
@@ -2229,7 +2364,7 @@ async function main(): Promise<void> {
   //
   // The read-only Founder/superadmin Lab surface over COPY_REGISTRY + the pure
   // render contract. Proven OFFLINE: the platform route + authorization, the
-  // browser deriving from the registry (never a duplicated entry list), all 47
+  // browser deriving from the registry (never a duplicated entry list), all 48
   // entries represented, PROTECTED_COPY visibly read-only, search/filter
   // purity, the preview going through renderCopy, template placeholders
   // exercised, missing required values failing safely, and no provider /
