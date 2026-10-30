@@ -281,10 +281,14 @@ export async function convertFollowUpToAppointmentAction(
   );
 
   if (result.success) {
-    revalidatePath("/appointments");
-    revalidatePath(`/appointments/${result.appointmentId}`);
-    if (followUp.sourceAppointmentId) {
-      revalidatePath(`/appointments/${followUp.sourceAppointmentId}`);
+    try {
+      revalidatePath("/appointments");
+      revalidatePath(`/appointments/${result.appointmentId}`);
+      if (followUp.sourceAppointmentId) {
+        revalidatePath(`/appointments/${followUp.sourceAppointmentId}`);
+      }
+    } catch {
+      // Outside Next.js request context (e.g. test harness / standalone runner)
     }
   }
 
