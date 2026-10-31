@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import { loginSchema } from "../src/features/auth/schemas/login-schema";
+import { proxy } from "../src/proxy";
+import { NextRequest } from "next/server";
+
 /**
  * FlowPilot — Stale-Session Sign-in Routing Regression Suite (ISS-017)
  *
@@ -13,11 +17,13 @@ import "./setup-test-env";
  * Run: pnpm check:stale-session-routing
  */
 
-import { proxy } from "../src/proxy";
-import { loginSchema } from "../src/features/auth/schemas/login-schema";
-import { NextRequest } from "next/server";
-
-type Check = { group: string; id: number; label: string; pass: boolean; details?: string };
+type Check = {
+  group: string;
+  id: number;
+  label: string;
+  pass: boolean;
+  details?: string;
+};
 const checks: Check[] = [];
 
 function check(
@@ -51,9 +57,12 @@ function resolveSafeRedirect(raw: string | string[] | undefined): string {
   return trimmed;
 }
 
-function evaluateAuthScreenRedirect(session: {
-  user: { role?: string; isActive?: boolean; accountType?: string | null };
-} | null, redirectParam?: string): { action: "render_form" | "redirect"; destination?: string } {
+function evaluateAuthScreenRedirect(
+  session: {
+    user: { role?: string; isActive?: boolean; accountType?: string | null };
+  } | null,
+  redirectParam?: string,
+): { action: "render_form" | "redirect"; destination?: string } {
   if (!session) {
     return { action: "render_form" };
   }
@@ -63,7 +72,10 @@ function evaluateAuthScreenRedirect(session: {
   if (session.user.accountType === "PLATFORM") {
     return { action: "redirect", destination: "/platform" };
   }
-  return { action: "redirect", destination: resolveSafeRedirect(redirectParam) };
+  return {
+    action: "redirect",
+    destination: resolveSafeRedirect(redirectParam),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,12 +105,15 @@ function evaluateAuthScreenRedirect(session: {
   const reqProtectedRoot = new NextRequest("http://localhost:3000/");
   const resProtectedRoot = proxy(reqProtectedRoot);
   const locationRoot = resProtectedRoot.headers.get("location");
+  const redirectParamRoot = locationRoot
+    ? new URL(locationRoot).searchParams.get("redirect")
+    : null;
   check(
     "A",
     3,
     "Protected root / without cookies redirects to /sign-in?redirect=/",
-    resProtectedRoot.status === 307 && locationRoot?.endsWith("/sign-in?redirect=/") === true,
-    `status=${resProtectedRoot.status}, location=${locationRoot}`,
+    resProtectedRoot.status === 307 && redirectParamRoot === "/",
+    `status=${resProtectedRoot.status}, redirectParam=${redirectParamRoot}`,
   );
 
   const reqProtectedAppointments = new NextRequest(
@@ -106,13 +121,16 @@ function evaluateAuthScreenRedirect(session: {
   );
   const resProtectedAppointments = proxy(reqProtectedAppointments);
   const locationAppointments = resProtectedAppointments.headers.get("location");
+  const redirectParamAppointments = locationAppointments
+    ? new URL(locationAppointments).searchParams.get("redirect")
+    : null;
   check(
     "A",
     4,
     "Protected /appointments without cookies preserves pathname and search params in redirect",
     resProtectedAppointments.status === 307 &&
-      locationAppointments?.endsWith("/sign-in?redirect=/appointments?date=2026-11-01") === true,
-    `location=${locationAppointments}`,
+      redirectParamAppointments === "/appointments?date=2026-11-01",
+    `redirectParam=${redirectParamAppointments}`,
   );
 
   const reqHealth = new NextRequest("http://localhost:3000/api/health");
@@ -124,9 +142,12 @@ function evaluateAuthScreenRedirect(session: {
     resHealth.status === 200 && !resHealth.headers.get("location"),
   );
 
-  const reqBlockedSignup = new NextRequest("http://localhost:3000/api/auth/sign-up/email", {
-    method: "POST",
-  });
+  const reqBlockedSignup = new NextRequest(
+    "http://localhost:3000/api/auth/sign-up/email",
+    {
+      method: "POST",
+    },
+  );
   const resBlockedSignup = proxy(reqBlockedSignup);
   check(
     "A",
@@ -141,7 +162,8 @@ function evaluateAuthScreenRedirect(session: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 {
-  const staleCookie = "better-auth.session_token=synthetic-stale-revoked-token-iss-017";
+  const staleCookie =
+    "better-auth.session_token=synthetic-stale-revoked-token-iss-017";
   const reqSignInStale = new NextRequest("http://localhost:3000/sign-in", {
     headers: { cookie: staleCookie },
   });
@@ -155,10 +177,14 @@ function evaluateAuthScreenRedirect(session: {
     `status=${resSignInStale.status}, location=${locSignInStale ?? "none"}`,
   );
 
-  const secureStaleCookie = "__Secure-better-auth.session_token=synthetic-stale-secure-token-iss-017";
-  const reqSignInSecureStale = new NextRequest("https://localhost:3000/sign-in", {
-    headers: { cookie: secureStaleCookie },
-  });
+  const secureStaleCookie =
+    "__Secure-better-auth.session_token=synthetic-stale-secure-token-iss-017";
+  const reqSignInSecureStale = new NextRequest(
+    "https://localhost:3000/sign-in",
+    {
+      headers: { cookie: secureStaleCookie },
+    },
+  );
   const resSignInSecureStale = proxy(reqSignInSecureStale);
   const locSignInSecureStale = resSignInSecureStale.headers.get("location");
   check(
@@ -342,7 +368,10 @@ function evaluateAuthScreenRedirect(session: {
     `destination=${d7.destination}`,
   );
 
-  const d8 = evaluateAuthScreenRedirect(activeBusinessUser, "/sign-in?nested=true");
+  const d8 = evaluateAuthScreenRedirect(
+    activeBusinessUser,
+    "/sign-in?nested=true",
+  );
   check(
     "E",
     8,
@@ -360,37 +389,37 @@ function evaluateAuthScreenRedirect(session: {
   const p1 = loginSchema.safeParse({
     email: "user@flowpilot.app",
     password: "example-password",
+    rememberMe: false,
   });
   check(
     "F",
     1,
-    "loginSchema defaults rememberMe to false when omitted",
+    "loginSchema validates valid submission with rememberMe: false",
     p1.success && p1.data.rememberMe === false,
     `rememberMe=${p1.success ? p1.data.rememberMe : "failed"}`,
   );
 
-  const p2 = loginSchema.safeParse({
+  const pOmitted = loginSchema.safeParse({
+    email: "user@flowpilot.app",
+    password: "example-password",
+  });
+  check(
+    "F",
+    2,
+    "loginSchema strictly enforces boolean rememberMe (fails when omitted)",
+    !pOmitted.success,
+  );
+
+  const pTrue = loginSchema.safeParse({
     email: "user@flowpilot.app",
     password: "example-password",
     rememberMe: true,
   });
   check(
     "F",
-    2,
-    "loginSchema preserves explicit rememberMe: true",
-    p2.success && p2.data.rememberMe === true,
-  );
-
-  const p3 = loginSchema.safeParse({
-    email: "user@flowpilot.app",
-    password: "example-password",
-    rememberMe: false,
-  });
-  check(
-    "F",
     3,
-    "loginSchema preserves explicit rememberMe: false",
-    p3.success && p3.data.rememberMe === false,
+    "loginSchema preserves explicit rememberMe: true",
+    pTrue.success && pTrue.data.rememberMe === true,
   );
 }
 
@@ -403,7 +432,9 @@ const passed = checks.filter((c) => c.pass).length;
 const failed = total - passed;
 
 console.log("\n────────────────────────────────────────────────────────────");
-console.log(`Stale-Session Routing Verification: ${passed}/${total} PASS (${failed} failed)`);
+console.log(
+  `Stale-Session Routing Verification: ${passed}/${total} PASS (${failed} failed)`,
+);
 console.log("────────────────────────────────────────────────────────────");
 
 if (failed > 0) {

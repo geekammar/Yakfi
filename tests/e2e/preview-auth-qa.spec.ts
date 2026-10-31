@@ -716,7 +716,11 @@ test.describe("Authenticated Preview QA", () => {
     // 2. Direct visit to / must terminate at /sign-in without an infinite redirect cycle
     let redirectCount = 0;
     page.on("response", (res) => {
-      if (res.status() === 307 || res.status() === 302 || res.status() === 301) {
+      if (
+        res.status() === 307 ||
+        res.status() === 302 ||
+        res.status() === 301
+      ) {
         redirectCount++;
       }
     });

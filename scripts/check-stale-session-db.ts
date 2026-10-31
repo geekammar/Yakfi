@@ -73,13 +73,18 @@ function classifyTarget(
 async function run(): Promise<void> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
-    console.log("ℹ️  DATABASE_URL not set — skipping DB-backed stale session check (CI runs this against flowpilot_test).");
+    console.log(
+      "ℹ️  DATABASE_URL not set — skipping DB-backed stale session check (CI runs this against flowpilot_test).",
+    );
     process.exit(0);
   }
 
   const classification = classifyTarget(dbUrl);
   if (!classification?.local) {
-    console.error("❌ Refusing to execute against non-disposable target:", dbUrl);
+    console.error(
+      "❌ Refusing to execute against non-disposable target:",
+      dbUrl,
+    );
     process.exit(1);
   }
 
@@ -120,7 +125,11 @@ async function run(): Promise<void> {
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000), // +24 hours
       },
     });
-    check("C-01", "Synthetic user and active session created in disposable DB", true);
+    check(
+      "C-01",
+      "Synthetic user and active session created in disposable DB",
+      true,
+    );
 
     // Verify session lookup recognizes active session
     const activeHeaders = new Headers({
@@ -139,7 +148,9 @@ async function run(): Promise<void> {
     check("C-03", "Session revoked server-side by deleting DB record", true);
 
     // Verify getSession returns null with stale cookie
-    const revokedSession = await auth.api.getSession({ headers: activeHeaders });
+    const revokedSession = await auth.api.getSession({
+      headers: activeHeaders,
+    });
     check(
       "C-04",
       "getSession returns null when obsolete/revoked cookie is sent",
@@ -206,7 +217,9 @@ async function run(): Promise<void> {
     const expiredHeaders = new Headers({
       cookie: `better-auth.session_token=${testTokenD}`,
     });
-    const expiredSession = await auth.api.getSession({ headers: expiredHeaders });
+    const expiredSession = await auth.api.getSession({
+      headers: expiredHeaders,
+    });
     check(
       "D-02",
       "getSession returns null for expired session with cookie present",
@@ -220,7 +233,8 @@ async function run(): Promise<void> {
     check(
       "D-03",
       "Direct /sign-in with expired cookie passes to server without redirect cycle",
-      resSignInExpired.status === 200 && !resSignInExpired.headers.get("location"),
+      resSignInExpired.status === 200 &&
+        !resSignInExpired.headers.get("location"),
     );
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -249,7 +263,6 @@ async function run(): Promise<void> {
       "Transient auth/DB service exception is distinguished from authoritative no-session and throws",
       errorCaught,
     );
-
   } finally {
     // Clean up all synthetic fixtures
     try {
@@ -270,7 +283,9 @@ async function run(): Promise<void> {
   const failed = total - passed;
 
   console.log("\n────────────────────────────────────────────────────────────");
-  console.log(`Stale-Session DB Verification: ${passed}/${total} PASS (${failed} failed)`);
+  console.log(
+    `Stale-Session DB Verification: ${passed}/${total} PASS (${failed} failed)`,
+  );
   console.log("────────────────────────────────────────────────────────────");
 
   if (failed > 0) {
@@ -279,6 +294,9 @@ async function run(): Promise<void> {
 }
 
 run().catch((err) => {
-  console.error("❌ Stale session DB check failed with unhandled exception:", err);
+  console.error(
+    "❌ Stale session DB check failed with unhandled exception:",
+    err,
+  );
   process.exit(1);
 });
