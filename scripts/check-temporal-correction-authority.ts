@@ -1981,6 +1981,7 @@ async function runSuite(): Promise<void> {
       check(
         "19.1 Bounded recovery on compatible revision conflict succeeds",
         commitCount === 2 && isReply(turnA) && isActive(turnA),
+        `commitCount=${commitCount}, ok=${(turnA as any)?.ok}, action=${(turnA as any)?.assistantAction}, status=${(turnA as any)?.conversationStatus}`,
       );
       const stA = getOffer(harness);
       check(
@@ -1988,12 +1989,13 @@ async function runSuite(): Promise<void> {
         stA?.offer?.status === "INVALIDATED" &&
           stA?.knownFacts?.unresolvedDate?.day === 5 &&
           stA?.knownFacts?.customerName === "أحمد",
+        `status=${stA?.offer?.status}, day=${stA?.knownFacts?.unresolvedDate?.day}, name=${stA?.knownFacts?.customerName}`,
       );
     }
 
     // 19.B: Concurrent update installs a different date and new active offer
     {
-      let conflictTriggered = false;
+      let conflictActive = false;
       class NewerDateConflictStore extends InMemoryConversationStateStore {
         override async save(
           businessId: string,
@@ -2001,8 +2003,8 @@ async function runSuite(): Promise<void> {
           expectedRevision: number | null,
           state: unknown,
         ) {
-          if (!conflictTriggered) {
-            conflictTriggered = true;
+          if (conflictActive) {
+            conflictActive = false;
             const row = this.rows.get(conversationId);
             if (row && typeof row.state === "object" && row.state !== null) {
               const raw = row.state as any;
@@ -2047,6 +2049,7 @@ async function runSuite(): Promise<void> {
       };
 
       await establishInitialOffer(harness, identity);
+      conflictActive = true;
 
       harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
       harness.deps.ai = {
@@ -2081,6 +2084,7 @@ async function runSuite(): Promise<void> {
         "19.2 Newer date and offer protected from overwrite in recovery",
         isReply(turnB) &&
           lastBody(harness).includes("حدث تعارض مؤقت أثناء معالجة طلبك"),
+        `isReply=${isReply(turnB)}, body=${lastBody(harness)}`,
       );
       const stB = getOffer(harness);
       check(
@@ -2088,12 +2092,13 @@ async function runSuite(): Promise<void> {
         stB?.knownFacts?.date === "2026-11-20" &&
           stB?.offer?.status === "ACTIVE" &&
           stB?.offer?.token === "dummy-offer-newer",
+        `date=${stB?.knownFacts?.date}, status=${stB?.offer?.status}, token=${stB?.offer?.token}`,
       );
     }
 
     // 19.C: Concurrent update advances the relevant offer lifecycle to CONSUMED
     {
-      let conflictTriggered = false;
+      let conflictActive = false;
       class ConsumedConflictStore extends InMemoryConversationStateStore {
         override async save(
           businessId: string,
@@ -2101,8 +2106,8 @@ async function runSuite(): Promise<void> {
           expectedRevision: number | null,
           state: unknown,
         ) {
-          if (!conflictTriggered) {
-            conflictTriggered = true;
+          if (conflictActive) {
+            conflictActive = false;
             const row = this.rows.get(conversationId);
             if (row && typeof row.state === "object" && row.state !== null) {
               const raw = row.state as any;
@@ -2145,6 +2150,7 @@ async function runSuite(): Promise<void> {
       };
 
       await establishInitialOffer(harness, identity);
+      conflictActive = true;
 
       harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
       harness.deps.ai = {
@@ -2179,11 +2185,13 @@ async function runSuite(): Promise<void> {
         "19.3 Advanced offer lifecycle CONSUMED protected from blind rewrite",
         isReply(turnC) &&
           lastBody(harness).includes("حدث تعارض مؤقت أثناء معالجة طلبك"),
+        `isReply=${isReply(turnC)}, body=${lastBody(harness)}`,
       );
       const stC = getOffer(harness);
       check(
         "19.3b Persisted state preserves CONSUMED offer status",
         stC?.offer?.status === "CONSUMED",
+        `status=${stC?.offer?.status}`,
       );
     }
 
