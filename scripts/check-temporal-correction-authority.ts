@@ -87,6 +87,7 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 1: Old pending offer + new past-date request (ISS-011)");
   {
+    // Group 2 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -103,6 +104,11 @@ async function runSuite(): Promise<void> {
 
     // Fixed clock: Sunday 1 November 2026, 10:00 AM UTC
     const clockTurn1 = "2026-11-01T10:00:00.000Z";
+
+    check(
+      "1.0 aiTemporalRequestSchema validates negative relative day offset",
+      aiTemporalRequestSchema.safeParse({ type: "relative_day", offsetDays: -1 }).success,
+    );
 
     // Turn 1: Customer requests booking for Thursday 5 November 2026
     harness.deps.ai = {
@@ -135,9 +141,9 @@ async function runSuite(): Promise<void> {
 
     check(
       "1.1 Turn 1 successfully presents booking options for 2026-11-05",
-      turn1.ok === true && turn1.assistantAction === "AI_REPLY",
+      turn1.ok === true && !turn1.duplicate && turn1.assistantAction === "AI_REPLY",
     );
-    const offer1 = harness.stateStore.rows.get(turn1.conversationId)?.state as any;
+    const offer1 = harness.stateStore.rows.get(harness.conversation.id)?.state as any;
     check(
       "1.2 Turn 1 establishes active SLOT offer for 2026-11-05",
       offer1?.offer?.kind === "SLOT" &&
@@ -177,11 +183,12 @@ async function runSuite(): Promise<void> {
     check(
       "1.3 Turn 2 responds with AI_REPLY and stays AI_ACTIVE",
       turn2.ok === true &&
+        !turn2.duplicate &&
         turn2.assistantAction === "AI_REPLY" &&
         turn2.conversationStatus === "AI_ACTIVE",
     );
 
-    const turn2Message = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.text ?? "";
+    const turn2Message = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.body ?? "";
     check(
       "1.4 Turn 2 delivers truthful past-date explanation",
       turn2Message.includes("التاريخ المحدد في الماضي") ||
@@ -196,10 +203,10 @@ async function runSuite(): Promise<void> {
 
     check(
       "1.6 Zero appointments created during past-date request",
-      harness.db.appointments.length === 0,
+      harness.appointments.length === 0,
     );
 
-    const stateAfterTurn2 = harness.stateStore.rows.get(turn1.conversationId)?.state as any;
+    const stateAfterTurn2 = harness.stateStore.rows.get(harness.conversation.id)?.state as any;
     check(
       "1.7 Obsolete offer is invalidated and cleared from actionable state",
       stateAfterTurn2?.offer === null || stateAfterTurn2?.offer?.status === "INVALIDATED",
@@ -216,6 +223,7 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 2: Past-date request without prior offer");
   {
+    // Group 2 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -261,11 +269,12 @@ async function runSuite(): Promise<void> {
     check(
       "2.1 Fresh past-date turn returns AI_REPLY and AI_ACTIVE",
       turn.ok === true &&
+        !turn.duplicate &&
         turn.assistantAction === "AI_REPLY" &&
         turn.conversationStatus === "AI_ACTIVE",
     );
 
-    const msg = harness.deliveredOutbound[0]?.text ?? "";
+    const msg = harness.deliveredOutbound[0]?.body ?? "";
     check(
       "2.2 Fresh past-date delivers past-date explanation",
       msg.includes("في الماضي"),
@@ -273,7 +282,7 @@ async function runSuite(): Promise<void> {
 
     check(
       "2.3 Zero appointments created",
-      harness.db.appointments.length === 0,
+      harness.appointments.length === 0,
     );
   }
 
@@ -308,7 +317,16 @@ async function runSuite(): Promise<void> {
       `Got: ${JSON.stringify(res31Apr)}`,
     );
 
+    check(
+      "3.2b Calendar helpers validate calendar components and ISO dates",
+      isValidCalendarComponents(30, 2, 2026) === false &&
+        isValidCalendarComponents(29, 2, 2028) === true &&
+        isValidIsoCalendarDate("2026-02-30") === false &&
+        isValidIsoCalendarDate("2028-02-29") === true,
+    );
+
     // 3.3 Engine end-to-end turn with "30 فبراير"
+    // Group 1 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -316,6 +334,11 @@ async function runSuite(): Promise<void> {
         confirmationMode: "automatic",
       },
     });
+
+    check(
+      "1.0 aiTemporalRequestSchema validates negative relative day offset",
+      aiTemporalRequestSchema.safeParse({ type: "relative_day", offsetDays: -1 }).success,
+    );
 
     const identity = {
       businessId: harness.business.id,
@@ -354,11 +377,12 @@ async function runSuite(): Promise<void> {
     check(
       "3.3 Engine executes 30 February as AI_REPLY / AI_ACTIVE",
       turn.ok === true &&
+        !turn.duplicate &&
         turn.assistantAction === "AI_REPLY" &&
         turn.conversationStatus === "AI_ACTIVE",
     );
 
-    const msg = harness.deliveredOutbound[0]?.text ?? "";
+    const msg = harness.deliveredOutbound[0]?.body ?? "";
     check(
       "3.4 Rejection explains impossible calendar date without rolling over to 1 March or 1 November",
       (msg.includes("غير موجود في التقويم") || msg.includes("فبراير")) &&
@@ -369,7 +393,7 @@ async function runSuite(): Promise<void> {
 
     check(
       "3.5 Zero appointments created for impossible date",
-      harness.db.appointments.length === 0,
+      harness.appointments.length === 0,
     );
   }
 
@@ -473,19 +497,20 @@ async function runSuite(): Promise<void> {
     check(
       "5.1 Day-only without prior context returns AI_REPLY and stays AI_ACTIVE",
       turn1.ok === true &&
+        !turn1.duplicate &&
         turn1.assistantAction === "AI_REPLY" &&
         turn1.conversationStatus === "AI_ACTIVE" &&
         turn1.handoffCause === null,
     );
 
-    const msg1 = harness1.deliveredOutbound[0]?.text ?? "";
+    const msg1 = harness1.deliveredOutbound[0]?.body ?? "";
     check(
       "5.2 Clarification asks for the missing month for day 5",
       msg1.includes("الشهر المطلوب") && msg1.includes("5"),
       `Delivered: ${msg1}`,
     );
 
-    const state1 = harness1.stateStore.rows.get(turn1.conversationId)?.state as any;
+    const state1 = harness1.stateStore.rows.get(harness1.conversation.id)?.state as any;
     check(
       "5.3 State preserves service and records date_month clarification for day 5",
       state1?.knownFacts?.service === "كشف أسنان" &&
@@ -515,6 +540,7 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 6: Invalid/ambiguous correction followed by a valid correction");
   {
+    // Group 2 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -560,7 +586,7 @@ async function runSuite(): Promise<void> {
 
     check(
       "6.1 Turn 1 establishes offer for 2026-11-05 with provider",
-      turn1.ok === true && turn1.assistantAction === "AI_REPLY",
+      turn1.ok === true && !turn1.duplicate && turn1.assistantAction === "AI_REPLY",
     );
 
     // Turn 2: Customer sends invalid date "30 فبراير"
@@ -594,10 +620,10 @@ async function runSuite(): Promise<void> {
 
     check(
       "6.2 Turn 2 rejects 30 February, clears obsolete offer",
-      turn2.ok === true && turn2.conversationStatus === "AI_ACTIVE",
+      turn2.ok === true && !turn2.duplicate && turn2.conversationStatus === "AI_ACTIVE",
     );
 
-    const state2 = harness.stateStore.rows.get(turn1.conversationId)?.state as any;
+    const state2 = harness.stateStore.rows.get(harness.conversation.id)?.state as any;
     check(
       "6.3 Provider and service survive after invalid date rejection",
       state2?.knownFacts?.service === "كشف أسنان" &&
@@ -635,10 +661,10 @@ async function runSuite(): Promise<void> {
 
     check(
       "6.4 Turn 3 successfully resumes booking for 2026-11-10",
-      turn3.ok === true && turn3.assistantAction === "AI_REPLY",
+      turn3.ok === true && !turn3.duplicate && turn3.assistantAction === "AI_REPLY",
     );
 
-    const msg3 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.text ?? "";
+    const msg3 = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.body ?? "";
     check(
       "6.5 Turn 3 presents slot choices for corrected date 2026-11-10",
       msg3.includes("2026-11-10") || msg3.includes("10 نوفمبر"),
@@ -651,6 +677,7 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 7: Obsolete callback after a date correction");
   {
+    // Group 2 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -694,7 +721,7 @@ async function runSuite(): Promise<void> {
       identity,
     );
 
-    const state1 = harness.stateStore.rows.get(turn1.conversationId)?.state as any;
+    const state1 = harness.stateStore.rows.get(harness.conversation.id)?.state as any;
     const tokenOffer1 = state1?.offer?.token;
     check("7.1 Turn 1 establishes offer token", Boolean(tokenOffer1));
 
@@ -742,10 +769,10 @@ async function runSuite(): Promise<void> {
 
     check(
       "7.2 Obsolete callback does NOT create an appointment",
-      harness.db.appointments.length === 0,
+      harness.appointments.length === 0,
     );
 
-    const turn3Msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.text ?? "";
+    const turn3Msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.body ?? "";
     check(
       "7.3 Obsolete callback does NOT confirm booking on 2026-11-05",
       !turn3Msg.includes("تم تأكيد الحجز"),
@@ -765,7 +792,8 @@ async function runSuite(): Promise<void> {
     const derivedCairoDate = deriveLocalDate(midnightInstant, CAIRO_TZ);
     check(
       "8.1 In Cairo timezone, 23:30 UTC on Oct 31 resolves to 2026-11-01",
-      derivedCairoDate === "2026-11-01",
+      derivedCairoDate === "2026-11-01" &&
+        todayIsoInTimeZone(CAIRO_TZ, midnightInstant) === "2026-11-01",
       `Got: ${derivedCairoDate}`,
     );
 
@@ -801,6 +829,7 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 9: Contract rejection/fallback behavior");
   {
+    // Group 2 harness
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
       businessConfig: {
@@ -869,16 +898,17 @@ async function runSuite(): Promise<void> {
     check(
       "9.2 Failed provider turn routes safely to NEED_HUMAN handoff",
       turn2.ok === true &&
+        !turn2.duplicate &&
         turn2.assistantAction === "AI_HANDOFF" &&
         turn2.conversationStatus === "NEED_HUMAN",
     );
 
     check(
       "9.3 Zero appointments created during fallback",
-      harness.db.appointments.length === 0,
+      harness.appointments.length === 0,
     );
 
-    const turn2Msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.text ?? "";
+    const turn2Msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.body ?? "";
     check(
       "9.4 Contract failure delivers safe failure reply without resurrecting 2026-11-05 slots",
       !turn2Msg.includes("5 نوفمبر") && !turn2Msg.includes("2026-11-05"),
@@ -936,7 +966,7 @@ async function runSuite(): Promise<void> {
 
       check(
         `10.1 [${pref}] Turn 1 establishes offer`,
-        turn1.ok === true && turn1.assistantAction === "AI_REPLY",
+        turn1.ok === true && !turn1.duplicate && turn1.assistantAction === "AI_REPLY",
       );
 
       // Turn 2: Past-date challenge
@@ -971,11 +1001,12 @@ async function runSuite(): Promise<void> {
       check(
         `10.2 [${pref}] Past date produces AI_REPLY, stays AI_ACTIVE`,
         turn2.ok === true &&
+          !turn2.duplicate &&
           turn2.assistantAction === "AI_REPLY" &&
           turn2.conversationStatus === "AI_ACTIVE",
       );
 
-      const msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.text ?? "";
+      const msg = harness.deliveredOutbound[harness.deliveredOutbound.length - 1]?.body ?? "";
       check(
         `10.3 [${pref}] Truthfully explains past date and never replays old offer`,
         msg.includes("في الماضي") && !msg.includes("5 نوفمبر"),
@@ -983,7 +1014,7 @@ async function runSuite(): Promise<void> {
 
       check(
         `10.4 [${pref}] Zero appointments created`,
-        harness.db.appointments.length === 0,
+        harness.appointments.length === 0,
       );
     }
   }
