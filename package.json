@@ -200,6 +200,7 @@
     "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:appointment-duration": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-duration.test.tsx",
     "test:login-form": "vitest run --config vitest.config.ts src/features/auth/components/login-form.test.tsx",
+    "test:sign-in-page": "vitest run --config vitest.config.ts src/app/(auth)/sign-in/page.test.tsx",
     "test:follow-up-scheduling": "vitest run --config vitest.config.ts src/features/appointments/components/follow-up-scheduling.test.tsx",
     "test:ux": "node scripts/run-ux-qa.mjs",
     "test:e2e": "playwright test",

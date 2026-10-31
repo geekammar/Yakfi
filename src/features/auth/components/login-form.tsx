@@ -6,27 +6,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { resolveSafeRedirect } from "@/lib/safe-redirect";
 
 import { EyeIcon, EyeOffIcon, LoaderCircleIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-
-function safeInternalPath(value: string | null): string {
-  if (
-    !value ||
-    !value.startsWith("/") ||
-    value.startsWith("//") ||
-    value.startsWith("/\\")
-  ) {
-    return "/";
-  }
-  const clean = value.split("?")[0];
-  if (clean === "/sign-in" || clean === "/sign-up") {
-    return "/";
-  }
-  return value;
-}
 
 export function LoginForm() {
   const router = useRouter();
@@ -103,7 +88,7 @@ export function LoginForm() {
         return;
       }
 
-      const target = safeInternalPath(searchParams.get("redirect"));
+      const target = resolveSafeRedirect(searchParams.get("redirect"));
       startTransition(() => {
         router.replace(target);
         router.refresh();

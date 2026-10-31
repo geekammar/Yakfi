@@ -246,24 +246,53 @@ async function run(): Promise<void> {
     );
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Requirement 8: Distinguish No-Session from DB Exception
+    // Requirement 8: Distinguish No-Session from DB Operational Failure
+    // Controlled failure injection at the actual authentication dependency boundary
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Verify operational DB exceptions are not silently treated as valid "signed out"
-    let exceptionPropagated = false;
+    let dbExceptionPropagated = false;
+    let actualOutcome: string = "unreached";
+    const originalFindUnique = db.session.findUnique;
+
     try {
-      await (async () => {
-        throw new Error("Simulated Neon PostgreSQL connection pool failure");
-      })();
-    } catch (err: any) {
-      if (err.message.includes("PostgreSQL connection pool failure")) {
-        exceptionPropagated = true;
+      // 1. Controlled failure injection at the actual authentication database dependency boundary
+      (db.session as any).findUnique = async () => {
+        throw new Error(
+          "Controlled DB failure: Neon PostgreSQL connection pool exhaustion",
+        );
+      };
+
+      // 2. Execute the real application authentication lookup boundary
+      const lookupResult = await auth.api.getSession({
+        headers: freshHeaders,
+      });
+
+      // 3. Verify failure is not silently classified as session: null
+      if (lookupResult === null) {
+        actualOutcome = "SILENTLY_CLASSIFIED_AS_NULL_SESSION";
+      } else {
+        actualOutcome = "UNEXPECTED_SESSION_RETURNED";
       }
+    } catch (err: any) {
+      if (
+        err?.message?.includes("Neon PostgreSQL connection pool exhaustion")
+      ) {
+        dbExceptionPropagated = true;
+        actualOutcome = err.message;
+      } else {
+        actualOutcome = `OTHER_EXCEPTION: ${err?.message}`;
+      }
+    } finally {
+      // 4. Restore real production database method
+      db.session.findUnique = originalFindUnique;
     }
+
     check(
       "08-01",
-      "Database service exception is distinguished from authoritative no-session and propagates",
-      exceptionPropagated,
+      "Authentication dependency failure is not silently classified as session:null and propagates",
+      dbExceptionPropagated &&
+        actualOutcome !== "SILENTLY_CLASSIFIED_AS_NULL_SESSION",
+      `outcome=${actualOutcome}`,
     );
   } finally {
     // Clean up all synthetic fixtures

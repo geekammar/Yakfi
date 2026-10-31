@@ -1,5 +1,7 @@
 import { LoginForm } from "@/features/auth/components/login-form";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Session } from "@/lib/auth";
+import { resolveSafeRedirect } from "@/lib/safe-redirect";
 import { getSession, isPlatformOperator } from "@/server/auth/guards";
 
 import type { Metadata } from "next";
@@ -14,21 +16,28 @@ interface SignInPageProps {
   searchParams?: Promise<{ redirect?: string | string[] }>;
 }
 
-function resolveSafeRedirect(raw: string | string[] | undefined): string {
-  if (typeof raw !== "string") return "/";
-  const trimmed = raw.trim();
-  if (
-    !trimmed.startsWith("/") ||
-    trimmed.startsWith("//") ||
-    trimmed.startsWith("/\\")
-  ) {
-    return "/";
+/**
+ * Authoritative destination decision at the sign-in boundary (ISS-017).
+ * - Null session -> null (render sign-in form)
+ * - Inactive user -> /access-denied
+ * - Platform Operator -> /platform
+ * - Active user -> resolved internal redirect target (or "/" default)
+ */
+export async function getSignInDestination(
+  session: Session | null,
+  searchParams?: Promise<{ redirect?: string | string[] }>,
+): Promise<string | null> {
+  if (!session) {
+    return null;
   }
-  const clean = trimmed.split("?")[0];
-  if (clean === "/sign-in" || clean === "/sign-up") {
-    return "/";
+  if (!session.user.isActive) {
+    return "/access-denied";
   }
-  return trimmed;
+  if (isPlatformOperator(session.user)) {
+    return "/platform";
+  }
+  const resolved = searchParams ? await searchParams : undefined;
+  return resolveSafeRedirect(resolved?.redirect);
 }
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
@@ -38,17 +47,10 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   // If the session is invalid, expired, or revoked, `getSession()` returns null,
   // allowing the sign-in form to render normally even if an obsolete cookie is present.
   const session = await getSession();
+  const destination = await getSignInDestination(session, searchParams);
 
-  if (session) {
-    if (!session.user.isActive) {
-      redirect("/access-denied");
-    }
-    if (isPlatformOperator(session.user)) {
-      redirect("/platform");
-    }
-    const resolved = searchParams ? await searchParams : undefined;
-    const target = resolveSafeRedirect(resolved?.redirect);
-    redirect(target);
+  if (destination) {
+    redirect(destination);
   }
 
   return (

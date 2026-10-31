@@ -64,11 +64,6 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
-      - name: Prettier format in runner
-        run: |
-          pnpm format
-          git diff
-
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
@@ -160,6 +155,7 @@ jobs:
           pnpm test:appointment-cancel
           pnpm test:appointment-duration
           pnpm test:login-form
+          pnpm test:sign-in-page
           pnpm check:stale-session-routing
           pnpm check:iss-006
           pnpm test:follow-up-scheduling
@@ -189,6 +185,20 @@ jobs:
     name: Automated Browser UX QA (Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flowpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -240,9 +250,16 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         run: node scripts/setup-env.mjs
 
+      - name: Deploy Prisma schema to test PostgreSQL
+        if: steps.change-check.outputs.should_run == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+        run: pnpm db:deploy
+
       - name: Build Next.js application
         if: steps.change-check.outputs.should_run == 'true'
         env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: pnpm build
 
@@ -257,13 +274,23 @@ jobs:
       - name: Focused Viewport Stability Check (mobile-390 repeat-each=3 retries=0)
         if: steps.change-check.outputs.should_run == 'true'
         env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: |
           pnpm exec playwright test tests/e2e/ux-viewports.spec.ts --project=mobile-390 -g "Sign-in page: RTL, horizontal overflow, touch targets and form states" --repeat-each=3 --retries=0
 
+      - name: Isolated Browser Recovery Journey (real Next.js + disposable PostgreSQL)
+        if: steps.change-check.outputs.should_run == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+          FLOWPILOT_ENABLE_QA_HARNESS: "true"
+        run: |
+          pnpm exec playwright test tests/e2e/stale-session-browser-recovery.spec.ts --project=desktop-1280
+
       - name: Run Automated UX QA Suite
         if: steps.change-check.outputs.should_run == 'true'
         env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: node scripts/run-ux-qa.mjs
 
