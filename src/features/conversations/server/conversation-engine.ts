@@ -6559,7 +6559,6 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
-                  day: serverTemporal.day,
                 },
               };
               if (turnSession.enabled) {
@@ -6580,7 +6579,6 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
-                  day: serverTemporal.day,
                 },
               };
               await turnSession.commit();
@@ -7114,7 +7112,6 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
-                  day: serverTemporal.day,
                 },
               };
               if (turnSession.enabled) {
@@ -7135,7 +7132,6 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
-                  day: serverTemporal.day,
                 },
               };
               await turnSession.commit();

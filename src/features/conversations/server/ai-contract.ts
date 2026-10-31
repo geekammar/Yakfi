@@ -129,15 +129,15 @@ export const aiTemporalRequestSchema = z.preprocess(
       const obj = val as Record<string, unknown>;
       // If model provided exact_date with an ISO-shaped string that is an impossible calendar date (e.g. "2026-02-30")
       if (obj.type === "exact_date" && typeof obj.date === "string") {
-        const d = obj.date.trim();
-        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isValidIsoCalendarDate(d)) {
-          const [y, m, day] = d.split("-").map(Number);
+        const rawDate: string = obj.date.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate) && !isValidIsoCalendarDate(rawDate)) {
+          const parts = rawDate.split("-").map(Number);
           return {
             type: "unresolved_date",
-            day,
-            month: m,
-            year: y,
-            rawText: d,
+            day: parts[2],
+            month: parts[1],
+            year: parts[0],
+            rawText: rawDate,
           };
         }
       }
