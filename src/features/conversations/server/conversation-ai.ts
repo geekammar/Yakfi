@@ -1736,6 +1736,8 @@ export function classifyCustomerMessage(
       extraction: emptyAiExtraction,
       handoffReason: null,
       summary: null,
+      requiredKnowledge: "business.faqs",
+      sourceId: (faq as { id?: string }).id ?? faq.question,
     };
   }
 

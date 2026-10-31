@@ -694,6 +694,78 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   }
 
   // ── Case C: Neither family nor sourceId provided
+  // Check if response content is an exact verbatim match to an exposed, disclosable stored source:
+  const trimmedContent = response.content.trim();
+
+  // 1. Exact stored FAQ answer match:
+  const exactFaq = context.request.faqs.find(
+    (f) => f.answer.trim() === trimmedContent,
+  );
+  if (exactFaq) {
+    const record = ledger.find((f) => f.key === "business.faqs");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.faqs"],
+        renderedContent: exactFaq.answer.trim(),
+      };
+    }
+  }
+
+  // 2. Exact stored business about match:
+  if (
+    context.request.businessAbout &&
+    context.request.businessAbout.trim() === trimmedContent
+  ) {
+    const record = ledger.find((f) => f.key === "business.about");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.about"],
+        renderedContent: context.request.businessAbout.trim(),
+      };
+    }
+  }
+
+  // 3. Exact stored business address match:
+  if (
+    context.request.businessAddress &&
+    context.request.businessAddress.trim() === trimmedContent
+  ) {
+    const record = ledger.find((f) => f.key === "business.address");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.address"],
+        renderedContent: buildBusinessAddressContent(
+          context.request.businessAddress,
+        ),
+      };
+    }
+  }
+
+  // 4. Exact stored service description match:
+  const exactDescService = context.request.services.find(
+    (s) => s.description && s.description.trim() === trimmedContent,
+  );
+  if (exactDescService) {
+    const record = ledger.find((f) => f.key === "service.description");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.description"],
+        renderedContent: buildServiceDescriptionContent(
+          exactDescService.name,
+          exactDescService.description!,
+        ),
+      };
+    }
+  }
+
   if (isStructured) {
     // Missing structured source reference on structured turn -> fail closed
     return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
