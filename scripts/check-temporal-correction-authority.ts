@@ -1942,26 +1942,22 @@ async function runSuite(): Promise<void> {
         connectionId: "conn-1",
       };
 
-      store.rows.set(harness.conversation.id, {
-        businessId: harness.business.id,
-        revision: 1,
-        updatedAt: new Date("2026-11-01T10:00:00.000Z"),
-        state: {
-          conversationId: harness.conversation.id,
-          businessId: harness.business.id,
-          knownFacts: { service: "كشف أسنان" },
-          selectedDate: null,
-          offer: {
-            token: "dummy-compat-tok",
-            status: "ACTIVE",
-            expiresAt: "2026-11-01T10:30:00.000Z",
-            kind: "SERVICE",
-            services: [],
-          },
-          missingFacts: [],
-          lastClarification: null,
-        },
-      });
+      await establishInitialOffer(harness, identity);
+      // Remove prior date so day=5 requires month clarification (ambiguous)
+      const initRow = store.rows.get(harness.conversation.id);
+      if (
+        initRow &&
+        typeof initRow.state === "object" &&
+        initRow.state !== null
+      ) {
+        const raw = initRow.state as any;
+        delete raw.knownFacts.date;
+        raw.selectedDate = null;
+        if (raw.offer) {
+          raw.offer.date = undefined;
+        }
+      }
+
       check(
         "19.0 Initial active offer established for conflict tests",
         store.rows.get(harness.conversation.id)?.state !== undefined,
