@@ -534,6 +534,86 @@ async function main(): Promise<void> {
     );
   }
 
+  // ── DB-5: Server-Authoritative Rendering in Real DB ───────────────────────
+  {
+    const customerPhone5 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const customer5 = await customerRepository.upsertByPhone(TEST_BUSINESS_ID, {
+      phone: customerPhone5,
+      name: "عميل تجريبي 5",
+    });
+
+    const conversation5 = await conversationRepository.create({
+      businessId: TEST_BUSINESS_ID,
+      customerId: customer5.id,
+      branchId,
+    });
+
+    const deps5 = {
+      ...baseDeps,
+      ai: {
+        providerName: "mock-db-ai",
+        respond: async () => ({
+          intent: "FAQ",
+          action: "reply",
+          // Model hallucinates price 900 EGP for service 1 (which costs 400 EGP in DB):
+          content: "سعر تنظيف الأسنان 900 جنيه شامل الكشف.",
+          extraction: {
+            service: "تنظيف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: service1.id,
+        }),
+      },
+    } as unknown as Parameters<typeof receiveInboundMessage>[0];
+
+    const result5 = await receiveInboundMessage(
+      deps5,
+      {
+        externalId: `ext-${RUN_ID}-db5`,
+        from: customerPhone5,
+        to: TEST_PHONE,
+        receivedAt: new Date().toISOString(),
+        text: "بكام تنظيف الأسنان؟",
+      },
+      { businessId: TEST_BUSINESS_ID },
+    );
+
+    check(
+      "DB-5.A Authoritative knowledge reply stays AI_ACTIVE in database",
+      result5.ok === true &&
+        !result5.duplicate &&
+        result5.assistantAction === "AI_REPLY" &&
+        result5.conversationStatus === "AI_ACTIVE",
+      result5,
+    );
+
+    const dbConv5 = await db.conversation.findUnique({
+      where: { id: conversation5.id },
+    });
+    check(
+      "DB-5.B Conversation status in PostgreSQL remains AI_ACTIVE",
+      dbConv5 !== null && dbConv5.status === "AI_ACTIVE",
+      dbConv5,
+    );
+
+    const dbMessages5 = await db.message.findMany({
+      where: { conversationId: conversation5.id, senderType: "AI" },
+    });
+    check(
+      "DB-5.C Persisted reply in PostgreSQL carries server-authoritative 400 EGP price, never hallucinated 900",
+      dbMessages5.length === 1 &&
+        dbMessages5[0]!.content.includes("400") &&
+        !dbMessages5[0]!.content.includes("900"),
+      dbMessages5,
+    );
+  }
+
   // ── Clean up test database records ────────────────────────────────────────
   await db.message.deleteMany({
     where: { conversation: { businessId: TEST_BUSINESS_ID } },

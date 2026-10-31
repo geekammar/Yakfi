@@ -399,6 +399,8 @@ const recentMessageSchema = z.object({
 });
 
 const serviceFactSchema = z.object({
+  /** Bounded unique identifier for structured source references. */
+  id: z.string().trim().min(1).max(120).optional(),
   name: z.string().trim().min(1).max(120),
   /**
    * Service duration is OPTIONAL since PROMPT-B02: the context builder
@@ -436,6 +438,8 @@ const serviceFactSchema = z.object({
 });
 
 const knowledgeEntrySchema = z.object({
+  /** Bounded unique or turn-local identifier for structured source references. */
+  id: z.string().trim().min(1).max(120).optional(),
   question: z.string().max(500),
   answer: z.string().max(2000),
 });
@@ -656,6 +660,22 @@ export type AiGoalKind = (typeof aiGoalKindValues)[number];
 export const aiGoalKindSchema = z.enum(aiGoalKindValues);
 
 /**
+ * Structured source reference proposed by the model (ISS-012).
+ * Allows the model to declare the explicit source entity (FAQ id/question,
+ * service id/name) backing its proposed answer. The server validates that
+ * the referenced source exists in context before disclosing the turn.
+ */
+export const aiKnowledgeRefSchema = z.union([
+  z.object({
+    family: z.string().trim().min(1).max(64).optional(),
+    sourceId: z.string().trim().min(1).max(120).optional().nullable(),
+  }),
+  z.string().trim().min(1).max(120),
+]);
+
+export type AiKnowledgeRef = z.infer<typeof aiKnowledgeRefSchema>;
+
+/**
  * One goal in a structured AI decision. `kind` is the target decision class;
  * the remaining labels are resolver-mapped (bounded labels, NOT a copy of the
  * evaluation-only vocabulary) and optional so a minimal goal stays valid.
@@ -666,6 +686,10 @@ export const aiGoalSchema = z.object({
   intent: z.string().trim().min(1).max(64).optional(),
   /** Resolver-mapped knowledge requirement label (additive). */
   requiredKnowledge: z.string().trim().min(1).max(64).optional(),
+  /** Structured source reference for knowledge answers (ISS-012). */
+  knowledgeRef: aiKnowledgeRefSchema.optional().nullable(),
+  /** Optional explicit source id for knowledge answers (ISS-012). */
+  sourceId: z.string().trim().min(1).max(120).optional().nullable(),
   /** Resolver-mapped domain action label (additive). */
   domainAction: z.string().trim().min(1).max(64).optional(),
   /** Stable ordering — lower runs first. Optional for compatibility. */
@@ -793,6 +817,10 @@ const aiResponseBase = {
   goals: z.array(aiGoalSchema).max(8).optional(),
   /** Optional top-level requiredKnowledge label for single-intent responses. */
   requiredKnowledge: z.string().trim().min(1).max(64).optional(),
+  /** Structured source reference for knowledge answers (ISS-012). */
+  knowledgeRef: aiKnowledgeRefSchema.optional().nullable(),
+  /** Optional explicit source id for knowledge answers (ISS-012). */
+  sourceId: z.string().trim().min(1).max(120).optional().nullable(),
   /** A proposed clarification (the engine decides; later slice). */
   clarification: aiClarificationSchema.optional(),
   /** An explicit typed handoff cause (the engine maps it; later slice). */

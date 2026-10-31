@@ -305,9 +305,24 @@ export type BuiltAiContext = {
 const storedFaqsSchema = z.array(faqEntrySchema);
 
 /** Malformed stored FAQ JSON degrades to "no knowledge" — never crashes. */
-function safeFaqs(raw: unknown): Array<{ question: string; answer: string }> {
+function safeFaqs(
+  raw: unknown,
+): Array<{ id?: string; question: string; answer: string }> {
   const parsed = storedFaqsSchema.safeParse(raw ?? []);
-  return parsed.success ? parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT) : [];
+  if (!parsed.success) return [];
+  const rawList = Array.isArray(raw) ? raw : [];
+  return parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT).map((faq, index) => {
+    const rawItem = rawList[index] as { id?: unknown } | undefined;
+    const rawId =
+      typeof rawItem?.id === "string" && rawItem.id.trim().length > 0
+        ? rawItem.id.trim()
+        : `faq-${index}`;
+    return {
+      id: rawId,
+      question: faq.question,
+      answer: faq.answer,
+    };
+  });
 }
 
 /**
@@ -756,6 +771,7 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
 
   const seenServiceNames = new Set<string>();
   const includedServices: Array<{
+    id?: string;
     name: string;
     price?: string;
     description?: string;
@@ -777,10 +793,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     if (seenServiceNames.has(service.name)) continue; // dedupe by name
     seenServiceNames.add(service.name);
     const included: {
+      id?: string;
       name: string;
       price?: string;
       description?: string;
-    } = { name: service.name };
+    } = { id: service.id, name: service.name };
 
     // durationMinutes is INTERNAL and no current AI task requires it:
     // availability comes from CORE-02, not from LLM schedule reasoning.
@@ -800,18 +817,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     // The deterministic formatter turns the structured columns into the
     // MINIMAL display string; a service with no stored price contributes
     // nothing (never a fabricated amount — missing price stays NO_KNOWLEDGE).
-    const rawService = service as Record<string, unknown>;
     const formattedPrice = formatServicePrice({
-      priceType:
-        service.priceType ??
-        (typeof rawService.price === "number" ? "FIXED" : null),
-      priceAmount:
-        service.priceAmount ??
-        (typeof rawService.price === "number" ? rawService.price : null),
+      priceType: service.priceType ?? null,
+      priceAmount: service.priceAmount ?? null,
       priceMaxAmount: service.priceMaxAmount ?? null,
-      priceCurrency:
-        service.priceCurrency ??
-        (typeof rawService.currency === "string" ? rawService.currency : null),
+      priceCurrency: service.priceCurrency ?? null,
       priceNote: service.priceNote ?? null,
     });
     const priceVerdict = evaluateCandidate({

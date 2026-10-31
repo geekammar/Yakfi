@@ -1380,6 +1380,40 @@ export function buildBusinessIdentityContent(businessName: string): string {
   return `أيوه، ${businessName} معاك. ${IDENTITY_INVITE}`;
 }
 
+/** Server-authoritative rendering for business address (ISS-012). */
+export function buildBusinessAddressContent(address: string): string {
+  return `عنواننا: ${address.trim()}.`;
+}
+
+/** Server-authoritative rendering for business about description (ISS-012). */
+export function buildBusinessAboutContent(about: string): string {
+  return about.trim();
+}
+
+/** Server-authoritative rendering for service price (ISS-012). */
+export function buildServicePriceContent(
+  serviceName: string,
+  price: string,
+): string {
+  return `سعر ${serviceName.trim()}: ${price.trim()}.`;
+}
+
+/** Server-authoritative rendering for service description (ISS-012). */
+export function buildServiceDescriptionContent(
+  serviceName: string,
+  description: string,
+): string {
+  return `${serviceName.trim()}: ${description.trim()}.`;
+}
+
+/** Server-authoritative rendering for service catalog list (ISS-012). */
+export function buildServiceCatalogContent(
+  services: ReadonlyArray<{ name: string }>,
+): string {
+  const names = services.map((s) => s.name.trim()).filter((n) => n.length > 0);
+  return `نقدم الخدمات التالية: ${names.join("، ")}.`;
+}
+
 /**
  * The deterministic identity reply. `intent: "FAQ"` is the established
  * contract label for an identity answer (the same intent the provider prompt

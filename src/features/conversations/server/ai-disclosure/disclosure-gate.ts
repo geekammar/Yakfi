@@ -1,5 +1,5 @@
 /**
- * Customer disclosure gate (PROMPT-B03) — the enforcement boundary between
+ * Customer disclosure gate (PROMPT-B03 / ISS-012) — the enforcement boundary between
  * an assistant result and a customer-visible reply.
  *
  *   AiResponse (validated)
@@ -19,40 +19,17 @@
  *
  * The gate is structural, not textual (binding):
  * - It never inspects, scores, or rewrites the reply text. There is no word
- *   blacklist, no regex redaction, no "leak detector". The decision is made
- *   from the structured `AiResponse` (its `action` and `intent`) plus the
+ *   blacklist, no regex redaction, no "leak detector", and no lexical overlap score.
+ *   The decision is made from the structured `AiResponse` (its `action`, `intent`,
+ *   and structured source reference `knowledgeRef`/`sourceId`) plus the
  *   ledger's typed per-fact verdicts.
- * - A reply the assistant AUTHORS itself (`action: "reply"`) is emitted only
- *   when the task it declares is backed by a fact the policy already marked
- *   `included` AND `disclosable` AND actually carried in the request. An
- *   INTERNAL fact is never disclosable (B-01), so it can never back a reply;
- *   a CONDITIONAL fact is disclosable only when B-02 found the task relevant;
- *   a FORBIDDEN fact is never even enrolled. A reply backed by nothing would
- *   have to be invented — it is routed to a human instead.
- * - A routing action (`handoff` / `booking_handoff`) IS the fallback channel.
- *   It discloses no knowledge, so the gate passes it through and the existing
- *   handoff semantics own the outcome — the AI-first default and the human
- *   fallback both stay exactly as they were.
- *
- * What this module is NOT (binding):
- * - NOT an LLM, NOT a judge, NOT a classifier — it cannot invent, infer, or
- *   rephrase anything. It can only refuse to emit and defer to a human.
- * - NOT a redactor — it never returns edited text; a refused reply is
- *   dropped wholesale (never persisted, never sent).
- * - NOT a policy source — the levels, the field classification, the
- *   provenance rules and the ledger all come from B-01/B-02.
- *
- * Fail-closed behavior (binding): a FORBIDDEN fact that somehow reached
- * context, a support family absent from the ledger, a family present but not
- * disclosable, or a family disclosable but carrying no data in the request —
- * every one of these yields `requires-human` with a typed reason. The gate
- * never guesses, never falls back to "probably fine", and never emits a
- * reply it cannot justify from the ledger.
- *
- * Server-side only: the refusal reasons are diagnostics for operators. They
- * never reach the customer — the customer sees the existing human-handoff
- * experience, and no policy name, provenance, or classification is ever
- * surfaced.
+ * - Server-Authoritative Rendering (ISS-012): For accepted knowledge answers,
+ *   the customer-visible content is rendered authoritatively from the validated
+ *   source (FAQ answer, formatted service price, stored about/address, catalog list).
+ *   Arbitrary model prose is never emitted merely because some source exists.
+ * - Fail-closed behavior (binding): an unknown reference, unpriced service,
+ *   missing knowledge, forbidden fact, or excluded family yields `requires-human`
+ *   with a typed reason and transitions safely to canonical human handoff.
  */
 
 import type { ContextFactRecord } from "@/features/conversations/server/ai-context-builder";
@@ -63,7 +40,24 @@ import {
   type AiRequest,
   type AiResponse,
 } from "@/features/conversations/server/ai-contract";
-import { normalizeArabicText } from "@/features/conversations/server/conversation-ai";
+import {
+  buildBusinessAboutContent,
+  buildBusinessAddressContent,
+  buildBusinessIdentityContent,
+  buildServiceCatalogContent,
+  buildServiceDescriptionContent,
+  buildServicePriceContent,
+  normalizeArabicText,
+} from "@/features/conversations/server/conversation-ai";
+
+export {
+  buildBusinessAboutContent,
+  buildBusinessAddressContent,
+  buildBusinessIdentityContent,
+  buildServiceCatalogContent,
+  buildServiceDescriptionContent,
+  buildServicePriceContent,
+};
 
 // ─── Decisions (typed, never free text) ─────────────────────────────────────
 
@@ -113,12 +107,6 @@ export type DisclosureRefusalReason =
 
 // ─── Task → support family (reuses the B-02 ledger keys verbatim) ────────────
 
-/**
- * The single request channel that may carry a support family, if one exists.
- * `null` marks families that are classified and ledgered by B-02 but carry no
- * `AiRequest` channel yet — a reply declaring that task can never be backed
- * today, so it routes to a human rather than being invented.
- */
 export type SupportChannel =
   | "faqs"
   | "availability"
@@ -137,41 +125,6 @@ export type TaskSupportFamily = {
   readonly channel: SupportChannel;
 };
 
-/**
- * Which ledger family backs each declared intent. A reply is emitted only
- * when its declared task's family is `included` + `disclosable` + carried.
- * The keys are the exact strings B-02 records, so the gate reads the ledger
- * rather than re-deriving anything.
- *
- * - FAQ answers come from the canonical knowledge store (`business.faqs`,
- *   PUBLIC as a whole — DECISIONS #13), or additively from a task-gated
- *   Slice-6 channel that is actually carried this turn (service price,
- *   business about, service description — see `candidateSupportFamilies`).
- * - Booking/availability answers come from the domain-computed result
- *   (`domain.availability`, CONDITIONAL — booking/availability asks only).
- * - Cancellation/reschedule answers would come from `business.cancellationPolicy`
- *   (CONDITIONAL). It is classified and ledgered by B-02 but carries NO
- *   request channel yet — so the assistant cannot answer these tasks itself;
- *   the existing `booking_handoff` routes them to staff. Wiring the channel
- *   is a later product decision, not this slice.
- * - HUMAN_REQUEST / AMBIGUOUS disclose no knowledge: they are the routing
- *   intents. They reach the customer only as handoff actions (the fallback
- *   channel), never as self-authored replies.
- */
-/**
- * Intents whose self-authored reply is a KNOWLEDGE-FREE social protocol —
- * a closed, exhaustive list. A reply declaring one of these needs no
- * backing fact because it can disclose nothing: the phrasing is a fixed
- * acknowledgment that never names a service, price, slot, policy, provider,
- * or business fact. The gate passes it by the DECLARED INTENT ONLY — it
- * still never inspects, scores, or rewrites the reply text.
- *
- * `GREETING` (DECISIONS #61) is the single member. The deterministic
- * classifier emits it only for a message that carries NO other intent
- * vocabulary (`isPureGreeting`), so a booking/FAQ/human-request turn can
- * never be answered by it. Extending this list is a disclosure-policy
- * decision, not an implementation detail.
- */
 export const KNOWLEDGE_FREE_REPLY_INTENTS: ReadonlyArray<AiIntent> = [
   "GREETING",
 ];
@@ -186,11 +139,6 @@ function isKnowledgeFreeReply(response: AiResponse): boolean {
 export const TASK_SUPPORT_FAMILIES: Readonly<
   Record<AiIntent, TaskSupportFamily>
 > = {
-  /**
-   * A greeting discloses no knowledge by construction (a fixed social
-   * acknowledgment), so it crosses the boundary on its declared intent —
-   * never on a fact the assistant was given.
-   */
   GREETING: { family: null, channel: null },
   FAQ: { family: "business.faqs", channel: "faqs" },
   BOOKING: { family: "domain.availability", channel: "availability" },
@@ -211,8 +159,7 @@ export type DisclosureInput = {
   readonly response: AiResponse;
   /**
    * The turn's built context: the request the assistant saw (what it may
-   * KNOW) and the disclosure ledger (what it may MENTION). Both are
-   * builder-side artifacts; neither is customer-visible.
+   * KNOW) and the disclosure ledger (what it may MENTION).
    */
   readonly context: {
     readonly request: AiRequest;
@@ -230,6 +177,12 @@ export type DisclosureResult =
        * rendered into customer output).
        */
       readonly support: readonly string[];
+      /**
+       * Server-authoritative rendered knowledge content (ISS-012).
+       * Present for accepted knowledge replies to guarantee unbacked model prose
+       * is never emitted to customers.
+       */
+      readonly renderedContent?: string;
     }
   | {
       readonly kind: "requires-human";
@@ -238,221 +191,45 @@ export type DisclosureResult =
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
-const RAW_GENERIC_ARABIC_WORDS = [
-  "عيادة",
-  "العيادة",
-  "مركز",
-  "المركز",
-  "دكتور",
-  "الدكتور",
-  "طبيب",
-  "الطبيب",
-  "خدمة",
-  "الخدمة",
-  "خدمات",
-  "الخدمات",
-  "فريق",
-  "الفريق",
-  "عمل",
-  "العمل",
-  "متابعة",
-  "المتابعة",
-  "مرحبا",
-  "أهلا",
-  "شكرا",
-  "استفسار",
-  "الاستفسار",
-  "معلومات",
-  "المعلومات",
-];
-
-const GENERIC_ARABIC_WORDS = new Set(
-  RAW_GENERIC_ARABIC_WORDS.map((w) => normalizeArabicText(w)),
-);
-
-function extractSubstantiveWords(text: string): Set<string> {
-  const norm = normalizeArabicText(text);
-  const words = norm
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !GENERIC_ARABIC_WORDS.has(w));
-  const set = new Set<string>();
-  for (const w of words) {
-    set.add(w);
-    if (w.startsWith("ال") && w.length >= 4) {
-      const stripped = w.slice(2);
-      if (!GENERIC_ARABIC_WORDS.has(stripped)) {
-        set.add(stripped);
-      }
-    }
-  }
-  return set;
-}
-
 /** Does the request actually carry data for this support channel? */
-function channelCarried(
-  request: AiRequest,
-  channel: SupportChannel,
-  response?: AiResponse,
-): boolean {
+function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
   switch (channel) {
-    case "faqs": {
-      if (request.faqs.length === 0) return false;
-      if (!response?.content) return true;
-      const contentWords = extractSubstantiveWords(response.content);
-      if (contentWords.size === 0) return false;
-      return request.faqs.some((faq) => {
-        const faqWords = extractSubstantiveWords(
-          `${faq.question} ${faq.answer}`,
-        );
-        for (const word of contentWords) {
-          if (faqWords.has(word)) return true;
-        }
-        return false;
-      });
-    }
+    case "faqs":
+      return request.faqs.length > 0;
     case "availability":
       return (request.availability?.length ?? 0) > 0;
-    case "services": {
-      // The service-catalog price channel (PROMPT-AI-ARCH-13 — Slice 6).
-      // If the response specifies an extracted service, that specific service
-      // must exist in request.services AND carry an authoritative price.
-      // Another service's price cannot authorize an unpriced service.
-      if (response?.extraction?.service) {
-        const target = normalizeArabicText(response.extraction.service);
-        const matching = request.services.find((s) => {
-          const norm = normalizeArabicText(s.name);
-          return (
-            norm === target || norm.includes(target) || target.includes(norm)
-          );
-        });
-        if (!matching) return false;
-        return (
-          typeof matching.price === "string" && matching.price.trim().length > 0
-        );
-      }
-      if (response?.content) {
-        const contentWords = extractSubstantiveWords(response.content);
-        return request.services.some((s) => {
-          if (typeof s.price !== "string" || s.price.trim().length === 0) {
-            return false;
-          }
-          const sWords = extractSubstantiveWords(s.name);
-          for (const w of sWords) {
-            if (contentWords.has(w)) return true;
-          }
-          return false;
-        });
-      }
-      return false;
-    }
-    case "businessAbout": {
-      // The PUBLIC business-about channel (PROMPT-AI-ARCH-15 — Slice 6) is
-      // carried only when the turn was business-info relevant AND the
-      // business carries authoritative about text. An empty channel means the
-      // reply would invent a business fact → refused.
-      if (
-        typeof request.businessAbout !== "string" ||
-        request.businessAbout.trim().length === 0
-      ) {
-        return false;
-      }
-      if (!response?.content) return true;
-      if (response.extraction?.service) return false;
-      const contentWords = extractSubstantiveWords(response.content);
-      if (contentWords.size === 0) return false;
-      const aboutWords = extractSubstantiveWords(request.businessAbout);
-      for (const word of contentWords) {
-        if (aboutWords.has(word)) return true;
-      }
-      return false;
-    }
-    case "businessAddress": {
-      // The CONDITIONAL business-location channel (PROMPT-AI-OPS-21) is
-      // carried only when the turn was contact/identity/location relevant AND
-      // the business stored an authoritative address. An empty channel means
-      // the reply would invent a location → refused.
-      if (
-        typeof request.businessAddress !== "string" ||
-        request.businessAddress.trim().length === 0
-      ) {
-        return false;
-      }
-      if (!response?.content) return true;
-      if (response.extraction?.service) return false;
-      const contentWords = extractSubstantiveWords(response.content);
-      if (contentWords.size === 0) return false;
-      const addressWords = extractSubstantiveWords(request.businessAddress);
-      for (const word of contentWords) {
-        if (addressWords.has(word)) return true;
-      }
-      return false;
-    }
+    case "services":
+      return request.services.some(
+        (service) =>
+          typeof service.price === "string" && service.price.trim().length > 0,
+      );
+    case "businessAbout":
+      return (
+        typeof request.businessAbout === "string" &&
+        request.businessAbout.trim().length > 0
+      );
+    case "businessAddress":
+      return (
+        typeof request.businessAddress === "string" &&
+        request.businessAddress.trim().length > 0
+      );
     case "businessName":
-      // The PUBLIC business-identity channel (PROMPT-AI-UX-02) is carried
-      // whenever the canonical Business record's name reached the request —
-      // B-02 only forwards it when the record's tenant was PROVEN against the
-      // turn's scope, so a foreign or unproven record yields an empty name and
-      // this channel stays empty. An empty channel means the business has no
-      // authoritative name stored → the reply would invent one → refused.
       return (
         typeof request.businessName === "string" &&
         request.businessName.trim().length > 0
       );
-    case "serviceDescriptions": {
-      // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6) is
-      // carried only when the turn was service-info relevant AND at least one
-      // exposed service carries an authoritative description. An empty channel
-      // means the reply would invent a service detail → refused.
-      if (request.services.length === 0) return false;
-      if (!response?.content) return true;
-      const normContent = normalizeArabicText(response.content);
-      const contentWords = extractSubstantiveWords(response.content);
-      return request.services.some((service) => {
-        if (
-          typeof service.description !== "string" ||
-          service.description.trim().length === 0
-        ) {
-          return false;
-        }
-        const normName = normalizeArabicText(service.name);
-        if (normName.length > 0 && normContent.includes(normName)) {
-          return true;
-        }
-        const descWords = extractSubstantiveWords(service.description);
-        for (const word of contentWords) {
-          if (descWords.has(word)) return true;
-        }
-        return false;
-      });
-    }
-    case "serviceNames": {
-      // The PUBLIC service-catalog NAME channel (PROMPT-AI-OPS-20) is carried
-      // whenever at least one service NAME is exposed in the catalog. B-01
-      // already declares a service name "AI may mention" and B-02 always
-      // carries the names in request.services; this channel lets the gate back
-      // a catalog-listing reply from those carried names instead of refusing
-      // it. If response content is present, the reply must mention at least one
-      // service from request.services so that unrelated catalog names cannot
-      // authorize an arbitrary unknown-fact answer.
-      if (request.services.length === 0) return false;
-      if (!response?.content) return true;
-      const contentWords = extractSubstantiveWords(response.content);
-      return request.services.some((service) => {
-        if (
-          typeof service.name !== "string" ||
-          service.name.trim().length === 0
-        ) {
-          return false;
-        }
-        const sWords = extractSubstantiveWords(service.name);
-        for (const w of sWords) {
-          if (contentWords.has(w)) return true;
-        }
-        return false;
-      });
-    }
+    case "serviceDescriptions":
+      return request.services.some(
+        (service) =>
+          typeof service.description === "string" &&
+          service.description.trim().length > 0,
+      );
+    case "serviceNames":
+      return request.services.some(
+        (service) =>
+          typeof service.name === "string" && service.name.trim().length > 0,
+      );
     case null:
-      // No request channel exists for this family today.
       return false;
   }
 }
@@ -498,39 +275,74 @@ export function supportFamilyForProposedKnowledge(
   }
 }
 
+export type ResolvedKnowledgeProposal = {
+  family: string | null;
+  sourceId: string | null;
+};
+
 /**
- * The ordered candidate support families a reply intent may draw its answer
- * from. Almost every intent has exactly ONE (its `TASK_SUPPORT_FAMILIES`
- * entry). FAQ is the exception (PROMPT-AI-ARCH-13/-15 — Slice 6,
- * PROMPT-AI-OPS-20): the fixed intent family has no separate
- * BUSINESS_INFO/SERVICE_INFO/SERVICE_CATALOG intents, so a business-profile,
- * service-detail, price, or services-list question is classified FAQ. A FAQ
- * reply may therefore be backed by the canonical FAQ store OR any of the
- * task-gated Slice-6 channels OR the carried service-catalog names OR the
- * canonical business NAME on an identity ask (PROMPT-AI-UX-02) — whichever is
- * included + disclosable + actually carried. This is purely ADDITIVE: a FAQ
- * reply the store already backs is unchanged, and each channel is carried ONLY
- * on its own relevance gate (`businessAbout` on business-info turns,
- * `serviceDescriptions` on service-info turns, `service.price` on price turns,
- * `business.identity` on identity turns) — so a booking or unrelated turn can
- * never carry them. The catalog-name channel is carried whenever the catalog
- * is exposed (B-01 marks names PUBLIC and B-02 always carries them), and it
- * backs ONLY the mention of those carried names.
+ * Extract the structured knowledge family and source reference proposal
+ * from a response or active goal without inspecting free-text prose.
  */
-function candidateSupportFamilies(intent: AiIntent): TaskSupportFamily[] {
-  const primary = TASK_SUPPORT_FAMILIES[intent];
-  if (intent === "FAQ") {
-    return [
-      primary,
-      { family: "service.price", channel: "services" },
-      { family: "business.about", channel: "businessAbout" },
-      { family: "business.address", channel: "businessAddress" },
-      { family: "business.identity", channel: "businessName" },
-      { family: "service.description", channel: "serviceDescriptions" },
-      { family: "service.name", channel: "serviceNames" },
-    ];
+export function resolveKnowledgeProposal(
+  response: AiResponse,
+  goal?: AiGoal | null,
+): ResolvedKnowledgeProposal {
+  let family: string | null = null;
+  let sourceId: string | null = null;
+
+  // 1. Goal or top-level knowledgeRef
+  const rawRef = goal?.knowledgeRef ?? response.knowledgeRef;
+  if (typeof rawRef === "string") {
+    const familyCandidate = supportFamilyForProposedKnowledge(rawRef);
+    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
+      family = familyCandidate.family;
+    } else {
+      sourceId = rawRef.trim();
+    }
+  } else if (rawRef && typeof rawRef === "object") {
+    if (rawRef.family) {
+      const familyCandidate = supportFamilyForProposedKnowledge(rawRef.family);
+      family =
+        familyCandidate && familyCandidate !== "GENERIC_FAQ"
+          ? familyCandidate.family
+          : rawRef.family.trim();
+    }
+    if (rawRef.sourceId) {
+      sourceId = rawRef.sourceId.trim();
+    }
   }
-  return [primary];
+
+  // 2. Goal or top-level sourceId
+  const explicitSourceId = goal?.sourceId ?? response.sourceId;
+  if (explicitSourceId && typeof explicitSourceId === "string") {
+    sourceId = explicitSourceId.trim();
+  }
+
+  // 3. Goal or top-level requiredKnowledge
+  const explicitRequiredKnowledge =
+    goal?.requiredKnowledge ?? response.requiredKnowledge;
+  if (
+    !family &&
+    explicitRequiredKnowledge &&
+    typeof explicitRequiredKnowledge === "string"
+  ) {
+    const familyCandidate = supportFamilyForProposedKnowledge(
+      explicitRequiredKnowledge,
+    );
+    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
+      family = familyCandidate.family;
+    } else {
+      family = explicitRequiredKnowledge.trim();
+    }
+  }
+
+  // 4. Extraction fallback for service queries
+  if (!sourceId && response.extraction?.service) {
+    sourceId = response.extraction.service.trim();
+  }
+
+  return { family, sourceId };
 }
 
 /**
@@ -546,7 +358,6 @@ export function isExplicitIdentityGoal(
 
 /**
  * Determine whether a response explicitly declares an identity answer.
- * Uses the canonical synthesizeDecisionGoals bridge to check explicit goals or top-level signal.
  */
 export function isExplicitIdentityResponse(response: AiResponse): boolean {
   const goals = synthesizeDecisionGoals(response);
@@ -568,158 +379,422 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   const ledger = context.facts;
 
   // ── Invariant: FORBIDDEN material never backs a reply (defense in depth).
-  // B-01 refuses such candidates at enrollment, so an included FORBIDDEN fact
-  // is unreachable by construction; if it ever appears, nothing is emitted.
   if (ledger.some((fact) => fact.visibility === "FORBIDDEN" && fact.included)) {
     return { kind: "requires-human", reason: "FORBIDDEN_FACT_IN_CONTEXT" };
   }
 
-  // ── Routing actions are the fallback channel: they disclose no knowledge,
-  //    so they pass through and the existing handoff semantics own the turn.
-  //    (The customer experience and the NEED_HUMAN/AI_HANDOFF contract stay
-  //    exactly as designed.)
+  // ── Routing actions are the fallback channel: they disclose no knowledge.
   if (response.action !== "reply") {
     return { kind: "disclosed", response, support: [] };
   }
 
-  // ── A self-authored reply must be backed by disclosable knowledge.
-  const support = TASK_SUPPORT_FAMILIES[response.intent];
-
-  // The one knowledge-free social protocol (DECISIONS #61): a GREETING
-  // reply is a fixed acknowledgment that can disclose nothing, so it
-  // needs no backing fact. Everything else still requires a ledger fact
-  // or it is routed to a human.
+  // ── A knowledge-free social protocol (GREETING) discloses no knowledge.
   if (isKnowledgeFreeReply(response)) {
     return { kind: "disclosed", response, support: [] };
   }
 
-  // A routing intent declaring a `reply` discloses nothing it may stand
-  // behind — there is no knowledge channel for it. Hand it to a human.
-  if (!support.family) {
+  // ── A routing intent declaring a `reply` discloses nothing it may stand behind.
+  const primarySupport = TASK_SUPPORT_FAMILIES[response.intent];
+  if (!primarySupport.family) {
     return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
   }
 
-  // Determine the active answer goal for this turn
+  const isStructured =
+    context.request.requiredSemanticCapability === "structured_turn";
   const goals = synthesizeDecisionGoals(response);
   const currentAnswerGoal =
     goals.find((g) => g.kind === "ANSWER") ?? goals[0] ?? null;
   const isIdentity = isExplicitIdentityGoal(currentAnswerGoal);
 
-  // If the current answer goal explicitly targets business.identity:
-  // Its ONLY permissible support family is business.identity.
-  // Unrelated channels (businessAbout, servicePrice, businessAddress, etc.) cannot authorize an identity answer.
+  const proposal = resolveKnowledgeProposal(response, currentAnswerGoal);
   if (isIdentity) {
-    const candidate = {
-      family: "business.identity" as const,
-      channel: "businessName" as const,
-    };
-    const record = ledger.find((fact) => fact.key === candidate.family);
-    if (!record || !record.included) {
-      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-    }
-    if (!record.disclosable) {
-      return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-    }
-    if (!channelCarried(context.request, candidate.channel, response)) {
-      return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-    }
-    return {
-      kind: "disclosed",
-      response,
-      support: [candidate.family],
-    };
+    proposal.family = "business.identity";
   }
 
-  // Support both existing requiredKnowledge representations:
-  // (1) top-level response.requiredKnowledge, (2) goal-level primary answer goal requiredKnowledge.
-  // requiredKnowledge is a model proposal, not factual proof:
-  // When proposed, the server evaluates ONLY that matching family against ledger and request.
-  const proposedKnowledge =
-    response.requiredKnowledge?.trim() ||
-    currentAnswerGoal?.requiredKnowledge?.trim() ||
-    null;
-
-  if (proposedKnowledge) {
-    const proposedCandidate =
-      supportFamilyForProposedKnowledge(proposedKnowledge);
-    if (proposedCandidate === null) {
-      // Model explicitly proposed an unknown or unbacked knowledge family -> fail closed
-      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-    }
-    if (proposedCandidate !== "GENERIC_FAQ") {
-      if (!proposedCandidate.family) {
+  // ── Case A: Explicit or resolved knowledge family
+  if (proposal.family) {
+    switch (proposal.family) {
+      case "business.identity": {
+        const record = ledger.find(
+          (f) => f.key === "business.identity" || f.key === "business.name",
+        );
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        if (
+          !context.request.businessName ||
+          context.request.businessName.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.identity"],
+          renderedContent: buildBusinessIdentityContent(
+            context.request.businessName,
+          ),
+        };
+      }
+      case "business.address": {
+        const record = ledger.find((f) => f.key === "business.address");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        if (
+          !context.request.businessAddress ||
+          context.request.businessAddress.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.address"],
+          renderedContent: buildBusinessAddressContent(
+            context.request.businessAddress,
+          ),
+        };
+      }
+      case "business.about": {
+        const record = ledger.find((f) => f.key === "business.about");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        if (
+          !context.request.businessAbout ||
+          context.request.businessAbout.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.about"],
+          renderedContent: buildBusinessAboutContent(
+            context.request.businessAbout,
+          ),
+        };
+      }
+      case "service.name": {
+        const record = ledger.find((f) => f.key === "service.name");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        if (context.request.services.length === 0) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["service.name"],
+          renderedContent: buildServiceCatalogContent(context.request.services),
+        };
+      }
+      case "service.price": {
+        const record = ledger.find((f) => f.key === "service.price");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        let matchedService: (typeof context.request.services)[number] | null =
+          null;
+        if (proposal.sourceId) {
+          const sId = proposal.sourceId.trim();
+          matchedService =
+            context.request.services.find(
+              (s) =>
+                s.id === sId ||
+                s.name === sId ||
+                normalizeArabicText(s.name) === normalizeArabicText(sId),
+            ) ?? null;
+        } else if (!isStructured) {
+          const priced = context.request.services.filter((s) => s.price);
+          if (priced.length === 1) matchedService = priced[0] ?? null;
+        }
+        if (
+          !matchedService ||
+          !matchedService.price ||
+          matchedService.price.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["service.price"],
+          renderedContent: buildServicePriceContent(
+            matchedService.name,
+            matchedService.price,
+          ),
+        };
+      }
+      case "service.description": {
+        const record = ledger.find((f) => f.key === "service.description");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        let matchedService: (typeof context.request.services)[number] | null =
+          null;
+        if (proposal.sourceId) {
+          const sId = proposal.sourceId.trim();
+          matchedService =
+            context.request.services.find(
+              (s) =>
+                s.id === sId ||
+                s.name === sId ||
+                normalizeArabicText(s.name) === normalizeArabicText(sId),
+            ) ?? null;
+        } else if (!isStructured) {
+          const described = context.request.services.filter(
+            (s) => s.description,
+          );
+          if (described.length === 1) matchedService = described[0] ?? null;
+        }
+        if (
+          !matchedService ||
+          !matchedService.description ||
+          matchedService.description.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["service.description"],
+          renderedContent: buildServiceDescriptionContent(
+            matchedService.name,
+            matchedService.description,
+          ),
+        };
+      }
+      case "business.faqs": {
+        const record = ledger.find((f) => f.key === "business.faqs");
+        if (!record || !record.included) {
+          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        }
+        if (!record.disclosable) {
+          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        }
+        let matchedFaq: (typeof context.request.faqs)[number] | null = null;
+        if (proposal.sourceId) {
+          const sId = proposal.sourceId.trim();
+          matchedFaq =
+            context.request.faqs.find(
+              (f) =>
+                (f.id && f.id === sId) ||
+                f.question === sId ||
+                normalizeArabicText(f.question) === normalizeArabicText(sId),
+            ) ?? null;
+        } else if (!isStructured && context.request.faqs.length === 1) {
+          matchedFaq = context.request.faqs[0] ?? null;
+        }
+        if (
+          !matchedFaq ||
+          !matchedFaq.answer ||
+          matchedFaq.answer.trim().length === 0
+        ) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.faqs"],
+          renderedContent: matchedFaq.answer.trim(),
+        };
+      }
+      default: {
         return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
       }
-      const family = proposedCandidate.family;
-      const record = ledger.find((fact) => fact.key === family);
+    }
+  }
+
+  // ── Case B: sourceId provided without explicit family
+  if (proposal.sourceId) {
+    const sId = proposal.sourceId.trim();
+    const matchedFaq = context.request.faqs.find(
+      (f) =>
+        (f.id && f.id === sId) ||
+        f.question === sId ||
+        normalizeArabicText(f.question) === normalizeArabicText(sId),
+    );
+    if (matchedFaq) {
+      const record = ledger.find((f) => f.key === "business.faqs");
       if (!record || !record.included) {
         return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
       }
       if (!record.disclosable) {
         return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
       }
-      if (
-        !channelCarried(context.request, proposedCandidate.channel, response)
-      ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-      }
       return {
         kind: "disclosed",
         response,
-        support: [family],
+        support: ["business.faqs"],
+        renderedContent: matchedFaq.answer.trim(),
+      };
+    }
+
+    const matchedService = context.request.services.find(
+      (s) =>
+        s.id === sId ||
+        s.name === sId ||
+        normalizeArabicText(s.name) === normalizeArabicText(sId),
+    );
+    if (matchedService) {
+      if (matchedService.price) {
+        const record = ledger.find((f) => f.key === "service.price");
+        if (record?.included && record.disclosable) {
+          return {
+            kind: "disclosed",
+            response,
+            support: ["service.price"],
+            renderedContent: buildServicePriceContent(
+              matchedService.name,
+              matchedService.price,
+            ),
+          };
+        }
+      }
+      if (matchedService.description) {
+        const record = ledger.find((f) => f.key === "service.description");
+        if (record?.included && record.disclosable) {
+          return {
+            kind: "disclosed",
+            response,
+            support: ["service.description"],
+            renderedContent: buildServiceDescriptionContent(
+              matchedService.name,
+              matchedService.description,
+            ),
+          };
+        }
+      }
+    }
+    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+  }
+
+  // ── Case C: Neither family nor sourceId provided
+  if (isStructured) {
+    // Missing structured source reference on structured turn -> fail closed
+    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+  }
+
+  // Compatibility candidate evaluation for legacy/offline test turns:
+  if (context.request.faqs.length === 1) {
+    const record = ledger.find((f) => f.key === "business.faqs");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.faqs"],
+        renderedContent: context.request.faqs[0]!.answer.trim(),
       };
     }
   }
 
-  // Fallback candidate evaluation for turns without explicit proposed requiredKnowledge:
-  // On structured turns:
-  // - business.identity is NOT a candidate for general FAQ/non-identity answers (PROMPT-AI-UX-02).
-  const isStructured =
-    context.request.requiredSemanticCapability === "structured_turn";
-  const candidates = candidateSupportFamilies(response.intent).filter((c) => {
-    if (isStructured && c.family === "business.identity") return false;
-    if (
-      response.extraction?.service &&
-      (c.family === "business.about" ||
-        c.family === "business.address" ||
-        c.family === "business.identity" ||
-        c.family === "service.name")
-    ) {
-      return false;
+  if (
+    context.request.businessAbout &&
+    context.request.businessAbout.trim().length > 0
+  ) {
+    const record = ledger.find((f) => f.key === "business.about");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.about"],
+        renderedContent: buildBusinessAboutContent(
+          context.request.businessAbout,
+        ),
+      };
     }
-    return true;
-  });
-
-  let primaryRefusal: DisclosureRefusalReason | null = null;
-  for (const candidate of candidates) {
-    if (!candidate.family) continue;
-    const record = ledger.find((fact) => fact.key === candidate.family);
-    if (!record || !record.included) {
-      if (primaryRefusal === null) primaryRefusal = "EXCLUDED_FROM_CONTEXT";
-      continue;
-    }
-    if (!record.disclosable) {
-      if (primaryRefusal === null) primaryRefusal = "NOT_DISCLOSABLE";
-      continue;
-    }
-    if (!channelCarried(context.request, candidate.channel, response)) {
-      if (primaryRefusal === null) primaryRefusal = "UNAVAILABLE_IN_REQUEST";
-      continue;
-    }
-    return {
-      kind: "disclosed",
-      response,
-      support: [candidate.family],
-    };
   }
 
-  return {
-    kind: "requires-human",
-    reason: primaryRefusal ?? "EXCLUDED_FROM_CONTEXT",
-  };
+  if (
+    context.request.businessAddress &&
+    context.request.businessAddress.trim().length > 0
+  ) {
+    const record = ledger.find((f) => f.key === "business.address");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.address"],
+        renderedContent: buildBusinessAddressContent(
+          context.request.businessAddress,
+        ),
+      };
+    }
+  }
+
+  const describedService = context.request.services.find(
+    (s) => typeof s.description === "string" && s.description.trim().length > 0,
+  );
+  if (describedService) {
+    const record = ledger.find((f) => f.key === "service.description");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.description"],
+        renderedContent: buildServiceDescriptionContent(
+          describedService.name,
+          describedService.description!,
+        ),
+      };
+    }
+  }
+
+  const pricedService = context.request.services.find(
+    (s) => typeof s.price === "string" && s.price.trim().length > 0,
+  );
+  if (pricedService) {
+    const record = ledger.find((f) => f.key === "service.price");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.price"],
+        renderedContent: buildServicePriceContent(
+          pricedService.name,
+          pricedService.price!,
+        ),
+      };
+    }
+  }
+
+  if (context.request.services.length > 0) {
+    const record = ledger.find((f) => f.key === "service.name");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.name"],
+        renderedContent: buildServiceCatalogContent(context.request.services),
+      };
+    }
+  }
+
+  return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
 }
 
-// ─── Static invariants (referenced by the harness; documented here) ──────────
+// ─── Static invariants ───────────────────────────────────────────────────────
 
 /**
  * The gate holds no secrets by construction: it consumes only the validated
@@ -727,6 +802,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
  * credential reference or value (FORBIDDEN facts are refused upstream). It
  * never reads `process.env`, never touches Prisma, and never calls a
  * provider. It also never holds reply-borne text as policy input — the
- * decision is structural (action + intent + ledger verdicts), never textual.
+ * decision is structural (action + intent + ledger verdicts + source references),
+ * never free-text regex or token overlap.
  */
 export const DISCLOSURE_GATE_NEVER_HOLDS_SECRETS = true as const;

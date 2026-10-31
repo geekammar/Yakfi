@@ -851,6 +851,8 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          sourceId: "faq-0",
         }),
       ],
     });
@@ -982,6 +984,66 @@ async function runSuite(): Promise<void> {
         resCat.conversationStatus === "AI_ACTIVE" &&
         (hCat.getSent()[0]?.includes("تنظيف أسنان") ?? false),
       resCat,
+    );
+
+    // 10.E Valid Address
+    const hAddr = createEngineHarness({
+      address: "15 شارع النصر، المعادي، القاهرة",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "عنواننا 15 شارع النصر بالمعادي",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.address",
+        }),
+      ],
+    });
+    const resAddr = await hAddr.runInbound(
+      "عنوانكم فين بالظبط؟",
+      "ext-sc10-addr",
+    );
+    check(
+      "10.E Supported business address is rendered authoritatively and stays AI_ACTIVE",
+      resAddr.ok === true &&
+        !resAddr.duplicate &&
+        resAddr.assistantAction === "AI_REPLY" &&
+        resAddr.conversationStatus === "AI_ACTIVE" &&
+        (hAddr.getSent()[0]?.includes("15 شارع النصر") ?? false),
+      resAddr,
+    );
+
+    // 10.F Valid About
+    const hAbout = createEngineHarness({
+      about: "عيادة أسنان تخصصية تقدم خدمات تقويم وجراحة وزراعة الأسنان",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نحن عيادة أسنان تخصصية",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.about",
+        }),
+      ],
+    });
+    const resAbout = await hAbout.runInbound(
+      "احكيلي عن العيادة وخدماتكم",
+      "ext-sc10-about",
+    );
+    check(
+      "10.F Supported business about is rendered authoritatively and stays AI_ACTIVE",
+      resAbout.ok === true &&
+        !resAbout.duplicate &&
+        resAbout.assistantAction === "AI_REPLY" &&
+        resAbout.conversationStatus === "AI_ACTIVE" &&
+        (hAbout.getSent()[0]?.includes("عيادة أسنان تخصصية") ?? false),
+      resAbout,
     );
   }
 
@@ -1118,6 +1180,153 @@ async function runSuite(): Promise<void> {
         resFaq.conversationStatus === "NEED_HUMAN" &&
         !(hUnrelatedFaq.getSent()[0]?.includes("التعقيم المعتمدة") ?? false),
       resFaq,
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 13. SCENARIO 13: Adversarial Lexical Authorization Defeat & Server-Authoritative Rendering
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    // 13.A Adversarial Word Overlap Defeat:
+    // Store has an address FAQ with words "العيادة" and "المعادي".
+    // Customer asks unsupported question: "متى تأسست العيادة؟"
+    // Model returns unbacked answer claiming founding year 1990 sharing words "العيادة" and "المعادي".
+    // Model specifies no valid source reference for founding year -> refused and handed off.
+    const hAdversarialOverlap = createEngineHarness({
+      faqs: [
+        {
+          question: "هل فرع العيادة في المعادي؟",
+          answer: "نعم فرع العيادة يقع في المعادي.",
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          // Cleverly crafting reply sharing substantive words "العيادة" and "المعادي"
+          content: "تأسست العيادة سنة 1990 في حي المعادي العريق.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          // Model targets an unexposed or unbacked reference
+          sourceId: "unsupported-founding-year-key",
+        }),
+      ],
+    });
+
+    const resAdv1 = await hAdversarialOverlap.runInbound(
+      "متى تأسست العيادة؟",
+      "ext-sc13-adv-1",
+    );
+    check(
+      "13.A Adversarial lexical overlap defeated: unsupported founding year prose is refused and handed off",
+      resAdv1.ok === true &&
+        !resAdv1.duplicate &&
+        resAdv1.assistantAction === "AI_HANDOFF" &&
+        resAdv1.conversationStatus === "NEED_HUMAN" &&
+        !hAdversarialOverlap.getSent().includes("1990"),
+      resAdv1,
+    );
+
+    // 13.B Hallucinated Price on Genuinely Priced Service:
+    // Service "تنظيف أسنان" costs 400 EGP in database.
+    // Model attempts to quote "900 جنيه" referencing the service.
+    // Server-authoritative rendering emits the canonical 400 EGP price, never the 900 quote.
+    const hAdvPrice = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف أسنان 900 جنيه شامل الكشف.",
+          extraction: {
+            ...emptyExtraction,
+            service: "تنظيف أسنان",
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-1",
+        }),
+      ],
+    });
+
+    const resAdvPrice = await hAdvPrice.runInbound(
+      "بكام تنظيف الأسنان؟",
+      "ext-sc13-adv-2",
+    );
+    const sentAdvPrice = hAdvPrice.getSent();
+    check(
+      "13.B Server-authoritative price rendering overrides hallucinated quote with authoritative price",
+      resAdvPrice.ok === true &&
+        !resAdvPrice.duplicate &&
+        resAdvPrice.assistantAction === "AI_REPLY" &&
+        resAdvPrice.conversationStatus === "AI_ACTIVE" &&
+        sentAdvPrice.length === 1 &&
+        (sentAdvPrice[0]?.includes("400") ?? false) &&
+        !sentAdvPrice[0]?.includes("900"),
+      sentAdvPrice,
+    );
+
+    // 13.C Foreign / Non-Existent Source Reference:
+    // Model proposes a source ID from another tenant or unknown identifier.
+    // Server validation fails closed -> NEED_HUMAN with POLICY_REFUSED.
+    const hAdvCross = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الجلسة 500 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "cross-tenant-foreign-id-999",
+        }),
+      ],
+    });
+
+    const resAdvCross = await hAdvCross.runInbound(
+      "سعر الخدمة ايه؟",
+      "ext-sc13-adv-3",
+    );
+    check(
+      "13.C Cross-tenant or unexposed source reference fails closed to NEED_HUMAN with POLICY_REFUSED",
+      resAdvCross.ok === true &&
+        !resAdvCross.duplicate &&
+        resAdvCross.assistantAction === "AI_HANDOFF" &&
+        resAdvCross.conversationStatus === "NEED_HUMAN" &&
+        resAdvCross.handoffCause === "POLICY_REFUSED",
+      resAdvCross,
     );
   }
 
