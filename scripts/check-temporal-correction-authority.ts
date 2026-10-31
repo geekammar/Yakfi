@@ -1839,17 +1839,17 @@ async function runSuite(): Promise<void> {
     const resolvedYearOnly = resolveServerTemporalRequest(
       { type: "unresolved_date", year: 2027 },
       null,
-      new Date("2026-11-01T10:00:00.000Z"),
+      new Date("2026-12-15T10:00:00.000Z"),
       "Africa/Cairo",
       60,
       {
-        unresolvedDate: { day: 5, month: 11 },
+        unresolvedDate: { day: 5, month: 1 },
       },
     );
     check(
-      "18.7 Year-only completion preserves prior day=5 and month=11, resolving 2027-11-05",
+      "18.7 Year-only completion preserves prior day=5 and month=1, resolving 2027-01-05",
       resolvedYearOnly.kind === "single_date" &&
-        resolvedYearOnly.date === "2027-11-05",
+        resolvedYearOnly.date === "2027-01-05",
     );
   }
 
@@ -1860,60 +1860,85 @@ async function runSuite(): Promise<void> {
     "\n── Group 19: Persistence Failures, Conflict & Bounded Recovery ──",
   );
   {
-    // 19.1: Revision conflict on first commit with successful bounded recovery (retry succeeds)
+    // 19.1: Revision conflict on first commit with successful bounded recovery
     let commitCount = 0;
-    class ConflictOnceStore extends InMemoryConversationStateStore {
+    let failCommits = false;
+
+    class CustomTestStore extends InMemoryConversationStateStore {
       override async save(
         businessId: string,
         conversationId: string,
         expectedRevision: number | null,
         state: unknown,
       ) {
-        commitCount++;
-        if (commitCount === 1) {
-          // Simulate concurrent write advancing revision in DB
-          const row = this.rows.get(conversationId);
-          if (row) {
-            row.revision += 1;
+        if (failCommits) {
+          commitCount++;
+          if (commitCount === 1) {
+            // Concurrent turn advanced revision in DB
+            const row = this.rows.get(conversationId);
+            if (row) {
+              row.revision += 1;
+            }
+            return { status: "conflict" as const };
           }
-          return { status: "conflict" as const };
         }
         return super.save(businessId, conversationId, expectedRevision, state);
       }
     }
 
+    const testStore = new CustomTestStore();
     const conflictHarness = createPlaygroundHarness({
       channel: "TELEGRAM",
       todayRef: "2026-11-01",
-      stateStore: new ConflictOnceStore(),
+      stateStore: testStore,
       businessConfig: {
         appointmentTimeDisplay: "START_ONLY",
         confirmationMode: "automatic",
       },
     });
 
-    conflictHarness.stateStore.rows.set(conflictHarness.conversation.id, {
+    conflictHarness.setVirtualNow(new Date("2026-11-01T10:00:00.000Z"));
+    const identity19 = {
       businessId: conflictHarness.business.id,
-      revision: 1,
-      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
-      state: {
-        conversationId: conflictHarness.conversation.id,
-        businessId: conflictHarness.business.id,
-        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
-        selectedDate: "2026-11-05",
-        offer: {
-          token: "dummy-conflict-tok",
-          status: "ACTIVE",
-          expiresAt: "2026-11-01T10:30:00.000Z",
-          kind: "SLOT",
-          date: "2026-11-05",
-          slots: [],
-        },
-        missingFacts: [],
-        lastClarification: null,
-      },
-    });
+      branchId: conflictHarness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
 
+    // Turn 0: Establish valid initial state with active offer naturally
+    conflictHarness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: "2026-11-05",
+            timePreference: null,
+            temporalRequest: { type: "exact_date", date: "2026-11-05" },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn0 = await receiveInboundMessage(
+      conflictHarness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 5 نوفمبر",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp19-turn0",
+      },
+      identity19,
+    );
+    check("19.0 Turn 0 establishes initial state", turn0.ok === true);
+
+    // Now enable conflict for next turn
+    failCommits = true;
+    commitCount = 0;
+
+    conflictHarness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
     conflictHarness.deps.ai = {
       providerName: "test-ai",
       async respond(): Promise<AiResponse> {
@@ -1930,19 +1955,13 @@ async function runSuite(): Promise<void> {
       },
     };
 
-    const identity19 = {
-      businessId: conflictHarness.business.id,
-      branchId: conflictHarness.business.defaultBranchId,
-      connectionId: "conn-1",
-    };
-
     const turn19_1 = await receiveInboundMessage(
       conflictHarness.deps,
       {
         to: "123456789",
         from: "998877",
         text: "عايز كشف أسنان يوم 5",
-        receivedAt: "2026-11-01T10:00:00.000Z",
+        receivedAt: "2026-11-01T10:05:00.000Z",
         externalId: "ext-grp19-turn1",
       },
       identity19,
@@ -1959,44 +1978,71 @@ async function runSuite(): Promise<void> {
     );
 
     // 19.2: Exhausted recovery / persistent store error returns safe failure reply
+    let failAlways = false;
     class AlwaysFailStore extends InMemoryConversationStateStore {
-      override async save() {
-        return { status: "conflict" as const };
+      override async save(
+        businessId: string,
+        conversationId: string,
+        expectedRevision: number | null,
+        state: unknown,
+      ) {
+        if (failAlways) {
+          return { status: "conflict" as const };
+        }
+        return super.save(businessId, conversationId, expectedRevision, state);
       }
     }
 
+    const alwaysFailStore = new AlwaysFailStore();
     const failHarness = createPlaygroundHarness({
       channel: "TELEGRAM",
       todayRef: "2026-11-01",
-      stateStore: new AlwaysFailStore(),
+      stateStore: alwaysFailStore,
       businessConfig: {
         appointmentTimeDisplay: "START_ONLY",
         confirmationMode: "automatic",
       },
     });
 
-    failHarness.stateStore.rows.set(failHarness.conversation.id, {
+    failHarness.setVirtualNow(new Date("2026-11-01T10:00:00.000Z"));
+    const identityFail = {
       businessId: failHarness.business.id,
-      revision: 1,
-      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
-      state: {
-        conversationId: failHarness.conversation.id,
-        businessId: failHarness.business.id,
-        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
-        selectedDate: "2026-11-05",
-        offer: {
-          token: "dummy-fail-tok",
-          status: "ACTIVE",
-          expiresAt: "2026-11-01T10:30:00.000Z",
-          kind: "SLOT",
-          date: "2026-11-05",
-          slots: [],
-        },
-        missingFacts: [],
-        lastClarification: null,
-      },
-    });
+      branchId: failHarness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
 
+    // Turn 0: Establish valid initial state with active offer naturally
+    failHarness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: "2026-11-05",
+            timePreference: null,
+            temporalRequest: { type: "exact_date", date: "2026-11-05" },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    await receiveInboundMessage(
+      failHarness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 5 نوفمبر",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp19-fail0",
+      },
+      identityFail,
+    );
+
+    // Now enable always-fail
+    failAlways = true;
+    failHarness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
     failHarness.deps.ai = {
       providerName: "test-ai",
       async respond(): Promise<AiResponse> {
@@ -2019,14 +2065,10 @@ async function runSuite(): Promise<void> {
         to: "123456789",
         from: "998877",
         text: "عايز كشف أسنان يوم 5",
-        receivedAt: "2026-11-01T10:00:00.000Z",
+        receivedAt: "2026-11-01T10:05:00.000Z",
         externalId: "ext-grp19-turn2",
       },
-      {
-        businessId: failHarness.business.id,
-        branchId: failHarness.business.defaultBranchId,
-        connectionId: "conn-1",
-      },
+      identityFail,
     );
     check(
       "19.2 Exhausted commit conflict delivers truthful bounded failure reply",
@@ -2063,39 +2105,43 @@ async function runSuite(): Promise<void> {
       connectionId: "conn-1",
     };
 
-    // 20.1: Establish active offer in durable state store for 2026-11-05
-    const oldOfferToken = "dummy-stale-tok";
-    harness.stateStore.rows.set(harness.conversation.id, {
-      businessId: harness.business.id,
-      revision: 1,
-      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
-      state: {
-        conversationId: harness.conversation.id,
-        businessId: harness.business.id,
-        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
-        selectedDate: "2026-11-05",
-        offer: {
-          token: oldOfferToken,
-          status: "ACTIVE",
-          expiresAt: "2026-11-01T10:30:00.000Z",
-          kind: "SLOT",
-          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
-          serviceName: "كشف أسنان",
-          date: "2026-11-05",
-          slots: [
-            {
-              slotKey: "k1",
-              time: "10:00",
-              providerId: PLAYGROUND_IDS.PROV_1,
-            },
-          ],
-        },
-        missingFacts: [],
-        lastClarification: null,
+    // 20.1: Establish active offer via natural turn
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: "2026-11-05",
+            timePreference: null,
+            temporalRequest: { type: "exact_date", date: "2026-11-05" },
+            exactTime: null,
+          },
+        });
       },
-    });
+    };
 
-    // 20.2: Customer sends temporal correction (e.g. past-date "عايز أحجز امبارح")
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 5 نوفمبر 2026",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp20-turn1",
+      },
+      identity,
+    );
+    const offer1 = getOffer(harness)?.offer;
+    const oldOfferToken = offer1?.token;
+    check(
+      "20.1 Active offer established in durable store",
+      isReply(turn1) && offer1?.status === "ACTIVE" && Boolean(oldOfferToken),
+    );
+
+    // 20.2: Customer sends temporal correction (past-date "عايز أحجز امبارح")
+    harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
     harness.deps.ai = {
       providerName: "test-ai",
       async respond(): Promise<AiResponse> {
@@ -2112,47 +2158,48 @@ async function runSuite(): Promise<void> {
       },
     };
 
-    const turn1 = await receiveInboundMessage(
+    const turn2 = await receiveInboundMessage(
       harness.deps,
       {
         to: "123456789",
         from: "998877",
         text: "عايز أحجز امبارح",
         receivedAt: "2026-11-01T10:05:00.000Z",
-        externalId: "ext-grp20-turn1",
+        externalId: "ext-grp20-turn2",
       },
       identity,
     );
     check(
-      "20.1 Temporal correction turn produces past-date warning",
-      isReply(turn1) &&
-        isActive(turn1) &&
+      "20.2 Temporal correction turn produces past-date warning",
+      isReply(turn2) &&
+        isActive(turn2) &&
         lastBody(harness).includes("في الماضي"),
     );
     const persistedAfterCorrection = getOffer(harness);
     check(
-      "20.2 Offer is INVALIDATED and selectedDate cleared in durable store",
+      "20.2b Offer is INVALIDATED and selectedDate cleared in durable store",
       persistedAfterCorrection?.offer?.status === "INVALIDATED" &&
         persistedAfterCorrection?.selectedDate === null &&
         persistedAfterCorrection?.knownFacts?.date === undefined,
     );
 
-    // 20.3: Customer now taps the old callback button (fp:tok-stale-callback-1:0)
-    const turn2 = await receiveInboundMessage(
+    // 20.3: Customer now taps the old callback button (fp:<oldOfferToken>:0)
+    harness.setVirtualNow(new Date("2026-11-01T10:10:00.000Z"));
+    const turn3 = await receiveInboundMessage(
       harness.deps,
       {
         to: "123456789",
         from: "998877",
         text: `fp:${oldOfferToken}:0`,
         receivedAt: "2026-11-01T10:10:00.000Z",
-        externalId: "ext-grp20-turn2",
+        externalId: "ext-grp20-turn3",
       },
       identity,
     );
 
     check(
       "20.3 Old callback returns stale rejection",
-      isReply(turn2) &&
+      isReply(turn3) &&
         (lastBody(harness).includes("لم يعد متاحاً") ||
           lastBody(harness).includes("انتهت صلاحية المواعيد")),
     );
