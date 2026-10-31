@@ -1516,6 +1516,17 @@ export function formatServiceCatalogContent(
   return `${header}\n${lines.join("\n")}\n\nلحجز أي خدمة، أخبرنا باسم الخدمة أو رقمها وسنساعدك في اختيار الموعد المناسب.`;
 }
 
+const LOCATION_SYNONYMS = new Set([
+  "اين",
+  "فين",
+  "مكان",
+  "عنوان",
+  "موقع",
+  "موقعكم",
+  "عنوانكم",
+  "مكانكم",
+]);
+
 /** Distinctive-token overlap score between a message and an FAQ question. */
 function faqMatchScore(
   messageTokens: string[],
@@ -1525,6 +1536,11 @@ function faqMatchScore(
   let shared = 0;
   for (const token of new Set(messageTokens)) {
     if (questionSet.has(token)) shared += 1;
+  }
+  const msgHasLoc = messageTokens.some((t) => LOCATION_SYNONYMS.has(t));
+  const qHasLoc = questionTokens.some((t) => LOCATION_SYNONYMS.has(t));
+  if (msgHasLoc && qHasLoc && shared === 0) {
+    shared += 2;
   }
   return shared;
 }
