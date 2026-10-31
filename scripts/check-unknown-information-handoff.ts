@@ -46,6 +46,7 @@ type AttentionRow = {
   conversationId: string;
   businessId: string;
   reason: string;
+  cause?: string | null;
   priority: string;
   status: string;
   createdAt: string;
