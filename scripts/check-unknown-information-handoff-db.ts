@@ -32,6 +32,7 @@ import "./setup-test-env";
  *     pnpm check:unknown-information-handoff-db
  */
 
+import { randomUUID } from "node:crypto";
 import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
@@ -70,8 +71,8 @@ function check(label: string, pass: boolean, details?: unknown): void {
 }
 
 const RUN_ID = `truth-db-${Date.now()}`;
-const TEST_OPERATOR_ID = `op-${RUN_ID}`;
-const TEST_BUSINESS_ID = `biz-${RUN_ID}`;
+const TEST_OPERATOR_ID = randomUUID();
+const TEST_BUSINESS_ID = randomUUID();
 const TEST_BUSINESS_NAME = "مركز الأمل التخصصي لطب الأسنان";
 const TEST_PHONE = `+2010${Math.floor(10000000 + Math.random() * 90000000)}`;
 const CUSTOMER_PHONE = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
@@ -145,7 +146,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const branchId = `${TEST_BUSINESS_ID}-branch`;
+  const branchId = randomUUID();
   await db.branch.create({
     data: {
       id: branchId,
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
     data: { defaultBranchId: branchId },
   });
 
-  const service1Id = `${TEST_BUSINESS_ID}-svc-1`;
+  const service1Id = randomUUID();
   await db.service.create({
     data: {
       id: service1Id,
@@ -266,7 +267,8 @@ async function main(): Promise<void> {
     check(
       "DB-1.C Exactly one operator attention row persisted in DB with POLICY_REFUSED",
       dbAttention.length === 1 &&
-        dbAttention[0]!.reason === "POLICY_REFUSED" &&
+        dbAttention[0]!.cause === "POLICY_REFUSED" &&
+        dbAttention[0]!.reason === "AI_HANDOFF" &&
         dbAttention[0]!.resolvedAt === null,
       dbAttention,
     );
@@ -358,7 +360,8 @@ async function main(): Promise<void> {
     check(
       "DB-2.C Operator attention record persisted in DB with reason NO_KNOWLEDGE",
       dbAttention2.length === 1 &&
-        dbAttention2[0]!.reason === "NO_KNOWLEDGE" &&
+        dbAttention2[0]!.cause === "NO_KNOWLEDGE" &&
+        dbAttention2[0]!.reason === "AI_HANDOFF" &&
         dbAttention2[0]!.resolvedAt === null,
       dbAttention2,
     );
@@ -491,8 +494,9 @@ async function main(): Promise<void> {
     } as unknown as Parameters<typeof receiveInboundMessage>[0];
 
     let persistenceThrew = false;
+    let result4: any = null;
     try {
-      await receiveInboundMessage(
+      result4 = await receiveInboundMessage(
         failingDeps,
         {
           externalId: `ext-${RUN_ID}-db4`,
@@ -507,10 +511,16 @@ async function main(): Promise<void> {
       persistenceThrew = true;
     }
 
+    const failedSafely4 =
+      persistenceThrew ||
+      (result4 !== null &&
+        typeof result4 === "object" &&
+        result4.ok === false);
+
     check(
       "DB-4.A Persistence failure throws cleanly; no false success reported",
-      persistenceThrew === true,
-      { persistenceThrew },
+      failedSafely4 === true,
+      { persistenceThrew, result4 },
     );
 
     // Verify database state: no AI message survived
