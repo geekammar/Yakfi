@@ -242,6 +242,7 @@ export function deriveSmartSuggestions(params: {
   selectedProviderId: string | null;
   requestedTime?: string | null;
   maxSuggestions?: number;
+  allowAlternativeProviders?: boolean;
 }): SmartTimeSuggestion[] {
   const {
     slots,
@@ -249,6 +250,7 @@ export function deriveSmartSuggestions(params: {
     selectedProviderId,
     requestedTime,
     maxSuggestions = 3,
+    allowAlternativeProviders = true,
   } = params;
   if (!slots || slots.length === 0) return [];
 
@@ -265,6 +267,14 @@ export function deriveSmartSuggestions(params: {
     badge: string,
     reason: SmartTimeSuggestion["reason"],
   ) {
+    if (
+      !allowAlternativeProviders &&
+      selectedProviderId &&
+      providerId &&
+      providerId !== selectedProviderId
+    ) {
+      return;
+    }
     const key = `${slot.startTime}:${providerId ?? "any"}`;
     if (!addedKeys.has(key) && suggestions.length < maxSuggestions) {
       addedKeys.add(key);
@@ -314,8 +324,8 @@ export function deriveSmartSuggestions(params: {
             "الوقت المطلوب",
             "earliest",
           );
-        } else {
-          // Same time with another eligible provider
+        } else if (allowAlternativeProviders) {
+          // Same time with another eligible provider (only if alternative providers allowed)
           const altId = targetSlot.availableProviderIds?.find(
             (id) => id !== selectedProviderId,
           );
@@ -348,21 +358,23 @@ export function deriveSmartSuggestions(params: {
       );
     }
 
-    // 2c. If the earliest day slot is with another provider (and not preferred)
-    const dayFirst = slots[0];
-    if (
-      dayFirst &&
-      (!dayFirst.availableProviderIds ||
-        !dayFirst.availableProviderIds.includes(selectedProviderId))
-    ) {
-      const altId = dayFirst.availableProviderIds?.[0] ?? null;
-      const altName = altId ? providerMap.get(altId) : null;
-      addSuggestion(
-        dayFirst,
-        altId,
-        altName ? `أقرب وقت اليوم (مع ${altName})` : "أقرب وقت متاح",
-        "same_time_alternative",
-      );
+    // 2c. If the earliest day slot is with another provider (and alternative providers allowed)
+    if (allowAlternativeProviders) {
+      const dayFirst = slots[0];
+      if (
+        dayFirst &&
+        (!dayFirst.availableProviderIds ||
+          !dayFirst.availableProviderIds.includes(selectedProviderId))
+      ) {
+        const altId = dayFirst.availableProviderIds?.[0] ?? null;
+        const altName = altId ? providerMap.get(altId) : null;
+        addSuggestion(
+          dayFirst,
+          altId,
+          altName ? `أقرب وقت اليوم (مع ${altName})` : "أقرب وقت متاح",
+          "same_time_alternative",
+        );
+      }
     }
 
     // 2d. Backfill with remaining preferred provider slots
@@ -382,17 +394,19 @@ export function deriveSmartSuggestions(params: {
       }
     }
 
-    // 2e. If still not full, backfill with any available slots
-    for (const slot of slots) {
-      if (suggestions.length >= maxSuggestions) break;
-      const altId = slot.availableProviderIds?.[0] ?? null;
-      const altName = altId ? providerMap.get(altId) : null;
-      addSuggestion(
-        slot,
-        altId,
-        altName ? `متاح مع ${altName}` : "وقت متاح",
-        "nearby",
-      );
+    // 2e. If still not full and alternatives are allowed, backfill with any available slots
+    if (allowAlternativeProviders) {
+      for (const slot of slots) {
+        if (suggestions.length >= maxSuggestions) break;
+        const altId = slot.availableProviderIds?.[0] ?? null;
+        const altName = altId ? providerMap.get(altId) : null;
+        addSuggestion(
+          slot,
+          altId,
+          altName ? `متاح مع ${altName}` : "وقت متاح",
+          "nearby",
+        );
+      }
     }
 
     return suggestions;

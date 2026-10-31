@@ -243,12 +243,15 @@ export function DateStep({
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs sm:text-sm text-foreground">
             <CalendarDaysIcon className="size-4 text-primary shrink-0" />
             <span>
-              حجز موعد متابعة: الفترة المحددة{" "}
               {allowedRange.startDate && allowedRange.endDate
-                ? `من ${formatArabicDate(allowedRange.startDate)} إلى ${formatArabicDate(allowedRange.endDate)}`
+                ? allowedRange.startDate > allowedRange.endDate
+                  ? `حجز موعد متابعة: فترة المتابعة غير صالحة (من ${formatArabicDate(allowedRange.startDate)} إلى ${formatArabicDate(allowedRange.endDate)})`
+                  : `حجز موعد متابعة: الفترة المحددة من ${formatArabicDate(allowedRange.startDate)} إلى ${formatArabicDate(allowedRange.endDate)}`
                 : allowedRange.startDate
-                  ? `ابتداءً من ${formatArabicDate(allowedRange.startDate)}`
-                  : `حتى ${formatArabicDate(allowedRange.endDate!)}`}
+                  ? `حجز موعد متابعة: الفترة المحددة ابتداءً من ${formatArabicDate(allowedRange.startDate)}`
+                  : allowedRange.endDate
+                    ? `حجز موعد متابعة: الفترة المحددة حتى ${formatArabicDate(allowedRange.endDate)}`
+                    : "حجز موعد متابعة: طلب متابعة دون تاريخ محدد — يمكنك اختيار أي موعد متاح"}
             </span>
           </div>
         ) : null}

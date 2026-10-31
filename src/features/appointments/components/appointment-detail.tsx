@@ -77,8 +77,7 @@ export function AppointmentDetail({
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const cancelOpenerRef = useRef<HTMLButtonElement | null>(null);
   const followUpButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [followUps] =
-    useState<FollowUpRequestWithRelations[]>(initialFollowUps);
+  const followUps = initialFollowUps;
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 

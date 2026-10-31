@@ -25,6 +25,9 @@ export function FollowUpList({
   onRefresh?: () => void;
 }) {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelledIds, setCancelledIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -41,6 +44,7 @@ export function FollowUpList({
       if (!res.success) {
         setError(res.message);
       } else {
+        setCancelledIds((current) => new Set(current).add(id));
         onRefresh?.();
       }
     });
@@ -66,8 +70,10 @@ export function FollowUpList({
 
       <div className="divide-y divide-border/60">
         {followUps.map((item) => {
-          const isPendingStatus = item.status === "PENDING";
-          const isScheduled = item.status === "SCHEDULED";
+          const isCancelled =
+            item.status === "CANCELLED" || cancelledIds.has(item.id);
+          const isPendingStatus = !isCancelled && item.status === "PENDING";
+          const isScheduled = !isCancelled && item.status === "SCHEDULED";
 
           const hasRange = !!item.startDate && !!item.endDate;
           const startStr = item.startDate

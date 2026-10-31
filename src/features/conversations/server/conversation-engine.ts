@@ -1590,8 +1590,8 @@ async function createAppointmentForSelection(
     customerId: string;
     serviceId: string;
     branchId: string;
-    assignedUserId: string;
-    providerId?: string;
+    assignedUserId?: string | null;
+    providerId?: string | null;
     date: string;
     startTime: string;
     endTime: string;
@@ -3112,7 +3112,7 @@ async function completeBookingSelection(
   const assigneeId = chosen.providerId
     ? await resolveAssigneeId(deps, scope.business.id, chosen.providerId)
     : null;
-  if (!resolvedBranchId || !assigneeId) {
+  if (!resolvedBranchId || (!chosen.providerId && !assigneeId)) {
     // The booking cannot be routed — the business's branch/assignee setup
     // cannot accept it. An operator can fix this configuration gap.
     if (turnSession?.enabled) {

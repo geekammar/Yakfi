@@ -29,6 +29,7 @@
  *   truth — the client never recomputes endTime or the date.
  */
 import { rescheduleAppointment } from "@/features/appointments/actions/appointment-actions";
+import { resolveEligibleProvidersAction } from "@/features/appointments/actions/provider-eligibility-actions";
 import { formatArabicDate } from "@/features/appointments/components/smart-create/date-format";
 import { DateStep } from "@/features/appointments/components/smart-create/date-step";
 import {
@@ -44,13 +45,15 @@ import type {
 import { Button } from "@/components/ui/button";
 import { appointmentDateSchema } from "@/lib/validation";
 
+import { useQuery } from "@tanstack/react-query";
 import {
+  AlertCircleIcon,
   CalendarClockIcon,
   CheckCircle2Icon,
   LoaderCircleIcon,
   RotateCwIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 /** The two guided stages (context is already known — no customer/service steps). */
 type RescheduleStage = "date" | "slot";
@@ -60,7 +63,8 @@ export function ReschedulePanel({
   today,
   timezone,
   workingHours,
-  slotDurationMinutes,
+  slotDurationMinutes = 30,
+  eligibleProviders: eligibleProvidersProp,
   onDone,
   onCancel,
 }: {
@@ -77,6 +81,11 @@ export function ReschedulePanel({
    */
   workingHours?: unknown;
   slotDurationMinutes?: number | null;
+  /**
+   * Optional authoritative eligible providers for the service.
+   * If omitted, ReschedulePanel loads them authoritatively via resolveEligibleProvidersAction.
+   */
+  eligibleProviders?: Array<{ providerId: string; displayName: string }>;
   /** Called with the SERVER-persisted values after a confirmed success. */
   onDone: (updated: {
     date: string;
@@ -96,6 +105,52 @@ export function ReschedulePanel({
   /** Re-entrancy guard: a second tap during an in-flight reschedule must
    * never issue a second write. */
   const submitInFlight = useRef(false);
+
+  const eligibleProvidersQuery = useQuery({
+    queryKey: ["booking-eligible-providers", appointment.service.id],
+    queryFn: () =>
+      resolveEligibleProvidersAction({ serviceId: appointment.service.id }),
+    enabled:
+      Boolean(appointment.service.id) && eligibleProvidersProp === undefined,
+    staleTime: 60_000,
+  });
+
+  const eligibleProviders = useMemo(() => {
+    if (eligibleProvidersProp !== undefined) return eligibleProvidersProp;
+    if (eligibleProvidersQuery.data?.success) {
+      return eligibleProvidersQuery.data.data.providers;
+    }
+    return [];
+  }, [eligibleProvidersProp, eligibleProvidersQuery.data]);
+
+  const isEligibleProvidersLoading =
+    eligibleProvidersProp === undefined && eligibleProvidersQuery.isPending;
+
+  const isEligibilityError =
+    eligibleProvidersProp === undefined &&
+    (eligibleProvidersQuery.isError ||
+      (eligibleProvidersQuery.data !== undefined &&
+        !eligibleProvidersQuery.data.success));
+
+  const eligibilityErrorMessage = useMemo(() => {
+    if (eligibleProvidersQuery.isError) {
+      return "تعذر تحميل بيانات مقدمي الخدمة حالياً. يرجى المحاولة مرة أخرى.";
+    }
+    if (eligibleProvidersQuery.data && !eligibleProvidersQuery.data.success) {
+      return (
+        eligibleProvidersQuery.data.error.message ||
+        "تعذر التحقق من أهلية مقدمي الخدمة."
+      );
+    }
+    return null;
+  }, [eligibleProvidersQuery.isError, eligibleProvidersQuery.data]);
+
+  const preservedProviderId = appointment.provider?.id ?? null;
+  const isPreservedProviderIneligible = useMemo(() => {
+    if (isEligibleProvidersLoading || !preservedProviderId) return false;
+    if (eligibleProviders.length === 0) return false;
+    return !eligibleProviders.some((p) => p.providerId === preservedProviderId);
+  }, [isEligibleProvidersLoading, preservedProviderId, eligibleProviders]);
 
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
   const resolvedSlot: SelectedSlot | null = selectedSlot;
@@ -199,6 +254,14 @@ export function ReschedulePanel({
             دقيقة
           </dd>
         </div>
+        {appointment.provider ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="shrink-0 text-muted-foreground">مقدم الخدمة</dt>
+            <dd className="truncate font-medium">
+              {appointment.provider.displayName || appointment.provider.name}
+            </dd>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-3">
           <dt className="shrink-0 text-muted-foreground">الموعد الحالي</dt>
           <dd className="truncate font-medium tabular-nums">
@@ -257,18 +320,67 @@ export function ReschedulePanel({
               تغيير التاريخ
             </Button>
           </div>
-          <SlotStep
-            serviceId={appointment.service.id}
-            date={date}
-            selectedSlot={resolvedSlot}
-            onSelectSlot={handleSelectSlot}
-            onSlotUnavailable={handleSlotUnavailable}
-            onGoToDate={() => setStage("date")}
-            onGoToService={() => setStage("date")}
-            excludeAppointmentId={appointment.id}
-            workingHours={workingHours}
-            slotDurationMinutes={slotDurationMinutes}
-          />
+          {isEligibilityError ? (
+            <div
+              role="alert"
+              className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"
+            >
+              <div className="flex items-start gap-2">
+                <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-semibold">
+                    تعذر تحميل بيانات مقدمي الخدمة
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {eligibilityErrorMessage}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void eligibleProvidersQuery.refetch()}
+                  disabled={eligibleProvidersQuery.isFetching}
+                >
+                  إعادة المحاولة
+                </Button>
+              </div>
+            </div>
+          ) : isPreservedProviderIneligible ? (
+            <div
+              role="alert"
+              className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"
+            >
+              <p className="font-semibold">
+                مقدم الخدمة الحالي لم يعد مؤهلاً لهذه الخدمة
+              </p>
+              <p className="text-xs text-muted-foreground">
+                وفقاً لسياسة الأهلية الحالية، لا يمكن إعادة جدولة الموعد بنفس
+                مقدم الخدمة (
+                {appointment.provider?.displayName ||
+                  appointment.provider?.name}
+                ).
+              </p>
+            </div>
+          ) : (
+            <SlotStep
+              serviceId={appointment.service.id}
+              date={date}
+              selectedSlot={resolvedSlot}
+              onSelectSlot={handleSelectSlot}
+              onSlotUnavailable={handleSlotUnavailable}
+              onGoToDate={() => setStage("date")}
+              onGoToService={() => setStage("date")}
+              excludeAppointmentId={appointment.id}
+              workingHours={workingHours}
+              slotDurationMinutes={slotDurationMinutes}
+              eligibleProviders={eligibleProviders}
+              selectedProviderId={preservedProviderId}
+              isEligibleProvidersLoading={isEligibleProvidersLoading}
+            />
+          )}
           {resolvedSlot ? (
             <div
               role="status"

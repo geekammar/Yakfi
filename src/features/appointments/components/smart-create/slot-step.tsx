@@ -110,7 +110,7 @@ export function SlotStep({
   eligibleProviders = [],
   selectedProviderId = null,
   onSelectProvider,
-  isEligibleProvidersLoading: _isEligibleProvidersLoading = false,
+  isEligibleProvidersLoading = false,
 }: {
   serviceId: string;
   /** Business-local "YYYY-MM-DD" chosen in Step 3. */
@@ -131,7 +131,6 @@ export function SlotStep({
   onSelectProvider?: (providerId: string | null) => void;
   isEligibleProvidersLoading?: boolean;
 }) {
-  void _isEligibleProvidersLoading;
   const [showAllTimes, setShowAllTimes] = useState(false);
   const [alternativePrompt, setAlternativePrompt] = useState<{
     startTime: string;
@@ -140,7 +139,8 @@ export function SlotStep({
     nearbyTime?: string;
   } | null>(null);
 
-  const isMultipleProviders = eligibleProviders.length >= 2;
+  const isMultipleProviders =
+    Boolean(onSelectProvider) && eligibleProviders.length >= 2;
 
   const dateIsValid = appointmentDateSchema.safeParse(date).success;
 
@@ -212,21 +212,37 @@ export function SlotStep({
     return null;
   }, [selectedProviderId, eligibleProviders]);
 
-  // Smart suggestions derived from all available slots
+  // When provider selection is not enabled (onSelectProvider is not passed,
+  // e.g. rescheduling where the provider is preserved), suggestions must NEVER
+  // suggest an alternative provider and must strictly operate on the preserved provider's slots.
+  const allowAlternativeProviders = Boolean(onSelectProvider);
+  const candidateSlotsForSuggestions = allowAlternativeProviders
+    ? rawSlots
+    : slots;
+
+  // Smart suggestions derived from available slots
   const smartSuggestions = useMemo(() => {
-    if (!rawSlots || rawSlots.length === 0) return [];
+    if (
+      !candidateSlotsForSuggestions ||
+      candidateSlotsForSuggestions.length === 0
+    )
+      return [];
     return deriveSmartSuggestions({
-      slots: rawSlots,
-      eligibleProviders,
+      slots: candidateSlotsForSuggestions,
+      eligibleProviders: allowAlternativeProviders
+        ? eligibleProviders
+        : eligibleProviders.filter((p) => p.providerId === selectedProviderId),
       selectedProviderId,
       requestedTime: selectedSlot?.startTime,
       maxSuggestions: 3,
+      allowAlternativeProviders,
     });
   }, [
-    rawSlots,
+    candidateSlotsForSuggestions,
     eligibleProviders,
     selectedProviderId,
     selectedSlot?.startTime,
+    allowAlternativeProviders,
   ]);
 
   const emptyReason: AvailabilityNoSlotsReason | null =
@@ -278,8 +294,8 @@ export function SlotStep({
 
   // When server determines no eligible providers exist for a provider-aware service:
   if (
-    emptyReason === "NO_ELIGIBLE_PROVIDERS" ||
-    eligibleProviders.length === 0
+    !isEligibleProvidersLoading &&
+    (emptyReason === "NO_ELIGIBLE_PROVIDERS" || eligibleProviders.length === 0)
   ) {
     return (
       <EmptyState
@@ -318,7 +334,7 @@ export function SlotStep({
     }
 
     // Candidate is not available with current provider. Check if another provider is free at same time.
-    if (selectedProviderId && rawSlots) {
+    if (Boolean(onSelectProvider) && selectedProviderId && rawSlots) {
       const altMatch = rawSlots.find(
         (s) => s.startTime === candidate.startTime,
       );
@@ -479,7 +495,7 @@ export function SlotStep({
         </div>
       ) : null}
 
-      {availability.isPending ? (
+      {isEligibleProvidersLoading || availability.isPending ? (
         <div className="space-y-5" aria-busy="true">
           <p role="status" className="sr-only">
             جارٍ تحميل الأوقات المتاحة…
@@ -542,11 +558,20 @@ export function SlotStep({
                       type="button"
                       onClick={() => {
                         if (
+                          onSelectProvider &&
                           suggestion.providerId &&
                           suggestion.providerId !== selectedProviderId &&
                           eligibleProviders.length > 1
                         ) {
-                          onSelectProvider?.(suggestion.providerId);
+                          onSelectProvider(suggestion.providerId);
+                        }
+                        if (
+                          !onSelectProvider &&
+                          selectedProviderId &&
+                          suggestion.providerId &&
+                          suggestion.providerId !== selectedProviderId
+                        ) {
+                          return;
                         }
                         onSelectSlot(suggestion.slot);
                         setAlternativePrompt(null);
