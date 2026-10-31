@@ -338,6 +338,8 @@ export function resolveKnowledgeProposal(
     );
     if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
       family = familyCandidate.family;
+    } else if (familyCandidate === "GENERIC_FAQ") {
+      family = "business.faqs";
     } else {
       family = explicitRequiredKnowledge.trim();
     }
@@ -621,6 +623,23 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           !matchedFaq.answer ||
           matchedFaq.answer.trim().length === 0
         ) {
+          const sName = response.extraction?.service?.trim();
+          if (sName) {
+            const matchedService = context.request.services.find(
+              (s) => s.name === sName,
+            );
+            if (matchedService?.price) {
+              const priceRecord = ledger.find((f) => f.key === "service.price");
+              if (priceRecord?.included && priceRecord.disclosable) {
+                return {
+                  kind: "disclosed",
+                  response,
+                  support: ["service.price"],
+                  renderedContent: response.content,
+                };
+              }
+            }
+          }
           return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
         }
         return {
@@ -819,7 +838,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           kind: "disclosed",
           response,
           support: ["business.faqs"],
-          renderedContent: matchedFaq.answer.trim(),
+          renderedContent: response.content,
         };
       }
     }
