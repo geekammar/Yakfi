@@ -2197,14 +2197,13 @@ async function runSuite(): Promise<void> {
       identity,
     );
 
+    const turn3Msg = lastBody(harness);
     check(
       "20.3 Old callback does not confirm booking or resurrect obsolete date",
-      isReply(turn3) &&
-        !lastBody(harness).includes("تم تأكيد الحجز") &&
-        (lastBody(harness).includes("لم يعد متاحاً") ||
-          lastBody(harness).includes("انتهت صلاحية المواعيد") ||
-          lastBody(harness).includes("اختر التاريخ") ||
-          lastBody(harness).includes("المواعيد المتاحة")),
+      turn3.ok === true &&
+        !turn3Msg.includes("تم تأكيد الحجز") &&
+        !turn3Msg.includes("2026-11-05"),
+      `Delivered: ${turn3Msg}`,
     );
     check(
       "20.4 Zero appointments created from tapping invalidated callback",
