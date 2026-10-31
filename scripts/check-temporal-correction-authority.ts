@@ -306,10 +306,7 @@ async function runSuite(): Promise<void> {
       msg.includes("في الماضي"),
     );
 
-    check(
-      "2.3 Zero appointments created",
-      harness.appointments.length === 0,
-    );
+    check("2.3 Zero appointments created", harness.appointments.length === 0);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
