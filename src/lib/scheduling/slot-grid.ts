@@ -51,6 +51,91 @@ export function toWallClock(minutes: number): string {
 }
 
 /**
+ * Internal clock-time parser: parses wall-clock seconds from a string without
+ * machine-local timezone parsing or arbitrary `new Date()` conversion.
+ *
+ * Supported formats:
+ * - "HH:mm" (e.g. "10:00")
+ * - "HH:mm:ss" (e.g. "10:00:00")
+ * - ISO 8601 epoch or date strings: "YYYY-MM-DDTHH:mm:ss.sssZ", etc.
+ *
+ * Fails closed (returns null) on:
+ * - non-string / empty values
+ * - invalid hour (outside 00..23)
+ * - invalid minute (outside 00..59)
+ * - invalid second (outside 00..59)
+ */
+function parseClockSeconds(value: unknown): {
+  totalSeconds: number;
+  hasFractionalSeconds: boolean;
+} | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^(?:\d{4}-\d{2}-\d{2}[T ])?([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(?:\.(\d+))?(?:Z|[+-]\d{2}:?\d{2})?$/,
+  );
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = match[3] !== undefined ? Number(match[3]) : 0;
+  const fractional = match[4];
+  const hasFractionalSeconds = Boolean(fractional && !/^0+$/.test(fractional));
+
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  return { totalSeconds, hasFractionalSeconds };
+}
+
+/**
+ * Calculates the duration in whole minutes between stored appointment start and end times.
+ *
+ * Domain invariants (ISS-008 / BK-50):
+ * 1. Single-day bounded: Appointments exist within a single calendar day; overnight
+ *    intervals (end <= start) are unsupported in this domain and return null.
+ * 2. Positive non-zero duration: `end > start` is strictly required. Equal or reversed
+ *    times return null.
+ * 3. Minute precision contract: All FlowPilot appointments and services operate on integer
+ *    minutes. Unsupported fractional-minute intervals (e.g., partial seconds diff) return
+ *    null rather than being rounded.
+ * 4. Deterministic clock arithmetic: Operates strictly on validated clock components,
+ *    avoiding device/machine-local timezone drift.
+ */
+export function calculateAppointmentDurationMinutes(
+  startTime: unknown,
+  endTime: unknown,
+): number | null {
+  const start = parseClockSeconds(startTime);
+  const end = parseClockSeconds(endTime);
+
+  if (!start || !end) {
+    return null;
+  }
+
+  // Any non-zero fractional seconds violate the domain's minute-level contract
+  if (start.hasFractionalSeconds || end.hasFractionalSeconds) {
+    return null;
+  }
+
+  const diffSeconds = end.totalSeconds - start.totalSeconds;
+
+  // The appointment domain strictly rejects end <= start (no overnight appointments,
+  // no negative durations, no zero duration).
+  if (diffSeconds <= 0) {
+    return null;
+  }
+
+  // Domain precision contract: appointment intervals are defined in whole minutes.
+  // We do not round non-integer minute intervals (e.g. 10:00:30 to 10:20:00).
+  if (diffSeconds % 60 !== 0) {
+    return null;
+  }
+
+  return diffSeconds / 60;
+}
+
+/**
  * Weekday key for a calendar date. A "YYYY-MM-DD" string maps to one
  * exact weekday — timezone-independent by construction, so the Business
  * timezone never changes which working-hours entry applies.

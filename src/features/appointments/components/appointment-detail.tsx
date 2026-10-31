@@ -12,6 +12,7 @@ import { formatSlotTime } from "@/features/appointments/components/smart-create/
 import type { AppointmentDetailData } from "@/features/appointments/types";
 import { Button } from "@/components/ui/button";
 import { parseAppointmentEndUtc } from "@/lib/scheduling/reminder-time";
+import { calculateAppointmentDurationMinutes } from "@/lib/scheduling/slot-grid";
 import type { FollowUpRequestWithRelations } from "@/types/domain";
 
 import {
@@ -38,6 +39,25 @@ import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 function formatTime(time: string) {
   return formatSlotTime(time.slice(11, 16));
 }
+
+export const APPOINTMENT_DURATION_UNAVAILABLE_LABEL = "مدة الموعد غير متاحة";
+
+/**
+ * Formats the truthful duration label for an appointment from its stored start and end interval (ISS-008 / BK-50).
+ * Uses Arabic label: "مدة الموعد: N دقيقة" or "مدة الموعد غير متاحة" if interval is missing/invalid.
+ */
+export function formatAppointmentDurationHint(
+  startTime: unknown,
+  endTime: unknown,
+): string {
+  const duration = calculateAppointmentDurationMinutes(startTime, endTime);
+  if (duration === null) {
+    return APPOINTMENT_DURATION_UNAVAILABLE_LABEL;
+  }
+  return `مدة الموعد: ${duration} دقيقة`;
+}
+
+export { calculateAppointmentDurationMinutes };
 
 const emptySubscribe = () => () => {};
 
@@ -179,7 +199,10 @@ export function AppointmentDetail({
                 icon={CalendarClockIcon}
                 label="الخدمة المحجوزة"
                 value={data.service.name}
-                hint={`${data.service.durationMinutes} دقيقة (الأصلية)`}
+                hint={formatAppointmentDurationHint(
+                  data.startTime,
+                  data.endTime,
+                )}
               />
               <Detail
                 icon={SparklesIcon}
