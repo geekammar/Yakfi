@@ -3592,113 +3592,43 @@ function transitionInvalidTemporalState(
   };
 }
 
-type TemporalDateRange = {
-  startDate: string;
-  endDate: string;
-};
-
-type TemporalUnresolvedDate = {
-  day?: number;
-  month?: number;
-  year?: number;
-};
-
-type TemporalStateDependencies = {
-  readonly knownDate: string | undefined;
-  readonly knownDateRange: TemporalDateRange | undefined;
-  readonly knownUnresolvedDate: TemporalUnresolvedDate | undefined;
-  readonly selectedDate: string | null;
-  readonly dateRange: TemporalDateRange | null;
-  readonly offerToken: string | null;
-  readonly offerStatus: string | null;
-  readonly offerDate: string | null;
-};
-
-function extractTemporalDependencies(
-  state: ConversationState | null,
-): TemporalStateDependencies {
-  if (!state) {
-    return {
-      knownDate: undefined,
-      knownDateRange: undefined,
-      knownUnresolvedDate: undefined,
-      selectedDate: null,
-      dateRange: null,
-      offerToken: null,
-      offerStatus: null,
-      offerDate: null,
-    };
-  }
-  let offerDate: string | null = null;
-  if (state.offer && "date" in state.offer) {
-    offerDate = state.offer.date ?? null;
-  }
-  return {
-    knownDate: state.knownFacts?.date,
-    knownDateRange: state.knownFacts?.dateRange
-      ? { ...state.knownFacts.dateRange }
-      : undefined,
-    knownUnresolvedDate: state.knownFacts?.unresolvedDate
-      ? { ...state.knownFacts.unresolvedDate }
-      : undefined,
-    selectedDate: state.selectedDate ?? null,
-    dateRange: state.dateRange ? { ...state.dateRange } : null,
-    offerToken: state.offer?.token ?? null,
-    offerStatus: state.offer?.status ?? null,
-    offerDate,
-  };
-}
-
-function isSameDateRange(
-  a?: TemporalDateRange | null,
-  b?: TemporalDateRange | null,
-): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.startDate === b.startDate && a.endDate === b.endDate;
-}
-
-function isSameUnresolvedDate(
-  a?: TemporalUnresolvedDate | null,
-  b?: TemporalUnresolvedDate | null,
-): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.day === b.day && a.month === b.month && a.year === b.year;
-}
-
-function isTemporalTransitionCompatible(
-  base: TemporalStateDependencies,
-  reloaded: TemporalStateDependencies,
-): boolean {
-  if (base.knownDate !== reloaded.knownDate) return false;
-  if (base.selectedDate !== reloaded.selectedDate) return false;
-  if (!isSameDateRange(base.knownDateRange, reloaded.knownDateRange)) {
-    return false;
-  }
-  if (!isSameDateRange(base.dateRange, reloaded.dateRange)) return false;
-  const bUnr = base.knownUnresolvedDate;
-  const rUnr = reloaded.knownUnresolvedDate;
-  if (!isSameUnresolvedDate(bUnr, rUnr)) return false;
-  if (base.offerToken !== reloaded.offerToken) return false;
-  if (base.offerStatus !== reloaded.offerStatus) return false;
-  if (base.offerDate !== reloaded.offerDate) return false;
-  return true;
-}
-
 type PersistTemporalTransitionResult = {
   ok: boolean;
   nextState: ConversationState | null;
   reason?: "CONFLICT" | "STORAGE_ERROR";
 };
 
-function temporalFailureMessage(
-  reason?: "CONFLICT" | "STORAGE_ERROR",
-): string {
+function getTemporalFingerprint(state: ConversationState | null): string {
+  if (!state) return "";
+  const offerDate =
+    state.offer && "date" in state.offer ? (state.offer.date ?? null) : null;
+  const kRange = state.knownFacts?.dateRange;
+  const dRange = state.dateRange;
+  const kUnr = state.knownFacts?.unresolvedDate;
+  return JSON.stringify([
+    state.knownFacts?.date ?? null,
+    kRange ? `${kRange.startDate}:${kRange.endDate}` : null,
+    kUnr ? `${kUnr.day ?? ""}:${kUnr.month ?? ""}:${kUnr.year ?? ""}` : null,
+    state.selectedDate ?? null,
+    dRange ? `${dRange.startDate}:${dRange.endDate}` : null,
+    state.offer?.token ?? null,
+    state.offer?.status ?? null,
+    offerDate,
+  ]);
+}
+
+function temporalFailureMessage(reason?: string): string {
   if (reason === "STORAGE_ERROR") {
     return "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة.";
   }
   return "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
+}
+
+function staleOfferMessage(isReplaced: boolean): string {
+  if (isReplaced) {
+    return "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً.";
+  }
+  return "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
 }
 
 async function persistTemporalStateTransition(
@@ -3713,7 +3643,7 @@ async function persistTemporalStateTransition(
 
   const baseState =
     turnSession.state ?? resolvedState ?? emptyConversationState();
-  const baseDeps = extractTemporalDependencies(baseState);
+  const baseFingerprint = getTemporalFingerprint(baseState);
 
   let candidate = transform(baseState);
   turnSession.state = candidate;
@@ -3726,13 +3656,8 @@ async function persistTemporalStateTransition(
 
     const reloaded = await turnSession.reload();
     if (reloaded && turnSession.state) {
-      const reloadedDeps = extractTemporalDependencies(turnSession.state);
-      const isCompatible = isTemporalTransitionCompatible(
-        baseDeps,
-        reloadedDeps,
-      );
-
-      if (isCompatible) {
+      const reloadedFingerprint = getTemporalFingerprint(turnSession.state);
+      if (baseFingerprint === reloadedFingerprint) {
         candidate = transform(turnSession.state);
         turnSession.state = candidate;
         ok = await turnSession.commit();
@@ -5814,16 +5739,11 @@ async function runInboundTurn(
       }
 
       // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
-      let staleMsg =
-        "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
-      if (
+      const isStaleOrClosed =
         offerReply.reason === "CLOSED" ||
         wasAlreadyBooked ||
-        isOfferInvalidated
-      ) {
-        staleMsg =
-          "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً.";
-      }
+        isOfferInvalidated;
+      const staleMsg = staleOfferMessage(isStaleOrClosed);
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
