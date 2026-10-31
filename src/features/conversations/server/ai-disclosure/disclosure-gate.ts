@@ -825,6 +825,24 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     }
   }
 
+  // 7. Mentioned service name inquiry for legacy/offline turns:
+  const mentionedService = context.request.services.find(
+    (s) =>
+      response.content.includes(s.name) &&
+      context.request.message.includes(s.name),
+  );
+  if (mentionedService) {
+    const record = ledger.find((f) => f.key === "service.name");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.name"],
+        renderedContent: response.content,
+      };
+    }
+  }
+
   if (isStructured) {
     // Missing structured source reference on structured turn -> fail closed
     return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
