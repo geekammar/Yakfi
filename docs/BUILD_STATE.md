@@ -31,7 +31,6 @@
 
 **Product version: v0.79.0 (main baseline; merged PR #68)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
 
-
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).
 - **Persistence & Validation**: Added additive column `appointment_time_display` (TEXT, NOT NULL, DEFAULT `'START_ONLY'`) to `businesses` via migration `20261030180000_business_appointment_time_display`. Validated at boundary via `appointmentTimeDisplaySchema` and `businessSettingsSchema`.

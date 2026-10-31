@@ -26,9 +26,9 @@
 import {
   createPlaygroundHarness,
 } from "../src/features/conversations/playground/harness";
-import type { AiResponse } from "../src/features/conversations/server/ai-contract";
 import {
   aiTemporalRequestSchema,
+  type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
 import {
   receiveInboundMessage,
@@ -403,8 +403,14 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n▶ Group 4: 29 February leap year vs non-leap year (ISS-015 C)");
   {
-    check("4.1 2026 is non-leap year, 2028 is leap year", !isLeapYear(2026) && isLeapYear(2028));
-    check("4.2 daysInMonth(2, 2026) === 28, daysInMonth(2, 2028) === 29", daysInMonth(2, 2026) === 28 && daysInMonth(2, 2028) === 29);
+    check(
+      "4.1 2026 is non-leap year, 2028 is leap year",
+      !isLeapYear(2026) && isLeapYear(2028),
+    );
+    check(
+      "4.2 daysInMonth(2, 2026) === 28, daysInMonth(2, 2028) === 29",
+      daysInMonth(2, 2026) === 28 && daysInMonth(2, 2028) === 29,
+    );
 
     // 4.3 29 February in non-leap year 2026
     const res2026 = resolveServerTemporalRequest(
@@ -443,7 +449,8 @@ async function runSuite(): Promise<void> {
     );
     check(
       "4.5 29 February without stated year in non-leap year 2026 is rejected honestly",
-      resNoYearNonLeap.kind === "invalid" && resNoYearNonLeap.reason === "IMPOSSIBLE_DATE",
+      resNoYearNonLeap.kind === "invalid" &&
+        resNoYearNonLeap.reason === "IMPOSSIBLE_DATE",
     );
   }
 
@@ -530,7 +537,8 @@ async function runSuite(): Promise<void> {
 
     check(
       "5.4 Day-only with November prior context resolves to 2026-11-05",
-      resWithContext.kind === "single_date" && resWithContext.date === "2026-11-05",
+      resWithContext.kind === "single_date" &&
+        resWithContext.date === "2026-11-05",
       `Got: ${JSON.stringify(resWithContext)}`,
     );
   }
@@ -723,7 +731,10 @@ async function runSuite(): Promise<void> {
 
     const state1 = harness.stateStore.rows.get(harness.conversation.id)?.state as any;
     const tokenOffer1 = state1?.offer?.token;
-    check("7.1 Turn 1 establishes offer token", turn1.ok === true && Boolean(tokenOffer1));
+    check(
+      "7.1 Turn 1 establishes offer token",
+      turn1.ok === true && Boolean(tokenOffer1),
+    );
 
     // Turn 2: Customer challenges with past date "عايز أحجز امبارح" -> invalidates offer
     harness.deps.ai = {

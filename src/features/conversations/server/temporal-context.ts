@@ -230,6 +230,12 @@ export function isValidCalendarComponents(
   return day >= 1 && day <= maxDays;
 }
 
+function formatIsoDate(year: number, month: number, day: number): string {
+  const m = String(month).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${year}-${m}-${d}`;
+}
+
 export type ServerTemporalInput =
   | { type: "exact_date"; date: string }
   | { type: "relative_day"; offsetDays: number }
@@ -532,21 +538,22 @@ export function resolveServerTemporalRequest(
       // 1. Both month and year are known
       if (month !== undefined && year !== undefined) {
         if (!isValidCalendarComponents(day, month, year)) {
-          const reason =
-            month === 2 && day === 29 && !isLeapYear(year)
-              ? `شهر فبراير في عام ${year} يضم 28 يوماً فقط (سنة غير كبيسة).`
-              : month === 2 && day > 29
-                ? "شهر فبراير لا يتجاوز 29 يوماً في أي سنة تقويمية."
-                : [4, 6, 9, 11].includes(month) && day > 30
-                  ? "هذا الشهر يضم 30 يوماً فقط."
-                  : "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
+          let reason =
+            "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
+          if (month === 2 && day === 29 && !isLeapYear(year)) {
+            reason = `شهر فبراير في عام ${year} يضم 28 يوماً فقط (سنة غير كبيسة).`;
+          } else if (month === 2 && day > 29) {
+            reason = "شهر فبراير لا يتجاوز 29 يوماً في أي سنة تقويمية.";
+          } else if ([4, 6, 9, 11].includes(month) && day > 30) {
+            reason = "هذا الشهر يضم 30 يوماً فقط.";
+          }
           return {
             kind: "invalid",
             reason: "IMPOSSIBLE_DATE",
             error: reason,
           };
         }
-        const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        const iso = formatIsoDate(year, month, day);
         if (iso < todayIso) {
           return {
             kind: "invalid",
@@ -561,7 +568,11 @@ export function resolveServerTemporalRequest(
             error: "التاريخ يتجاوز أفق الحجز المتاح",
           };
         }
-        return { kind: "single_date", date: iso, source: "unresolved_date" };
+        return {
+          kind: "single_date",
+          date: iso,
+          source: "unresolved_date",
+        };
       }
 
       // 2. Month is known, year is omitted
@@ -609,17 +620,18 @@ export function resolveServerTemporalRequest(
 
         // Standard valid month and day (e.g. 15 November)
         let candYear = currentYear;
-        let candIso = `${candYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        let candIso = formatIsoDate(candYear, month, day);
         if (candIso < todayIso) {
-          // If in the past this year, try next year (e.g. today is Dec 28 and customer requested Jan 5)
+          // If in the past this year, try next year
           candYear = currentYear + 1;
-          candIso = `${candYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          candIso = formatIsoDate(candYear, month, day);
         }
         if (!isValidCalendarComponents(day, month, candYear)) {
           return {
             kind: "invalid",
             reason: "IMPOSSIBLE_DATE",
-            error: "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.",
+            error:
+              "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.",
           };
         }
         if (candIso < todayIso) {
@@ -636,7 +648,11 @@ export function resolveServerTemporalRequest(
             error: "التاريخ يتجاوز أفق الحجز المتاح",
           };
         }
-        return { kind: "single_date", date: candIso, source: "unresolved_date" };
+        return {
+          kind: "single_date",
+          date: candIso,
+          source: "unresolved_date",
+        };
       }
 
       // 3. Month is omitted (e.g. "يوم 5" / Day only)
@@ -675,7 +691,7 @@ export function resolveServerTemporalRequest(
               error: "التاريخ المطلوب غير موجود في التقويم للشهر المحدد.",
             };
           }
-          const candIso = `${resolvedYear}-${String(resolvedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const candIso = formatIsoDate(resolvedYear, resolvedMonth, day);
           if (candIso < todayIso) {
             return {
               kind: "invalid",
