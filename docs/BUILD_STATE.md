@@ -9,7 +9,31 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.2 (feature branch; candidate PR)** — `Truthful Appointment Duration in Appointment Detail (ISS-008 / BK-50)`. Baseline: v0.79.0 (commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`).
+**Product version: v0.79.3 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
+
+- **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
+- **Temporal Correction Authority (ISS-011)**:
+  - Turn temporal proposals strictly retain authority over inherited state dates.
+  - When customer requests a past date (e.g. "عايز أحجز امبارح"), negative relative day offset (`offsetDays: -365..60`) is parsed cleanly by AI schema.
+  - The server evaluates the date in business timezone, truthfully explains that the requested date is in the past, asks for a future date, clears the obsolete state date, and invalidates any pending booking offer so it cannot be re-presented or accidentally selected.
+  - Valid service and provider preferences remain intact.
+- **Calendar Validity & Leap Year Handling (ISS-015)**:
+  - Impossible dates (e.g. "30 فبراير" or "31 أبريل") are recognized as structured `unresolved_date` or `invalid_date` rather than failing schema or falling back to "missing date" (which previously caused upcoming date rollover to 1 November).
+  - Pure server-side calendar functions (`isLeapYear`, `daysInMonth`, `isValidCalendarComponents`) strictly govern date resolution.
+  - 29 February is evaluated against the resolved year: valid in leap years (e.g. 2028), marked `IMPOSSIBLE_DATE` in non-leap years (e.g. 2026).
+- **Ambiguous Day Clarification (ISS-015)**:
+  - Requests with a day number but missing month (e.g. "يوم 5") resolve against reliable prior context (such as an existing pending offer or previous discussion of that month).
+  - Without reliable prior context, the engine delivers a single bounded clarification question (`kind: "ambiguous"`) asking for the month/date, without escalating to human handoff or inventing certainty.
+- **Stale Callback Safety**:
+  - Superseded callbacks on invalidated offers reject booking creation without resurrecting the obsolete date.
+- **Persistence Safety & Bounded Recovery**:
+  - Replaced unhandled boolean results from `commit()` and `invalidateOffer()` with `persistTemporalStateTransition`.
+  - Atomic state update and offer invalidation with single bounded reload-and-retry on revision conflict.
+  - Fails closed to truthful safe operational message (`حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.`) on persistent failure or storage error without corrupting state or falsely claiming invalidation.
+- **Verification Suite Evidence**:
+  - Offline domain suite `scripts/check-temporal-correction-authority.ts` covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, parity under both `START_ONLY` and `FULL_RANGE`, complete AI response parsing (negative offsets, impossible dates, contradictions, malformed output), state serialization and fact preservation across turns, explicit date removal, bounded persistence conflict recovery, and stale callback safety.
+
+**Product version: v0.79.2 (main baseline; merged PR #72)** — `Truthful Appointment Duration in Appointment Detail (ISS-008 / BK-50)`. Baseline: v0.79.0 (commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`).
 
 - **Problem & Scope (ISS-008 / BK-50)**: Fixed misleading duration label in `AppointmentDetail` where booked-service detail rendered `hint={`${data.service.durationMinutes} دقيقة (الأصلية)}``. This displayed current catalog duration instead of establishing the duration of the stored appointment interval or original booking duration.
 - **Product Decision & Presentation**:
@@ -23,7 +47,7 @@
   - Added unit and rendered-component suite `src/features/appointments/components/appointment-duration.test.tsx` (`pnpm test:appointment-duration`).
   - Covers 20m interval with 25m catalog duration, cross-hour boundary (10:50–11:10), cross-noon (11:50–12:10), catalog change isolation, interval change reactivity, invalid/reversed/overnight time handling, and booked/performed service detail preservation.
 
-**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
+**Product version: v0.79.0 (merged PR #68)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
 
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).

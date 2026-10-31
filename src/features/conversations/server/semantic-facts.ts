@@ -176,7 +176,10 @@ export function reconcileTurnSemanticFacts(
     provider: removedKeys.has("provider")
       ? null
       : (setFacts.get("provider")?.value ?? extraction?.provider ?? null),
-    temporalRequest: extraction?.temporalRequest ?? null,
+    temporalRequest:
+      removedKeys.has("date") || removedKeys.has("dateRange")
+        ? null
+        : (extraction?.temporalRequest ?? null),
   };
 
   return {
