@@ -3592,7 +3592,11 @@ function transitionInvalidTemporalState(
   };
 }
 
-type TemporalDateRange = { startDate: string; endDate: string };
+type TemporalDateRange = {
+  startDate: string;
+  endDate: string;
+};
+
 type TemporalUnresolvedDate = {
   day?: number;
   month?: number;
@@ -3688,7 +3692,9 @@ type PersistTemporalTransitionResult = {
   reason?: "CONFLICT" | "STORAGE_ERROR";
 };
 
-function temporalFailureMessage(reason?: "CONFLICT" | "STORAGE_ERROR"): string {
+function temporalFailureMessage(
+  reason?: "CONFLICT" | "STORAGE_ERROR",
+): string {
   if (reason === "STORAGE_ERROR") {
     return "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة.";
   }
@@ -5808,14 +5814,16 @@ async function runInboundTurn(
       }
 
       // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
-      const isStaleOrClosed =
+      let staleMsg =
+        "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+      if (
         offerReply.reason === "CLOSED" ||
         wasAlreadyBooked ||
-        isOfferInvalidated;
-      const staleMsg =
-        isStaleOrClosed
-          ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
-          : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+        isOfferInvalidated
+      ) {
+        staleMsg =
+          "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً.";
+      }
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
