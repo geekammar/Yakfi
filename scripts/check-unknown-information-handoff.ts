@@ -678,6 +678,14 @@ async function runSuite(): Promise<void> {
           throw new Error("Simulated LLM provider timeout (HTTP 504)");
         },
       ],
+      telemetry: [
+        {
+          finalStatus: "FAILURE",
+          conversationControl: {
+            handoffReason: "PROVIDER_UNAVAILABLE",
+          },
+        } as never,
+      ],
     });
 
     const res = await h.runInbound("استفسار مع عطل مزود", "ext-sc6-1");
@@ -691,6 +699,7 @@ async function runSuite(): Promise<void> {
         !res.duplicate &&
         res.assistantAction === "AI_HANDOFF" &&
         res.conversationStatus === "NEED_HUMAN" &&
+        res.handoffCause === "PROVIDER_FAILURE" &&
         conv.status === "NEED_HUMAN",
       { res, conv },
     );

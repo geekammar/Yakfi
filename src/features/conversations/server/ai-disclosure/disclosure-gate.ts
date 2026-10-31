@@ -268,11 +268,20 @@ const GENERIC_ARABIC_WORDS = new Set([
 
 function extractSubstantiveWords(text: string): Set<string> {
   const norm = normalizeArabicText(text);
-  return new Set(
-    norm
-      .split(/\s+/)
-      .filter((w) => w.length >= 3 && !GENERIC_ARABIC_WORDS.has(w)),
-  );
+  const words = norm
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !GENERIC_ARABIC_WORDS.has(w));
+  const set = new Set<string>();
+  for (const w of words) {
+    set.add(w);
+    if (w.startsWith("ال") && w.length >= 4) {
+      const stripped = w.slice(2);
+      if (!GENERIC_ARABIC_WORDS.has(stripped)) {
+        set.add(stripped);
+      }
+    }
+  }
+  return set;
 }
 
 /** Does the request actually carry data for this support channel? */
@@ -318,13 +327,16 @@ function channelCarried(
         );
       }
       if (response?.content) {
-        const normContent = normalizeArabicText(response.content);
+        const contentWords = extractSubstantiveWords(response.content);
         return request.services.some((s) => {
           if (typeof s.price !== "string" || s.price.trim().length === 0) {
             return false;
           }
-          const norm = normalizeArabicText(s.name);
-          return norm.length > 0 && normContent.includes(norm);
+          const sWords = extractSubstantiveWords(s.name);
+          for (const w of sWords) {
+            if (contentWords.has(w)) return true;
+          }
+          return false;
         });
       }
       return false;
@@ -420,7 +432,7 @@ function channelCarried(
       // authorize an arbitrary unknown-fact answer.
       if (request.services.length === 0) return false;
       if (!response?.content) return true;
-      const normContent = normalizeArabicText(response.content);
+      const contentWords = extractSubstantiveWords(response.content);
       return request.services.some((service) => {
         if (
           typeof service.name !== "string" ||
@@ -428,8 +440,11 @@ function channelCarried(
         ) {
           return false;
         }
-        const normName = normalizeArabicText(service.name);
-        return normName.length > 0 && normContent.includes(normName);
+        const sWords = extractSubstantiveWords(service.name);
+        for (const w of sWords) {
+          if (contentWords.has(w)) return true;
+        }
+        return false;
       });
     }
     case null:

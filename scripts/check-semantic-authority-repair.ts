@@ -1193,8 +1193,7 @@ async function runSuite(): Promise<void> {
       eq(replyTimeout, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyUnavailable, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyQuota, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
-        replyTimeout ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        replyTimeout === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
       { replyTimeout },
     );
   }
@@ -1216,8 +1215,7 @@ async function runSuite(): Promise<void> {
       eq(replyInvalid, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyUnsupported, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyDefault, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
-        replyInvalid ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        replyInvalid === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { replyInvalid },
     );
   }
@@ -1350,8 +1348,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { res, sent: h.getSent() },
     );
   }
@@ -1374,8 +1371,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { res, sent: h.getSent() },
     );
   }
@@ -1406,7 +1402,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res) &&
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "CUSTOMER_REQUESTED_HUMAN" &&
-        h.getSent()[0] === "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.HUMAN_REQUEST,
       { res, sent: h.getSent() },
     );
   }
@@ -1434,8 +1430,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res) &&
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "SENSITIVE_OR_RESTRICTED" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.SENSITIVE,
       { res, sent: h.getSent() },
     );
   }
@@ -1468,8 +1463,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "POLICY_REFUSED" &&
         !h.getSent().some((s) => s.includes("300")) &&
-        h.getSent()[0] ===
-          "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED,
       { res, sent: h.getSent() },
     );
   }
