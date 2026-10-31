@@ -340,11 +340,6 @@ export function resolveKnowledgeProposal(
     }
   }
 
-  // 4. Extraction fallback for service queries
-  if (!sourceId && response.extraction?.service) {
-    sourceId = response.extraction.service.trim();
-  }
-
   return { family, sourceId };
 }
 
@@ -516,8 +511,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         }
         let matchedService: (typeof context.request.services)[number] | null =
           null;
-        if (proposal.sourceId) {
-          const sId = proposal.sourceId.trim();
+        const sId =
+          proposal.sourceId?.trim() ?? response.extraction?.service?.trim();
+        if (sId) {
           matchedService =
             context.request.services.find(
               (s) =>
@@ -556,8 +552,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         }
         let matchedService: (typeof context.request.services)[number] | null =
           null;
-        if (proposal.sourceId) {
-          const sId = proposal.sourceId.trim();
+        const sId =
+          proposal.sourceId?.trim() ?? response.extraction?.service?.trim();
+        if (sId) {
           matchedService =
             context.request.services.find(
               (s) =>
@@ -606,8 +603,15 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
                 f.question === sId ||
                 normalizeArabicText(f.question) === normalizeArabicText(sId),
             ) ?? null;
-        } else if (!isStructured && context.request.faqs.length === 1) {
-          matchedFaq = context.request.faqs[0] ?? null;
+        } else {
+          const exact = context.request.faqs.find(
+            (f) => f.answer.trim() === response.content.trim(),
+          );
+          if (exact) {
+            matchedFaq = exact;
+          } else if (!isStructured && context.request.faqs.length === 1) {
+            matchedFaq = context.request.faqs[0] ?? null;
+          }
         }
         if (
           !matchedFaq ||
@@ -690,6 +694,22 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         }
       }
     }
+
+    const exactFaq = context.request.faqs.find(
+      (f) => f.answer.trim() === response.content.trim(),
+    );
+    if (exactFaq) {
+      const record = ledger.find((f) => f.key === "business.faqs");
+      if (record?.included && record.disclosable) {
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.faqs"],
+          renderedContent: exactFaq.answer.trim(),
+        };
+      }
+    }
+
     return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
   }
 
