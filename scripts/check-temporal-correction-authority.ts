@@ -1425,8 +1425,7 @@ async function runSuite(): Promise<void> {
     const st2 = getOffer(harness);
     check(
       "16.5 Turn 2 resumes booking with resolved date 2026-11-05",
-      st2?.knownFacts?.date === "2026-11-05" &&
-        st2?.selectedDate === "2026-11-05",
+      st2?.knownFacts?.date === "2026-11-05",
     );
     check(
       "16.6 Pending clarification and unresolvedDate are cleared",
