@@ -26,8 +26,12 @@
   - Without reliable prior context, the engine delivers a single bounded clarification question (`kind: "ambiguous"`) asking for the month/date, without escalating to human handoff or inventing certainty.
 - **Stale Callback Safety**:
   - Superseded callbacks on invalidated offers reject booking creation without resurrecting the obsolete date.
+- **Persistence Safety & Bounded Recovery**:
+  - Replaced unhandled boolean results from `commit()` and `invalidateOffer()` with `persistTemporalStateTransition`.
+  - Atomic state update and offer invalidation with single bounded reload-and-retry on revision conflict.
+  - Fails closed to truthful safe operational message (`حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.`) on persistent failure or storage error without corrupting state or falsely claiming invalidation.
 - **Verification Suite Evidence**:
-  - Offline domain suite `scripts/check-temporal-correction-authority.ts` covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, and both `START_ONLY` and `FULL_RANGE` display preferences.
+  - Offline domain suite `scripts/check-temporal-correction-authority.ts` covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, parity under both `START_ONLY` and `FULL_RANGE`, complete AI response parsing (negative offsets, impossible dates, contradictions, malformed output), state serialization and fact preservation across turns, explicit date removal, bounded persistence conflict recovery, and stale callback safety.
 
 **Product version: v0.79.2 (main baseline; merged PR #72)** — `Truthful Appointment Duration in Appointment Detail (ISS-008 / BK-50)`. Baseline: v0.79.0 (commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`).
 

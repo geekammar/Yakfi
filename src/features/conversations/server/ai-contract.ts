@@ -222,7 +222,7 @@ export type AiExactTimeRequest = z.infer<typeof aiExactTimeRequestSchema>;
  * in structured `exactTime` without losing AM/PM uncertainty.
  * The DOMAIN resolves actual slots deterministically.
  */
-export const aiExtractionSchema = z.object({
+const baseAiExtractionSchema = z.object({
   /** Matched service name, when the message names one. */
   service: z.string().trim().min(1).max(120).nullable().default(null),
   /** Customer's stated provider preference ("أي دكتور" resolves in the domain). */
@@ -335,6 +335,46 @@ export const aiExtractionSchema = z.object({
     }, aiExactTimeRequestSchema.nullable().optional())
     .optional(),
 });
+
+export const aiExtractionSchema = z.preprocess((val) => {
+  if (val && typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.date === "string") {
+      const trimmed = obj.date.trim();
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+      if (match) {
+        const y = Number(match[1]);
+        const m = Number(match[2]);
+        const d = Number(match[3]);
+        const parsed = new Date(Date.UTC(y, m - 1, d));
+        const isIsoValid =
+          !Number.isNaN(parsed.getTime()) &&
+          parsed.getUTCFullYear() === y &&
+          parsed.getUTCMonth() === m - 1 &&
+          parsed.getUTCDate() === d;
+        if (!isIsoValid) {
+          const res = { ...obj, date: null };
+          if (
+            !res.temporalRequest ||
+            (typeof res.temporalRequest === "object" &&
+              (res.temporalRequest as Record<string, unknown>).type ===
+                "exact_date")
+          ) {
+            res.temporalRequest = {
+              type: "unresolved_date",
+              day: d,
+              month: m,
+              year: y,
+              rawText: trimmed,
+            };
+          }
+          return res;
+        }
+      }
+    }
+  }
+  return val;
+}, baseAiExtractionSchema);
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;
 

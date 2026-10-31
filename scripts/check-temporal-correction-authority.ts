@@ -1,9 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
-import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
+import {
+  createPlaygroundHarness,
+  InMemoryConversationStateStore,
+  PLAYGROUND_IDS,
+} from "../src/features/conversations/playground/harness";
 import {
   aiTemporalRequestSchema,
+  parseAiResponse,
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
@@ -1435,6 +1440,729 @@ async function runSuite(): Promise<void> {
       "16.7 Offer is presented for 2026-11-05",
       st2?.offer?.status === "ACTIVE" &&
         (st2?.offer?.kind === "SLOT" ? st2.offer.date === "2026-11-05" : true),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 17: Complete AI Response Parsing (parseAiResponse)
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log(
+    "\n── Group 17: Complete AI Response Parsing (parseAiResponse) ──",
+  );
+  {
+    // 17.1: Negative relative offset (offsetDays: -1)
+    const rawNegativeRelative = {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "المواعيد المتاحة:",
+      summary: "طلب حجز",
+      extraction: {
+        service: "كشف أسنان",
+        provider: null,
+        date: null,
+        timePreference: null,
+        temporalRequest: { type: "relative_day", offsetDays: -1 },
+        exactTime: null,
+      },
+    };
+    const parsed17_1 = parseAiResponse(rawNegativeRelative);
+    check(
+      "17.1 parseAiResponse accepts negative relative offset without rejection",
+      parsed17_1 !== null &&
+        parsed17_1.extraction.temporalRequest?.type === "relative_day" &&
+        (parsed17_1.extraction.temporalRequest as any).offsetDays === -1,
+    );
+    const resolved17_1 = resolveServerTemporalRequest(
+      parsed17_1?.extraction.temporalRequest ?? null,
+      null,
+      new Date("2026-11-01T10:00:00.000Z"),
+      "Africa/Cairo",
+      60,
+    );
+    check(
+      "17.1b Negative relative offset resolves to kind: 'invalid' (PAST_DATE)",
+      resolved17_1.kind === "invalid" && resolved17_1.reason === "PAST_DATE",
+    );
+
+    // 17.2: Impossible exact_date in temporalRequest ("2026-02-30")
+    const rawImpossibleTemporal = {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "المواعيد المتاحة:",
+      summary: "طلب حجز",
+      extraction: {
+        service: "كشف أسنان",
+        provider: null,
+        date: null,
+        timePreference: null,
+        temporalRequest: { type: "exact_date", date: "2026-02-30" },
+        exactTime: null,
+      },
+    };
+    const parsed17_2 = parseAiResponse(rawImpossibleTemporal);
+    check(
+      "17.2 parseAiResponse normalizes impossible exact_date to unresolved_date",
+      parsed17_2 !== null &&
+        parsed17_2.extraction.temporalRequest?.type === "unresolved_date" &&
+        (parsed17_2.extraction.temporalRequest as any).day === 30 &&
+        (parsed17_2.extraction.temporalRequest as any).month === 2 &&
+        (parsed17_2.extraction.temporalRequest as any).year === 2026,
+    );
+    const resolved17_2 = resolveServerTemporalRequest(
+      parsed17_2?.extraction.temporalRequest ?? null,
+      null,
+      new Date("2026-11-01T10:00:00.000Z"),
+      "Africa/Cairo",
+      60,
+    );
+    check(
+      "17.2b Impossible exact_date resolves to kind: 'invalid' (IMPOSSIBLE_DATE)",
+      resolved17_2.kind === "invalid" &&
+        resolved17_2.reason === "IMPOSSIBLE_DATE",
+    );
+
+    // 17.3: Impossible ISO-shaped date in BOTH extraction.date and temporalRequest
+    const rawBothImpossible = {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "المواعيد المتاحة:",
+      summary: "طلب حجز",
+      extraction: {
+        service: "كشف أسنان",
+        provider: null,
+        date: "2026-02-30",
+        timePreference: null,
+        temporalRequest: { type: "exact_date", date: "2026-02-30" },
+        exactTime: null,
+      },
+    };
+    const parsed17_3 = parseAiResponse(rawBothImpossible);
+    check(
+      "17.3 Impossible date in both date and temporalRequest preprocessed safely",
+      parsed17_3 !== null &&
+        parsed17_3.extraction.date === null &&
+        parsed17_3.extraction.temporalRequest?.type === "unresolved_date" &&
+        (parsed17_3.extraction.temporalRequest as any).day === 30 &&
+        (parsed17_3.extraction.temporalRequest as any).month === 2,
+    );
+    const resolved17_3 = resolveServerTemporalRequest(
+      parsed17_3?.extraction.temporalRequest ?? null,
+      parsed17_3?.extraction.date ?? null,
+      new Date("2026-11-01T10:00:00.000Z"),
+      "Africa/Cairo",
+      60,
+    );
+    check(
+      "17.3b Preprocessed impossible date resolves to kind: 'invalid' (IMPOSSIBLE_DATE)",
+      resolved17_3.kind === "invalid" &&
+        resolved17_3.reason === "IMPOSSIBLE_DATE",
+    );
+
+    // 17.4: Contradictory valid same-turn date proposals
+    const rawContradictory = {
+      intent: "BOOKING",
+      action: "booking_handoff",
+      content: "المواعيد المتاحة:",
+      summary: "طلب حجز",
+      extraction: {
+        service: "كشف أسنان",
+        provider: null,
+        date: "2026-11-10",
+        timePreference: null,
+        temporalRequest: { type: "exact_date", date: "2026-11-05" },
+        exactTime: null,
+      },
+    };
+    const parsed17_4 = parseAiResponse(rawContradictory);
+    check(
+      "17.4 parseAiResponse accepts validly-shaped proposals with contradictory dates",
+      parsed17_4 !== null &&
+        parsed17_4.extraction.date === "2026-11-10" &&
+        (parsed17_4.extraction.temporalRequest as any)?.date === "2026-11-05",
+    );
+    const resolved17_4 = resolveServerTemporalRequest(
+      parsed17_4?.extraction.temporalRequest ?? null,
+      parsed17_4?.extraction.date ?? null,
+      new Date("2026-11-01T10:00:00.000Z"),
+      "Africa/Cairo",
+      60,
+    );
+    check(
+      "17.4b Contradictory proposals fail closed to kind: 'invalid' (CONTRADICTION)",
+      resolved17_4.kind === "invalid" &&
+        resolved17_4.reason === "CONTRADICTION",
+    );
+
+    // 17.5: Genuinely malformed provider output
+    const rawMalformed1 = {
+      intent: "UNKNOWN_INTENT_123",
+      content: "text",
+    };
+    const rawMalformed2 = {
+      intent: "BOOKING",
+      action: "reply",
+      content: "text",
+      extraction: {
+        date: "not-a-valid-date-format",
+      },
+    };
+    const rawMalformed3 = "just a string";
+    check(
+      "17.5 Genuinely malformed provider output rejected (returns null)",
+      parseAiResponse(rawMalformed1) === null &&
+        parseAiResponse(rawMalformed2) === null &&
+        parseAiResponse(rawMalformed3) === null,
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 18: Strengthened Durable Clarification Verification
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log(
+    "\n── Group 18: Strengthened Durable Clarification Verification ──",
+  );
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-11-01",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    harness.setVirtualNow(new Date("2026-11-01T10:00:00.000Z"));
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    // A: Day-only request stores day=5 with legitimate service & provider facts
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: "دكتور باهر",
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", day: 5 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز أحجز كشف أسنان عند دكتور باهر يوم 5",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp18-turn1",
+      },
+      identity,
+    );
+    check(
+      "18.1 Turn 1 produces AI_REPLY asking month clarification",
+      isReply(turn1) &&
+        isActive(turn1) &&
+        lastBody(harness).includes("توضيح الشهر"),
+    );
+
+    // B: Serialize, hydrate, and verify row through state-store boundary
+    const storedRow = await harness.stateStore.load(
+      harness.business.id,
+      harness.conversation.id,
+    );
+    const hydratedState = storedRow ? (storedRow.state as any) : null;
+    check(
+      "18.2 State store persists day=5 and preserves service & provider",
+      hydratedState?.knownFacts?.unresolvedDate?.day === 5 &&
+        hydratedState?.knownFacts?.service === "كشف أسنان" &&
+        hydratedState?.knownFacts?.provider === "دكتور باهر",
+    );
+
+    // C & D: Subsequent month-only proposal with NO service/provider facts in extraction
+    harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: null, // intentionally null! Prior fact must survive!
+            provider: null, // intentionally null! Prior fact must survive!
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", month: 11 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "شهر نوفمبر",
+        receivedAt: "2026-11-01T10:05:00.000Z",
+        externalId: "ext-grp18-turn2",
+      },
+      identity,
+    );
+    check(
+      "18.3 Turn 2 resolves date to 2026-11-05 and preserves prior service & provider",
+      isReply(turn2) && isActive(turn2),
+    );
+    const st2 = getOffer(harness);
+    check(
+      "18.4 Prior facts survived without re-supplying in Turn 2 mocked response",
+      st2?.knownFacts?.date === "2026-11-05" &&
+        st2?.knownFacts?.service === "كشف أسنان" &&
+        st2?.knownFacts?.provider === "دكتور باهر" &&
+        st2?.knownFacts?.unresolvedDate === undefined,
+    );
+
+    // E: Explicit date removal clears partial date and its clarification
+    // Setup state with unresolvedDate and date_month clarification
+    harness.stateStore.rows.set(harness.conversation.id, {
+      businessId: harness.business.id,
+      revision: (storedRow?.revision ?? 1) + 2,
+      updatedAt: new Date("2026-11-01T10:10:00.000Z"),
+      state: {
+        ...st2,
+        selectedDate: null,
+        knownFacts: {
+          ...st2.knownFacts,
+          unresolvedDate: { day: 5 },
+        },
+        lastClarification: {
+          type: "date_month",
+          unresolvedDate: { day: 5 },
+        },
+      },
+    });
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          factUpdates: [
+            {
+              key: "date",
+              operation: "remove",
+            },
+          ],
+        });
+      },
+    };
+
+    const turn3 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "مش عايز اليوم ده، الغي التاريخ",
+        receivedAt: "2026-11-01T10:10:00.000Z",
+        externalId: "ext-grp18-turn3",
+      },
+      identity,
+    );
+    check("18.5 Turn 3 date removal succeeds", turn3.ok === true);
+    const st3 = getOffer(harness);
+    check(
+      "18.5b Explicit date removal deletes unresolvedDate and clears date_month clarification",
+      st3?.knownFacts?.unresolvedDate === undefined &&
+        st3?.lastClarification?.type !== "date_month",
+    );
+
+    // F: Replacement full date clears obsolete partial date components
+    harness.stateStore.rows.set(harness.conversation.id, {
+      businessId: harness.business.id,
+      revision: (st3?.revision ?? 4) + 1,
+      updatedAt: new Date("2026-11-01T10:15:00.000Z"),
+      state: {
+        ...st3,
+        knownFacts: {
+          ...st3.knownFacts,
+          unresolvedDate: { day: 5 },
+        },
+        lastClarification: {
+          type: "date_month",
+          unresolvedDate: { day: 5 },
+        },
+      },
+    });
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: "2026-11-20",
+            timePreference: null,
+            temporalRequest: { type: "exact_date", date: "2026-11-20" },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn4 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "احجزلي يوم 20 نوفمبر 2026",
+        receivedAt: "2026-11-01T10:15:00.000Z",
+        externalId: "ext-grp18-turn4",
+      },
+      identity,
+    );
+    check("18.6 Replacement full date turn succeeds", turn4.ok === true);
+    const st4 = getOffer(harness);
+    check(
+      "18.6b Replacement full date sets date=2026-11-20 and clears obsolete unresolvedDate",
+      st4?.knownFacts?.date === "2026-11-20" &&
+        st4?.knownFacts?.unresolvedDate === undefined &&
+        st4?.lastClarification === null,
+    );
+
+    // G: Year-only completion preserves previously supplied day and month
+    const resolvedYearOnly = resolveServerTemporalRequest(
+      { type: "unresolved_date", year: 2027 },
+      null,
+      new Date("2026-11-01T10:00:00.000Z"),
+      "Africa/Cairo",
+      60,
+      {
+        unresolvedDate: { day: 5, month: 11 },
+      },
+    );
+    check(
+      "18.7 Year-only completion preserves prior day=5 and month=11, resolving 2027-11-05",
+      resolvedYearOnly.kind === "single_date" &&
+        resolvedYearOnly.date === "2027-11-05",
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 19: Persistence Failures, Conflict & Bounded Recovery
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log(
+    "\n── Group 19: Persistence Failures, Conflict & Bounded Recovery ──",
+  );
+  {
+    // 19.1: Revision conflict on first commit with successful bounded recovery (retry succeeds)
+    let commitCount = 0;
+    class ConflictOnceStore extends InMemoryConversationStateStore {
+      override async save(
+        businessId: string,
+        conversationId: string,
+        expectedRevision: number | null,
+        state: unknown,
+      ) {
+        commitCount++;
+        if (commitCount === 1) {
+          // Simulate concurrent write advancing revision in DB
+          const row = this.rows.get(conversationId);
+          if (row) {
+            row.revision += 1;
+          }
+          return { status: "conflict" as const };
+        }
+        return super.save(businessId, conversationId, expectedRevision, state);
+      }
+    }
+
+    const conflictHarness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-11-01",
+      stateStore: new ConflictOnceStore(),
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    conflictHarness.stateStore.rows.set(conflictHarness.conversation.id, {
+      businessId: conflictHarness.business.id,
+      revision: 1,
+      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
+      state: {
+        conversationId: conflictHarness.conversation.id,
+        businessId: conflictHarness.business.id,
+        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
+        selectedDate: "2026-11-05",
+        offer: {
+          token: "dummy-conflict-tok",
+          status: "ACTIVE",
+          expiresAt: "2026-11-01T10:30:00.000Z",
+          kind: "SLOT",
+          date: "2026-11-05",
+          slots: [],
+        },
+        missingFacts: [],
+        lastClarification: null,
+      },
+    });
+
+    conflictHarness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", day: 5 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const identity19 = {
+      businessId: conflictHarness.business.id,
+      branchId: conflictHarness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    const turn19_1 = await receiveInboundMessage(
+      conflictHarness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 5",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp19-turn1",
+      },
+      identity19,
+    );
+    check(
+      "19.1 Bounded recovery on revision conflict succeeds on second commit",
+      commitCount === 2 && isReply(turn19_1) && isActive(turn19_1),
+    );
+    const st19_1 = getOffer(conflictHarness);
+    check(
+      "19.1b Offer invalidated and unresolvedDate day 5 persisted after reload/recovery",
+      st19_1?.offer?.status === "INVALIDATED" &&
+        st19_1?.knownFacts?.unresolvedDate?.day === 5,
+    );
+
+    // 19.2: Exhausted recovery / persistent store error returns safe failure reply
+    class AlwaysFailStore extends InMemoryConversationStateStore {
+      override async save() {
+        return { status: "conflict" as const };
+      }
+    }
+
+    const failHarness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-11-01",
+      stateStore: new AlwaysFailStore(),
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    failHarness.stateStore.rows.set(failHarness.conversation.id, {
+      businessId: failHarness.business.id,
+      revision: 1,
+      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
+      state: {
+        conversationId: failHarness.conversation.id,
+        businessId: failHarness.business.id,
+        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
+        selectedDate: "2026-11-05",
+        offer: {
+          token: "dummy-fail-tok",
+          status: "ACTIVE",
+          expiresAt: "2026-11-01T10:30:00.000Z",
+          kind: "SLOT",
+          date: "2026-11-05",
+          slots: [],
+        },
+        missingFacts: [],
+        lastClarification: null,
+      },
+    });
+
+    failHarness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", day: 5 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn19_2 = await receiveInboundMessage(
+      failHarness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز كشف أسنان يوم 5",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp19-turn2",
+      },
+      {
+        businessId: failHarness.business.id,
+        branchId: failHarness.business.defaultBranchId,
+        connectionId: "conn-1",
+      },
+    );
+    check(
+      "19.2 Exhausted commit conflict delivers truthful bounded failure reply",
+      isReply(turn19_2) &&
+        lastBody(failHarness).includes("حدث تعارض مؤقت أثناء معالجة طلبك"),
+    );
+    const st19_2 = getOffer(failHarness);
+    check(
+      "19.2b Persisted state not claimed to be modified when commit failed",
+      st19_2?.offer?.status === "ACTIVE",
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 20: Stale Callback Tapping After Temporal Correction
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log(
+    "\n── Group 20: Stale Callback Tapping After Temporal Correction ──",
+  );
+  {
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      todayRef: "2026-11-01",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
+      },
+    });
+
+    harness.setVirtualNow(new Date("2026-11-01T10:00:00.000Z"));
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
+
+    // 20.1: Establish active offer in durable state store for 2026-11-05
+    const oldOfferToken = "dummy-stale-tok";
+    harness.stateStore.rows.set(harness.conversation.id, {
+      businessId: harness.business.id,
+      revision: 1,
+      updatedAt: new Date("2026-11-01T10:00:00.000Z"),
+      state: {
+        conversationId: harness.conversation.id,
+        businessId: harness.business.id,
+        knownFacts: { service: "كشف أسنان", date: "2026-11-05" },
+        selectedDate: "2026-11-05",
+        offer: {
+          token: oldOfferToken,
+          status: "ACTIVE",
+          expiresAt: "2026-11-01T10:30:00.000Z",
+          kind: "SLOT",
+          serviceId: PLAYGROUND_IDS.SERV_DENTAL,
+          serviceName: "كشف أسنان",
+          date: "2026-11-05",
+          slots: [
+            {
+              slotKey: "k1",
+              time: "10:00",
+              providerId: PLAYGROUND_IDS.PROV_1,
+            },
+          ],
+        },
+        missingFacts: [],
+        lastClarification: null,
+      },
+    });
+
+    // 20.2: Customer sends temporal correction (e.g. past-date "عايز أحجز امبارح")
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "relative_day", offsetDays: -1 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: "عايز أحجز امبارح",
+        receivedAt: "2026-11-01T10:05:00.000Z",
+        externalId: "ext-grp20-turn1",
+      },
+      identity,
+    );
+    check(
+      "20.1 Temporal correction turn produces past-date warning",
+      isReply(turn1) &&
+        isActive(turn1) &&
+        lastBody(harness).includes("في الماضي"),
+    );
+    const persistedAfterCorrection = getOffer(harness);
+    check(
+      "20.2 Offer is INVALIDATED and selectedDate cleared in durable store",
+      persistedAfterCorrection?.offer?.status === "INVALIDATED" &&
+        persistedAfterCorrection?.selectedDate === null &&
+        persistedAfterCorrection?.knownFacts?.date === undefined,
+    );
+
+    // 20.3: Customer now taps the old callback button (fp:tok-stale-callback-1:0)
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "998877",
+        text: `fp:${oldOfferToken}:0`,
+        receivedAt: "2026-11-01T10:10:00.000Z",
+        externalId: "ext-grp20-turn2",
+      },
+      identity,
+    );
+
+    check(
+      "20.3 Old callback returns stale rejection",
+      isReply(turn2) &&
+        (lastBody(harness).includes("لم يعد متاحاً") ||
+          lastBody(harness).includes("انتهت صلاحية المواعيد")),
+    );
+    check(
+      "20.4 Zero appointments created from tapping invalidated callback",
+      harness.appointments.length === 0,
+    );
+    check(
+      "20.5 Old slot offer or old date is NOT resurrected",
+      harness.capturedAppointmentWrites.length === 0,
     );
   }
 

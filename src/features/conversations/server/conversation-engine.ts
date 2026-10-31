@@ -3542,6 +3542,89 @@ export async function receiveInboundMessage(
   return result;
 }
 
+function transitionAmbiguousTemporalState(
+  state: ConversationState,
+  unresolvedDatePayload?: { day?: number; month?: number; year?: number },
+): ConversationState {
+  const nextFacts = {
+    ...state.knownFacts,
+    ...(unresolvedDatePayload
+      ? { unresolvedDate: unresolvedDatePayload }
+      : {}),
+  };
+  delete nextFacts.date;
+  delete nextFacts.dateRange;
+  return {
+    ...state,
+    knownFacts: nextFacts,
+    selectedDate: null,
+    dateRange: null,
+    offer: state.offer ? { ...state.offer, status: "INVALIDATED" } : null,
+    pendingOffer: null,
+    missingFacts: state.missingFacts.includes("date")
+      ? state.missingFacts
+      : [...state.missingFacts.filter((f) => f !== "date"), "date"],
+    lastClarification: {
+      type: "date_month",
+      ...(unresolvedDatePayload
+        ? { unresolvedDate: unresolvedDatePayload }
+        : {}),
+    },
+  };
+}
+
+function transitionInvalidTemporalState(
+  state: ConversationState,
+): ConversationState {
+  const nextFacts = { ...state.knownFacts };
+  delete nextFacts.date;
+  delete nextFacts.dateRange;
+  delete nextFacts.unresolvedDate;
+  return {
+    ...state,
+    knownFacts: nextFacts,
+    selectedDate: null,
+    dateRange: null,
+    offer: state.offer ? { ...state.offer, status: "INVALIDATED" } : null,
+    pendingOffer: null,
+    lastClarification:
+      state.lastClarification?.type === "date_month"
+        ? null
+        : state.lastClarification,
+  };
+}
+
+async function persistTemporalStateTransition(
+  turnSession: TurnStateSession,
+  resolvedState: ConversationState | null,
+  transform: (state: ConversationState) => ConversationState,
+): Promise<{ ok: boolean; nextState: ConversationState | null }> {
+  if (!turnSession.enabled) {
+    const nextState = resolvedState ? transform(resolvedState) : null;
+    return { ok: true, nextState };
+  }
+
+  const baseState =
+    turnSession.state ?? resolvedState ?? emptyConversationState();
+  let candidate = transform(baseState);
+  turnSession.state = candidate;
+
+  let ok = await turnSession.commit();
+  if (!ok) {
+    const reloaded = await turnSession.reload();
+    if (reloaded && turnSession.state) {
+      candidate = transform(turnSession.state);
+      turnSession.state = candidate;
+      ok = await turnSession.commit();
+    }
+  }
+
+  if (!ok) {
+    return { ok: false, nextState: null };
+  }
+  return { ok: true, nextState: turnSession.state };
+}
+
 async function runInboundTurn(
   deps: ConversationEngineDeps,
   input: unknown,
@@ -6467,11 +6550,16 @@ async function runInboundTurn(
             const nextFacts = { ...resolvedState.knownFacts };
             delete nextFacts.date;
             delete nextFacts.dateRange;
+            delete nextFacts.unresolvedDate;
             resolvedState = {
               ...resolvedState,
               knownFacts: nextFacts,
               selectedDate: null,
               dateRange: null,
+              lastClarification:
+                resolvedState.lastClarification?.type === "date_month"
+                  ? null
+                  : resolvedState.lastClarification,
             };
             if (turnSession.enabled) {
               turnSession.state = resolvedState;
@@ -6551,9 +6639,6 @@ async function runInboundTurn(
 
           if (serverTemporal.kind === "ambiguous") {
             const ambiguousMsg = serverTemporal.message;
-            if (turnSession.enabled) {
-              await turnSession.invalidateOffer();
-            }
             const unresolvedDatePayload =
               serverTemporal.day !== undefined ||
               serverTemporal.month !== undefined ||
@@ -6570,60 +6655,28 @@ async function runInboundTurn(
                       : {}),
                   }
                 : undefined;
-            if (resolvedState) {
-              const nextFacts = {
-                ...resolvedState.knownFacts,
-                ...(unresolvedDatePayload
-                  ? { unresolvedDate: unresolvedDatePayload }
-                  : {}),
-              };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                missingFacts: ["date"],
-                lastClarification: {
-                  type: "date_month",
-                  ...(unresolvedDatePayload
-                    ? { unresolvedDate: unresolvedDatePayload }
-                    : {}),
-                },
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-                await turnSession.commit();
-              }
-            } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = {
-                ...turnSession.state.knownFacts,
-                ...(unresolvedDatePayload
-                  ? { unresolvedDate: unresolvedDatePayload }
-                  : {}),
-              };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              turnSession.state = {
-                ...turnSession.state,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                missingFacts: ["date"],
-                lastClarification: {
-                  type: "date_month",
-                  ...(unresolvedDatePayload
-                    ? { unresolvedDate: unresolvedDatePayload }
-                    : {}),
-                },
-              };
-              await turnSession.commit();
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              (s) =>
+                transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
             }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
@@ -6671,49 +6724,27 @@ async function runInboundTurn(
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
             }
-            if (turnSession.enabled) {
-              await turnSession.invalidateOffer();
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              transitionInvalidTemporalState,
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
             }
-            if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              delete nextFacts.unresolvedDate;
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                lastClarification:
-                  resolvedState.lastClarification?.type === "date_month"
-                    ? null
-                    : resolvedState.lastClarification,
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-                await turnSession.commit();
-              }
-            } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = { ...turnSession.state.knownFacts };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              delete nextFacts.unresolvedDate;
-              turnSession.state = {
-                ...turnSession.state,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                lastClarification:
-                  turnSession.state.lastClarification?.type === "date_month"
-                    ? null
-                    : turnSession.state.lastClarification,
-              };
-              await turnSession.commit();
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
             }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
@@ -7084,11 +7115,16 @@ async function runInboundTurn(
             const nextFacts = { ...resolvedState.knownFacts };
             delete nextFacts.date;
             delete nextFacts.dateRange;
+            delete nextFacts.unresolvedDate;
             resolvedState = {
               ...resolvedState,
               knownFacts: nextFacts,
               selectedDate: null,
               dateRange: null,
+              lastClarification:
+                resolvedState.lastClarification?.type === "date_month"
+                  ? null
+                  : resolvedState.lastClarification,
             };
             if (turnSession.enabled) {
               turnSession.state = resolvedState;
@@ -7206,9 +7242,6 @@ async function runInboundTurn(
 
           if (serverTemporal.kind === "ambiguous") {
             const ambiguousMsg = serverTemporal.message;
-            if (turnSession.enabled) {
-              await turnSession.invalidateOffer();
-            }
             const unresolvedDatePayload =
               serverTemporal.day !== undefined ||
               serverTemporal.month !== undefined ||
@@ -7225,60 +7258,28 @@ async function runInboundTurn(
                       : {}),
                   }
                 : undefined;
-            if (resolvedState) {
-              const nextFacts = {
-                ...resolvedState.knownFacts,
-                ...(unresolvedDatePayload
-                  ? { unresolvedDate: unresolvedDatePayload }
-                  : {}),
-              };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                missingFacts: ["date"],
-                lastClarification: {
-                  type: "date_month",
-                  ...(unresolvedDatePayload
-                    ? { unresolvedDate: unresolvedDatePayload }
-                    : {}),
-                },
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-                await turnSession.commit();
-              }
-            } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = {
-                ...turnSession.state.knownFacts,
-                ...(unresolvedDatePayload
-                  ? { unresolvedDate: unresolvedDatePayload }
-                  : {}),
-              };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              turnSession.state = {
-                ...turnSession.state,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                missingFacts: ["date"],
-                lastClarification: {
-                  type: "date_month",
-                  ...(unresolvedDatePayload
-                    ? { unresolvedDate: unresolvedDatePayload }
-                    : {}),
-                },
-              };
-              await turnSession.commit();
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              (s) =>
+                transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
             }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
@@ -7326,49 +7327,27 @@ async function runInboundTurn(
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
             }
-            if (turnSession.enabled) {
-              await turnSession.invalidateOffer();
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              transitionInvalidTemporalState,
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
             }
-            if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              delete nextFacts.unresolvedDate;
-              resolvedState = {
-                ...resolvedState,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                lastClarification:
-                  resolvedState.lastClarification?.type === "date_month"
-                    ? null
-                    : resolvedState.lastClarification,
-              };
-              if (turnSession.enabled) {
-                turnSession.state = resolvedState;
-                await turnSession.commit();
-              }
-            } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = { ...turnSession.state.knownFacts };
-              delete nextFacts.date;
-              delete nextFacts.dateRange;
-              delete nextFacts.unresolvedDate;
-              turnSession.state = {
-                ...turnSession.state,
-                knownFacts: nextFacts,
-                selectedDate: null,
-                dateRange: null,
-                offer: null,
-                pendingOffer: null,
-                lastClarification:
-                  turnSession.state.lastClarification?.type === "date_month"
-                    ? null
-                    : turnSession.state.lastClarification,
-              };
-              await turnSession.commit();
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
             }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
