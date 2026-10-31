@@ -1232,7 +1232,7 @@ async function runSuite(): Promise<void> {
     check(
       "B3. Validated explicit human request maps to human transfer copy",
       eq(replyHuman, SAFE_HANDOFF_REPLIES.HUMAN_REQUEST) &&
-        replyHuman === "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+        replyHuman === "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
     );
   }
 
@@ -1247,7 +1247,7 @@ async function runSuite(): Promise<void> {
       "B4. Validated safety restriction maps to sensitive assistance copy",
       eq(replySensitive, SAFE_HANDOFF_REPLIES.SENSITIVE) &&
         replySensitive ===
-          "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+          "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
     );
   }
 
@@ -1256,7 +1256,7 @@ async function runSuite(): Promise<void> {
     check(
       "B5. Disclosure refusal constant matches canonical neutral assistance copy",
       SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED ===
-        "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+        "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
     );
   }
 

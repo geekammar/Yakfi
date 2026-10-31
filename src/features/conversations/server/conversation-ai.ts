@@ -27,6 +27,7 @@ import type {
   AiIntent,
   AiRequest,
   AiResponse,
+  HandoffReason as ContractHandoffReason,
 } from "@/features/conversations/server/ai-contract";
 import {
   emptyAiExtraction,
@@ -1108,12 +1109,12 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
  * of customer text when choosing a safe fallback message.
  */
 export const SAFE_HANDOFF_REPLIES = {
-  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
-  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+  HUMAN_REQUEST: "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  SENSITIVE: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
   PROVIDER_FAILURE:
-    "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  INVALID_OUTPUT: "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  DISCLOSURE_REFUSED: "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+    "واجهت صعوبة مؤقتة في الرد — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  INVALID_OUTPUT: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  DISCLOSURE_REFUSED: "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
 } as const;
 
 export type SafeFailureReplyInput = {
@@ -1146,6 +1147,28 @@ export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
   return SAFE_HANDOFF_REPLIES.INVALID_OUTPUT;
 }
 
+/**
+ * Canonical customer-facing reply for authoritative action=handoff decisions.
+ * Guarantees that model-generated handoff prose cannot invent immediate SLAs
+ * or false contact promises.
+ */
+export function resolveHandoffActionReply(
+  reason: ContractHandoffReason | null,
+): string {
+  switch (reason) {
+    case "HUMAN_REQUEST":
+      return SAFE_HANDOFF_REPLIES.HUMAN_REQUEST;
+    case "SENSITIVE":
+      return SAFE_HANDOFF_REPLIES.SENSITIVE;
+    case "NO_KNOWLEDGE":
+      return REPLIES.NO_KNOWLEDGE;
+    case "AMBIGUOUS":
+      return REPLIES.AMBIGUOUS;
+    default:
+      return SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED;
+  }
+}
+
 const REPLIES = {
   BOOKING:
     "يسعدنا خدمتك! سيتواصل معك أحد أعضاء الفريق لإتمام الحجز وتحديد الوقت المناسب.",
@@ -1153,11 +1176,11 @@ const REPLIES = {
     "شكراً لسؤالك — سيرسل لك أحد أعضاء الفريق الأوقات المتاحة قريباً.",
   RESCHEDULE: "بالطبع — سيتولى أحد أعضاء الفريق تعديل موعدك والتواصل معك.",
   CANCELLATION: "تمام — سيتواصل معك أحد أعضاء الفريق لإتمام إلغاء الموعد.",
-  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
-  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
-  NO_KNOWLEDGE: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
+  HUMAN_REQUEST: "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  SENSITIVE: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  NO_KNOWLEDGE: "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
   AMBIGUOUS:
-    "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+    "لم أفهم طلبك تماماً — تم تحويل المحادثة لفريق العمل للمساعدة.",
 } as const;
 
 const BOOKING_SUMMARIES = {

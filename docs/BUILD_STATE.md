@@ -9,7 +9,29 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.3 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
+**Product version: v0.79.4 (feature branch; candidate PR)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.3 (merged PR #71, commit `e34eec8`). Branch: `fix/unknown-information-handoff`.
+
+- **Feature Scope**: Fixes false handoff promises under `AI_ACTIVE` and unbacked reply leaks on unknown clinic facts or unpublished prices observed in production v0.78.5 (ISS-012 / TG-22).
+- **Structured Authority Boundary in Disclosure Gate**:
+  - `disclosure-gate.ts` enforces that model-proposed `requiredKnowledge` (supported via both top-level `response.requiredKnowledge` and goal-level `response.goals[].requiredKnowledge` through `synthesizeDecisionGoals`) is evaluated ONLY against its corresponding support family.
+  - Unrelated catalog service names (`service.name`) cannot authorize arbitrary FAQ answers on structured turns.
+  - For `service.price`, when an extracted service is present, that specific service must carry an authoritative non-empty price in `request.services`; another service's price cannot authorize it.
+  - For `business.faqs`, `request.faqs` must contain an entry whose answer supports the reply; unrelated FAQs cannot authorize arbitrary prose.
+- **Prevention of False Handoff Promises under `AI_ACTIVE`**:
+  - When the model outputs unbacked prose or claims to transfer the customer under `action: "reply"`, the gate refuses the turn (`requires-human`).
+  - The unbacked prose is dropped wholesale; the engine authoritatively transitions to `status: "NEED_HUMAN"` with `cause: "POLICY_REFUSED"`, creates an `operator_attention` record, and delivers canonical truthful handoff wording (`SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED`).
+- **Server-Authoritative Handoff Wording**:
+  - On `action: "handoff"`, the engine substitutes canonical server copy `resolveHandoffActionReply(validated.handoffReason)`, preventing model prose from inventing immediate response SLAs («الآن», «خلال دقائق») or guaranteed contact promises («سيتواصل معك»).
+  - All handoff copy across `SAFE_HANDOFF_REPLIES`, `HANDOFF_MESSAGES`, `REPLIES`, and `COPY_REGISTRY` describes the established system state («تم تحويل المحادثة لفريق العمل للمتابعة / للمساعدة»).
+- **Terminal Turn Non-Silence**:
+  - Provider timeouts, failure outcomes, and transport errors are handled deterministically; every terminal turn produces a bounded customer-facing reply or safe failure outcome without multi-minute silence or dropped turns.
+- **Staff Ownership & Safety Precedence**:
+  - Conversations already marked `NEED_HUMAN` or assigned to staff strictly preserve staff ownership (`DEFERRED_TO_STAFF`).
+- **Verification Suite Evidence**:
+  - Offline domain suite `scripts/check-unknown-information-handoff.ts` covering 12 deterministic scenarios (baseline reproduction, unknown clinic facts, false handoff replies, valid handoff, persistence failures, unpublished-price pressure, provider failure, transport failure, duplicate inbound deduplication, staff ownership preservation, supported known answers, knowledge gap recording resilience, and unrelated-support isolation).
+  - Disposable PostgreSQL integration suite `scripts/check-unknown-information-handoff-db.ts` verifying durable DB transitions, operator attention rows, and rollback boundaries.
+
+**Product version: v0.79.3 (main baseline; merged PR #71)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
 
 - **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
 - **Temporal Correction Authority (ISS-011)**:

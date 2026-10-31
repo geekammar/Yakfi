@@ -132,6 +132,7 @@ jobs:
           pnpm check:customer-time-display
           pnpm check:semantic-date-ranges
           pnpm check:temporal-correction-authority
+          pnpm check:unknown-information-handoff
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics
@@ -174,6 +175,7 @@ jobs:
           pnpm check:booking-acceptance-db
           pnpm check:iss-006-db
           pnpm check:customer-time-display-db
+          pnpm check:unknown-information-handoff-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

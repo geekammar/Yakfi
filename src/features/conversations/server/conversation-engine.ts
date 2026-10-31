@@ -155,6 +155,7 @@ import {
   buildBusinessIdentityContent,
   bypassDeterministicAi,
   normalizeArabicText,
+  resolveHandoffActionReply,
   resolveSafeFailureReply,
   resolveTurnControlSignals,
 } from "@/features/conversations/server/conversation-ai";
@@ -9198,6 +9199,10 @@ async function runInboundTurn(
         delivery,
       };
     }
+    // Server-authoritative bounded handoff wording (ISS-012):
+    // When the model produces action=handoff, canonical server copy describes
+    // the durable queue transition actually established, guaranteeing that model
+    // prose cannot invent immediate SLAs or false follow-up promises.
     // Bounded domain rendering for business identity (PROMPT-AI-UX-02 / Semantic Authority Repair):
     // An identity reply is backed by the authoritative business.name fact. When the turn's
     // active answer goal is business identity (or backed by business.identity support), the domain
@@ -9206,9 +9211,12 @@ async function runInboundTurn(
     const isIdentityAnswer =
       disclosure.support.includes("business.identity") ||
       isExplicitIdentityGoal(resolvedTurn?.plan?.steps[0]);
-    const content = isIdentityAnswer
-      ? buildBusinessIdentityContent(business.name)
-      : disclosure.response.content;
+    const content =
+      validated.action === "handoff"
+        ? resolveHandoffActionReply(validated.handoffReason)
+        : isIdentityAnswer
+          ? buildBusinessIdentityContent(business.name)
+          : disclosure.response.content;
 
     // ANSWER-AND-CONTINUE (PROMPT-AI-ARCH-09 — Slice 5). When the SAME customer
     // turn expressed a KNOWLEDGE goal AND a DOMAIN/booking goal, the resolver
