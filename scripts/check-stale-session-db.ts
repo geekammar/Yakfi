@@ -76,7 +76,7 @@ function extractCookieValue(setCookieHeader: string | null): string | null {
   const match = setCookieHeader.match(
     /((?:__Secure-)?better-auth\.session_token=[^;]+)/,
   );
-  return match ? match[1] : null;
+  return match?.[1] ?? null;
 }
 
 async function run(): Promise<void> {
