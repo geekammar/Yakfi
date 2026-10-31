@@ -800,11 +800,18 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     // The deterministic formatter turns the structured columns into the
     // MINIMAL display string; a service with no stored price contributes
     // nothing (never a fabricated amount — missing price stays NO_KNOWLEDGE).
+    const rawService = service as Record<string, unknown>;
     const formattedPrice = formatServicePrice({
-      priceType: service.priceType ?? null,
-      priceAmount: service.priceAmount ?? null,
+      priceType:
+        service.priceType ??
+        (typeof rawService.price === "number" ? "FIXED" : null),
+      priceAmount:
+        service.priceAmount ??
+        (typeof rawService.price === "number" ? rawService.price : null),
       priceMaxAmount: service.priceMaxAmount ?? null,
-      priceCurrency: service.priceCurrency ?? null,
+      priceCurrency:
+        service.priceCurrency ??
+        (typeof rawService.currency === "string" ? rawService.currency : null),
       priceNote: service.priceNote ?? null,
     });
     const priceVerdict = evaluateCandidate({
