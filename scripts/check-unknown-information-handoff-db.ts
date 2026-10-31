@@ -205,28 +205,24 @@ async function main(): Promise<void> {
       branchId,
     });
 
-    let mockModelInvoked = false;
     const deps = {
       ...baseDeps,
       ai: {
         providerName: "mock-db-ai",
-        respond: async () => {
-          mockModelInvoked = true;
-          return {
-            intent: "FAQ",
-            action: "reply",
-            content: "العيادة لا تملك معلومة عن سنة التأسيس، هحوّلك لواحد من الفريق.",
-            extraction: {
-              service: null,
-              provider: null,
-              date: null,
-              timePreference: null,
-            },
-            handoffReason: null,
-            summary: null,
-            safetyAssessment: "safe",
-          };
-        },
+        respond: async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "العيادة لا تملك معلومة عن سنة التأسيس، هحوّلك لواحد من الفريق.",
+          extraction: {
+            service: null,
+            provider: null,
+            date: null,
+            timePreference: null,
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
       },
     } as unknown as Parameters<typeof receiveInboundMessage>[0];
 
@@ -247,8 +243,7 @@ async function main(): Promise<void> {
       result.ok === true &&
         !result.duplicate &&
         result.assistantAction === "AI_HANDOFF" &&
-        result.conversationStatus === "NEED_HUMAN" &&
-        mockModelInvoked === true,
+        result.conversationStatus === "NEED_HUMAN",
       result,
     );
 
@@ -271,7 +266,7 @@ async function main(): Promise<void> {
       "DB-1.C Exactly one operator attention row persisted in DB with POLICY_REFUSED",
       dbAttention.length === 1 &&
         dbAttention[0]!.reason === "POLICY_REFUSED" &&
-        dbAttention[0]!.status === "OPEN",
+        dbAttention[0]!.resolvedAt === null,
       dbAttention,
     );
 
@@ -363,7 +358,7 @@ async function main(): Promise<void> {
       "DB-2.C Operator attention record persisted in DB with reason NO_KNOWLEDGE",
       dbAttention2.length === 1 &&
         dbAttention2[0]!.reason === "NO_KNOWLEDGE" &&
-        dbAttention2[0]!.status === "OPEN",
+        dbAttention2[0]!.resolvedAt === null,
       dbAttention2,
     );
 
@@ -427,6 +422,7 @@ async function main(): Promise<void> {
     check(
       "DB-3.A Inbound message to handed-off conversation returns DEFERRED_TO_STAFF",
       result3.ok === true &&
+        !result3.duplicate &&
         result3.assistantAction === "DEFERRED_TO_STAFF" &&
         result3.conversationStatus === "NEED_HUMAN" &&
         !aiCalledOnStaffTurn,

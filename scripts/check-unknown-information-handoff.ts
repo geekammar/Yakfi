@@ -512,6 +512,7 @@ async function runSuite(): Promise<void> {
     check(
       "3.A Explicit human request handoff yields truthful queue transfer copy",
       resHuman.ok === true &&
+        !resHuman.duplicate &&
         resHuman.conversationStatus === "NEED_HUMAN" &&
         sentHuman[0] === SAFE_HANDOFF_REPLIES.HUMAN_REQUEST &&
         sentHuman[0] === "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة." &&
@@ -540,6 +541,7 @@ async function runSuite(): Promise<void> {
     check(
       "3.B Sensitive emergency handoff yields truthful assistance copy without false SLAs",
       resSens.ok === true &&
+        !resSens.duplicate &&
         resSens.conversationStatus === "NEED_HUMAN" &&
         sentSens[0] === SAFE_HANDOFF_REPLIES.SENSITIVE &&
         sentSens[0] === "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة." &&
@@ -708,6 +710,7 @@ async function runSuite(): Promise<void> {
     check(
       "7.A Outbound delivery failure is captured without crashing turn; DB state preserved",
       res.ok === true &&
+        !res.duplicate &&
         res.delivery?.delivered === false &&
         conv.status === "NEED_HUMAN" &&
         attention.has(conv.id),
@@ -775,6 +778,7 @@ async function runSuite(): Promise<void> {
     check(
       "9.A Conversation already assigned to staff maintains staff ownership; AI does not intervene",
       res.ok === true &&
+        !res.duplicate &&
         res.assistantAction === "DEFERRED_TO_STAFF" &&
         res.conversationStatus === "NEED_HUMAN" &&
         conv.status === "NEED_HUMAN" &&
