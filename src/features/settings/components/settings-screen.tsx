@@ -46,7 +46,7 @@ import {
   UsersIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 /**
@@ -124,6 +124,29 @@ export function SettingsScreen({
           : "inactive"
         : "unavailable";
 
+  useEffect(() => {
+    const subscription = form.watch(() => {
+      if (saved) {
+        setSaved(false);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, saved]);
+
+  const registerGuarded = (name: keyof BusinessSettingsInput) => {
+    const reg = form.register(name);
+    return {
+      ...reg,
+      disabled: isSubmitting,
+      onChange: (
+        e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+      ) => {
+        if (isSubmitting) return;
+        return reg.onChange(e);
+      },
+    };
+  };
+
   const submit = form.handleSubmit(async (data) => {
     setError(null);
     setSaved(false);
@@ -138,14 +161,21 @@ export function SettingsScreen({
     }
 
     setIsSubmitting(true);
-    const result = await updateBusinessSettingsAction(data);
-    setIsSubmitting(false);
-    if (!result.success) {
-      setError(result.message);
-      return;
+    try {
+      const result = await updateBusinessSettingsAction(data);
+      if (!result.success) {
+        setError(result.message);
+        return;
+      }
+      form.reset(data);
+      setSaved(true);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "تعذر حفظ الإعدادات الآن",
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-    form.reset(data);
-    setSaved(true);
   });
 
   const fieldError = (message?: string) =>
@@ -259,102 +289,131 @@ export function SettingsScreen({
       </div>
 
       <form onSubmit={submit} className="space-y-8" noValidate>
-        {/* ─── Section 1: بيانات المنشأة ─── */}
-        <section
-          aria-labelledby="settings-business-section"
-          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+        <fieldset
+          disabled={isSubmitting}
+          className="border-0 p-0 m-0 min-w-0 space-y-8"
         >
-          <SectionHeader
-            title="بيانات المنشأة"
-            description="تظهر للعملاء عند التواصل والحجز."
-          />
-          <div className="grid gap-5 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="settings-name">اسم المنشأة</Label>
-              <Input
-                id="settings-name"
-                autoComplete="organization"
-                aria-invalid={Boolean(form.formState.errors.name)}
-                {...form.register("name")}
-              />
-              {fieldError(form.formState.errors.name?.message)}
-            </div>
+          {/* ─── Section 1: بيانات المنشأة ─── */}
+          <section
+            aria-labelledby="settings-business-section"
+            className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+          >
+            <SectionHeader
+              title="بيانات المنشأة"
+              description="تظهر للعملاء عند التواصل والحجز."
+            />
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="settings-name">اسم المنشأة</Label>
+                <Input
+                  id="settings-name"
+                  autoComplete="organization"
+                  aria-invalid={Boolean(form.formState.errors.name)}
+                  {...registerGuarded("name")}
+                />
+                {fieldError(form.formState.errors.name?.message)}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="settings-vertical">نوع المنشأة</Label>
-              <Controller
-                control={form.control}
-                name="vertical"
-                render={({ field }) => (
-                  <Select
-                    value={field.value || undefined}
-                    onValueChange={field.onChange}
-                  >
-                    <SelectTrigger id="settings-vertical" className="w-full">
-                      <SelectValue placeholder="اختر نوع المنشأة" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VERTICALS.map((vertical) => (
-                        <SelectItem key={vertical.value} value={vertical.value}>
-                          {vertical.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {fieldError(form.formState.errors.vertical?.message)}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="settings-vertical">نوع المنشأة</Label>
+                <Controller
+                  control={form.control}
+                  name="vertical"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || undefined}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(val);
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger
+                        id="settings-vertical"
+                        className="w-full"
+                        disabled={isSubmitting}
+                      >
+                        <SelectValue placeholder="اختر نوع المنشأة" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {VERTICALS.map((vertical) => (
+                          <SelectItem
+                            key={vertical.value}
+                            value={vertical.value}
+                          >
+                            {vertical.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {fieldError(form.formState.errors.vertical?.message)}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="settings-city">المدينة</Label>
-              <Input
-                id="settings-city"
-                autoComplete="address-level2"
-                aria-invalid={Boolean(form.formState.errors.city)}
-                {...form.register("city")}
-              />
-              {fieldError(form.formState.errors.city?.message)}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="settings-city">المدينة</Label>
+                <Input
+                  id="settings-city"
+                  autoComplete="address-level2"
+                  aria-invalid={Boolean(form.formState.errors.city)}
+                  {...registerGuarded("city")}
+                />
+                {fieldError(form.formState.errors.city?.message)}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="settings-whatsapp">رقم واتساب</Label>
-              <Input
-                id="settings-whatsapp"
-                type="tel"
-                dir="ltr"
-                autoComplete="tel"
-                className="text-start"
-                aria-invalid={Boolean(form.formState.errors.whatsappNumber)}
-                {...form.register("whatsappNumber")}
-              />
-              {fieldError(form.formState.errors.whatsappNumber?.message)}
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="settings-whatsapp">رقم واتساب</Label>
+                <Input
+                  id="settings-whatsapp"
+                  type="tel"
+                  dir="ltr"
+                  autoComplete="tel"
+                  className="text-start"
+                  aria-invalid={Boolean(form.formState.errors.whatsappNumber)}
+                  {...registerGuarded("whatsappNumber")}
+                />
+                {fieldError(form.formState.errors.whatsappNumber?.message)}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="settings-timezone">المنطقة الزمنية</Label>
-              <Controller
-                control={form.control}
-                name="timezone"
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="settings-timezone" className="w-full">
-                      <SelectValue placeholder="اختر المنطقة الزمنية" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TIMEZONES.map((timezone) => (
-                        <SelectItem key={timezone.value} value={timezone.value}>
-                          {timezone.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {fieldError(form.formState.errors.timezone?.message)}
+              <div className="space-y-2">
+                <Label htmlFor="settings-timezone">المنطقة الزمنية</Label>
+                <Controller
+                  control={form.control}
+                  name="timezone"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(val);
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger
+                        id="settings-timezone"
+                        className="w-full"
+                        disabled={isSubmitting}
+                      >
+                        <SelectValue placeholder="اختر المنطقة الزمنية" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TIMEZONES.map((timezone) => (
+                          <SelectItem
+                            key={timezone.value}
+                            value={timezone.value}
+                          >
+                            {timezone.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {fieldError(form.formState.errors.timezone?.message)}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
         {/* ─── Section 2: معلومات المساعد (AI information — optional) ─── */}
         <section
@@ -378,7 +437,7 @@ export function SettingsScreen({
                 rows={3}
                 placeholder="مثال: عيادة أسنان متخصصة في تنظيف وحشو الأسنان، فريق محترف وأحدث الأجهزة."
                 aria-invalid={Boolean(form.formState.errors.about)}
-                {...form.register("about")}
+                {...registerGuarded("about")}
               />
               {fieldError(form.formState.errors.about?.message)}
               <p className="text-xs text-muted-foreground">
@@ -398,7 +457,7 @@ export function SettingsScreen({
                 autoComplete="street-address"
                 placeholder="مثال: كفر الشيخ — شارع الجمهورية، بجوار صيدلية النيل"
                 aria-invalid={Boolean(form.formState.errors.address)}
-                {...form.register("address")}
+                {...registerGuarded("address")}
               />
               {fieldError(form.formState.errors.address?.message)}
               <p className="text-xs text-muted-foreground">
@@ -426,18 +485,27 @@ export function SettingsScreen({
                 render={({ field }) => (
                   <RadioGroup
                     value={field.value}
-                    onValueChange={field.onChange}
+                    onValueChange={(val) => {
+                      if (isSubmitting) return;
+                      field.onChange(val);
+                    }}
+                    disabled={isSubmitting}
                     className="gap-3"
                   >
                     {CONFIRMATION_MODES.map((mode) => (
                       <Label
                         key={mode.value}
                         htmlFor={`confirmation-${mode.value}`}
-                        className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60"
+                        className={cn(
+                          "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
+                          isSubmitting &&
+                            "cursor-not-allowed opacity-60 pointer-events-none",
+                        )}
                       >
                         <RadioGroupItem
                           id={`confirmation-${mode.value}`}
                           value={mode.value}
+                          disabled={isSubmitting}
                           className="mt-0.5"
                         />
                         <span className="space-y-1">
@@ -466,18 +534,27 @@ export function SettingsScreen({
                 render={({ field }) => (
                   <RadioGroup
                     value={field.value}
-                    onValueChange={field.onChange}
+                    onValueChange={(val) => {
+                      if (isSubmitting) return;
+                      field.onChange(val);
+                    }}
+                    disabled={isSubmitting}
                     className="gap-3"
                   >
                     {APPOINTMENT_TIME_DISPLAY_OPTIONS.map((opt) => (
                       <Label
                         key={opt.value}
                         htmlFor={`time-display-${opt.value}`}
-                        className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60"
+                        className={cn(
+                          "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
+                          isSubmitting &&
+                            "cursor-not-allowed opacity-60 pointer-events-none",
+                        )}
                       >
                         <RadioGroupItem
                           id={`time-display-${opt.value}`}
                           value={opt.value}
+                          disabled={isSubmitting}
                           className="mt-0.5"
                         />
                         <span className="space-y-1">
@@ -513,11 +590,16 @@ export function SettingsScreen({
                     value={
                       field.value !== undefined ? String(field.value) : "30"
                     }
-                    onValueChange={(val) => field.onChange(Number(val))}
+                    onValueChange={(val) => {
+                      if (isSubmitting) return;
+                      field.onChange(Number(val));
+                    }}
+                    disabled={isSubmitting}
                   >
                     <SelectTrigger
                       id="settings-slot-duration"
                       className="w-full"
+                      disabled={isSubmitting}
                       aria-invalid={Boolean(
                         form.formState.errors.slotDurationMinutes,
                       )}
@@ -548,7 +630,7 @@ export function SettingsScreen({
                 rows={3}
                 placeholder="مثال: يمكن الإلغاء أو التعديل قبل الموعد بـ 24 ساعة."
                 aria-invalid={Boolean(form.formState.errors.cancellationPolicy)}
-                {...form.register("cancellationPolicy")}
+                {...registerGuarded("cancellationPolicy")}
               />
               {fieldError(form.formState.errors.cancellationPolicy?.message)}
             </div>
@@ -575,7 +657,11 @@ export function SettingsScreen({
                     <Checkbox
                       id="settings-default-service-enabled"
                       checked={field.value ?? false}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        if (isSubmitting) return;
+                        field.onChange(checked);
+                      }}
+                      disabled={isSubmitting}
                       aria-describedby="default-service-enabled-desc"
                     />
                   )}
@@ -583,7 +669,11 @@ export function SettingsScreen({
                 <div className="space-y-1 leading-none">
                   <Label
                     htmlFor="settings-default-service-enabled"
-                    className="text-sm font-semibold cursor-pointer"
+                    className={cn(
+                      "text-sm font-semibold cursor-pointer",
+                      isSubmitting &&
+                        "cursor-not-allowed opacity-60 pointer-events-none",
+                    )}
                   >
                     استخدام الخدمة الافتراضية عند طلب حجز دون تحديد خدمة
                   </Label>
@@ -635,13 +725,16 @@ export function SettingsScreen({
                           <Select
                             value={field.value ?? ""}
                             onValueChange={(val) => {
+                              if (isSubmitting) return;
                               field.onChange(val || null);
                               if (error) setError(null);
                             }}
+                            disabled={isSubmitting}
                           >
                             <SelectTrigger
                               id="settings-default-service"
                               className="w-full"
+                              disabled={isSubmitting}
                               aria-invalid={
                                 Boolean(
                                   form.formState.errors.defaultBookingServiceId,
@@ -685,7 +778,9 @@ export function SettingsScreen({
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={isSubmitting}
                             onClick={() => {
+                              if (isSubmitting) return;
                               field.onChange(null);
                               if (error) setError(null);
                             }}
@@ -824,11 +919,15 @@ export function SettingsScreen({
                       initialSettings.remindersOperational ? field.value : false
                     }
                     onCheckedChange={
-                      initialSettings.remindersOperational
-                        ? field.onChange
+                      initialSettings.remindersOperational && !isSubmitting
+                        ? (checked) => {
+                            if (isSubmitting) return;
+                            field.onChange(checked);
+                          }
                         : undefined
                     }
                     disabled={
+                      isSubmitting ||
                       !initialSettings.remindersOperational ||
                       !initialSettings.channelReadiness.hasActiveChannel
                     }
@@ -841,7 +940,7 @@ export function SettingsScreen({
                   htmlFor="settings-reminder-enabled"
                   className={cn(
                     "text-base font-semibold",
-                    initialSettings.remindersOperational
+                    initialSettings.remindersOperational && !isSubmitting
                       ? "cursor-pointer"
                       : "cursor-not-allowed opacity-75",
                   )}
@@ -927,11 +1026,16 @@ export function SettingsScreen({
                 render={({ field }) => (
                   <Select
                     value={String(field.value)}
-                    onValueChange={(val) => field.onChange(Number(val))}
+                    onValueChange={(val) => {
+                      if (isSubmitting) return;
+                      field.onChange(Number(val));
+                    }}
+                    disabled={isSubmitting}
                   >
                     <SelectTrigger
                       id="settings-reminder-lead"
                       className="w-full"
+                      disabled={isSubmitting}
                     >
                       <SelectValue placeholder="اختر وقت التذكير" />
                     </SelectTrigger>
@@ -960,10 +1064,18 @@ export function SettingsScreen({
                 control={form.control}
                 name="reminderTemplateId"
                 render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
+                  <Select
+                    value={field.value}
+                    onValueChange={(val) => {
+                      if (isSubmitting) return;
+                      field.onChange(val);
+                    }}
+                    disabled={isSubmitting}
+                  >
                     <SelectTrigger
                       id="settings-reminder-template"
                       className="w-full"
+                      disabled={isSubmitting}
                     >
                       <SelectValue placeholder="اختر نموذج التذكير" />
                     </SelectTrigger>
@@ -1004,6 +1116,7 @@ export function SettingsScreen({
             </div>
           </div>
         </section>
+      </fieldset>
 
         {error ? (
           <p role="alert" className="text-sm text-destructive">

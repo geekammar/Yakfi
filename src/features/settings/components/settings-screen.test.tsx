@@ -573,3 +573,317 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(clearButton).not.toBeNull();
   });
 });
+
+describe("SettingsScreen — Pending Save Locking Policy & Draft Preservation", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  function createDeferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const baseSettings: BusinessSettingsView = {
+    name: "عيادة النور",
+    vertical: "dental",
+    city: "القاهرة",
+    whatsappNumber: "+201000000001",
+    timezone: "Africa/Cairo",
+    about: "عيادة متخصصة",
+    address: "الدقي",
+    confirmationMode: "automatic",
+    appointmentTimeDisplay: "START_ONLY",
+    slotDurationMinutes: 30,
+    cancellationPolicy: "قبل 24 ساعة",
+    reminderEnabled: false,
+    reminderLeadHours: 24,
+    reminderTemplateId: "standard",
+    remindersOperational: true,
+    defaultServiceBookingEnabled: true,
+    defaultBookingServiceId: "srv-active-1",
+    channelReadiness: {
+      whatsapp: true,
+      telegram: true,
+      hasActiveChannel: true,
+    },
+  };
+
+  const sampleServices = [
+    { id: "srv-active-1", name: "كشف عام", isActive: true },
+    { id: "srv-active-2", name: "استشارة تخصصية", isActive: true },
+    { id: "srv-inactive-1", name: "خدمة قديمة متوقفة", isActive: false },
+  ];
+
+  async function renderScreen(
+    settingsOverrides: Partial<BusinessSettingsView> = {},
+    services = sampleServices,
+  ) {
+    const settings: BusinessSettingsView = {
+      ...baseSettings,
+      ...settingsOverrides,
+    };
+    await act(async () => {
+      root.render(
+        <SettingsScreen initialSettings={settings} services={services} />,
+      );
+    });
+    return { container };
+  }
+
+  it("1-4. Locks all controls while save is pending, rejects edits, preserves submitted values on success", async () => {
+    const deferred = createDeferred<{ success: boolean; message?: string }>();
+    updateBusinessSettingsAction.mockImplementationOnce(() => deferred.promise);
+
+    await renderScreen({
+      name: "عيادة النور الأصلية",
+      defaultServiceBookingEnabled: true,
+      defaultBookingServiceId: "srv-active-1",
+    });
+
+    const nameInput = container.querySelector(
+      "#settings-name",
+    ) as HTMLInputElement;
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الإعدادات"),
+    ) as HTMLButtonElement;
+    const clearButton = container.querySelector(
+      "button[aria-label='إلغاء اختيار الخدمة الافتراضية']",
+    ) as HTMLButtonElement;
+    const checkbox = container.querySelector(
+      "#settings-default-service-enabled",
+    ) as HTMLElement;
+    const fieldset = container.querySelector("fieldset") as HTMLFieldSetElement;
+
+    expect(nameInput).not.toBeNull();
+    expect(saveButton).not.toBeNull();
+    expect(clearButton).not.toBeNull();
+    expect(checkbox).not.toBeNull();
+
+    // 1. Start save and hold promise
+    await act(async () => {
+      saveButton.click();
+    });
+
+    // Verify request was dispatched
+    expect(updateBusinessSettingsAction).toHaveBeenCalledTimes(1);
+
+    // 2 & 3. Verify locking policy is active
+    expect(saveButton.disabled).toBe(true);
+    expect(nameInput.disabled).toBe(true);
+    expect(clearButton.disabled).toBe(true);
+    expect(fieldset.disabled).toBe(true);
+    expect(checkbox.hasAttribute("disabled")).toBe(true);
+
+    // Attempt edits and interactions while pending
+    await act(async () => {
+      // Attempt click clear button
+      clearButton.click();
+
+      // Attempt click checkbox toggle
+      checkbox.click();
+
+      // Attempt input change
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      descriptor?.set?.call(nameInput, "اسم تم تغييره أثناء الحفظ");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    // Verification: selection must NOT have been cleared while pending
+    const serviceTrigger = container.querySelector("#settings-default-service");
+    expect(serviceTrigger?.textContent).toContain("كشف عام");
+
+    // Checkbox must still be checked
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+
+    // 4. Resolve success
+    await act(async () => {
+      deferred.resolve({ success: true });
+    });
+
+    // Controls unlock after success
+    expect(saveButton.disabled).toBe(false);
+    expect(nameInput.disabled).toBe(false);
+    expect(fieldset.disabled).toBe(false);
+
+    // Success status is visible
+    expect(container.textContent).toContain("تم حفظ الإعدادات");
+
+    // Submitted values remain
+    expect(nameInput.value).toBe("عيادة النور الأصلية");
+    expect(serviceTrigger?.textContent).toContain("كشف عام");
+  });
+
+  it("5. Returned failure preserves drafts, unlocks controls, shows no success, and allows retry", async () => {
+    const deferred = createDeferred<{ success: boolean; message?: string }>();
+    updateBusinessSettingsAction.mockImplementationOnce(() => deferred.promise);
+
+    await renderScreen({
+      name: "عيادة النور",
+    });
+
+    const nameInput = container.querySelector(
+      "#settings-name",
+    ) as HTMLInputElement;
+
+    // Operator makes a draft edit
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      descriptor?.set?.call(nameInput, "عيادة النور - تعديل مسودة");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الإعدادات"),
+    ) as HTMLButtonElement;
+
+    // Start save
+    await act(async () => {
+      saveButton.click();
+    });
+
+    expect(nameInput.disabled).toBe(true);
+
+    // Resolve with business error
+    await act(async () => {
+      deferred.resolve({
+        success: false,
+        message: "خطأ من السيرفر: رقم الهاتف مستخدم بالفعل",
+      });
+    });
+
+    // Controls unlock
+    expect(nameInput.disabled).toBe(false);
+    expect(saveButton.disabled).toBe(false);
+
+    // Error is shown, success is NOT shown
+    expect(container.textContent).toContain(
+      "خطأ من السيرفر: رقم الهاتف مستخدم بالفعل",
+    );
+    expect(container.textContent).not.toContain("تم حفظ الإعدادات");
+
+    // Draft is preserved
+    expect(nameInput.value).toBe("عيادة النور - تعديل مسودة");
+
+    // Retry is possible
+    updateBusinessSettingsAction.mockResolvedValueOnce({ success: true });
+    await act(async () => {
+      saveButton.click();
+    });
+
+    expect(updateBusinessSettingsAction).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("تم حفظ الإعدادات");
+  });
+
+  it("5b. Thrown exception / rejected promise unlocks controls, preserves draft, and shows no success", async () => {
+    const deferred = createDeferred<{ success: boolean; message?: string }>();
+    updateBusinessSettingsAction.mockImplementationOnce(() => deferred.promise);
+
+    await renderScreen({
+      name: "عيادة النور",
+    });
+
+    const nameInput = container.querySelector(
+      "#settings-name",
+    ) as HTMLInputElement;
+
+    // Operator makes a draft edit
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      descriptor?.set?.call(nameInput, "مسودة قبل انقطاع الشبكة");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الإعدادات"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.click();
+    });
+
+    expect(nameInput.disabled).toBe(true);
+
+    // Reject promise (simulating network error / unhandled throw)
+    await act(async () => {
+      deferred.reject(new Error("Network connection error"));
+    });
+
+    // Controls must unlock via finally block
+    expect(nameInput.disabled).toBe(false);
+    expect(saveButton.disabled).toBe(false);
+
+    // No success message
+    expect(container.textContent).not.toContain("تم حفظ الإعدادات");
+    expect(container.textContent).toContain("Network connection error");
+
+    // Draft is preserved
+    expect(nameInput.value).toBe("مسودة قبل انقطاع الشبكة");
+  });
+
+  it("6. Editing after a completed save immediately clears/hides the saved indication", async () => {
+    updateBusinessSettingsAction.mockResolvedValueOnce({ success: true });
+
+    await renderScreen({
+      name: "عيادة النور",
+    });
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الإعدادات"),
+    ) as HTMLButtonElement;
+
+    await act(async () => {
+      saveButton.click();
+    });
+
+    // Saved indication is visible
+    expect(container.textContent).toContain("تم حفظ الإعدادات");
+
+    // Now operator edits a field after success
+    const nameInput = container.querySelector(
+      "#settings-name",
+    ) as HTMLInputElement;
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      descriptor?.set?.call(nameInput, "عيادة النور بعد التعديل اللاحق");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    // Stale saved indication must be removed immediately
+    expect(container.textContent).not.toContain("تم حفظ الإعدادات");
+  });
+});
