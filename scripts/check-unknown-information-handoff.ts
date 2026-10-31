@@ -1,23 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
-import { buildAiContext } from "../src/features/conversations/server/ai-context-builder/context-builder";
-import {
-  enforceDisclosure,
-  supportFamilyForProposedKnowledge,
-} from "../src/features/conversations/server/ai-disclosure/disclosure-gate";
 import {
   parseAiResponse,
-  type AiRequest,
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
 import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
-  resolveSafeFailureReply,
 } from "../src/features/conversations/server/conversation-ai";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
-import { HANDOFF_MESSAGES } from "../src/server/integrations/ai/conversation-control/handoff-policy";
 
 type Check = { label: string; pass: boolean; details?: unknown };
 const checks: Check[] = [];

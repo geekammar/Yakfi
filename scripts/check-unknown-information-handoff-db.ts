@@ -194,8 +194,7 @@ async function main(): Promise<void> {
 
   // ── DB-1: Unbacked Unknown Fact Turn (False Handoff Prevention) ───────────
   {
-    const customer = await customerRepository.upsertByPhone({
-      businessId: TEST_BUSINESS_ID,
+    const customer = await customerRepository.upsertByPhone(TEST_BUSINESS_ID, {
       phone: CUSTOMER_PHONE,
       name: "عميل تجريبي 1",
     });
@@ -203,8 +202,7 @@ async function main(): Promise<void> {
     const conversation = await conversationRepository.create({
       businessId: TEST_BUSINESS_ID,
       customerId: customer.id,
-      channel: "WHATSAPP",
-      status: "AI_ACTIVE",
+      branchId,
     });
 
     let mockModelInvoked = false;
@@ -249,7 +247,8 @@ async function main(): Promise<void> {
       result.ok === true &&
         !result.duplicate &&
         result.assistantAction === "AI_HANDOFF" &&
-        result.conversationStatus === "NEED_HUMAN",
+        result.conversationStatus === "NEED_HUMAN" &&
+        mockModelInvoked === true,
       result,
     );
 
@@ -293,8 +292,7 @@ async function main(): Promise<void> {
   // ── DB-2: Explicit NO_KNOWLEDGE Handoff Turn ──────────────────────────────
   {
     const customerPhone2 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const customer2 = await customerRepository.upsertByPhone({
-      businessId: TEST_BUSINESS_ID,
+    const customer2 = await customerRepository.upsertByPhone(TEST_BUSINESS_ID, {
       phone: customerPhone2,
       name: "عميل تجريبي 2",
     });
@@ -302,8 +300,7 @@ async function main(): Promise<void> {
     const conversation2 = await conversationRepository.create({
       businessId: TEST_BUSINESS_ID,
       customerId: customer2.id,
-      channel: "WHATSAPP",
-      status: "AI_ACTIVE",
+      branchId,
     });
 
     const deps = {
@@ -387,8 +384,7 @@ async function main(): Promise<void> {
   // ── DB-3: Staff Ownership Preservation in DB ──────────────────────────────
   {
     const customerPhone3 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const customer3 = await customerRepository.upsertByPhone({
-      businessId: TEST_BUSINESS_ID,
+    const customer3 = await customerRepository.upsertByPhone(TEST_BUSINESS_ID, {
       phone: customerPhone3,
       name: "عميل تجريبي 3",
     });
@@ -396,13 +392,12 @@ async function main(): Promise<void> {
     const conversation3 = await conversationRepository.create({
       businessId: TEST_BUSINESS_ID,
       customerId: customer3.id,
-      channel: "WHATSAPP",
-      status: "NEED_HUMAN",
+      branchId,
     });
 
     await db.conversation.update({
       where: { id: conversation3.id },
-      data: { assignedUserId: TEST_OPERATOR_ID },
+      data: { status: "NEED_HUMAN", assignedUserId: TEST_OPERATOR_ID },
     });
 
     let aiCalledOnStaffTurn = false;
@@ -454,8 +449,7 @@ async function main(): Promise<void> {
   // ── DB-4: Persistence Failure Boundary / Rollback ─────────────────────────
   {
     const customerPhone4 = `+2011${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const customer4 = await customerRepository.upsertByPhone({
-      businessId: TEST_BUSINESS_ID,
+    const customer4 = await customerRepository.upsertByPhone(TEST_BUSINESS_ID, {
       phone: customerPhone4,
       name: "عميل تجريبي 4",
     });
@@ -463,8 +457,7 @@ async function main(): Promise<void> {
     const conversation4 = await conversationRepository.create({
       businessId: TEST_BUSINESS_ID,
       customerId: customer4.id,
-      channel: "WHATSAPP",
-      status: "AI_ACTIVE",
+      branchId,
     });
 
     // Injected failing conversationRepository.addMessage on AI turn
