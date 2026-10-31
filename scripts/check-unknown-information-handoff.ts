@@ -236,7 +236,7 @@ function createEngineHarness(opts: {
     },
     appointmentRepository: {
       countOverlapping: async () => 0,
-      create: async () => ({} as never),
+      create: async () => ({}) as never,
       listUpcomingForCustomer: async () => [],
       listForBusinessDay: async () => [],
     },
@@ -244,8 +244,7 @@ function createEngineHarness(opts: {
       listByBusiness: async () => services,
       listActiveByBusiness: async () =>
         services.filter((s) => s.isActive !== false),
-      findById: async (id: string) =>
-        services.find((s) => s.id === id) ?? null,
+      findById: async (id: string) => services.find((s) => s.id === id) ?? null,
       findByIdWithinBusiness: async (id: string) =>
         services.find((s) => s.id === id) ?? null,
       findByNameWithinBusiness: async (name: string) =>
@@ -269,9 +268,9 @@ function createEngineHarness(opts: {
     },
     conversationStateRepository: {
       findByConversationId: async () => null,
-      create: async () => ({} as never),
-      updateState: async () => ({} as never),
-      updateWithOptimisticLock: async () => ({} as never),
+      create: async () => ({}) as never,
+      updateState: async () => ({}) as never,
+      updateWithOptimisticLock: async () => ({}) as never,
     },
     attentionRepository: {
       open: async (data: unknown) => {
@@ -348,9 +347,15 @@ function createEngineHarness(opts: {
 }
 
 async function runSuite(): Promise<void> {
-  console.log("════════════════════════════════════════════════════════════════");
-  console.log("ISS-012: Truthful Unknown-Information Replies & Handoff Consistency");
-  console.log("════════════════════════════════════════════════════════════════\n");
+  console.log(
+    "════════════════════════════════════════════════════════════════",
+  );
+  console.log(
+    "ISS-012: Truthful Unknown-Information Replies & Handoff Consistency",
+  );
+  console.log(
+    "════════════════════════════════════════════════════════════════\n",
+  );
 
   // ────────────────────────────────────────────────────────────────────────────
   // 1. BASELINE CONTROLLED INCONSISTENT-REPLY REPRODUCTION (Through Engine)
@@ -506,7 +511,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const resHuman = await hHuman.runInbound("عايز أكلم حد من خدمة العملاء", "ext-sc3-1");
+    const resHuman = await hHuman.runInbound(
+      "عايز أكلم حد من خدمة العملاء",
+      "ext-sc3-1",
+    );
     const sentHuman = hHuman.getSent();
 
     check(
@@ -535,7 +543,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const resSens = await hSens.runInbound("عندي نزيف حاد وألم شديد", "ext-sc3-2");
+    const resSens = await hSens.runInbound(
+      "عندي نزيف حاد وألم شديد",
+      "ext-sc3-2",
+    );
     const sentSens = hSens.getSent();
 
     check(
@@ -544,7 +555,8 @@ async function runSuite(): Promise<void> {
         !resSens.duplicate &&
         resSens.conversationStatus === "NEED_HUMAN" &&
         sentSens[0] === SAFE_HANDOFF_REPLIES.SENSITIVE &&
-        sentSens[0] === "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة." &&
+        sentSens[0] ===
+          "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة." &&
         !sentSens[0].includes("في أقرب وقت") &&
         !sentSens[0].includes("سيتواصل معك"),
       sentSens,
@@ -732,7 +744,13 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
-          goals: [{ kind: "ANSWER", intent: "FAQ", requiredKnowledge: "business.identity" }],
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              requiredKnowledge: "business.identity",
+            },
+          ],
         }),
       ],
     });
@@ -748,7 +766,12 @@ async function runSuite(): Promise<void> {
         res2.duplicate === true &&
         h.getProviderInvocations() === 1 &&
         h.getSent().length === 1,
-      { res1, res2, invocations: h.getProviderInvocations(), sent: h.getSent() },
+      {
+        res1,
+        res2,
+        invocations: h.getProviderInvocations(),
+        sent: h.getSent(),
+      },
     );
   }
 
@@ -794,7 +817,12 @@ async function runSuite(): Promise<void> {
   {
     // 10.A Valid FAQ answer matching store
     const hFaq = createEngineHarness({
-      faqs: [{ question: "مواعيد العمل", answer: "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً." }],
+      faqs: [
+        {
+          question: "مواعيد العمل",
+          answer: "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
+        },
+      ],
       responders: [
         async () => ({
           intent: "FAQ",
@@ -829,7 +857,13 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
-          goals: [{ kind: "ANSWER", intent: "FAQ", requiredKnowledge: "business.identity" }],
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              requiredKnowledge: "business.identity",
+            },
+          ],
         }),
       ],
     });
@@ -875,7 +909,10 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resPrice = await hPrice.runInbound("بكام تنظيف الأسنان؟", "ext-sc10-price");
+    const resPrice = await hPrice.runInbound(
+      "بكام تنظيف الأسنان؟",
+      "ext-sc10-price",
+    );
     check(
       "10.C Supported service price with matching catalog price is disclosed and stays AI_ACTIVE",
       resPrice.ok === true &&
@@ -914,7 +951,10 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resCat = await hCat.runInbound("ايه الخدمات المتاحة؟", "ext-sc10-cat");
+    const resCat = await hCat.runInbound(
+      "ايه الخدمات المتاحة؟",
+      "ext-sc10-cat",
+    );
     check(
       "10.D Supported service catalog listing with explicit requiredKnowledge is disclosed",
       resCat.ok === true &&
@@ -945,7 +985,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const res = await h.runInbound("سؤال غير معروف مع فشل فجوة المعرفة", "ext-sc11-1");
+    const res = await h.runInbound(
+      "سؤال غير معروف مع فشل فجوة المعرفة",
+      "ext-sc11-1",
+    );
     const sent = h.getSent();
     const conv = h.getConversation();
 
@@ -1011,7 +1054,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const resPrice = await hUnrelatedPrice.runInbound("كم سعر تبييض الأسنان؟", "ext-sc12-unrelated-price");
+    const resPrice = await hUnrelatedPrice.runInbound(
+      "كم سعر تبييض الأسنان؟",
+      "ext-sc12-unrelated-price",
+    );
     check(
       "12.A Another service's price does not authorize an unpriced service (unrelated support isolated)",
       resPrice.ok === true &&
@@ -1041,7 +1087,10 @@ async function runSuite(): Promise<void> {
       ],
     });
 
-    const resFaq = await hUnrelatedFaq.runInbound("ما هي إجراءات التعقيم؟", "ext-sc12-unrelated-faq");
+    const resFaq = await hUnrelatedFaq.runInbound(
+      "ما هي إجراءات التعقيم؟",
+      "ext-sc12-unrelated-faq",
+    );
     check(
       "12.B Unrelated FAQ in store does not authorize unsupported answer; strictly handed off",
       resFaq.ok === true &&
@@ -1057,13 +1106,19 @@ async function runSuite(): Promise<void> {
   // SUMMARY
   // ────────────────────────────────────────────────────────────────────────────
   const failed = checks.filter((c) => !c.pass);
-  console.log("\n────────────────────────────────────────────────────────────────");
-  console.log(`Results: ${checks.length - failed.length}/${checks.length} passed.`);
+  console.log(
+    "\n────────────────────────────────────────────────────────────────",
+  );
+  console.log(
+    `Results: ${checks.length - failed.length}/${checks.length} passed.`,
+  );
   if (failed.length > 0) {
     console.error(`FAILED: ${failed.length} check(s) failed.`);
     process.exit(1);
   }
-  console.log("All unknown-information and handoff consistency checks passed successfully.");
+  console.log(
+    "All unknown-information and handoff consistency checks passed successfully.",
+  );
 }
 
 runSuite().catch((err) => {

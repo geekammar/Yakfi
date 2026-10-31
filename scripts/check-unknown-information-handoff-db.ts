@@ -212,7 +212,8 @@ async function main(): Promise<void> {
         respond: async () => ({
           intent: "FAQ",
           action: "reply",
-          content: "العيادة لا تملك معلومة عن سنة التأسيس، هحوّلك لواحد من الفريق.",
+          content:
+            "العيادة لا تملك معلومة عن سنة التأسيس، هحوّلك لواحد من الفريق.",
           extraction: {
             service: null,
             provider: null,
@@ -463,7 +464,9 @@ async function main(): Promise<void> {
         ...conversationRepository,
         addMessage: async (input: any, workflow: any) => {
           if (input.senderType === "AI") {
-            throw new Error("Simulated database failure on assistant reply write");
+            throw new Error(
+              "Simulated database failure on assistant reply write",
+            );
           }
           return conversationRepository.addMessage(input, workflow);
         },
@@ -549,13 +552,19 @@ async function main(): Promise<void> {
   });
 
   const failed = checks.filter((c) => !c.pass);
-  console.log("\n────────────────────────────────────────────────────────────────");
-  console.log(`Results: ${checks.length - failed.length}/${checks.length} passed.`);
+  console.log(
+    "\n────────────────────────────────────────────────────────────────",
+  );
+  console.log(
+    `Results: ${checks.length - failed.length}/${checks.length} passed.`,
+  );
   if (failed.length > 0) {
     console.error(`FAILED: ${failed.length} check(s) failed.`);
     process.exit(1);
   }
-  console.log("All disposable PostgreSQL integration checks passed successfully.");
+  console.log(
+    "All disposable PostgreSQL integration checks passed successfully.",
+  );
 }
 
 main().catch((err) => {

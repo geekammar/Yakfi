@@ -29,7 +29,8 @@ import type { HandoffReason } from "./types";
  * scattered or duplicated.
  */
 export const HANDOFF_MESSAGES: Readonly<Record<HandoffReason, string>> = {
-  CUSTOMER_REQUESTED_HUMAN: "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  CUSTOMER_REQUESTED_HUMAN:
+    "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
   AI_REQUESTED_HANDOFF: "تم تحويل المحادثة لفريق العمل للمتابعة.",
   RETRY_EXHAUSTED:
     "واجهت صعوبة مؤقتة في الرد — تم تحويل المحادثة لفريق العمل للمتابعة.",

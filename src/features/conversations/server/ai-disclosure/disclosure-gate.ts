@@ -321,18 +321,29 @@ function channelCarried(
           typeof service.description === "string" &&
           service.description.trim().length > 0,
       );
-    case "serviceNames":
+    case "serviceNames": {
       // The PUBLIC service-catalog NAME channel (PROMPT-AI-OPS-20) is carried
       // whenever at least one service NAME is exposed in the catalog. B-01
       // already declares a service name "AI may mention" and B-02 always
       // carries the names in request.services; this channel lets the gate back
       // a catalog-listing reply from those carried names instead of refusing
-      // it. It licenses mentioning the CATALOG ONLY — never a price, location,
-      // hour or detail, each of which still requires its own carried channel.
-      return request.services.some(
-        (service) =>
-          typeof service.name === "string" && service.name.trim().length > 0,
-      );
+      // it. If response content is present, the reply must mention at least one
+      // service from request.services so that unrelated catalog names cannot
+      // authorize an arbitrary unknown-fact answer.
+      if (request.services.length === 0) return false;
+      if (!response?.content) return true;
+      const normContent = normalizeArabicText(response.content);
+      return request.services.some((service) => {
+        if (
+          typeof service.name !== "string" ||
+          service.name.trim().length === 0
+        ) {
+          return false;
+        }
+        const normName = normalizeArabicText(service.name);
+        return normName.length > 0 && normContent.includes(normName);
+      });
+    }
     case null:
       // No request channel exists for this family today.
       return false;
@@ -538,16 +549,10 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   // Fallback candidate evaluation for turns without explicit proposed requiredKnowledge:
   // On structured turns:
   // - business.identity is NOT a candidate for general FAQ/non-identity answers (PROMPT-AI-UX-02).
-  // - unrelated catalog service.name is NOT a candidate for general FAQ answers (ISS-012):
-  //   catalog mentions require explicit service.name knowledge or dedicated catalog turns.
   const isStructured =
     context.request.requiredSemanticCapability === "structured_turn";
   const candidates = candidateSupportFamilies(response.intent).filter(
-    (c) =>
-      !(
-        isStructured &&
-        (c.family === "business.identity" || c.family === "service.name")
-      ),
+    (c) => !(isStructured && c.family === "business.identity"),
   );
 
   let primaryRefusal: DisclosureRefusalReason | null = null;
