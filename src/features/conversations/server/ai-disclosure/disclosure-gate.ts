@@ -356,26 +356,37 @@ function channelCarried(
  */
 export function supportFamilyForProposedKnowledge(
   key: string,
-): TaskSupportFamily | null {
-  switch (key) {
+): TaskSupportFamily | "GENERIC_FAQ" | null {
+  const norm = key.toLowerCase().trim();
+  switch (norm) {
     case "business.identity":
+    case "identity":
       return { family: "business.identity", channel: "businessName" };
     case "business.address":
+    case "address":
       return { family: "business.address", channel: "businessAddress" };
     case "business.about":
+    case "about":
       return { family: "business.about", channel: "businessAbout" };
     case "service.price":
+    case "price":
       return { family: "service.price", channel: "services" };
     case "service.description":
+    case "description":
       return { family: "service.description", channel: "serviceDescriptions" };
     case "service.name":
     case "service.catalog":
+    case "catalog":
+    case "service":
       return { family: "service.name", channel: "serviceNames" };
     case "business.faqs":
-    case "faq":
       return { family: "business.faqs", channel: "faqs" };
     case "domain.availability":
+    case "availability":
       return { family: "domain.availability", channel: "availability" };
+    case "faq":
+    case "none":
+      return "GENERIC_FAQ";
     default:
       return null;
   }
@@ -525,24 +536,31 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   if (proposedKnowledge) {
     const proposedCandidate =
       supportFamilyForProposedKnowledge(proposedKnowledge);
-    if (!proposedCandidate || !proposedCandidate.family) {
+    if (proposedCandidate === null) {
+      // Model explicitly proposed an unknown or unbacked knowledge family -> fail closed
       return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
     }
-    const record = ledger.find((fact) => fact.key === proposedCandidate.family);
-    if (!record || !record.included) {
-      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+    if (proposedCandidate !== "GENERIC_FAQ") {
+      const record = ledger.find(
+        (fact) => fact.key === proposedCandidate.family,
+      );
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      if (
+        !channelCarried(context.request, proposedCandidate.channel, response)
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: [proposedCandidate.family],
+      };
     }
-    if (!record.disclosable) {
-      return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-    }
-    if (!channelCarried(context.request, proposedCandidate.channel, response)) {
-      return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-    }
-    return {
-      kind: "disclosed",
-      response,
-      support: [proposedCandidate.family],
-    };
   }
 
   // Fallback candidate evaluation for turns without explicit proposed requiredKnowledge:
