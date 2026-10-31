@@ -1,5 +1,22 @@
-#!/usr/bin/env tsx
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import "./setup-test-env";
+
+import { createPlaygroundHarness } from "../src/features/conversations/playground/harness";
+import {
+  aiTemporalRequestSchema,
+  type AiResponse,
+} from "../src/features/conversations/server/ai-contract";
+import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+import {
+  daysInMonth,
+  deriveLocalDate,
+  isLeapYear,
+  isValidCalendarComponents,
+  isValidIsoCalendarDate,
+  resolveServerTemporalRequest,
+  todayIsoInTimeZone,
+} from "../src/features/conversations/server/temporal-context";
+
 /**
  * Temporal Correction Authority & Invalid-Date Acceptance Suite
  * (ISS-011 & ISS-015).
@@ -23,28 +40,6 @@
  * 10. Equivalent temporal authority under START_ONLY and FULL_RANGE.
  */
 
-import "./setup-test-env";
-
-import {
-  createPlaygroundHarness,
-} from "../src/features/conversations/playground/harness";
-import {
-  aiTemporalRequestSchema,
-  type AiResponse,
-} from "../src/features/conversations/server/ai-contract";
-import {
-  receiveInboundMessage,
-} from "../src/features/conversations/server/conversation-engine";
-import {
-  daysInMonth,
-  deriveLocalDate,
-  isLeapYear,
-  isValidCalendarComponents,
-  isValidIsoCalendarDate,
-  resolveServerTemporalRequest,
-  todayIsoInTimeZone,
-} from "../src/features/conversations/server/temporal-context";
-
 type Check = { label: string; pass: boolean; details?: string };
 const checks: Check[] = [];
 
@@ -54,20 +49,29 @@ function check(label: string, condition: boolean, details?: string): void {
   console.log(`${icon} ${label}${details ? ` (${details})` : ""}`);
 }
 
-const lastBody = (h: any) =>
-  h.deliveredOutbound[h.deliveredOutbound.length - 1]?.body ?? "";
+function lastBody(h: any): string {
+  return h.deliveredOutbound[h.deliveredOutbound.length - 1]?.body ?? "";
+}
 
-const getOffer = (h: any) =>
-  h.stateStore.rows.get(h.conversation.id)?.state as any;
+function getOffer(h: any): any {
+  return h.stateStore.rows.get(h.conversation.id)?.state;
+}
 
-const isReply = (res: any) =>
-  res.ok === true && !res.duplicate && res.assistantAction === "AI_REPLY";
+function isReply(res: any): boolean {
+  return (
+    res.ok === true && !res.duplicate && res.assistantAction === "AI_REPLY"
+  );
+}
 
-const isActive = (res: any) =>
-  res.ok === true && !res.duplicate && res.conversationStatus === "AI_ACTIVE";
+function isActive(res: any): boolean {
+  return (
+    res.ok === true && !res.duplicate && res.conversationStatus === "AI_ACTIVE"
+  );
+}
 
-const noHandoff = (res: any) =>
-  res.ok === true && !res.duplicate && res.handoffCause === null;
+function noHandoff(res: any): boolean {
+  return res.ok === true && !res.duplicate && res.handoffCause === null;
+}
 
 function createMockAiResponse(overrides: Partial<AiResponse> = {}): AiResponse {
   return {
@@ -201,17 +205,21 @@ async function runSuite(): Promise<void> {
     );
 
     const turn2Message = lastBody(harness);
+    const hasPastExplanation =
+      turn2Message.includes("التاريخ المحدد في الماضي") ||
+      turn2Message.includes("في الماضي");
     check(
       "1.4 Turn 2 delivers truthful past-date explanation",
-      turn2Message.includes("التاريخ المحدد في الماضي") ||
-        turn2Message.includes("في الماضي"),
+      hasPastExplanation,
       `Delivered: ${turn2Message}`,
     );
 
+    const noOldOffer =
+      !turn2Message.includes("2026-11-05") &&
+      !turn2Message.includes("5 نوفمبر");
     check(
       "1.5 Turn 2 does NOT re-present the old 2026-11-05 offer",
-      !turn2Message.includes("2026-11-05") &&
-        !turn2Message.includes("5 نوفمبر"),
+      noOldOffer,
     );
 
     check(
@@ -220,15 +228,19 @@ async function runSuite(): Promise<void> {
     );
 
     const stateAfterTurn2 = getOffer(harness);
+    const isOfferInvalidated =
+      stateAfterTurn2?.offer === null ||
+      stateAfterTurn2?.offer?.status === "INVALIDATED";
     check(
       "1.7 Obsolete offer is invalidated and cleared from actionable state",
-      stateAfterTurn2?.offer === null ||
-        stateAfterTurn2?.offer?.status === "INVALIDATED",
+      isOfferInvalidated,
     );
+    const dateClearedServiceSurvives =
+      stateAfterTurn2?.knownFacts?.date === undefined &&
+      stateAfterTurn2?.knownFacts?.service === "كشف أسنان";
     check(
       "1.8 Obsolete date is cleared from knownFacts while service survives",
-      stateAfterTurn2?.knownFacts?.date === undefined &&
-        stateAfterTurn2?.knownFacts?.service === "كشف أسنان",
+      dateClearedServiceSurvives,
     );
   }
 
@@ -388,11 +400,13 @@ async function runSuite(): Promise<void> {
     );
 
     const msg = lastBody(harness);
+    const hasImpossibleDateReject =
+      (msg.includes("غير موجود في التقويم") || msg.includes("فبراير")) &&
+      !msg.includes("1 نوفمبر") &&
+      !msg.includes("1 مارس");
     check(
       "3.4 Rejection explains impossible calendar date without rollover",
-      (msg.includes("غير موجود في التقويم") || msg.includes("فبراير")) &&
-        !msg.includes("1 نوفمبر") &&
-        !msg.includes("1 مارس"),
+      hasImpossibleDateReject,
       `Delivered message: ${msg}`,
     );
 
@@ -451,10 +465,12 @@ async function runSuite(): Promise<void> {
       CAIRO_TZ,
       60,
     );
+    const isNoYearNonLeapInvalid =
+      resNoYearNonLeap.kind === "invalid" &&
+      resNoYearNonLeap.reason === "IMPOSSIBLE_DATE";
     check(
       "4.5 29 February without stated year in non-leap year 2026 is rejected",
-      resNoYearNonLeap.kind === "invalid" &&
-        resNoYearNonLeap.reason === "IMPOSSIBLE_DATE",
+      isNoYearNonLeapInvalid,
     );
   }
 
@@ -519,10 +535,12 @@ async function runSuite(): Promise<void> {
     );
 
     const state1 = getOffer(harness1);
+    const preservesServiceAndClarification =
+      state1?.knownFacts?.service === "كشف أسنان" &&
+      state1?.lastClarification?.type === "date_month";
     check(
       "5.3 State preserves service and records date_month clarification",
-      state1?.knownFacts?.service === "كشف أسنان" &&
-        state1?.lastClarification?.type === "date_month",
+      preservesServiceAndClarification,
     );
 
     // 5.4 Day-only with prior context (November 2026)
@@ -632,10 +650,12 @@ async function runSuite(): Promise<void> {
     );
 
     const state2 = getOffer(harness);
+    const providerAndServiceSurvive =
+      state2?.knownFacts?.service === "كشف أسنان" &&
+      state2?.knownFacts?.provider !== undefined;
     check(
       "6.3 Provider and service survive after invalid date rejection",
-      state2?.knownFacts?.service === "كشف أسنان" &&
-        state2?.knownFacts?.provider !== undefined,
+      providerAndServiceSurvive,
     );
 
     // Turn 3: Customer sends valid correction: "2026-11-10"
@@ -828,10 +848,12 @@ async function runSuite(): Promise<void> {
       midnightInstant,
       CAIRO_TZ,
     );
+    const isPastCairo =
+      resOct31InCairo.kind === "invalid" &&
+      resOct31InCairo.reason === "PAST_DATE";
     check(
       "8.3 2026-10-31 is rejected as PAST_DATE in Cairo at 23:30 UTC",
-      resOct31InCairo.kind === "invalid" &&
-        resOct31InCairo.reason === "PAST_DATE",
+      isPastCairo,
       `Got: ${JSON.stringify(resOct31InCairo)}`,
     );
   }
@@ -921,9 +943,11 @@ async function runSuite(): Promise<void> {
     );
 
     const turn2Msg = lastBody(harness);
+    const noResurrectedSlots =
+      !turn2Msg.includes("5 نوفمبر") && !turn2Msg.includes("2026-11-05");
     check(
       "9.4 Contract failure does not resurrect 2026-11-05 slots",
-      !turn2Msg.includes("5 نوفمبر") && !turn2Msg.includes("2026-11-05"),
+      noResurrectedSlots,
     );
   }
 
