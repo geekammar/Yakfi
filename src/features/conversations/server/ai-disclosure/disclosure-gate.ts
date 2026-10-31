@@ -534,9 +534,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     if (!record.disclosable) {
       return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
     }
-    if (
-      !channelCarried(context.request, proposedCandidate.channel, response)
-    ) {
+    if (!channelCarried(context.request, proposedCandidate.channel, response)) {
       return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
     }
     return {
