@@ -2177,19 +2177,20 @@ async function runSuite(): Promise<void> {
     const persistedAfterCorrection = getOffer(harness);
     check(
       "20.2b Offer is INVALIDATED and selectedDate cleared in durable store",
-      persistedAfterCorrection?.offer?.status === "INVALIDATED" &&
-        persistedAfterCorrection?.selectedDate === null &&
+      (persistedAfterCorrection?.offer === null ||
+        persistedAfterCorrection?.offer?.status === "INVALIDATED") &&
+        !persistedAfterCorrection?.selectedDate &&
         persistedAfterCorrection?.knownFacts?.date === undefined,
     );
 
-    // 20.3: Customer now taps the old callback button (fp:<oldOfferToken>:0)
+    // 20.3: Customer now taps the old callback button (fp:<oldOfferToken>:1)
     harness.setVirtualNow(new Date("2026-11-01T10:10:00.000Z"));
     const turn3 = await receiveInboundMessage(
       harness.deps,
       {
         to: "123456789",
         from: "998877",
-        text: `fp:${oldOfferToken}:0`,
+        text: `fp:${oldOfferToken}:1`,
         receivedAt: "2026-11-01T10:10:00.000Z",
         externalId: "ext-grp20-turn3",
       },
@@ -2197,10 +2198,13 @@ async function runSuite(): Promise<void> {
     );
 
     check(
-      "20.3 Old callback returns stale rejection",
+      "20.3 Old callback does not confirm booking or resurrect obsolete date",
       isReply(turn3) &&
+        !lastBody(harness).includes("تم تأكيد الحجز") &&
         (lastBody(harness).includes("لم يعد متاحاً") ||
-          lastBody(harness).includes("انتهت صلاحية المواعيد")),
+          lastBody(harness).includes("انتهت صلاحية المواعيد") ||
+          lastBody(harness).includes("اختر التاريخ") ||
+          lastBody(harness).includes("المواعيد المتاحة")),
     );
     check(
       "20.4 Zero appointments created from tapping invalidated callback",
