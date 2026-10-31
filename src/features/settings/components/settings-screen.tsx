@@ -712,7 +712,7 @@ export function SettingsScreen({
                           </div>
                           <p className="text-muted-foreground dark:text-amber-200/90">
                             الخدمة المحفوظة كخدمة افتراضية (
-                            {matchedService.name}) متوقفة حالياً ولا يمكن
+                            {matchedService.name}) غير مفعّلة حالياً ولا يمكن
                             استخدامها للحجز التلقائي. يرجى اختيار خدمة نشطة
                             بديلة، أو إلغاء تحديد الخدمة وتعطيل الحجز السريع.
                           </p>

@@ -199,9 +199,9 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     defaultServiceBookingEnabled: false,
     defaultBookingServiceId: null,
     channelReadiness: {
-      whatsapp: false,
-      telegram: false,
-      hasActiveChannel: false,
+      whatsapp: true,
+      telegram: true,
+      hasActiveChannel: true,
     },
   };
 
@@ -241,11 +241,11 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(container.textContent).toContain("معاينة سلوك الحجز مع العميل:");
     expect(container.textContent).toContain("كشف عام");
 
-    // No warning alerts rendered for active service
-    const alert = container.querySelector(
-      "[role='alert']:not([id^='field-error'])",
+    // No warning alerts rendered for active service in booking section
+    const bookingSection = container.querySelector(
+      "section[aria-labelledby='settings-booking-section']",
     );
-    expect(alert).toBeNull();
+    expect(bookingSection?.querySelector("[role='alert']")).toBeNull();
   });
 
   it("2. Inactive saved default: service identity and warning are visible; no misleading success preview", async () => {
@@ -259,7 +259,10 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(trigger?.textContent).toContain("خدمة قديمة متوقفة (غير مفعّلة)");
 
     // Accessible warning is visible explaining inactive status
-    const alert = container.querySelector("[role='alert']");
+    const bookingSection = container.querySelector(
+      "section[aria-labelledby='settings-booking-section']",
+    );
+    const alert = bookingSection?.querySelector("[role='alert']");
     expect(alert).not.toBeNull();
     expect(alert?.textContent).toContain(
       "الخدمة الافتراضية المحفوظة غير مفعّلة (خدمة قديمة متوقفة)",
@@ -281,7 +284,10 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(trigger?.textContent).toContain("خدمة غير متاحة");
 
     // Warning is visible and honest
-    const alert = container.querySelector("[role='alert']");
+    const bookingSection = container.querySelector(
+      "section[aria-labelledby='settings-booking-section']",
+    );
+    const alert = bookingSection?.querySelector("[role='alert']");
     expect(alert).not.toBeNull();
     expect(alert?.textContent).toContain(
       "الخدمة الافتراضية المحفوظة غير متاحة",
@@ -311,9 +317,17 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     // Disabled status banner is shown
     expect(container.textContent).toContain("الحالة الحالية: الوضع معطّل");
 
-    // No inactive or unavailable alert is rendered
-    const alert = container.querySelector("[role='alert']");
-    expect(alert).toBeNull();
+    // No inactive or unavailable alert is rendered in booking section
+    const bookingSection = container.querySelector(
+      "section[aria-labelledby='settings-booking-section']",
+    );
+    expect(bookingSection?.querySelector("[role='alert']")).toBeNull();
+    expect(container.textContent).not.toContain(
+      "الخدمة الافتراضية المحفوظة غير مفعّلة",
+    );
+    expect(container.textContent).not.toContain(
+      "الخدمة الافتراضية المحفوظة غير متاحة",
+    );
 
     // No preview is shown
     expect(container.textContent).not.toContain("معاينة سلوك الحجز مع العميل:");
@@ -479,13 +493,15 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     ) as HTMLInputElement;
     expect(nameInput).not.toBeNull();
 
-    const descriptor = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    );
-    descriptor?.set?.call(nameInput, "عيادة النور الجديدة المسودة");
-    nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-    nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await act(async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      );
+      descriptor?.set?.call(nameInput, "عيادة النور الجديدة المسودة");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
 
     const saveButton = Array.from(container.querySelectorAll("button")).find(
       (b) => b.textContent?.includes("حفظ الإعدادات"),
@@ -511,8 +527,11 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
       defaultBookingServiceId: "srv-inactive-1",
     });
 
-    // Warning has role="alert"
-    const alert = container.querySelector("[role='alert']");
+    // Warning has role="alert" in booking section
+    const bookingSection = container.querySelector(
+      "section[aria-labelledby='settings-booking-section']",
+    );
+    const alert = bookingSection?.querySelector("[role='alert']");
     expect(alert).not.toBeNull();
     expect(alert?.getAttribute("role")).toBe("alert");
 
