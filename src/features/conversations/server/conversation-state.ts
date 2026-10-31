@@ -1043,16 +1043,19 @@ export function withPresentedOffer(
     suspendedOffer = null;
   }
 
-  const facts: ConversationKnownFacts = isSlot
-    ? {
-        ...state.knownFacts,
-        service: state.knownFacts.service ?? offer.serviceName,
-        date: state.knownFacts.date ?? offer.date,
-        ...(offer.followUpRequestId
-          ? { followUpRequestId: offer.followUpRequestId }
-          : {}),
-      }
-    : state.knownFacts;
+  let facts: ConversationKnownFacts = state.knownFacts;
+  if (isSlot) {
+    const { unresolvedDate: _droppedUnrD, ...rest } = state.knownFacts;
+    void _droppedUnrD;
+    facts = {
+      ...rest,
+      service: state.knownFacts.service ?? offer.serviceName,
+      date: state.knownFacts.date ?? offer.date,
+      ...(offer.followUpRequestId
+        ? { followUpRequestId: offer.followUpRequestId }
+        : {}),
+    };
+  }
 
   const pendingOffer = pendingOfferMirror(offer);
 
@@ -1084,6 +1087,10 @@ export function withPresentedOffer(
           serviceId: offer.serviceId,
           serviceSource: offer.serviceSource,
           bookingStage: "AVAILABILITY_RESOLVED" as const,
+          lastClarification:
+            state.lastClarification?.type === "date_month"
+              ? null
+              : state.lastClarification,
         }
       : {}),
     activeTask,

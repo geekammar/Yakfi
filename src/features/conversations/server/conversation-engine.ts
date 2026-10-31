@@ -8649,9 +8649,13 @@ async function runInboundTurn(
               turnSession.state ?? resolvedState ?? emptyConversationState(),
               slotOffer,
             );
-            const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-              turnSession.state.knownFacts ?? {};
+            const {
+              unresolvedTime: _droppedUnr,
+              unresolvedDate: _droppedUnrD,
+              ...cleanKnown
+            } = turnSession.state.knownFacts ?? {};
             void _droppedUnr;
+            void _droppedUnrD;
             turnSession.state = {
               ...turnSession.state,
               activeTask: {
@@ -8673,9 +8677,13 @@ async function runInboundTurn(
           }
         } else if (turnSession.enabled) {
           await turnSession.invalidateOffer();
-          const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-            turnSession.state?.knownFacts ?? {};
+          const {
+            unresolvedTime: _droppedUnr,
+            unresolvedDate: _droppedUnrD,
+            ...cleanKnown
+          } = turnSession.state?.knownFacts ?? {};
           void _droppedUnr;
+          void _droppedUnrD;
           turnSession.state = {
             ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
             activeTask: {

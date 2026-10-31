@@ -1147,7 +1147,7 @@ async function runSuite(): Promise<void> {
       harness.deps,
       {
         to: "123456789",
-        from: "778899",
+        from: "998877",
         text: "عايز أحجز كشف أسنان يوم 5 نوفمبر",
         receivedAt: "2026-11-01T10:00:00.000Z",
         externalId: "ext-grp13-turn1",
@@ -1178,7 +1178,7 @@ async function runSuite(): Promise<void> {
       harness.deps,
       {
         to: "123456789",
-        from: "778899",
+        from: "998877",
         text: "عايز أحجز امبارح",
         receivedAt: "2026-11-01T10:05:00.000Z",
         externalId: "ext-grp13-turn2",
@@ -1212,7 +1212,7 @@ async function runSuite(): Promise<void> {
       harness.deps,
       {
         to: "123456789",
-        from: "778899",
+        from: "998877",
         text: "يوم 5",
         receivedAt: "2026-11-01T10:10:00.000Z",
         externalId: "ext-grp13-turn3",
@@ -1361,7 +1361,7 @@ async function runSuite(): Promise<void> {
       harness.deps,
       {
         to: "123456789",
-        from: "11223344",
+        from: "998877",
         text: "عايز أحجز كشف أسنان يوم 5",
         receivedAt: "2026-11-01T10:00:00.000Z",
         externalId: "ext-grp16-turn1",
@@ -1404,7 +1404,7 @@ async function runSuite(): Promise<void> {
       harness.deps,
       {
         to: "123456789",
-        from: "11223344",
+        from: "998877",
         text: "نوفمبر",
         receivedAt: "2026-11-01T10:05:00.000Z",
         externalId: "ext-grp16-turn2",
