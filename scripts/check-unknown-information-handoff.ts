@@ -432,7 +432,7 @@ async function runSuite(): Promise<void> {
     check(
       "1.D Operator attention badge created in store with POLICY_REFUSED",
       attention.has(conv.id) &&
-        attention.get(conv.id)?.reason === "POLICY_REFUSED",
+        attention.get(conv.id)?.cause === "POLICY_REFUSED",
       attention.get(conv.id),
     );
 
