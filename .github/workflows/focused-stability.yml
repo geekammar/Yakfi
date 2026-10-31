@@ -51,8 +51,3 @@ jobs:
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: |
           pnpm exec playwright test tests/e2e/ux-viewports.spec.ts --project=mobile-390 -g "Sign-in page: RTL, horizontal overflow, touch targets and form states" --repeat-each=3 --retries=0
-
-      - name: Preparation format inspect
-        run: |
-          pnpm prettier -w src/app/\(auth\)/sign-in/page.test.tsx
-          git diff src/app/\(auth\)/sign-in/page.test.tsx

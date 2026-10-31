@@ -1,6 +1,6 @@
-import SignInPage, { getSignInDestination } from "@/app/(auth)/sign-in/page";
 import type { Session } from "@/lib/auth";
 
+import SignInPage, { getSignInDestination } from "@/app/(auth)/sign-in/page";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetSession, mockRedirect } = vi.hoisted(() => ({
@@ -81,9 +81,7 @@ describe("SignInPage Boundary & Decision Routing", () => {
     };
     mockGetSession.mockResolvedValue(platformSession);
 
-    await expect(SignInPage({})).rejects.toThrow(
-      "NEXT_REDIRECT:/platform",
-    );
+    await expect(SignInPage({})).rejects.toThrow("NEXT_REDIRECT:/platform");
   });
 
   it("redirects active users to '/' by default when no param given", async () => {
