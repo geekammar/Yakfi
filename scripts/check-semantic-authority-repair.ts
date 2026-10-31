@@ -1292,8 +1292,7 @@ async function runSuite(): Promise<void> {
         res1.assistantAction === "AI_HANDOFF" &&
         res1.handoffCause === "RETRY_EXHAUSTED" &&
         h1.getSent().length === 1 &&
-        h1.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h1.getSent()[0] === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
       { res1, sent: h1.getSent() },
     );
 
@@ -1320,8 +1319,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res2) &&
         res2.conversationStatus === "NEED_HUMAN" &&
         res2.handoffCause === "PROVIDER_FAILURE" &&
-        h2.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h2.getSent()[0] === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
     );
   }
 
