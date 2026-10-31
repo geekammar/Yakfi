@@ -6770,6 +6770,9 @@ async function runInboundTurn(
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: resolvedState.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
                 lastClarification:
                   resolvedState.lastClarification?.type === "date_month"
                     ? null
@@ -6790,6 +6793,9 @@ async function runInboundTurn(
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: turnSession.state.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
                 lastClarification:
                   turnSession.state.lastClarification?.type === "date_month"
                     ? null
@@ -7419,6 +7425,9 @@ async function runInboundTurn(
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: resolvedState.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
                 lastClarification:
                   resolvedState.lastClarification?.type === "date_month"
                     ? null
@@ -7439,6 +7448,9 @@ async function runInboundTurn(
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: turnSession.state.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
                 lastClarification:
                   turnSession.state.lastClarification?.type === "date_month"
                     ? null

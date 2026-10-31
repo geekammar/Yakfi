@@ -1087,6 +1087,7 @@ export function withPresentedOffer(
           serviceId: offer.serviceId,
           serviceSource: offer.serviceSource,
           bookingStage: "AVAILABILITY_RESOLVED" as const,
+          missingFacts: state.missingFacts.filter((f) => f !== "date"),
           lastClarification:
             state.lastClarification?.type === "date_month"
               ? null

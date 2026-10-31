@@ -1115,6 +1115,7 @@ async function runSuite(): Promise<void> {
   {
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
+      todayRef: "2026-11-01",
       businessConfig: {
         appointmentTimeDisplay: "START_ONLY",
         confirmationMode: "automatic",
@@ -1329,11 +1330,14 @@ async function runSuite(): Promise<void> {
   {
     const harness = createPlaygroundHarness({
       channel: "TELEGRAM",
+      todayRef: "2026-11-01",
       businessConfig: {
         appointmentTimeDisplay: "START_ONLY",
         confirmationMode: "automatic",
       },
     });
+
+    harness.setVirtualNow(new Date("2026-11-01T10:00:00.000Z"));
 
     const identity = {
       businessId: harness.business.id,
@@ -1383,6 +1387,8 @@ async function runSuite(): Promise<void> {
       st1?.lastClarification?.unresolvedDate?.day === 5 &&
         st1?.knownFacts?.unresolvedDate?.day === 5,
     );
+
+    harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
 
     harness.deps.ai = {
       providerName: "test-ai",
