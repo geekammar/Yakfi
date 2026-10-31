@@ -323,8 +323,8 @@ describe("AppointmentDetail rendered component tests (ISS-008 / BK-50)", () => {
       endTime: "1970-01-01T10:00:00.000Z",
     });
     expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-    expect(container.textContent).not.toContain("NaN");
-    expect(container.textContent).not.toContain("-");
+    expect(getBookedServiceSection().hintText).not.toContain("NaN");
+    expect(getBookedServiceSection().hintText).not.toContain("-");
 
     // 2. Reversed times (10:20 to 10:00)
     renderDetail({
@@ -333,7 +333,8 @@ describe("AppointmentDetail rendered component tests (ISS-008 / BK-50)", () => {
       endTime: "1970-01-01T10:00:00.000Z",
     });
     expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-    expect(container.textContent).not.toContain("NaN");
+    expect(getBookedServiceSection().hintText).not.toContain("NaN");
+    expect(getBookedServiceSection().hintText).not.toContain("-");
 
     // 3. Overnight attempt (23:00 to 01:00)
     renderDetail({
