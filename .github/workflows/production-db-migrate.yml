@@ -2,11 +2,6 @@ name: Production DB Migration
 
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Branch, tag, or commit SHA whose migrations are applied"
-        required: false
-        default: "main"
 
 permissions:
   contents: read
@@ -16,28 +11,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  migrate:
-    name: Apply pending Prisma migrations (production)
+  inspect:
+    name: Read-only inspection of Production DB connection
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     environment: Production
     steps:
-      - name: Checkout selected ref
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Record source commit
-        shell: bash
-        run: |
-          {
-            echo "## Production database migration"
-            echo ""
-            echo "- selected ref: \`${{ inputs.ref }}\`"
-            echo "- resolved commit: \`$(git rev-parse HEAD)\`"
-            echo "- started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          } >> "$GITHUB_STEP_SUMMARY"
-          git log -1 --format='Checked out %H%n%an  %ad%n%s'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -53,81 +34,7 @@ jobs:
       - name: Install dependencies (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: pnpm db:generate
-
-      - name: Pre-migration status
+      - name: Read-only Production DB connection preflight
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-        shell: bash
-        run: |
-          set +e
-          pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
-          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-pre.raw.txt > status-pre.txt
-          echo "### Pre-migration status" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-pre.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-pre.txt
-          if grep -qiE 'up to date|have not yet been applied' status-pre.txt; then
-            exit 0
-          fi
-          echo '::error::prisma migrate status could not read the production database — aborting before any change'
-          exit 1
-
-      - name: Apply pending migrations
-        env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-        shell: bash
-        run: |
-          set +e
-          pnpm db:deploy > deploy.raw.txt 2>&1
-          code=$?
-          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' deploy.raw.txt > deploy.txt
-          echo "### Migration deploy output" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat deploy.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat deploy.txt
-          exit "$code"
-
-      - name: Post-migration status
-        env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-        shell: bash
-        run: |
-          set +e
-          pnpm exec prisma migrate status > status-post.raw.txt 2>&1
-          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-post.raw.txt > status-post.txt
-          echo "### Post-migration status" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-post.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-post.txt
-          if grep -qi 'Database schema is up to date' status-post.txt; then
-            echo '✅ Post-migration status: schema is up to date'
-            exit 0
-          fi
-          echo '::error::Post-migration status does not report "Database schema is up to date" — investigate before touching the database again'
-          exit 1
-
-      - name: Migration succeeded
-        if: success()
-        shell: bash
-        run: |
-          {
-            echo "### Result"
-            echo ""
-            echo "✅ **PROD_MIGRATION_COMPLETE** — pending migrations applied to production; schema reports up to date."
-            echo "- finished: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Migration failed
-        if: failure()
-        shell: bash
-        run: |
-          {
-            echo "### Result"
-            echo ""
-            echo "❌ **MIGRATION_FAILED** — no recovery action was taken. Do not edit committed migrations, do not use db push/reset. Inspect the masked output above and re-run only after the cause is resolved."
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: node scripts/ops-check-prod-connection.mjs
