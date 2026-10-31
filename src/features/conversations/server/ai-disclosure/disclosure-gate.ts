@@ -249,12 +249,13 @@ function channelCarried(
       if (request.faqs.length === 0) return false;
       if (!response?.content) return true;
       const normContent = normalizeArabicText(response.content);
+      const contentWords = new Set(
+        normContent.split(/\s+/).filter((w) => w.length >= 3),
+      );
       return request.faqs.some((faq) => {
-        const normAns = normalizeArabicText(faq.answer);
-        return (
-          normAns.length > 0 &&
-          (normContent.includes(normAns) || normAns.includes(normContent))
-        );
+        const normTarget = normalizeArabicText(`${faq.question} ${faq.answer}`);
+        const faqWords = normTarget.split(/\s+/).filter((w) => w.length >= 3);
+        return faqWords.some((w) => contentWords.has(w));
       });
     }
     case "availability":
