@@ -11,12 +11,12 @@ import {
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
 import { buildServiceOffer } from "../src/features/conversations/server/booking-offer";
+import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
   dehydrateConversationState,
   emptyConversationState,
   withPresentedOffer,
 } from "../src/features/conversations/server/conversation-state";
-import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
   daysInMonth,
   deriveLocalDate,
