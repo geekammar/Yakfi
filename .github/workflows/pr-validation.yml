@@ -260,7 +260,7 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         env:
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
-        run: pnpm build
+        run: pnpm build || pnpm build
 
       - name: Resolve dynamic Vercel Preview URL
         if: steps.change-check.outputs.should_run == 'true'

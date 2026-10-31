@@ -78,6 +78,12 @@ describe("LoginForm Component Contract", () => {
   });
 
   function renderForm() {
+    if (root) {
+      act(() => {
+        root?.unmount();
+      });
+      root = null;
+    }
     root = createRoot(container);
     act(() => {
       root?.render(<LoginForm />);
