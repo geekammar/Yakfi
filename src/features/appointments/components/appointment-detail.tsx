@@ -43,8 +43,8 @@ function formatTime(time: string) {
 export const APPOINTMENT_DURATION_UNAVAILABLE_LABEL = "مدة الموعد غير متاحة";
 
 /**
- * Formats the truthful duration label for an appointment from its stored start and end interval (ISS-008 / BK-50).
- * Uses Arabic label: "مدة الموعد: N دقيقة" or "مدة الموعد غير متاحة" if interval is missing/invalid.
+ * Formats truthful appointment duration from stored start/end (ISS-008).
+ * Uses Arabic label: "مدة الموعد: N دقيقة" or "مدة الموعد غير متاحة".
  */
 export function formatAppointmentDurationHint(
   startTime: unknown,

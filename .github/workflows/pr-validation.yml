@@ -64,6 +64,14 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
+      - name: Format check & print patch on isolated runner
+        run: |
+          pnpm format || true
+          echo "=== BEGIN FORMAT PATCH ==="
+          git diff
+          echo "=== END FORMAT PATCH ==="
+          git checkout -- .
+
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 

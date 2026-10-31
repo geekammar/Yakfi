@@ -89,18 +89,20 @@ function parseClockSeconds(value: unknown): {
 }
 
 /**
- * Calculates the duration in whole minutes between stored appointment start and end times.
+ * Calculates the duration in whole minutes between stored appointment start
+ * and end times.
  *
  * Domain invariants (ISS-008 / BK-50):
- * 1. Single-day bounded: Appointments exist within a single calendar day; overnight
- *    intervals (end <= start) are unsupported in this domain and return null.
- * 2. Positive non-zero duration: `end > start` is strictly required. Equal or reversed
- *    times return null.
- * 3. Minute precision contract: All FlowPilot appointments and services operate on integer
- *    minutes. Unsupported fractional-minute intervals (e.g., partial seconds diff) return
- *    null rather than being rounded.
- * 4. Deterministic clock arithmetic: Operates strictly on validated clock components,
- *    avoiding device/machine-local timezone drift.
+ * 1. Single-day bounded: Appointments exist within a single calendar day;
+ *    overnight intervals (end <= start) are unsupported in this domain and
+ *    return null.
+ * 2. Positive non-zero duration: `end > start` is strictly required. Equal
+ *    or reversed times return null.
+ * 3. Minute precision contract: All FlowPilot appointments and services
+ *    operate on integer minutes. Unsupported fractional-minute intervals
+ *    (e.g., partial seconds diff) return null rather than being rounded.
+ * 4. Deterministic clock arithmetic: Operates strictly on validated clock
+ *    components, avoiding device/machine-local timezone drift.
  */
 export function calculateAppointmentDurationMinutes(
   startTime: unknown,
@@ -113,21 +115,21 @@ export function calculateAppointmentDurationMinutes(
     return null;
   }
 
-  // Any non-zero fractional seconds violate the domain's minute-level contract
+  // Any non-zero fractional seconds violate the domain minute-level contract
   if (start.hasFractionalSeconds || end.hasFractionalSeconds) {
     return null;
   }
 
   const diffSeconds = end.totalSeconds - start.totalSeconds;
 
-  // The appointment domain strictly rejects end <= start (no overnight appointments,
-  // no negative durations, no zero duration).
+  // The appointment domain strictly rejects end <= start (no overnight
+  // appointments, no negative durations, no zero duration).
   if (diffSeconds <= 0) {
     return null;
   }
 
-  // Domain precision contract: appointment intervals are defined in whole minutes.
-  // We do not round non-integer minute intervals (e.g. 10:00:30 to 10:20:00).
+  // Domain precision contract: appointment intervals are defined in whole
+  // minutes. We do not round non-integer minute intervals (e.g. 10:00:30).
   if (diffSeconds % 60 !== 0) {
     return null;
   }
