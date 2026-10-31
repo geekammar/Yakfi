@@ -597,12 +597,14 @@ export function resolveServerTemporalRequest(
           priorContext.dateRange.startDate <= priorContext.dateRange.endDate
         ) {
           const { startDate, endDate } = priorContext.dateRange;
-          const [startYear, startMonth] = startDate
-            .split("-")
-            .map(Number) as [number, number];
-          const [endYear, endMonth] = endDate
-            .split("-")
-            .map(Number) as [number, number];
+          const [startYear, startMonth] = startDate.split("-").map(Number) as [
+            number,
+            number,
+          ];
+          const [endYear, endMonth] = endDate.split("-").map(Number) as [
+            number,
+            number,
+          ];
 
           const matchingCandidates: {
             year: number;
@@ -638,8 +640,7 @@ export function resolveServerTemporalRequest(
               field: "month",
               day,
               year,
-              message:
-                `يرجى توضيح الشهر المطلوب ليوم ${day} ضمن الفترة المحددة.`,
+              message: `يرجى توضيح الشهر المطلوب ليوم ${day} ضمن الفترة المحددة.`,
             };
           }
         }
@@ -656,8 +657,7 @@ export function resolveServerTemporalRequest(
             field: "month",
             day,
             year,
-            message:
-              `يرجى توضيح الشهر المطلوب ليوم ${day} (مثال: ${day} نوفمبر).`,
+            message: `يرجى توضيح الشهر المطلوب ليوم ${day} (مثال: ${day} نوفمبر).`,
           };
         }
       }
@@ -692,8 +692,7 @@ export function resolveServerTemporalRequest(
           let error =
             "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
           if (month === 2 && day === 29 && !isLeapYear(year)) {
-            error =
-              `شهر فبراير في عام ${year} يضم 28 يوماً فقط (سنة غير كبيسة).`;
+            error = `شهر فبراير في عام ${year} يضم 28 يوماً فقط (سنة غير كبيسة).`;
           }
           return {
             kind: "invalid",

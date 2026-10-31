@@ -667,8 +667,7 @@ export function mergeConversationState(
         knownFacts.unresolvedTime?.minute);
   const unresolvedDateChanged =
     Boolean(state.knownFacts.unresolvedDate || knownFacts.unresolvedDate) &&
-    (state.knownFacts.unresolvedDate?.day !==
-      knownFacts.unresolvedDate?.day ||
+    (state.knownFacts.unresolvedDate?.day !== knownFacts.unresolvedDate?.day ||
       state.knownFacts.unresolvedDate?.month !==
         knownFacts.unresolvedDate?.month ||
       state.knownFacts.unresolvedDate?.year !==

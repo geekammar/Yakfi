@@ -67,12 +67,6 @@ jobs:
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
-      - name: Debug format failure
-        if: failure()
-        run: |
-          pnpm exec prettier --write scripts/check-temporal-correction-authority.ts src/features/conversations/server/conversation-state.ts src/features/conversations/server/temporal-context.ts
-          git diff
-
       - name: Verify PWA icon generation and committed assets
         run: node scripts/generate-pwa-icons.mjs --check
 

@@ -1292,8 +1292,7 @@ async function runSuite(): Promise<void> {
     );
     check(
       "15.1 Conflicting same-turn extraction.date yields CONTRADICTION",
-      conflictRes.kind === "invalid" &&
-        conflictRes.reason === "CONTRADICTION",
+      conflictRes.kind === "invalid" && conflictRes.reason === "CONTRADICTION",
     );
 
     const matchRes = resolveServerTemporalRequest(
