@@ -66,6 +66,9 @@ const isReply = (res: any) =>
 const isActive = (res: any) =>
   res.ok === true && !res.duplicate && res.conversationStatus === "AI_ACTIVE";
 
+const noHandoff = (res: any) =>
+  res.ok === true && !res.duplicate && res.handoffCause === null;
+
 function createMockAiResponse(overrides: Partial<AiResponse> = {}): AiResponse {
   return {
     intent: "BOOKING",
@@ -505,7 +508,7 @@ async function runSuite(): Promise<void> {
 
     check(
       "5.1 Day-only without prior context returns AI_REPLY and stays AI_ACTIVE",
-      isReply(turn1) && isActive(turn1) && turn1.handoffCause === null,
+      isReply(turn1) && isActive(turn1) && noHandoff(turn1),
     );
 
     const msg1 = lastBody(harness1);
