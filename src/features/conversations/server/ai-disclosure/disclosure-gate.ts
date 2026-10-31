@@ -48,7 +48,9 @@ import {
   buildServiceDescriptionContent,
   buildServicePriceContent,
   isPureServiceCatalogQuestion,
+  matchFaq,
   normalizeArabicText,
+  tokenize,
 } from "@/features/conversations/server/conversation-ai";
 
 export {
@@ -801,6 +803,25 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         support: ["service.name"],
         renderedContent: buildServiceCatalogContent(context.request.services),
       };
+    }
+  }
+
+  // 6. Matching stored FAQ for legacy/offline test turns where model omitted source reference:
+  if (context.request.faqs.length > 0) {
+    const matchedFaq = matchFaq(
+      tokenize(context.request.message),
+      context.request.faqs,
+    );
+    if (matchedFaq) {
+      const record = ledger.find((f) => f.key === "business.faqs");
+      if (record?.included && record.disclosable) {
+        return {
+          kind: "disclosed",
+          response,
+          support: ["business.faqs"],
+          renderedContent: matchedFaq.answer.trim(),
+        };
+      }
     }
   }
 

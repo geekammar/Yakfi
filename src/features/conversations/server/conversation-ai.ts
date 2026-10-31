@@ -94,7 +94,7 @@ export function stripAffixes(token: string): string {
   return word;
 }
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return normalizeArabicText(text)
     .split(" ")
     .filter(Boolean)
@@ -1533,7 +1533,7 @@ function faqMatchScore(
  * Best FAQ match: at least 2 shared distinctive tokens, or at least half
  * of a short question's tokens. Ties keep the earliest entry.
  */
-function matchFaq(
+export function matchFaq(
   messageTokens: string[],
   faqs: ReadonlyArray<{ question: string; answer: string }>,
 ): { question: string; answer: string } | null {
