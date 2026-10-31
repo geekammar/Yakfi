@@ -10,6 +10,12 @@ import {
   parseAiResponse,
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
+import { buildServiceOffer } from "../src/features/conversations/server/booking-offer";
+import {
+  dehydrateConversationState,
+  emptyConversationState,
+  withPresentedOffer,
+} from "../src/features/conversations/server/conversation-state";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
 import {
   daysInMonth,
@@ -1942,21 +1948,30 @@ async function runSuite(): Promise<void> {
         connectionId: "conn-1",
       };
 
-      await establishInitialOffer(harness, identity);
-      // Remove prior date so day=5 requires month clarification (ambiguous)
-      const initRow = store.rows.get(harness.conversation.id);
-      if (
-        initRow &&
-        typeof initRow.state === "object" &&
-        initRow.state !== null
-      ) {
-        const raw = initRow.state as any;
-        delete raw.knownFacts.date;
-        raw.selectedDate = null;
-        if (raw.offer) {
-          raw.offer.date = undefined;
-        }
-      }
+      const initialOffer = buildServiceOffer(
+        {
+          businessId: harness.business.id,
+          conversationId: harness.conversation.id,
+        },
+        "offer-compat-init",
+        [{ id: "srv-1", name: "كشف أسنان" }],
+        new Date("2026-11-01T10:00:00.000Z"),
+      )!;
+
+      const baseState = withPresentedOffer(
+        {
+          ...emptyConversationState(),
+          knownFacts: { service: "كشف أسنان" },
+        },
+        initialOffer,
+      );
+
+      store.rows.set(harness.conversation.id, {
+        businessId: harness.business.id,
+        revision: 1,
+        updatedAt: new Date("2026-11-01T10:00:00.000Z"),
+        state: dehydrateConversationState(baseState),
+      });
 
       check(
         "19.0 Initial active offer established for conflict tests",
