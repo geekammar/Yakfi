@@ -680,7 +680,9 @@ async function runSuite(): Promise<void> {
       ],
       telemetry: [
         {
+          finalProvider: "mock-truth-provider",
           finalStatus: "FAILURE",
+          attempts: [],
           conversationControl: {
             handoffReason: "PROVIDER_UNAVAILABLE",
           },

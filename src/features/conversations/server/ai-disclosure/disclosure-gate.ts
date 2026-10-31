@@ -238,7 +238,7 @@ export type DisclosureResult =
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
-const GENERIC_ARABIC_WORDS = new Set([
+const RAW_GENERIC_ARABIC_WORDS = [
   "عيادة",
   "العيادة",
   "مركز",
@@ -264,7 +264,11 @@ const GENERIC_ARABIC_WORDS = new Set([
   "الاستفسار",
   "معلومات",
   "المعلومات",
-]);
+];
+
+const GENERIC_ARABIC_WORDS = new Set(
+  RAW_GENERIC_ARABIC_WORDS.map((w) => normalizeArabicText(w)),
+);
 
 function extractSubstantiveWords(text: string): Set<string> {
   const norm = normalizeArabicText(text);
@@ -678,7 +682,8 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       response.extraction?.service &&
       (c.family === "business.about" ||
         c.family === "business.address" ||
-        c.family === "business.identity")
+        c.family === "business.identity" ||
+        c.family === "service.name")
     ) {
       return false;
     }
