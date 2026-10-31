@@ -175,7 +175,7 @@ export const aiTemporalRequestSchema = z.preprocess(
     }),
     z.object({
       type: z.literal("unresolved_date"),
-      day: z.number().int().min(1).max(31),
+      day: z.number().int().min(1).max(31).optional(),
       month: z.number().int().min(1).max(12).optional(),
       year: z.number().int().min(2000).max(2100).optional(),
       rawText: z.string().max(120).optional(),
@@ -450,6 +450,13 @@ export const conversationContextProjectionSchema = z.object({
         .object({
           hour: z.number().int().min(1).max(12),
           minute: z.number().int().min(0).max(59),
+        })
+        .optional(),
+      unresolvedDate: z
+        .object({
+          day: z.number().int().min(1).max(31).optional(),
+          month: z.number().int().min(1).max(12).optional(),
+          year: z.number().int().optional(),
         })
         .optional(),
     })

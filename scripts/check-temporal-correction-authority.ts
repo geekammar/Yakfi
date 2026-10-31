@@ -1047,6 +1047,384 @@ async function runSuite(): Promise<void> {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Group 11: PR71 Review 1.A — Preserve Explicit Components
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 11: Review 1.A — Preserve Explicit Components ──");
+  {
+    const refDate = new Date("2026-11-01T12:00:00.000Z");
+    const prior = { date: "2026-11-20" };
+    const res = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5, year: 2027 },
+      null,
+      refDate,
+      CAIRO_TZ,
+      400,
+      prior,
+    );
+    check(
+      "11.1 Explicit year 2027 preserved with prior context",
+      res.kind === "single_date" && res.date === "2027-11-05",
+      res.kind === "single_date" ? res.date : res.kind,
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 12: PR71 Review 1.B — Range Resolution Without Arbitrary Month
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 12: Review 1.B — Range Context Resolution ──");
+  {
+    const refDate = new Date("2026-11-01T12:00:00.000Z");
+    const multiRange = {
+      dateRange: { startDate: "2026-11-01", endDate: "2026-12-10" },
+    };
+    const multiRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5 },
+      null,
+      refDate,
+      CAIRO_TZ,
+      60,
+      multiRange,
+    );
+    check(
+      "12.1 Spanning range with multiple day-5 matches asks clarification",
+      multiRes.kind === "ambiguous" &&
+        multiRes.reason === "AMBIGUOUS_RANGE_MONTH",
+    );
+
+    const singleRange = {
+      dateRange: { startDate: "2026-11-01", endDate: "2026-11-20" },
+    };
+    const singleRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5 },
+      null,
+      refDate,
+      CAIRO_TZ,
+      60,
+      singleRange,
+    );
+    check(
+      "12.2 Range with unique day-5 match resolves without ambiguity",
+      singleRes.kind === "single_date" && singleRes.date === "2026-11-05",
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 13: PR71 Review 1.C — Respect Offer Validity
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 13: Review 1.C — Respect Offer Validity ──");
+  {
+    const harness = await createPlaygroundHarness({
+      initialState: {
+        now: "2026-11-01T10:00:00.000Z",
+        serviceId: "srv-dental",
+        serviceName: "كشف أسنان",
+        status: "AI_ACTIVE",
+      },
+    });
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: "2026-11-05",
+            timePreference: null,
+            temporalRequest: { type: "exact_date", date: "2026-11-05" },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "778899",
+        text: "عايز أحجز كشف أسنان يوم 5 نوفمبر",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp13-turn1",
+      },
+      identity,
+    );
+    check("13.1 Turn 1 establishes active offer", isReply(turn1));
+    const st1 = getOffer(harness);
+    check("13.2 State has active offer", st1?.offer?.status === "ACTIVE");
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "relative_day", offsetDays: -1 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "778899",
+        text: "عايز أحجز امبارح",
+        receivedAt: "2026-11-01T10:05:00.000Z",
+        externalId: "ext-grp13-turn2",
+      },
+      identity,
+    );
+    check("13.3 Turn 2 invalidates offer", isReply(turn2));
+    const st2 = getOffer(harness);
+    check(
+      "13.4 Offer is now invalidated or cleared",
+      !st2?.offer || st2.offer.status !== "ACTIVE",
+    );
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", day: 5 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn3 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "778899",
+        text: "يوم 5",
+        receivedAt: "2026-11-01T10:10:00.000Z",
+        externalId: "ext-grp13-turn3",
+      },
+      identity,
+    );
+    check("13.5 Turn 3 produces AI_REPLY", isReply(turn3) && isActive(turn3));
+    const body3 = lastBody(harness);
+    check(
+      "13.6 Does NOT resurrect invalidated offer; asks month clarification",
+      body3.includes("توضيح الشهر") && !body3.includes("المواعيد المتاحة"),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 14: PR71 Review 1.D — Yearless 29 February & Year Resolution Policy
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 14: Review 1.D — Yearless 29 February ──");
+  {
+    const refEnd2027 = new Date("2027-12-31T12:00:00.000Z");
+    const leapRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 29, month: 2 },
+      null,
+      refEnd2027,
+      CAIRO_TZ,
+      60,
+      null,
+    );
+    check(
+      "14.1 Yearless 29 Feb on 2027-12-31 resolves to 2028-02-29",
+      leapRes.kind === "single_date" && leapRes.date === "2028-02-29",
+      leapRes.kind === "single_date" ? leapRes.date : leapRes.kind,
+    );
+
+    const refPostLeap = new Date("2028-03-01T12:00:00.000Z");
+    const pastLeapRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 29, month: 2 },
+      null,
+      refPostLeap,
+      CAIRO_TZ,
+      60,
+      null,
+    );
+    check(
+      "14.2 29 Feb evaluated on 2028-03-01 is PAST_DATE",
+      pastLeapRes.kind === "invalid" && pastLeapRes.reason === "PAST_DATE",
+    );
+
+    const ref2026 = new Date("2026-01-01T12:00:00.000Z");
+    const nonLeapRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 29, month: 2, year: 2026 },
+      null,
+      ref2026,
+      CAIRO_TZ,
+      60,
+      null,
+    );
+    check(
+      "14.3 Explicit 2026-02-29 is IMPOSSIBLE_DATE",
+      nonLeapRes.kind === "invalid" && nonLeapRes.reason === "IMPOSSIBLE_DATE",
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 15: PR71 Review 2 — Contradiction Checks
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 15: Review 2 — Contradiction Checks ──");
+  {
+    const refDate = new Date("2026-11-01T12:00:00.000Z");
+    const conflictRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5, month: 11 },
+      "2026-11-10",
+      refDate,
+      CAIRO_TZ,
+      60,
+      null,
+    );
+    check(
+      "15.1 Conflicting same-turn extraction.date yields CONTRADICTION",
+      conflictRes.kind === "invalid" &&
+        conflictRes.reason === "CONTRADICTION",
+    );
+
+    const matchRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5, month: 11 },
+      "2026-11-05",
+      refDate,
+      CAIRO_TZ,
+      60,
+      null,
+    );
+    check(
+      "15.2 Concordant same-turn extraction.date resolves cleanly",
+      matchRes.kind === "single_date" && matchRes.date === "2026-11-05",
+    );
+
+    const replaceRes = resolveServerTemporalRequest(
+      { type: "unresolved_date", day: 5, month: 11 },
+      null,
+      refDate,
+      CAIRO_TZ,
+      60,
+      { date: "2026-11-20" },
+    );
+    check(
+      "15.3 Legitimate replacement of inherited date does not contradict",
+      replaceRes.kind === "single_date" && replaceRes.date === "2026-11-05",
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Group 16: PR71 Review 3 — Durable Partial-Date Clarification & Resume
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log("\n── Group 16: Review 3 — Durable Clarification & Resume ──");
+  {
+    const harness = await createPlaygroundHarness({
+      initialState: {
+        now: "2026-11-01T10:00:00.000Z",
+        serviceId: "srv-dental",
+        serviceName: "كشف أسنان",
+        status: "AI_ACTIVE",
+      },
+    });
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", day: 5 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn1 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "11223344",
+        text: "عايز أحجز كشف أسنان يوم 5",
+        receivedAt: "2026-11-01T10:00:00.000Z",
+        externalId: "ext-grp16-turn1",
+      },
+      identity,
+    );
+    check(
+      "16.1 Turn 1 produces AI_REPLY, stays AI_ACTIVE",
+      isReply(turn1) && isActive(turn1),
+    );
+    check(
+      "16.2 Turn 1 asks for month clarification",
+      lastBody(harness).includes("توضيح الشهر"),
+    );
+
+    const st1 = getOffer(harness);
+    check(
+      "16.3 State persists unresolvedDate day 5",
+      st1?.lastClarification?.unresolvedDate?.day === 5 &&
+        st1?.knownFacts?.unresolvedDate?.day === 5,
+    );
+
+    harness.deps.ai = {
+      providerName: "test-ai",
+      async respond(): Promise<AiResponse> {
+        return createMockAiResponse({
+          extraction: {
+            service: "كشف أسنان",
+            provider: null,
+            date: null,
+            timePreference: null,
+            temporalRequest: { type: "unresolved_date", month: 11 },
+            exactTime: null,
+          },
+        });
+      },
+    };
+
+    const turn2 = await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "123456789",
+        from: "11223344",
+        text: "نوفمبر",
+        receivedAt: "2026-11-01T10:05:00.000Z",
+        externalId: "ext-grp16-turn2",
+      },
+      identity,
+    );
+    check(
+      "16.4 Turn 2 produces AI_REPLY, stays AI_ACTIVE",
+      isReply(turn2) && isActive(turn2),
+    );
+
+    const st2 = getOffer(harness);
+    check(
+      "16.5 Turn 2 resumes booking with resolved date 2026-11-05",
+      st2?.knownFacts?.date === "2026-11-05" &&
+        st2?.selectedDate === "2026-11-05",
+    );
+    check(
+      "16.6 Pending clarification and unresolvedDate are cleared",
+      st2?.lastClarification === null && !st2?.knownFacts?.unresolvedDate,
+    );
+    check(
+      "16.7 Offer is presented for 2026-11-05",
+      st2?.offer?.status === "ACTIVE" &&
+        (st2?.offer?.kind === "SLOT" ? st2.offer.date === "2026-11-05" : true),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Summary
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n────────────────────────────────────────────────────────────");

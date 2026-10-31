@@ -6492,9 +6492,18 @@ async function runInboundTurn(
               turnSession.state?.knownFacts.dateRange ??
               null,
             offerDate:
-              turnSession.state?.offer && "date" in turnSession.state.offer
+              turnSession.state?.offer &&
+              turnSession.state.offer.status === "ACTIVE" &&
+              "date" in turnSession.state.offer &&
+              typeof turnSession.state.offer.date === "string"
                 ? turnSession.state.offer.date
                 : null,
+            unresolvedDate:
+              resolvedState?.lastClarification?.unresolvedDate ??
+              resolvedState?.knownFacts.unresolvedDate ??
+              turnSession.state?.lastClarification?.unresolvedDate ??
+              turnSession.state?.knownFacts.unresolvedDate ??
+              null,
           };
           const serverTemporal = resolveServerTemporalRequest(
             bookingAiResponse.extraction.temporalRequest ?? null,
@@ -6545,8 +6554,29 @@ async function runInboundTurn(
             if (turnSession.enabled) {
               await turnSession.invalidateOffer();
             }
+            const unresolvedDatePayload =
+              serverTemporal.day !== undefined ||
+              serverTemporal.month !== undefined ||
+              serverTemporal.year !== undefined
+                ? {
+                    ...(serverTemporal.day !== undefined
+                      ? { day: serverTemporal.day }
+                      : {}),
+                    ...(serverTemporal.month !== undefined
+                      ? { month: serverTemporal.month }
+                      : {}),
+                    ...(serverTemporal.year !== undefined
+                      ? { year: serverTemporal.year }
+                      : {}),
+                  }
+                : undefined;
             if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
+              const nextFacts = {
+                ...resolvedState.knownFacts,
+                ...(unresolvedDatePayload
+                  ? { unresolvedDate: unresolvedDatePayload }
+                  : {}),
+              };
               delete nextFacts.date;
               delete nextFacts.dateRange;
               resolvedState = {
@@ -6559,6 +6589,9 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
+                  ...(unresolvedDatePayload
+                    ? { unresolvedDate: unresolvedDatePayload }
+                    : {}),
                 },
               };
               if (turnSession.enabled) {
@@ -6566,7 +6599,12 @@ async function runInboundTurn(
                 await turnSession.commit();
               }
             } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = { ...turnSession.state.knownFacts };
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                ...(unresolvedDatePayload
+                  ? { unresolvedDate: unresolvedDatePayload }
+                  : {}),
+              };
               delete nextFacts.date;
               delete nextFacts.dateRange;
               turnSession.state = {
@@ -6579,6 +6617,9 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
+                  ...(unresolvedDatePayload
+                    ? { unresolvedDate: unresolvedDatePayload }
+                    : {}),
                 },
               };
               await turnSession.commit();
@@ -6637,6 +6678,7 @@ async function runInboundTurn(
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
@@ -6644,6 +6686,10 @@ async function runInboundTurn(
                 dateRange: null,
                 offer: null,
                 pendingOffer: null,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
@@ -6653,6 +6699,7 @@ async function runInboundTurn(
               const nextFacts = { ...turnSession.state.knownFacts };
               delete nextFacts.date;
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               turnSession.state = {
                 ...turnSession.state,
                 knownFacts: nextFacts,
@@ -6660,6 +6707,10 @@ async function runInboundTurn(
                 dateRange: null,
                 offer: null,
                 pendingOffer: null,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
               };
               await turnSession.commit();
             }
@@ -6713,15 +6764,37 @@ async function runInboundTurn(
                 date: serverTemporal.date,
               };
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           } else if (serverTemporal.kind === "date_range") {
             const rangeObj = {
@@ -6743,6 +6816,7 @@ async function runInboundTurn(
             if (resolvedState) {
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
               nextFacts.dateRange = rangeObj;
               const hasObsoleteSlotOffer =
                 turnSession.state?.offer?.kind === "SLOT" ||
@@ -6753,6 +6827,10 @@ async function runInboundTurn(
                 selectedDate: null,
                 dateRange: rangeObj,
                 offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -6760,6 +6838,24 @@ async function runInboundTurn(
                 }
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
+              nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state.offer?.kind === "SLOT";
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : turnSession.state.offer,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           }
         }
@@ -7045,9 +7141,18 @@ async function runInboundTurn(
               turnSession.state?.knownFacts.dateRange ??
               null,
             offerDate:
-              turnSession.state?.offer && "date" in turnSession.state.offer
+              turnSession.state?.offer &&
+              turnSession.state.offer.status === "ACTIVE" &&
+              "date" in turnSession.state.offer &&
+              typeof turnSession.state.offer.date === "string"
                 ? turnSession.state.offer.date
                 : null,
+            unresolvedDate:
+              resolvedState?.lastClarification?.unresolvedDate ??
+              resolvedState?.knownFacts.unresolvedDate ??
+              turnSession.state?.lastClarification?.unresolvedDate ??
+              turnSession.state?.knownFacts.unresolvedDate ??
+              null,
           };
           const serverTemporal = resolveServerTemporalRequest(
             candidateTemporal,
@@ -7098,8 +7203,29 @@ async function runInboundTurn(
             if (turnSession.enabled) {
               await turnSession.invalidateOffer();
             }
+            const unresolvedDatePayload =
+              serverTemporal.day !== undefined ||
+              serverTemporal.month !== undefined ||
+              serverTemporal.year !== undefined
+                ? {
+                    ...(serverTemporal.day !== undefined
+                      ? { day: serverTemporal.day }
+                      : {}),
+                    ...(serverTemporal.month !== undefined
+                      ? { month: serverTemporal.month }
+                      : {}),
+                    ...(serverTemporal.year !== undefined
+                      ? { year: serverTemporal.year }
+                      : {}),
+                  }
+                : undefined;
             if (resolvedState) {
-              const nextFacts = { ...resolvedState.knownFacts };
+              const nextFacts = {
+                ...resolvedState.knownFacts,
+                ...(unresolvedDatePayload
+                  ? { unresolvedDate: unresolvedDatePayload }
+                  : {}),
+              };
               delete nextFacts.date;
               delete nextFacts.dateRange;
               resolvedState = {
@@ -7112,6 +7238,9 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
+                  ...(unresolvedDatePayload
+                    ? { unresolvedDate: unresolvedDatePayload }
+                    : {}),
                 },
               };
               if (turnSession.enabled) {
@@ -7119,7 +7248,12 @@ async function runInboundTurn(
                 await turnSession.commit();
               }
             } else if (turnSession.enabled && turnSession.state) {
-              const nextFacts = { ...turnSession.state.knownFacts };
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                ...(unresolvedDatePayload
+                  ? { unresolvedDate: unresolvedDatePayload }
+                  : {}),
+              };
               delete nextFacts.date;
               delete nextFacts.dateRange;
               turnSession.state = {
@@ -7132,6 +7266,9 @@ async function runInboundTurn(
                 missingFacts: ["date"],
                 lastClarification: {
                   type: "date_month",
+                  ...(unresolvedDatePayload
+                    ? { unresolvedDate: unresolvedDatePayload }
+                    : {}),
                 },
               };
               await turnSession.commit();
@@ -7190,6 +7327,7 @@ async function runInboundTurn(
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
@@ -7197,6 +7335,10 @@ async function runInboundTurn(
                 dateRange: null,
                 offer: null,
                 pendingOffer: null,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
@@ -7206,6 +7348,7 @@ async function runInboundTurn(
               const nextFacts = { ...turnSession.state.knownFacts };
               delete nextFacts.date;
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               turnSession.state = {
                 ...turnSession.state,
                 knownFacts: nextFacts,
@@ -7213,6 +7356,10 @@ async function runInboundTurn(
                 dateRange: null,
                 offer: null,
                 pendingOffer: null,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
               };
               await turnSession.commit();
             }
@@ -7266,15 +7413,37 @@ async function runInboundTurn(
                 date: serverTemporal.date,
               };
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           } else if (serverTemporal.kind === "date_range") {
             const rangeObj = {
@@ -7296,6 +7465,7 @@ async function runInboundTurn(
             if (resolvedState) {
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
               nextFacts.dateRange = rangeObj;
               const hasObsoleteSlotOffer =
                 turnSession.state?.offer?.kind === "SLOT" ||
@@ -7306,6 +7476,10 @@ async function runInboundTurn(
                 selectedDate: null,
                 dateRange: rangeObj,
                 offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -7313,6 +7487,24 @@ async function runInboundTurn(
                 }
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
+              nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state.offer?.kind === "SLOT";
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : turnSession.state.offer,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           }
         }
