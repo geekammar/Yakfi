@@ -20,6 +20,8 @@ export type BusinessSettingsView = {
   /** Customer-facing location line (PROMPT-AI-OPS-21). "" when not set. */
   address: string;
   confirmationMode: string;
+  /** Customer appointment time display preference (START_ONLY vs FULL_RANGE). */
+  appointmentTimeDisplay: "START_ONLY" | "FULL_RANGE";
   cancellationPolicy: string;
   /** Candidate appointment start-time interval in minutes (UX001-R3). */
   slotDurationMinutes: number;

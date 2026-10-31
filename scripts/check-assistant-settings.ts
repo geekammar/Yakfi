@@ -153,6 +153,7 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     workingHours: null,
     slotDurationMinutes: 30,
     confirmationMode: "automatic",
+    appointmentTimeDisplay: "START_ONLY",
     faqs: null,
     cancellationPolicy: null,
     assistantName: null,

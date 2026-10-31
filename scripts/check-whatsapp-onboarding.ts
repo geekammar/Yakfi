@@ -751,6 +751,7 @@ async function main(): Promise<void> {
     workingHours: null;
     slotDurationMinutes: number;
     confirmationMode: string;
+    appointmentTimeDisplay: string;
     faqs: null;
     cancellationPolicy: string | null;
     onboardingCompletedAt: Date | null;
@@ -783,6 +784,7 @@ async function main(): Promise<void> {
     workingHours: null,
     slotDurationMinutes: 30,
     confirmationMode: "manual",
+    appointmentTimeDisplay: "START_ONLY",
     faqs: null,
     cancellationPolicy: null,
     onboardingCompletedAt: fixedNow,

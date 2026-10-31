@@ -168,6 +168,7 @@ export const slotOfferSchema = z.object({
   serviceSource: z.enum(["CUSTOMER", "DEFAULT"]),
   providerId: shortText.nullable(),
   timePreference: canonicalTimePreferenceSchema.nullable().optional(),
+  timeDisplayPreference: z.enum(["START_ONLY", "FULL_RANGE"]).optional(),
   date: isoDate,
   range: z
     .object({
@@ -402,6 +403,7 @@ export function buildSlotOffer(
     serviceSource?: "CUSTOMER" | "DEFAULT";
     providerId?: string | null;
     timePreference?: CanonicalTimePreference | null;
+    timeDisplayPreference?: "START_ONLY" | "FULL_RANGE";
     date: string;
     range?: { startDate: string; endDate: string } | null;
     followUpRequestId?: string | null;
@@ -424,6 +426,7 @@ export function buildSlotOffer(
     serviceSource: input.serviceSource ?? "CUSTOMER",
     providerId: input.providerId ?? null,
     timePreference: input.timePreference ?? null,
+    timeDisplayPreference: input.timeDisplayPreference ?? "START_ONLY",
     date: input.date,
     range: input.range ?? null,
     followUpRequestId: input.followUpRequestId ?? null,

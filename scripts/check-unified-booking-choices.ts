@@ -183,10 +183,16 @@ async function run(): Promise<void> {
 
   const singleChoiceLabel = formatSlotChoiceLabel(singleProvSlots[0]!, true);
   const mixedChoiceLabel = formatSlotChoiceLabel(mixedProvSlots[0]!, false);
+  const singleChoiceLabelFull = formatSlotChoiceLabel(
+    singleProvSlots[0]!,
+    true,
+    "FULL_RANGE",
+  );
   check(
     "A.3b Single-provider slot choice label omits redundant provider name",
-    singleChoiceLabel === "1️⃣ 10:00 ص",
-    `received: ${singleChoiceLabel}`,
+    singleChoiceLabel === "1️⃣ 10:00 ص" &&
+      singleChoiceLabelFull === "1️⃣ 10:00 ص إلى 10:30 ص",
+    `received: ${singleChoiceLabel}, full: ${singleChoiceLabelFull}`,
   );
   check(
     "A.3c Mixed-provider slot choice label identifies specific provider",
@@ -199,19 +205,30 @@ async function run(): Promise<void> {
     date: "2026-10-25",
     formattedDate: "الأحد، 25 أكتوبر",
     options: singleProvSlots,
+    timeDisplayPreference: "FULL_RANGE",
   });
   const mixedCopy = formatBookingOptionsCopy({
     serviceName: "تنظيف أسنان",
     date: "2026-10-25",
     formattedDate: "الأحد، 25 أكتوبر",
     options: mixedProvSlots,
+    timeDisplayPreference: "FULL_RANGE",
+  });
+  const singleCopyStartOnly = formatBookingOptionsCopy({
+    serviceName: "تنظيف أسنان",
+    date: "2026-10-25",
+    formattedDate: "الأحد، 25 أكتوبر",
+    options: singleProvSlots,
+    timeDisplayPreference: "START_ONLY",
   });
 
   check(
     "A.3d Single-provider copy mentions provider in header and omits repetition in lines",
     singleCopy.includes('لخدمة "تنظيف أسنان" مع د. سارة') &&
       singleCopy.includes("1. 10:00 ص إلى 10:30 ص") &&
-      !singleCopy.includes("1. د. سارة —"),
+      !singleCopy.includes("1. د. سارة —") &&
+      singleCopyStartOnly.includes("1. 10:00 ص") &&
+      !singleCopyStartOnly.includes("إلى 10:30 ص"),
   );
   check(
     "A.3e Mixed-provider copy mentions provider on each line",

@@ -120,6 +120,7 @@ function toView(
     reminderTemplateId?: string;
     defaultServiceBookingEnabled?: boolean;
     defaultBookingServiceId?: string | null;
+    appointmentTimeDisplay?: string | null;
   },
   channelReadiness: {
     whatsapp: boolean;
@@ -136,6 +137,10 @@ function toView(
     about: business.about ?? "",
     address: business.address ?? "",
     confirmationMode: business.confirmationMode,
+    appointmentTimeDisplay:
+      business.appointmentTimeDisplay === "FULL_RANGE"
+        ? "FULL_RANGE"
+        : "START_ONLY",
     cancellationPolicy: business.cancellationPolicy ?? "",
     slotDurationMinutes: business.slotDurationMinutes ?? 30,
     reminderEnabled: business.reminderEnabled ?? false,
@@ -237,6 +242,8 @@ export async function updateBusinessSettings(
       about: blankToEmpty(parsed.data.about),
       address: blankToEmpty(parsed.data.address),
       confirmationMode: parsed.data.confirmationMode,
+      appointmentTimeDisplay:
+        parsed.data.appointmentTimeDisplay ?? "START_ONLY",
       cancellationPolicy: parsed.data.cancellationPolicy,
       reminderEnabled: effectiveReminderEnabled,
       reminderLeadHours: parsed.data.reminderLeadHours,

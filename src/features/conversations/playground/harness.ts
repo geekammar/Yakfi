@@ -242,6 +242,7 @@ export function createPlaygroundHarness(
     bookingHorizonDays: 30,
     bookingIntervalMinutes: 30,
     confirmationMode: "automatic",
+    appointmentTimeDisplay: "START_ONLY",
     defaultBranchId: PLAYGROUND_IDS.BRANCH_ID,
     whatsappNumber: "+201001111111",
     isActive: true,

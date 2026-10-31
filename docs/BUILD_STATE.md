@@ -9,7 +9,39 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.78.7 (feature branch; candidate PR)** — `Follow-up Scheduling Wizard Crash & Atomic Cancellation Race Resolution (ISS-006)`. Baseline: v0.78.6 (PR #69 merged baseline, commit `39d6b18`).
+**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
+
+- **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
+- **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).
+- **Persistence & Validation**: Added additive column `appointment_time_display` (TEXT, NOT NULL, DEFAULT `'START_ONLY'`) to `businesses` via migration `20261030180000_business_appointment_time_display`. Validated at boundary via `appointmentTimeDisplaySchema` and `businessSettingsSchema`.
+- **Settings UX**: Arabic radio group control in booking settings («إعدادات الحجز») with two options («البداية فقط» with example «2:00 م», «الفترة كاملة» with example «2:00 م إلى 2:40 م»). Authorized server-side update boundary (`updateBusinessSettings`) strictly enforced; zero AI calls. Mounted component lifecycle and save/reopen verified in `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`).
+- **Centralized Presentation & Formatter Output Recovery**: Centralized in `presentation-formatters.ts` (`formatAppointmentTimeSpan`, `formatConfirmationTime`, `formatSlotChoiceLabel`, `formatBookingOptionsCopy`). Normalizes customer surfaces (buttons and textual copy) from previous mixed presentation. Defines safe fallback for missing/unavailable end time to start time without inventing end times.
+- **Fail-Closed Legacy Offer Recovery & Concurrency Hardening**:
+  - `parseOfferDate` strictly validates Gregorian calendar dates (rejects Feb 31, Apr 31, non-leap Feb 29) and checks weekday consistency (Arabic weekday must match candidate date).
+  - Yearless labels fail closed to `null` unless anchored by deterministic message provenance (`msg.sentAt ?? msg.createdAt` or explicit provenance date) evaluated in business timezone (`Africa/Cairo`). Current turn clock never becomes historical offer provenance.
+  - Newest recognized offer bounds recovery: `extractLastBookingOffer` never reactivates older superseded offers if the newest offer header fails date parsing or lacks valid slot options.
+  - Strict time validation in `normalizeTimeTo24h` validates 0..23 24h, 1..12 12h, and 0..59 min, rejecting invalid inputs (`25:00`, `14:00 ص`).
+  - No end-time fabrication on start-only offers (`OfferedBookingOption.endTime` remains undefined).
+  - Serialized test DB migrations (`test-db-migration-shared-singleton` with `cancel-in-progress: false`) and direct connection stripping `-pooler.` from Neon database URL to eliminate P1002 advisory-lock collisions.
+- **Protocol Stability & Invariant Mapping**: Slot callback IDs (`fp:<token>:<index>`), choice IDs (`String(option.index)`), and slot values remain unchanged. Mid-flight preference changes while an offer is outstanding preserve valid callback-to-slot mapping and complete booking with 0 model calls.
+- **Reviewed Integration & Production Cutover Order**:
+  1. Upstream PR sequencing: PR #69 and PR #70 merged into `main` (merge commits `39d6b18` and `501149c`).
+  2. Integrated PR #68 onto `main` (baseline `v0.78.7`), preserving PR #69 provider eligibility/reschedule repairs and PR #70 atomic follow-up scheduling/cancellation invariants.
+  3. Validate integrated candidate via GitHub Actions CI (PR validation, disposable DB migrations, and Playwright UX QA).
+  4. Pin final candidate SHA on `feat/customer-time-display-preference`.
+  5. Operator reviews all pending production migrations before execution.
+  6. Operator triggers authorized production database migration via `.github/workflows/production-db-migrate.yml` targeting the pinned SHA (applying pending migrations including `20261030180000_business_appointment_time_display`).
+  7. Operator executes read-only schema, default, and health checks on production database.
+  8. Human code review and manual merge of PR #68 into `main`.
+  9. Automatic Vercel production deployment triggered by merge to `main`.
+  10. Authenticated post-deployment operational health and live customer acceptance verification.
+- **Verification Suite Evidence**:
+  - Offline domain suite `scripts/check-customer-time-display.ts` (75/75 automated checks across 8 groups passing).
+  - Mounted component test `src/features/settings/components/settings-screen.test.tsx` (`pnpm test:settings`, 3/3 checks passing in jsdom).
+  - Real disposable PostgreSQL integration suite `scripts/check-customer-time-display-db.ts` (`pnpm check:customer-time-display-db`, 10/10 checks passing in CI).
+  - Retained PR #69 and PR #70 suites: `check:booking-acceptance-db` (20/20), `test:reschedule-panel` (12/12), `test:provider-dialog` (6/6), `check:iss-006-db` (13/13), `test:follow-up-scheduling` (10/10), `check:iss-006` (12/12).
+
+**Product version: v0.78.7 (main baseline; merged PR #70)** — `Follow-up Scheduling Wizard Crash & Atomic Cancellation Race Resolution (ISS-006)`. Baseline: v0.78.6 (PR #69 merged baseline, commit `39d6b18`).
 
 1. **DateStep Undated & Range Safety (ISS-006)**: Repaired crash when opening undated follow-ups (`startDate: null, endDate: null`) where formatting `null` dates caused an unhandled `RangeError: Invalid time value` reaching Next.js Error Boundary twice on production v0.78.5. Added defensive Arabic date formatters (`formatArabicDate`, `formatArabicWeekday`, `formatArabicMonth`, `formatArabicDayMonth`) returning safe fallbacks on invalid/null dates, and explicit DateStep UI handling for undated requests («طلب متابعة دون تاريخ محدد — يمكنك اختيار أي موعد متاح») and inverted ranges.
 2. **Atomic Cancellation vs Scheduling Race**: Replaced non-atomic read-then-write cancellation with tenant-scoped atomic `cancelPending` transition asserting `status: "PENDING"` in SQL `WHERE` clause with serializable conflict retries. Prevented concurrent scheduling transactions from being overwritten by cancellation.

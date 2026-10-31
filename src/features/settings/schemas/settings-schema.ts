@@ -1,4 +1,5 @@
 import {
+  APPOINTMENT_TIME_DISPLAY_VALUES,
   CONFIRMATION_MODE_VALUES,
   TIMEZONES,
   phoneSchema,
@@ -47,6 +48,11 @@ export const businessSettingsSchema = z
       CONFIRMATION_MODE_VALUES,
       "اختر طريقة تأكيد الحجز",
     ),
+    appointmentTimeDisplay: z
+      .enum(APPOINTMENT_TIME_DISPLAY_VALUES, {
+        error: "اختر طريقة عرض وقت الموعد للعميل",
+      })
+      .optional(),
     slotDurationMinutes: z
       .union(
         [

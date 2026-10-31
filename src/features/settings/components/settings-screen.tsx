@@ -26,6 +26,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  APPOINTMENT_TIME_DISPLAY_OPTIONS,
   BOOKING_INTERVAL_OPTIONS,
   CONFIRMATION_MODES,
   TIMEZONES,
@@ -79,6 +80,9 @@ export function SettingsScreen({
       address: initialSettings.address,
       confirmationMode:
         initialSettings.confirmationMode as BusinessSettingsInput["confirmationMode"],
+      appointmentTimeDisplay:
+        (initialSettings.appointmentTimeDisplay as
+          "START_ONLY" | "FULL_RANGE") ?? "START_ONLY",
       slotDurationMinutes:
         initialSettings.slotDurationMinutes as BusinessSettingsInput["slotDurationMinutes"],
       cancellationPolicy: initialSettings.cancellationPolicy,
@@ -422,6 +426,51 @@ export function SettingsScreen({
                 )}
               />
               {fieldError(form.formState.errors.confirmationMode?.message)}
+            </fieldset>
+
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">
+                طريقة عرض وقت الموعد للعميل
+              </legend>
+              <Controller
+                control={form.control}
+                name="appointmentTimeDisplay"
+                render={({ field }) => (
+                  <RadioGroup
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    className="gap-3"
+                  >
+                    {APPOINTMENT_TIME_DISPLAY_OPTIONS.map((opt) => (
+                      <Label
+                        key={opt.value}
+                        htmlFor={`time-display-${opt.value}`}
+                        className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60"
+                      >
+                        <RadioGroupItem
+                          id={`time-display-${opt.value}`}
+                          value={opt.value}
+                          className="mt-0.5"
+                        />
+                        <span className="space-y-1">
+                          <span className="block text-sm font-medium">
+                            {opt.label}
+                          </span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            {opt.hint}
+                          </span>
+                          <span className="block text-xs font-mono text-muted-foreground/80">
+                            {opt.example}
+                          </span>
+                        </span>
+                      </Label>
+                    ))}
+                  </RadioGroup>
+                )}
+              />
+              {fieldError(
+                form.formState.errors.appointmentTimeDisplay?.message,
+              )}
             </fieldset>
 
             <div className="max-w-sm space-y-2">

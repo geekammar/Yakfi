@@ -130,6 +130,7 @@ import {
 import type {
   BookingSelection,
   BookingSelectionContext,
+  ChronologicalMessage,
   OfferReply,
 } from "@/features/conversations/server/booking-selection";
 import {
@@ -192,7 +193,9 @@ import {
   formatArabicDate,
   formatArabicDateRange,
   formatBookingOptionsCopy,
+  formatConfirmationTime,
   sampleRepresentativeSlots,
+  type AppointmentTimeDisplayPreference,
 } from "@/features/conversations/server/presentation-formatters";
 import {
   extractProviderPreferenceDetailed,
@@ -757,6 +760,7 @@ export function formatBookingOptionsMessage(
   }>,
   followUpRequestId?: string | null,
   isMoreTimes?: boolean,
+  timeDisplayPreference: AppointmentTimeDisplayPreference = "START_ONLY",
 ): string {
   const normalizedOptions = options.map((opt, idx) => ({
     index: opt.index ?? idx + 1,
@@ -775,6 +779,7 @@ export function formatBookingOptionsMessage(
     options: normalizedOptions,
     followUpRequestId,
     isMoreTimes,
+    timeDisplayPreference,
   });
 }
 
@@ -871,7 +876,7 @@ function includedKnowledgeSources(
  * turn (same contract as usage telemetry).
  */
 function observeConversationStateTransition(
-  recentChronological: ReadonlyArray<{ senderType: string; content: string }>,
+  recentChronological: ReadonlyArray<ChronologicalMessage>,
   decision: AiResponse | null,
 ): TurnStateTransitionObservation | undefined {
   if (!decision) return undefined;
@@ -971,7 +976,10 @@ function resolveFinishedTurn(
     });
 
     const base =
-      priorState ?? deriveConversationStateFromHistory(recentChronological);
+      priorState ??
+      deriveConversationStateFromHistory(recentChronological, {
+        timezone,
+      });
     // Reconstruct a pending clarification from history (migration-safe §9) so
     // the resumed state reflects what the engine actually asked last turn.
     const pending = derivePendingClarification(recentChronological);
@@ -1628,6 +1636,7 @@ type BookingSelectionScope = {
     defaultServiceBookingEnabled?: boolean;
     defaultBookingServiceId?: string | null;
     defaultServiceId?: string | null;
+    appointmentTimeDisplay?: string | null;
   };
   conversation: Conversation;
   customer: { id: string; phone: string };
@@ -2509,6 +2518,10 @@ async function presentSlotChoices(
             date: input.date,
             range:
               input.range ?? turnSession.state?.knownFacts.dateRange ?? null,
+            timeDisplayPreference:
+              scope.business.appointmentTimeDisplay === "FULL_RANGE"
+                ? "FULL_RANGE"
+                : "START_ONLY",
             followUpRequestId: null,
             shownCount: representativeOptions.length,
             shownSlotKeys: representativeOptions.map(
@@ -2561,11 +2574,22 @@ async function presentSlotChoices(
           }
         }
 
-        const choices = slotOffer ? buildChannelChoices(slotOffer) : undefined;
+        const timeDisplayPref =
+          scope.business.appointmentTimeDisplay === "FULL_RANGE"
+            ? "FULL_RANGE"
+            : "START_ONLY";
+        const choices = slotOffer
+          ? buildChannelChoices(slotOffer, {
+              timeDisplayPreference: timeDisplayPref,
+            })
+          : undefined;
         const optionsMsg = formatBookingOptionsMessage(
           input.serviceName,
           input.date,
           representativeOptions,
+          null,
+          false,
+          timeDisplayPref,
         );
         const assistantMessage = await persistAssistantReply(
           deps,
@@ -2746,6 +2770,10 @@ async function completeBookingSelection(
   const serviceName = serviceMatch.serviceName;
   const date = context.date;
   const branchId = (scope.conversation.branchId as string | null) ?? null;
+  const timeDisplayPref =
+    scope.business.appointmentTimeDisplay === "FULL_RANGE"
+      ? "FULL_RANGE"
+      : "START_ONLY";
 
   // 2. CORE-01 — fresh eligibility (server-derived business scope).
   const eligibilityDeps = buildEligibilityDeps(deps);
@@ -2950,6 +2978,7 @@ async function completeBookingSelection(
             serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
             providerId: providerId ?? null,
             timePreference: canonicalTimePref,
+            timeDisplayPreference: timeDisplayPref,
             date,
             followUpRequestId: context.followUpRequestId ?? null,
             shownCount: newShownKeys.length,
@@ -2974,13 +3003,18 @@ async function completeBookingSelection(
           }
         }
       }
-      const choices = nextOffer ? buildChannelChoices(nextOffer) : undefined;
+      const choices = nextOffer
+        ? buildChannelChoices(nextOffer, {
+            timeDisplayPreference: timeDisplayPref,
+          })
+        : undefined;
       const optionsMsg = formatBookingOptionsMessage(
         serviceName,
         date,
         nextBatch,
         context.followUpRequestId,
         true,
+        timeDisplayPref,
       );
       return reply(optionsMsg, "AI_ACTIVE", null, undefined, choices);
     }
@@ -3007,7 +3041,7 @@ async function completeBookingSelection(
           await turnSession.invalidateOffer();
         }
         return reply(
-          `لم يعد بإمكاني التأكد من الخيارات المعروضة — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, freshOptions)}`,
+          `لم يعد بإمكاني التأكد من الخيارات المعروضة — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, freshOptions, null, false, timeDisplayPref)}`,
           "AI_ACTIVE",
         );
       }
@@ -3033,7 +3067,7 @@ async function completeBookingSelection(
         await turnSession.invalidateOffer();
       }
       return reply(
-        `الخيار المحدد لم يعد متاحاً — إليك المواعيد المحدثة:\n${formatBookingOptionsMessage(serviceName, date, freshOptions)}`,
+        `الخيار المحدد لم يعد متاحاً — إليك المواعيد المحدثة:\n${formatBookingOptionsMessage(serviceName, date, freshOptions, null, false, timeDisplayPref)}`,
         "AI_ACTIVE",
       );
     }
@@ -3173,6 +3207,7 @@ async function completeBookingSelection(
             serviceSource: context.serviceId ? "CUSTOMER" : "DEFAULT",
             providerId: providerId ?? null,
             timePreference: canonicalTimePref ?? null,
+            timeDisplayPreference: timeDisplayPref,
             date,
             followUpRequestId,
             shownCount: retry.data.options.length,
@@ -3196,9 +3231,13 @@ async function completeBookingSelection(
           }
         }
       }
-      const choices = retryOffer ? buildChannelChoices(retryOffer) : undefined;
+      const choices = retryOffer
+        ? buildChannelChoices(retryOffer, {
+            timeDisplayPreference: timeDisplayPref,
+          })
+        : undefined;
       return reply(
-        `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options, followUpRequestId)}`,
+        `عذراً، تم حجز هذا الموعد للتو — إليك المواعيد المتاحة الآن:\n${formatBookingOptionsMessage(serviceName, date, retry.data.options, followUpRequestId, false, timeDisplayPref)}`,
         "AI_ACTIVE",
         null,
         undefined,
@@ -3258,13 +3297,14 @@ async function completeBookingSelection(
   }
 
   const businessName = scope.business.name;
+  const timeSpan = formatConfirmationTime(startTime, endTime, timeDisplayPref);
   const confirmation = followUpRequestId
     ? initialStatus === "CONFIRMED"
-      ? `تم تأكيد حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}.`
-      : `تم استلام طلب حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`
+      ? `تم تأكيد حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} ${timeSpan} مع ${chosen.displayName} لدى ${businessName}.`
+      : `تم استلام طلب حجز موعد المتابعة لخدمة "${serviceName}" يوم ${date} ${timeSpan} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`
     : initialStatus === "CONFIRMED"
-      ? `تم تأكيد حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}.`
-      : `تم استلام طلب حجزك لخدمة "${serviceName}" يوم ${date} من ${startTime} إلى ${endTime} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`;
+      ? `تم تأكيد حجزك لخدمة "${serviceName}" يوم ${date} ${timeSpan} مع ${chosen.displayName} لدى ${businessName}.`
+      : `تم استلام طلب حجزك لخدمة "${serviceName}" يوم ${date} ${timeSpan} مع ${chosen.displayName} لدى ${businessName}. سيتواصل معك الفريق لتأكيد الموعد.`;
   return reply(confirmation, "BOOKED");
 }
 
@@ -3710,6 +3750,7 @@ async function runInboundTurn(
     const recentChronological = [...recent].reverse().map((message) => ({
       senderType: message.senderType,
       content: message.content,
+      createdAt: message.createdAt,
     }));
     // CTX-01 (PERF-04) — the current customer message reaches the assistant
     // EXACTLY ONCE, through the CURRENT message slot (`sources.message`
@@ -3732,6 +3773,7 @@ async function runInboundTurn(
       .map((message) => ({
         senderType: message.senderType,
         content: message.content,
+        createdAt: message.createdAt,
       }));
 
     const selectionScope: BookingSelectionScope = {
@@ -3861,7 +3903,14 @@ async function runInboundTurn(
                 undefined,
               );
             }
-            const choices = buildChannelChoices(suspended);
+            const suspendedTimePref =
+              suspended.timeDisplayPreference ??
+              (selectionScope.business.appointmentTimeDisplay === "FULL_RANGE"
+                ? "FULL_RANGE"
+                : "START_ONLY");
+            const choices = buildChannelChoices(suspended, {
+              timeDisplayPreference: suspendedTimePref,
+            });
             const optionsMsg = formatBookingOptionsMessage(
               suspended.serviceName,
               suspended.date,
@@ -3871,6 +3920,9 @@ async function runInboundTurn(
                 startAt: o.startAt,
                 endAt: o.endAt,
               })),
+              suspended.followUpRequestId,
+              false,
+              suspendedTimePref,
             );
             return selectionReply(
               deps,
@@ -5589,7 +5641,9 @@ async function runInboundTurn(
       const selectionAttempt =
         wasBooked || (turnSession.enabled && turnSession.state?.offer)
           ? null
-          : tryParseBookingSelection(inbound.text, recentChronological);
+          : tryParseBookingSelection(inbound.text, recentChronological, {
+              timezone: business.timezone ?? "Africa/Cairo",
+            });
       if (selectionAttempt) {
         const selectionResult = await completeBookingSelection(
           deps,
@@ -8391,6 +8445,10 @@ async function runInboundTurn(
         4,
       );
 
+      const turnTimeDisplayPref =
+        business.appointmentTimeDisplay === "FULL_RANGE"
+          ? "FULL_RANGE"
+          : "START_ONLY";
       let slotOffer: SlotOffer | null = null;
       if (turnSession.enabled) {
         slotOffer = buildSlotOffer(
@@ -8402,6 +8460,7 @@ async function runInboundTurn(
             serviceSource: mapped.serviceSource,
             providerId: providerId ?? null,
             timePreference: timeOfDayPref ?? null,
+            timeDisplayPreference: turnTimeDisplayPref,
             date: mapped.date!,
             followUpRequestId: activeFollowUpId,
             shownCount: representativeOptions.length,
@@ -8437,7 +8496,11 @@ async function runInboundTurn(
         }
       }
 
-      const choices = slotOffer ? buildChannelChoices(slotOffer) : undefined;
+      const choices = slotOffer
+        ? buildChannelChoices(slotOffer, {
+            timeDisplayPreference: turnTimeDisplayPref,
+          })
+        : undefined;
 
       // Success with options — AI_REPLY, stay AI_ACTIVE (no appointment mutation)
       const optionsMsg = formatBookingOptionsMessage(
@@ -8445,6 +8508,8 @@ async function runInboundTurn(
         mapped.date!,
         representativeOptions,
         activeFollowUpId,
+        false,
+        turnTimeDisplayPref,
       );
       const assistantMessage = await persistAssistantReply(
         deps,
