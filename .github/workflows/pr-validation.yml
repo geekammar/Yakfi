@@ -131,6 +131,7 @@ jobs:
           pnpm check:unified-booking-choices
           pnpm check:customer-time-display
           pnpm check:semantic-date-ranges
+          pnpm check:temporal-correction-authority
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics

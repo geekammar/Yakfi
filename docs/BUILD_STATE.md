@@ -9,7 +9,28 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.0 (feature branch; candidate PR)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
+**Product version: v0.79.1 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.0 (merged PR #68, commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`). Branch: `fix/temporal-correction-authority`.
+
+- **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
+- **Temporal Correction Authority (ISS-011)**:
+  - Turn temporal proposals strictly retain authority over inherited state dates.
+  - When customer requests a past date (e.g. "عايز أحجز امبارح"), negative relative day offset (`offsetDays: -365..60`) is parsed cleanly by AI schema.
+  - The server evaluates the date in business timezone, truthfully explains that the requested date is in the past, asks for a future date, clears the obsolete state date, and invalidates any pending booking offer so it cannot be re-presented or accidentally selected.
+  - Valid service and provider preferences remain intact.
+- **Calendar Validity & Leap Year Handling (ISS-015)**:
+  - Impossible dates (e.g. "30 فبراير" or "31 أبريل") are recognized as structured `unresolved_date` or `invalid_date` rather than failing schema or falling back to "missing date" (which previously caused upcoming date rollover to 1 November).
+  - Pure server-side calendar functions (`isLeapYear`, `daysInMonth`, `isValidCalendarComponents`) strictly govern date resolution.
+  - 29 February is evaluated against the resolved year: valid in leap years (e.g. 2028), marked `IMPOSSIBLE_DATE` in non-leap years (e.g. 2026).
+- **Ambiguous Day Clarification (ISS-015)**:
+  - Requests with a day number but missing month (e.g. "يوم 5") resolve against reliable prior context (such as an existing pending offer or previous discussion of that month).
+  - Without reliable prior context, the engine delivers a single bounded clarification question (`kind: "ambiguous"`) asking for the month/date, without escalating to human handoff or inventing certainty.
+- **Stale Callback Safety**:
+  - Superseded callbacks on invalidated offers reject booking creation without resurrecting the obsolete date.
+- **Verification Suite Evidence**:
+  - Offline domain suite `scripts/check-temporal-correction-authority.ts` (10/10 scenarios passing, covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, and both `START_ONLY` and `FULL_RANGE` display preferences).
+
+**Product version: v0.79.0 (main baseline; merged PR #68)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
+
 
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).

@@ -5540,7 +5540,11 @@ async function runInboundTurn(
         const candidateDate =
           turnSession.state?.selectedDate ??
           turnSession.state?.knownFacts.date ??
-          (staleOffer && "date" in staleOffer ? staleOffer.date : null);
+          (staleOffer &&
+          staleOffer.status !== "INVALIDATED" &&
+          "date" in staleOffer
+            ? staleOffer.date
+            : null);
         const tz = resolveValidTimeZone(business.timezone);
         const todayIso = todayIsoInTimeZone(now, tz);
         const isFutureDate = candidateDate ? candidateDate >= todayIso : false;
@@ -6478,11 +6482,27 @@ async function runInboundTurn(
             turnReconciled.setFacts.get("date")?.value ??
             bookingAiResponse.extraction.date ??
             null;
+          const priorTemporalContext = {
+            date:
+              resolvedState?.knownFacts.date ??
+              turnSession.state?.knownFacts.date ??
+              null,
+            dateRange:
+              resolvedState?.knownFacts.dateRange ??
+              turnSession.state?.knownFacts.dateRange ??
+              null,
+            offerDate:
+              turnSession.state?.offer && "date" in turnSession.state.offer
+                ? turnSession.state.offer.date
+                : null,
+          };
           const serverTemporal = resolveServerTemporalRequest(
             bookingAiResponse.extraction.temporalRequest ?? null,
             explicitDate,
             now,
             business.timezone ?? "UTC",
+            60,
+            priorTemporalContext,
           );
 
           if (serverTemporal.kind === "range_too_broad") {
@@ -6520,16 +6540,130 @@ async function runInboundTurn(
             };
           }
 
+          if (serverTemporal.kind === "ambiguous") {
+            const ambiguousMsg = serverTemporal.message;
+            if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+            }
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+                missingFacts: ["date"],
+                lastClarification: {
+                  type: "date_month",
+                  day: serverTemporal.day,
+                },
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+                await turnSession.commit();
+              }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+                missingFacts: ["date"],
+                lastClarification: {
+                  type: "date_month",
+                  day: serverTemporal.day,
+                },
+              };
+              await turnSession.commit();
+            }
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              ambiguousMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              ambiguousMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
           if (serverTemporal.kind === "invalid") {
             let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
             if (serverTemporal.reason === "PAST_DATE") {
               invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "IMPOSSIBLE_DATE") {
+              invalidMsg =
+                serverTemporal.error ||
+                "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
             } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
               invalidMsg =
                 "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
             } else if (serverTemporal.reason === "CONTRADICTION") {
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
+            }
+            if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+            }
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+                await turnSession.commit();
+              }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+              };
+              await turnSession.commit();
             }
             const assistantMessage = await persistAssistantReply(
               deps,
@@ -6903,11 +7037,27 @@ async function runInboundTurn(
             }
           }
 
+          const priorTemporalContext = {
+            date:
+              resolvedState?.knownFacts.date ??
+              turnSession.state?.knownFacts.date ??
+              null,
+            dateRange:
+              resolvedState?.knownFacts.dateRange ??
+              turnSession.state?.knownFacts.dateRange ??
+              null,
+            offerDate:
+              turnSession.state?.offer && "date" in turnSession.state.offer
+                ? turnSession.state.offer.date
+                : null,
+          };
           const serverTemporal = resolveServerTemporalRequest(
             candidateTemporal,
             explicitDate,
             now,
             business.timezone ?? "UTC",
+            60,
+            priorTemporalContext,
           );
 
           if (serverTemporal.kind === "range_too_broad") {
@@ -6945,16 +7095,130 @@ async function runInboundTurn(
             };
           }
 
+          if (serverTemporal.kind === "ambiguous") {
+            const ambiguousMsg = serverTemporal.message;
+            if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+            }
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+                missingFacts: ["date"],
+                lastClarification: {
+                  type: "date_month",
+                  day: serverTemporal.day,
+                },
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+                await turnSession.commit();
+              }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+                missingFacts: ["date"],
+                lastClarification: {
+                  type: "date_month",
+                  day: serverTemporal.day,
+                },
+              };
+              await turnSession.commit();
+            }
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              ambiguousMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              ambiguousMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
           if (serverTemporal.kind === "invalid") {
             let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
             if (serverTemporal.reason === "PAST_DATE") {
               invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "IMPOSSIBLE_DATE") {
+              invalidMsg =
+                serverTemporal.error ||
+                "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
             } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
               invalidMsg =
                 "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
             } else if (serverTemporal.reason === "CONTRADICTION") {
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
+            }
+            if (turnSession.enabled) {
+              await turnSession.invalidateOffer();
+            }
+            if (resolvedState) {
+              const nextFacts = { ...resolvedState.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              resolvedState = {
+                ...resolvedState,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+              };
+              if (turnSession.enabled) {
+                turnSession.state = resolvedState;
+                await turnSession.commit();
+              }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.dateRange;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: null,
+                offer: null,
+                pendingOffer: null,
+              };
+              await turnSession.commit();
             }
             const assistantMessage = await persistAssistantReply(
               deps,

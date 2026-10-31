@@ -32,6 +32,7 @@ import {
 } from "./conversation-facts";
 import {
   aiTemporalContextSchema,
+  isValidIsoCalendarDate,
   type AiTemporalContext,
 } from "./temporal-context";
 import { z } from "zod";
@@ -41,6 +42,7 @@ export {
   canonicalTimePreferenceValues,
   conversationFactKeys,
   isCanonicalTimePreference,
+  isValidIsoCalendarDate,
   removableFactKeys,
   type CanonicalTimePreference,
   type ConversationFactKey,
@@ -121,25 +123,62 @@ const isoDateSchema = z
  * Distinguishes an exact calendar date, a relative day offset, a calendar week range,
  * and an explicit bounded date range.
  */
-export const aiTemporalRequestSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("exact_date"),
-    date: isoDateSchema,
-  }),
-  z.object({
-    type: z.literal("relative_day"),
-    offsetDays: z.number().int().min(0).max(60),
-  }),
-  z.object({
-    type: z.literal("calendar_week"),
-    weekOffset: z.number().int().min(0).max(8),
-  }),
-  z.object({
-    type: z.literal("date_range"),
-    startDate: isoDateSchema,
-    endDate: isoDateSchema,
-  }),
-]);
+export const aiTemporalRequestSchema = z.preprocess(
+  (val) => {
+    if (val && typeof val === "object" && "type" in val) {
+      const obj = val as Record<string, unknown>;
+      // If model provided exact_date with an ISO-shaped string that is an impossible calendar date (e.g. "2026-02-30")
+      if (obj.type === "exact_date" && typeof obj.date === "string") {
+        const d = obj.date.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isValidIsoCalendarDate(d)) {
+          const [y, m, day] = d.split("-").map(Number);
+          return {
+            type: "unresolved_date",
+            day,
+            month: m,
+            year: y,
+            rawText: d,
+          };
+        }
+      }
+    }
+    return val;
+  },
+  z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("exact_date"),
+      date: isoDateSchema,
+    }),
+    z.object({
+      type: z.literal("relative_day"),
+      offsetDays: z.number().int().min(-365).max(60),
+    }),
+    z.object({
+      type: z.literal("calendar_week"),
+      weekOffset: z.number().int().min(-52).max(8),
+    }),
+    z.object({
+      type: z.literal("date_range"),
+      startDate: isoDateSchema,
+      endDate: isoDateSchema,
+    }),
+    z.object({
+      type: z.literal("unresolved_date"),
+      day: z.number().int().min(1).max(31),
+      month: z.number().int().min(1).max(12).optional(),
+      year: z.number().int().min(2000).max(2100).optional(),
+      rawText: z.string().max(120).optional(),
+    }),
+    z.object({
+      type: z.literal("invalid_date"),
+      day: z.number().int().min(1).max(31).optional(),
+      month: z.number().int().min(1).max(12).optional(),
+      year: z.number().int().min(2000).max(2100).optional(),
+      reason: z.string().max(100).optional(),
+      rawText: z.string().max(120).optional(),
+    }),
+  ]),
+);
 
 export type AiTemporalRequest = z.infer<typeof aiTemporalRequestSchema>;
 
