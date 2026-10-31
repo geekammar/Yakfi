@@ -3620,6 +3620,10 @@ function extractTemporalDependencies(
       offerDate: null,
     };
   }
+  let offerDate: string | null = null;
+  if (state.offer && "date" in state.offer) {
+    offerDate = state.offer.date ?? null;
+  }
   return {
     knownDate: state.knownFacts?.date,
     knownDateRange: state.knownFacts?.dateRange
@@ -3632,8 +3636,7 @@ function extractTemporalDependencies(
     dateRange: state.dateRange ? { ...state.dateRange } : null,
     offerToken: state.offer?.token ?? null,
     offerStatus: state.offer?.status ?? null,
-    offerDate:
-      state.offer && "date" in state.offer ? (state.offer.date ?? null) : null,
+    offerDate,
   };
 }
 
@@ -3679,15 +3682,26 @@ function isTemporalTransitionCompatible(
   return true;
 }
 
+type PersistTemporalTransitionResult = {
+  ok: boolean;
+  nextState: ConversationState | null;
+  reason?: "CONFLICT" | "STORAGE_ERROR";
+};
+
+function temporalFailureMessage(
+  reason?: "CONFLICT" | "STORAGE_ERROR",
+): string {
+  if (reason === "STORAGE_ERROR") {
+    return "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة.";
+  }
+  return "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
+}
+
 async function persistTemporalStateTransition(
   turnSession: TurnStateSession,
   resolvedState: ConversationState | null,
   transform: (state: ConversationState) => ConversationState,
-): Promise<{
-  ok: boolean;
-  nextState: ConversationState | null;
-  reason?: "CONFLICT" | "STORAGE_ERROR";
-}> {
+): Promise<PersistTemporalTransitionResult> {
   if (!turnSession.enabled) {
     const nextState = resolvedState ? transform(resolvedState) : null;
     return { ok: true, nextState };
@@ -5795,12 +5809,14 @@ async function runInboundTurn(
         }
       }
 
-      // 5. Default stale message
-      // (insufficient context, malformed, or consumed/booked/invalidated)
-      const staleMsg =
-        offerReply.reason === "CLOSED" || wasAlreadyBooked || isOfferInvalidated
-          ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
-          : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+      // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
+      const isStaleOrClosed =
+        offerReply.reason === "CLOSED" ||
+        wasAlreadyBooked ||
+        isOfferInvalidated;
+      const staleMsg = isStaleOrClosed
+        ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
+        : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
@@ -6770,14 +6786,10 @@ async function runInboundTurn(
               (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
-              const conflictMsg =
-                persisted.reason === "STORAGE_ERROR"
-                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
-                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                conflictMsg,
+                temporalFailureMessage(persisted.reason),
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -6842,14 +6854,10 @@ async function runInboundTurn(
               transitionInvalidTemporalState,
             );
             if (!persisted.ok) {
-              const conflictMsg =
-                persisted.reason === "STORAGE_ERROR"
-                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
-                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                conflictMsg,
+                temporalFailureMessage(persisted.reason),
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -7380,14 +7388,10 @@ async function runInboundTurn(
               (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
-              const conflictMsg =
-                persisted.reason === "STORAGE_ERROR"
-                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
-                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                conflictMsg,
+                temporalFailureMessage(persisted.reason),
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -7452,14 +7456,10 @@ async function runInboundTurn(
               transitionInvalidTemporalState,
             );
             if (!persisted.ok) {
-              const conflictMsg =
-                persisted.reason === "STORAGE_ERROR"
-                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
-                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                conflictMsg,
+                temporalFailureMessage(persisted.reason),
                 "AI_ACTIVE",
                 null,
                 undefined,
