@@ -3598,23 +3598,25 @@ type PersistTemporalTransitionResult = {
   reason?: "CONFLICT" | "STORAGE_ERROR";
 };
 
-function getTemporalFingerprint(state: ConversationState | null): string {
-  if (!state) return "";
-  const offerDate =
-    state.offer && "date" in state.offer ? (state.offer.date ?? null) : null;
-  const kRange = state.knownFacts?.dateRange;
-  const dRange = state.dateRange;
-  const kUnr = state.knownFacts?.unresolvedDate;
-  return JSON.stringify([
-    state.knownFacts?.date ?? null,
-    kRange ? `${kRange.startDate}:${kRange.endDate}` : null,
-    kUnr ? `${kUnr.day ?? ""}:${kUnr.month ?? ""}:${kUnr.year ?? ""}` : null,
-    state.selectedDate ?? null,
-    dRange ? `${dRange.startDate}:${dRange.endDate}` : null,
-    state.offer?.token ?? null,
-    state.offer?.status ?? null,
-    offerDate,
-  ]);
+function isTemporalConflictCompatible(
+  base: ConversationState,
+  reloaded: ConversationState,
+): boolean {
+  if (base.offer?.token !== reloaded.offer?.token) return false;
+  if (base.offer?.status !== reloaded.offer?.status) return false;
+
+  const baseDate = base.knownFacts?.date ?? base.selectedDate ?? null;
+  const reloadedDate =
+    reloaded.knownFacts?.date ?? reloaded.selectedDate ?? null;
+  if (baseDate !== reloadedDate) return false;
+
+  const bR = base.knownFacts?.dateRange ?? base.dateRange;
+  const rR = reloaded.knownFacts?.dateRange ?? reloaded.dateRange;
+  const bRange = bR ? `${bR.startDate}:${bR.endDate}` : null;
+  const rRange = rR ? `${rR.startDate}:${rR.endDate}` : null;
+  if (bRange !== rRange) return false;
+
+  return true;
 }
 
 function temporalFailureMessage(reason?: string): string {
@@ -3643,7 +3645,6 @@ async function persistTemporalStateTransition(
 
   const baseState =
     turnSession.state ?? resolvedState ?? emptyConversationState();
-  const baseFingerprint = getTemporalFingerprint(baseState);
 
   let candidate = transform(baseState);
   turnSession.state = candidate;
@@ -3656,8 +3657,7 @@ async function persistTemporalStateTransition(
 
     const reloaded = await turnSession.reload();
     if (reloaded && turnSession.state) {
-      const reloadedFingerprint = getTemporalFingerprint(turnSession.state);
-      if (baseFingerprint === reloadedFingerprint) {
+      if (isTemporalConflictCompatible(baseState, turnSession.state)) {
         candidate = transform(turnSession.state);
         turnSession.state = candidate;
         ok = await turnSession.commit();
