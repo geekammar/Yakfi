@@ -3,7 +3,6 @@ import "./setup-test-env";
 
 import {
   InMemoryConversationStateStore,
-  PLAYGROUND_IDS,
   createPlaygroundHarness,
 } from "../src/features/conversations/playground/harness";
 import {
