@@ -260,6 +260,9 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+          BETTER_AUTH_SECRET: 0123456789012345678901234567890123456789
+          BETTER_AUTH_URL: http://localhost:3099
+          NEXT_PUBLIC_APP_URL: http://localhost:3099
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: pnpm build
 
@@ -275,6 +278,9 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+          BETTER_AUTH_SECRET: 0123456789012345678901234567890123456789
+          BETTER_AUTH_URL: http://localhost:3099
+          NEXT_PUBLIC_APP_URL: http://localhost:3099
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: |
           pnpm exec playwright test tests/e2e/ux-viewports.spec.ts --project=mobile-390 -g "Sign-in page: RTL, horizontal overflow, touch targets and form states" --repeat-each=3 --retries=0
@@ -283,6 +289,9 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+          BETTER_AUTH_SECRET: 0123456789012345678901234567890123456789
+          BETTER_AUTH_URL: http://localhost:3099
+          NEXT_PUBLIC_APP_URL: http://localhost:3099
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: |
           pnpm exec playwright test tests/e2e/stale-session-browser-recovery.spec.ts --project=desktop-1280
@@ -291,6 +300,9 @@ jobs:
         if: steps.change-check.outputs.should_run == 'true'
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
+          BETTER_AUTH_SECRET: 0123456789012345678901234567890123456789
+          BETTER_AUTH_URL: http://localhost:3099
+          NEXT_PUBLIC_APP_URL: http://localhost:3099
           FLOWPILOT_ENABLE_QA_HARNESS: "true"
         run: node scripts/run-ux-qa.mjs
 

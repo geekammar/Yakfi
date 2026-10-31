@@ -1,23 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { expect, test } from "@playwright/test";
 
-import { auth } from "@/lib/auth";
-import { db } from "@/server/db";
-
 /**
  * FlowPilot — Stale-Session Browser Recovery Journey (ISS-017)
  *
- * Verifies real end-to-end browser cookie handling and authentication recovery
- * against a real Next.js application and disposable PostgreSQL database in CI:
- *
- * 1. Creates an authorized synthetic user through supported auth.api.signUpEmail.
- * 2. Completes real UI sign-in through the actual login form.
- * 3. Keeps the same browser context and cookies.
- * 4. Revokes the session server-side in the disposable database.
- * 5. Visits "/" and direct "/sign-in"; confirms bounded navigation terminates at usable form.
- * 6. Submits valid credentials through the UI in the SAME browser context.
- * 7. Verifies protected page loads with authenticated identity.
- * 8. Repeats recovery with controlled session expiration (expiresAt in the past).
+ * Real browser recovery against Next.js and disposable PostgreSQL.
  */
 
 function isDisposableDb(url?: string): boolean {
@@ -43,18 +30,17 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
   let testBusinessId: string | null = null;
 
   test.afterAll(async () => {
-    if (testUserId) {
+    if (testUserId || testBusinessId) {
       try {
-        await db.session.deleteMany({ where: { userId: testUserId } });
-        await db.account.deleteMany({ where: { userId: testUserId } });
-        await db.user.deleteMany({ where: { id: testUserId } });
-      } catch {
-        // Best-effort cleanup
-      }
-    }
-    if (testBusinessId) {
-      try {
-        await db.business.deleteMany({ where: { id: testBusinessId } });
+        const { db } = await import("@/server/db");
+        if (testUserId) {
+          await db.session.deleteMany({ where: { userId: testUserId } });
+          await db.account.deleteMany({ where: { userId: testUserId } });
+          await db.user.deleteMany({ where: { id: testUserId } });
+        }
+        if (testBusinessId) {
+          await db.business.deleteMany({ where: { id: testBusinessId } });
+        }
       } catch {
         // Best-effort cleanup
       }
@@ -66,13 +52,17 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
   }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop-1280",
-      "Scenario runs once in isolated desktop-1280 profile against disposable PostgreSQL",
+      "Runs once in isolated desktop-1280 profile",
     );
 
     test.skip(
       !isDisposableDb(dbUrl),
-      "Requires disposable PostgreSQL database (flowpilot_test) in isolated CI",
+      "Requires disposable PostgreSQL in isolated CI",
     );
+
+    // Dynamic import to prevent premature env evaluation
+    const { auth } = await import("@/lib/auth");
+    const { db } = await import("@/server/db");
 
     const testEmail = `browser.recovery.${Date.now()}@flowpilot.test`;
     const testPassword = "ExamplePassword@1234";
@@ -134,10 +124,10 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
     expect(activeDbSession).toBeTruthy();
     await db.session.delete({ where: { id: activeDbSession!.id } });
 
-    // e. Visit "/" and direct "/sign-in"; navigation must terminate at a usable form without cycle
-    let revocationRedirectHops = 0;
+    // e. Visit "/" and direct "/sign-in"; navigation must terminate at usable form
+    let revocationHops = 0;
     const countRevocationHop = (res: any) => {
-      if ([301, 302, 307, 308].includes(res.status())) revocationRedirectHops++;
+      if ([301, 302, 307, 308].includes(res.status())) revocationHops++;
     };
     page.on("response", countRevocationHop);
 
@@ -145,7 +135,7 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
     page.off("response", countRevocationHop);
 
     expect(page.url()).toContain("/sign-in");
-    expect(revocationRedirectHops).toBeLessThanOrEqual(3);
+    expect(revocationHops).toBeLessThanOrEqual(3);
 
     // Direct /sign-in also terminates at the form
     await page.goto("/sign-in", {
@@ -185,9 +175,9 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
     });
 
     // In the SAME browser context, visit "/"
-    let expirationRedirectHops = 0;
+    let expirationHops = 0;
     const countExpirationHop = (res: any) => {
-      if ([301, 302, 307, 308].includes(res.status())) expirationRedirectHops++;
+      if ([301, 302, 307, 308].includes(res.status())) expirationHops++;
     };
     page.on("response", countExpirationHop);
 
@@ -195,7 +185,7 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
     page.off("response", countExpirationHop);
 
     expect(page.url()).toContain("/sign-in");
-    expect(expirationRedirectHops).toBeLessThanOrEqual(3);
+    expect(expirationHops).toBeLessThanOrEqual(3);
 
     // Form is usable
     await expect(emailInput).toBeVisible();

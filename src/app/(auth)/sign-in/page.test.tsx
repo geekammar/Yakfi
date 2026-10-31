@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
+import SignInPage, { getSignInDestination } from "@/app/(auth)/sign-in/page";
 import type { Session } from "@/lib/auth";
 
-import SignInPage, { getSignInDestination } from "@/app/(auth)/sign-in/page";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockGetSession, mockRedirect } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
@@ -54,7 +53,7 @@ describe("SignInPage Boundary & Decision Routing", () => {
     },
   };
 
-  it("renders the sign-in form without redirect when session is null (invalid/expired/revoked cookie)", async () => {
+  it("renders form without redirect when session is null", async () => {
     mockGetSession.mockResolvedValue(null);
 
     const jsx = await SignInPage({});
@@ -70,7 +69,9 @@ describe("SignInPage Boundary & Decision Routing", () => {
     };
     mockGetSession.mockResolvedValue(inactiveSession);
 
-    await expect(SignInPage({})).rejects.toThrow("NEXT_REDIRECT:/access-denied");
+    await expect(SignInPage({})).rejects.toThrow(
+      "NEXT_REDIRECT:/access-denied",
+    );
   });
 
   it("redirects Platform Operators to /platform control surface", async () => {
@@ -80,10 +81,12 @@ describe("SignInPage Boundary & Decision Routing", () => {
     };
     mockGetSession.mockResolvedValue(platformSession);
 
-    await expect(SignInPage({})).rejects.toThrow("NEXT_REDIRECT:/platform");
+    await expect(SignInPage({})).rejects.toThrow(
+      "NEXT_REDIRECT:/platform",
+    );
   });
 
-  it("redirects authenticated business users to '/' by default when no redirect param is given", async () => {
+  it("redirects active users to '/' by default when no param given", async () => {
     mockGetSession.mockResolvedValue(baseSession);
 
     await expect(SignInPage({})).rejects.toThrow("NEXT_REDIRECT:/");
