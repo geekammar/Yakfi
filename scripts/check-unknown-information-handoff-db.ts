@@ -33,6 +33,7 @@ import "./setup-test-env";
  */
 
 import { randomUUID } from "node:crypto";
+
 import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
@@ -513,9 +514,7 @@ async function main(): Promise<void> {
 
     const failedSafely4 =
       persistenceThrew ||
-      (result4 !== null &&
-        typeof result4 === "object" &&
-        result4.ok === false);
+      (result4 !== null && typeof result4 === "object" && result4.ok === false);
 
     check(
       "DB-4.A Persistence failure throws cleanly; no false success reported",
