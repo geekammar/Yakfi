@@ -398,6 +398,7 @@ describe("LoginForm Component Contract", () => {
       mockRefresh.mockReset();
       mockRedirectParam = unsafeRedirect;
       mockSignInEmail.mockResolvedValue({ error: null });
+      renderForm();
 
       const emailInput = container.querySelector<HTMLInputElement>("#email")!;
       const passwordInput =

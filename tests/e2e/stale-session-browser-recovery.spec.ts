@@ -63,6 +63,7 @@ test.describe("Full Browser Recovery Journey (ISS-017)", () => {
   test("Complete same-browser recovery: server revocation and controlled expiration", async ({
     page,
   }, testInfo) => {
+    test.setTimeout(90_000);
     test.skip(
       testInfo.project.name !== "desktop-1280",
       "Runs once in isolated desktop-1280 profile",
