@@ -106,10 +106,37 @@ export function SettingsScreen({
   const selectedDefaultService = activeServices.find(
     (s) => s.id === selectedServiceId,
   );
+  const matchedService = selectedServiceId
+    ? services.find((s) => s.id === selectedServiceId)
+    : null;
+
+  // Explicitly distinguish states (ISS-007 / BK-41):
+  // A. No default service configured
+  // B. Valid active default service selected
+  // C. Saved default service exists but is inactive
+  // D. Saved ID cannot be resolved in tenant's available service data
+  const defaultServiceState: "none" | "active" | "inactive" | "unavailable" =
+    !selectedServiceId
+      ? "none"
+      : matchedService
+        ? matchedService.isActive !== false
+          ? "active"
+          : "inactive"
+        : "unavailable";
 
   const submit = form.handleSubmit(async (data) => {
     setError(null);
     setSaved(false);
+
+    // Guard against saving an invalid or inactive service when default booking is enabled
+    if (data.defaultServiceBookingEnabled && data.defaultBookingServiceId) {
+      const srv = services.find((s) => s.id === data.defaultBookingServiceId);
+      if (!srv || srv.isActive === false) {
+        setError("الخدمة الافتراضية المحددة غير صالحة أو غير مفعّلة");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     const result = await updateBusinessSettingsAction(data);
     setIsSubmitting(false);
@@ -117,6 +144,7 @@ export function SettingsScreen({
       setError(result.message);
       return;
     }
+    form.reset(data);
     setSaved(true);
   });
 
@@ -601,33 +629,115 @@ export function SettingsScreen({
                   control={form.control}
                   name="defaultBookingServiceId"
                   render={({ field }) => (
-                    <Select
-                      value={field.value ?? ""}
-                      onValueChange={(val) => field.onChange(val || null)}
-                    >
-                      <SelectTrigger
-                        id="settings-default-service"
-                        className="w-full"
-                        aria-invalid={Boolean(
-                          form.formState.errors.defaultBookingServiceId,
-                        )}
-                      >
-                        <SelectValue placeholder="اختر الخدمة الافتراضية" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeServices.length > 0 ? (
-                          activeServices.map((service) => (
-                            <SelectItem key={service.id} value={service.id}>
-                              {service.name}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <div className="p-2 text-xs text-muted-foreground text-center">
-                            لا توجد خدمات نشطة متاحة
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <Select
+                            value={field.value ?? ""}
+                            onValueChange={(val) => {
+                              field.onChange(val || null);
+                              if (error) setError(null);
+                            }}
+                          >
+                            <SelectTrigger
+                              id="settings-default-service"
+                              className="w-full"
+                              aria-invalid={
+                                Boolean(
+                                  form.formState.errors.defaultBookingServiceId,
+                                ) ||
+                                (defaultServiceBookingEnabled &&
+                                  (defaultServiceState === "inactive" ||
+                                    defaultServiceState === "unavailable"))
+                              }
+                            >
+                              <SelectValue placeholder="اختر الخدمة الافتراضية">
+                                {selectedDefaultService
+                                  ? selectedDefaultService.name
+                                  : defaultServiceState === "inactive" &&
+                                      matchedService
+                                    ? `${matchedService.name} (غير مفعّلة)`
+                                    : defaultServiceState === "unavailable"
+                                      ? "خدمة غير متاحة"
+                                      : undefined}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {activeServices.length > 0 ? (
+                                activeServices.map((service) => (
+                                  <SelectItem
+                                    key={service.id}
+                                    value={service.id}
+                                  >
+                                    {service.name}
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <div className="p-2 text-xs text-muted-foreground text-center">
+                                  لا توجد خدمات نشطة متاحة
+                                </div>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {field.value ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              field.onChange(null);
+                              if (error) setError(null);
+                            }}
+                            className="shrink-0 text-xs h-9 px-2.5"
+                            aria-label="إلغاء اختيار الخدمة الافتراضية"
+                          >
+                            إلغاء التحديد
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      {/* State C: Saved default service exists but is inactive */}
+                      {defaultServiceState === "inactive" && matchedService ? (
+                        <div
+                          role="alert"
+                          className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-sm">
+                            <span className="size-2 rounded-full bg-amber-500 shrink-0" />
+                            <span>
+                              الخدمة الافتراضية المحفوظة غير مفعّلة (
+                              {matchedService.name})
+                            </span>
                           </div>
-                        )}
-                      </SelectContent>
-                    </Select>
+                          <p className="text-muted-foreground dark:text-amber-200/90">
+                            الخدمة المحفوظة كخدمة افتراضية ({matchedService.name}
+                            ) متوقفة حالياً ولا يمكن استخدامها للحجز التلقائي.
+                            يرجى اختيار خدمة نشطة بديلة، أو إلغاء تحديد الخدمة
+                            وتعطيل الحجز السريع.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {/* State D: Saved ID cannot be resolved in tenant's available services */}
+                      {defaultServiceState === "unavailable" ? (
+                        <div
+                          role="alert"
+                          className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+                        >
+                          <div className="flex items-center gap-2 font-semibold text-sm">
+                            <span className="size-2 rounded-full bg-amber-500 shrink-0" />
+                            <span>الخدمة الافتراضية المحفوظة غير متاحة</span>
+                          </div>
+                          <p className="text-muted-foreground dark:text-amber-200/90">
+                            الخدمة الافتراضية المحفوظة غير متاحة في قائمة خدمات
+                            المنشأة الحالية. يرجى اختيار خدمة نشطة بديلة، أو
+                            تعطيل الحجز بالخدمة الافتراضية واستخدام زر
+                            &quot;إلغاء التحديد&quot;.
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
                   )}
                 />
                 {fieldError(
@@ -900,7 +1010,7 @@ export function SettingsScreen({
             {error}
           </p>
         ) : null}
-        {saved ? (
+        {saved && !form.formState.isDirty ? (
           <p
             role="status"
             className="flex items-center gap-1.5 text-sm text-success"
