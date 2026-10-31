@@ -1892,7 +1892,7 @@ async function runSuite(): Promise<void> {
     // bounded recovery works
     {
       let commitCount = 0;
-      let failFirst = true;
+      let failFirst = false;
 
       class CompatibleConflictStore extends InMemoryConversationStateStore {
         override async save(
@@ -1948,6 +1948,7 @@ async function runSuite(): Promise<void> {
         initTurn.ok === true,
       );
 
+      failFirst = true;
       harness.setVirtualNow(new Date("2026-11-01T10:05:00.000Z"));
       harness.deps.ai = {
         providerName: "test-ai",
