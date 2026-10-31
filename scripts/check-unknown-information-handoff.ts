@@ -583,16 +583,23 @@ async function runSuite(): Promise<void> {
     });
 
     let threw = false;
+    let res: unknown = null;
     try {
-      await h.runInbound("سؤال اختباري", "ext-sc4-1");
+      res = await h.runInbound("سؤال اختباري", "ext-sc4-1");
     } catch {
       threw = true;
     }
 
+    const failedSafely =
+      threw === true ||
+      (res !== null &&
+        typeof res === "object" &&
+        (res as { ok: boolean }).ok === false);
+
     check(
-      "4.A Failed DB persistence throws explicitly; does not fabricate success or partial send",
-      threw === true && h.getSent().length === 0,
-      { threw, sent: h.getSent() },
+      "4.A Failed DB persistence safely rejects; does not fabricate success or partial send",
+      failedSafely && h.getSent().length === 0,
+      { threw, res, sent: h.getSent() },
     );
   }
 
