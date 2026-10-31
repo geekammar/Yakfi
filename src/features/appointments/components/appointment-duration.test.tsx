@@ -15,11 +15,6 @@
  * 8. Booked service name and performed service details remain fully intact.
  */
 
-import type { Root } from "react-dom/client";
-import { createRoot } from "react-dom/client";
-import { act } from "react-dom/test-utils";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import {
   APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
   AppointmentDetail,
@@ -27,6 +22,11 @@ import {
   formatAppointmentDurationHint,
 } from "@/features/appointments/components/appointment-detail";
 import type { AppointmentDetailData } from "@/features/appointments/types";
+
+import type { Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { updateAppointmentStatus } = vi.hoisted(() => ({
   updateAppointmentStatus: vi.fn(),
@@ -120,15 +120,15 @@ describe("calculateAppointmentDurationMinutes pure calculation", () => {
   });
 
   it("handles clock times with zero seconds", () => {
-    expect(
-      calculateAppointmentDurationMinutes("10:00:00", "10:20:00"),
-    ).toBe(20);
+    expect(calculateAppointmentDurationMinutes("10:00:00", "10:20:00")).toBe(
+      20,
+    );
   });
 
   it("handles matched non-zero seconds (exact whole minutes)", () => {
-    expect(
-      calculateAppointmentDurationMinutes("10:00:30", "10:20:30"),
-    ).toBe(20);
+    expect(calculateAppointmentDurationMinutes("10:00:30", "10:20:30")).toBe(
+      20,
+    );
   });
 
   it("returns null for non-integer minute intervals (no rounding)", () => {
@@ -177,23 +177,20 @@ describe("formatAppointmentDurationHint formatter", () => {
     );
   });
 
-  it(
-    "returns honest unavailable label for invalid or unsupported interval",
-    () => {
-      expect(formatAppointmentDurationHint("10:00", "10:00")).toBe(
-        APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
-      );
-      expect(formatAppointmentDurationHint("10:20", "10:00")).toBe(
-        APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
-      );
-      expect(formatAppointmentDurationHint("23:00", "01:00")).toBe(
-        APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
-      );
-      expect(formatAppointmentDurationHint("invalid", "10:20")).toBe(
-        APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
-      );
-    },
-  );
+  it("returns honest unavailable label for invalid or unsupported interval", () => {
+    expect(formatAppointmentDurationHint("10:00", "10:00")).toBe(
+      APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
+    );
+    expect(formatAppointmentDurationHint("10:20", "10:00")).toBe(
+      APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
+    );
+    expect(formatAppointmentDurationHint("23:00", "01:00")).toBe(
+      APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
+    );
+    expect(formatAppointmentDurationHint("invalid", "10:20")).toBe(
+      APPOINTMENT_DURATION_UNAVAILABLE_LABEL,
+    );
+  });
 });
 
 describe("AppointmentDetail rendered component tests (ISS-008 / BK-50)", () => {
@@ -253,35 +250,29 @@ describe("AppointmentDetail rendered component tests (ISS-008 / BK-50)", () => {
     };
   }
 
-  it(
-    "A. Stored 10:00–10:20 with catalog duration 25 renders truthful label",
-    () => {
-      renderDetail(BASE_FIXTURE);
+  it("A. Stored 10:00–10:20 with catalog duration 25 renders truthful label", () => {
+    renderDetail(BASE_FIXTURE);
 
-      const section = getBookedServiceSection();
-      expect(section.valueText).toBe("جلسة تنظيف وتلميع أسنان");
-      expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
+    const section = getBookedServiceSection();
+    expect(section.valueText).toBe("جلسة تنظيف وتلميع أسنان");
+    expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
 
-      // Must NOT contain the old misleading label anywhere in the document
-      expect(container.textContent).not.toContain("25 دقيقة (الأصلية)");
-      expect(container.textContent).not.toContain("(الأصلية)");
-    },
-  );
+    // Must NOT contain the old misleading label anywhere in the document
+    expect(container.textContent).not.toContain("25 دقيقة (الأصلية)");
+    expect(container.textContent).not.toContain("(الأصلية)");
+  });
 
-  it(
-    "B. Stored 10:50–11:10 renders 'مدة الموعد: 20 دقيقة' across hour boundary",
-    () => {
-      const data: AppointmentDetailData = {
-        ...BASE_FIXTURE,
-        startTime: "1970-01-01T10:50:00.000Z",
-        endTime: "1970-01-01T11:10:00.000Z",
-      };
-      renderDetail(data);
+  it("B. Stored 10:50–11:10 renders 'مدة الموعد: 20 دقيقة' across hour boundary", () => {
+    const data: AppointmentDetailData = {
+      ...BASE_FIXTURE,
+      startTime: "1970-01-01T10:50:00.000Z",
+      endTime: "1970-01-01T11:10:00.000Z",
+    };
+    renderDetail(data);
 
-      const section = getBookedServiceSection();
-      expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
-    },
-  );
+    const section = getBookedServiceSection();
+    expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
+  });
 
   it("C. Stored 11:50–12:10 renders 'مدة الموعد: 20 دقيقة' across noon", () => {
     const data: AppointmentDetailData = {
@@ -295,118 +286,106 @@ describe("AppointmentDetail rendered component tests (ISS-008 / BK-50)", () => {
     expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
   });
 
-  it(
-    "D. Changing only catalog duration does NOT alter displayed duration",
-    () => {
-      const dataWithChangedCatalog: AppointmentDetailData = {
-        ...BASE_FIXTURE,
-        service: {
-          ...BASE_FIXTURE.service,
-          durationMinutes: 90, // Catalog changed to 90 min
-        },
-      };
-      renderDetail(dataWithChangedCatalog);
+  it("D. Changing only catalog duration does NOT alter displayed duration", () => {
+    const dataWithChangedCatalog: AppointmentDetailData = {
+      ...BASE_FIXTURE,
+      service: {
+        ...BASE_FIXTURE.service,
+        durationMinutes: 90, // Catalog changed to 90 min
+      },
+    };
+    renderDetail(dataWithChangedCatalog);
 
-      const section = getBookedServiceSection();
-      // Duration is derived from stored 10:00–10:20 (20m);
-      // unaffected by catalog duration
-      expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
-      expect(container.textContent).not.toContain("90 دقيقة");
-    },
-  );
+    const section = getBookedServiceSection();
+    // Duration is derived from stored 10:00–10:20 (20m);
+    // unaffected by catalog duration
+    expect(section.hintText).toBe("مدة الموعد: 20 دقيقة");
+    expect(container.textContent).not.toContain("90 دقيقة");
+  });
 
-  it(
-    "E. Changing stored appointment interval updates displayed duration",
-    () => {
-      const dataWith45MinInterval: AppointmentDetailData = {
-        ...BASE_FIXTURE,
-        startTime: "1970-01-01T10:00:00.000Z",
-        endTime: "1970-01-01T10:45:00.000Z",
-      };
-      renderDetail(dataWith45MinInterval);
+  it("E. Changing stored appointment interval updates displayed duration", () => {
+    const dataWith45MinInterval: AppointmentDetailData = {
+      ...BASE_FIXTURE,
+      startTime: "1970-01-01T10:00:00.000Z",
+      endTime: "1970-01-01T10:45:00.000Z",
+    };
+    renderDetail(dataWith45MinInterval);
 
-      const section = getBookedServiceSection();
-      expect(section.hintText).toBe("مدة الموعد: 45 دقيقة");
-    },
-  );
+    const section = getBookedServiceSection();
+    expect(section.hintText).toBe("مدة الموعد: 45 دقيقة");
+  });
 
-  it(
-    "F. Missing, malformed, equal, reversed, overnight render unavailable",
-    () => {
-      // 1. Equal times (10:00 to 10:00)
-      renderDetail({
-        ...BASE_FIXTURE,
-        startTime: "1970-01-01T10:00:00.000Z",
-        endTime: "1970-01-01T10:00:00.000Z",
-      });
-      expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-      expect(container.textContent).not.toContain("NaN");
-      expect(container.textContent).not.toContain("-");
+  it("F. Missing, malformed, equal, reversed, overnight render unavailable", () => {
+    // 1. Equal times (10:00 to 10:00)
+    renderDetail({
+      ...BASE_FIXTURE,
+      startTime: "1970-01-01T10:00:00.000Z",
+      endTime: "1970-01-01T10:00:00.000Z",
+    });
+    expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
+    expect(container.textContent).not.toContain("NaN");
+    expect(container.textContent).not.toContain("-");
 
-      // 2. Reversed times (10:20 to 10:00)
-      renderDetail({
-        ...BASE_FIXTURE,
-        startTime: "1970-01-01T10:20:00.000Z",
-        endTime: "1970-01-01T10:00:00.000Z",
-      });
-      expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-      expect(container.textContent).not.toContain("NaN");
+    // 2. Reversed times (10:20 to 10:00)
+    renderDetail({
+      ...BASE_FIXTURE,
+      startTime: "1970-01-01T10:20:00.000Z",
+      endTime: "1970-01-01T10:00:00.000Z",
+    });
+    expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
+    expect(container.textContent).not.toContain("NaN");
 
-      // 3. Overnight attempt (23:00 to 01:00)
-      renderDetail({
-        ...BASE_FIXTURE,
-        startTime: "1970-01-01T23:00:00.000Z",
-        endTime: "1970-01-01T01:00:00.000Z",
-      });
-      expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-      expect(container.textContent).not.toContain("120 دقيقة");
+    // 3. Overnight attempt (23:00 to 01:00)
+    renderDetail({
+      ...BASE_FIXTURE,
+      startTime: "1970-01-01T23:00:00.000Z",
+      endTime: "1970-01-01T01:00:00.000Z",
+    });
+    expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
+    expect(container.textContent).not.toContain("120 دقيقة");
 
-      // 4. Missing/malformed time
-      renderDetail({
-        ...BASE_FIXTURE,
-        startTime: "invalid",
-        endTime: "10:20",
-      });
-      expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
-      expect(container.textContent).not.toContain("NaN");
-    },
-  );
+    // 4. Missing/malformed time
+    renderDetail({
+      ...BASE_FIXTURE,
+      startTime: "invalid",
+      endTime: "10:20",
+    });
+    expect(getBookedServiceSection().hintText).toBe("مدة الموعد غير متاحة");
+    expect(container.textContent).not.toContain("NaN");
+  });
 
-  it(
-    "G. Booked-service name and performed-service details remain intact",
-    () => {
-      const completedWithPerformedService: AppointmentDetailData = {
-        ...BASE_FIXTURE,
-        status: "COMPLETED",
-        service: {
-          id: "srv-1",
-          name: "جلسة تنظيف وتلميع أسنان",
-          durationMinutes: 25,
-        },
-        performedService: {
-          id: "srv-2",
-          name: "علاج عصب وقناة الجذر",
-          durationMinutes: 45,
-        },
-        serviceCorrectedAt: "2026-11-04T12:00:00.000Z",
-      };
-      renderDetail(completedWithPerformedService);
+  it("G. Booked-service name and performed-service details remain intact", () => {
+    const completedWithPerformedService: AppointmentDetailData = {
+      ...BASE_FIXTURE,
+      status: "COMPLETED",
+      service: {
+        id: "srv-1",
+        name: "جلسة تنظيف وتلميع أسنان",
+        durationMinutes: 25,
+      },
+      performedService: {
+        id: "srv-2",
+        name: "علاج عصب وقناة الجذر",
+        durationMinutes: 45,
+      },
+      serviceCorrectedAt: "2026-11-04T12:00:00.000Z",
+    };
+    renderDetail(completedWithPerformedService);
 
-      // Booked service remains truthful
-      const bookedSection = getBookedServiceSection();
-      expect(bookedSection.valueText).toBe("جلسة تنظيف وتلميع أسنان");
-      expect(bookedSection.hintText).toBe("مدة الموعد: 20 دقيقة");
+    // Booked service remains truthful
+    const bookedSection = getBookedServiceSection();
+    expect(bookedSection.valueText).toBe("جلسة تنظيف وتلميع أسنان");
+    expect(bookedSection.hintText).toBe("مدة الموعد: 20 دقيقة");
 
-      // Performed service remains intact
-      const dts = Array.from(container.querySelectorAll("dt"));
-      const performedDt = dts.find(
-        (dt) => dt.textContent?.trim() === "الخدمة المنفذة",
-      );
-      expect(performedDt).toBeTruthy();
-      const performedParent = performedDt?.parentElement;
-      expect(performedParent?.querySelector("dd")?.textContent?.trim()).toBe(
-        "علاج عصب وقناة الجذر",
-      );
-    },
-  );
+    // Performed service remains intact
+    const dts = Array.from(container.querySelectorAll("dt"));
+    const performedDt = dts.find(
+      (dt) => dt.textContent?.trim() === "الخدمة المنفذة",
+    );
+    expect(performedDt).toBeTruthy();
+    const performedParent = performedDt?.parentElement;
+    expect(performedParent?.querySelector("dd")?.textContent?.trim()).toBe(
+      "علاج عصب وقناة الجذر",
+    );
+  });
 });
