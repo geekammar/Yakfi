@@ -541,9 +541,11 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
     }
     if (proposedCandidate !== "GENERIC_FAQ") {
-      const record = ledger.find(
-        (fact) => fact.key === proposedCandidate.family,
-      );
+      if (!proposedCandidate.family) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      const family = proposedCandidate.family;
+      const record = ledger.find((fact) => fact.key === family);
       if (!record || !record.included) {
         return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
       }
@@ -558,7 +560,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       return {
         kind: "disclosed",
         response,
-        support: [proposedCandidate.family],
+        support: [family],
       };
     }
   }
