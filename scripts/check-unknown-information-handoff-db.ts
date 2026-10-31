@@ -541,6 +541,10 @@ async function main(): Promise<void> {
   await db.service.deleteMany({
     where: { businessId: TEST_BUSINESS_ID },
   });
+  await db.business.updateMany({
+    where: { id: TEST_BUSINESS_ID },
+    data: { defaultBranchId: null },
+  });
   await db.branch.deleteMany({
     where: { businessId: TEST_BUSINESS_ID },
   });
