@@ -197,17 +197,71 @@ export function endOfSaturdayWeek(isoDate: string): string {
   return addDaysToIso(sat, 6);
 }
 
+/**
+ * Determines whether a given 4-digit year is a leap year in the Gregorian calendar.
+ */
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/**
+ * Returns the maximum number of days in a given Gregorian month (1..12).
+ */
+export function daysInMonth(month: number, year: number): number {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  if ([4, 6, 9, 11].includes(month)) {
+    return 30;
+  }
+  return 31;
+}
+
+/**
+ * Validates whether day/month/year components form a real calendar date.
+ */
+export function isValidCalendarComponents(
+  day: number,
+  month: number,
+  year: number,
+): boolean {
+  if (month < 1 || month > 12) return false;
+  const maxDays = daysInMonth(month, year);
+  return day >= 1 && day <= maxDays;
+}
+
+function formatIsoDate(year: number, month: number, day: number): string {
+  const m = String(month).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${year}-${m}-${d}`;
+}
+
 export type ServerTemporalInput =
   | { type: "exact_date"; date: string }
   | { type: "relative_day"; offsetDays: number }
   | { type: "calendar_week"; weekOffset: number }
-  | { type: "date_range"; startDate: string; endDate: string };
+  | { type: "date_range"; startDate: string; endDate: string }
+  | {
+      type: "unresolved_date";
+      day?: number;
+      month?: number;
+      year?: number;
+      rawText?: string;
+    }
+  | {
+      type: "invalid_date";
+      day?: number;
+      month?: number;
+      year?: number;
+      reason?: string;
+      rawText?: string;
+    };
 
 export type ResolvedServerTemporal =
   | {
       kind: "single_date";
       date: string;
-      source: "exact_date" | "relative_day" | "legacy_date";
+      source: "exact_date" | "relative_day" | "legacy_date" | "unresolved_date";
     }
   | {
       kind: "date_range";
@@ -230,12 +284,37 @@ export type ResolvedServerTemporal =
         | "PAST_DATE"
         | "OUT_OF_BOUNDS"
         | "INVALID_ORDER"
-        | "INVALID_FORMAT";
+        | "INVALID_FORMAT"
+        | "IMPOSSIBLE_DATE";
       error: string;
+    }
+  | {
+      kind: "ambiguous";
+      reason:
+        | "MISSING_MONTH"
+        | "MISSING_YEAR"
+        | "MISSING_DAY"
+        | "AMBIGUOUS_RANGE_MONTH";
+      field: "month" | "year" | "day";
+      day?: number;
+      month?: number;
+      year?: number;
+      message: string;
     }
   | {
       kind: "none";
     };
+
+export type PriorTemporalContext = {
+  date?: string | null;
+  dateRange?: { startDate: string; endDate: string } | null;
+  offerDate?: string | null;
+  unresolvedDate?: {
+    day?: number;
+    month?: number;
+    year?: number;
+  } | null;
+};
 
 /**
  * Server-authoritative resolution of a model-proposed temporal request against
@@ -254,6 +333,7 @@ export function resolveServerTemporalRequest(
   referenceInstant: Date | string,
   timeZoneInput?: string | null,
   maxBookingHorizonDays = 60,
+  priorContext?: PriorTemporalContext | null,
 ): ResolvedServerTemporal {
   const timeZone = resolveValidTimeZone(timeZoneInput);
   const todayIso = deriveLocalDate(referenceInstant, timeZone);
@@ -447,6 +527,289 @@ export function resolveServerTemporalRequest(
         startDate,
         endDate,
         source: "date_range",
+      };
+    }
+
+    if (temporalRequest.type === "invalid_date") {
+      return {
+        kind: "invalid",
+        reason: "IMPOSSIBLE_DATE",
+        error:
+          temporalRequest.reason ??
+          "التاريخ المطلوب غير صالح في التقويم، يرجى اختيار تاريخ صحيح.",
+      };
+    }
+
+    if (temporalRequest.type === "unresolved_date") {
+      const rawDay = temporalRequest.day;
+      const rawMonth = temporalRequest.month;
+      const rawYear = temporalRequest.year;
+
+      const day = rawDay ?? priorContext?.unresolvedDate?.day;
+      let month = rawMonth ?? priorContext?.unresolvedDate?.month;
+      let year = rawYear;
+      if (
+        year === undefined &&
+        priorContext?.unresolvedDate?.year !== undefined
+      ) {
+        year = priorContext.unresolvedDate.year;
+      }
+
+      if (day === undefined) {
+        return {
+          kind: "ambiguous",
+          reason: "MISSING_DAY",
+          field: "day",
+          month,
+          year,
+          message: "يرجى تحديد اليوم المطلوب للحجز.",
+        };
+      }
+
+      if (day < 1 || day > 31) {
+        return {
+          kind: "invalid",
+          reason: "IMPOSSIBLE_DATE",
+          error: "اليوم المطلوب غير صحيح في التقويم.",
+        };
+      }
+
+      // If month is omitted, attempt resolution via authoritative prior context
+      if (month === undefined) {
+        let resolvedMonthFromContext: number | null = null;
+        let resolvedYearFromContext: number | null = null;
+
+        if (priorContext?.date && isValidIsoCalendarDate(priorContext.date)) {
+          const [py, pm] = priorContext.date.split("-").map(Number);
+          resolvedYearFromContext = py!;
+          resolvedMonthFromContext = pm!;
+        } else if (
+          priorContext?.offerDate &&
+          isValidIsoCalendarDate(priorContext.offerDate)
+        ) {
+          const [py, pm] = priorContext.offerDate.split("-").map(Number);
+          resolvedYearFromContext = py!;
+          resolvedMonthFromContext = pm!;
+        } else if (
+          priorContext?.dateRange &&
+          isValidIsoCalendarDate(priorContext.dateRange.startDate) &&
+          isValidIsoCalendarDate(priorContext.dateRange.endDate) &&
+          priorContext.dateRange.startDate <= priorContext.dateRange.endDate
+        ) {
+          const { startDate, endDate } = priorContext.dateRange;
+          const [startYear, startMonth] = startDate.split("-").map(Number) as [
+            number,
+            number,
+          ];
+          const [endYear, endMonth] = endDate.split("-").map(Number) as [
+            number,
+            number,
+          ];
+
+          const matchingCandidates: {
+            year: number;
+            month: number;
+            iso: string;
+          }[] = [];
+
+          for (let y = startYear; y <= endYear; y++) {
+            const mStart = y === startYear ? startMonth : 1;
+            const mEnd = y === endYear ? endMonth : 12;
+            for (let m = mStart; m <= mEnd; m++) {
+              if (year !== undefined && y !== year) continue;
+              if (!isValidCalendarComponents(day, m, y)) continue;
+              const candIso = formatIsoDate(y, m, day);
+              if (
+                candIso >= startDate &&
+                candIso <= endDate &&
+                candIso >= todayIso &&
+                daysBetweenIso(todayIso, candIso) <= maxBookingHorizonDays
+              ) {
+                matchingCandidates.push({ year: y, month: m, iso: candIso });
+              }
+            }
+          }
+
+          if (matchingCandidates.length === 1) {
+            resolvedYearFromContext = matchingCandidates[0]!.year;
+            resolvedMonthFromContext = matchingCandidates[0]!.month;
+          } else if (matchingCandidates.length > 1) {
+            return {
+              kind: "ambiguous",
+              reason: "AMBIGUOUS_RANGE_MONTH",
+              field: "month",
+              day,
+              year,
+              message: `يرجى توضيح الشهر المطلوب ليوم ${day} ضمن الفترة المحددة.`,
+            };
+          }
+        }
+
+        if (resolvedMonthFromContext !== null) {
+          month = resolvedMonthFromContext;
+          if (year === undefined && resolvedYearFromContext !== null) {
+            year = resolvedYearFromContext;
+          }
+        } else {
+          return {
+            kind: "ambiguous",
+            reason: "MISSING_MONTH",
+            field: "month",
+            day,
+            year,
+            message: `يرجى توضيح الشهر المطلوب ليوم ${day} (مثال: ${day} نوفمبر).`,
+          };
+        }
+      }
+
+      if (month < 1 || month > 12) {
+        return {
+          kind: "invalid",
+          reason: "IMPOSSIBLE_DATE",
+          error: "الشهر المطلوب غير صالح في التقويم.",
+        };
+      }
+      if (month === 2 && day > 29) {
+        return {
+          kind: "invalid",
+          reason: "IMPOSSIBLE_DATE",
+          error: "شهر فبراير لا يتجاوز 29 يوماً في أي سنة تقويمية.",
+        };
+      }
+      if ([4, 6, 9, 11].includes(month) && day > 30) {
+        return {
+          kind: "invalid",
+          reason: "IMPOSSIBLE_DATE",
+          error: "هذا الشهر يضم 30 يوماً فقط.",
+        };
+      }
+
+      const [currentYear] = todayIso.split("-").map(Number) as [number];
+      let resolvedCandidateIso: string | null = null;
+
+      if (year !== undefined) {
+        if (!isValidCalendarComponents(day, month, year)) {
+          let error =
+            "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
+          if (month === 2 && day === 29 && !isLeapYear(year)) {
+            error = `شهر فبراير في عام ${year} يضم 28 يوماً فقط (سنة غير كبيسة).`;
+          }
+          return {
+            kind: "invalid",
+            reason: "IMPOSSIBLE_DATE",
+            error,
+          };
+        }
+        const candIso = formatIsoDate(year, month, day);
+        if (candIso < todayIso) {
+          return {
+            kind: "invalid",
+            reason: "PAST_DATE",
+            error: "التاريخ المطلوب في الماضي",
+          };
+        }
+        if (daysBetweenIso(todayIso, candIso) > maxBookingHorizonDays) {
+          return {
+            kind: "invalid",
+            reason: "OUT_OF_BOUNDS",
+            error: "التاريخ يتجاوز أفق الحجز المتاح",
+          };
+        }
+        resolvedCandidateIso = candIso;
+      } else {
+        const cand1Valid = isValidCalendarComponents(day, month, currentYear);
+        const candIso1 = cand1Valid
+          ? formatIsoDate(currentYear, month, day)
+          : null;
+
+        const cand2Valid = isValidCalendarComponents(
+          day,
+          month,
+          currentYear + 1,
+        );
+        const candIso2 = cand2Valid
+          ? formatIsoDate(currentYear + 1, month, day)
+          : null;
+
+        if (candIso1 !== null && candIso1 >= todayIso) {
+          if (daysBetweenIso(todayIso, candIso1) <= maxBookingHorizonDays) {
+            resolvedCandidateIso = candIso1;
+          } else {
+            return {
+              kind: "invalid",
+              reason: "OUT_OF_BOUNDS",
+              error: "التاريخ يتجاوز أفق الحجز المتاح",
+            };
+          }
+        } else if (candIso2 !== null && candIso2 >= todayIso) {
+          if (daysBetweenIso(todayIso, candIso2) <= maxBookingHorizonDays) {
+            resolvedCandidateIso = candIso2;
+          } else {
+            return {
+              kind: "invalid",
+              reason: "OUT_OF_BOUNDS",
+              error: "التاريخ يتجاوز أفق الحجز المتاح",
+            };
+          }
+        } else {
+          if (month === 2 && day === 29) {
+            if (
+              isLeapYear(currentYear) &&
+              candIso1 !== null &&
+              candIso1 < todayIso
+            ) {
+              return {
+                kind: "invalid",
+                reason: "PAST_DATE",
+                error: "تاريخ 29 فبراير لهذا العام قد مضى.",
+              };
+            }
+            if (isLeapYear(currentYear + 1) && candIso2 !== null) {
+              return {
+                kind: "invalid",
+                reason: "OUT_OF_BOUNDS",
+                error: "تاريخ 29 فبراير القادم يتجاوز أفق الحجز المتاح.",
+              };
+            }
+            return {
+              kind: "invalid",
+              reason: "IMPOSSIBLE_DATE",
+              error:
+                `شهر فبراير في عام ${currentYear} يضم 28 يوماً فقط، ` +
+                "والعام القادم سنة غير كبيسة.",
+            };
+          }
+
+          if (candIso1 !== null && candIso1 < todayIso) {
+            return {
+              kind: "invalid",
+              reason: "PAST_DATE",
+              error: "التاريخ المطلوب في الماضي",
+            };
+          }
+          return {
+            kind: "invalid",
+            reason: "OUT_OF_BOUNDS",
+            error: "التاريخ يتجاوز أفق الحجز المتاح",
+          };
+        }
+      }
+
+      if (
+        cleanLegacyDate !== null &&
+        cleanLegacyDate !== resolvedCandidateIso
+      ) {
+        return {
+          kind: "invalid",
+          reason: "CONTRADICTION",
+          error: "تعارض بين التاريخ المحدد والطلب الزمني",
+        };
+      }
+
+      return {
+        kind: "single_date",
+        date: resolvedCandidateIso,
+        source: "unresolved_date",
       };
     }
   }
