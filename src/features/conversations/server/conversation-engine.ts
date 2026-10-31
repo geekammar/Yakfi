@@ -3548,9 +3548,7 @@ function transitionAmbiguousTemporalState(
 ): ConversationState {
   const nextFacts = {
     ...state.knownFacts,
-    ...(unresolvedDatePayload
-      ? { unresolvedDate: unresolvedDatePayload }
-      : {}),
+    ...(unresolvedDatePayload ? { unresolvedDate: unresolvedDatePayload } : {}),
   };
   delete nextFacts.date;
   delete nextFacts.dateRange;
@@ -6659,8 +6657,7 @@ async function runInboundTurn(
             const persisted = await persistTemporalStateTransition(
               turnSession,
               resolvedState,
-              (s) =>
-                transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+              (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
               return selectionReply(
@@ -7262,8 +7259,7 @@ async function runInboundTurn(
             const persisted = await persistTemporalStateTransition(
               turnSession,
               resolvedState,
-              (s) =>
-                transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+              (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
               return selectionReply(

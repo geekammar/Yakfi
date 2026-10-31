@@ -353,22 +353,20 @@ export const aiExtractionSchema = z.preprocess((val) => {
           parsed.getUTCMonth() === m - 1 &&
           parsed.getUTCDate() === d;
         if (!isIsoValid) {
-          const res: Record<string, unknown> = { ...obj, date: null };
-          if (
-            !res.temporalRequest ||
-            (typeof res.temporalRequest === "object" &&
-              (res.temporalRequest as Record<string, unknown>).type ===
-                "exact_date")
-          ) {
-            res.temporalRequest = {
-              type: "unresolved_date",
-              day: d,
-              month: m,
-              year: y,
-              rawText: trimmed,
-            };
+          if (obj.temporalRequest && typeof obj.temporalRequest === "object") {
+            const tr = obj.temporalRequest as Record<string, unknown>;
+            if (tr.type === "exact_date" || tr.type === "unresolved_date") {
+              const res: Record<string, unknown> = { ...obj, date: null };
+              res.temporalRequest = {
+                type: "unresolved_date",
+                day: d,
+                month: m,
+                year: y,
+                rawText: trimmed,
+              };
+              return res;
+            }
           }
-          return res;
         }
       }
     }

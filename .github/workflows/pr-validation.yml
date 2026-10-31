@@ -64,11 +64,6 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
-      - name: Prettier format diff
-        run: |
-          pnpm format || true
-          git diff
-
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
