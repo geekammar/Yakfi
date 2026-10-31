@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Temporal Correction Authority & Invalid-Date Clarification Acceptance Suite (ISS-011 & ISS-015).
  *
