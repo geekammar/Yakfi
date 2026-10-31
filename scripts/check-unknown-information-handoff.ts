@@ -811,6 +811,7 @@ async function runSuite(): Promise<void> {
     check(
       "10.A Supported FAQ reply with matching store answer is disclosed and stays AI_ACTIVE",
       resFaq.ok === true &&
+        !resFaq.duplicate &&
         resFaq.assistantAction === "AI_REPLY" &&
         resFaq.conversationStatus === "AI_ACTIVE" &&
         hFaq.getSent()[0] === "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
@@ -836,9 +837,10 @@ async function runSuite(): Promise<void> {
     check(
       "10.B Supported business identity is rendered via canonical bounded format and stays AI_ACTIVE",
       resId.ok === true &&
+        !resId.duplicate &&
         resId.assistantAction === "AI_REPLY" &&
         resId.conversationStatus === "AI_ACTIVE" &&
-        hId.getSent()[0].includes("مركز رعاية الأسنان التخصصي"),
+        (hId.getSent()[0]?.includes("مركز رعاية الأسنان التخصصي") ?? false),
       resId,
     );
 
@@ -877,9 +879,10 @@ async function runSuite(): Promise<void> {
     check(
       "10.C Supported service price with matching catalog price is disclosed and stays AI_ACTIVE",
       resPrice.ok === true &&
+        !resPrice.duplicate &&
         resPrice.assistantAction === "AI_REPLY" &&
         resPrice.conversationStatus === "AI_ACTIVE" &&
-        hPrice.getSent()[0].includes("400"),
+        (hPrice.getSent()[0]?.includes("400") ?? false),
       resPrice,
     );
 
@@ -915,9 +918,10 @@ async function runSuite(): Promise<void> {
     check(
       "10.D Supported service catalog listing with explicit requiredKnowledge is disclosed",
       resCat.ok === true &&
+        !resCat.duplicate &&
         resCat.assistantAction === "AI_REPLY" &&
         resCat.conversationStatus === "AI_ACTIVE" &&
-        hCat.getSent()[0].includes("تنظيف أسنان"),
+        (hCat.getSent()[0]?.includes("تنظيف أسنان") ?? false),
       resCat,
     );
   }
@@ -948,6 +952,7 @@ async function runSuite(): Promise<void> {
     check(
       "11.A Knowledge gap repository failure does not crash engine; turn succeeds and safely hands off",
       res.ok === true &&
+        !res.duplicate &&
         res.assistantAction === "AI_HANDOFF" &&
         res.conversationStatus === "NEED_HUMAN" &&
         conv.status === "NEED_HUMAN" &&
@@ -1010,6 +1015,7 @@ async function runSuite(): Promise<void> {
     check(
       "12.A Another service's price does not authorize an unpriced service (unrelated support isolated)",
       resPrice.ok === true &&
+        !resPrice.duplicate &&
         resPrice.assistantAction === "AI_HANDOFF" &&
         resPrice.conversationStatus === "NEED_HUMAN" &&
         !hUnrelatedPrice.getSent().includes("2000"),
@@ -1039,6 +1045,7 @@ async function runSuite(): Promise<void> {
     check(
       "12.B Unrelated FAQ in store does not authorize unsupported answer; strictly handed off",
       resFaq.ok === true &&
+        !resFaq.duplicate &&
         resFaq.assistantAction === "AI_HANDOFF" &&
         resFaq.conversationStatus === "NEED_HUMAN" &&
         !hUnrelatedFaq.getSent()[0].includes("التعقيم المعتمدة"),
