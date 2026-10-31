@@ -359,9 +359,9 @@ async function main(): Promise<void> {
     });
 
     check(
-      "DB-2.C Operator attention record persisted in DB with reason NO_KNOWLEDGE",
+      "DB-2.C Operator attention record persisted in DB with cause KNOWLEDGE_GAP_UNRESOLVED",
       dbAttention2.length === 1 &&
-        dbAttention2[0]!.cause === "NO_KNOWLEDGE" &&
+        dbAttention2[0]!.cause === "KNOWLEDGE_GAP_UNRESOLVED" &&
         dbAttention2[0]!.reason === "AI_HANDOFF" &&
         dbAttention2[0]!.resolvedAt === null,
       dbAttention2,
