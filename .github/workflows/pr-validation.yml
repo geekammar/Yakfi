@@ -155,6 +155,7 @@ jobs:
           pnpm test:appointment-cancel
           pnpm test:appointment-duration
           pnpm test:login-form
+          pnpm check:stale-session-routing
           pnpm check:iss-006
           pnpm test:follow-up-scheduling
           pnpm check:qa-harness
@@ -174,6 +175,7 @@ jobs:
           pnpm check:booking-acceptance-db
           pnpm check:iss-006-db
           pnpm check:customer-time-display-db
+          pnpm check:stale-session-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

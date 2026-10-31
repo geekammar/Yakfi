@@ -13,9 +13,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
 function safeInternalPath(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//")
-    ? value
-    : "/";
+  if (
+    !value ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.startsWith("/\\")
+  ) {
+    return "/";
+  }
+  const clean = value.split("?")[0];
+  if (clean === "/sign-in" || clean === "/sign-up") {
+    return "/";
+  }
+  return value;
 }
 
 export function LoginForm() {

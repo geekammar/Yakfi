@@ -9,7 +9,25 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.3 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
+**Product version: v0.79.4 (candidate PR)** — `Stale-Session Sign-in Redirect Loop Repair (ISS-017)`. Baseline: v0.79.3 (merged PR #71, commit `e34eec8bd26716791c09153e67ca1d041d613bb6`). Branch: `fix/stale-session-signin-loop`. Candidate PR: open.
+
+- **Problem & Root Cause (ISS-017)**:
+  - `src/proxy.ts` previously redirected incoming requests for `/sign-in` and `/sign-up` to `/` whenever any session cookie was present (`hasSessionCookie = Boolean(getSessionCookie(request))`), without authoritative server validation of session validity.
+  - When a browser held an expired, revoked, or invalid session cookie, visiting `/` passed the edge proxy but was authoritatively rejected by `src/server/auth/guards.ts` (`loadActiveSession()` -> `getSession()` -> DB lookup returning null), triggering `redirect("/sign-in")`.
+  - The browser then requested `/sign-in` with the same cookie header, causing `src/proxy.ts` to redirect back to `/`, producing an infinite redirect loop (`ERR_TOO_MANY_REDIRECTS`) and blocking the user from reaching the sign-in form in the same browser context.
+- **Architectural Repair**:
+  - Removed edge-proxy redirect away from `/sign-in` and `/sign-up` in `src/proxy.ts`. Edge proxy gates protected routes only, allowing auth screens (`/sign-in`, `/sign-up`, etc.) to pass directly to the server.
+  - Established authoritative server-side authenticated session skipping at the Server Component page boundary (`src/app/(auth)/sign-in/page.tsx` and `src/app/(auth)/sign-up/page.tsx`).
+  - Active valid sessions skip the form and route to intended destinations (`redirect` query param or default `/`), Platform Operators route to `/platform`, and disabled accounts route to `/access-denied`.
+  - Absent, expired, or revoked sessions (`session === null`) allow the sign-in form to render immediately without redirect oscillation.
+  - Safe internal path validation (`safeInternalPath` / `resolveSafeRedirect`) hardened against protocol-relative (`//`), backslash-escaped (`/\`), and self-referential (`/sign-in`, `/sign-up`) destinations.
+  - Zero DB migrations, zero architecture alterations, zero open redirects, rememberMe semantics completely preserved.
+- **Verification Suites**:
+  - Domain routing suite `scripts/check-stale-session-routing.ts` (`pnpm check:stale-session-routing`) covering Groups A, B, E, and F (17 deterministic checks).
+  - Disposable PostgreSQL database suite `scripts/check-stale-session-db.ts` (`pnpm check:stale-session-db`) covering genuine session revocation (C-01 to C-07), controlled past expiration (D-01 to D-03), and exception separation (08-01).
+  - Browser UX and E2E regression tests in `tests/e2e/sign-in-validation.spec.ts` and `tests/e2e/preview-auth-qa.spec.ts`.
+
+**Product version: v0.79.3 (main baseline; merged PR #71)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
 
 - **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
 - **Temporal Correction Authority (ISS-011)**:
