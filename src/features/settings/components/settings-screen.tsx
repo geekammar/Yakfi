@@ -170,9 +170,7 @@ export function SettingsScreen({
       form.reset(data);
       setSaved(true);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "تعذر حفظ الإعدادات الآن",
-      );
+      setError(err instanceof Error ? err.message : "تعذر حفظ الإعدادات الآن");
     } finally {
       setIsSubmitting(false);
     }
@@ -415,708 +413,720 @@ export function SettingsScreen({
             </div>
           </section>
 
-        {/* ─── Section 2: معلومات المساعد (AI information — optional) ─── */}
-        <section
-          aria-labelledby="settings-ai-section"
-          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
-        >
-          <SectionHeader
-            title="معلومات المساعد"
-            description="أدخل أهم المعلومات عن نشاطك مرة واحدة، والمساعد يستخدمها للإجابة على العملاء — اختيارية بالكامل."
-          />
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="settings-about">
-                نبذة عن المنشأة{" "}
-                <span className="font-normal text-muted-foreground">
-                  (اختياري)
-                </span>
-              </Label>
-              <Textarea
-                id="settings-about"
-                rows={3}
-                placeholder="مثال: عيادة أسنان متخصصة في تنظيف وحشو الأسنان، فريق محترف وأحدث الأجهزة."
-                aria-invalid={Boolean(form.formState.errors.about)}
-                {...registerGuarded("about")}
-              />
-              {fieldError(form.formState.errors.about?.message)}
-              <p className="text-xs text-muted-foreground">
-                يُستخدمها المساعد عندما يسأل العميل عن نشاطك.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="settings-address">
-                موقع النشاط{" "}
-                <span className="font-normal text-muted-foreground">
-                  (اختياري)
-                </span>
-              </Label>
-              <Input
-                id="settings-address"
-                autoComplete="street-address"
-                placeholder="مثال: كفر الشيخ — شارع الجمهورية، بجوار صيدلية النيل"
-                aria-invalid={Boolean(form.formState.errors.address)}
-                {...registerGuarded("address")}
-              />
-              {fieldError(form.formState.errors.address?.message)}
-              <p className="text-xs text-muted-foreground">
-                يُستخدمها المساعد عندما يسأل العميل عن مكانك.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* ─── Section 3: إعدادات الحجز ─── */}
-        <section
-          aria-labelledby="settings-booking-section"
-          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
-        >
-          <SectionHeader
-            title="إعدادات الحجز"
-            description="كيف تُضاف المواعيد الجديدة إلى جدولك."
-          />
-          <div className="space-y-5">
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">طريقة تأكيد الحجز</legend>
-              <Controller
-                control={form.control}
-                name="confirmationMode"
-                render={({ field }) => (
-                  <RadioGroup
-                    value={field.value}
-                    onValueChange={(val) => {
-                      if (isSubmitting) return;
-                      field.onChange(val);
-                    }}
-                    disabled={isSubmitting}
-                    className="gap-3"
-                  >
-                    {CONFIRMATION_MODES.map((mode) => (
-                      <Label
-                        key={mode.value}
-                        htmlFor={`confirmation-${mode.value}`}
-                        className={cn(
-                          "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
-                          isSubmitting &&
-                            "cursor-not-allowed opacity-60 pointer-events-none",
-                        )}
-                      >
-                        <RadioGroupItem
-                          id={`confirmation-${mode.value}`}
-                          value={mode.value}
-                          disabled={isSubmitting}
-                          className="mt-0.5"
-                        />
-                        <span className="space-y-1">
-                          <span className="block text-sm font-medium">
-                            {mode.label}
-                          </span>
-                          <span className="block text-xs leading-5 text-muted-foreground">
-                            {mode.hint}
-                          </span>
-                        </span>
-                      </Label>
-                    ))}
-                  </RadioGroup>
-                )}
-              />
-              {fieldError(form.formState.errors.confirmationMode?.message)}
-            </fieldset>
-
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">
-                طريقة عرض وقت الموعد للعميل
-              </legend>
-              <Controller
-                control={form.control}
-                name="appointmentTimeDisplay"
-                render={({ field }) => (
-                  <RadioGroup
-                    value={field.value}
-                    onValueChange={(val) => {
-                      if (isSubmitting) return;
-                      field.onChange(val);
-                    }}
-                    disabled={isSubmitting}
-                    className="gap-3"
-                  >
-                    {APPOINTMENT_TIME_DISPLAY_OPTIONS.map((opt) => (
-                      <Label
-                        key={opt.value}
-                        htmlFor={`time-display-${opt.value}`}
-                        className={cn(
-                          "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
-                          isSubmitting &&
-                            "cursor-not-allowed opacity-60 pointer-events-none",
-                        )}
-                      >
-                        <RadioGroupItem
-                          id={`time-display-${opt.value}`}
-                          value={opt.value}
-                          disabled={isSubmitting}
-                          className="mt-0.5"
-                        />
-                        <span className="space-y-1">
-                          <span className="block text-sm font-medium">
-                            {opt.label}
-                          </span>
-                          <span className="block text-xs leading-5 text-muted-foreground">
-                            {opt.hint}
-                          </span>
-                          <span className="block text-xs font-mono text-muted-foreground/80">
-                            {opt.example}
-                          </span>
-                        </span>
-                      </Label>
-                    ))}
-                  </RadioGroup>
-                )}
-              />
-              {fieldError(
-                form.formState.errors.appointmentTimeDisplay?.message,
-              )}
-            </fieldset>
-
-            <div className="max-w-sm space-y-2">
-              <Label htmlFor="settings-slot-duration">
-                الفاصل الزمني بين بدايات المواعيد
-              </Label>
-              <Controller
-                control={form.control}
-                name="slotDurationMinutes"
-                render={({ field }) => (
-                  <Select
-                    value={
-                      field.value !== undefined ? String(field.value) : "30"
-                    }
-                    onValueChange={(val) => {
-                      if (isSubmitting) return;
-                      field.onChange(Number(val));
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger
-                      id="settings-slot-duration"
-                      className="w-full"
-                      disabled={isSubmitting}
-                      aria-invalid={Boolean(
-                        form.formState.errors.slotDurationMinutes,
-                      )}
-                    >
-                      <SelectValue placeholder="اختر الفاصل الزمني" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BOOKING_INTERVAL_OPTIONS.map((minutes) => (
-                        <SelectItem key={minutes} value={String(minutes)}>
-                          {minutes} دقيقة
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {fieldError(form.formState.errors.slotDurationMinutes?.message)}
-              <p className="text-xs leading-5 text-muted-foreground">
-                يحدد عدد الدقائق بين أوقات بدء الحجز المعروضة، ولا يغيّر مدة
-                الخدمة أو المواعيد المحجوزة مسبقًا.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="settings-cancellation">سياسة الإلغاء</Label>
-              <Textarea
-                id="settings-cancellation"
-                rows={3}
-                placeholder="مثال: يمكن الإلغاء أو التعديل قبل الموعد بـ 24 ساعة."
-                aria-invalid={Boolean(form.formState.errors.cancellationPolicy)}
-                {...registerGuarded("cancellationPolicy")}
-              />
-              {fieldError(form.formState.errors.cancellationPolicy?.message)}
-            </div>
-
-            {/* ─── الحجز السريع بالخدمة الافتراضية (CONV-PLAY-01) ─── */}
-            <div className="border-t pt-5 space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold">
-                  الحجز السريع بالخدمة الافتراضية
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5 leading-5">
-                  إذا طلب العميل حجز موعد دون تحديد الخدمة، سيختار المساعد
-                  الخدمة الافتراضية لتسريع الحجز. يمكنك تغييرها لاحقًا، ويمكن
-                  للعميل اختيار خدمة أخرى في أي وقت.
+          {/* ─── Section 2: معلومات المساعد (AI information — optional) ─── */}
+          <section
+            aria-labelledby="settings-ai-section"
+            className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+          >
+            <SectionHeader
+              title="معلومات المساعد"
+              description="أدخل أهم المعلومات عن نشاطك مرة واحدة، والمساعد يستخدمها للإجابة على العملاء — اختيارية بالكامل."
+            />
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="settings-about">
+                  نبذة عن المنشأة{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (اختياري)
+                  </span>
+                </Label>
+                <Textarea
+                  id="settings-about"
+                  rows={3}
+                  placeholder="مثال: عيادة أسنان متخصصة في تنظيف وحشو الأسنان، فريق محترف وأحدث الأجهزة."
+                  aria-invalid={Boolean(form.formState.errors.about)}
+                  {...registerGuarded("about")}
+                />
+                {fieldError(form.formState.errors.about?.message)}
+                <p className="text-xs text-muted-foreground">
+                  يُستخدمها المساعد عندما يسأل العميل عن نشاطك.
                 </p>
               </div>
 
-              {/* Toggle */}
+              <div className="space-y-2">
+                <Label htmlFor="settings-address">
+                  موقع النشاط{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (اختياري)
+                  </span>
+                </Label>
+                <Input
+                  id="settings-address"
+                  autoComplete="street-address"
+                  placeholder="مثال: كفر الشيخ — شارع الجمهورية، بجوار صيدلية النيل"
+                  aria-invalid={Boolean(form.formState.errors.address)}
+                  {...registerGuarded("address")}
+                />
+                {fieldError(form.formState.errors.address?.message)}
+                <p className="text-xs text-muted-foreground">
+                  يُستخدمها المساعد عندما يسأل العميل عن مكانك.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* ─── Section 3: إعدادات الحجز ─── */}
+          <section
+            aria-labelledby="settings-booking-section"
+            className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+          >
+            <SectionHeader
+              title="إعدادات الحجز"
+              description="كيف تُضاف المواعيد الجديدة إلى جدولك."
+            />
+            <div className="space-y-5">
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">
+                  طريقة تأكيد الحجز
+                </legend>
+                <Controller
+                  control={form.control}
+                  name="confirmationMode"
+                  render={({ field }) => (
+                    <RadioGroup
+                      value={field.value}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(val);
+                      }}
+                      disabled={isSubmitting}
+                      className="gap-3"
+                    >
+                      {CONFIRMATION_MODES.map((mode) => (
+                        <Label
+                          key={mode.value}
+                          htmlFor={`confirmation-${mode.value}`}
+                          className={cn(
+                            "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
+                            isSubmitting &&
+                              "cursor-not-allowed opacity-60 pointer-events-none",
+                          )}
+                        >
+                          <RadioGroupItem
+                            id={`confirmation-${mode.value}`}
+                            value={mode.value}
+                            disabled={isSubmitting}
+                            className="mt-0.5"
+                          />
+                          <span className="space-y-1">
+                            <span className="block text-sm font-medium">
+                              {mode.label}
+                            </span>
+                            <span className="block text-xs leading-5 text-muted-foreground">
+                              {mode.hint}
+                            </span>
+                          </span>
+                        </Label>
+                      ))}
+                    </RadioGroup>
+                  )}
+                />
+                {fieldError(form.formState.errors.confirmationMode?.message)}
+              </fieldset>
+
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">
+                  طريقة عرض وقت الموعد للعميل
+                </legend>
+                <Controller
+                  control={form.control}
+                  name="appointmentTimeDisplay"
+                  render={({ field }) => (
+                    <RadioGroup
+                      value={field.value}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(val);
+                      }}
+                      disabled={isSubmitting}
+                      className="gap-3"
+                    >
+                      {APPOINTMENT_TIME_DISPLAY_OPTIONS.map((opt) => (
+                        <Label
+                          key={opt.value}
+                          htmlFor={`time-display-${opt.value}`}
+                          className={cn(
+                            "flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-accent/60 has-data-checked:border-primary has-data-checked:bg-accent/60",
+                            isSubmitting &&
+                              "cursor-not-allowed opacity-60 pointer-events-none",
+                          )}
+                        >
+                          <RadioGroupItem
+                            id={`time-display-${opt.value}`}
+                            value={opt.value}
+                            disabled={isSubmitting}
+                            className="mt-0.5"
+                          />
+                          <span className="space-y-1">
+                            <span className="block text-sm font-medium">
+                              {opt.label}
+                            </span>
+                            <span className="block text-xs leading-5 text-muted-foreground">
+                              {opt.hint}
+                            </span>
+                            <span className="block text-xs font-mono text-muted-foreground/80">
+                              {opt.example}
+                            </span>
+                          </span>
+                        </Label>
+                      ))}
+                    </RadioGroup>
+                  )}
+                />
+                {fieldError(
+                  form.formState.errors.appointmentTimeDisplay?.message,
+                )}
+              </fieldset>
+
+              <div className="max-w-sm space-y-2">
+                <Label htmlFor="settings-slot-duration">
+                  الفاصل الزمني بين بدايات المواعيد
+                </Label>
+                <Controller
+                  control={form.control}
+                  name="slotDurationMinutes"
+                  render={({ field }) => (
+                    <Select
+                      value={
+                        field.value !== undefined ? String(field.value) : "30"
+                      }
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(Number(val));
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger
+                        id="settings-slot-duration"
+                        className="w-full"
+                        disabled={isSubmitting}
+                        aria-invalid={Boolean(
+                          form.formState.errors.slotDurationMinutes,
+                        )}
+                      >
+                        <SelectValue placeholder="اختر الفاصل الزمني" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BOOKING_INTERVAL_OPTIONS.map((minutes) => (
+                          <SelectItem key={minutes} value={String(minutes)}>
+                            {minutes} دقيقة
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {fieldError(form.formState.errors.slotDurationMinutes?.message)}
+                <p className="text-xs leading-5 text-muted-foreground">
+                  يحدد عدد الدقائق بين أوقات بدء الحجز المعروضة، ولا يغيّر مدة
+                  الخدمة أو المواعيد المحجوزة مسبقًا.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="settings-cancellation">سياسة الإلغاء</Label>
+                <Textarea
+                  id="settings-cancellation"
+                  rows={3}
+                  placeholder="مثال: يمكن الإلغاء أو التعديل قبل الموعد بـ 24 ساعة."
+                  aria-invalid={Boolean(
+                    form.formState.errors.cancellationPolicy,
+                  )}
+                  {...registerGuarded("cancellationPolicy")}
+                />
+                {fieldError(form.formState.errors.cancellationPolicy?.message)}
+              </div>
+
+              {/* ─── الحجز السريع بالخدمة الافتراضية (CONV-PLAY-01) ─── */}
+              <div className="border-t pt-5 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold">
+                    الحجز السريع بالخدمة الافتراضية
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-5">
+                    إذا طلب العميل حجز موعد دون تحديد الخدمة، سيختار المساعد
+                    الخدمة الافتراضية لتسريع الحجز. يمكنك تغييرها لاحقًا، ويمكن
+                    للعميل اختيار خدمة أخرى في أي وقت.
+                  </p>
+                </div>
+
+                {/* Toggle */}
+                <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
+                  <Controller
+                    control={form.control}
+                    name="defaultServiceBookingEnabled"
+                    render={({ field }) => (
+                      <Checkbox
+                        id="settings-default-service-enabled"
+                        checked={field.value ?? false}
+                        onCheckedChange={(checked) => {
+                          if (isSubmitting) return;
+                          field.onChange(checked);
+                        }}
+                        disabled={isSubmitting}
+                        aria-describedby="default-service-enabled-desc"
+                      />
+                    )}
+                  />
+                  <div className="space-y-1 leading-none">
+                    <Label
+                      htmlFor="settings-default-service-enabled"
+                      className={cn(
+                        "text-sm font-semibold cursor-pointer",
+                        isSubmitting &&
+                          "cursor-not-allowed opacity-60 pointer-events-none",
+                      )}
+                    >
+                      استخدام الخدمة الافتراضية عند طلب حجز دون تحديد خدمة
+                    </Label>
+                    <p
+                      id="default-service-enabled-desc"
+                      className="text-xs text-muted-foreground leading-5"
+                    >
+                      تحديد خدمة أساسية للاقتراح الفوري عند عدم تحديد العميل
+                      لنوع الخدمة.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Status indicator when disabled */}
+                {!defaultServiceBookingEnabled ? (
+                  <div
+                    role="status"
+                    className="rounded-lg border border-border/60 bg-muted/40 p-3 text-xs leading-5 text-muted-foreground"
+                  >
+                    <p>
+                      <span className="font-semibold text-foreground">
+                        الحالة الحالية:
+                      </span>{" "}
+                      الوضع معطّل — عند طلب حجز بدون تحديد خدمة، سيعرض المساعد
+                      قائمة الخدمات المتاحة ليختار العميل منها.
+                    </p>
+                  </div>
+                ) : null}
+
+                {/* Dropdown: الخدمة الافتراضية */}
+                <div className="max-w-sm space-y-2">
+                  <Label htmlFor="settings-default-service">
+                    الخدمة الافتراضية
+                    {defaultServiceBookingEnabled ? (
+                      <span className="text-destructive ms-1">*</span>
+                    ) : (
+                      <span className="font-normal text-muted-foreground ms-1">
+                        (تجهيز مسبق)
+                      </span>
+                    )}
+                  </Label>
+                  <Controller
+                    control={form.control}
+                    name="defaultBookingServiceId"
+                    render={({ field }) => (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 min-w-0">
+                            <Select
+                              value={field.value ?? ""}
+                              onValueChange={(val) => {
+                                if (isSubmitting) return;
+                                field.onChange(val || null);
+                                if (error) setError(null);
+                              }}
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger
+                                id="settings-default-service"
+                                className="w-full"
+                                disabled={isSubmitting}
+                                aria-invalid={
+                                  Boolean(
+                                    form.formState.errors
+                                      .defaultBookingServiceId,
+                                  ) ||
+                                  (defaultServiceBookingEnabled &&
+                                    (defaultServiceState === "inactive" ||
+                                      defaultServiceState === "unavailable"))
+                                }
+                              >
+                                <SelectValue placeholder="اختر الخدمة الافتراضية">
+                                  {selectedDefaultService
+                                    ? selectedDefaultService.name
+                                    : defaultServiceState === "inactive" &&
+                                        matchedService
+                                      ? `${matchedService.name} (غير مفعّلة)`
+                                      : defaultServiceState === "unavailable"
+                                        ? "خدمة غير متاحة"
+                                        : undefined}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {activeServices.length > 0 ? (
+                                  activeServices.map((service) => (
+                                    <SelectItem
+                                      key={service.id}
+                                      value={service.id}
+                                    >
+                                      {service.name}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="p-2 text-xs text-muted-foreground text-center">
+                                    لا توجد خدمات نشطة متاحة
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {field.value ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isSubmitting}
+                              onClick={() => {
+                                if (isSubmitting) return;
+                                field.onChange(null);
+                                if (error) setError(null);
+                              }}
+                              className="shrink-0 text-xs h-9 px-2.5"
+                              aria-label="إلغاء اختيار الخدمة الافتراضية"
+                            >
+                              إلغاء التحديد
+                            </Button>
+                          ) : null}
+                        </div>
+
+                        {/* State C: Saved default service exists but is inactive */}
+                        {defaultServiceState === "inactive" &&
+                        matchedService ? (
+                          <div
+                            role="alert"
+                            className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-sm">
+                              <span className="size-2 rounded-full bg-amber-500 shrink-0" />
+                              <span>
+                                الخدمة الافتراضية المحفوظة غير مفعّلة (
+                                {matchedService.name})
+                              </span>
+                            </div>
+                            <p className="text-muted-foreground dark:text-amber-200/90">
+                              الخدمة المحفوظة كخدمة افتراضية (
+                              {matchedService.name}) غير مفعّلة حالياً ولا يمكن
+                              استخدامها للحجز التلقائي. يرجى اختيار خدمة نشطة
+                              بديلة، أو إلغاء تحديد الخدمة وتعطيل الحجز السريع.
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {/* State D: Saved ID cannot be resolved in tenant's available services */}
+                        {defaultServiceState === "unavailable" ? (
+                          <div
+                            role="alert"
+                            className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+                          >
+                            <div className="flex items-center gap-2 font-semibold text-sm">
+                              <span className="size-2 rounded-full bg-amber-500 shrink-0" />
+                              <span>الخدمة الافتراضية المحفوظة غير متاحة</span>
+                            </div>
+                            <p className="text-muted-foreground dark:text-amber-200/90">
+                              الخدمة الافتراضية المحفوظة غير متاحة في قائمة
+                              خدمات المنشأة الحالية. يرجى اختيار خدمة نشطة
+                              بديلة، أو تعطيل الحجز بالخدمة الافتراضية واستخدام
+                              زر &quot;إلغاء التحديد&quot;.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  />
+                  {fieldError(
+                    form.formState.errors.defaultBookingServiceId?.message,
+                  )}
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    تُعرض الخدمات النشطة والمتاحة للمنشأة فقط.
+                  </p>
+                </div>
+
+                {/* Booking Preview when enabled */}
+                {defaultServiceBookingEnabled && selectedDefaultService ? (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-xs leading-6 space-y-1.5">
+                    <div className="font-semibold text-primary flex items-center gap-1.5">
+                      <SparklesIcon className="size-3.5" />
+                      <span>معاينة سلوك الحجز مع العميل:</span>
+                    </div>
+                    <p className="text-muted-foreground">
+                      العميل:{" "}
+                      <span className="font-medium text-foreground">
+                        &quot;عايز أحجز بكرة&quot;
+                      </span>
+                    </p>
+                    <p className="text-muted-foreground">
+                      المساعد:{" "}
+                      <span className="font-medium text-foreground">
+                        &quot;تمام، هحجز لك على خدمة{" "}
+                        {selectedDefaultService.name}. تقدر تغيّر الخدمة لو
+                        حابب. دي المواعيد المتاحة بكرة...&quot;
+                      </span>
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          {/* ─── Section 4: التذكير بالمواعيد (BOOK-REM-01) ─── */}
+          <section
+            aria-labelledby="settings-reminders-section"
+            className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <SectionHeader
+                title="التذكير بالمواعيد"
+                description="ذكّر عملاءك تلقائيًا قبل موعدهم."
+              />
+              {!initialSettings.remindersOperational ? (
+                <Badge
+                  variant="outline"
+                  className="w-fit text-xs border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                >
+                  مرحلة الإعداد (غير مفعّل)
+                </Badge>
+              ) : null}
+            </div>
+            <div className="space-y-6 pt-2">
+              {/* Informative Status when feature is globally disabled */}
+              {!initialSettings.remindersOperational ? (
+                <div
+                  role="status"
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
+                >
+                  <div className="flex items-center gap-2 font-semibold text-sm">
+                    <span className="size-2 rounded-full bg-amber-500" />
+                    <span>التذكير التلقائي غير مفعّل حاليًا</span>
+                  </div>
+                  <p className="text-muted-foreground dark:text-amber-200/80">
+                    يمكنك استعراض إعدادات التذكير وتجهيزها، لكن لن يتم إرسال
+                    رسائل تلقائية خلال المرحلة الحالية.
+                  </p>
+                </div>
+              ) : null}
+
+              {/* Setting A: Enable reminder */}
               <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
                 <Controller
                   control={form.control}
-                  name="defaultServiceBookingEnabled"
+                  name="reminderEnabled"
                   render={({ field }) => (
                     <Checkbox
-                      id="settings-default-service-enabled"
-                      checked={field.value ?? false}
-                      onCheckedChange={(checked) => {
-                        if (isSubmitting) return;
-                        field.onChange(checked);
-                      }}
-                      disabled={isSubmitting}
-                      aria-describedby="default-service-enabled-desc"
+                      id="settings-reminder-enabled"
+                      checked={
+                        initialSettings.remindersOperational
+                          ? field.value
+                          : false
+                      }
+                      onCheckedChange={
+                        initialSettings.remindersOperational && !isSubmitting
+                          ? (checked) => {
+                              if (isSubmitting) return;
+                              field.onChange(checked);
+                            }
+                          : undefined
+                      }
+                      disabled={
+                        isSubmitting ||
+                        !initialSettings.remindersOperational ||
+                        !initialSettings.channelReadiness.hasActiveChannel
+                      }
+                      aria-describedby="reminder-enabled-desc"
                     />
                   )}
                 />
                 <div className="space-y-1 leading-none">
                   <Label
-                    htmlFor="settings-default-service-enabled"
+                    htmlFor="settings-reminder-enabled"
                     className={cn(
-                      "text-sm font-semibold cursor-pointer",
-                      isSubmitting &&
-                        "cursor-not-allowed opacity-60 pointer-events-none",
+                      "text-base font-semibold",
+                      initialSettings.remindersOperational && !isSubmitting
+                        ? "cursor-pointer"
+                        : "cursor-not-allowed opacity-75",
                     )}
                   >
-                    استخدام الخدمة الافتراضية عند طلب حجز دون تحديد خدمة
+                    تفعيل التذكير التلقائي
                   </Label>
                   <p
-                    id="default-service-enabled-desc"
+                    id="reminder-enabled-desc"
                     className="text-xs text-muted-foreground leading-5"
                   >
-                    تحديد خدمة أساسية للاقتراح الفوري عند عدم تحديد العميل لنوع
-                    الخدمة.
+                    {initialSettings.remindersOperational
+                      ? "إرسال رسالة تذكير تلقائية للعميل قبل موعده لتقليل نسبة عدم الحضور."
+                      : "التذكير التلقائي معطل حالياً في هذه المرحلة التجريبية. يمكنك تجهيز خيارات التوقيت والنموذج بالأسفل وحفظها للمستقبل."}
                   </p>
                 </div>
               </div>
 
-              {/* Status indicator when disabled */}
-              {!defaultServiceBookingEnabled ? (
-                <div
-                  role="status"
-                  className="rounded-lg border border-border/60 bg-muted/40 p-3 text-xs leading-5 text-muted-foreground"
-                >
-                  <p>
-                    <span className="font-semibold text-foreground">
-                      الحالة الحالية:
-                    </span>{" "}
-                    الوضع معطّل — عند طلب حجز بدون تحديد خدمة، سيعرض المساعد
-                    قائمة الخدمات المتاحة ليختار العميل منها.
-                  </p>
-                </div>
-              ) : null}
+              {/* Setting C: Channel readiness */}
+              <div className="space-y-2">
+                <span className="text-sm font-medium">حالة قنوات المراسلة</span>
+                {!initialSettings.channelReadiness.hasActiveChannel ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-destructive/30 bg-destructive/10 p-3.5 text-xs leading-5 text-destructive space-y-2"
+                  >
+                    <p className="font-semibold">
+                      لا توجد قناة مراسلة جاهزة حالياً لإرسال التذكيرات.
+                    </p>
+                    <p>
+                      لتفعيل التذكير التلقائي، يجب أن يكون رقم واتساب أو بوت
+                      تيليجرام متصلاً ومفعلاً.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <Link
+                        href="/settings/whatsapp"
+                        className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
+                      >
+                        <MessageCircleIcon className="size-3.5" />
+                        إعداد واتساب
+                      </Link>
+                      <span>·</span>
+                      <Link
+                        href="/settings/telegram"
+                        className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
+                      >
+                        <SendIcon className="size-3.5" />
+                        إعداد تيليجرام
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {initialSettings.channelReadiness.whatsapp ? (
+                      <Badge
+                        variant="outline"
+                        className="border-success/30 bg-success/10 text-success gap-1.5 py-1 px-2.5"
+                      >
+                        <MessageCircleIcon className="size-3.5" />
+                        واتساب متصل ومؤهل
+                      </Badge>
+                    ) : null}
+                    {initialSettings.channelReadiness.telegram ? (
+                      <Badge
+                        variant="outline"
+                        className="border-info/30 bg-info/10 text-info gap-1.5 py-1 px-2.5"
+                      >
+                        <SendIcon className="size-3.5" />
+                        تيليجرام متصل ومؤهل
+                      </Badge>
+                    ) : null}
+                  </div>
+                )}
+              </div>
 
-              {/* Dropdown: الخدمة الافتراضية */}
+              {/* Setting B: Reminder lead time */}
               <div className="max-w-sm space-y-2">
-                <Label htmlFor="settings-default-service">
-                  الخدمة الافتراضية
-                  {defaultServiceBookingEnabled ? (
-                    <span className="text-destructive ms-1">*</span>
-                  ) : (
-                    <span className="font-normal text-muted-foreground ms-1">
-                      (تجهيز مسبق)
-                    </span>
-                  )}
+                <Label htmlFor="settings-reminder-lead">
+                  إرسال التذكير قبل الموعد
                 </Label>
                 <Controller
                   control={form.control}
-                  name="defaultBookingServiceId"
+                  name="reminderLeadHours"
                   render={({ field }) => (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 min-w-0">
-                          <Select
-                            value={field.value ?? ""}
-                            onValueChange={(val) => {
-                              if (isSubmitting) return;
-                              field.onChange(val || null);
-                              if (error) setError(null);
-                            }}
-                            disabled={isSubmitting}
-                          >
-                            <SelectTrigger
-                              id="settings-default-service"
-                              className="w-full"
-                              disabled={isSubmitting}
-                              aria-invalid={
-                                Boolean(
-                                  form.formState.errors.defaultBookingServiceId,
-                                ) ||
-                                (defaultServiceBookingEnabled &&
-                                  (defaultServiceState === "inactive" ||
-                                    defaultServiceState === "unavailable"))
-                              }
-                            >
-                              <SelectValue placeholder="اختر الخدمة الافتراضية">
-                                {selectedDefaultService
-                                  ? selectedDefaultService.name
-                                  : defaultServiceState === "inactive" &&
-                                      matchedService
-                                    ? `${matchedService.name} (غير مفعّلة)`
-                                    : defaultServiceState === "unavailable"
-                                      ? "خدمة غير متاحة"
-                                      : undefined}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              {activeServices.length > 0 ? (
-                                activeServices.map((service) => (
-                                  <SelectItem
-                                    key={service.id}
-                                    value={service.id}
-                                  >
-                                    {service.name}
-                                  </SelectItem>
-                                ))
-                              ) : (
-                                <div className="p-2 text-xs text-muted-foreground text-center">
-                                  لا توجد خدمات نشطة متاحة
-                                </div>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {field.value ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={isSubmitting}
-                            onClick={() => {
-                              if (isSubmitting) return;
-                              field.onChange(null);
-                              if (error) setError(null);
-                            }}
-                            className="shrink-0 text-xs h-9 px-2.5"
-                            aria-label="إلغاء اختيار الخدمة الافتراضية"
-                          >
-                            إلغاء التحديد
-                          </Button>
-                        ) : null}
-                      </div>
-
-                      {/* State C: Saved default service exists but is inactive */}
-                      {defaultServiceState === "inactive" && matchedService ? (
-                        <div
-                          role="alert"
-                          className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
-                        >
-                          <div className="flex items-center gap-2 font-semibold text-sm">
-                            <span className="size-2 rounded-full bg-amber-500 shrink-0" />
-                            <span>
-                              الخدمة الافتراضية المحفوظة غير مفعّلة (
-                              {matchedService.name})
-                            </span>
-                          </div>
-                          <p className="text-muted-foreground dark:text-amber-200/90">
-                            الخدمة المحفوظة كخدمة افتراضية (
-                            {matchedService.name}) غير مفعّلة حالياً ولا يمكن
-                            استخدامها للحجز التلقائي. يرجى اختيار خدمة نشطة
-                            بديلة، أو إلغاء تحديد الخدمة وتعطيل الحجز السريع.
-                          </p>
-                        </div>
-                      ) : null}
-
-                      {/* State D: Saved ID cannot be resolved in tenant's available services */}
-                      {defaultServiceState === "unavailable" ? (
-                        <div
-                          role="alert"
-                          className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
-                        >
-                          <div className="flex items-center gap-2 font-semibold text-sm">
-                            <span className="size-2 rounded-full bg-amber-500 shrink-0" />
-                            <span>الخدمة الافتراضية المحفوظة غير متاحة</span>
-                          </div>
-                          <p className="text-muted-foreground dark:text-amber-200/90">
-                            الخدمة الافتراضية المحفوظة غير متاحة في قائمة خدمات
-                            المنشأة الحالية. يرجى اختيار خدمة نشطة بديلة، أو
-                            تعطيل الحجز بالخدمة الافتراضية واستخدام زر
-                            &quot;إلغاء التحديد&quot;.
-                          </p>
-                        </div>
-                      ) : null}
-                    </div>
+                    <Select
+                      value={String(field.value)}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(Number(val));
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger
+                        id="settings-reminder-lead"
+                        className="w-full"
+                        disabled={isSubmitting}
+                      >
+                        <SelectValue placeholder="اختر وقت التذكير" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REMINDER_LEAD_HOURS_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={String(opt.value)}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
                 />
-                {fieldError(
-                  form.formState.errors.defaultBookingServiceId?.message,
-                )}
+                {fieldError(form.formState.errors.reminderLeadHours?.message)}
                 <p className="text-xs leading-5 text-muted-foreground">
-                  تُعرض الخدمات النشطة والمتاحة للمنشأة فقط.
+                  يتم حساب وقت الإرسال بدقة بحسب المنطقة الزمنية المعتمدة
+                  للمنشأة.
                 </p>
               </div>
 
-              {/* Booking Preview when enabled */}
-              {defaultServiceBookingEnabled && selectedDefaultService ? (
-                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-xs leading-6 space-y-1.5">
-                  <div className="font-semibold text-primary flex items-center gap-1.5">
-                    <SparklesIcon className="size-3.5" />
-                    <span>معاينة سلوك الحجز مع العميل:</span>
-                  </div>
-                  <p className="text-muted-foreground">
-                    العميل:{" "}
-                    <span className="font-medium text-foreground">
-                      &quot;عايز أحجز بكرة&quot;
-                    </span>
-                  </p>
-                  <p className="text-muted-foreground">
-                    المساعد:{" "}
-                    <span className="font-medium text-foreground">
-                      &quot;تمام، هحجز لك على خدمة {selectedDefaultService.name}
-                      . تقدر تغيّر الخدمة لو حابب. دي المواعيد المتاحة
-                      بكرة...&quot;
-                    </span>
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-
-        {/* ─── Section 4: التذكير بالمواعيد (BOOK-REM-01) ─── */}
-        <section
-          aria-labelledby="settings-reminders-section"
-          className="rounded-xl border bg-card p-5 shadow-xs sm:p-6"
-        >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <SectionHeader
-              title="التذكير بالمواعيد"
-              description="ذكّر عملاءك تلقائيًا قبل موعدهم."
-            />
-            {!initialSettings.remindersOperational ? (
-              <Badge
-                variant="outline"
-                className="w-fit text-xs border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-              >
-                مرحلة الإعداد (غير مفعّل)
-              </Badge>
-            ) : null}
-          </div>
-          <div className="space-y-6 pt-2">
-            {/* Informative Status when feature is globally disabled */}
-            {!initialSettings.remindersOperational ? (
-              <div
-                role="status"
-                className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-5 text-amber-950 dark:text-amber-200 space-y-1"
-              >
-                <div className="flex items-center gap-2 font-semibold text-sm">
-                  <span className="size-2 rounded-full bg-amber-500" />
-                  <span>التذكير التلقائي غير مفعّل حاليًا</span>
-                </div>
-                <p className="text-muted-foreground dark:text-amber-200/80">
-                  يمكنك استعراض إعدادات التذكير وتجهيزها، لكن لن يتم إرسال رسائل
-                  تلقائية خلال المرحلة الحالية.
-                </p>
-              </div>
-            ) : null}
-
-            {/* Setting A: Enable reminder */}
-            <div className="flex items-start gap-3 rounded-lg border p-4 bg-muted/20">
-              <Controller
-                control={form.control}
-                name="reminderEnabled"
-                render={({ field }) => (
-                  <Checkbox
-                    id="settings-reminder-enabled"
-                    checked={
-                      initialSettings.remindersOperational ? field.value : false
-                    }
-                    onCheckedChange={
-                      initialSettings.remindersOperational && !isSubmitting
-                        ? (checked) => {
-                            if (isSubmitting) return;
-                            field.onChange(checked);
-                          }
-                        : undefined
-                    }
-                    disabled={
-                      isSubmitting ||
-                      !initialSettings.remindersOperational ||
-                      !initialSettings.channelReadiness.hasActiveChannel
-                    }
-                    aria-describedby="reminder-enabled-desc"
-                  />
-                )}
-              />
-              <div className="space-y-1 leading-none">
-                <Label
-                  htmlFor="settings-reminder-enabled"
-                  className={cn(
-                    "text-base font-semibold",
-                    initialSettings.remindersOperational && !isSubmitting
-                      ? "cursor-pointer"
-                      : "cursor-not-allowed opacity-75",
-                  )}
-                >
-                  تفعيل التذكير التلقائي
+              {/* Setting D: Message style and live preview */}
+              <div className="max-w-sm space-y-2">
+                <Label htmlFor="settings-reminder-template">
+                  نموذج رسالة التذكير
                 </Label>
-                <p
-                  id="reminder-enabled-desc"
-                  className="text-xs text-muted-foreground leading-5"
-                >
-                  {initialSettings.remindersOperational
-                    ? "إرسال رسالة تذكير تلقائية للعميل قبل موعده لتقليل نسبة عدم الحضور."
-                    : "التذكير التلقائي معطل حالياً في هذه المرحلة التجريبية. يمكنك تجهيز خيارات التوقيت والنموذج بالأسفل وحفظها للمستقبل."}
+                <Controller
+                  control={form.control}
+                  name="reminderTemplateId"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(val) => {
+                        if (isSubmitting) return;
+                        field.onChange(val);
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger
+                        id="settings-reminder-template"
+                        className="w-full"
+                        disabled={isSubmitting}
+                      >
+                        <SelectValue placeholder="اختر نموذج التذكير" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REMINDER_TEMPLATE_OPTIONS.map((tpl) => (
+                          <SelectItem key={tpl.id} value={tpl.id}>
+                            {tpl.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {fieldError(form.formState.errors.reminderTemplateId?.message)}
+              </div>
+
+              {/* Live Message Preview */}
+              <div className="space-y-2 rounded-xl border bg-muted/30 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <BellIcon className="size-3.5" />
+                    معاينة رسالة التذكير (مثال للعميل):
+                  </span>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-normal"
+                  >
+                    معاينة فقط
+                  </Badge>
+                </div>
+                <div className="rounded-lg border bg-card p-3.5 text-sm leading-6 shadow-xs whitespace-pre-wrap">
+                  {form.watch("reminderTemplateId") === "compact"
+                    ? `تذكير بموعدك: لدى ${form.watch("name") || "عيادة الأمل"} يوم الأحد (مثال) الساعة 10:00 ص لخدمة كشف واستشارة. نرجو الحضور قبل الموعد بـ 10 دقائق.`
+                    : `مرحباً بك! نود تذكيرك بموعدك لدى ${form.watch("name") || "عيادة الأمل"} يوم الأحد (مثال) الساعة 10:00 ص (خدمة: كشف واستشارة). يسعدنا حضورك في الموعد المحدد.`}
+                </div>
+                <p className="text-[11px] leading-4 text-muted-foreground">
+                  * معاينة تجريبية لشكل النص فقط — لن يتم إرسال أي رسائل للعملاء
+                  خلال هذه المرحلة. في المستقبل، سيتم الإرسال عبر القالب المعتمد
+                  رسمياً دون أي بيانات خاصة.
                 </p>
               </div>
             </div>
-
-            {/* Setting C: Channel readiness */}
-            <div className="space-y-2">
-              <span className="text-sm font-medium">حالة قنوات المراسلة</span>
-              {!initialSettings.channelReadiness.hasActiveChannel ? (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-destructive/30 bg-destructive/10 p-3.5 text-xs leading-5 text-destructive space-y-2"
-                >
-                  <p className="font-semibold">
-                    لا توجد قناة مراسلة جاهزة حالياً لإرسال التذكيرات.
-                  </p>
-                  <p>
-                    لتفعيل التذكير التلقائي، يجب أن يكون رقم واتساب أو بوت
-                    تيليجرام متصلاً ومفعلاً.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    <Link
-                      href="/settings/whatsapp"
-                      className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
-                    >
-                      <MessageCircleIcon className="size-3.5" />
-                      إعداد واتساب
-                    </Link>
-                    <span>·</span>
-                    <Link
-                      href="/settings/telegram"
-                      className="inline-flex items-center gap-1 font-medium underline hover:text-foreground"
-                    >
-                      <SendIcon className="size-3.5" />
-                      إعداد تيليجرام
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  {initialSettings.channelReadiness.whatsapp ? (
-                    <Badge
-                      variant="outline"
-                      className="border-success/30 bg-success/10 text-success gap-1.5 py-1 px-2.5"
-                    >
-                      <MessageCircleIcon className="size-3.5" />
-                      واتساب متصل ومؤهل
-                    </Badge>
-                  ) : null}
-                  {initialSettings.channelReadiness.telegram ? (
-                    <Badge
-                      variant="outline"
-                      className="border-info/30 bg-info/10 text-info gap-1.5 py-1 px-2.5"
-                    >
-                      <SendIcon className="size-3.5" />
-                      تيليجرام متصل ومؤهل
-                    </Badge>
-                  ) : null}
-                </div>
-              )}
-            </div>
-
-            {/* Setting B: Reminder lead time */}
-            <div className="max-w-sm space-y-2">
-              <Label htmlFor="settings-reminder-lead">
-                إرسال التذكير قبل الموعد
-              </Label>
-              <Controller
-                control={form.control}
-                name="reminderLeadHours"
-                render={({ field }) => (
-                  <Select
-                    value={String(field.value)}
-                    onValueChange={(val) => {
-                      if (isSubmitting) return;
-                      field.onChange(Number(val));
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger
-                      id="settings-reminder-lead"
-                      className="w-full"
-                      disabled={isSubmitting}
-                    >
-                      <SelectValue placeholder="اختر وقت التذكير" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REMINDER_LEAD_HOURS_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={String(opt.value)}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {fieldError(form.formState.errors.reminderLeadHours?.message)}
-              <p className="text-xs leading-5 text-muted-foreground">
-                يتم حساب وقت الإرسال بدقة بحسب المنطقة الزمنية المعتمدة للمنشأة.
-              </p>
-            </div>
-
-            {/* Setting D: Message style and live preview */}
-            <div className="max-w-sm space-y-2">
-              <Label htmlFor="settings-reminder-template">
-                نموذج رسالة التذكير
-              </Label>
-              <Controller
-                control={form.control}
-                name="reminderTemplateId"
-                render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={(val) => {
-                      if (isSubmitting) return;
-                      field.onChange(val);
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger
-                      id="settings-reminder-template"
-                      className="w-full"
-                      disabled={isSubmitting}
-                    >
-                      <SelectValue placeholder="اختر نموذج التذكير" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REMINDER_TEMPLATE_OPTIONS.map((tpl) => (
-                        <SelectItem key={tpl.id} value={tpl.id}>
-                          {tpl.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {fieldError(form.formState.errors.reminderTemplateId?.message)}
-            </div>
-
-            {/* Live Message Preview */}
-            <div className="space-y-2 rounded-xl border bg-muted/30 p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                  <BellIcon className="size-3.5" />
-                  معاينة رسالة التذكير (مثال للعميل):
-                </span>
-                <Badge variant="secondary" className="text-[10px] font-normal">
-                  معاينة فقط
-                </Badge>
-              </div>
-              <div className="rounded-lg border bg-card p-3.5 text-sm leading-6 shadow-xs whitespace-pre-wrap">
-                {form.watch("reminderTemplateId") === "compact"
-                  ? `تذكير بموعدك: لدى ${form.watch("name") || "عيادة الأمل"} يوم الأحد (مثال) الساعة 10:00 ص لخدمة كشف واستشارة. نرجو الحضور قبل الموعد بـ 10 دقائق.`
-                  : `مرحباً بك! نود تذكيرك بموعدك لدى ${form.watch("name") || "عيادة الأمل"} يوم الأحد (مثال) الساعة 10:00 ص (خدمة: كشف واستشارة). يسعدنا حضورك في الموعد المحدد.`}
-              </div>
-              <p className="text-[11px] leading-4 text-muted-foreground">
-                * معاينة تجريبية لشكل النص فقط — لن يتم إرسال أي رسائل للعملاء
-                خلال هذه المرحلة. في المستقبل، سيتم الإرسال عبر القالب المعتمد
-                رسمياً دون أي بيانات خاصة.
-              </p>
-            </div>
-          </div>
-        </section>
-      </fieldset>
+          </section>
+        </fieldset>
 
         {error ? (
           <p role="alert" className="text-sm text-destructive">
