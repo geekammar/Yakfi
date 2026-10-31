@@ -567,7 +567,7 @@ async function main(): Promise<void> {
           summary: null,
           safetyAssessment: "safe",
           requiredKnowledge: "service.price",
-          sourceId: service1.id,
+          sourceId: service1Id,
         }),
       },
     } as unknown as Parameters<typeof receiveInboundMessage>[0];

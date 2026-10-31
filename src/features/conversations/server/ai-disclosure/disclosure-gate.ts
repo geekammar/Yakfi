@@ -192,7 +192,10 @@ export type DisclosureResult =
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /** Does the request actually carry data for this support channel? */
-function channelCarried(request: AiRequest, channel: SupportChannel): boolean {
+export function channelCarried(
+  request: AiRequest,
+  channel: SupportChannel,
+): boolean {
   switch (channel) {
     case "faqs":
       return request.faqs.length > 0;

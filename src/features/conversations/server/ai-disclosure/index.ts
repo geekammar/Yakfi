@@ -16,6 +16,7 @@ export {
   DISCLOSURE_REFUSAL_REASONS,
   KNOWLEDGE_FREE_REPLY_INTENTS,
   TASK_SUPPORT_FAMILIES,
+  channelCarried,
   enforceDisclosure,
   isExplicitIdentityGoal,
   isExplicitIdentityResponse,
