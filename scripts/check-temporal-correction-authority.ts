@@ -585,7 +585,7 @@ async function runSuite(): Promise<void> {
         return createMockAiResponse({
           extraction: {
             service: "كشف أسنان",
-            provider: "د. حسام",
+            provider: "د. أحمد سامي",
             date: "2026-11-05",
             timePreference: null,
             temporalRequest: { type: "exact_date", date: "2026-11-05" },
@@ -600,7 +600,7 @@ async function runSuite(): Promise<void> {
       {
         to: "123456789",
         from: "998877",
-        text: "عايز كشف أسنان مع د. حسام يوم 5 نوفمبر",
+        text: "عايز كشف أسنان مع د. أحمد سامي يوم 5 نوفمبر",
         receivedAt: "2026-11-01T10:00:00.000Z",
         externalId: "ext-grp6-turn1",
       },
@@ -619,7 +619,7 @@ async function runSuite(): Promise<void> {
         return createMockAiResponse({
           extraction: {
             service: "كشف أسنان",
-            provider: "د. حسام",
+            provider: "د. أحمد سامي",
             date: null,
             timePreference: null,
             temporalRequest: { type: "unresolved_date", day: 30, month: 2 },
@@ -662,7 +662,7 @@ async function runSuite(): Promise<void> {
         return createMockAiResponse({
           extraction: {
             service: "كشف أسنان",
-            provider: "د. حسام",
+            provider: "د. أحمد سامي",
             date: "2026-11-10",
             timePreference: null,
             temporalRequest: { type: "exact_date", date: "2026-11-10" },
