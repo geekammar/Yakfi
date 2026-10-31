@@ -1048,7 +1048,7 @@ async function runSuite(): Promise<void> {
         !resFaq.duplicate &&
         resFaq.assistantAction === "AI_HANDOFF" &&
         resFaq.conversationStatus === "NEED_HUMAN" &&
-        !hUnrelatedFaq.getSent()[0].includes("التعقيم المعتمدة"),
+        !(hUnrelatedFaq.getSent()[0]?.includes("التعقيم المعتمدة") ?? false),
       resFaq,
     );
   }
