@@ -138,6 +138,11 @@ export type ConversationKnownFacts = {
     readonly hour: number;
     readonly minute: number;
   };
+  readonly unresolvedDate?: {
+    readonly day?: number;
+    readonly month?: number;
+    readonly year?: number;
+  };
   readonly provider?: string;
   readonly customerName?: string;
   readonly followUpRequestId?: string;
@@ -240,6 +245,11 @@ export type ConversationState = {
     readonly unresolvedTime?: {
       readonly hour: number;
       readonly minute: number;
+    };
+    readonly unresolvedDate?: {
+      readonly day?: number;
+      readonly month?: number;
+      readonly year?: number;
     };
   } | null;
   /**
@@ -410,6 +420,11 @@ export type MergeConversationStateInput = {
       readonly hour: number;
       readonly minute: number;
     };
+    readonly unresolvedDate?: {
+      readonly day?: number;
+      readonly month?: number;
+      readonly year?: number;
+    };
   } | null;
   /**
    * CONV-CORE-01 — the service identity the ENGINE resolved this turn against
@@ -472,7 +487,8 @@ export function mergeConversationState(
     if (update.operation === "remove") {
       if (
         rawPrev !== null ||
-        (key === "exactTime" && knownFacts.unresolvedTime !== undefined)
+        (key === "exactTime" && knownFacts.unresolvedTime !== undefined) ||
+        (key === "date" && knownFacts.unresolvedDate !== undefined)
       ) {
         revisions.push({
           key,
@@ -486,6 +502,10 @@ export function mergeConversationState(
         if (key === "exactTime") {
           const { unresolvedTime: _droppedUnr, ...cleanRest } = rest;
           void _droppedUnr;
+          knownFacts = cleanRest;
+        } else if (key === "date") {
+          const { unresolvedDate: _droppedUnrDate, ...cleanRest } = rest;
+          void _droppedUnrDate;
           knownFacts = cleanRest;
         } else {
           knownFacts = rest;
@@ -512,8 +532,13 @@ export function mergeConversationState(
           ...(input.turnId ? { turnId: input.turnId } : {}),
         });
       }
-      const { dateRange: _droppedRange, ...rest } = knownFacts;
+      const {
+        dateRange: _droppedRange,
+        unresolvedDate: _droppedUnrDate,
+        ...rest
+      } = knownFacts;
       void _droppedRange;
+      void _droppedUnrDate;
       knownFacts = { ...rest, [key]: nextValue };
     } else if (key === "dateRange") {
       let candidate: unknown = null;
@@ -543,8 +568,13 @@ export function mergeConversationState(
           ...(input.turnId ? { turnId: input.turnId } : {}),
         });
       }
-      const { date: _droppedDate, ...rest } = knownFacts;
+      const {
+        date: _droppedDate,
+        unresolvedDate: _droppedUnrDate,
+        ...rest
+      } = knownFacts;
       void _droppedDate;
+      void _droppedUnrDate;
       knownFacts = {
         ...rest,
         dateRange: parsedRange.data,
@@ -635,6 +665,13 @@ export function mergeConversationState(
       knownFacts.unresolvedTime?.hour ||
       state.knownFacts.unresolvedTime?.minute !==
         knownFacts.unresolvedTime?.minute);
+  const unresolvedDateChanged =
+    Boolean(state.knownFacts.unresolvedDate || knownFacts.unresolvedDate) &&
+    (state.knownFacts.unresolvedDate?.day !== knownFacts.unresolvedDate?.day ||
+      state.knownFacts.unresolvedDate?.month !==
+        knownFacts.unresolvedDate?.month ||
+      state.knownFacts.unresolvedDate?.year !==
+        knownFacts.unresolvedDate?.year);
   const slotDependencyChanged =
     serviceIdentityChanged ||
     changed("date") ||
@@ -642,7 +679,8 @@ export function mergeConversationState(
     changed("provider") ||
     changed("timePreference") ||
     changed("exactTime") ||
-    unresolvedTimeChanged;
+    unresolvedTimeChanged ||
+    unresolvedDateChanged;
   let offer: BookingOffer | null = state.offer;
   if (offer && offer.status === "ACTIVE") {
     const invalidate =
@@ -825,6 +863,9 @@ export function mergeConversationState(
       ...(input.clarification.unresolvedTime
         ? { unresolvedTime: input.clarification.unresolvedTime }
         : {}),
+      ...(input.clarification.unresolvedDate
+        ? { unresolvedDate: input.clarification.unresolvedDate }
+        : {}),
     };
   } else if (lastClarification && missingFacts.length === 0) {
     // The outstanding clarification's facts are all supplied → resume.
@@ -1002,16 +1043,19 @@ export function withPresentedOffer(
     suspendedOffer = null;
   }
 
-  const facts: ConversationKnownFacts = isSlot
-    ? {
-        ...state.knownFacts,
-        service: state.knownFacts.service ?? offer.serviceName,
-        date: state.knownFacts.date ?? offer.date,
-        ...(offer.followUpRequestId
-          ? { followUpRequestId: offer.followUpRequestId }
-          : {}),
-      }
-    : state.knownFacts;
+  let facts: ConversationKnownFacts = state.knownFacts;
+  if (isSlot) {
+    const { unresolvedDate: _droppedUnrD, ...rest } = state.knownFacts;
+    void _droppedUnrD;
+    facts = {
+      ...rest,
+      service: state.knownFacts.service ?? offer.serviceName,
+      date: state.knownFacts.date ?? offer.date,
+      ...(offer.followUpRequestId
+        ? { followUpRequestId: offer.followUpRequestId }
+        : {}),
+    };
+  }
 
   const pendingOffer = pendingOfferMirror(offer);
 
@@ -1043,6 +1087,11 @@ export function withPresentedOffer(
           serviceId: offer.serviceId,
           serviceSource: offer.serviceSource,
           bookingStage: "AVAILABILITY_RESOLVED" as const,
+          missingFacts: state.missingFacts.filter((f) => f !== "date"),
+          lastClarification:
+            state.lastClarification?.type === "date_month"
+              ? null
+              : state.lastClarification,
         }
       : {}),
     activeTask,
@@ -1190,6 +1239,12 @@ const unresolvedTimeFactSchema = z.object({
   minute: z.number().int().min(0).max(59),
 });
 
+const unresolvedDateFactSchema = z.object({
+  day: z.number().int().min(1).max(31).optional(),
+  month: z.number().int().min(1).max(12).optional(),
+  year: z.number().int().optional(),
+});
+
 const factsSchema = z
   .object({
     service: z.string().max(200).optional(),
@@ -1198,6 +1253,7 @@ const factsSchema = z
     timePreference: z.string().max(80).optional(),
     exactTime: z.string().max(20).optional(),
     unresolvedTime: unresolvedTimeFactSchema.optional(),
+    unresolvedDate: unresolvedDateFactSchema.optional(),
     provider: z.string().max(200).optional(),
     customerName: z.string().max(200).optional(),
     followUpRequestId: z.string().max(200).optional(),
@@ -1230,6 +1286,7 @@ const persistedStateSchema = z.object({
       type: z.string().max(60),
       turnId: z.string().max(100).optional(),
       unresolvedTime: unresolvedTimeFactSchema.optional(),
+      unresolvedDate: unresolvedDateFactSchema.optional(),
     })
     .nullable(),
   serviceId: z.string().max(200).nullable(),
@@ -1270,6 +1327,9 @@ export function dehydrateConversationState(
             : {}),
           ...(state.lastClarification.unresolvedTime
             ? { unresolvedTime: state.lastClarification.unresolvedTime }
+            : {}),
+          ...(state.lastClarification.unresolvedDate
+            ? { unresolvedDate: state.lastClarification.unresolvedDate }
             : {}),
         }
       : null,
@@ -1418,6 +1478,11 @@ export function projectConversationState(
         ? { unresolvedTime: state.lastClarification.unresolvedTime }
         : state.knownFacts.unresolvedTime
           ? { unresolvedTime: state.knownFacts.unresolvedTime }
+          : {}),
+      ...(state.lastClarification?.unresolvedDate
+        ? { unresolvedDate: state.lastClarification.unresolvedDate }
+        : state.knownFacts.unresolvedDate
+          ? { unresolvedDate: state.knownFacts.unresolvedDate }
           : {}),
     };
   }

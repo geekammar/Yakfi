@@ -3542,6 +3542,137 @@ export async function receiveInboundMessage(
   return result;
 }
 
+function transitionAmbiguousTemporalState(
+  state: ConversationState,
+  unresolvedDatePayload?: { day?: number; month?: number; year?: number },
+): ConversationState {
+  const nextFacts = {
+    ...state.knownFacts,
+    ...(unresolvedDatePayload ? { unresolvedDate: unresolvedDatePayload } : {}),
+  };
+  delete nextFacts.date;
+  delete nextFacts.dateRange;
+  return {
+    ...state,
+    knownFacts: nextFacts,
+    selectedDate: null,
+    dateRange: null,
+    offer: state.offer ? { ...state.offer, status: "INVALIDATED" } : null,
+    pendingOffer: null,
+    missingFacts: state.missingFacts.includes("date")
+      ? state.missingFacts
+      : [...state.missingFacts.filter((f) => f !== "date"), "date"],
+    lastClarification: {
+      type: "date_month",
+      ...(unresolvedDatePayload
+        ? { unresolvedDate: unresolvedDatePayload }
+        : {}),
+    },
+  };
+}
+
+function transitionInvalidTemporalState(
+  state: ConversationState,
+): ConversationState {
+  const nextFacts = { ...state.knownFacts };
+  delete nextFacts.date;
+  delete nextFacts.dateRange;
+  delete nextFacts.unresolvedDate;
+  return {
+    ...state,
+    knownFacts: nextFacts,
+    selectedDate: null,
+    dateRange: null,
+    offer: state.offer ? { ...state.offer, status: "INVALIDATED" } : null,
+    pendingOffer: null,
+    lastClarification:
+      state.lastClarification?.type === "date_month"
+        ? null
+        : state.lastClarification,
+  };
+}
+
+type PersistTemporalTransitionResult = {
+  ok: boolean;
+  nextState: ConversationState | null;
+  reason?: "CONFLICT" | "STORAGE_ERROR";
+};
+
+function isTemporalConflictCompatible(
+  base: ConversationState,
+  reloaded: ConversationState,
+): boolean {
+  if (base.offer?.token !== reloaded.offer?.token) return false;
+  if (base.offer?.status !== reloaded.offer?.status) return false;
+
+  const baseDate = base.knownFacts?.date ?? base.selectedDate ?? null;
+  const reloadedDate =
+    reloaded.knownFacts?.date ?? reloaded.selectedDate ?? null;
+  if (baseDate !== reloadedDate) return false;
+
+  const bR = base.knownFacts?.dateRange ?? base.dateRange;
+  const rR = reloaded.knownFacts?.dateRange ?? reloaded.dateRange;
+  const bRange = bR ? `${bR.startDate}:${bR.endDate}` : null;
+  const rRange = rR ? `${rR.startDate}:${rR.endDate}` : null;
+  if (bRange !== rRange) return false;
+
+  return true;
+}
+
+function temporalFailureMessage(reason?: string): string {
+  if (reason === "STORAGE_ERROR") {
+    return "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة.";
+  }
+  return "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
+}
+
+function staleOfferMessage(isReplaced: boolean): string {
+  if (isReplaced) {
+    return "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً.";
+  }
+  return "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+}
+
+async function persistTemporalStateTransition(
+  turnSession: TurnStateSession,
+  resolvedState: ConversationState | null,
+  transform: (state: ConversationState) => ConversationState,
+): Promise<PersistTemporalTransitionResult> {
+  if (!turnSession.enabled) {
+    const nextState = resolvedState ? transform(resolvedState) : null;
+    return { ok: true, nextState };
+  }
+
+  const baseState =
+    turnSession.state ?? resolvedState ?? emptyConversationState();
+
+  let candidate = transform(baseState);
+  turnSession.state = candidate;
+
+  let ok = await turnSession.commit();
+  if (!ok) {
+    if (!turnSession.enabled) {
+      return { ok: false, nextState: null, reason: "STORAGE_ERROR" };
+    }
+
+    const reloaded = await turnSession.reload();
+    if (reloaded && turnSession.state) {
+      if (isTemporalConflictCompatible(baseState, turnSession.state)) {
+        candidate = transform(turnSession.state);
+        turnSession.state = candidate;
+        ok = await turnSession.commit();
+      } else {
+        return { ok: false, nextState: null, reason: "CONFLICT" };
+      }
+    }
+  }
+
+  if (!ok) {
+    return { ok: false, nextState: null, reason: "CONFLICT" };
+  }
+  return { ok: true, nextState: turnSession.state };
+}
+
 async function runInboundTurn(
   deps: ConversationEngineDeps,
   input: unknown,
@@ -5522,7 +5653,9 @@ async function runInboundTurn(
       const isUnknownCallback =
         offerReply.reason === "UNKNOWN_TOKEN" || !parsedCb;
 
-      if (!wasAlreadyBooked && !isUnknownCallback) {
+      const isOfferInvalidated = staleOffer?.status === "INVALIDATED";
+
+      if (!wasAlreadyBooked && !isUnknownCallback && !isOfferInvalidated) {
         // 2. Resolve trusted context for mechanical recovery
         const serviceId =
           turnSession.state?.serviceId ??
@@ -5540,7 +5673,11 @@ async function runInboundTurn(
         const candidateDate =
           turnSession.state?.selectedDate ??
           turnSession.state?.knownFacts.date ??
-          (staleOffer && "date" in staleOffer ? staleOffer.date : null);
+          (staleOffer &&
+          staleOffer.status !== "INVALIDATED" &&
+          "date" in staleOffer
+            ? staleOffer.date
+            : null);
         const tz = resolveValidTimeZone(business.timezone);
         const todayIso = todayIsoInTimeZone(now, tz);
         const isFutureDate = candidateDate ? candidateDate >= todayIso : false;
@@ -5602,10 +5739,11 @@ async function runInboundTurn(
       }
 
       // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
-      const staleMsg =
-        offerReply.reason === "CLOSED" || wasAlreadyBooked
-          ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
-          : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+      const isStaleOrClosed =
+        offerReply.reason === "CLOSED" ||
+        wasAlreadyBooked ||
+        isOfferInvalidated;
+      const staleMsg = staleOfferMessage(isStaleOrClosed);
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
@@ -6463,11 +6601,16 @@ async function runInboundTurn(
             const nextFacts = { ...resolvedState.knownFacts };
             delete nextFacts.date;
             delete nextFacts.dateRange;
+            delete nextFacts.unresolvedDate;
             resolvedState = {
               ...resolvedState,
               knownFacts: nextFacts,
               selectedDate: null,
               dateRange: null,
+              lastClarification:
+                resolvedState.lastClarification?.type === "date_month"
+                  ? null
+                  : resolvedState.lastClarification,
             };
             if (turnSession.enabled) {
               turnSession.state = resolvedState;
@@ -6478,11 +6621,36 @@ async function runInboundTurn(
             turnReconciled.setFacts.get("date")?.value ??
             bookingAiResponse.extraction.date ??
             null;
+          const priorTemporalContext = {
+            date:
+              resolvedState?.knownFacts.date ??
+              turnSession.state?.knownFacts.date ??
+              null,
+            dateRange:
+              resolvedState?.knownFacts.dateRange ??
+              turnSession.state?.knownFacts.dateRange ??
+              null,
+            offerDate:
+              turnSession.state?.offer &&
+              turnSession.state.offer.status === "ACTIVE" &&
+              "date" in turnSession.state.offer &&
+              typeof turnSession.state.offer.date === "string"
+                ? turnSession.state.offer.date
+                : null,
+            unresolvedDate:
+              resolvedState?.lastClarification?.unresolvedDate ??
+              resolvedState?.knownFacts.unresolvedDate ??
+              turnSession.state?.lastClarification?.unresolvedDate ??
+              turnSession.state?.knownFacts.unresolvedDate ??
+              null,
+          };
           const serverTemporal = resolveServerTemporalRequest(
             bookingAiResponse.extraction.temporalRequest ?? null,
             explicitDate,
             now,
             business.timezone ?? "UTC",
+            60,
+            priorTemporalContext,
           );
 
           if (serverTemporal.kind === "range_too_broad") {
@@ -6520,10 +6688,85 @@ async function runInboundTurn(
             };
           }
 
+          if (serverTemporal.kind === "ambiguous") {
+            const ambiguousMsg = serverTemporal.message;
+            const unresolvedDatePayload =
+              serverTemporal.day !== undefined ||
+              serverTemporal.month !== undefined ||
+              serverTemporal.year !== undefined
+                ? {
+                    ...(serverTemporal.day !== undefined
+                      ? { day: serverTemporal.day }
+                      : {}),
+                    ...(serverTemporal.month !== undefined
+                      ? { month: serverTemporal.month }
+                      : {}),
+                    ...(serverTemporal.year !== undefined
+                      ? { year: serverTemporal.year }
+                      : {}),
+                  }
+                : undefined;
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                temporalFailureMessage(persisted.reason),
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
+            }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              ambiguousMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              ambiguousMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
           if (serverTemporal.kind === "invalid") {
             let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
             if (serverTemporal.reason === "PAST_DATE") {
               invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "IMPOSSIBLE_DATE") {
+              invalidMsg =
+                serverTemporal.error ||
+                "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
             } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
               invalidMsg =
                 "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
@@ -6531,6 +6774,27 @@ async function runInboundTurn(
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
             }
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              transitionInvalidTemporalState,
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                temporalFailureMessage(persisted.reason),
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
+            }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
@@ -6581,15 +6845,43 @@ async function runInboundTurn(
                 date: serverTemporal.date,
               };
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: resolvedState.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
+                missingFacts: turnSession.state.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           } else if (serverTemporal.kind === "date_range") {
             const rangeObj = {
@@ -6611,6 +6903,7 @@ async function runInboundTurn(
             if (resolvedState) {
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
               nextFacts.dateRange = rangeObj;
               const hasObsoleteSlotOffer =
                 turnSession.state?.offer?.kind === "SLOT" ||
@@ -6621,6 +6914,10 @@ async function runInboundTurn(
                 selectedDate: null,
                 dateRange: rangeObj,
                 offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -6628,6 +6925,24 @@ async function runInboundTurn(
                 }
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
+              nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state.offer?.kind === "SLOT";
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : turnSession.state.offer,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           }
         }
@@ -6850,11 +7165,16 @@ async function runInboundTurn(
             const nextFacts = { ...resolvedState.knownFacts };
             delete nextFacts.date;
             delete nextFacts.dateRange;
+            delete nextFacts.unresolvedDate;
             resolvedState = {
               ...resolvedState,
               knownFacts: nextFacts,
               selectedDate: null,
               dateRange: null,
+              lastClarification:
+                resolvedState.lastClarification?.type === "date_month"
+                  ? null
+                  : resolvedState.lastClarification,
             };
             if (turnSession.enabled) {
               turnSession.state = resolvedState;
@@ -6903,11 +7223,36 @@ async function runInboundTurn(
             }
           }
 
+          const priorTemporalContext = {
+            date:
+              resolvedState?.knownFacts.date ??
+              turnSession.state?.knownFacts.date ??
+              null,
+            dateRange:
+              resolvedState?.knownFacts.dateRange ??
+              turnSession.state?.knownFacts.dateRange ??
+              null,
+            offerDate:
+              turnSession.state?.offer &&
+              turnSession.state.offer.status === "ACTIVE" &&
+              "date" in turnSession.state.offer &&
+              typeof turnSession.state.offer.date === "string"
+                ? turnSession.state.offer.date
+                : null,
+            unresolvedDate:
+              resolvedState?.lastClarification?.unresolvedDate ??
+              resolvedState?.knownFacts.unresolvedDate ??
+              turnSession.state?.lastClarification?.unresolvedDate ??
+              turnSession.state?.knownFacts.unresolvedDate ??
+              null,
+          };
           const serverTemporal = resolveServerTemporalRequest(
             candidateTemporal,
             explicitDate,
             now,
             business.timezone ?? "UTC",
+            60,
+            priorTemporalContext,
           );
 
           if (serverTemporal.kind === "range_too_broad") {
@@ -6945,10 +7290,85 @@ async function runInboundTurn(
             };
           }
 
+          if (serverTemporal.kind === "ambiguous") {
+            const ambiguousMsg = serverTemporal.message;
+            const unresolvedDatePayload =
+              serverTemporal.day !== undefined ||
+              serverTemporal.month !== undefined ||
+              serverTemporal.year !== undefined
+                ? {
+                    ...(serverTemporal.day !== undefined
+                      ? { day: serverTemporal.day }
+                      : {}),
+                    ...(serverTemporal.month !== undefined
+                      ? { month: serverTemporal.month }
+                      : {}),
+                    ...(serverTemporal.year !== undefined
+                      ? { year: serverTemporal.year }
+                      : {}),
+                  }
+                : undefined;
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                temporalFailureMessage(persisted.reason),
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
+            }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
+            const assistantMessage = await persistAssistantReply(
+              deps,
+              conversation.id,
+              ambiguousMsg,
+              "AI_ACTIVE",
+            );
+            const delivery = await deliverAssistantReply(
+              deps,
+              customer.phone,
+              business.name,
+              conversation.id,
+              ambiguousMsg,
+              assistantMessage.id,
+              business.id,
+              outboundConnectionId,
+            );
+            return {
+              ok: true,
+              duplicate: false,
+              businessId: business.id,
+              conversationId: conversation.id,
+              customerId: customer.id,
+              customerMessageId: customerMessage.id,
+              assistantAction: "AI_REPLY",
+              intent: validated.intent,
+              conversationStatus: "AI_ACTIVE",
+              handoffCause: null,
+              assistantProvider: deps.ai.providerName,
+              delivery,
+            };
+          }
+
           if (serverTemporal.kind === "invalid") {
             let invalidMsg = "التاريخ المطلوب غير صالح، يرجى تحديد تاريخ قادم.";
             if (serverTemporal.reason === "PAST_DATE") {
               invalidMsg = "التاريخ المحدد في الماضي، يرجى اختيار تاريخ قادم.";
+            } else if (serverTemporal.reason === "IMPOSSIBLE_DATE") {
+              invalidMsg =
+                serverTemporal.error ||
+                "التاريخ المطلوب غير موجود في التقويم، يرجى اختيار تاريخ صحيح.";
             } else if (serverTemporal.reason === "OUT_OF_BOUNDS") {
               invalidMsg =
                 "نعتذر، الحجز متاح فقط خلال الـ 60 يوماً القادمة. يرجى اختيار موعد ضمن هذه الفترة.";
@@ -6956,6 +7376,27 @@ async function runInboundTurn(
               invalidMsg =
                 "حدث تعارض في تحديد التاريخ، يرجى توضيح اليوم أو الأسبوع المطلوب.";
             }
+
+            const persisted = await persistTemporalStateTransition(
+              turnSession,
+              resolvedState,
+              transitionInvalidTemporalState,
+            );
+            if (!persisted.ok) {
+              return selectionReply(
+                deps,
+                selectionScope,
+                temporalFailureMessage(persisted.reason),
+                "AI_ACTIVE",
+                null,
+                undefined,
+                turnObservability,
+              );
+            }
+            if (persisted.nextState) {
+              resolvedState = persisted.nextState;
+            }
+
             const assistantMessage = await persistAssistantReply(
               deps,
               conversation.id,
@@ -7006,15 +7447,43 @@ async function runInboundTurn(
                 date: serverTemporal.date,
               };
               delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
               resolvedState = {
                 ...resolvedState,
                 knownFacts: nextFacts,
                 selectedDate: serverTemporal.date,
                 dateRange: null,
+                missingFacts: resolvedState.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = {
+                ...turnSession.state.knownFacts,
+                date: serverTemporal.date,
+              };
+              delete nextFacts.dateRange;
+              delete nextFacts.unresolvedDate;
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: serverTemporal.date,
+                dateRange: null,
+                missingFacts: turnSession.state.missingFacts.filter(
+                  (k) => k !== "date",
+                ),
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           } else if (serverTemporal.kind === "date_range") {
             const rangeObj = {
@@ -7036,6 +7505,7 @@ async function runInboundTurn(
             if (resolvedState) {
               const nextFacts = { ...resolvedState.knownFacts };
               delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
               nextFacts.dateRange = rangeObj;
               const hasObsoleteSlotOffer =
                 turnSession.state?.offer?.kind === "SLOT" ||
@@ -7046,6 +7516,10 @@ async function runInboundTurn(
                 selectedDate: null,
                 dateRange: rangeObj,
                 offer: hasObsoleteSlotOffer ? null : resolvedState.offer,
+                lastClarification:
+                  resolvedState.lastClarification?.type === "date_month"
+                    ? null
+                    : resolvedState.lastClarification,
               };
               if (turnSession.enabled) {
                 if (turnSession.state?.offer?.kind === "SLOT") {
@@ -7053,6 +7527,24 @@ async function runInboundTurn(
                 }
                 turnSession.state = resolvedState;
               }
+            } else if (turnSession.enabled && turnSession.state) {
+              const nextFacts = { ...turnSession.state.knownFacts };
+              delete nextFacts.date;
+              delete nextFacts.unresolvedDate;
+              nextFacts.dateRange = rangeObj;
+              const hasObsoleteSlotOffer =
+                turnSession.state.offer?.kind === "SLOT";
+              turnSession.state = {
+                ...turnSession.state,
+                knownFacts: nextFacts,
+                selectedDate: null,
+                dateRange: rangeObj,
+                offer: hasObsoleteSlotOffer ? null : turnSession.state.offer,
+                lastClarification:
+                  turnSession.state.lastClarification?.type === "date_month"
+                    ? null
+                    : turnSession.state.lastClarification,
+              };
             }
           }
         }
@@ -8197,9 +8689,13 @@ async function runInboundTurn(
               turnSession.state ?? resolvedState ?? emptyConversationState(),
               slotOffer,
             );
-            const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-              turnSession.state.knownFacts ?? {};
+            const {
+              unresolvedTime: _droppedUnr,
+              unresolvedDate: _droppedUnrD,
+              ...cleanKnown
+            } = turnSession.state.knownFacts ?? {};
             void _droppedUnr;
+            void _droppedUnrD;
             turnSession.state = {
               ...turnSession.state,
               activeTask: {
@@ -8221,9 +8717,13 @@ async function runInboundTurn(
           }
         } else if (turnSession.enabled) {
           await turnSession.invalidateOffer();
-          const { unresolvedTime: _droppedUnr, ...cleanKnown } =
-            turnSession.state?.knownFacts ?? {};
+          const {
+            unresolvedTime: _droppedUnr,
+            unresolvedDate: _droppedUnrD,
+            ...cleanKnown
+          } = turnSession.state?.knownFacts ?? {};
           void _droppedUnr;
+          void _droppedUnrD;
           turnSession.state = {
             ...(turnSession.state ?? resolvedState ?? emptyConversationState()),
             activeTask: {

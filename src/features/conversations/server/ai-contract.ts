@@ -32,6 +32,7 @@ import {
 } from "./conversation-facts";
 import {
   aiTemporalContextSchema,
+  isValidIsoCalendarDate,
   type AiTemporalContext,
 } from "./temporal-context";
 import { z } from "zod";
@@ -41,6 +42,7 @@ export {
   canonicalTimePreferenceValues,
   conversationFactKeys,
   isCanonicalTimePreference,
+  isValidIsoCalendarDate,
   removableFactKeys,
   type CanonicalTimePreference,
   type ConversationFactKey,
@@ -121,25 +123,73 @@ const isoDateSchema = z
  * Distinguishes an exact calendar date, a relative day offset, a calendar week range,
  * and an explicit bounded date range.
  */
-export const aiTemporalRequestSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("exact_date"),
-    date: isoDateSchema,
-  }),
-  z.object({
-    type: z.literal("relative_day"),
-    offsetDays: z.number().int().min(0).max(60),
-  }),
-  z.object({
-    type: z.literal("calendar_week"),
-    weekOffset: z.number().int().min(0).max(8),
-  }),
-  z.object({
-    type: z.literal("date_range"),
-    startDate: isoDateSchema,
-    endDate: isoDateSchema,
-  }),
-]);
+export const aiTemporalRequestSchema = z.preprocess(
+  (val) => {
+    if (val && typeof val === "object" && "type" in val) {
+      const obj = val as Record<string, unknown>;
+      // If model provided exact_date with an ISO-shaped string that is an impossible calendar date (e.g. "2026-02-30")
+      if (obj.type === "exact_date" && typeof obj.date === "string") {
+        const rawDate = obj.date.trim();
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDate);
+        if (match) {
+          const y = Number(match[1]);
+          const m = Number(match[2]);
+          const d = Number(match[3]);
+          const parsed = new Date(Date.UTC(y, m - 1, d));
+          const isIsoValid =
+            !Number.isNaN(parsed.getTime()) &&
+            parsed.getUTCFullYear() === y &&
+            parsed.getUTCMonth() === m - 1 &&
+            parsed.getUTCDate() === d;
+          if (!isIsoValid) {
+            return {
+              type: "unresolved_date",
+              day: d,
+              month: m,
+              year: y,
+              rawText: rawDate,
+            };
+          }
+        }
+      }
+    }
+    return val;
+  },
+  z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("exact_date"),
+      date: isoDateSchema,
+    }),
+    z.object({
+      type: z.literal("relative_day"),
+      offsetDays: z.number().int().min(-365).max(60),
+    }),
+    z.object({
+      type: z.literal("calendar_week"),
+      weekOffset: z.number().int().min(-52).max(8),
+    }),
+    z.object({
+      type: z.literal("date_range"),
+      startDate: isoDateSchema,
+      endDate: isoDateSchema,
+    }),
+    z.object({
+      type: z.literal("unresolved_date"),
+      day: z.number().int().min(1).max(31).optional(),
+      month: z.number().int().min(1).max(12).optional(),
+      year: z.number().int().min(2000).max(2100).optional(),
+      rawText: z.string().max(120).optional(),
+    }),
+    z.object({
+      type: z.literal("invalid_date"),
+      day: z.number().int().min(1).max(31).optional(),
+      month: z.number().int().min(1).max(12).optional(),
+      year: z.number().int().min(2000).max(2100).optional(),
+      reason: z.string().max(100).optional(),
+      rawText: z.string().max(120).optional(),
+    }),
+  ]),
+);
 
 export type AiTemporalRequest = z.infer<typeof aiTemporalRequestSchema>;
 
@@ -172,7 +222,7 @@ export type AiExactTimeRequest = z.infer<typeof aiExactTimeRequestSchema>;
  * in structured `exactTime` without losing AM/PM uncertainty.
  * The DOMAIN resolves actual slots deterministically.
  */
-export const aiExtractionSchema = z.object({
+const baseAiExtractionSchema = z.object({
   /** Matched service name, when the message names one. */
   service: z.string().trim().min(1).max(120).nullable().default(null),
   /** Customer's stated provider preference ("أي دكتور" resolves in the domain). */
@@ -285,6 +335,44 @@ export const aiExtractionSchema = z.object({
     }, aiExactTimeRequestSchema.nullable().optional())
     .optional(),
 });
+
+export const aiExtractionSchema = z.preprocess((val) => {
+  if (val && typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    if (typeof obj.date === "string") {
+      const trimmed = obj.date.trim();
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+      if (match) {
+        const y = Number(match[1]);
+        const m = Number(match[2]);
+        const d = Number(match[3]);
+        const parsed = new Date(Date.UTC(y, m - 1, d));
+        const isIsoValid =
+          !Number.isNaN(parsed.getTime()) &&
+          parsed.getUTCFullYear() === y &&
+          parsed.getUTCMonth() === m - 1 &&
+          parsed.getUTCDate() === d;
+        if (!isIsoValid) {
+          if (obj.temporalRequest && typeof obj.temporalRequest === "object") {
+            const tr = obj.temporalRequest as Record<string, unknown>;
+            if (tr.type === "exact_date" || tr.type === "unresolved_date") {
+              const res: Record<string, unknown> = { ...obj, date: null };
+              res.temporalRequest = {
+                type: "unresolved_date",
+                day: d,
+                month: m,
+                year: y,
+                rawText: trimmed,
+              };
+              return res;
+            }
+          }
+        }
+      }
+    }
+  }
+  return val;
+}, baseAiExtractionSchema);
 
 export type AiExtraction = z.infer<typeof aiExtractionSchema>;
 
@@ -400,6 +488,13 @@ export const conversationContextProjectionSchema = z.object({
         .object({
           hour: z.number().int().min(1).max(12),
           minute: z.number().int().min(0).max(59),
+        })
+        .optional(),
+      unresolvedDate: z
+        .object({
+          day: z.number().int().min(1).max(31).optional(),
+          month: z.number().int().min(1).max(12).optional(),
+          year: z.number().int().optional(),
         })
         .optional(),
     })
