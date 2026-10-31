@@ -64,6 +64,11 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
+      - name: Auto format and show patch
+        run: |
+          pnpm format || true
+          git diff
+
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
