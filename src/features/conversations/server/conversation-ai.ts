@@ -1140,7 +1140,8 @@ export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
     reason === "QUOTA_EXHAUSTED" ||
     reason === "AUTH_OR_CONFIGURATION_FAILURE" ||
     input.failureCause === "PROVIDER_FAILURE" ||
-    input.failureCause === "RETRY_EXHAUSTED"
+    input.failureCause === "RETRY_EXHAUSTED" ||
+    input.failureCause === "AI_FAILURE"
   ) {
     return SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE;
   }

@@ -238,6 +238,43 @@ export type DisclosureResult =
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
+const GENERIC_ARABIC_WORDS = new Set([
+  "عيادة",
+  "العيادة",
+  "مركز",
+  "المركز",
+  "دكتور",
+  "الدكتور",
+  "طبيب",
+  "الطبيب",
+  "خدمة",
+  "الخدمة",
+  "خدمات",
+  "الخدمات",
+  "فريق",
+  "الفريق",
+  "عمل",
+  "العمل",
+  "متابعة",
+  "المتابعة",
+  "مرحبا",
+  "أهلا",
+  "شكرا",
+  "استفسار",
+  "الاستفسار",
+  "معلومات",
+  "المعلومات",
+]);
+
+function extractSubstantiveWords(text: string): Set<string> {
+  const norm = normalizeArabicText(text);
+  return new Set(
+    norm
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !GENERIC_ARABIC_WORDS.has(w)),
+  );
+}
+
 /** Does the request actually carry data for this support channel? */
 function channelCarried(
   request: AiRequest,
@@ -248,14 +285,16 @@ function channelCarried(
     case "faqs": {
       if (request.faqs.length === 0) return false;
       if (!response?.content) return true;
-      const normContent = normalizeArabicText(response.content);
-      const contentWords = new Set(
-        normContent.split(/\s+/).filter((w) => w.length >= 3),
-      );
+      const contentWords = extractSubstantiveWords(response.content);
+      if (contentWords.size === 0) return false;
       return request.faqs.some((faq) => {
-        const normTarget = normalizeArabicText(`${faq.question} ${faq.answer}`);
-        const faqWords = normTarget.split(/\s+/).filter((w) => w.length >= 3);
-        return faqWords.some((w) => contentWords.has(w));
+        const faqWords = extractSubstantiveWords(
+          `${faq.question} ${faq.answer}`,
+        );
+        for (const word of contentWords) {
+          if (faqWords.has(word)) return true;
+        }
+        return false;
       });
     }
     case "availability":
@@ -278,29 +317,60 @@ function channelCarried(
           typeof matching.price === "string" && matching.price.trim().length > 0
         );
       }
-      return request.services.some(
-        (service) =>
-          typeof service.price === "string" && service.price.trim().length > 0,
-      );
+      if (response?.content) {
+        const normContent = normalizeArabicText(response.content);
+        return request.services.some((s) => {
+          if (typeof s.price !== "string" || s.price.trim().length === 0) {
+            return false;
+          }
+          const norm = normalizeArabicText(s.name);
+          return norm.length > 0 && normContent.includes(norm);
+        });
+      }
+      return false;
     }
-    case "businessAbout":
+    case "businessAbout": {
       // The PUBLIC business-about channel (PROMPT-AI-ARCH-15 — Slice 6) is
       // carried only when the turn was business-info relevant AND the
       // business carries authoritative about text. An empty channel means the
       // reply would invent a business fact → refused.
-      return (
-        typeof request.businessAbout === "string" &&
-        request.businessAbout.trim().length > 0
-      );
-    case "businessAddress":
+      if (
+        typeof request.businessAbout !== "string" ||
+        request.businessAbout.trim().length === 0
+      ) {
+        return false;
+      }
+      if (!response?.content) return true;
+      if (response.extraction?.service) return false;
+      const contentWords = extractSubstantiveWords(response.content);
+      if (contentWords.size === 0) return false;
+      const aboutWords = extractSubstantiveWords(request.businessAbout);
+      for (const word of contentWords) {
+        if (aboutWords.has(word)) return true;
+      }
+      return false;
+    }
+    case "businessAddress": {
       // The CONDITIONAL business-location channel (PROMPT-AI-OPS-21) is
       // carried only when the turn was contact/identity/location relevant AND
       // the business stored an authoritative address. An empty channel means
       // the reply would invent a location → refused.
-      return (
-        typeof request.businessAddress === "string" &&
-        request.businessAddress.trim().length > 0
-      );
+      if (
+        typeof request.businessAddress !== "string" ||
+        request.businessAddress.trim().length === 0
+      ) {
+        return false;
+      }
+      if (!response?.content) return true;
+      if (response.extraction?.service) return false;
+      const contentWords = extractSubstantiveWords(response.content);
+      if (contentWords.size === 0) return false;
+      const addressWords = extractSubstantiveWords(request.businessAddress);
+      for (const word of contentWords) {
+        if (addressWords.has(word)) return true;
+      }
+      return false;
+    }
     case "businessName":
       // The PUBLIC business-identity channel (PROMPT-AI-UX-02) is carried
       // whenever the canonical Business record's name reached the request —
@@ -312,16 +382,33 @@ function channelCarried(
         typeof request.businessName === "string" &&
         request.businessName.trim().length > 0
       );
-    case "serviceDescriptions":
+    case "serviceDescriptions": {
       // The PUBLIC service-description channel (PROMPT-AI-ARCH-15 — Slice 6) is
       // carried only when the turn was service-info relevant AND at least one
       // exposed service carries an authoritative description. An empty channel
       // means the reply would invent a service detail → refused.
-      return request.services.some(
-        (service) =>
-          typeof service.description === "string" &&
-          service.description.trim().length > 0,
-      );
+      if (request.services.length === 0) return false;
+      if (!response?.content) return true;
+      const normContent = normalizeArabicText(response.content);
+      const contentWords = extractSubstantiveWords(response.content);
+      return request.services.some((service) => {
+        if (
+          typeof service.description !== "string" ||
+          service.description.trim().length === 0
+        ) {
+          return false;
+        }
+        const normName = normalizeArabicText(service.name);
+        if (normName.length > 0 && normContent.includes(normName)) {
+          return true;
+        }
+        const descWords = extractSubstantiveWords(service.description);
+        for (const word of contentWords) {
+          if (descWords.has(word)) return true;
+        }
+        return false;
+      });
+    }
     case "serviceNames": {
       // The PUBLIC service-catalog NAME channel (PROMPT-AI-OPS-20) is carried
       // whenever at least one service NAME is exposed in the catalog. B-01
@@ -570,9 +657,18 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   // - business.identity is NOT a candidate for general FAQ/non-identity answers (PROMPT-AI-UX-02).
   const isStructured =
     context.request.requiredSemanticCapability === "structured_turn";
-  const candidates = candidateSupportFamilies(response.intent).filter(
-    (c) => !(isStructured && c.family === "business.identity"),
-  );
+  const candidates = candidateSupportFamilies(response.intent).filter((c) => {
+    if (isStructured && c.family === "business.identity") return false;
+    if (
+      response.extraction?.service &&
+      (c.family === "business.about" ||
+        c.family === "business.address" ||
+        c.family === "business.identity")
+    ) {
+      return false;
+    }
+    return true;
+  });
 
   let primaryRefusal: DisclosureRefusalReason | null = null;
   for (const candidate of candidates) {
