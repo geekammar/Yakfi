@@ -3592,14 +3592,19 @@ function transitionInvalidTemporalState(
   };
 }
 
+type TemporalDateRange = { startDate: string; endDate: string };
+type TemporalUnresolvedDate = {
+  day?: number;
+  month?: number;
+  year?: number;
+};
+
 type TemporalStateDependencies = {
   readonly knownDate: string | undefined;
-  readonly knownDateRange: { startDate: string; endDate: string } | undefined;
-  readonly knownUnresolvedDate:
-    | { day?: number; month?: number; year?: number }
-    | undefined;
+  readonly knownDateRange: TemporalDateRange | undefined;
+  readonly knownUnresolvedDate: TemporalUnresolvedDate | undefined;
   readonly selectedDate: string | null;
-  readonly dateRange: { startDate: string; endDate: string } | null;
+  readonly dateRange: TemporalDateRange | null;
   readonly offerToken: string | null;
   readonly offerStatus: string | null;
   readonly offerDate: string | null;
@@ -3641,8 +3646,8 @@ function extractTemporalDependencies(
 }
 
 function isSameDateRange(
-  a?: { startDate: string; endDate: string } | null,
-  b?: { startDate: string; endDate: string } | null,
+  a?: TemporalDateRange | null,
+  b?: TemporalDateRange | null,
 ): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
@@ -3650,8 +3655,8 @@ function isSameDateRange(
 }
 
 function isSameUnresolvedDate(
-  a?: { day?: number; month?: number; year?: number } | null,
-  b?: { day?: number; month?: number; year?: number } | null,
+  a?: TemporalUnresolvedDate | null,
+  b?: TemporalUnresolvedDate | null,
 ): boolean {
   if (!a && !b) return true;
   if (!a || !b) return false;
@@ -3668,14 +3673,9 @@ function isTemporalTransitionCompatible(
     return false;
   }
   if (!isSameDateRange(base.dateRange, reloaded.dateRange)) return false;
-  if (
-    !isSameUnresolvedDate(
-      base.knownUnresolvedDate,
-      reloaded.knownUnresolvedDate,
-    )
-  ) {
-    return false;
-  }
+  const bUnr = base.knownUnresolvedDate;
+  const rUnr = reloaded.knownUnresolvedDate;
+  if (!isSameUnresolvedDate(bUnr, rUnr)) return false;
   if (base.offerToken !== reloaded.offerToken) return false;
   if (base.offerStatus !== reloaded.offerStatus) return false;
   if (base.offerDate !== reloaded.offerDate) return false;
@@ -3688,9 +3688,7 @@ type PersistTemporalTransitionResult = {
   reason?: "CONFLICT" | "STORAGE_ERROR";
 };
 
-function temporalFailureMessage(
-  reason?: "CONFLICT" | "STORAGE_ERROR",
-): string {
+function temporalFailureMessage(reason?: "CONFLICT" | "STORAGE_ERROR"): string {
   if (reason === "STORAGE_ERROR") {
     return "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة.";
   }
@@ -5814,9 +5812,10 @@ async function runInboundTurn(
         offerReply.reason === "CLOSED" ||
         wasAlreadyBooked ||
         isOfferInvalidated;
-      const staleMsg = isStaleOrClosed
-        ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
-        : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
+      const staleMsg =
+        isStaleOrClosed
+          ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
+          : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
       const assistantMessage = await persistAssistantReply(
         deps,
         conversation.id,
