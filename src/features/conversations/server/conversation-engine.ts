@@ -3592,11 +3592,102 @@ function transitionInvalidTemporalState(
   };
 }
 
+type TemporalStateDependencies = {
+  readonly knownDate: string | undefined;
+  readonly knownDateRange: { startDate: string; endDate: string } | undefined;
+  readonly knownUnresolvedDate:
+    | { day?: number; month?: number; year?: number }
+    | undefined;
+  readonly selectedDate: string | null;
+  readonly dateRange: { startDate: string; endDate: string } | null;
+  readonly offerToken: string | null;
+  readonly offerStatus: string | null;
+  readonly offerDate: string | null;
+};
+
+function extractTemporalDependencies(
+  state: ConversationState | null,
+): TemporalStateDependencies {
+  if (!state) {
+    return {
+      knownDate: undefined,
+      knownDateRange: undefined,
+      knownUnresolvedDate: undefined,
+      selectedDate: null,
+      dateRange: null,
+      offerToken: null,
+      offerStatus: null,
+      offerDate: null,
+    };
+  }
+  return {
+    knownDate: state.knownFacts?.date,
+    knownDateRange: state.knownFacts?.dateRange
+      ? { ...state.knownFacts.dateRange }
+      : undefined,
+    knownUnresolvedDate: state.knownFacts?.unresolvedDate
+      ? { ...state.knownFacts.unresolvedDate }
+      : undefined,
+    selectedDate: state.selectedDate ?? null,
+    dateRange: state.dateRange ? { ...state.dateRange } : null,
+    offerToken: state.offer?.token ?? null,
+    offerStatus: state.offer?.status ?? null,
+    offerDate:
+      state.offer && "date" in state.offer ? (state.offer.date ?? null) : null,
+  };
+}
+
+function isSameDateRange(
+  a?: { startDate: string; endDate: string } | null,
+  b?: { startDate: string; endDate: string } | null,
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.startDate === b.startDate && a.endDate === b.endDate;
+}
+
+function isSameUnresolvedDate(
+  a?: { day?: number; month?: number; year?: number } | null,
+  b?: { day?: number; month?: number; year?: number } | null,
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.day === b.day && a.month === b.month && a.year === b.year;
+}
+
+function isTemporalTransitionCompatible(
+  base: TemporalStateDependencies,
+  reloaded: TemporalStateDependencies,
+): boolean {
+  if (base.knownDate !== reloaded.knownDate) return false;
+  if (base.selectedDate !== reloaded.selectedDate) return false;
+  if (!isSameDateRange(base.knownDateRange, reloaded.knownDateRange)) {
+    return false;
+  }
+  if (!isSameDateRange(base.dateRange, reloaded.dateRange)) return false;
+  if (
+    !isSameUnresolvedDate(
+      base.knownUnresolvedDate,
+      reloaded.knownUnresolvedDate,
+    )
+  ) {
+    return false;
+  }
+  if (base.offerToken !== reloaded.offerToken) return false;
+  if (base.offerStatus !== reloaded.offerStatus) return false;
+  if (base.offerDate !== reloaded.offerDate) return false;
+  return true;
+}
+
 async function persistTemporalStateTransition(
   turnSession: TurnStateSession,
   resolvedState: ConversationState | null,
   transform: (state: ConversationState) => ConversationState,
-): Promise<{ ok: boolean; nextState: ConversationState | null }> {
+): Promise<{
+  ok: boolean;
+  nextState: ConversationState | null;
+  reason?: "CONFLICT" | "STORAGE_ERROR";
+}> {
   if (!turnSession.enabled) {
     const nextState = resolvedState ? transform(resolvedState) : null;
     return { ok: true, nextState };
@@ -3604,21 +3695,37 @@ async function persistTemporalStateTransition(
 
   const baseState =
     turnSession.state ?? resolvedState ?? emptyConversationState();
+  const baseDeps = extractTemporalDependencies(baseState);
+
   let candidate = transform(baseState);
   turnSession.state = candidate;
 
   let ok = await turnSession.commit();
   if (!ok) {
+    if (!turnSession.enabled) {
+      return { ok: false, nextState: null, reason: "STORAGE_ERROR" };
+    }
+
     const reloaded = await turnSession.reload();
     if (reloaded && turnSession.state) {
-      candidate = transform(turnSession.state);
-      turnSession.state = candidate;
-      ok = await turnSession.commit();
+      const reloadedDeps = extractTemporalDependencies(turnSession.state);
+      const isCompatible = isTemporalTransitionCompatible(
+        baseDeps,
+        reloadedDeps,
+      );
+
+      if (isCompatible) {
+        candidate = transform(turnSession.state);
+        turnSession.state = candidate;
+        ok = await turnSession.commit();
+      } else {
+        return { ok: false, nextState: null, reason: "CONFLICT" };
+      }
     }
   }
 
   if (!ok) {
-    return { ok: false, nextState: null };
+    return { ok: false, nextState: null, reason: "CONFLICT" };
   }
   return { ok: true, nextState: turnSession.state };
 }
@@ -5603,7 +5710,9 @@ async function runInboundTurn(
       const isUnknownCallback =
         offerReply.reason === "UNKNOWN_TOKEN" || !parsedCb;
 
-      if (!wasAlreadyBooked && !isUnknownCallback) {
+      const isOfferInvalidated = staleOffer?.status === "INVALIDATED";
+
+      if (!wasAlreadyBooked && !isUnknownCallback && !isOfferInvalidated) {
         // 2. Resolve trusted context for mechanical recovery
         const serviceId =
           turnSession.state?.serviceId ??
@@ -5686,9 +5795,10 @@ async function runInboundTurn(
         }
       }
 
-      // 5. Default stale message (insufficient context, malformed, or already consumed/booked)
+      // 5. Default stale message
+      // (insufficient context, malformed, or consumed/booked/invalidated)
       const staleMsg =
-        offerReply.reason === "CLOSED" || wasAlreadyBooked
+        offerReply.reason === "CLOSED" || wasAlreadyBooked || isOfferInvalidated
           ? "هذا العرض لم يعد متاحاً (تم تأكيده مسبقاً أو تم استبداله). يرجى تحديد الخدمة واليوم المناسب لعرض المواعيد المتاحة حالياً."
           : "انتهت صلاحية المواعيد المعروضة — يرجى تحديد الخدمة المطلوبة لعرض المواعيد المتاحة حالياً.";
       const assistantMessage = await persistAssistantReply(
@@ -6660,10 +6770,14 @@ async function runInboundTurn(
               (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
+              const conflictMsg =
+                persisted.reason === "STORAGE_ERROR"
+                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
+                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                conflictMsg,
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -6728,10 +6842,14 @@ async function runInboundTurn(
               transitionInvalidTemporalState,
             );
             if (!persisted.ok) {
+              const conflictMsg =
+                persisted.reason === "STORAGE_ERROR"
+                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
+                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                conflictMsg,
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -7262,10 +7380,14 @@ async function runInboundTurn(
               (s) => transitionAmbiguousTemporalState(s, unresolvedDatePayload),
             );
             if (!persisted.ok) {
+              const conflictMsg =
+                persisted.reason === "STORAGE_ERROR"
+                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
+                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                conflictMsg,
                 "AI_ACTIVE",
                 null,
                 undefined,
@@ -7330,10 +7452,14 @@ async function runInboundTurn(
               transitionInvalidTemporalState,
             );
             if (!persisted.ok) {
+              const conflictMsg =
+                persisted.reason === "STORAGE_ERROR"
+                  ? "تعذر حفظ بيانات المحادثة مؤقتاً، يرجى إعادة المحاولة."
+                  : "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.";
               return selectionReply(
                 deps,
                 selectionScope,
-                "حدث تعارض مؤقت أثناء معالجة طلبك، يرجى إعادة المحاولة.",
+                conflictMsg,
                 "AI_ACTIVE",
                 null,
                 undefined,
