@@ -353,7 +353,7 @@ export const aiExtractionSchema = z.preprocess((val) => {
           parsed.getUTCMonth() === m - 1 &&
           parsed.getUTCDate() === d;
         if (!isIsoValid) {
-          const res = { ...obj, date: null };
+          const res: Record<string, unknown> = { ...obj, date: null };
           if (
             !res.temporalRequest ||
             (typeof res.temporalRequest === "object" &&
