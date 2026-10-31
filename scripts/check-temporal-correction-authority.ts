@@ -1942,10 +1942,29 @@ async function runSuite(): Promise<void> {
         connectionId: "conn-1",
       };
 
-      const initTurn = await establishInitialOffer(harness, identity);
+      store.rows.set(harness.conversation.id, {
+        businessId: harness.business.id,
+        revision: 1,
+        updatedAt: new Date("2026-11-01T10:00:00.000Z"),
+        state: {
+          conversationId: harness.conversation.id,
+          businessId: harness.business.id,
+          knownFacts: { service: "كشف أسنان" },
+          selectedDate: null,
+          offer: {
+            token: "dummy-compat-tok",
+            status: "ACTIVE",
+            expiresAt: "2026-11-01T10:30:00.000Z",
+            kind: "SERVICE",
+            services: [],
+          },
+          missingFacts: [],
+          lastClarification: null,
+        },
+      });
       check(
-        "19.0 Initial offer established for conflict tests",
-        initTurn.ok === true,
+        "19.0 Initial active offer established for conflict tests",
+        store.rows.get(harness.conversation.id)?.state !== undefined,
       );
 
       failFirst = true;
