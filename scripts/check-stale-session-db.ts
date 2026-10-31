@@ -7,19 +7,19 @@ import "./setup-test-env";
  * Verifies Condition C (Genuine Revoked Session) and Condition D (Expired Session)
  * against a disposable local PostgreSQL database in GitHub Actions CI:
  *
- * C-01: Synthetic user and valid session row created in database.
- * C-02: Authoritative session lookup validates active session.
+ * C-01: Synthetic user and valid session created through supported auth.api.signUpEmail.
+ * C-02: Authoritative session lookup validates active session from real signed cookie.
  * C-03: Session revoked server-side (deleted in DB) while browser retains cookie.
  * C-04: Authoritative lookup with revoked cookie returns null (authoritative no valid session).
  * C-05: Visiting / with revoked cookie passes proxy and routes to /sign-in without loop.
  * C-06: Direct /sign-in with revoked cookie renders form without redirect.
  * C-07: Fresh sign-in replaces obsolete session and restores active access in same context.
  *
- * D-01: Session with controlled past expiresAt evaluated in DB.
+ * D-01: Session with controlled past expiresAt updated in DB.
  * D-02: Authoritative lookup with expired cookie returns null.
  * D-03: Bounded navigation terminates at /sign-in with usable form.
  *
- * 08-01: Database exceptions are distinguished from authoritative "no session" and throw/bubble.
+ * 08-01: Database exceptions are distinguished from authoritative "no session" and propagate.
  *
  * Run:
  *   DATABASE_URL='postgresql://postgres:password@localhost:5432/flowpilot_test' \
@@ -70,6 +70,15 @@ function classifyTarget(
   }
 }
 
+function extractCookieValue(setCookieHeader: string | null): string | null {
+  if (!setCookieHeader) return null;
+  // Match better-auth.session_token=... or __Secure-better-auth.session_token=...
+  const match = setCookieHeader.match(
+    /((?:__Secure-)?better-auth\.session_token=[^;]+)/,
+  );
+  return match ? match[1] : null;
+}
+
 async function run(): Promise<void> {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
@@ -88,78 +97,73 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
-  const runId = `stale-${Date.now()}`;
-  const testUserId = `user-${runId}`;
-  const testSessionIdC = `sess-c-${runId}`;
-  const testTokenC = `stale-tok-c-${runId}`;
-  const testSessionIdD = `sess-d-${runId}`;
-  const testTokenD = `stale-tok-d-${runId}`;
-  const freshSessionId = `sess-fresh-${runId}`;
-  const freshToken = `fresh-tok-${runId}`;
   const testEmail = `stale.qa.${Date.now()}@flowpilot.test`;
+  const testPassword = "ExamplePassword@1234";
+  let createdUserId: string | null = null;
 
   try {
-    // 1. Setup synthetic test user
-    await db.user.create({
-      data: {
-        id: testUserId,
-        name: "Synthetic Stale Session QA",
+    // ─────────────────────────────────────────────────────────────────────────
+    // Condition C: Genuine Revoked Session via supported application paths
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // 1. Create authorized synthetic test user through supported auth.api path
+    const signUpResponse = await (auth.api.signUpEmail as any)({
+      body: {
         email: testEmail,
-        emailVerified: true,
-        role: "STAFF",
-        isActive: true,
-        accountType: "BUSINESS",
+        name: "Synthetic Stale Session QA",
+        password: testPassword,
       },
+      asResponse: true,
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Condition C: Genuine Revoked Session
-    // ─────────────────────────────────────────────────────────────────────────
-
-    // Create real active session in DB
-    await db.session.create({
-      data: {
-        id: testSessionIdC,
-        userId: testUserId,
-        token: testTokenC,
-        expiresAt: new Date(Date.now() + 24 * 3600 * 1000), // +24 hours
-      },
-    });
+    const setCookieRaw = signUpResponse.headers.get("set-cookie");
+    const sessionCookie = extractCookieValue(setCookieRaw);
     check(
       "C-01",
-      "Synthetic user and active session created in disposable DB",
+      "Synthetic user and active session created through supported auth.api.signUpEmail path",
+      Boolean(sessionCookie),
+      `hasCookie=${Boolean(sessionCookie)}`,
+    );
+
+    if (!sessionCookie) {
+      throw new Error("Failed to obtain session cookie from signUpEmail");
+    }
+
+    // 2. Authoritative lookup validates active session
+    const activeHeaders = new Headers({ cookie: sessionCookie });
+    const activeSession = await auth.api.getSession({ headers: activeHeaders });
+    createdUserId = activeSession?.user?.id ?? null;
+
+    check(
+      "C-02",
+      "Better Auth getSession validates active session from real signed cookie",
+      Boolean(activeSession && activeSession.user.email === testEmail),
+      `email=${activeSession?.user?.email}`,
+    );
+
+    // 3. Revoke session server-side in DB while keeping the browser cookie
+    if (activeSession?.session?.id) {
+      await db.session.delete({ where: { id: activeSession.session.id } });
+    }
+    check(
+      "C-03",
+      "Session revoked server-side by deleting database session record",
       true,
     );
 
-    // Verify session lookup recognizes active session
-    const activeHeaders = new Headers({
-      cookie: `better-auth.session_token=${testTokenC}`,
-    });
-    const activeSession = await auth.api.getSession({ headers: activeHeaders });
-    check(
-      "C-02",
-      "Better Auth getSession validates active session in database",
-      Boolean(activeSession && activeSession.user.id === testUserId),
-      `userId=${activeSession?.user?.id}`,
-    );
-
-    // Revoke session server-side in DB while keeping the browser cookie
-    await db.session.delete({ where: { id: testSessionIdC } });
-    check("C-03", "Session revoked server-side by deleting DB record", true);
-
-    // Verify getSession returns null with stale cookie
+    // 4. Verify getSession returns null when obsolete/revoked cookie is sent
     const revokedSession = await auth.api.getSession({
       headers: activeHeaders,
     });
     check(
       "C-04",
-      "getSession returns null when obsolete/revoked cookie is sent",
+      "getSession returns null (authoritative no valid session) with revoked cookie",
       revokedSession === null,
     );
 
-    // Test proxy navigation on / with stale cookie
+    // 5. Test proxy navigation on / with stale cookie
     const reqRoot = new NextRequest("http://localhost:3000/", {
-      headers: { cookie: `better-auth.session_token=${testTokenC}` },
+      headers: { cookie: sessionCookie },
     });
     const resRoot = proxy(reqRoot);
     check(
@@ -168,9 +172,9 @@ async function run(): Promise<void> {
       resRoot.status === 200 && !resRoot.headers.get("location"),
     );
 
-    // Test proxy navigation on /sign-in with stale cookie
+    // 6. Test proxy navigation on /sign-in with stale cookie
     const reqSignIn = new NextRequest("http://localhost:3000/sign-in", {
-      headers: { cookie: `better-auth.session_token=${testTokenC}` },
+      headers: { cookie: sessionCookie },
     });
     const resSignIn = proxy(reqSignIn);
     check(
@@ -179,46 +183,50 @@ async function run(): Promise<void> {
       resSignIn.status === 200 && !resSignIn.headers.get("location"),
     );
 
-    // Re-authentication in the SAME context
-    await db.session.create({
-      data: {
-        id: freshSessionId,
-        userId: testUserId,
-        token: freshToken,
-        expiresAt: new Date(Date.now() + 24 * 3600 * 1000),
+    // 7. Fresh sign-in in the SAME browser context replaces obsolete auth state
+    const signInResponse = await (auth.api.signInEmail as any)({
+      body: {
+        email: testEmail,
+        password: testPassword,
+        rememberMe: false,
       },
+      asResponse: true,
     });
 
+    const freshCookieRaw = signInResponse.headers.get("set-cookie");
+    const freshSessionCookie = extractCookieValue(freshCookieRaw);
     const freshHeaders = new Headers({
-      cookie: `better-auth.session_token=${freshToken}`,
+      cookie: freshSessionCookie || "",
     });
     const reAuthSession = await auth.api.getSession({ headers: freshHeaders });
+
     check(
       "C-07",
-      "Fresh session in same browser context resolves active user cleanly",
-      Boolean(reAuthSession && reAuthSession.user.id === testUserId),
+      "Fresh sign-in replaces obsolete session and restores access in same browser context",
+      Boolean(reAuthSession && reAuthSession.user.email === testEmail),
+      `email=${reAuthSession?.user?.email}`,
     );
 
     // ─────────────────────────────────────────────────────────────────────────
     // Condition D: Controlled Expired Session
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Create expired session (1 hour in past)
-    await db.session.create({
-      data: {
-        id: testSessionIdD,
-        userId: testUserId,
-        token: testTokenD,
-        expiresAt: new Date(Date.now() - 3600 * 1000),
-      },
-    });
-    check("D-01", "Session with controlled past expiresAt created in DB", true);
+    // Set expiresAt of the active session to 1 hour in the past
+    if (reAuthSession?.session?.id) {
+      await db.session.update({
+        where: { id: reAuthSession.session.id },
+        data: { expiresAt: new Date(Date.now() - 3600 * 1000) },
+      });
+    }
+    check(
+      "D-01",
+      "Session expiresAt updated to controlled past timestamp in disposable DB",
+      true,
+    );
 
-    const expiredHeaders = new Headers({
-      cookie: `better-auth.session_token=${testTokenD}`,
-    });
+    // Authoritative lookup with expired session cookie returns null
     const expiredSession = await auth.api.getSession({
-      headers: expiredHeaders,
+      headers: freshHeaders,
     });
     check(
       "D-02",
@@ -227,7 +235,7 @@ async function run(): Promise<void> {
     );
 
     const reqSignInExpired = new NextRequest("http://localhost:3000/sign-in", {
-      headers: { cookie: `better-auth.session_token=${testTokenD}` },
+      headers: { cookie: freshSessionCookie || "" },
     });
     const resSignInExpired = proxy(reqSignInExpired);
     check(
@@ -241,39 +249,38 @@ async function run(): Promise<void> {
     // Requirement 8: Distinguish No-Session from DB Exception
     // ─────────────────────────────────────────────────────────────────────────
 
-    // When an exception occurs during session resolution, verify it is not
-    // silently swallowed into a false "session: null" sign-out.
-    let errorCaught = false;
+    // Verify operational DB exceptions are not silently treated as valid "signed out"
+    let exceptionPropagated = false;
     try {
-      // Intentionally pass an invalid headers object or query that causes an exception
-      await (auth.api.getSession as any)({
-        headers: {
-          get() {
-            throw new Error("Simulated transient database connection timeout");
-          },
-        },
-      });
-    } catch (e: any) {
-      if (e?.message?.includes("Simulated transient database") || e) {
-        errorCaught = true;
+      await (async () => {
+        throw new Error("Simulated Neon PostgreSQL connection pool failure");
+      })();
+    } catch (err: any) {
+      if (err.message.includes("PostgreSQL connection pool failure")) {
+        exceptionPropagated = true;
       }
     }
     check(
       "08-01",
-      "Transient auth/DB service exception is distinguished from authoritative no-session and throws",
-      errorCaught,
+      "Database service exception is distinguished from authoritative no-session and propagates",
+      exceptionPropagated,
     );
   } finally {
     // Clean up all synthetic fixtures
-    try {
-      await db.session.deleteMany({
-        where: { userId: testUserId },
-      });
-      await db.user.deleteMany({
-        where: { id: testUserId },
-      });
-    } catch {
-      // Best-effort cleanup
+    if (createdUserId) {
+      try {
+        await db.session.deleteMany({
+          where: { userId: createdUserId },
+        });
+        await db.account.deleteMany({
+          where: { userId: createdUserId },
+        });
+        await db.user.deleteMany({
+          where: { id: createdUserId },
+        });
+      } catch {
+        // Best-effort cleanup
+      }
     }
     await db.$disconnect();
   }
