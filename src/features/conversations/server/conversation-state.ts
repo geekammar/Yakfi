@@ -532,8 +532,13 @@ export function mergeConversationState(
           ...(input.turnId ? { turnId: input.turnId } : {}),
         });
       }
-      const { dateRange: _droppedRange, ...rest } = knownFacts;
+      const {
+        dateRange: _droppedRange,
+        unresolvedDate: _droppedUnrDate,
+        ...rest
+      } = knownFacts;
       void _droppedRange;
+      void _droppedUnrDate;
       knownFacts = { ...rest, [key]: nextValue };
     } else if (key === "dateRange") {
       let candidate: unknown = null;
@@ -563,8 +568,13 @@ export function mergeConversationState(
           ...(input.turnId ? { turnId: input.turnId } : {}),
         });
       }
-      const { date: _droppedDate, ...rest } = knownFacts;
+      const {
+        date: _droppedDate,
+        unresolvedDate: _droppedUnrDate,
+        ...rest
+      } = knownFacts;
       void _droppedDate;
+      void _droppedUnrDate;
       knownFacts = {
         ...rest,
         dateRange: parsedRange.data,
@@ -582,19 +592,6 @@ export function mergeConversationState(
       const { unresolvedTime: _droppedUnr, ...rest } = knownFacts;
       void _droppedUnr;
       knownFacts = { ...rest, exactTime: nextValue };
-    } else if (key === "date") {
-      if (rawPrev !== null) {
-        revisions.push({
-          key,
-          from: prevStr,
-          to: nextValue,
-          isRevision: update.isRevision === true,
-          ...(input.turnId ? { turnId: input.turnId } : {}),
-        });
-      }
-      const { unresolvedDate: _droppedUnrDate, ...rest } = knownFacts;
-      void _droppedUnrDate;
-      knownFacts = { ...rest, date: nextValue };
     } else {
       if (rawPrev !== null) {
         revisions.push({

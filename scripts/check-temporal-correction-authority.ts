@@ -1113,14 +1113,19 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n── Group 13: Review 1.C — Respect Offer Validity ──");
   {
-    const harness = await createPlaygroundHarness({
-      initialState: {
-        now: "2026-11-01T10:00:00.000Z",
-        serviceId: "srv-dental",
-        serviceName: "كشف أسنان",
-        status: "AI_ACTIVE",
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
       },
     });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
 
     harness.deps.ai = {
       providerName: "test-ai",
@@ -1323,14 +1328,19 @@ async function runSuite(): Promise<void> {
   // ───────────────────────────────────────────────────────────────────────────
   console.log("\n── Group 16: Review 3 — Durable Clarification & Resume ──");
   {
-    const harness = await createPlaygroundHarness({
-      initialState: {
-        now: "2026-11-01T10:00:00.000Z",
-        serviceId: "srv-dental",
-        serviceName: "كشف أسنان",
-        status: "AI_ACTIVE",
+    const harness = createPlaygroundHarness({
+      channel: "TELEGRAM",
+      businessConfig: {
+        appointmentTimeDisplay: "START_ONLY",
+        confirmationMode: "automatic",
       },
     });
+
+    const identity = {
+      businessId: harness.business.id,
+      branchId: harness.business.defaultBranchId,
+      connectionId: "conn-1",
+    };
 
     harness.deps.ai = {
       providerName: "test-ai",
