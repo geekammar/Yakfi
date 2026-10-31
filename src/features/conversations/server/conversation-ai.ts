@@ -1892,6 +1892,7 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
         extraction: emptyAiExtraction,
         handoffReason: null,
         summary: null,
+        requiredKnowledge: "service.name",
       };
     }
   }
@@ -1945,6 +1946,7 @@ export const deterministicConversationAi: ConversationAi = {
         extraction: emptyAiExtraction,
         handoffReason: null,
         summary: null,
+        requiredKnowledge: "service.name",
       };
     }
     const result = classifyCustomerMessage(request.message, request.faqs);

@@ -47,6 +47,7 @@ import {
   buildServiceCatalogContent,
   buildServiceDescriptionContent,
   buildServicePriceContent,
+  isPureServiceCatalogQuestion,
   normalizeArabicText,
 } from "@/features/conversations/server/conversation-ai";
 
@@ -782,6 +783,23 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           exactDescService.name,
           exactDescService.description!,
         ),
+      };
+    }
+  }
+
+  // 5. Exposed service catalog listing:
+  if (
+    context.request.services.length > 0 &&
+    (context.request.services.every((s) => response.content.includes(s.name)) ||
+      isPureServiceCatalogQuestion(context.request.message))
+  ) {
+    const record = ledger.find((f) => f.key === "service.name");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.name"],
+        renderedContent: buildServiceCatalogContent(context.request.services),
       };
     }
   }
