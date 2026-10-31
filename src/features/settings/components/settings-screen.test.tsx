@@ -267,9 +267,7 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(alert?.textContent).toContain("غير مفعّلة حالياً");
 
     // Misleading success booking preview is NOT rendered
-    expect(container.textContent).not.toContain(
-      "معاينة سلوك الحجز مع العميل:",
-    );
+    expect(container.textContent).not.toContain("معاينة سلوك الحجز مع العميل:");
   });
 
   it("3. Missing saved ID: honest unavailable state without fabricated cause", async () => {
@@ -297,9 +295,7 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(alert?.textContent).not.toContain("منشأة أخرى");
 
     // Misleading preview is NOT rendered
-    expect(container.textContent).not.toContain(
-      "معاينة سلوك الحجز مع العميل:",
-    );
+    expect(container.textContent).not.toContain("معاينة سلوك الحجز مع العميل:");
   });
 
   it("4. No configured default: normal empty state, not an inactive warning", async () => {
@@ -320,9 +316,7 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
     expect(alert).toBeNull();
 
     // No preview is shown
-    expect(container.textContent).not.toContain(
-      "معاينة سلوك الحجز مع العميل:",
-    );
+    expect(container.textContent).not.toContain("معاينة سلوك الحجز مع العميل:");
   });
 
   it("5. Page mount does not submit, clear or replace the saved configuration", async () => {
@@ -367,7 +361,8 @@ describe("SettingsScreen — Inactive & Unavailable Default Booking Service (ISS
 
     const activeOption = Array.from(
       document.body.querySelectorAll("[role='option']"),
-    ).find((el) => el.textContent?.includes("استشارة تخصصية")) as HTMLElement | undefined;
+    ).find((el) => el.textContent?.includes("استشارة تخصصية")) as
+      HTMLElement | undefined;
 
     if (activeOption) {
       await act(async () => {

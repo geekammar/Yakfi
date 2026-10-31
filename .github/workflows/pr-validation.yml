@@ -64,14 +64,6 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
-      - name: Format check & print patch on isolated runner
-        run: |
-          pnpm prettier --write src/features/settings/components/settings-screen.tsx src/features/settings/components/settings-screen.test.tsx || true
-          echo "=== BEGIN FORMAT PATCH ==="
-          git diff src/features/settings/components/
-          echo "=== END FORMAT PATCH ==="
-          git checkout -- src/features/settings/components/
-
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
