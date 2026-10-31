@@ -9,7 +9,7 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.1 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.0 (merged PR #68, commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`). Branch: `fix/temporal-correction-authority`.
+**Product version: v0.79.3 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
 
 - **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
 - **Temporal Correction Authority (ISS-011)**:
@@ -27,9 +27,23 @@
 - **Stale Callback Safety**:
   - Superseded callbacks on invalidated offers reject booking creation without resurrecting the obsolete date.
 - **Verification Suite Evidence**:
-  - Offline domain suite `scripts/check-temporal-correction-authority.ts` (10/10 scenarios passing, covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, and both `START_ONLY` and `FULL_RANGE` display preferences).
+  - Offline domain suite `scripts/check-temporal-correction-authority.ts` covering ISS-011, ISS-015, leap years, midnight boundaries, prior context resolution, and both `START_ONLY` and `FULL_RANGE` display preferences.
 
-**Product version: v0.79.0 (main baseline; merged PR #68)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
+**Product version: v0.79.2 (main baseline; merged PR #72)** — `Truthful Appointment Duration in Appointment Detail (ISS-008 / BK-50)`. Baseline: v0.79.0 (commit `14c1e46e80d65da9b83947b3f82fe11b16d934a1`).
+
+- **Problem & Scope (ISS-008 / BK-50)**: Fixed misleading duration label in `AppointmentDetail` where booked-service detail rendered `hint={`${data.service.durationMinutes} دقيقة (الأصلية)}``. This displayed current catalog duration instead of establishing the duration of the stored appointment interval or original booking duration.
+- **Product Decision & Presentation**:
+  - Replaced catalog-duration hint with duration computed from the stored start/end interval: `مدة الموعد: N دقيقة`.
+  - Removed misleading «(الأصلية)» label since appointments may have been rescheduled.
+  - Fail-closed handling for missing, malformed, equal, reversed, or overnight intervals: honestly displays `مدة الموعد غير متاحة` without NaN, negative values, catalog fallback, or invented 24-hour overnight durations.
+- **Deterministic Wall-Clock Helper**: Implemented pure `calculateAppointmentDurationMinutes` in `src/lib/scheduling/slot-grid.ts` and `formatAppointmentDurationHint` in `src/features/appointments/components/appointment-detail.tsx`. Operates strictly on validated clock components, avoiding device/machine-local timezone drift.
+- **Precision Contract**: FlowPilot appointment domain requires integer minute precision (`diffSeconds % 60 === 0`). Unsupported fractional-minute intervals fail closed to unavailable (`null`) rather than rounding.
+- **Zero Invariant Side-Effects**: Pure display correction. Zero database migrations, zero mutations to appointment start/end or status, zero changes to service catalog, availability, rescheduling, customer time preferences (`START_ONLY` / `FULL_RANGE`), or performed-service correction and audit trail.
+- **Verification Suite**:
+  - Added unit and rendered-component suite `src/features/appointments/components/appointment-duration.test.tsx` (`pnpm test:appointment-duration`).
+  - Covers 20m interval with 25m catalog duration, cross-hour boundary (10:50–11:10), cross-noon (11:50–12:10), catalog change isolation, interval change reactivity, invalid/reversed/overnight time handling, and booked/performed service detail preservation.
+
+**Product version: v0.79.0 (merged PR #68)** — `Customer Appointment Time Display Preference (START_ONLY vs FULL_RANGE)`. Baseline: v0.78.7 (merged PR #70, commit `501149cf9100625fb8b9970b840d34398074116c`). Candidate PR: [#68](https://github.com/geekammar/Yakfi/pull/68). Verified HEAD: `37034dfad8ae16a1de22aa1df44f291e6d081cf9`.
 
 - **Feature Scope**: Business-level customer-facing appointment time display preference (`START_ONLY` البداية فقط, default; `FULL_RANGE` الفترة كاملة).
 - **Presentation-Only Invariant**: Strictly changes customer presentation without altering appointment start/end, duration, availability calculations, slot identity, provider eligibility, booking conflicts, or confirmation state. Full interval information is maintained across staff operational views (agenda, visual calendar, and appointment detail).

@@ -153,6 +153,7 @@ jobs:
           pnpm test:customer-detail
           pnpm test:reschedule-panel
           pnpm test:appointment-cancel
+          pnpm test:appointment-duration
           pnpm test:login-form
           pnpm check:iss-006
           pnpm test:follow-up-scheduling
