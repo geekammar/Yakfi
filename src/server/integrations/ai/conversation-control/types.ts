@@ -89,8 +89,8 @@ export type RetryPolicyInput = {
    * Used only to decide whether the budget can host another attempt.
    */
   attemptTimeoutMs: number | null;
-  /** True iff the customer's message is an explicit human request. */
-  explicitHumanRequest: boolean;
+  /** True iff the customer's message is an explicit human request (optional; defaults to false). */
+  explicitHumanRequest?: boolean;
 };
 
 /** Why the retry policy returned its verdict (telemetry only). */
@@ -202,9 +202,8 @@ export type ConversationControlDeps = {
   /** Optional sink; a fresh in-memory dedup sink is used otherwise. */
   notificationSink?: NotificationSink;
   /**
-   * Optional deterministic human-request classifier. Defaults to the
-   * existing {@link classifyCustomerMessage} infrastructure (Phase 6) —
-   * never a second LLM call.
+   * Optional deterministic human-request classifier. Defaults to false —
+   * provider retry and failure handling have zero lexical authority over customer prose.
    */
   isHumanRequest?: (request: AiRequest) => boolean;
 };

@@ -252,9 +252,9 @@ async function main(): Promise<void> {
     },
   });
 
-  // 4. explicit customer human request ────────────────────────────────────────
+  // 4. technical retry on customer human request wording ──────────────────────
   scenarios.push({
-    name: "4. explicit customer human request",
+    name: "4. technical retry on customer human request wording",
     run: async () => {
       const { control, getCalls } = makeControl([
         { kind: "failure", code: "TIMEOUT" },
@@ -266,11 +266,11 @@ async function main(): Promise<void> {
       counters.notifications += o.notifications.length;
       counters.scenarios += 1;
       const ok =
-        getCalls() === 1 &&
-        o.retryTrace.retrySkippedReason === "HUMAN_REQUEST" &&
-        o.handoffReason === "CUSTOMER_REQUESTED_HUMAN" &&
-        o.notifications.length === 1 &&
-        o.notifications[0]?.event === "HUMAN_HANDOFF_REQUESTED";
+        o.result.ok &&
+        getCalls() === 2 &&
+        o.retryTrace.retryAttempted === true &&
+        o.handoffReason === null &&
+        o.notifications.length === 0;
       console.log(
         `   calls=${getCalls()} retries=${o.retryTrace.attempts.length - 1} ` +
           `handoff=${o.handoffReason} msg="${o.handoffMessage}" ` +

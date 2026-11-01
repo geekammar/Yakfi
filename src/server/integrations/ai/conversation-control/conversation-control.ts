@@ -30,7 +30,6 @@
  *  - No DB writes, no transport calls, no queues.
  */
 import type { AiRequest } from "@/features/conversations/server/ai-contract";
-import { classifyCustomerMessage } from "@/features/conversations/server/conversation-ai";
 
 import { computeCostAggregation } from "../http";
 import type {
@@ -73,20 +72,13 @@ const DEFAULT_ROUTE_BUDGET_MS = 300_000;
 const ROUTE_BUDGET_SAFETY_MARGIN_MS = 20_000;
 
 /**
- * Default deterministic human-request detector (Phase 6): reuses the
- * EXISTING `classifyCustomerMessage` infrastructure — never a second LLM
- * call. Total: any failure means we cannot PROVE an explicit request, so
- * the retry is not blocked on that basis.
+ * Default deterministic human-request detector: returns false.
+ * Provider retry decisions and failure classification have zero lexical authority
+ * over customer prose. Retry policy is strictly governed by technical error
+ * classification and bounded retry limits.
  */
-function defaultIsHumanRequest(request: AiRequest): boolean {
-  try {
-    return (
-      classifyCustomerMessage(request.message, request.faqs).intent ===
-      "HUMAN_REQUEST"
-    );
-  } catch {
-    return false;
-  }
+function defaultIsHumanRequest(_request: AiRequest): boolean {
+  return false;
 }
 
 export type ConversationControl = AiProviderAdapter & {
@@ -208,6 +200,8 @@ export function createConversationControl(
       if (result.ok) break;
 
       // Ask the RETRY POLICY (never the adapter) what to do next.
+      // Provider retry decisions are based strictly on technical failure classification
+      // and bounded retry policy, not customer-message wording.
       const remainingAfterAttemptMs = deadline - getNow();
       const verdict = decideRetry({
         attempt: attemptNumber,
@@ -216,7 +210,7 @@ export function createConversationControl(
         retryEnabled: config.retryEnabled,
         remainingBudgetMs: remainingAfterAttemptMs,
         attemptTimeoutMs: options?.session ? null : attemptTimeoutMs,
-        explicitHumanRequest: explicitHuman,
+        explicitHumanRequest: false,
       });
 
       if (verdict.decision === "NO_RETRY") {
@@ -381,16 +375,13 @@ export function createConversationControl(
       }
     } else {
       // Phase 9: map the final failure classification onto a handoff
-      // reason. `failureCodeToHandoffReason` is total (never null), so a
-      // TIMEOUT that reached here already exhausted its retries.
+      // reason. When no validated semantic decision exists, do not assert
+      // that the customer explicitly requested a human. `failureCodeToHandoffReason`
+      // is total (never null), so a TIMEOUT that reached here already exhausted its retries.
       handoffReason = refineRetryableFailure(
         failureCodeToHandoffReason(result.error.code),
         result.error.httpStatus,
       );
-      // The customer asked for a human and the provider failed: this is
-      // the customer's request, NOT a retry exhaustion, and it must never
-      // be reported as a provider incident.
-      if (explicitHuman) handoffReason = "CUSTOMER_REQUESTED_HUMAN";
     }
 
     // Apply the account-level handoff toggles (safe defaults all ON).
