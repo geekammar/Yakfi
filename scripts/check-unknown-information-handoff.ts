@@ -260,7 +260,13 @@ function createEngineHarness(opts: {
       listForBusinessDay: async () => [],
     },
     serviceRepository: {
-      listByBusiness: async () => services,
+      listByBusiness: async (
+        _bId?: string,
+        options?: { includeInactive?: boolean },
+      ) =>
+        options?.includeInactive
+          ? services
+          : services.filter((s) => s.isActive !== false),
       listActiveByBusiness: async () =>
         services.filter((s) => s.isActive !== false),
       findById: async (id: string) => services.find((s) => s.id === id) ?? null,
@@ -277,7 +283,8 @@ function createEngineHarness(opts: {
       findByNameWithinBusiness: async () => null,
     },
     inboundDedupeRepository: {
-      claim: async (key: string) => {
+      claim: async (bIdOrKey: string, maybeKey?: string) => {
+        const key = maybeKey ?? bIdOrKey;
         if (claimedKeys.has(key)) {
           return { status: "duplicate" as const, existingClaim: {} as never };
         }

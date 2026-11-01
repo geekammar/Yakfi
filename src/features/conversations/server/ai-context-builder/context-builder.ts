@@ -769,7 +769,7 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     }
   }
 
-  const seenServiceNames = new Set<string>();
+  const seenServices = new Set<string>();
   const includedServices: Array<{
     id?: string;
     name: string;
@@ -790,8 +790,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       taskRequired: true,
     });
     if (!nameVerdict.included) continue;
-    if (seenServiceNames.has(service.name)) continue; // dedupe by name
-    seenServiceNames.add(service.name);
+    const dedupeKey = service.id?.trim()
+      ? `id:${service.id.trim()}`
+      : `name:${service.name.trim()}`;
+    if (seenServices.has(dedupeKey)) continue;
+    seenServices.add(dedupeKey);
     const included: {
       id?: string;
       name: string;
