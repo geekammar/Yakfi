@@ -396,23 +396,52 @@ async function main(): Promise<void> {
       !a2Outcome.alreadyInHandoff,
   );
 
-  // ── A9. explicit human request bypasses the retry ────────────────────────
+  // ── A9. retry policy governed strictly by technical classification ─────
+  // Customer-message wording does not bypass provider retries or dictate failure reason.
+  // With maxAttempts=2 and a retryable TIMEOUT, the attempt is retried and succeeds.
   const a9 = controlWith([
     { kind: "failure", code: "TIMEOUT" },
     { kind: "success", response: VALID_REPLY },
   ]);
   const a9Outcome = await a9.control.executeTurn(humanRequest);
   check(
-    "A9 explicit human request: TIMEOUT NOT retried",
-    !a9Outcome.result.ok &&
-      a9Outcome.result.error.code === "TIMEOUT" &&
-      a9.calls() === 1,
+    "A9 human request with retryable TIMEOUT: retried and succeeds on attempt 2",
+    a9Outcome.result.ok &&
+      a9.calls() === 2 &&
+      a9Outcome.retryTrace.retryAttempted === true &&
+      a9Outcome.handoffReason === null,
   );
+
+  // When retries are exhausted under humanRequest, it exhausts technically to RETRY_EXHAUSTED
+  const a9Exhausted = controlWith([
+    { kind: "failure", code: "TIMEOUT" },
+    { kind: "failure", code: "TIMEOUT" },
+  ]);
+  const a9ExhaustedOutcome =
+    await a9Exhausted.control.executeTurn(humanRequest);
   check(
-    "A9 skipReason=HUMAN_REQUEST; reason=CUSTOMER_REQUESTED_HUMAN",
-    a9Outcome.retryTrace.retrySkippedReason === "HUMAN_REQUEST" &&
-      a9Outcome.retryTrace.retryAttempted === false &&
-      a9Outcome.handoffReason === "CUSTOMER_REQUESTED_HUMAN",
+    "A9b terminal failure under humanRequest: RETRY_EXHAUSTED without lexical human assertion",
+    !a9ExhaustedOutcome.result.ok &&
+      a9Exhausted.calls() === 2 &&
+      a9ExhaustedOutcome.retryTrace.retrySkippedReason ===
+        "MAX_ATTEMPTS_REACHED" &&
+      a9ExhaustedOutcome.handoffReason === "RETRY_EXHAUSTED",
+  );
+
+  // Verify same technical failure + different customer wording = same retry/failure policy
+  const a9BaseExhausted = controlWith([
+    { kind: "failure", code: "TIMEOUT" },
+    { kind: "failure", code: "TIMEOUT" },
+  ]);
+  const a9BaseOutcome = await a9BaseExhausted.control.executeTurn(baseRequest);
+  check(
+    "A9c same technical failure + different customer wording yields identical retry policy",
+    a9BaseOutcome.retryTrace.retryAttempted ===
+      a9ExhaustedOutcome.retryTrace.retryAttempted &&
+      a9BaseOutcome.handoffReason === a9ExhaustedOutcome.handoffReason &&
+      a9BaseOutcome.retryTrace.retrySkippedReason ===
+        a9ExhaustedOutcome.retryTrace.retrySkippedReason &&
+      a9BaseExhausted.calls() === a9Exhausted.calls(),
   );
 
   // ── A10. maxAttempts=2 means exactly TWO maximum attempts ────────────────
