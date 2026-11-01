@@ -724,6 +724,10 @@ async function main(): Promise<void> {
       handoffReason: null,
       summary: null,
       safetyAssessment: "safe" as const,
+      knowledgeRef: {
+        family: "business.faqs",
+        sourceId: "مواعيد العمل",
+      },
     };
   }
   function bookingAi(service: string | null, date: string | null) {

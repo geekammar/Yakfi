@@ -1640,7 +1640,13 @@ async function runSuite(): Promise<void> {
       {
         kind: "ok",
         body: openAiEnvelope(
-          validAiResponseJson({ content: "نعم متوفر كشف أسنان" }),
+          validAiResponseJson({
+            content: "نعم متوفر كشف أسنان",
+            knowledgeRef: {
+              family: "service.name",
+              sourceId: "كشف أسنان",
+            },
+          }),
         ),
       },
     ]);

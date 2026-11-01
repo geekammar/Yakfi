@@ -389,6 +389,10 @@ async function main() {
         handoffReason: null,
         summary: null,
         safetyAssessment: "safe",
+        knowledgeRef: {
+          family: "business.faqs",
+          sourceId: "مواعيد العمل",
+        },
       }),
       getLastTelemetry: () => ({
         finalProvider: "agentrouter",

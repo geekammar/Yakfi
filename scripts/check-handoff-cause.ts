@@ -893,6 +893,10 @@ async function main(): Promise<void> {
             extraction: emptyExtraction,
             handoffReason: null,
             summary: null,
+            knowledgeRef: {
+              family: "business.faqs",
+              sourceId: "مواعيد العمل",
+            },
           }) as AiResponse,
       ],
     });
@@ -1021,8 +1025,20 @@ async function main(): Promise<void> {
             extraction: emptyExtraction,
             handoffReason: null,
             summary: null,
+            knowledgeRef: {
+              family: "business.faqs",
+              sourceId: "مواعيد العمل",
+            },
             goals: [
-              { kind: "ANSWER", intent: "FAQ", priority: 0 },
+              {
+                kind: "ANSWER",
+                intent: "FAQ",
+                priority: 0,
+                knowledgeRef: {
+                  family: "business.faqs",
+                  sourceId: "مواعيد العمل",
+                },
+              },
               {
                 kind: "DOMAIN_ACTION",
                 intent: "BOOKING",
