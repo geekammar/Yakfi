@@ -73,6 +73,8 @@ function createEngineHarness(opts: {
   }>;
   about?: string | null;
   address?: string | null;
+  businessAbout?: string | null;
+  businessAddress?: string | null;
   responders: Array<(req: unknown) => Promise<AiResponse>>;
   telemetry?: Array<Record<string, unknown>>;
   transportThrows?: boolean;
@@ -112,9 +114,19 @@ function createEngineHarness(opts: {
     id: TENANT_A,
     name: "مركز رعاية الأسنان التخصصي",
     isActive: true,
-    about: opts.about !== undefined ? opts.about : "عيادة أسنان تخصصية",
+    about:
+      opts.businessAbout !== undefined
+        ? opts.businessAbout
+        : opts.about !== undefined
+          ? opts.about
+          : "عيادة أسنان تخصصية",
     whatsappNumber: WHATSAPP,
-    address: opts.address !== undefined ? opts.address : "شارع التحرير",
+    address:
+      opts.businessAddress !== undefined
+        ? opts.businessAddress
+        : opts.address !== undefined
+          ? opts.address
+          : "شارع التحرير",
     cancellationPolicy: "24h",
     slotDurationMinutes: 30,
     confirmationMode: "manual",
@@ -2106,33 +2118,47 @@ async function runSuite(): Promise<void> {
     );
 
     // 14.8h Singleton invalid reference -> refused, safe handoff
+    let capturedReqAddress: string | undefined;
     const hAdv8h = createEngineHarness({
       businessAddress: "شارع التحرير، الدقي، الجيزة",
       responders: [
-        async () => ({
-          intent: "FAQ",
-          action: "reply",
-          content: "عنوان العيادة في شارع التحرير.",
-          extraction: emptyExtraction,
-          handoffReason: null,
-          summary: null,
-          safetyAssessment: "safe",
-          knowledgeRef: {
-            family: "business.address",
-            sourceId: "invalid-bogus-address-ref-999",
-          },
-        }),
+        async (req) => {
+          if (
+            typeof req === "object" &&
+            req !== null &&
+            "businessAddress" in req &&
+            typeof (req as { businessAddress?: unknown }).businessAddress ===
+              "string"
+          ) {
+            capturedReqAddress = (req as { businessAddress: string })
+              .businessAddress;
+          }
+          return {
+            intent: "FAQ",
+            action: "reply",
+            content: "عنوان العيادة في شارع التحرير.",
+            extraction: emptyExtraction,
+            handoffReason: null,
+            summary: null,
+            safetyAssessment: "safe",
+            knowledgeRef: {
+              family: "business.address",
+              sourceId: "invalid-bogus-address-ref-999",
+            },
+          };
+        },
       ],
     });
     const resAdv8h = await hAdv8h.runInbound("عنوانكم فين؟", "adv-8h");
     check(
       "14.8h Singleton invalid reference -> refused, safe handoff",
-      resAdv8h.ok === true &&
+      capturedReqAddress === "شارع التحرير، الدقي، الجيزة" &&
+        resAdv8h.ok === true &&
         !resAdv8h.duplicate &&
         resAdv8h.assistantAction === "AI_HANDOFF" &&
         resAdv8h.conversationStatus === "NEED_HUMAN" &&
         resAdv8h.handoffCause === "POLICY_REFUSED",
-      resAdv8h,
+      { capturedReqAddress, resAdv8h },
     );
 
     // 14.8i Same-level conflict between knowledgeRef and requiredKnowledge -> refused

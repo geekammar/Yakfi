@@ -294,14 +294,15 @@ export type ResolvedKnowledgeProposal = {
 };
 
 function extractEntityProposal(
-  entity: {
-    knowledgeRef?:
-      | string
-      | { family?: string; sourceId?: string | null }
-      | null;
-    sourceId?: string | null;
-    requiredKnowledge?: string | null;
-  } | null | undefined,
+  entity:
+    | {
+        knowledgeRef?:
+          string | { family?: string; sourceId?: string | null } | null;
+        sourceId?: string | null;
+        requiredKnowledge?: string | null;
+      }
+    | null
+    | undefined,
 ): {
   family: string | null;
   sourceId: string | null;
@@ -396,7 +397,7 @@ export function resolveKnowledgeProposal(
   const respProp = extractEntityProposal(response);
 
   let conflict = goalProp.conflict || respProp.conflict;
-  let invalidFamily = goalProp.invalidFamily || respProp.invalidFamily;
+  const invalidFamily = goalProp.invalidFamily || respProp.invalidFamily;
 
   if (
     goalProp.family &&
@@ -755,10 +756,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
       }
       const matchedFaq = matches[0]!;
-      if (
-        !matchedFaq.answer ||
-        matchedFaq.answer.trim().length === 0
-      ) {
+      if (!matchedFaq.answer || matchedFaq.answer.trim().length === 0) {
         return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
       }
       return {
