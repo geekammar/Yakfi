@@ -384,7 +384,7 @@ async function main(): Promise<void> {
       "5a.3 Engine handoffCause is RETRY_EXHAUSTED (not CUSTOMER_REQUESTED_HUMAN)",
       (res as any).handoffCause === "RETRY_EXHAUSTED",
     );
-    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "AI");
     check(
       "5a.4 Assistant reply is neutral SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE",
       sent.length === 1 &&
@@ -437,7 +437,7 @@ async function main(): Promise<void> {
       "5b.3 Engine handoffCause is PROVIDER_FAILURE",
       (res as any).handoffCause === "PROVIDER_FAILURE",
     );
-    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "AI");
     check(
       "5b.4 Assistant reply is neutral PROVIDER_FAILURE acknowledgment",
       sent.length === 1 &&
@@ -491,7 +491,7 @@ async function main(): Promise<void> {
       "5c.3 Handoff cause is AI_FAILURE (never CUSTOMER_REQUESTED_HUMAN)",
       (res as any).handoffCause === "AI_FAILURE",
     );
-    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "AI");
     check(
       "5c.4 Assistant reply is neutral SAFE_HANDOFF_REPLIES.INVALID_OUTPUT",
       sent.length === 1 &&
@@ -551,8 +551,8 @@ async function main(): Promise<void> {
       (resA as any).handoffCause === (resB as any).handoffCause &&
         (resA as any).handoffCause === "RETRY_EXHAUSTED",
     );
-    const sentA = harnessA.messages.filter((m) => m.senderType === "ASSISTANT");
-    const sentB = harnessB.messages.filter((m) => m.senderType === "ASSISTANT");
+    const sentA = harnessA.messages.filter((m) => m.senderType === "AI");
+    const sentB = harnessB.messages.filter((m) => m.senderType === "AI");
     check(
       "5d.2 Assistant reply text identical across wordings",
       sentA[0]?.content === sentB[0]?.content &&
