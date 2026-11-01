@@ -60,7 +60,10 @@ function mockBooking(params: {
   };
 }
 
-function mockFaq(content: string): Record<string, unknown> {
+function mockFaq(
+  content: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     intent: "FAQ",
     action: "reply",
@@ -68,6 +71,10 @@ function mockFaq(content: string): Record<string, unknown> {
     summary: null,
     handoffReason: null,
     safetyAssessment: "safe",
+    knowledgeRef: {
+      family: "business.faqs",
+      sourceId: "عنوان ومكان العيادة",
+    },
     extraction: {
       service: null,
       date: null,
@@ -75,6 +82,7 @@ function mockFaq(content: string): Record<string, unknown> {
       timePreference: null,
     },
     factUpdates: [],
+    ...extra,
   };
 }
 
@@ -1085,7 +1093,9 @@ export const CORE_03C2_SMOKE_SCENARIOS: EgyptianScenarioDefinition[] = [
         }),
       },
       2: {
-        body: mockFaq("عنوان العيادة: 15 شارع النصر، المعادي، القاهرة."),
+        body: mockFaq(
+          "عنوان العيادة: الفرع الرئيسي - القاهرة. شرفنا بزيارتك في أي وقت.",
+        ),
       },
     },
     turns: [

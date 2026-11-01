@@ -89,7 +89,7 @@ function sources(message: string, price: PriceCols, faqs: unknown[]): Sources {
   };
 }
 
-function faqReply(): AiResponse {
+function faqReply(overrides: Partial<AiResponse> = {}): AiResponse {
   return {
     intent: "FAQ",
     action: "reply",
@@ -102,6 +102,8 @@ function faqReply(): AiResponse {
     },
     handoffReason: null,
     summary: null,
+    knowledgeRef: { family: "service.price", sourceId: "svc-1" },
+    ...overrides,
   };
 }
 
@@ -414,8 +416,13 @@ function main(): void {
   });
   const faqOnlyDisclosure = enforceDisclosure({
     response: {
-      ...faqReply(),
-      content: "نعمل من السبت إلى الخميس.",
+      ...faqReply({
+        knowledgeRef: {
+          family: "business.faqs",
+          sourceId: "ما هي مواعيد العمل؟",
+        },
+      }),
+      content: "من السبت للخميس.",
     },
     context: { request: faqOnlyTurn.request, facts: faqOnlyTurn.facts },
   });

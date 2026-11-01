@@ -1207,11 +1207,13 @@ async function gapAnswerFlowSection(): Promise<void> {
       message: "كم سعر الكشف عندكم؟",
     },
   });
-  const answer = stored[0]!.answer;
-  const futureReply: AiResponse = {
+  const exposedFaq = built.request.faqs[0];
+  const sourceRef =
+    exposedFaq?.id ?? exposedFaq?.question ?? "كم سعر الكشف عندكم؟";
+  const validFutureReply: AiResponse = {
     intent: "FAQ",
     action: "reply",
-    content: answer,
+    content: "صياغة مقترحة غير معتمدة من النموذج لسعر الكشف",
     extraction: {
       service: null,
       provider: null,
@@ -1220,18 +1222,46 @@ async function gapAnswerFlowSection(): Promise<void> {
     },
     handoffReason: null,
     summary: null,
+    knowledgeRef: {
+      family: "business.faqs",
+      sourceId: sourceRef,
+    },
   };
-  const futureDecision = enforceDisclosure({
-    response: futureReply,
+  const validDecision = enforceDisclosure({
+    response: validFutureReply,
     context: { request: built.request, facts: built.facts },
   });
+
+  const missingRefReply: AiResponse = {
+    ...validFutureReply,
+    knowledgeRef: undefined,
+  };
+  const missingRefDecision = enforceDisclosure({
+    response: missingRefReply,
+    context: { request: built.request, facts: built.facts },
+  });
+
+  const invalidRefReply: AiResponse = {
+    ...validFutureReply,
+    knowledgeRef: {
+      family: "business.faqs",
+      sourceId: "non-existent-faq-id-999",
+    },
+  };
+  const invalidRefDecision = enforceDisclosure({
+    response: invalidRefReply,
+    context: { request: built.request, facts: built.facts },
+  });
+
   record(
     "K12 الإجابة المحفوظة تصل أدوار الذكاء القادمة عبر مسار السياق القائم",
     built.request.faqs.length === 1 &&
       built.request.faqs[0]!.question === "كم سعر الكشف عندكم؟" &&
-      futureDecision.kind === "disclosed" &&
-      futureDecision.kind === "disclosed" &&
-      futureDecision.support[0] === "business.faqs",
+      validDecision.kind === "disclosed" &&
+      validDecision.support[0] === "business.faqs" &&
+      validDecision.renderedContent === stored[0]!.answer &&
+      missingRefDecision.kind === "requires-human" &&
+      invalidRefDecision.kind === "requires-human",
   );
 
   // K13 — the existing knowledge editor stays compatible: the list read

@@ -1749,6 +1749,7 @@ async function main(): Promise<void> {
             summary: "استفسار عن الخدمات",
             content: "الخدمات المتاحة لدينا هي: كشف أسنان، وتنظيف أسنان.",
             handoffReason: null,
+            knowledgeRef: "service.name",
             extraction: {
               service: null,
               provider: null,

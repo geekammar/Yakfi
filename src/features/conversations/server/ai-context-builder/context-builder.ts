@@ -305,9 +305,24 @@ export type BuiltAiContext = {
 const storedFaqsSchema = z.array(faqEntrySchema);
 
 /** Malformed stored FAQ JSON degrades to "no knowledge" — never crashes. */
-function safeFaqs(raw: unknown): Array<{ question: string; answer: string }> {
+function safeFaqs(
+  raw: unknown,
+): Array<{ id?: string; question: string; answer: string }> {
   const parsed = storedFaqsSchema.safeParse(raw ?? []);
-  return parsed.success ? parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT) : [];
+  if (!parsed.success) return [];
+  const rawList = Array.isArray(raw) ? raw : [];
+  return parsed.data.slice(0, AI_KNOWLEDGE_ENTRY_LIMIT).map((faq, index) => {
+    const rawItem = rawList[index] as { id?: unknown } | undefined;
+    const rawId =
+      typeof rawItem?.id === "string" && rawItem.id.trim().length > 0
+        ? rawItem.id.trim()
+        : `faq-${index}`;
+    return {
+      id: rawId,
+      question: faq.question,
+      answer: faq.answer,
+    };
+  });
 }
 
 /**
@@ -754,8 +769,9 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     }
   }
 
-  const seenServiceNames = new Set<string>();
+  const seenServices = new Set<string>();
   const includedServices: Array<{
+    id?: string;
     name: string;
     price?: string;
     description?: string;
@@ -774,13 +790,17 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       taskRequired: true,
     });
     if (!nameVerdict.included) continue;
-    if (seenServiceNames.has(service.name)) continue; // dedupe by name
-    seenServiceNames.add(service.name);
+    const dedupeKey = service.id?.trim()
+      ? `id:${service.id.trim()}`
+      : `name:${service.name.trim()}`;
+    if (seenServices.has(dedupeKey)) continue;
+    seenServices.add(dedupeKey);
     const included: {
+      id?: string;
       name: string;
       price?: string;
       description?: string;
-    } = { name: service.name };
+    } = { id: service.id, name: service.name };
 
     // durationMinutes is INTERNAL and no current AI task requires it:
     // availability comes from CORE-02, not from LLM schedule reasoning.

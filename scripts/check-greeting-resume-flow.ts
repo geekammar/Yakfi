@@ -145,7 +145,7 @@ function mockAiFaq(): AiResponse {
   return {
     intent: "FAQ",
     action: "reply",
-    content: "نحن متواجدون في شارع المعادي، القاهرة.",
+    content: "عنوان العيادة: الفرع الرئيسي - القاهرة. شرفنا بزيارتك في أي وقت.",
     summary: "استفسار عن الموقع",
     handoffReason: null,
     safetyAssessment: "safe",
@@ -159,7 +159,11 @@ function mockAiFaq(): AiResponse {
       {
         kind: "ANSWER",
         intent: "FAQ",
-        requiredKnowledge: "FAQ",
+        requiredKnowledge: "business.faqs",
+        knowledgeRef: {
+          family: "business.faqs",
+          sourceId: "عنوان ومكان العيادة",
+        },
       },
     ],
   };
@@ -874,7 +878,7 @@ async function run(): Promise<void> {
       res.ok && (res as InboundSuccess).assistantAction === "AI_REPLY";
     check("J1. FAQ turn answers normally", isReply);
     const sent = lastSentPayload(harness);
-    check("J2. FAQ answer text matches", sent?.body?.includes("المعادي"));
+    check("J2. FAQ answer text matches", sent?.body?.includes("القاهرة"));
     check(
       "J3. Choices are NOT attached to unrelated FAQ reply",
       sent?.choices === null || sent?.choices === undefined,
@@ -905,7 +909,11 @@ async function run(): Promise<void> {
         {
           kind: "ANSWER",
           intent: "FAQ",
-          requiredKnowledge: "FAQ",
+          requiredKnowledge: "service.price",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: PLAYGROUND_IDS.SERV_DENTAL,
+          },
         },
         {
           kind: "DOMAIN_ACTION",

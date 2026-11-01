@@ -155,6 +155,7 @@ import {
   buildBusinessIdentityContent,
   bypassDeterministicAi,
   normalizeArabicText,
+  resolveHandoffActionReply,
   resolveSafeFailureReply,
   resolveTurnControlSignals,
 } from "@/features/conversations/server/conversation-ai";
@@ -9056,7 +9057,11 @@ async function runInboundTurn(
     //     only assistant-authored text does.
     const disclosure = enforceDisclosure({
       response: validated,
-      context: { request: aiRequest, facts: builtContext.facts },
+      context: {
+        request: aiRequest,
+        facts: builtContext.facts,
+        scope: { businessId: business.id },
+      },
     });
     // PROMPT-AI-OPS-22 — record the gate's verdict on the evidence record so
     // "did disclosure allow or refuse this channel?" is answerable from
@@ -9198,17 +9203,23 @@ async function runInboundTurn(
         delivery,
       };
     }
-    // Bounded domain rendering for business identity (PROMPT-AI-UX-02 / Semantic Authority Repair):
-    // An identity reply is backed by the authoritative business.name fact. When the turn's
-    // active answer goal is business identity (or backed by business.identity support), the domain
-    // renders the canonical, bounded Arabic identity acknowledgement, guaranteeing that arbitrary
-    // unbacked prose (such as fabricated prices or procedure claims) is never emitted.
+    // Server-authoritative bounded handoff wording & knowledge rendering (ISS-012):
+    // When the model produces action=handoff, canonical server copy describes
+    // the durable queue transition actually established, guaranteeing that model
+    // prose cannot invent immediate SLAs or false follow-up promises.
+    // For accepted knowledge answers, server-authoritative rendering ensures the customer
+    // receives the verified stored source data (FAQ answer, formatted price, identity,
+    // description, about, or address) rather than arbitrary or hallucinated model prose.
     const isIdentityAnswer =
       disclosure.support.includes("business.identity") ||
       isExplicitIdentityGoal(resolvedTurn?.plan?.steps[0]);
-    const content = isIdentityAnswer
-      ? buildBusinessIdentityContent(business.name)
-      : disclosure.response.content;
+    const content =
+      validated.action === "handoff"
+        ? resolveHandoffActionReply(validated.handoffReason)
+        : (disclosure.renderedContent ??
+          (isIdentityAnswer
+            ? buildBusinessIdentityContent(business.name)
+            : disclosure.response.content));
 
     // ANSWER-AND-CONTINUE (PROMPT-AI-ARCH-09 — Slice 5). When the SAME customer
     // turn expressed a KNOWLEDGE goal AND a DOMAIN/booking goal, the resolver

@@ -1426,7 +1426,9 @@ async function main(): Promise<void> {
       "T19: Customer receives safe temporary failure acknowledgment",
       lastReply?.body?.includes("واجهت صعوبة مؤقتة في الرد") ||
         lastReply?.body?.includes("سيتواصل معك أحد أعضاء الفريق") ||
-        lastReply?.body?.includes("جارٍ تحويلك لأحد أعضاء الفريق"),
+        lastReply?.body?.includes("جارٍ تحويلك لأحد أعضاء الفريق") ||
+        lastReply?.body?.includes("سنعتني بطلبك") ||
+        lastReply?.body?.includes("تم تحويل المحادثة لفريق العمل"),
     );
     check(
       "T19: Zero appointments created",

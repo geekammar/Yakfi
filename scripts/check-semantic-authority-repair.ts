@@ -18,6 +18,7 @@ import {
 } from "@/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
+  buildBusinessAddressContent,
   buildBusinessIdentityContent,
   resolveSafeFailureReply,
 } from "@/features/conversations/server/conversation-ai";
@@ -806,6 +807,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: { family: "service.price", sourceId: "s1" },
     };
     const priceResult = enforceDisclosure({
       context: priceBuilt,
@@ -833,6 +835,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: "business.address",
     };
     const addressResult = enforceDisclosure({
       context: addressBuilt,
@@ -868,6 +871,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: "service.name",
     };
     const catalogResult = enforceDisclosure({
       context: catalogBuilt,
@@ -972,6 +976,7 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
+          knowledgeRef: { family: "service.price", sourceId: "s1" },
         }),
       ],
     });
@@ -985,7 +990,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0] === "سعر كشف الأسنان 300 جنيه.",
+        sentMessages[0] === "سعر كشف أسنان: 300 جنيه.",
       { sentMessages },
     );
   }
@@ -1005,6 +1010,7 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
+          knowledgeRef: "business.address",
         }),
       ],
     });
@@ -1018,7 +1024,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0] === "عنوان العيادة في 15 شارع النصر، المعادي.",
+        sentMessages[0] ===
+          buildBusinessAddressContent("15 شارع النصر، المعادي"),
       { sentMessages },
     );
   }
@@ -1193,8 +1200,7 @@ async function runSuite(): Promise<void> {
       eq(replyTimeout, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyUnavailable, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
         eq(replyQuota, SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE) &&
-        replyTimeout ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        replyTimeout === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
       { replyTimeout },
     );
   }
@@ -1216,8 +1222,7 @@ async function runSuite(): Promise<void> {
       eq(replyInvalid, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyUnsupported, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
         eq(replyDefault, SAFE_HANDOFF_REPLIES.INVALID_OUTPUT) &&
-        replyInvalid ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        replyInvalid === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { replyInvalid },
     );
   }
@@ -1232,7 +1237,7 @@ async function runSuite(): Promise<void> {
     check(
       "B3. Validated explicit human request maps to human transfer copy",
       eq(replyHuman, SAFE_HANDOFF_REPLIES.HUMAN_REQUEST) &&
-        replyHuman === "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+        replyHuman === "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
     );
   }
 
@@ -1247,7 +1252,7 @@ async function runSuite(): Promise<void> {
       "B4. Validated safety restriction maps to sensitive assistance copy",
       eq(replySensitive, SAFE_HANDOFF_REPLIES.SENSITIVE) &&
         replySensitive ===
-          "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+          "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
     );
   }
 
@@ -1256,7 +1261,7 @@ async function runSuite(): Promise<void> {
     check(
       "B5. Disclosure refusal constant matches canonical neutral assistance copy",
       SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED ===
-        "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+        "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
     );
   }
 
@@ -1294,8 +1299,7 @@ async function runSuite(): Promise<void> {
         res1.assistantAction === "AI_HANDOFF" &&
         res1.handoffCause === "RETRY_EXHAUSTED" &&
         h1.getSent().length === 1 &&
-        h1.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h1.getSent()[0] === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
       { res1, sent: h1.getSent() },
     );
 
@@ -1322,8 +1326,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res2) &&
         res2.conversationStatus === "NEED_HUMAN" &&
         res2.handoffCause === "PROVIDER_FAILURE" &&
-        h2.getSent()[0] ===
-          "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h2.getSent()[0] === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
     );
   }
 
@@ -1350,8 +1353,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { res, sent: h.getSent() },
     );
   }
@@ -1374,8 +1376,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.assistantAction === "AI_HANDOFF" &&
         res.handoffCause === "AI_FAILURE" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
       { res, sent: h.getSent() },
     );
   }
@@ -1406,7 +1407,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res) &&
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "CUSTOMER_REQUESTED_HUMAN" &&
-        h.getSent()[0] === "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.HUMAN_REQUEST,
       { res, sent: h.getSent() },
     );
   }
@@ -1434,8 +1435,7 @@ async function runSuite(): Promise<void> {
       isSuccess(res) &&
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "SENSITIVE_OR_RESTRICTED" &&
-        h.getSent()[0] ===
-          "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.SENSITIVE,
       { res, sent: h.getSent() },
     );
   }
@@ -1468,8 +1468,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "NEED_HUMAN" &&
         res.handoffCause === "POLICY_REFUSED" &&
         !h.getSent().some((s) => s.includes("300")) &&
-        h.getSent()[0] ===
-          "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+        h.getSent()[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED,
       { res, sent: h.getSent() },
     );
   }

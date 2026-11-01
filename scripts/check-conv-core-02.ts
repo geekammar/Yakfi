@@ -452,6 +452,10 @@ async function main(): Promise<void> {
             summary: "سؤال عن المكان",
             content: "عنواننا في التجمع الخامس، القاهرة.",
             handoffReason: null,
+            knowledgeRef: {
+              family: "business.faqs",
+              sourceId: "عنوان ومكان العيادة فين؟",
+            },
             extraction: {
               service: null,
               provider: null,
@@ -466,8 +470,20 @@ async function main(): Promise<void> {
             summary: "استفسار عن السعر مع حجز",
             content: "سعر كشف الأسنان 300 جنيه.",
             handoffReason: null,
+            knowledgeRef: {
+              family: "business.faqs",
+              sourceId: "بكام كشف الأسنان؟",
+            },
             goals: [
-              { kind: "ANSWER", intent: "FAQ", continueAfter: true },
+              {
+                kind: "ANSWER",
+                intent: "FAQ",
+                continueAfter: true,
+                knowledgeRef: {
+                  family: "business.faqs",
+                  sourceId: "بكام كشف الأسنان؟",
+                },
+              },
               { kind: "DOMAIN_ACTION", intent: "BOOKING" },
             ],
             extraction: {

@@ -27,6 +27,7 @@ import type {
   AiIntent,
   AiRequest,
   AiResponse,
+  HandoffReason as ContractHandoffReason,
 } from "@/features/conversations/server/ai-contract";
 import {
   emptyAiExtraction,
@@ -93,7 +94,7 @@ export function stripAffixes(token: string): string {
   return word;
 }
 
-function tokenize(text: string): string[] {
+export function tokenize(text: string): string[] {
   return normalizeArabicText(text)
     .split(" ")
     .filter(Boolean)
@@ -1108,12 +1109,12 @@ export function deriveTaskRelevance(message: string): TaskRelevance {
  * of customer text when choosing a safe fallback message.
  */
 export const SAFE_HANDOFF_REPLIES = {
-  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
-  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
+  HUMAN_REQUEST: "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  SENSITIVE: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
   PROVIDER_FAILURE:
-    "واجهت صعوبة مؤقتة في الرد — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  INVALID_OUTPUT: "سنعتني بطلبك — جارٍ تحويلك لأحد أعضاء الفريق للمتابعة.",
-  DISCLOSURE_REFUSED: "شكراً لسؤالك — جارٍ تحويلك لأحد أعضاء الفريق للمساعدة.",
+    "واجهت صعوبة مؤقتة في الرد — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  INVALID_OUTPUT: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  DISCLOSURE_REFUSED: "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
 } as const;
 
 export type SafeFailureReplyInput = {
@@ -1146,6 +1147,28 @@ export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
   return SAFE_HANDOFF_REPLIES.INVALID_OUTPUT;
 }
 
+/**
+ * Canonical customer-facing reply for authoritative action=handoff decisions.
+ * Guarantees that model-generated handoff prose cannot invent immediate SLAs
+ * or false contact promises.
+ */
+export function resolveHandoffActionReply(
+  reason: ContractHandoffReason | null,
+): string {
+  switch (reason) {
+    case "HUMAN_REQUEST":
+      return SAFE_HANDOFF_REPLIES.HUMAN_REQUEST;
+    case "SENSITIVE":
+      return SAFE_HANDOFF_REPLIES.SENSITIVE;
+    case "NO_KNOWLEDGE":
+      return REPLIES.NO_KNOWLEDGE;
+    case "AMBIGUOUS":
+      return REPLIES.AMBIGUOUS;
+    default:
+      return SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED;
+  }
+}
+
 const REPLIES = {
   BOOKING:
     "يسعدنا خدمتك! سيتواصل معك أحد أعضاء الفريق لإتمام الحجز وتحديد الوقت المناسب.",
@@ -1153,11 +1176,10 @@ const REPLIES = {
     "شكراً لسؤالك — سيرسل لك أحد أعضاء الفريق الأوقات المتاحة قريباً.",
   RESCHEDULE: "بالطبع — سيتولى أحد أعضاء الفريق تعديل موعدك والتواصل معك.",
   CANCELLATION: "تمام — سيتواصل معك أحد أعضاء الفريق لإتمام إلغاء الموعد.",
-  HUMAN_REQUEST: "تحت أمرك — جارٍ تحويلك الآن لأحد أعضاء الفريق.",
-  SENSITIVE: "سنعتني بطلبك — سيتواصل معك أحد أعضاء الفريق في أقرب وقت.",
-  NO_KNOWLEDGE: "شكراً لسؤالك — سيرد عليك أحد أعضاء الفريق قريباً.",
-  AMBIGUOUS:
-    "لم أفهم طلبك تماماً — سيرد عليك أحد أعضاء الفريق لمساعدتك قريباً.",
+  HUMAN_REQUEST: "تحت أمرك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  SENSITIVE: "سنعتني بطلبك — تم تحويل المحادثة لفريق العمل للمتابعة.",
+  NO_KNOWLEDGE: "شكراً لسؤالك — تم تحويل استفسارك لفريق العمل للمتابعة.",
+  AMBIGUOUS: "لم أفهم طلبك تماماً — تم تحويل المحادثة لفريق العمل للمساعدة.",
 } as const;
 
 const BOOKING_SUMMARIES = {
@@ -1358,6 +1380,40 @@ export function buildBusinessIdentityContent(businessName: string): string {
   return `أيوه، ${businessName} معاك. ${IDENTITY_INVITE}`;
 }
 
+/** Server-authoritative rendering for business address (ISS-012). */
+export function buildBusinessAddressContent(address: string): string {
+  return `عنواننا: ${address.trim()}.`;
+}
+
+/** Server-authoritative rendering for business about description (ISS-012). */
+export function buildBusinessAboutContent(about: string): string {
+  return about.trim();
+}
+
+/** Server-authoritative rendering for service price (ISS-012). */
+export function buildServicePriceContent(
+  serviceName: string,
+  price: string,
+): string {
+  return `سعر ${serviceName.trim()}: ${price.trim()}.`;
+}
+
+/** Server-authoritative rendering for service description (ISS-012). */
+export function buildServiceDescriptionContent(
+  serviceName: string,
+  description: string,
+): string {
+  return `${serviceName.trim()}: ${description.trim()}.`;
+}
+
+/** Server-authoritative rendering for service catalog list (ISS-012). */
+export function buildServiceCatalogContent(
+  services: ReadonlyArray<{ name: string }>,
+): string {
+  const names = services.map((s) => s.name.trim()).filter((n) => n.length > 0);
+  return `نقدم الخدمات التالية: ${names.join("، ")}.`;
+}
+
 /**
  * The deterministic identity reply. `intent: "FAQ"` is the established
  * contract label for an identity answer (the same intent the provider prompt
@@ -1460,6 +1516,20 @@ export function formatServiceCatalogContent(
   return `${header}\n${lines.join("\n")}\n\nلحجز أي خدمة، أخبرنا باسم الخدمة أو رقمها وسنساعدك في اختيار الموعد المناسب.`;
 }
 
+const LOCATION_SYNONYMS = new Set([
+  "اين",
+  "فين",
+  "مكان",
+  "ومكان",
+  "عنوان",
+  "وعنوان",
+  "موقع",
+  "وموقع",
+  "موقعكم",
+  "عنوانكم",
+  "مكانكم",
+]);
+
 /** Distinctive-token overlap score between a message and an FAQ question. */
 function faqMatchScore(
   messageTokens: string[],
@@ -1470,6 +1540,11 @@ function faqMatchScore(
   for (const token of new Set(messageTokens)) {
     if (questionSet.has(token)) shared += 1;
   }
+  const msgHasLoc = messageTokens.some((t) => LOCATION_SYNONYMS.has(t));
+  const qHasLoc = questionTokens.some((t) => LOCATION_SYNONYMS.has(t));
+  if (msgHasLoc && qHasLoc) {
+    shared += 2;
+  }
   return shared;
 }
 
@@ -1477,7 +1552,7 @@ function faqMatchScore(
  * Best FAQ match: at least 2 shared distinctive tokens, or at least half
  * of a short question's tokens. Ties keep the earliest entry.
  */
-function matchFaq(
+export function matchFaq(
   messageTokens: string[],
   faqs: ReadonlyArray<{ question: string; answer: string }>,
 ): { question: string; answer: string } | null {
@@ -1680,6 +1755,8 @@ export function classifyCustomerMessage(
       extraction: emptyAiExtraction,
       handoffReason: null,
       summary: null,
+      requiredKnowledge: "business.faqs",
+      sourceId: (faq as { id?: string }).id ?? faq.question,
     };
   }
 
@@ -1834,6 +1911,7 @@ export function bypassDeterministicAi(request: AiRequest): AiResponse | null {
         extraction: emptyAiExtraction,
         handoffReason: null,
         summary: null,
+        requiredKnowledge: "service.name",
       };
     }
   }
@@ -1887,6 +1965,7 @@ export const deterministicConversationAi: ConversationAi = {
         extraction: emptyAiExtraction,
         handoffReason: null,
         summary: null,
+        requiredKnowledge: "service.name",
       };
     }
     const result = classifyCustomerMessage(request.message, request.faqs);

@@ -9,7 +9,29 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.4 (candidate PR #75)** — `Stale-Session Sign-in Redirect Loop Repair (ISS-017)`. Baseline: v0.79.3 (merged PR #71, commit `e34eec8bd26716791c09153e67ca1d041d613bb6`). Branch: `fix/stale-session-signin-loop`. Candidate PR: [#75](https://github.com/geekammar/Yakfi/pull/75). Status: In review / candidate PR open for independent review. Full CI quality gates, unit tests, regression suites, and Playwright UX QA passing on GitHub Actions run [`41256404508`](https://github.com/geekammar/Yakfi/actions/runs/41256404508). Active exact-HEAD Preview URL resolved: `https://flowpilot-prod-git-fix-stale-session-signin-loop-ammarj1.vercel.app`.
+**Product version: v0.79.5 (feature branch; candidate PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.4 (merged PR #75, commit `99df8b2`). Branch: `fix/unknown-information-handoff`.
+
+- **Feature Scope**: Fixes false handoff promises under `AI_ACTIVE` and unbacked reply leaks on unknown clinic facts or unpublished prices observed in production v0.78.5 (ISS-012 / TG-22).
+- **Structured Authority Boundary in Disclosure Gate**:
+  - `disclosure-gate.ts` enforces that model-proposed `requiredKnowledge` (supported via both top-level `response.requiredKnowledge` and goal-level `response.goals[].requiredKnowledge` through `synthesizeDecisionGoals`) is evaluated ONLY against its corresponding support family.
+  - Unrelated catalog service names (`service.name`) cannot authorize arbitrary FAQ answers on structured turns.
+  - For `service.price`, when an extracted service is present, that specific service must carry an authoritative non-empty price in `request.services`; another service's price cannot authorize it.
+  - For `business.faqs`, `request.faqs` must contain an entry whose answer supports the reply; unrelated FAQs cannot authorize arbitrary prose.
+- **Prevention of False Handoff Promises under `AI_ACTIVE`**:
+  - When the model outputs unbacked prose or claims to transfer the customer under `action: "reply"`, the gate refuses the turn (`requires-human`).
+  - The unbacked prose is dropped wholesale; the engine authoritatively transitions to `status: "NEED_HUMAN"` with `cause: "POLICY_REFUSED"`, creates an `operator_attention` record, and delivers canonical truthful handoff wording (`SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED`).
+- **Server-Authoritative Handoff Wording**:
+  - On `action: "handoff"`, the engine substitutes canonical server copy `resolveHandoffActionReply(validated.handoffReason)`, preventing model prose from inventing immediate response SLAs («الآن», «خلال دقائق») or guaranteed contact promises («سيتواصل معك»).
+  - All handoff copy across `SAFE_HANDOFF_REPLIES`, `HANDOFF_MESSAGES`, `REPLIES`, and `COPY_REGISTRY` describes the established system state («تم تحويل المحادثة لفريق العمل للمتابعة / للمساعدة»).
+- **Terminal Turn Non-Silence**:
+  - Provider timeouts, failure outcomes, and transport errors are handled deterministically; every terminal turn produces a bounded customer-facing reply or safe failure outcome without multi-minute silence or dropped turns.
+- **Staff Ownership & Safety Precedence**:
+  - Conversations already marked `NEED_HUMAN` or assigned to staff strictly preserve staff ownership (`DEFERRED_TO_STAFF`).
+- **Verification Suite Evidence**:
+  - Offline domain suite `scripts/check-unknown-information-handoff.ts` covering 14 deterministic scenarios (baseline reproduction, unknown clinic facts, false handoff replies, valid handoff, persistence failures, unpublished-price pressure, provider failure, transport failure, duplicate inbound deduplication, staff ownership preservation, supported known answers, knowledge gap recording resilience, unrelated-support isolation, and comprehensive adversarial reference tests).
+  - Disposable PostgreSQL integration suite `scripts/check-unknown-information-handoff-db.ts` verifying durable DB transitions, operator attention rows, and rollback boundaries.
+
+**Product version: v0.79.4 (main baseline; merged PR #75)** — `Stale-Session Sign-in Redirect Loop Repair (ISS-017)`. Baseline: v0.79.3 (merged PR #71, commit `e34eec8bd26716791c09153e67ca1d041d613bb6`). Branch: `fix/stale-session-signin-loop`. Merged PR: [#75](https://github.com/geekammar/Yakfi/pull/75). Commit `99df8b2`. Status: Merged into main. Full CI quality gates, unit tests, regression suites, and Playwright UX QA passing on GitHub Actions run [`41256404508`](https://github.com/geekammar/Yakfi/actions/runs/41256404508). Active exact-HEAD Preview URL resolved: `https://flowpilot-prod-git-fix-stale-session-signin-loop-ammarj1.vercel.app`.
 
 - **Problem & Root Cause (ISS-017)**:
   - `src/proxy.ts` previously redirected incoming requests for `/sign-in` and `/sign-up` to `/` whenever any session cookie was present (`hasSessionCookie = Boolean(getSessionCookie(request))`), without authoritative server validation of session validity.
