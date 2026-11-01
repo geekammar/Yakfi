@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.5",
+  "version": "0.79.6",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -53,6 +53,7 @@
     "generate:ai-prompts": "tsx scripts/generate-ai-prompts.ts",
     "check:ai-provider": "tsx scripts/check-ai-provider.ts",
     "check:provider-failure-diagnostics": "tsx scripts/check-provider-failure-diagnostics.ts",
+    "check:provider-failure-lexical-authority": "tsx scripts/check-provider-failure-lexical-authority.ts",
     "check:response-normalizer": "tsx scripts/check-response-normalizer.ts",
     "check:atria-retry": "tsx scripts/check-atria-retry.ts",
     "check:conversation-control": "tsx scripts/check-conversation-control.ts",
