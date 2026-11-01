@@ -872,14 +872,21 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
               normalizeArabicText(extractedServiceName)) &&
           Boolean(s.price),
       )
-    : context.request.services.find(
-        (s) =>
-          Boolean(s.price) &&
-          (response.content.includes(s.price!) ||
-            (isPriceAsk &&
-              response.content.includes(s.name) &&
-              context.request.message.includes(s.name))),
-      );
+    : context.request.services.find((s) => {
+        if (!s.price) return false;
+        if (response.content.includes(s.price)) return true;
+        if (isPriceAsk) {
+          const sTokens = tokenize(s.name);
+          const respTokens = tokenize(response.content);
+          const msgTokens = tokenize(context.request.message);
+          const respMatches =
+            sTokens.length > 0 && sTokens.every((t) => respTokens.includes(t));
+          const msgMatches =
+            sTokens.length > 0 && sTokens.every((t) => msgTokens.includes(t));
+          if (respMatches || msgMatches) return true;
+        }
+        return false;
+      });
   if (legacyPricedService) {
     const record = ledger.find(
       (f) => f.key === "service.price" || f.key.startsWith("service.price:"),
@@ -895,11 +902,16 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   }
 
   // 8. Mentioned service name inquiry for legacy/offline turns:
-  const mentionedService = context.request.services.find(
-    (s) =>
-      response.content.includes(s.name) &&
-      context.request.message.includes(s.name),
-  );
+  const mentionedService = context.request.services.find((s) => {
+    const sTokens = tokenize(s.name);
+    if (sTokens.length === 0) return false;
+    const respTokens = tokenize(response.content);
+    const msgTokens = tokenize(context.request.message);
+    return (
+      sTokens.every((t) => respTokens.includes(t)) ||
+      sTokens.every((t) => msgTokens.includes(t))
+    );
+  });
   if (mentionedService) {
     const record = ledger.find(
       (f) => f.key === "service.name" || f.key.startsWith("service.name:"),
