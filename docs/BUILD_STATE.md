@@ -9,7 +9,28 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.3 (feature branch; candidate PR)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
+**Product version: v0.79.4 (candidate PR #75)** — `Stale-Session Sign-in Redirect Loop Repair (ISS-017)`. Baseline: v0.79.3 (merged PR #71, commit `e34eec8bd26716791c09153e67ca1d041d613bb6`). Branch: `fix/stale-session-signin-loop`. Candidate PR: [#75](https://github.com/geekammar/Yakfi/pull/75). Status: In review / candidate PR open for independent review. Full CI quality gates, unit tests, regression suites, and Playwright UX QA passing on GitHub Actions run [`41256404508`](https://github.com/geekammar/Yakfi/actions/runs/41256404508). Active exact-HEAD Preview URL resolved: `https://flowpilot-prod-git-fix-stale-session-signin-loop-ammarj1.vercel.app`.
+
+- **Problem & Root Cause (ISS-017)**:
+  - `src/proxy.ts` previously redirected incoming requests for `/sign-in` and `/sign-up` to `/` whenever any session cookie was present (`hasSessionCookie = Boolean(getSessionCookie(request))`), without authoritative server validation of session validity.
+  - When a browser held an expired, revoked, or invalid session cookie, visiting `/` passed the edge proxy but was authoritatively rejected by `src/server/auth/guards.ts` (`loadActiveSession()` -> `getSession()` -> DB lookup returning null), triggering `redirect("/sign-in")`.
+  - The browser then requested `/sign-in` with the same cookie header, causing `src/proxy.ts` to redirect back to `/`, producing an infinite redirect loop (`ERR_TOO_MANY_REDIRECTS`) and blocking the user from reaching the sign-in form in the same browser context.
+- **Architectural Repair**:
+  - Removed edge-proxy redirect away from `/sign-in` and `/sign-up` in `src/proxy.ts`. Edge proxy gates protected routes only, allowing auth screens (`/sign-in`, `/sign-up`, etc.) to pass directly to the server.
+  - Shared safe redirect helper (`src/lib/safe-redirect.ts`): Rejects control characters, backslashes, and non-string inputs; parses against a hardcoded trusted origin; normalizes dot segments; and prevents redirects back to auth screens. Shared across client (`LoginForm`) and server (`SignInPage`).
+  - Server Component page boundary (`src/app/(auth)/sign-in/page.tsx` and `getSignInDestination`): Authoritatively checks `getSession()`. Valid sessions skip the form and route to intended destinations (`redirect` query param or default `/`), Platform Operators route to `/platform`, and disabled accounts route to `/access-denied`.
+  - Absent, expired, or revoked sessions (`session === null`) allow the sign-in form to render immediately without redirect oscillation.
+  - Zero DB migrations, zero architecture alterations, zero open redirects, rememberMe semantics completely preserved.
+- **Verification Suites & Test Categories (Distinctly Labeled)**:
+  - **[Proxy Route Protection Tier]**: `scripts/check-stale-session-routing.ts` Groups A & B (11 checks) verifying unauthenticated routing, public exemptions, and pass-through for stale standard and HTTPS secure-prefix cookies.
+  - **[SafeRedirect Shared Helper]**: `scripts/check-stale-session-routing.ts` Group C (22 checks) verifying internal destinations, query strings, control characters (`\t`, `\n`, `\r`, `\0`), protocol-relative (`//`), backslashes (`\`), dot segment normalization, and auth-screen rejection.
+  - **[Server Page Boundary]**: `scripts/check-stale-session-routing.ts` Group D (9 checks) and `src/app/(auth)/sign-in/page.test.tsx` (10 unit scenarios) executing real `getSignInDestination` and `SignInPage` decisions with mocked session lookup.
+  - **[Client Form UI]**: `src/features/auth/components/login-form.test.tsx` (15 unit scenarios) verifying RTL, rememberMe unchecked default, field errors, generic 401 alert, and redirect sanitization.
+  - **[Disposable DB Integration & Failure Injection]**: `scripts/check-stale-session-db.ts` (11 checks) against disposable PostgreSQL in CI, covering genuine user creation, server session revocation, past expiration, and controlled failure injection at `db.session` query delegate proving DB operational errors propagate and are not swallowed into `session: null`.
+  - **[Browser UX & Recovery QA]**: `tests/e2e/stale-session-browser-recovery.spec.ts` (complete same-browser recovery after revocation and expiration against real Next.js and disposable PostgreSQL; 1/1 passed) and automated Playwright UX suite (195 total tests: 182 passed, 1 flaky [mobile-320 preview auth journey timed out on first attempt in page.waitForResponse, passed on retry], 0 failed, 12 intentionally skipped [desktop-1280 isolated recovery and PWA tests on non-matching viewports]). Single production build attempt with zero retry wrappers. Redacted test-target DB error messages.
+  - **[Preview QA Gate]**: Exact-HEAD Preview resolved: `https://flowpilot-prod-git-fix-stale-session-signin-loop-ammarj1.vercel.app`. Local HTTP testing verified in isolated runner, with deployed HTTPS secure-cookie pass-through verified in `scripts/check-stale-session-routing.ts` (`__Secure-` cookie prefix).
+
+**Product version: v0.79.3 (main baseline; merged PR #71)** — `Temporal Correction Authority and Invalid-Date Clarification (ISS-011 and ISS-015)`. Baseline: v0.79.2 (merged PR #72, commit `d9c571c`). Branch: `fix/temporal-correction-authority`. Candidate PR: [#71](https://github.com/geekammar/Yakfi/pull/71).
 
 - **Feature Scope**: Fixes loss of customer temporal correction authority (ISS-011 / TG-11) and calendar date distortion / false handoff on impossible or incomplete dates (ISS-015 / TG-47).
 - **Temporal Correction Authority (ISS-011)**:
