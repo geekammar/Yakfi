@@ -112,7 +112,6 @@ export function createConversationControl(
    */
   async function runAttempts(
     request: AiRequest,
-    explicitHuman: boolean,
     options?: AiCallOptions,
   ): Promise<{
     result: AiProviderResult;
@@ -360,7 +359,6 @@ export function createConversationControl(
 
     const { result, trace, skipped, retriesStarted } = await runAttempts(
       request,
-      explicitHuman,
       options,
     );
 

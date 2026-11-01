@@ -40,7 +40,7 @@ import type {
   AiProviderResult,
 } from "@/server/integrations/ai/types";
 
-let failures = 0;
+let failureCount = 0;
 const checks: { label: string; pass: boolean }[] = [];
 
 function check(label: string, condition: boolean): void {
@@ -49,7 +49,7 @@ function check(label: string, condition: boolean): void {
     console.log(`✔ ${label}`);
   } else {
     console.error(`✘ ${label}`);
-    failures += 1;
+    failureCount += 1;
   }
 }
 
@@ -378,13 +378,13 @@ async function main(): Promise<void> {
     check("5a.1 Engine completes turn on timeout", res.ok === true);
     check(
       "5a.2 Engine status transitions to NEED_HUMAN",
-      res.conversationStatus === "NEED_HUMAN",
+      (res as any).conversationStatus === "NEED_HUMAN",
     );
     check(
       "5a.3 Engine handoffCause is RETRY_EXHAUSTED (not CUSTOMER_REQUESTED_HUMAN)",
-      res.handoffCause === "RETRY_EXHAUSTED",
+      (res as any).handoffCause === "RETRY_EXHAUSTED",
     );
-    const sent = harness.messages.filter((m) => m.sender === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
     check(
       "5a.4 Assistant reply is neutral SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE",
       sent.length === 1 &&
@@ -431,13 +431,13 @@ async function main(): Promise<void> {
     check("5b.1 Engine completes turn on HTTP 503", res.ok === true);
     check(
       "5b.2 Engine status is NEED_HUMAN",
-      res.conversationStatus === "NEED_HUMAN",
+      (res as any).conversationStatus === "NEED_HUMAN",
     );
     check(
       "5b.3 Engine handoffCause is PROVIDER_FAILURE",
-      res.handoffCause === "PROVIDER_FAILURE",
+      (res as any).handoffCause === "PROVIDER_FAILURE",
     );
-    const sent = harness.messages.filter((m) => m.sender === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
     check(
       "5b.4 Assistant reply is neutral PROVIDER_FAILURE acknowledgment",
       sent.length === 1 &&
@@ -485,13 +485,13 @@ async function main(): Promise<void> {
     check("5c.1 Missing safetyAssessment completes turn", res.ok === true);
     check(
       "5c.2 Status transitions to NEED_HUMAN",
-      res.conversationStatus === "NEED_HUMAN",
+      (res as any).conversationStatus === "NEED_HUMAN",
     );
     check(
       "5c.3 Handoff cause is AI_FAILURE (never CUSTOMER_REQUESTED_HUMAN)",
-      res.handoffCause === "AI_FAILURE",
+      (res as any).handoffCause === "AI_FAILURE",
     );
-    const sent = harness.messages.filter((m) => m.sender === "ASSISTANT");
+    const sent = harness.messages.filter((m) => m.senderType === "ASSISTANT");
     check(
       "5c.4 Assistant reply is neutral SAFE_HANDOFF_REPLIES.INVALID_OUTPUT",
       sent.length === 1 &&
@@ -548,11 +548,11 @@ async function main(): Promise<void> {
 
     check(
       "5d.1 Engine handoffCause identical across wordings",
-      resA.handoffCause === resB.handoffCause &&
-        resA.handoffCause === "RETRY_EXHAUSTED",
+      (resA as any).handoffCause === (resB as any).handoffCause &&
+        (resA as any).handoffCause === "RETRY_EXHAUSTED",
     );
-    const sentA = harnessA.messages.filter((m) => m.sender === "ASSISTANT");
-    const sentB = harnessB.messages.filter((m) => m.sender === "ASSISTANT");
+    const sentA = harnessA.messages.filter((m) => m.senderType === "ASSISTANT");
+    const sentB = harnessB.messages.filter((m) => m.senderType === "ASSISTANT");
     check(
       "5d.2 Assistant reply text identical across wordings",
       sentA[0]?.content === sentB[0]?.content &&
@@ -587,11 +587,10 @@ async function main(): Promise<void> {
   }
 
   // ── Summary ─────────────────────────────────────────────────────────────────
-  const failed = checks.filter((c) => !c.pass);
   console.log(
-    `\n=== Results: ${checks.length - failed.length}/${checks.length} passed, ${failed.length} failed ===\n`,
+    `\n=== Results: ${checks.length - failureCount}/${checks.length} passed, ${failureCount} failed ===\n`,
   );
-  if (failed.length > 0) {
+  if (failureCount > 0) {
     process.exitCode = 1;
   }
 }
