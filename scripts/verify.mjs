@@ -41,19 +41,10 @@ let failed = false;
 for (const step of steps) {
   console.log(`▶ ${step.label} — ${step.desc}`);
   const t0 = Date.now();
-  let result = spawnSync(step.cmd, step.args, {
+  const result = spawnSync(step.cmd, step.args, {
     stdio: "inherit",
     shell: process.platform === "win32",
   });
-  if (result.status !== 0 && step.label.startsWith("build")) {
-    console.log(
-      "⚠️ Initial build failed; retrying build once to guard against transient font/network drops...",
-    );
-    result = spawnSync(step.cmd, step.args, {
-      stdio: "inherit",
-      shell: process.platform === "win32",
-    });
-  }
   const seconds = ((Date.now() - t0) / 1000).toFixed(1);
   const code = result.status ?? 1;
   const pass = code === 0;

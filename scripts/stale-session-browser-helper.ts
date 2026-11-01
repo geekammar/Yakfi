@@ -37,7 +37,9 @@ async function main(): Promise<void> {
 
   const classification = classifyTarget(dbUrl);
   if (!classification?.local) {
-    console.error("Refusing to execute against non-disposable target:", dbUrl);
+    console.error(
+      "Refusing to execute against non-disposable target. DATABASE_URL must point to a local disposable test database (localhost/127.0.0.1).",
+    );
     process.exit(1);
   }
 
