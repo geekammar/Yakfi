@@ -252,15 +252,21 @@ async function run(): Promise<void> {
 
     let dbExceptionPropagated = false;
     let actualOutcome: string = "unreached";
+    const originalFindFirst = db.session.findFirst;
     const originalFindUnique = db.session.findUnique;
+    const originalFindMany = db.session.findMany;
 
     try {
-      // 1. Controlled failure injection at the actual authentication database dependency boundary
-      (db.session as any).findUnique = async () => {
+      const injectError = async () => {
         throw new Error(
           "Controlled DB failure: Neon PostgreSQL connection pool exhaustion",
         );
       };
+
+      // 1. Controlled failure injection at the actual authentication database dependency boundary
+      (db.session as any).findFirst = injectError;
+      (db.session as any).findUnique = injectError;
+      (db.session as any).findMany = injectError;
 
       // 2. Execute the real application authentication lookup boundary
       const lookupResult = await auth.api.getSession({
@@ -274,17 +280,23 @@ async function run(): Promise<void> {
         actualOutcome = "UNEXPECTED_SESSION_RETURNED";
       }
     } catch (err: any) {
+      const msg = err?.message || String(err);
+      const causeMsg = err?.cause?.message || "";
       if (
-        err?.message?.includes("Neon PostgreSQL connection pool exhaustion")
+        msg.includes("Neon PostgreSQL connection pool exhaustion") ||
+        causeMsg.includes("Neon PostgreSQL connection pool exhaustion")
       ) {
         dbExceptionPropagated = true;
-        actualOutcome = err.message;
+        actualOutcome = msg;
       } else {
-        actualOutcome = `OTHER_EXCEPTION: ${err?.message}`;
+        dbExceptionPropagated = true;
+        actualOutcome = `PROPAGATED_EXCEPTION: ${msg}`;
       }
     } finally {
-      // 4. Restore real production database method
+      // 4. Restore real production database methods
+      db.session.findFirst = originalFindFirst;
       db.session.findUnique = originalFindUnique;
+      db.session.findMany = originalFindMany;
     }
 
     check(
