@@ -6,17 +6,20 @@ import { NextResponse, type NextRequest } from "next/server";
 /**
  * FlowPilot route protection (Next.js 16 `proxy`, successor of middleware).
  *
- * Two-tier protection model (see docs/DECISIONS.md #13):
- *  1. THIS file gates on session-cookie presence only — cheap, edge-friendly.
- *     Unauthenticated users are redirected to /sign-in before any render.
- *     Public paths (auth screens, /api/health, /api/auth, and the
- *     token-scoped invitation activation routes /invite/<token> and
- *     /owner-invite/<token>) are exempt: the invitation token itself is the
- *     credential there and its lifecycle is enforced by the invitation
- *     service, not by a session.
- *  2. Role checks (ADMIN/STAFF) and isActive validation run server-side in
- *     layout guards (`src/server/auth/guards.ts`) because sessions are
- *     DB-backed and cannot be fully verified here without a DB round-trip.
+ * Two-tier protection model (see docs/DECISIONS.md #13, #103):
+ *  1. THIS file gates protected routes on session-cookie presence — cheap, edge-friendly.
+ *     Unauthenticated users accessing protected routes without a cookie are redirected
+ *     to /sign-in before any render.
+ *     Public paths (auth screens including /sign-in and /sign-up, /api/health, /api/auth,
+ *     and token-scoped invitation activation routes /invite/<token> and /owner-invite/<token>)
+ *     are exempt and pass directly to the server without edge redirects.
+ *     Skipping the sign-in screen for genuinely authenticated users is handled
+ *     authoritatively at the server page boundary (`src/app/(auth)/sign-in/page.tsx`)
+ *     using the verified session, preventing infinite redirect loops when obsolete,
+ *     expired, or revoked session cookies are present (ISS-017).
+ *  2. Role checks (ADMIN/STAFF), isActive validation, and authoritative session
+ *     verification run server-side in layout/page guards (`src/server/auth/guards.ts`)
+ *     because sessions are DB-backed and cannot be fully verified here without a DB round-trip.
  *
  * PUBLIC SIGNUP IS CLOSED (PROMPT-OPS-05): this file also refuses public
  * POSTs to the Better Auth sign-up endpoints. Internal server-side
@@ -43,14 +46,6 @@ export function proxy(request: NextRequest) {
   }
 
   const hasSessionCookie = Boolean(getSessionCookie(request));
-
-  // Signed-in users skip the auth screens.
-  if (
-    hasSessionCookie &&
-    (pathname === "/sign-in" || pathname === "/sign-up")
-  ) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
 
   if (hasSessionCookie || isPublicPath(pathname)) {
     return NextResponse.next();

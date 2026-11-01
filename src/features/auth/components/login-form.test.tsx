@@ -78,6 +78,12 @@ describe("LoginForm Component Contract", () => {
   });
 
   function renderForm() {
+    if (root) {
+      act(() => {
+        root?.unmount();
+      });
+      root = null;
+    }
     root = createRoot(container);
     act(() => {
       root?.render(<LoginForm />);
@@ -381,6 +387,37 @@ describe("LoginForm Component Contract", () => {
 
     expect(mockReplace).toHaveBeenCalledWith("/admin/team");
     expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("12b. sanitizes control-character, protocol-relative, backslash, and auth-screen redirects to '/'", async () => {
+    for (const unsafeRedirect of [
+      "/\t/evil.example",
+      "/\n/evil.example",
+      "/\\evil.example",
+      "//evil.example",
+      "/sign-in",
+      "/sign-up",
+      "/admin/../sign-in",
+      "/sign-in?nested=1",
+    ]) {
+      mockReplace.mockReset();
+      mockRefresh.mockReset();
+      mockRedirectParam = unsafeRedirect;
+      mockSignInEmail.mockResolvedValue({ error: null });
+      renderForm();
+
+      const emailInput = container.querySelector<HTMLInputElement>("#email")!;
+      const passwordInput =
+        container.querySelector<HTMLInputElement>("#password")!;
+
+      setInputValue(emailInput, "admin@flowpilot.app");
+      setInputValue(passwordInput, "example-password");
+
+      await submitFormAsync();
+
+      expect(mockReplace).toHaveBeenCalledWith("/");
+      expect(mockRefresh).toHaveBeenCalled();
+    }
   });
 
   it("13. clears previous form-level authentication error when credentials are edited", async () => {
