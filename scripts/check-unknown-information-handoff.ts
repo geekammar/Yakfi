@@ -1750,8 +1750,105 @@ async function runSuite(): Promise<void> {
       },
     );
 
-    // 14.8 Unknown, unexposed, cross-tenant and ambiguous source references -> refused, zero leaked content
-    const hAdv8 = createEngineHarness({
+    // 14.8a Unknown source reference -> refused, zero leaked content
+    const hAdv8a = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الخدمة غير المعروفة 999 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "non-existent-svc-id-999",
+          },
+        }),
+      ],
+    });
+    const resAdv8a = await hAdv8a.runInbound("بكام الخدمة؟", "adv-8a");
+    check(
+      "14.8a Unknown source reference -> refused, zero leaked content",
+      resAdv8a.ok === true &&
+        !resAdv8a.duplicate &&
+        resAdv8a.assistantAction === "AI_HANDOFF" &&
+        resAdv8a.conversationStatus === "NEED_HUMAN" &&
+        resAdv8a.handoffCause === "POLICY_REFUSED" &&
+        !hAdv8a.getSent().some((msg) => msg.includes("999")),
+      resAdv8a,
+    );
+
+    // 14.8b Source present in storage but not exposed this turn -> refused
+    const hAdv8b = createEngineHarness({
+      services: [
+        {
+          id: "svc-active-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: "تنظيف جير",
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+        {
+          id: "svc-unexposed-inactive",
+          businessId: TENANT_A,
+          name: "خدمة معطلة",
+          description: "وصف خدمة معطلة",
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 800,
+          priceCurrency: "EGP",
+          isActive: false, // inactive -> filtered from AI context request
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الخدمة المعطلة 800 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "svc-unexposed-inactive",
+          },
+        }),
+      ],
+    });
+    const resAdv8b = await hAdv8b.runInbound("بكام الخدمة المعطلة؟", "adv-8b");
+    check(
+      "14.8b Source present in storage but not exposed this turn -> refused",
+      resAdv8b.ok === true &&
+        !resAdv8b.duplicate &&
+        resAdv8b.assistantAction === "AI_HANDOFF" &&
+        resAdv8b.conversationStatus === "NEED_HUMAN" &&
+        resAdv8b.handoffCause === "POLICY_REFUSED" &&
+        !hAdv8b.getSent().some((msg) => msg.includes("800")),
+      resAdv8b,
+    );
+
+    // 14.8c Cross-tenant source excluded from current context -> refused, zero leaked content
+    const hAdv8c = createEngineHarness({
       services: [
         {
           id: "svc-tenant-a-1",
@@ -1781,18 +1878,231 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resAdv8 = await hAdv8.runInbound("سعر الخدمة ايه؟", "adv-8");
+    const resAdv8c = await hAdv8c.runInbound("سعر الخدمة ايه؟", "adv-8c");
     check(
-      "14.8 Unknown, unexposed, cross-tenant and ambiguous source references -> refused, zero leaked content",
-      resAdv8.ok === true &&
-        !resAdv8.duplicate &&
-        resAdv8.assistantAction === "AI_HANDOFF" &&
-        resAdv8.conversationStatus === "NEED_HUMAN" &&
-        resAdv8.handoffCause === "POLICY_REFUSED" &&
-        !hAdv8
+      "14.8c Cross-tenant source excluded from current context -> refused, zero leaked content",
+      resAdv8c.ok === true &&
+        !resAdv8c.duplicate &&
+        resAdv8c.assistantAction === "AI_HANDOFF" &&
+        resAdv8c.conversationStatus === "NEED_HUMAN" &&
+        resAdv8c.handoffCause === "POLICY_REFUSED" &&
+        !hAdv8c
           .getSent()
           .some((msg) => msg.includes("1000") || msg.includes("مستأجر")),
-      resAdv8,
+      resAdv8c,
+    );
+
+    // 14.8d Duplicate/ambiguous matching source references -> refused by cardinality check
+    const hAdv8d = createEngineHarness({
+      services: [
+        {
+          id: "svc-dental-standard",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+        {
+          id: "svc-dental-deep",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 45,
+          priceType: "FIXED",
+          priceAmount: 700,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف الأسنان 400 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "تنظيف أسنان",
+          },
+        }),
+      ],
+    });
+    const resAdv8d = await hAdv8d.runInbound("بكام تنظيف الأسنان؟", "adv-8d");
+    check(
+      "14.8d Duplicate/ambiguous matching source references -> refused by cardinality check",
+      resAdv8d.ok === true &&
+        !resAdv8d.duplicate &&
+        resAdv8d.assistantAction === "AI_HANDOFF" &&
+        resAdv8d.conversationStatus === "NEED_HUMAN" &&
+        resAdv8d.handoffCause === "POLICY_REFUSED",
+      resAdv8d,
+    );
+
+    // 14.8e Conflicting top-level versus goal-level references -> refused
+    const hAdv8e = createEngineHarness({
+      faqs: [{ question: "مواعيد العمل", answer: "من 9 إلى 5" }],
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "مواعيد العمل من 9 صباحاً.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "business.faqs",
+            sourceId: "مواعيد العمل",
+          },
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              priority: 1,
+              continueAfter: false,
+              knowledgeRef: {
+                family: "service.price",
+                sourceId: "svc-1",
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const resAdv8e = await hAdv8e.runInbound("مواعيد وسعر؟", "adv-8e");
+    check(
+      "14.8e Conflicting top-level versus goal-level references -> refused",
+      resAdv8e.ok === true &&
+        !resAdv8e.duplicate &&
+        resAdv8e.assistantAction === "AI_HANDOFF" &&
+        resAdv8e.conversationStatus === "NEED_HUMAN" &&
+        resAdv8e.handoffCause === "POLICY_REFUSED",
+      resAdv8e,
+    );
+
+    // 14.8f Service source without a resolvable knowledge operation -> refused without guessing
+    const hAdv8f = createEngineHarness({
+      services: [
+        {
+          id: "svc-combo",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان شامل",
+          description: "تنظيف وتبييض وصيانة كاملة",
+          durationMinutes: 45,
+          priceType: "FIXED",
+          priceAmount: 600,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف أسنان شامل 600 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          sourceId: "svc-combo",
+        }),
+      ],
+    });
+    const resAdv8f = await hAdv8f.runInbound("عايز تفاصيل الخدمة", "adv-8f");
+    check(
+      "14.8f Service source without a resolvable knowledge operation -> refused without guessing",
+      resAdv8f.ok === true &&
+        !resAdv8f.duplicate &&
+        resAdv8f.assistantAction === "AI_HANDOFF" &&
+        resAdv8f.conversationStatus === "NEED_HUMAN" &&
+        resAdv8f.handoffCause === "POLICY_REFUSED",
+      resAdv8f,
+    );
+
+    // 14.8g Valid explicit price and description references remain successful
+    const hAdv8g = createEngineHarness({
+      services: [
+        {
+          id: "svc-combo",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان شامل",
+          description: "تنظيف جير وتلميع أسنان شامل",
+          durationMinutes: 45,
+          priceType: "FIXED",
+          priceAmount: 600,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "السعر المخترع 9999 جنيه غير المعتمد.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "svc-combo",
+          },
+        }),
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "الوصف المخترع غير المعتمد.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.description",
+            sourceId: "svc-combo",
+          },
+        }),
+      ],
+    });
+    const resPrice = await hAdv8g.runInbound("بكام الخدمة؟", "adv-8g-1");
+    const sentPrice = hAdv8g.getSent();
+    const resDesc = await hAdv8g.runInbound("ايه تفاصيل الخدمة؟", "adv-8g-2");
+    const sentDesc = hAdv8g.getSent();
+
+    check(
+      "14.8g Valid explicit price and description references remain successful",
+      resPrice.ok === true &&
+        !resPrice.duplicate &&
+        resPrice.assistantAction === "AI_REPLY" &&
+        resPrice.conversationStatus === "AI_ACTIVE" &&
+        sentPrice[0]?.includes("600") === true &&
+        sentPrice[0]?.includes("9999") === false &&
+        resDesc.ok === true &&
+        !resDesc.duplicate &&
+        resDesc.assistantAction === "AI_REPLY" &&
+        resDesc.conversationStatus === "AI_ACTIVE" &&
+        sentDesc[1]?.includes("تنظيف جير وتلميع أسنان شامل") === true &&
+        sentDesc[1]?.includes("المخترع") === false,
+      { resPrice, resDesc, sent: sentDesc },
     );
 
     // 14.9 Failed persistence, duplicate inbound, provider failure and staff-owned conversation invariants preserved

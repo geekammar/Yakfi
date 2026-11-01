@@ -262,7 +262,6 @@ export function supportFamilyForProposedKnowledge(
     case "service.name":
     case "service.catalog":
     case "catalog":
-    case "service":
       return { family: "service.name", channel: "serviceNames" };
     case "business.faqs":
       return { family: "business.faqs", channel: "faqs" };
@@ -280,7 +279,100 @@ export function supportFamilyForProposedKnowledge(
 export type ResolvedKnowledgeProposal = {
   family: string | null;
   sourceId: string | null;
+  conflict?: boolean;
+  invalidFamily?: boolean;
 };
+
+function extractEntityProposal(
+  entity: {
+    knowledgeRef?:
+      | string
+      | { family?: string; sourceId?: string | null }
+      | null;
+    sourceId?: string | null;
+    requiredKnowledge?: string | null;
+  } | null | undefined,
+): {
+  family: string | null;
+  sourceId: string | null;
+  conflict: boolean;
+  invalidFamily: boolean;
+} {
+  let family: string | null = null;
+  let sourceId: string | null = null;
+  let conflict = false;
+  let invalidFamily = false;
+
+  if (!entity) {
+    return { family, sourceId, conflict, invalidFamily };
+  }
+
+  // 1. knowledgeRef
+  if (typeof entity.knowledgeRef === "string") {
+    const raw = entity.knowledgeRef.trim();
+    const familyCandidate = supportFamilyForProposedKnowledge(raw);
+    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
+      family = familyCandidate.family;
+    } else if (familyCandidate === "GENERIC_FAQ") {
+      family = "business.faqs";
+    } else if (raw.includes(".")) {
+      invalidFamily = true;
+    } else {
+      sourceId = raw;
+    }
+  } else if (entity.knowledgeRef && typeof entity.knowledgeRef === "object") {
+    if (entity.knowledgeRef.family) {
+      const rawFamily = entity.knowledgeRef.family.trim();
+      const familyCandidate = supportFamilyForProposedKnowledge(rawFamily);
+      if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
+        family = familyCandidate.family;
+      } else if (familyCandidate === "GENERIC_FAQ") {
+        family = "business.faqs";
+      } else {
+        invalidFamily = true;
+      }
+    }
+    if (entity.knowledgeRef.sourceId) {
+      sourceId = entity.knowledgeRef.sourceId.trim();
+    }
+  }
+
+  // 2. sourceId
+  if (entity.sourceId && typeof entity.sourceId === "string") {
+    const rawSourceId = entity.sourceId.trim();
+    if (sourceId && sourceId !== rawSourceId) {
+      conflict = true;
+    } else {
+      sourceId = rawSourceId;
+    }
+  }
+
+  // 3. requiredKnowledge
+  if (
+    entity.requiredKnowledge &&
+    typeof entity.requiredKnowledge === "string"
+  ) {
+    const rawReq = entity.requiredKnowledge.trim();
+    const familyCandidate = supportFamilyForProposedKnowledge(rawReq);
+    let reqFamily: string | null = null;
+    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
+      reqFamily = familyCandidate.family;
+    } else if (familyCandidate === "GENERIC_FAQ") {
+      reqFamily = "business.faqs";
+    } else {
+      invalidFamily = true;
+    }
+    if (reqFamily) {
+      if (family && family !== reqFamily) {
+        conflict = true;
+      } else {
+        family = reqFamily;
+      }
+    }
+  }
+
+  return { family, sourceId, conflict, invalidFamily };
+}
 
 /**
  * Extract the structured knowledge family and source reference proposal
@@ -290,56 +382,31 @@ export function resolveKnowledgeProposal(
   response: AiResponse,
   goal?: AiGoal | null,
 ): ResolvedKnowledgeProposal {
-  let family: string | null = null;
-  let sourceId: string | null = null;
+  const goalProp = extractEntityProposal(goal);
+  const respProp = extractEntityProposal(response);
 
-  // 1. Goal or top-level knowledgeRef
-  const rawRef = goal?.knowledgeRef ?? response.knowledgeRef;
-  if (typeof rawRef === "string") {
-    const familyCandidate = supportFamilyForProposedKnowledge(rawRef);
-    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
-      family = familyCandidate.family;
-    } else {
-      sourceId = rawRef.trim();
-    }
-  } else if (rawRef && typeof rawRef === "object") {
-    if (rawRef.family) {
-      const familyCandidate = supportFamilyForProposedKnowledge(rawRef.family);
-      family =
-        familyCandidate && familyCandidate !== "GENERIC_FAQ"
-          ? familyCandidate.family
-          : rawRef.family.trim();
-    }
-    if (rawRef.sourceId) {
-      sourceId = rawRef.sourceId.trim();
-    }
-  }
+  let conflict = goalProp.conflict || respProp.conflict;
+  let invalidFamily = goalProp.invalidFamily || respProp.invalidFamily;
 
-  // 2. Goal or top-level sourceId
-  const explicitSourceId = goal?.sourceId ?? response.sourceId;
-  if (explicitSourceId && typeof explicitSourceId === "string") {
-    sourceId = explicitSourceId.trim();
-  }
-
-  // 3. Goal or top-level requiredKnowledge
-  const explicitRequiredKnowledge =
-    goal?.requiredKnowledge ?? response.requiredKnowledge;
   if (
-    !family &&
-    explicitRequiredKnowledge &&
-    typeof explicitRequiredKnowledge === "string"
+    goalProp.family &&
+    respProp.family &&
+    goalProp.family !== respProp.family
   ) {
-    const familyCandidate = supportFamilyForProposedKnowledge(
-      explicitRequiredKnowledge,
-    );
-    if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
-      family = familyCandidate.family;
-    } else if (!familyCandidate) {
-      family = explicitRequiredKnowledge.trim();
-    }
+    conflict = true;
+  }
+  if (
+    goalProp.sourceId &&
+    respProp.sourceId &&
+    goalProp.sourceId !== respProp.sourceId
+  ) {
+    conflict = true;
   }
 
-  return { family, sourceId };
+  const family = goalProp.family ?? respProp.family ?? null;
+  const sourceId = goalProp.sourceId ?? respProp.sourceId ?? null;
+
+  return { family, sourceId, conflict, invalidFamily };
 }
 
 /**
@@ -406,209 +473,198 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     proposal.family = "business.identity";
   }
 
-  // ── Case A: Explicit or resolved knowledge family
-  if (proposal.family) {
-    switch (proposal.family) {
-      case "business.identity": {
-        const record = ledger.find(
-          (f) => f.key === "business.identity" || f.key === "business.name",
-        );
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        if (
-          !context.request.businessName ||
-          context.request.businessName.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.identity"],
-          renderedContent: buildBusinessIdentityContent(
-            context.request.businessName,
-          ),
-        };
-      }
-      case "business.address": {
-        const record = ledger.find((f) => f.key === "business.address");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        if (
-          !context.request.businessAddress ||
-          context.request.businessAddress.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.address"],
-          renderedContent: buildBusinessAddressContent(
-            context.request.businessAddress,
-          ),
-        };
-      }
-      case "business.about": {
-        const record = ledger.find((f) => f.key === "business.about");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        if (
-          !context.request.businessAbout ||
-          context.request.businessAbout.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.about"],
-          renderedContent: buildBusinessAboutContent(
-            context.request.businessAbout,
-          ),
-        };
-      }
-      case "service.name":
-      case "service.catalog": {
-        const record = ledger.find((f) => f.key === "service.name");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        if (context.request.services.length === 0) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["service.name"],
-          renderedContent: buildServiceCatalogContent(context.request.services),
-        };
-      }
-      case "service.price": {
-        if (!proposal.sourceId) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        const record = ledger.find((f) => f.key === "service.price");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        const sId = proposal.sourceId.trim();
-        const matchedService =
-          context.request.services.find(
-            (s) => s.id === sId || s.name === sId,
-          ) ?? null;
-        if (
-          !matchedService ||
-          !matchedService.price ||
-          matchedService.price.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["service.price"],
-          renderedContent: buildServicePriceContent(
-            matchedService.name,
-            matchedService.price,
-          ),
-        };
-      }
-      case "service.description": {
-        if (!proposal.sourceId) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        const record = ledger.find((f) => f.key === "service.description");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        const sId = proposal.sourceId.trim();
-        const matchedService =
-          context.request.services.find(
-            (s) => s.id === sId || s.name === sId,
-          ) ?? null;
-        if (
-          !matchedService ||
-          !matchedService.description ||
-          matchedService.description.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["service.description"],
-          renderedContent: buildServiceDescriptionContent(
-            matchedService.name,
-            matchedService.description,
-          ),
-        };
-      }
-      case "business.faqs": {
-        if (!proposal.sourceId) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        const record = ledger.find((f) => f.key === "business.faqs");
-        if (!record || !record.included) {
-          return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-        }
-        if (!record.disclosable) {
-          return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
-        }
-        const sId = proposal.sourceId.trim();
-        const matchedFaq =
-          context.request.faqs.find(
-            (f) => (f.id && f.id === sId) || f.question === sId,
-          ) ?? null;
-        if (
-          !matchedFaq ||
-          !matchedFaq.answer ||
-          matchedFaq.answer.trim().length === 0
-        ) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-        }
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.faqs"],
-          renderedContent: matchedFaq.answer.trim(),
-        };
-      }
-      default: {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
-      }
-    }
+  if (proposal.conflict) {
+    return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+  }
+  if (proposal.invalidFamily) {
+    return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+  }
+  if (!proposal.family) {
+    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
   }
 
-  // ── Case B: sourceId provided without explicit family
-  if (proposal.sourceId) {
-    const sId = proposal.sourceId.trim();
-    const matchedFaq = context.request.faqs.find(
-      (f) => (f.id && f.id === sId) || f.question === sId,
-    );
-    if (matchedFaq) {
-      const record = ledger.find((f) => f.key === "business.faqs");
+  // ── Unambiguous structured knowledge-family/operation selection
+  switch (proposal.family) {
+    case "business.identity": {
+      if (proposal.sourceId) {
+        const sId = proposal.sourceId.trim();
+        const validRefs = [
+          context.request.businessName?.trim(),
+          context.scope.businessId?.trim(),
+          "business.identity",
+          "business.name",
+          "identity",
+        ].filter(Boolean);
+        if (!validRefs.includes(sId)) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+      }
+      const record = ledger.find(
+        (f) => f.key === "business.identity" || f.key === "business.name",
+      );
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      if (
+        !context.request.businessName ||
+        context.request.businessName.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.identity"],
+        renderedContent: buildBusinessIdentityContent(
+          context.request.businessName,
+        ),
+      };
+    }
+    case "business.address": {
+      if (proposal.sourceId) {
+        const sId = proposal.sourceId.trim();
+        const validRefs = [
+          context.request.businessAddress?.trim(),
+          context.scope.businessId?.trim(),
+          "business.address",
+          "address",
+        ].filter(Boolean);
+        if (!validRefs.includes(sId)) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+      }
+      const record = ledger.find((f) => f.key === "business.address");
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      if (
+        !context.request.businessAddress ||
+        context.request.businessAddress.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.address"],
+        renderedContent: buildBusinessAddressContent(
+          context.request.businessAddress,
+        ),
+      };
+    }
+    case "business.about": {
+      if (proposal.sourceId) {
+        const sId = proposal.sourceId.trim();
+        const validRefs = [
+          context.request.businessAbout?.trim(),
+          context.scope.businessId?.trim(),
+          "business.about",
+          "about",
+        ].filter(Boolean);
+        if (!validRefs.includes(sId)) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
+      }
+      const record = ledger.find((f) => f.key === "business.about");
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      if (
+        !context.request.businessAbout ||
+        context.request.businessAbout.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: ["business.about"],
+        renderedContent: buildBusinessAboutContent(
+          context.request.businessAbout,
+        ),
+      };
+    }
+    case "service.name":
+    case "service.catalog": {
+      const record = ledger.find((f) => f.key === "service.name");
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      if (context.request.services.length === 0) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      if (proposal.sourceId) {
+        const sId = proposal.sourceId.trim();
+        const catalogRefs = [
+          "service.catalog",
+          "service.name",
+          "catalog",
+          "services",
+          context.scope.businessId?.trim(),
+        ].filter(Boolean);
+        if (!catalogRefs.includes(sId)) {
+          const matches = context.request.services.filter(
+            (s) => s.id === sId || s.name.trim() === sId,
+          );
+          if (matches.length === 0) {
+            return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+          }
+          if (matches.length > 1) {
+            return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+          }
+          return {
+            kind: "disclosed",
+            response,
+            support: ["service.name"],
+            renderedContent: buildServiceCatalogContent([matches[0]!]),
+          };
+        }
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.name"],
+        renderedContent: buildServiceCatalogContent(context.request.services),
+      };
+    }
+    case "service.price": {
+      if (!proposal.sourceId) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      const sId = proposal.sourceId.trim();
+      const matches = context.request.services.filter(
+        (s) => s.id === sId || s.name.trim() === sId,
+      );
+      if (matches.length === 0) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      if (matches.length > 1) {
+        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+      }
+      const matchedService = matches[0]!;
+      if (
+        typeof matchedService.price !== "string" ||
+        matchedService.price.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      const record = ledger.find(
+        (f) =>
+          f.key === "service.price" ||
+          f.key === `service.price:${matchedService.id}`,
+      );
       if (!record || !record.included) {
         return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
       }
@@ -618,57 +674,94 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       return {
         kind: "disclosed",
         response,
+        support: ["service.price"],
+        renderedContent: buildServicePriceContent(
+          matchedService.name,
+          matchedService.price,
+        ),
+      };
+    }
+    case "service.description": {
+      if (!proposal.sourceId) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      const sId = proposal.sourceId.trim();
+      const matches = context.request.services.filter(
+        (s) => s.id === sId || s.name.trim() === sId,
+      );
+      if (matches.length === 0) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      if (matches.length > 1) {
+        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+      }
+      const matchedService = matches[0]!;
+      if (
+        typeof matchedService.description !== "string" ||
+        matchedService.description.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      const record = ledger.find(
+        (f) =>
+          f.key === "service.description" ||
+          f.key === `service.description:${matchedService.id}`,
+      );
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.description"],
+        renderedContent: buildServiceDescriptionContent(
+          matchedService.name,
+          matchedService.description,
+        ),
+      };
+    }
+    case "business.faqs": {
+      if (!proposal.sourceId) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      const record = ledger.find((f) => f.key === "business.faqs");
+      if (!record || !record.included) {
+        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      }
+      if (!record.disclosable) {
+        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+      }
+      const sId = proposal.sourceId.trim();
+      const matches = context.request.faqs.filter(
+        (f) => (f.id && f.id === sId) || f.question.trim() === sId,
+      );
+      if (matches.length === 0) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      if (matches.length > 1) {
+        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+      }
+      const matchedFaq = matches[0]!;
+      if (
+        !matchedFaq.answer ||
+        matchedFaq.answer.trim().length === 0
+      ) {
+        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+      }
+      return {
+        kind: "disclosed",
+        response,
         support: ["business.faqs"],
         renderedContent: matchedFaq.answer.trim(),
       };
     }
-
-    const matchedService = context.request.services.find(
-      (s) => s.id === sId || s.name === sId,
-    );
-    if (matchedService) {
-      if (
-        typeof matchedService.price === "string" &&
-        matchedService.price.trim().length > 0
-      ) {
-        const record = ledger.find((f) => f.key === "service.price");
-        if (record?.included && record.disclosable) {
-          return {
-            kind: "disclosed",
-            response,
-            support: ["service.price"],
-            renderedContent: buildServicePriceContent(
-              matchedService.name,
-              matchedService.price,
-            ),
-          };
-        }
-      }
-      if (
-        typeof matchedService.description === "string" &&
-        matchedService.description.trim().length > 0
-      ) {
-        const record = ledger.find((f) => f.key === "service.description");
-        if (record?.included && record.disclosable) {
-          return {
-            kind: "disclosed",
-            response,
-            support: ["service.description"],
-            renderedContent: buildServiceDescriptionContent(
-              matchedService.name,
-              matchedService.description,
-            ),
-          };
-        }
-      }
+    default: {
+      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
     }
-
-    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
   }
-
-  // ── Case C: Neither family nor sourceId provided
-  // Turn lacks a validated structured knowledge reference -> strictly fail closed
-  return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
 }
 
 // ─── Static invariants ───────────────────────────────────────────────────────
