@@ -650,7 +650,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         }
         const renderedFaq =
           proposal.sourceId ||
-          (exact && exact.answer.trim() === response.content.trim())
+          matchedFaq.answer.trim() === response.content.trim()
             ? matchedFaq.answer.trim()
             : response.content;
         return {
@@ -875,7 +875,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
 
   // 8. Priced service inquiry for legacy/offline turns:
   const extractedServiceName = response.extraction?.service?.trim();
-  const pricedService = extractedServiceName
+  const legacyPricedService = extractedServiceName
     ? context.request.services.find(
         (s) =>
           (s.name === extractedServiceName ||
@@ -890,7 +890,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
             (response.content.includes(s.name) &&
               context.request.message.includes(s.name))),
       );
-  if (pricedService) {
+  if (legacyPricedService) {
     const record = ledger.find((f) => f.key === "service.price");
     if (record?.included && record.disclosable) {
       return {
