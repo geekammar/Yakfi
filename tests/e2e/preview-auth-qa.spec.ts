@@ -692,4 +692,82 @@ test.describe("Authenticated Preview QA", () => {
     // Assert no critical console errors
     expect(consoleErrors).toEqual([]);
   });
+
+  test("Stale session recovery on deployed Preview: invalid session cookie terminates at /sign-in and re-authenticates in same context (ISS-017)", async ({
+    page,
+  }, testInfo) => {
+    const vpName = testInfo.project.name;
+    const url = new URL(PREVIEW_URL);
+
+    // 1. Clear existing cookies and seed synthetic stale/invalid session cookie in browser context
+    await page.context().clearCookies();
+    await page.context().addCookies([
+      {
+        name: "__Secure-better-auth.session_token",
+        value: "synthetic-stale-revoked-token-iss-017",
+        domain: url.hostname,
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    // 2. Direct visit to / must terminate at /sign-in without an infinite redirect cycle
+    let redirectCount = 0;
+    page.on("response", (res) => {
+      if (
+        res.status() === 307 ||
+        res.status() === 302 ||
+        res.status() === 301
+      ) {
+        redirectCount++;
+      }
+    });
+
+    await page.goto("/", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    expect(page.url()).toContain("/sign-in");
+    // Ensure bounded redirects: / -> /sign-in (strictly <= 3 hops, 0 cycles)
+    expect(redirectCount).toBeLessThanOrEqual(3);
+
+    // 3. The sign-in form is fully rendered and usable
+    const emailInput = page.locator('input[id="email"]');
+    const passwordInput = page.locator('input[id="password"]');
+    const submitBtn = page.locator('button[type="submit"]');
+    await expect(emailInput).toBeVisible();
+    await expect(passwordInput).toBeVisible();
+    await expect(submitBtn).toBeVisible();
+
+    // 4. Fill credentials and sign in again in the SAME browser context
+    await emailInput.fill(ADMIN_EMAIL);
+    await passwordInput.fill(ADMIN_PASSWORD);
+
+    let loginStatus = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const [response] = await Promise.all([
+        page.waitForResponse((res) =>
+          res.url().includes("/api/auth/sign-in/email"),
+        ),
+        submitBtn.click(),
+      ]);
+      loginStatus = response.status();
+      if (loginStatus === 200) break;
+      if (loginStatus === 429) {
+        await page.waitForTimeout(1500 * (attempt + 1));
+      }
+    }
+    expect(loginStatus).toBe(200);
+
+    // 5. Successful navigation away from sign-in to protected destination
+    await page.waitForURL((u) => !u.pathname.includes("/sign-in"), {
+      timeout: 15_000,
+      waitUntil: "domcontentloaded",
+    });
+
+    // 6. Screenshot recovery confirmation
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `${vpName}-stale-session-recovered.png`),
+      fullPage: true,
+    });
+  });
 });

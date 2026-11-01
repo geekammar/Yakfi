@@ -9057,7 +9057,11 @@ async function runInboundTurn(
     //     only assistant-authored text does.
     const disclosure = enforceDisclosure({
       response: validated,
-      context: { request: aiRequest, facts: builtContext.facts },
+      context: {
+        request: aiRequest,
+        facts: builtContext.facts,
+        scope: { businessId: business.id },
+      },
     });
     // PROMPT-AI-OPS-22 — record the gate's verdict on the evidence record so
     // "did disclosure allow or refuse this channel?" is answerable from

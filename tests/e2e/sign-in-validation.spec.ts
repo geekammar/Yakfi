@@ -276,4 +276,56 @@ test.describe("Sign-in validation and recovery UX", () => {
       "البريد الإلكتروني أو كلمة المرور غير صحيحة",
     );
   });
+
+  test("6. Stale session cookie: visiting sign-in with obsolete session cookie renders form without redirect cycle", async ({
+    page,
+  }, testInfo) => {
+    // Inject synthetic obsolete / revoked Better Auth session cookies
+    await page.context().addCookies([
+      {
+        name: "better-auth.session_token",
+        value: "synthetic-obsolete-token-iss-017",
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-better-auth.session_token",
+        value: "synthetic-obsolete-secure-token-iss-017",
+        domain: "localhost",
+        path: "/",
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+
+    // Assert heading and page structure remain rendered and usable
+    const heading = page.locator("h1");
+    await expect(heading).toHaveText("تسجيل الدخول");
+
+    const emailInput = page.locator("#email");
+    const passwordInput = page.locator("#password");
+    const submitBtn = page.locator('button[type="submit"]');
+
+    await expect(emailInput).toBeVisible();
+    await expect(passwordInput).toBeVisible();
+    await expect(submitBtn).toBeVisible();
+
+    // Verify inputs are interactable
+    await emailInput.fill("recovered@flowpilot.app");
+    await expect(emailInput).toHaveValue("recovered@flowpilot.app");
+
+    // Capture stale session recovery screenshot
+    await page.screenshot({
+      path: path.join(
+        SCREENSHOT_DIR,
+        `stale-session-form-rendered-${testInfo.project.name}.png`,
+      ),
+      fullPage: true,
+    });
+  });
 });

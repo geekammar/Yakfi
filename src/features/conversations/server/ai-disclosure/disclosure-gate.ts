@@ -99,6 +99,11 @@ export const DISCLOSURE_REFUSAL_REASONS = [
    * channel today). The reply would have to be invented.
    */
   "UNAVAILABLE_IN_REQUEST",
+  /**
+   * The proposal matched multiple distinct records or supplied conflicting
+   * references (ISS-012). Fails closed rather than arbitrarily guessing.
+   */
+  "AMBIGUOUS_MATCH",
 ] as const;
 
 export type DisclosureRefusalReason =
@@ -163,6 +168,11 @@ export type DisclosureInput = {
   readonly context: {
     readonly request: AiRequest;
     readonly facts: ReadonlyArray<ContextFactRecord>;
+    /**
+     * Server-derived tenant scope (trusted, from engine or context builder).
+     * Used for validating singleton references against authoritative scope.
+     */
+    readonly scope?: { readonly businessId: string };
   };
 };
 
@@ -490,7 +500,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         const sId = proposal.sourceId.trim();
         const validRefs = [
           context.request.businessName?.trim(),
-          context.scope.businessId?.trim(),
+          context.scope?.businessId?.trim(),
           "business.identity",
           "business.name",
           "identity",
@@ -528,7 +538,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         const sId = proposal.sourceId.trim();
         const validRefs = [
           context.request.businessAddress?.trim(),
-          context.scope.businessId?.trim(),
+          context.scope?.businessId?.trim(),
           "business.address",
           "address",
         ].filter(Boolean);
@@ -563,7 +573,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         const sId = proposal.sourceId.trim();
         const validRefs = [
           context.request.businessAbout?.trim(),
-          context.scope.businessId?.trim(),
+          context.scope?.businessId?.trim(),
           "business.about",
           "about",
         ].filter(Boolean);
@@ -612,7 +622,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           "service.name",
           "catalog",
           "services",
-          context.scope.businessId?.trim(),
+          context.scope?.businessId?.trim(),
         ].filter(Boolean);
         if (!catalogRefs.includes(sId)) {
           const matches = context.request.services.filter(

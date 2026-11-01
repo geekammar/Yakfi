@@ -2105,6 +2105,79 @@ async function runSuite(): Promise<void> {
       { resPrice, resDesc, sent: sentDesc },
     );
 
+    // 14.8h Singleton invalid reference -> refused, safe handoff
+    const hAdv8h = createEngineHarness({
+      businessAddress: "شارع التحرير، الدقي، الجيزة",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "عنوان العيادة في شارع التحرير.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "business.address",
+            sourceId: "invalid-bogus-address-ref-999",
+          },
+        }),
+      ],
+    });
+    const resAdv8h = await hAdv8h.runInbound("عنوانكم فين؟", "adv-8h");
+    check(
+      "14.8h Singleton invalid reference -> refused, safe handoff",
+      resAdv8h.ok === true &&
+        !resAdv8h.duplicate &&
+        resAdv8h.assistantAction === "AI_HANDOFF" &&
+        resAdv8h.conversationStatus === "NEED_HUMAN" &&
+        resAdv8h.handoffCause === "POLICY_REFUSED",
+      resAdv8h,
+    );
+
+    // 14.8i Same-level conflict between knowledgeRef and requiredKnowledge -> refused
+    const hAdv8i = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف أسنان 400 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "svc-1",
+          },
+          requiredKnowledge: "business.faqs", // same-level conflict with knowledgeRef.family!
+        }),
+      ],
+    });
+    const resAdv8i = await hAdv8i.runInbound("بكام التنظيف؟", "adv-8i");
+    check(
+      "14.8i Same-level conflict between knowledgeRef and requiredKnowledge -> refused",
+      resAdv8i.ok === true &&
+        !resAdv8i.duplicate &&
+        resAdv8i.assistantAction === "AI_HANDOFF" &&
+        resAdv8i.conversationStatus === "NEED_HUMAN" &&
+        resAdv8i.handoffCause === "POLICY_REFUSED",
+      resAdv8i,
+    );
+
     // 14.9 Failed persistence, duplicate inbound, provider failure and staff-owned conversation invariants preserved
     // Confirms end-to-end invariant preservation from Scenarios 4, 6, 8, 9
     check(

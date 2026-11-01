@@ -223,6 +223,7 @@ async function main(): Promise<void> {
     deepEq(
       [...DISCLOSURE_REFUSAL_REASONS].sort(),
       [
+        "AMBIGUOUS_MATCH",
         "EXCLUDED_FROM_CONTEXT",
         "FORBIDDEN_FACT_IN_CONTEXT",
         "NOT_DISCLOSABLE",
