@@ -338,9 +338,7 @@ export function resolveKnowledgeProposal(
     );
     if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
       family = familyCandidate.family;
-    } else if (familyCandidate === "GENERIC_FAQ") {
-      family = "business.faqs";
-    } else {
+    } else if (!familyCandidate) {
       family = explicitRequiredKnowledge.trim();
     }
   }
@@ -614,8 +612,16 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           );
           if (exact) {
             matchedFaq = exact;
-          } else if (!isStructured && context.request.faqs.length === 1) {
-            matchedFaq = context.request.faqs[0] ?? null;
+          } else {
+            const matchedByMsg = matchFaq(
+              tokenize(context.request.message),
+              context.request.faqs,
+            );
+            if (matchedByMsg) {
+              matchedFaq = matchedByMsg;
+            } else if (!isStructured && context.request.faqs.length === 1) {
+              matchedFaq = context.request.faqs[0] ?? null;
+            }
           }
         }
         if (
@@ -642,11 +648,16 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           }
           return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
         }
+        const renderedFaq =
+          proposal.sourceId ||
+          (exact && exact.answer.trim() === response.content.trim())
+            ? matchedFaq.answer.trim()
+            : response.content;
         return {
           kind: "disclosed",
           response,
           support: ["business.faqs"],
-          renderedContent: matchedFaq.answer.trim(),
+          renderedContent: renderedFaq,
         };
       }
       default: {
@@ -857,6 +868,35 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         kind: "disclosed",
         response,
         support: ["service.name"],
+        renderedContent: response.content,
+      };
+    }
+  }
+
+  // 8. Priced service inquiry for legacy/offline turns:
+  const extractedServiceName = response.extraction?.service?.trim();
+  const pricedService = extractedServiceName
+    ? context.request.services.find(
+        (s) =>
+          (s.name === extractedServiceName ||
+            normalizeArabicText(s.name) ===
+              normalizeArabicText(extractedServiceName)) &&
+          Boolean(s.price),
+      )
+    : context.request.services.find(
+        (s) =>
+          Boolean(s.price) &&
+          (response.content.includes(s.price!) ||
+            (response.content.includes(s.name) &&
+              context.request.message.includes(s.name))),
+      );
+  if (pricedService) {
+    const record = ledger.find((f) => f.key === "service.price");
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.price"],
         renderedContent: response.content,
       };
     }

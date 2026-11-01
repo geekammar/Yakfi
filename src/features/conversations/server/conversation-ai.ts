@@ -1520,8 +1520,11 @@ const LOCATION_SYNONYMS = new Set([
   "اين",
   "فين",
   "مكان",
+  "ومكان",
   "عنوان",
+  "وعنوان",
   "موقع",
+  "وموقع",
   "موقعكم",
   "عنوانكم",
   "مكانكم",
@@ -1539,7 +1542,7 @@ function faqMatchScore(
   }
   const msgHasLoc = messageTokens.some((t) => LOCATION_SYNONYMS.has(t));
   const qHasLoc = questionTokens.some((t) => LOCATION_SYNONYMS.has(t));
-  if (msgHasLoc && qHasLoc && shared === 0) {
+  if (msgHasLoc && qHasLoc) {
     shared += 2;
   }
   return shared;
