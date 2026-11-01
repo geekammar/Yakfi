@@ -466,6 +466,10 @@ async function main(): Promise<void> {
                 provider: null,
               },
               handoffReason: null,
+              knowledgeRef: {
+                family: "business.faqs",
+                sourceId: "عنوان ومكان العيادة فين؟",
+              },
             };
           }
           if (msgText.includes("تنظيف أسنان")) {

@@ -18,6 +18,7 @@ import {
 } from "@/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
+  buildBusinessAddressContent,
   buildBusinessIdentityContent,
   resolveSafeFailureReply,
 } from "@/features/conversations/server/conversation-ai";
@@ -806,6 +807,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: { family: "service.price", sourceId: "s1" },
     };
     const priceResult = enforceDisclosure({
       context: priceBuilt,
@@ -833,6 +835,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: "business.address",
     };
     const addressResult = enforceDisclosure({
       context: addressBuilt,
@@ -868,6 +871,7 @@ async function runSuite(): Promise<void> {
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
+      knowledgeRef: "service.name",
     };
     const catalogResult = enforceDisclosure({
       context: catalogBuilt,
@@ -972,6 +976,7 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
+          knowledgeRef: { family: "service.price", sourceId: "s1" },
         }),
       ],
     });
@@ -985,7 +990,7 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0] === "سعر كشف الأسنان 300 جنيه.",
+        sentMessages[0] === "سعر كشف أسنان: 300 جنيه.",
       { sentMessages },
     );
   }
@@ -1005,6 +1010,7 @@ async function runSuite(): Promise<void> {
           handoffReason: null,
           summary: null,
           safetyAssessment: "safe",
+          knowledgeRef: "business.address",
         }),
       ],
     });
@@ -1018,7 +1024,8 @@ async function runSuite(): Promise<void> {
         res.conversationStatus === "AI_ACTIVE" &&
         res.assistantAction === "AI_REPLY" &&
         sentMessages.length === 1 &&
-        sentMessages[0] === "عنوان العيادة في 15 شارع النصر، المعادي.",
+        sentMessages[0] ===
+          buildBusinessAddressContent("15 شارع النصر، المعادي"),
       { sentMessages },
     );
   }

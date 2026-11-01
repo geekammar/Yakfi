@@ -47,10 +47,6 @@ import {
   buildServiceCatalogContent,
   buildServiceDescriptionContent,
   buildServicePriceContent,
-  isPureServiceCatalogQuestion,
-  matchFaq,
-  normalizeArabicText,
-  tokenize,
 } from "@/features/conversations/server/conversation-ai";
 
 export {
@@ -400,8 +396,6 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
   }
 
-  const isStructured =
-    context.request.requiredSemanticCapability === "structured_turn";
   const goals = synthesizeDecisionGoals(response);
   const currentAnswerGoal =
     goals.find((g) => g.kind === "ANSWER") ?? goals[0] ?? null;
@@ -486,7 +480,8 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           ),
         };
       }
-      case "service.name": {
+      case "service.name":
+      case "service.catalog": {
         const record = ledger.find((f) => f.key === "service.name");
         if (!record || !record.included) {
           return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
@@ -505,6 +500,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         };
       }
       case "service.price": {
+        if (!proposal.sourceId) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
         const record = ledger.find((f) => f.key === "service.price");
         if (!record || !record.included) {
           return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
@@ -512,22 +510,11 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         if (!record.disclosable) {
           return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
         }
-        let matchedService: (typeof context.request.services)[number] | null =
-          null;
-        const sId =
-          proposal.sourceId?.trim() ?? response.extraction?.service?.trim();
-        if (sId) {
-          matchedService =
-            context.request.services.find(
-              (s) =>
-                s.id === sId ||
-                s.name === sId ||
-                normalizeArabicText(s.name) === normalizeArabicText(sId),
-            ) ?? null;
-        } else if (!isStructured) {
-          const priced = context.request.services.filter((s) => s.price);
-          if (priced.length === 1) matchedService = priced[0] ?? null;
-        }
+        const sId = proposal.sourceId.trim();
+        const matchedService =
+          context.request.services.find(
+            (s) => s.id === sId || s.name === sId,
+          ) ?? null;
         if (
           !matchedService ||
           !matchedService.price ||
@@ -546,6 +533,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         };
       }
       case "service.description": {
+        if (!proposal.sourceId) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
         const record = ledger.find((f) => f.key === "service.description");
         if (!record || !record.included) {
           return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
@@ -553,24 +543,11 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         if (!record.disclosable) {
           return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
         }
-        let matchedService: (typeof context.request.services)[number] | null =
-          null;
-        const sId =
-          proposal.sourceId?.trim() ?? response.extraction?.service?.trim();
-        if (sId) {
-          matchedService =
-            context.request.services.find(
-              (s) =>
-                s.id === sId ||
-                s.name === sId ||
-                normalizeArabicText(s.name) === normalizeArabicText(sId),
-            ) ?? null;
-        } else if (!isStructured) {
-          const described = context.request.services.filter(
-            (s) => s.description,
-          );
-          if (described.length === 1) matchedService = described[0] ?? null;
-        }
+        const sId = proposal.sourceId.trim();
+        const matchedService =
+          context.request.services.find(
+            (s) => s.id === sId || s.name === sId,
+          ) ?? null;
         if (
           !matchedService ||
           !matchedService.description ||
@@ -589,6 +566,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         };
       }
       case "business.faqs": {
+        if (!proposal.sourceId) {
+          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        }
         const record = ledger.find((f) => f.key === "business.faqs");
         if (!record || !record.included) {
           return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
@@ -596,68 +576,23 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         if (!record.disclosable) {
           return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
         }
-        let matchedFaq: (typeof context.request.faqs)[number] | null = null;
-        if (proposal.sourceId) {
-          const sId = proposal.sourceId.trim();
-          matchedFaq =
-            context.request.faqs.find(
-              (f) =>
-                (f.id && f.id === sId) ||
-                f.question === sId ||
-                normalizeArabicText(f.question) === normalizeArabicText(sId),
-            ) ?? null;
-        } else {
-          const exact = context.request.faqs.find(
-            (f) => f.answer.trim() === response.content.trim(),
-          );
-          if (exact) {
-            matchedFaq = exact;
-          } else {
-            const matchedByMsg = matchFaq(
-              tokenize(context.request.message),
-              context.request.faqs,
-            );
-            if (matchedByMsg) {
-              matchedFaq = matchedByMsg;
-            } else if (!isStructured && context.request.faqs.length === 1) {
-              matchedFaq = context.request.faqs[0] ?? null;
-            }
-          }
-        }
+        const sId = proposal.sourceId.trim();
+        const matchedFaq =
+          context.request.faqs.find(
+            (f) => (f.id && f.id === sId) || f.question === sId,
+          ) ?? null;
         if (
           !matchedFaq ||
           !matchedFaq.answer ||
           matchedFaq.answer.trim().length === 0
         ) {
-          const sName = response.extraction?.service?.trim();
-          if (sName) {
-            const matchedService = context.request.services.find(
-              (s) => s.name === sName,
-            );
-            if (matchedService?.price) {
-              const priceRecord = ledger.find((f) => f.key === "service.price");
-              if (priceRecord?.included && priceRecord.disclosable) {
-                return {
-                  kind: "disclosed",
-                  response,
-                  support: ["service.price"],
-                  renderedContent: response.content,
-                };
-              }
-            }
-          }
           return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
         }
-        const renderedFaq =
-          proposal.sourceId ||
-          matchedFaq.answer.trim() === response.content.trim()
-            ? matchedFaq.answer.trim()
-            : response.content;
         return {
           kind: "disclosed",
           response,
           support: ["business.faqs"],
-          renderedContent: renderedFaq,
+          renderedContent: matchedFaq.answer.trim(),
         };
       }
       default: {
@@ -670,10 +605,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   if (proposal.sourceId) {
     const sId = proposal.sourceId.trim();
     const matchedFaq = context.request.faqs.find(
-      (f) =>
-        (f.id && f.id === sId) ||
-        f.question === sId ||
-        normalizeArabicText(f.question) === normalizeArabicText(sId),
+      (f) => (f.id && f.id === sId) || f.question === sId,
     );
     if (matchedFaq) {
       const record = ledger.find((f) => f.key === "business.faqs");
@@ -692,13 +624,13 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     }
 
     const matchedService = context.request.services.find(
-      (s) =>
-        s.id === sId ||
-        s.name === sId ||
-        normalizeArabicText(s.name) === normalizeArabicText(sId),
+      (s) => s.id === sId || s.name === sId,
     );
     if (matchedService) {
-      if (matchedService.price) {
+      if (
+        typeof matchedService.price === "string" &&
+        matchedService.price.trim().length > 0
+      ) {
         const record = ledger.find((f) => f.key === "service.price");
         if (record?.included && record.disclosable) {
           return {
@@ -712,7 +644,10 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           };
         }
       }
-      if (matchedService.description) {
+      if (
+        typeof matchedService.description === "string" &&
+        matchedService.description.trim().length > 0
+      ) {
         const record = ledger.find((f) => f.key === "service.description");
         if (record?.included && record.disclosable) {
           return {
@@ -728,304 +663,11 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       }
     }
 
-    const exactFaq = context.request.faqs.find(
-      (f) => f.answer.trim() === response.content.trim(),
-    );
-    if (exactFaq) {
-      const record = ledger.find((f) => f.key === "business.faqs");
-      if (record?.included && record.disclosable) {
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.faqs"],
-          renderedContent: exactFaq.answer.trim(),
-        };
-      }
-    }
-
     return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
   }
 
   // ── Case C: Neither family nor sourceId provided
-  // Check if response content is an exact verbatim match to an exposed, disclosable stored source:
-  const trimmedContent = response.content.trim();
-
-  // 1. Exact stored FAQ answer match:
-  const exactFaq = context.request.faqs.find(
-    (f) => f.answer.trim() === trimmedContent,
-  );
-  if (exactFaq) {
-    const record = ledger.find((f) => f.key === "business.faqs");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.faqs"],
-        renderedContent: exactFaq.answer.trim(),
-      };
-    }
-  }
-
-  // 2. Stored business about match:
-  if (
-    context.request.businessAbout &&
-    context.request.businessAbout.trim().length > 0 &&
-    (context.request.businessAbout.trim() === trimmedContent ||
-      response.content.includes(context.request.businessAbout.trim()))
-  ) {
-    const record = ledger.find((f) => f.key === "business.about");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.about"],
-        renderedContent: response.content,
-      };
-    }
-  }
-
-  // 3. Stored business address match:
-  if (
-    context.request.businessAddress &&
-    context.request.businessAddress.trim().length > 0 &&
-    (context.request.businessAddress.trim() === trimmedContent ||
-      response.content.includes(context.request.businessAddress.trim()))
-  ) {
-    const record = ledger.find((f) => f.key === "business.address");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.address"],
-        renderedContent: response.content,
-      };
-    }
-  }
-
-  // 4. Exact stored service description match:
-  const exactDescService = context.request.services.find(
-    (s) => s.description && s.description.trim() === trimmedContent,
-  );
-  if (exactDescService) {
-    const record = ledger.find((f) => f.key === "service.description");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.description"],
-        renderedContent: buildServiceDescriptionContent(
-          exactDescService.name,
-          exactDescService.description!,
-        ),
-      };
-    }
-  }
-
-  // 5. Exposed service catalog listing:
-  if (
-    context.request.services.length > 0 &&
-    (context.request.services.every((s) => response.content.includes(s.name)) ||
-      isPureServiceCatalogQuestion(context.request.message))
-  ) {
-    const record = ledger.find((f) => f.key === "service.name");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.name"],
-        renderedContent: buildServiceCatalogContent(context.request.services),
-      };
-    }
-  }
-
-  // 6. Matching stored FAQ for legacy/offline test turns where model omitted source reference:
-  if (context.request.faqs.length > 0) {
-    const matchedFaq = matchFaq(
-      tokenize(context.request.message),
-      context.request.faqs,
-    );
-    if (matchedFaq) {
-      const record = ledger.find((f) => f.key === "business.faqs");
-      if (record?.included && record.disclosable) {
-        return {
-          kind: "disclosed",
-          response,
-          support: ["business.faqs"],
-          renderedContent: response.content,
-        };
-      }
-    }
-  }
-
-  // 7. Priced service inquiry for legacy/offline turns:
-  const isPriceAsk =
-    context.request.message.includes("بكام") ||
-    context.request.message.includes("سعر") ||
-    context.request.message.includes("كم") ||
-    context.request.message.includes("تكلفة");
-  const extractedServiceName = response.extraction?.service?.trim();
-  const legacyPricedService = extractedServiceName
-    ? context.request.services.find(
-        (s) =>
-          (s.name === extractedServiceName ||
-            normalizeArabicText(s.name) ===
-              normalizeArabicText(extractedServiceName)) &&
-          Boolean(s.price),
-      )
-    : context.request.services.find((s) => {
-        if (!s.price) return false;
-        if (response.content.includes(s.price)) return true;
-        if (isPriceAsk) {
-          const sTokens = tokenize(s.name);
-          const respTokens = tokenize(response.content);
-          const msgTokens = tokenize(context.request.message);
-          const respMatches =
-            sTokens.length > 0 && sTokens.every((t) => respTokens.includes(t));
-          const msgMatches =
-            sTokens.length > 0 && sTokens.every((t) => msgTokens.includes(t));
-          if (respMatches && msgMatches) return true;
-        }
-        return false;
-      });
-  if (legacyPricedService) {
-    const record = ledger.find(
-      (f) => f.key === "service.price" || f.key.startsWith("service.price:"),
-    );
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.price"],
-        renderedContent: response.content,
-      };
-    }
-  }
-
-  // 8. Mentioned service name inquiry for legacy/offline turns:
-  const mentionedService = context.request.services.find((s) => {
-    const sTokens = tokenize(s.name);
-    if (sTokens.length === 0) return false;
-    const respTokens = tokenize(response.content);
-    const msgTokens = tokenize(context.request.message);
-    return (
-      sTokens.every((t) => respTokens.includes(t)) &&
-      sTokens.every((t) => msgTokens.includes(t))
-    );
-  });
-  if (mentionedService) {
-    const record = ledger.find(
-      (f) => f.key === "service.name" || f.key.startsWith("service.name:"),
-    );
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.name"],
-        renderedContent: response.content,
-      };
-    }
-  }
-
-  if (isStructured) {
-    // Missing structured source reference on structured turn -> fail closed
-    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-  }
-
-  // Compatibility candidate evaluation for legacy/offline test turns:
-  if (context.request.faqs.length === 1) {
-    const record = ledger.find((f) => f.key === "business.faqs");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.faqs"],
-        renderedContent: context.request.faqs[0]!.answer.trim(),
-      };
-    }
-  }
-
-  if (
-    context.request.businessAbout &&
-    context.request.businessAbout.trim().length > 0
-  ) {
-    const record = ledger.find((f) => f.key === "business.about");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.about"],
-        renderedContent: buildBusinessAboutContent(
-          context.request.businessAbout,
-        ),
-      };
-    }
-  }
-
-  if (
-    context.request.businessAddress &&
-    context.request.businessAddress.trim().length > 0
-  ) {
-    const record = ledger.find((f) => f.key === "business.address");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["business.address"],
-        renderedContent: buildBusinessAddressContent(
-          context.request.businessAddress,
-        ),
-      };
-    }
-  }
-
-  const describedService = context.request.services.find(
-    (s) => typeof s.description === "string" && s.description.trim().length > 0,
-  );
-  if (describedService) {
-    const record = ledger.find((f) => f.key === "service.description");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.description"],
-        renderedContent: buildServiceDescriptionContent(
-          describedService.name,
-          describedService.description!,
-        ),
-      };
-    }
-  }
-
-  const pricedService = context.request.services.find(
-    (s) => typeof s.price === "string" && s.price.trim().length > 0,
-  );
-  if (pricedService) {
-    const record = ledger.find((f) => f.key === "service.price");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.price"],
-        renderedContent: buildServicePriceContent(
-          pricedService.name,
-          pricedService.price!,
-        ),
-      };
-    }
-  }
-
-  if (context.request.services.length > 0) {
-    const record = ledger.find((f) => f.key === "service.name");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.name"],
-        renderedContent: buildServiceCatalogContent(context.request.services),
-      };
-    }
-  }
-
+  // Turn lacks a validated structured knowledge reference -> strictly fail closed
   return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
 }
 

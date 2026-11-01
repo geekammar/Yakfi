@@ -6,6 +6,12 @@ import {
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
 import {
+  buildBusinessAboutContent,
+  buildBusinessAddressContent,
+  buildBusinessIdentityContent,
+  buildServiceDescriptionContent,
+} from "../src/features/conversations/server/ai-disclosure";
+import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
 } from "../src/features/conversations/server/conversation-ai";
@@ -927,6 +933,7 @@ async function runSuite(): Promise<void> {
           summary: null,
           safetyAssessment: "safe",
           requiredKnowledge: "service.price",
+          sourceId: "svc-1",
         }),
       ],
     });
@@ -1131,6 +1138,7 @@ async function runSuite(): Promise<void> {
           summary: null,
           safetyAssessment: "safe",
           requiredKnowledge: "service.price",
+          sourceId: "svc-2",
         }),
       ],
     });
@@ -1327,6 +1335,484 @@ async function runSuite(): Promise<void> {
         resAdvCross.conversationStatus === "NEED_HUMAN" &&
         resAdvCross.handoffCause === "POLICY_REFUSED",
       resAdvCross,
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 14. NINE AUTHORITATIVE ADVERSARIAL GROUNDING CHECKS (PR74 REQUIRED REPAIR)
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    // 14.1 Missing reference + stored address in reply containing invented founding year & transfer promise -> refused and dropped
+    const hAdv1 = createEngineHarness({
+      address: "شارع التحرير، الدقي، الجيزة",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content:
+            "تأسست العيادة عام 1995 في شارع التحرير، الدقي، الجيزة وهحولك لواحد من الفريق فوراً.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+    const resAdv1 = await hAdv1.runInbound(
+      "متى تأسست العيادة وعنوانكم فين؟",
+      "adv-1",
+    );
+    const sentAdv1 = hAdv1.getSent();
+    check(
+      "14.1 Missing reference + stored address in reply containing invented founding year & transfer promise -> refused and dropped",
+      resAdv1.ok === true &&
+        !resAdv1.duplicate &&
+        resAdv1.assistantAction === "AI_HANDOFF" &&
+        resAdv1.conversationStatus === "NEED_HUMAN" &&
+        resAdv1.handoffCause === "POLICY_REFUSED" &&
+        !sentAdv1.some(
+          (msg) =>
+            msg.includes("1995") ||
+            msg.includes("هحولك") ||
+            msg.includes("الفريق"),
+        ),
+      { resAdv1, sentAdv1 },
+    );
+
+    // 14.2 Explicit FAQ family without source ID + customer text matching FAQ -> refused (lexical cannot rescue)
+    const hAdv2 = createEngineHarness({
+      faqs: [
+        {
+          question: "ما هي مواعيد العمل؟",
+          answer: "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content:
+            "مواعيد العمل الرسمية من 9 صباحاً حتى 5 مساءً وسأقوم بمساعدتك فوراً.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          // explicitly omitting sourceId
+        }),
+      ],
+    });
+    const resAdv2 = await hAdv2.runInbound("ما هي مواعيد العمل؟", "adv-2");
+    check(
+      "14.2 Explicit FAQ family without source ID + customer text matching FAQ -> refused (lexical cannot rescue)",
+      resAdv2.ok === true &&
+        !resAdv2.duplicate &&
+        resAdv2.assistantAction === "AI_HANDOFF" &&
+        resAdv2.conversationStatus === "NEED_HUMAN" &&
+        resAdv2.handoffCause === "POLICY_REFUSED" &&
+        hAdv2.getSent()[0] !== "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
+      resAdv2,
+    );
+
+    // 14.3 Invalid FAQ reference + exact stored answer in content -> refused
+    const hAdv3 = createEngineHarness({
+      faqs: [
+        {
+          question: "ما هي مواعيد العمل؟",
+          answer: "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "مواعيدنا يومياً من 9 صباحاً حتى 5 مساءً.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          sourceId: "non-existent-faq-id-999",
+        }),
+      ],
+    });
+    const resAdv3 = await hAdv3.runInbound("مواعيد العمل؟", "adv-3");
+    check(
+      "14.3 Invalid FAQ reference + exact stored answer in content -> refused",
+      resAdv3.ok === true &&
+        !resAdv3.duplicate &&
+        resAdv3.assistantAction === "AI_HANDOFF" &&
+        resAdv3.conversationStatus === "NEED_HUMAN" &&
+        resAdv3.handoffCause === "POLICY_REFUSED",
+      resAdv3,
+    );
+
+    // 14.4 Failed FAQ lookup + extracted priced service + wrong numeric quote -> refused
+    const hAdv4 = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      faqs: [],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سنة تأسيس العيادة 2010 وسعر تنظيف الأسنان 9999 جنيه.",
+          extraction: {
+            ...emptyExtraction,
+            service: "تنظيف أسنان",
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          sourceId: "non-existent-founding-year-faq",
+        }),
+      ],
+    });
+    const resAdv4 = await hAdv4.runInbound("متى تأسستم؟", "adv-4");
+    check(
+      "14.4 Failed FAQ lookup + extracted priced service + wrong numeric quote -> refused",
+      resAdv4.ok === true &&
+        !resAdv4.duplicate &&
+        resAdv4.assistantAction === "AI_HANDOFF" &&
+        resAdv4.conversationStatus === "NEED_HUMAN" &&
+        resAdv4.handoffCause === "POLICY_REFUSED" &&
+        !hAdv4
+          .getSent()
+          .some((msg) => msg.includes("9999") || msg.includes("2010")),
+      resAdv4,
+    );
+
+    // 14.5 Missing reference + Arabic price keywords + known service name -> refused
+    const hAdv5 = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف أسنان 350 جنيه شامل الخصم.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          // missing reference completely
+        }),
+      ],
+    });
+    const resAdv5 = await hAdv5.runInbound(
+      "بكام سعر تنظيف أسنان وتكلفة الجلسة كم؟",
+      "adv-5",
+    );
+    check(
+      "14.5 Missing reference + Arabic price keywords + known service name -> refused",
+      resAdv5.ok === true &&
+        !resAdv5.duplicate &&
+        resAdv5.assistantAction === "AI_HANDOFF" &&
+        resAdv5.conversationStatus === "NEED_HUMAN" &&
+        resAdv5.handoffCause === "POLICY_REFUSED" &&
+        !hAdv5.getSent().some((msg) => msg.includes("350")),
+      resAdv5,
+    );
+
+    // 14.6 Explicit valid service-price reference + wrong numeric quote -> emits only authoritative stored price
+    const hAdv6 = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر تنظيف أسنان 850 جنيه شامل الكشف.",
+          extraction: {
+            ...emptyExtraction,
+            service: "تنظيف أسنان",
+          },
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-1",
+        }),
+      ],
+    });
+    const resAdv6 = await hAdv6.runInbound("بكام تنظيف الأسنان؟", "adv-6");
+    const sentAdv6 = hAdv6.getSent();
+    check(
+      "14.6 Explicit valid service-price reference + wrong numeric quote -> emits only authoritative stored price",
+      resAdv6.ok === true &&
+        !resAdv6.duplicate &&
+        resAdv6.assistantAction === "AI_REPLY" &&
+        resAdv6.conversationStatus === "AI_ACTIVE" &&
+        sentAdv6.length === 1 &&
+        sentAdv6[0]?.includes("400") === true &&
+        sentAdv6[0]?.includes("850") === false,
+      sentAdv6,
+    );
+
+    // 14.7 Valid FAQ/address/about/identity/description/catalog references -> verify exact canonical emitted content
+    // 14.7a FAQ
+    const hAdv7Faq = createEngineHarness({
+      faqs: [{ question: "مواعيد العمل", answer: "من 9 صباحاً حتى 5 مساءً." }],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          sourceId: "مواعيد العمل",
+        }),
+      ],
+    });
+    await hAdv7Faq.runInbound("مواعيد العمل", "adv-7-faq");
+    const sent7Faq = hAdv7Faq.getSent()[0];
+
+    // 14.7b Address
+    const hAdv7Addr = createEngineHarness({
+      address: "15 شارع النصر، المعادي، القاهرة",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.address",
+        }),
+      ],
+    });
+    await hAdv7Addr.runInbound("عنوانكم", "adv-7-addr");
+    const sent7Addr = hAdv7Addr.getSent()[0];
+
+    // 14.7c About
+    const hAdv7About = createEngineHarness({
+      about: "عيادة أسنان تخصصية بأحدث الأجهزة",
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.about",
+        }),
+      ],
+    });
+    await hAdv7About.runInbound("عن العيادة", "adv-7-about");
+    const sent7About = hAdv7About.getSent()[0];
+
+    // 14.7d Identity
+    const hAdv7Id = createEngineHarness({
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          goals: [
+            {
+              kind: "ANSWER",
+              intent: "FAQ",
+              requiredKnowledge: "business.identity",
+            },
+          ],
+        }),
+      ],
+    });
+    await hAdv7Id.runInbound("اسم المركز ايه", "adv-7-id");
+    const sent7Id = hAdv7Id.getSent()[0];
+
+    // 14.7e Description
+    const hAdv7Desc = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: "تنظيف الجير والتلميع الكامل بالفرشاة الدوارة",
+          durationMinutes: 30,
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.description",
+            sourceId: "svc-1",
+          },
+        }),
+      ],
+    });
+    await hAdv7Desc.runInbound("تفاصيل تنظيف الأسنان", "adv-7-desc");
+    const sent7Desc = hAdv7Desc.getSent()[0];
+
+    // 14.7f Catalog
+    const hAdv7Cat = createEngineHarness({
+      services: [
+        {
+          id: "svc-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "نص عشوائي للموديل لا يجب ظهوره",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.name",
+        }),
+      ],
+    });
+    await hAdv7Cat.runInbound("الخدمات المتاحة", "adv-7-cat");
+    const sent7Cat = hAdv7Cat.getSent()[0];
+
+    check(
+      "14.7 Valid FAQ/address/about/identity/description/catalog references -> verify exact canonical emitted content",
+      sent7Faq === "من 9 صباحاً حتى 5 مساءً." &&
+        sent7Addr ===
+          buildBusinessAddressContent("15 شارع النصر، المعادي، القاهرة") &&
+        sent7About ===
+          buildBusinessAboutContent("عيادة أسنان تخصصية بأحدث الأجهزة") &&
+        sent7Id ===
+          buildBusinessIdentityContent("مركز رعاية الأسنان التخصصي") &&
+        sent7Desc ===
+          buildServiceDescriptionContent(
+            "تنظيف أسنان",
+            "تنظيف الجير والتلميع الكامل بالفرشاة الدوارة",
+          ) &&
+        sent7Cat?.includes("تنظيف أسنان") === true,
+      {
+        sent7Faq,
+        sent7Addr,
+        sent7About,
+        sent7Id,
+        sent7Desc,
+        sent7Cat,
+      },
+    );
+
+    // 14.8 Unknown, unexposed, cross-tenant and ambiguous source references -> refused, zero leaked content
+    const hAdv8 = createEngineHarness({
+      services: [
+        {
+          id: "svc-tenant-a-1",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الخدمة الخاصة 1000 جنيه من مستأجر آخر.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: {
+            family: "service.price",
+            sourceId: "foreign-tenant-svc-999",
+          },
+        }),
+      ],
+    });
+    const resAdv8 = await hAdv8.runInbound("سعر الخدمة ايه؟", "adv-8");
+    check(
+      "14.8 Unknown, unexposed, cross-tenant and ambiguous source references -> refused, zero leaked content",
+      resAdv8.ok === true &&
+        !resAdv8.duplicate &&
+        resAdv8.assistantAction === "AI_HANDOFF" &&
+        resAdv8.conversationStatus === "NEED_HUMAN" &&
+        resAdv8.handoffCause === "POLICY_REFUSED" &&
+        !hAdv8
+          .getSent()
+          .some((msg) => msg.includes("1000") || msg.includes("مستأجر")),
+      resAdv8,
+    );
+
+    // 14.9 Failed persistence, duplicate inbound, provider failure and staff-owned conversation invariants preserved
+    // Confirms end-to-end invariant preservation from Scenarios 4, 6, 8, 9
+    check(
+      "14.9 Failed persistence, duplicate inbound, provider failure and staff-owned conversation invariants preserved",
+      checks.some(
+        (c) => c.label.includes("4.A Failed DB persistence") && c.pass === true,
+      ) &&
+        checks.some(
+          (c) => c.label.includes("6.A Provider failure") && c.pass === true,
+        ) &&
+        checks.some(
+          (c) => c.label.includes("8.A Duplicate inbound") && c.pass === true,
+        ) &&
+        checks.some(
+          (c) =>
+            c.label.includes("9.A Conversation already assigned to staff") &&
+            c.pass === true,
+        ),
     );
   }
 
