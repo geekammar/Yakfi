@@ -857,25 +857,12 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     }
   }
 
-  // 7. Mentioned service name inquiry for legacy/offline turns:
-  const mentionedService = context.request.services.find(
-    (s) =>
-      response.content.includes(s.name) &&
-      context.request.message.includes(s.name),
-  );
-  if (mentionedService) {
-    const record = ledger.find((f) => f.key === "service.name");
-    if (record?.included && record.disclosable) {
-      return {
-        kind: "disclosed",
-        response,
-        support: ["service.name"],
-        renderedContent: response.content,
-      };
-    }
-  }
-
-  // 8. Priced service inquiry for legacy/offline turns:
+  // 7. Priced service inquiry for legacy/offline turns:
+  const isPriceAsk =
+    context.request.message.includes("بكام") ||
+    context.request.message.includes("سعر") ||
+    context.request.message.includes("كم") ||
+    context.request.message.includes("تكلفة");
   const extractedServiceName = response.extraction?.service?.trim();
   const legacyPricedService = extractedServiceName
     ? context.request.services.find(
@@ -889,16 +876,39 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         (s) =>
           Boolean(s.price) &&
           (response.content.includes(s.price!) ||
-            (response.content.includes(s.name) &&
+            (isPriceAsk &&
+              response.content.includes(s.name) &&
               context.request.message.includes(s.name))),
       );
   if (legacyPricedService) {
-    const record = ledger.find((f) => f.key === "service.price");
+    const record = ledger.find(
+      (f) => f.key === "service.price" || f.key.startsWith("service.price:"),
+    );
     if (record?.included && record.disclosable) {
       return {
         kind: "disclosed",
         response,
         support: ["service.price"],
+        renderedContent: response.content,
+      };
+    }
+  }
+
+  // 8. Mentioned service name inquiry for legacy/offline turns:
+  const mentionedService = context.request.services.find(
+    (s) =>
+      response.content.includes(s.name) &&
+      context.request.message.includes(s.name),
+  );
+  if (mentionedService) {
+    const record = ledger.find(
+      (f) => f.key === "service.name" || f.key.startsWith("service.name:"),
+    );
+    if (record?.included && record.disclosable) {
+      return {
+        kind: "disclosed",
+        response,
+        support: ["service.name"],
         renderedContent: response.content,
       };
     }
