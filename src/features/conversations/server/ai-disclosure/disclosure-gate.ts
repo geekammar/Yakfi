@@ -883,7 +883,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
             sTokens.length > 0 && sTokens.every((t) => respTokens.includes(t));
           const msgMatches =
             sTokens.length > 0 && sTokens.every((t) => msgTokens.includes(t));
-          if (respMatches || msgMatches) return true;
+          if (respMatches && msgMatches) return true;
         }
         return false;
       });
@@ -908,7 +908,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     const respTokens = tokenize(response.content);
     const msgTokens = tokenize(context.request.message);
     return (
-      sTokens.every((t) => respTokens.includes(t)) ||
+      sTokens.every((t) => respTokens.includes(t)) &&
       sTokens.every((t) => msgTokens.includes(t))
     );
   });
