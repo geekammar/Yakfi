@@ -766,10 +766,12 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     }
   }
 
-  // 2. Exact stored business about match:
+  // 2. Stored business about match:
   if (
     context.request.businessAbout &&
-    context.request.businessAbout.trim() === trimmedContent
+    context.request.businessAbout.trim().length > 0 &&
+    (context.request.businessAbout.trim() === trimmedContent ||
+      response.content.includes(context.request.businessAbout.trim()))
   ) {
     const record = ledger.find((f) => f.key === "business.about");
     if (record?.included && record.disclosable) {
@@ -777,15 +779,17 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         kind: "disclosed",
         response,
         support: ["business.about"],
-        renderedContent: context.request.businessAbout.trim(),
+        renderedContent: response.content,
       };
     }
   }
 
-  // 3. Exact stored business address match:
+  // 3. Stored business address match:
   if (
     context.request.businessAddress &&
-    context.request.businessAddress.trim() === trimmedContent
+    context.request.businessAddress.trim().length > 0 &&
+    (context.request.businessAddress.trim() === trimmedContent ||
+      response.content.includes(context.request.businessAddress.trim()))
   ) {
     const record = ledger.find((f) => f.key === "business.address");
     if (record?.included && record.disclosable) {
@@ -793,9 +797,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         kind: "disclosed",
         response,
         support: ["business.address"],
-        renderedContent: buildBusinessAddressContent(
-          context.request.businessAddress,
-        ),
+        renderedContent: response.content,
       };
     }
   }
