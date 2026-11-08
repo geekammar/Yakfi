@@ -1,6 +1,6 @@
 # Yakfi — Current State
 
-> Tier 0 orientation. Verified on 8 November 2026 at 23:49 Cairo. Refresh volatile facts before executing work. See `AGENT_RULES.md`, `DECISIONS_INDEX.md`, and the relevant technical docs. Use `BUILD_STATE.md` for implementation history and candidate evidence.
+> Tier 0 orientation. Verified on 9 November 2026 at 00:35 Cairo. Refresh volatile facts before executing work. See `AGENT_RULES.md`, `DECISIONS_INDEX.md`, and the relevant technical docs. Use `BUILD_STATE.md` for implementation history and candidate evidence.
 
 ## Verified release and acceptance
 
@@ -11,7 +11,7 @@
 
 ## Execution order
 
-1. High-impact acceptance. Reconcile existing BK-03/33/34 evidence after #69. Retest only gaps. UI-29 / ISS-018 is the next P1: execution R3-UI-29-A1 (row 249) reproduced staff-reply non-delivery on 0.79.7. Source review confirmed `sendStaffReply` persists the staff message and returns success without calling outbound transport. Audit authoritative channel/connection/destination, legacy records and replay/failure semantics before proposing the fix. After delivery verification, proceed to TG-22 / ISS-012 (truthful unknown-information response and handoff).
+1. High-impact acceptance. Reconcile existing BK-03/33/34 evidence after #69. Retest only gaps. UI-29 / ISS-018 is the next P1: execution R3-UI-29-A1 (row 249) reproduced staff-reply non-delivery on 0.79.7. Source review confirmed `sendStaffReply` persists the staff message and returns success without calling outbound transport. The read-only audit is complete. The reviewer scoped the next candidate to safe Telegram staff reply delivery: authenticated route provenance, fail closed on ambiguous records, durable pre-dispatch claim, typed outcomes, and draft preservation. The proposed send-before-save design was not approved. No implementation or live acceptance yet. After delivery verification, proceed to TG-22 / ISS-012 (truthful unknown-information response and handoff).
 2. UX Conversation Lab. Authorized Platform Operator acceptance and isolated verification of the existing `welcome.intro` runtime path. Scope any new wiring separately.
 3. Cost & Price. Confirm the frozen design and implement the smallest cost-evidence persistence slice before forming pilot price hypotheses.
 4. Real-business pilot and Spec A exit. Spec B evidence and Spec C vertical selection follow. Defer low-impact P2/P3 polish until after Lab and Cost & Price. PR #77 is a tracked P2 candidate.
