@@ -9,6 +9,22 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
+**Product version: v0.79.8 (feature branch; candidate PR for ISS-007 follow-up / BK-41)** — `Settings Page Saved Inactive Default Service Resolution (ISS-007, BK-41)`. Baseline: v0.79.7 (merged `main`, commit `8d12aa2a72169bb2563e624e89045858d090e8f3`). Branch: `fix/show-saved-inactive-service-settings`.
+
+- **Problem & Root Cause (ISS-007 / BK-41 Follow-up)**:
+  - Following the UI defect repair in PR #73 (`settings-screen.tsx`), production testing (Executions row 248, R2-BK-41-A1) proved that after deactivating the saved default service in the catalog, the `/settings` UI displayed "خدمة غير متاحة" (generic unavailable state) instead of the known inactive service's name and inactive status warning.
+  - Root cause: `/settings` page boundary (`src/app/(app)/settings/page.tsx`) fetched services solely via `serviceRepository.listByBusiness(session.user.businessId)`, which by default filters `isActive: true`. Because the deactivated service was excluded from `services` passed to `<SettingsScreen services={...} />`, `SettingsScreen` could not find a match for `defaultBookingServiceId` in the received collection and fell back to state D ("unavailable").
+- **Smallest Page-Level Repair**:
+  - `src/app/(app)/settings/page.tsx` checks if `settings.defaultBookingServiceId` is set and absent from the active services list returned by `serviceRepository.listByBusiness`.
+  - When missing, it performs a single tenant-scoped point lookup: `await serviceRepository.findByIdWithinBusiness(settings.defaultBookingServiceId, session.user.businessId)`.
+  - If resolved, the record is appended to the services collection with its native `isActive: false` status, avoiding any expensive full-catalog scan (`includeInactive: true`).
+  - Preserves soft-delete filtering (`deletedAt: null`), foreign-tenant isolation, and active-only dropdown options and pagination (`SettingsScreen` filters options with `s.isActive !== false`).
+  - When the reference cannot be resolved (missing, deleted, or foreign-tenant), the generic unavailable state is truthfully displayed without exposing service names.
+- **Verification**:
+  - Added focused regression test `src/app/(app)/settings/page.test.tsx` (4 tests) verifying inactive service resolution, generic unavailable fallback, active service avoidance of redundant queries, and unconfigured default behavior.
+  - Test fails with the old active-only data-loading input and passes with tenant-scoped point lookup.
+  - Component tests in `src/features/settings/components/settings-screen.test.tsx` (18 tests) remain green; combined `pnpm test:settings` (22 tests) green.
+
 **Product version: v0.79.5 (feature branch; candidate PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.4 (merged PR #75, commit `99df8b2`). Branch: `fix/unknown-information-handoff`.
 
 - **Feature Scope**: Fixes false handoff promises under `AI_ACTIVE` and unbacked reply leaks on unknown clinic facts or unpublished prices observed in production v0.78.5 (ISS-012 / TG-22).

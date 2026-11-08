@@ -157,6 +157,7 @@ jobs:
           pnpm test:appointment-duration
           pnpm test:login-form
           pnpm test:sign-in-page
+          pnpm test:settings-page
           pnpm check:stale-session-routing
           pnpm check:iss-006
           pnpm test:follow-up-scheduling

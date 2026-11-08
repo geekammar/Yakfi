@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.7",
+  "version": "0.79.8",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -192,7 +192,8 @@
     "eval:coverage": "tsx scripts/eval-coverage.ts",
     "test:copy-lab": "vitest run --config vitest.config.ts src/features/platform/components/copy-lab-detail.test.tsx",
     "test:assistant-settings": "vitest run --config vitest.config.ts src/features/assistant/components/assistant-settings-screen.test.tsx",
-    "test:settings": "vitest run --config vitest.config.ts src/features/settings/components/settings-screen.test.tsx",
+    "test:settings": "vitest run --config vitest.config.ts src/features/settings/components/settings-screen.test.tsx 'src/app/(app)/settings/page.test.tsx'",
+    "test:settings-page": "vitest run --config vitest.config.ts 'src/app/(app)/settings/page.test.tsx'",
     "test:conversation-detail": "vitest run --config vitest.config.ts src/features/conversations/components/conversation-detail.test.tsx",
     "test:staff-workspace": "vitest run --config vitest.config.ts src/features/staff/components/staff-workspace.test.tsx",
     "test:provider-dialog": "vitest run --config vitest.config.ts src/features/staff/components/provider-dialog.test.tsx",
