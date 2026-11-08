@@ -17,13 +17,13 @@
 - **Smallest Page-Level Repair**:
   - `src/app/(app)/settings/page.tsx` checks if `settings.defaultBookingServiceId` is set and absent from the active services list returned by `serviceRepository.listByBusiness`.
   - When missing, it performs a single tenant-scoped point lookup: `await serviceRepository.findByIdWithinBusiness(settings.defaultBookingServiceId, session.user.businessId)`.
-  - If resolved, the record is appended to the services collection with its native `isActive: false` status, avoiding any expensive full-catalog scan (`includeInactive: true`).
+  - If resolved and confirmed inactive (`savedDefault.isActive === false`), the record is appended to the services collection with its native `isActive: false` status, avoiding any expensive full-catalog scan (`includeInactive: true`). Active point-lookup records outside the initial page are strictly NOT appended, preserving original active catalog pagination and ordering.
   - Preserves soft-delete filtering (`deletedAt: null`), foreign-tenant isolation, and active-only dropdown options and pagination (`SettingsScreen` filters options with `s.isActive !== false`).
   - When the reference cannot be resolved (missing, deleted, or foreign-tenant), the generic unavailable state is truthfully displayed without exposing service names.
 - **Verification**:
-  - Added focused regression test `src/app/(app)/settings/page.test.tsx` (4 tests) verifying inactive service resolution, generic unavailable fallback, active service avoidance of redundant queries, and unconfigured default behavior.
+  - Added focused regression test `src/app/(app)/settings/page.test.tsx` (5 tests) verifying inactive service resolution, active pagination preservation (preventing active records from point-lookup being appended to dropdown options), generic unavailable fallback, active service avoidance of redundant queries, and unconfigured default behavior.
   - Test fails with the old active-only data-loading input and passes with tenant-scoped point lookup.
-  - Component tests in `src/features/settings/components/settings-screen.test.tsx` (18 tests) remain green; combined `pnpm test:settings` (22 tests) green.
+  - Component tests in `src/features/settings/components/settings-screen.test.tsx` (18 tests) remain green; combined `pnpm test:settings` (23 tests) green.
 
 **Product version: v0.79.5 (feature branch; candidate PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.4 (merged PR #75, commit `99df8b2`). Branch: `fix/unknown-information-handoff`.
 

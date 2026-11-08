@@ -177,6 +177,39 @@ describe("SettingsPage Data-Loading Boundary (ISS-007 / BK-41 Regression)", () =
     );
   });
 
+  it("does not append point-lookup record when resolved record is active (preserves active catalog pagination and order)", async () => {
+    // 1. serviceRepository.listByBusiness returns bounded active page
+    const originalActivePage = [
+      { id: "srv-active-1", name: "أ. خدمة أولى", isActive: true },
+      { id: "srv-active-2", name: "ب. خدمة ثانية", isActive: true },
+    ];
+    mockListByBusiness.mockResolvedValue(originalActivePage);
+
+    // 2. Settings points to a service absent from the current active page
+    mockGetBusinessSettings.mockResolvedValue({
+      ...baseSettings,
+      defaultServiceBookingEnabled: true,
+      defaultBookingServiceId: "srv-active-page-2",
+    });
+
+    // 3. Point lookup returns an active record (outside current active page)
+    mockFindByIdWithinBusiness.mockResolvedValue({
+      id: "srv-active-page-2",
+      name: "ج. خدمة نشطة في صفحة تالية",
+      isActive: true,
+      businessId: "biz_test_123",
+      deletedAt: null,
+    });
+
+    const jsx = await SettingsPage();
+
+    // Active services passed to SettingsScreen must be EXACTLY the original ordered list
+    expect(jsx.props.services).toEqual([
+      { id: "srv-active-1", name: "أ. خدمة أولى", isActive: true },
+      { id: "srv-active-2", name: "ب. خدمة ثانية", isActive: true },
+    ]);
+  });
+
   it("shows generic unavailable state when saved default cannot be resolved (missing, deleted, or foreign tenant)", async () => {
     // 1. Active-only services
     mockListByBusiness.mockResolvedValue([

@@ -50,7 +50,7 @@ export default async function SettingsPage() {
       settings.defaultBookingServiceId,
       session.user.businessId,
     );
-    if (savedDefault) {
+    if (savedDefault && savedDefault.isActive === false) {
       allServices = [...services, savedDefault];
     }
   }
