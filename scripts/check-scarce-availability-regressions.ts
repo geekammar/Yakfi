@@ -77,6 +77,7 @@ function check(label: string, pass: boolean, details?: string): void {
 // ── Deterministic Fixtures & In-Memory Repositories ─────────────────────────
 
 const TEST_DATE = "2026-11-03"; // Tuesday
+const FIXED_NOW = () => new Date("2026-11-01T07:00:00Z");
 const BIZ_ID = PLAYGROUND_IDS.BIZ_ID;
 const BRANCH_ID = PLAYGROUND_IDS.BRANCH_ID;
 
@@ -410,6 +411,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -703,6 +705,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -853,6 +856,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -1064,6 +1068,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -1129,6 +1134,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_2.id, userId: PROVIDER_2.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -1252,6 +1258,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -1303,6 +1310,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {
@@ -1358,6 +1366,7 @@ async function runSuite(): Promise<void> {
             { providerId: PROVIDER_1.id, userId: PROVIDER_1.userId } as any,
           ],
         },
+        now: FIXED_NOW,
       },
       { userId: "usr_test", role: "STAFF", businessId: BIZ_ID },
       {

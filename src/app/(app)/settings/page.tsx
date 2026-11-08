@@ -40,10 +40,25 @@ export default async function SettingsPage() {
   if (!("name" in result)) redirect("/onboarding");
 
   const settings: BusinessSettingsView = result;
+
+  let allServices = services;
+  if (
+    settings.defaultBookingServiceId &&
+    !services.some((s) => s.id === settings.defaultBookingServiceId)
+  ) {
+    const savedDefault = await serviceRepository.findByIdWithinBusiness(
+      settings.defaultBookingServiceId,
+      session.user.businessId,
+    );
+    if (savedDefault && savedDefault.isActive === false) {
+      allServices = [...services, savedDefault];
+    }
+  }
+
   return (
     <SettingsScreen
       initialSettings={settings}
-      services={services.map((s) => ({
+      services={allServices.map((s) => ({
         id: s.id,
         name: s.name,
         isActive: s.isActive,
