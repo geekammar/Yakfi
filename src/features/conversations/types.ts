@@ -84,3 +84,15 @@ export type ConversationDetailData = {
 
 export type ConversationActionResult =
   { success: true } | { success: false; message: string };
+
+export type StaffReplyOutcome =
+  "unroutable" | "in-progress" | "accepted" | "definite_rejection" | "unknown";
+
+export type StaffReplyActionResult =
+  | { success: true; outcome: "accepted"; messageId?: string }
+  | {
+      success: false;
+      outcome: "unroutable" | "in-progress" | "definite_rejection" | "unknown";
+      message: string;
+      code?: string;
+    };

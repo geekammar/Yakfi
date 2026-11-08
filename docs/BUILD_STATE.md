@@ -9,7 +9,34 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.5 (feature branch; candidate PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.4 (merged PR #75, commit `99df8b2`). Branch: `fix/unknown-information-handoff`.
+**Product version: v0.79.8 (feature branch; candidate PR)** — `Safe Telegram Staff Reply Delivery & Route Authority (ISS-018 / UI-29)`. Baseline: v0.79.7 (commit `8d12aa2a72169bb2563e624e89045858d090e8f3`). Branch: `fix/safe-telegram-staff-reply-delivery`.
+
+- **Feature Scope**: Ensures one authorized staff submission can send at most one reply through the verified Telegram customer route, with durable and truthful outcomes (ISS-018 / UI-29).
+- **Route Authority & Ingress Linkage**:
+  - Established server-authoritative route binding via additive `ConversationDeliveryRoute` model (`conversation_id` unique, `channel`, `connection_id`, `bot_external_id`, `recipient_external_id`).
+  - Authenticated inbound Telegram turns bind route atomically during `ConversationRepository.addMessage`. Routes are immutable and never overwritten by subsequent inbound connections.
+  - Cross-checks route against `InboundMessageDedupe` and active tenant connection credentials (`resolveTelegramConnectionForSend`). Fails closed on missing or conflicting evidence (e.g. cross-channel or multi-bot handle collisions).
+  - Routes are determined strictly by the server. Never inferred from customer phone numbers, regexes, UI labels, or "first active connection".
+- **Durable Submission Claiming**:
+  - Atomic claim via additive `StaffReplySubmission` table with unique constraint `@@unique([businessId, conversationId, submissionKey])` and SHA-256 `payloadHash` binding.
+  - Concurrent or replayed submissions claim atomically at the DB layer without duplicate network calls.
+  - Replays with modified payloads fail closed as `definite_rejection` (`PAYLOAD_MISMATCH`).
+- **Typed Outcomes & Blanket 5xx Isolation**:
+  - Returns 5 typed outcomes: `unroutable`, `in-progress`, `accepted`, `definite_rejection`, `unknown`.
+  - Telegram Bot API 400/403/404 are classified as `definite_rejection`.
+  - Blanket 5xx, timeouts, network drops, and post-acceptance persistence write failures strictly remain `unknown` (unconfirmed, no auto-resend).
+  - Provider acceptance is treated truthfully as provider dispatch, not proof of customer receipt.
+- **Staff Ownership & Draft Recovery**:
+  - Preserves existing staff assignment (`assignedUserId`) without stealing ownership from other staff members.
+  - Submitted draft is cleared only upon confirmed provider acceptance (`outcome === "accepted"`).
+  - Newer text typed while reply is pending is preserved.
+  - Failed or unconfirmed drafts remain recoverable in the UI with truthful outcome banners.
+- **Verification Suite Evidence**:
+  - Offline unit suite `scripts/check-safe-telegram-reply.ts` (22 checks).
+  - Disposable PostgreSQL integration suite `scripts/check-safe-telegram-reply-db.ts` (9 scenarios with physical provider call count assertions).
+  - Wired into `.github/workflows/pr-validation.yml`.
+
+**Product version: v0.79.7 (main baseline; merged PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.6 (commit `4644f37`). Branch: `fix/unknown-information-handoff`. Merged PR: [#74](https://github.com/geekammar/Yakfi/pull/74). Commit `8d12aa2`.
 
 - **Feature Scope**: Fixes false handoff promises under `AI_ACTIVE` and unbacked reply leaks on unknown clinic facts or unpublished prices observed in production v0.78.5 (ISS-012 / TG-22).
 - **Structured Authority Boundary in Disclosure Gate**:

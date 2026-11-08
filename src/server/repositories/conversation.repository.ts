@@ -193,6 +193,12 @@ export class ConversationRepository {
     dedupe?: {
       claimId: string;
     },
+    deliveryRoute?: {
+      channel: string;
+      connectionId: string;
+      botExternalId: string;
+      recipientExternalId: string;
+    },
   ): Promise<Message> {
     return db.$transaction(async (tx) => {
       const message = await tx.message.create({
@@ -212,6 +218,42 @@ export class ConversationRepository {
         where: { id: input.conversationId },
         data: { lastMessageAt: message.createdAt, ...workflow },
       });
+      if (deliveryRoute) {
+        const existingRoute = await tx.conversationDeliveryRoute.findUnique({
+          where: { conversationId: input.conversationId },
+        });
+        if (!existingRoute) {
+          const conflicting = await tx.inboundMessageDedupe.findFirst({
+            where: {
+              conversationId: input.conversationId,
+              customerMessageId: { not: null },
+              NOT: {
+                externalKey: {
+                  startsWith: `tg:${deliveryRoute.botExternalId}:`,
+                },
+              },
+            },
+          });
+          if (!conflicting) {
+            const conv = await tx.conversation.findUnique({
+              where: { id: input.conversationId },
+              select: { businessId: true },
+            });
+            if (conv) {
+              await tx.conversationDeliveryRoute.create({
+                data: {
+                  businessId: conv.businessId,
+                  conversationId: input.conversationId,
+                  channel: deliveryRoute.channel,
+                  connectionId: deliveryRoute.connectionId,
+                  botExternalId: deliveryRoute.botExternalId,
+                  recipientExternalId: deliveryRoute.recipientExternalId,
+                },
+              });
+            }
+          }
+        }
+      }
       if (dedupe) {
         const won = await tx.inboundMessageDedupe.updateMany({
           where: { id: dedupe.claimId, customerMessageId: null },

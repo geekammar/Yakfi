@@ -7,7 +7,11 @@ import {
   transitionConversationSchema,
 } from "@/features/conversations/schemas/conversation-schema";
 import { invalidateConversationOffer } from "@/features/conversations/server/conversation-state-store";
-import type { ConversationActionResult } from "@/features/conversations/types";
+import { submitStaffReply } from "@/features/conversations/server/staff-reply-delivery";
+import type {
+  ConversationActionResult,
+  StaffReplyActionResult,
+} from "@/features/conversations/types";
 import { requireUser } from "@/server/auth/guards";
 import {
   conversationRepository,
@@ -146,37 +150,47 @@ export async function transitionConversation(
 
 export async function sendStaffReply(
   input: unknown,
-): Promise<ConversationActionResult> {
+): Promise<StaffReplyActionResult> {
   const parsed = replySchema.safeParse(input);
   if (!parsed.success) {
-    return failure(parsed.error.issues[0]?.message ?? "الرسالة غير صالحة");
+    return {
+      success: false,
+      outcome: "definite_rejection",
+      message: parsed.error.issues[0]?.message ?? "الرسالة غير صالحة",
+    };
   }
   const context = await actionContext(parsed.data.id);
-  if (!context) return failure("المحادثة غير موجودة");
-
-  try {
-    await conversationRepository.addMessage(
-      {
-        conversationId: parsed.data.id,
-        senderType: "STAFF",
-        content: parsed.data.content,
-      },
-      {
-        // Replying takes ownership only when the thread is unowned —
-        // an already-assigned conversation is never silently stolen;
-        // ownership changes only through explicit takeover/assignment.
-        ...(context.conversation.assignedUserId
-          ? {}
-          : { assignedUserId: context.user.id }),
-        status: "NEED_HUMAN",
-      },
-    );
-    await invalidateAssistantOffer(context.businessId, parsed.data.id);
-    refreshConversation(parsed.data.id);
-    return { success: true };
-  } catch {
-    return failure("تعذر إرسال الرد الآن");
+  if (!context) {
+    return {
+      success: false,
+      outcome: "unroutable",
+      message: "المحادثة غير موجودة",
+    };
   }
+
+  const result = await submitStaffReply({
+    businessId: context.businessId,
+    conversationId: parsed.data.id,
+    staffUserId: context.user.id,
+    content: parsed.data.content,
+    clientSubmissionId: parsed.data.clientSubmissionId,
+  });
+
+  if (result.ok) {
+    refreshConversation(parsed.data.id);
+    return {
+      success: true,
+      outcome: "accepted",
+      messageId: result.messageId,
+    };
+  }
+
+  return {
+    success: false,
+    outcome: result.outcome,
+    code: result.code,
+    message: result.message,
+  };
 }
 
 export async function updateAiSummary(

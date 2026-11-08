@@ -21,6 +21,7 @@ export const transitionConversationSchema = z.object({
 export const replySchema = z.object({
   id: uuidSchema,
   content: z.string().trim().min(1, "اكتب رسالة أولاً").max(4096),
+  clientSubmissionId: z.string().trim().min(1).max(128).optional(),
 });
 
 export const summarySchema = z.object({

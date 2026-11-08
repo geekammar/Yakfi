@@ -534,7 +534,7 @@ export function ConversationDetail({
 
     startTransition(async () => {
       const success = await runAction(() =>
-        sendStaffReply({ id: data.id, content }),
+        sendStaffReply({ id: data.id, content, clientSubmissionId: pendingId }),
       );
       setPendingMessageId(null);
 

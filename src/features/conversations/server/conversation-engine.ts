@@ -3810,6 +3810,16 @@ async function runInboundTurn(
       now,
     });
 
+    const deliveryRoute =
+      inbound.externalId?.startsWith("tg:") && resolvedIdentity?.connectionId
+        ? {
+            channel: "telegram",
+            connectionId: resolvedIdentity.connectionId,
+            botExternalId: inbound.to,
+            recipientExternalId: inbound.from,
+          }
+        : undefined;
+
     let customerMessage;
     try {
       customerMessage = await deps.conversationRepository.addMessage(
@@ -3830,6 +3840,7 @@ async function runInboundTurn(
             : {}
           : { status: "NEED_HUMAN" },
         { claimId: claim.claimId },
+        deliveryRoute,
       );
     } catch (error) {
       if (error instanceof InboundDuplicateError) {
