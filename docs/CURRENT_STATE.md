@@ -1,11 +1,11 @@
 # Yakfi — Current State
 
-> Tier 0 orientation. Verified on 8 November 2026 at 22:50 Cairo. Refresh volatile facts before executing work. See `AGENT_RULES.md`, `DECISIONS_INDEX.md`, and the relevant technical docs. Use `BUILD_STATE.md` for implementation history and candidate evidence.
+> Tier 0 orientation. Verified on 8 November 2026 at 23:18 Cairo. Refresh volatile facts before executing work. See `AGENT_RULES.md`, `DECISIONS_INDEX.md`, and the relevant technical docs. Use `BUILD_STATE.md` for implementation history and candidate evidence.
 
 ## Verified release and acceptance
 
 - [Main](https://github.com/geekammar/Yakfi/commit/8d12aa2a72169bb2563e624e89045858d090e8f3) and [Production health](https://flowpilot-prod.vercel.app/api/health) matched `8d12aa2a72169bb2563e624e89045858d090e8f3` and `0.79.7`. Database connected and deploymentReady=true at the check.
-- PRs #73–76 were merged. [PR #77](https://github.com/geekammar/Yakfi/pull/77) was open on `8a092eb2e274ff37f90cd8707998b5a2ce0355f3`. The owner reported the scoped correction was in progress. Recheck its HEAD, CI, Preview identity, and Step B acceptance independently.
+- PRs #73–76 were merged. [PR #77](https://github.com/geekammar/Yakfi/pull/77) was open on `42f58dd02130543664f3feb886a0aa17316ef5eb` (candidate `0.79.8`). Reviewer verified the inactive-only lookup result, the off-page active regression, [CI](https://github.com/geekammar/Yakfi/actions/runs/42522320282), and matching Preview metadata. CI recorded 23 settings tests passed and Playwright 183 passed / 12 skipped. Preview DB isolation and Step B live acceptance remain pending. Keep P2 separate from high-impact QA.
 - ISS-017 clean and valid-session paths passed live. Invalid-cookie recovery remains blocked on Muse browser capability. BK-41 execution R2-BK-41-A1 (row 248) verified save, replacement and explicit clear. The named inactive-service behavior still needs exact-release acceptance.
 - Spec A is in pre-pilot acceptance. Booking, staff console and channel adapters are built. A successful live business pilot is the exit gate.
 
