@@ -404,23 +404,23 @@ export async function submitStaffReply(
       chatId: route.recipientExternalId,
       text,
     });
-  } catch (error) {
-    // Network / unhandled client failure before or during transmission
-    const errorMsg =
-      error instanceof Error ? error.message : "خطأ أثناء الاتصال بتيليجرام";
+  } catch {
+    // Network / unhandled client failure before or during transmission.
+    // Safe typed error: never leak raw transport/network/credential details.
+    const safeErrorMsg = "تعذر تأكيد تسليم الرد بسبب انقطاع الاتصال بمزود الخدمة";
     await db.staffReplySubmission.update({
       where: { id: submission.id },
       data: {
         status: "UNCONFIRMED",
         errorCode: "TRANSIENT_TRANSPORT_FAILURE",
-        errorMessage: errorMsg,
+        errorMessage: safeErrorMsg,
       },
     });
     return {
       ok: false,
       outcome: "unknown",
       code: "TRANSIENT_TRANSPORT_FAILURE",
-      message: errorMsg,
+      message: safeErrorMsg,
     };
   }
 
@@ -473,7 +473,7 @@ export async function submitStaffReply(
   if (deps.onBeforeResultWrite) {
     try {
       await deps.onBeforeResultWrite();
-    } catch (injectedError) {
+    } catch {
       await db.staffReplySubmission.update({
         where: { id: submission.id },
         data: {
@@ -481,10 +481,7 @@ export async function submitStaffReply(
           completedAt: new Date(),
           providerMessageId: String(sendResult.result.message_id),
           errorCode: "RESULT_WRITE_FAILURE",
-          errorMessage:
-            injectedError instanceof Error
-              ? injectedError.message
-              : "فشل حفظ النتيجة",
+          errorMessage: "تعذر حفظ نتيجة الإرسال في قاعدة البيانات",
         },
       });
       return {
@@ -550,7 +547,7 @@ export async function submitStaffReply(
       outcome: "accepted",
       messageId: providerMessageId,
     };
-  } catch (writeError) {
+  } catch {
     // Acceptance followed by result write failure!
     // Leave outcome UNCONFIRMED, never auto-resend.
     try {
@@ -561,10 +558,7 @@ export async function submitStaffReply(
           completedAt: new Date(),
           providerMessageId: String(sendResult.result.message_id),
           errorCode: "RESULT_WRITE_FAILURE",
-          errorMessage:
-            writeError instanceof Error
-              ? writeError.message
-              : "تعذر حفظ الرسالة في قاعدة البيانات",
+          errorMessage: "تعذر حفظ نتيجة الإرسال في قاعدة البيانات",
         },
       });
     } catch {

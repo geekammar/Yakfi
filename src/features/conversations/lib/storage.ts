@@ -7,6 +7,7 @@
  */
 
 const DRAFT_PREFIX = "fp_draft:";
+const ATTEMPT_PREFIX = "fp_reply_attempt:";
 const INBOX_STATE_PREFIX = "fp_inbox_state:";
 const INBOX_SCROLL_PREFIX = "fp_inbox_scroll:";
 
@@ -88,6 +89,86 @@ export function removeStoredDraft(
   if (!storage) return;
   try {
     const key = getDraftStorageKey(businessId, userId, conversationId);
+    storage.removeItem(key);
+  } catch {
+    // Safe removal under quota exhaustion or storage errors
+  }
+}
+
+export interface StoredReplyAttempt {
+  attemptId: string;
+  content: string;
+  status: "pending" | "in-progress" | "unknown" | "rejected";
+  timestamp: number;
+  message?: string;
+  code?: string;
+}
+
+export function getReplyAttemptStorageKey(
+  businessId: string,
+  userId: string,
+  conversationId: string,
+): string {
+  return `${ATTEMPT_PREFIX}${encodeURIComponent(businessId)}:${encodeURIComponent(userId)}:${encodeURIComponent(conversationId)}`;
+}
+
+export function getStoredReplyAttempt(
+  businessId?: string,
+  userId?: string,
+  conversationId?: string,
+): StoredReplyAttempt | null {
+  if (!businessId || !userId || !conversationId) return null;
+  const storage = getSessionStorage();
+  if (!storage) return null;
+  try {
+    const key = getReplyAttemptStorageKey(businessId, userId, conversationId);
+    const raw = storage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (
+      typeof parsed.attemptId !== "string" ||
+      typeof parsed.content !== "string"
+    ) {
+      return null;
+    }
+    return parsed as StoredReplyAttempt;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredReplyAttempt(
+  businessId?: string,
+  userId?: string,
+  conversationId?: string,
+  attempt?: StoredReplyAttempt | null,
+): void {
+  if (!businessId || !userId || !conversationId) return;
+  const storage = getSessionStorage();
+  if (!storage) return;
+  try {
+    const key = getReplyAttemptStorageKey(businessId, userId, conversationId);
+    if (attempt) {
+      storage.setItem(key, JSON.stringify(attempt));
+    } else {
+      storage.removeItem(key);
+    }
+  } catch {
+    // Quota exhaustion or storage write errors are safely ignored
+  }
+}
+
+export function removeStoredReplyAttempt(
+  businessId?: string,
+  userId?: string,
+  conversationId?: string,
+): void {
+  if (!businessId || !userId || !conversationId) return;
+  const storage = getSessionStorage();
+  if (!storage) return;
+  try {
+    const key = getReplyAttemptStorageKey(businessId, userId, conversationId);
     storage.removeItem(key);
   } catch {
     // Safe removal under quota exhaustion or storage errors
@@ -220,6 +301,7 @@ export function clearConversationStorage(): void {
       if (
         key &&
         (key.startsWith(DRAFT_PREFIX) ||
+          key.startsWith(ATTEMPT_PREFIX) ||
           key.startsWith(INBOX_STATE_PREFIX) ||
           key.startsWith(INBOX_SCROLL_PREFIX))
       ) {

@@ -943,6 +943,89 @@ async function main(): Promise<void> {
       "9.3 Submission status is REJECTED in DB",
       rejectedSub?.status === "REJECTED",
     );
+
+    // ── Scenario 10: Disposable-Postgres Race (Two Requests Starting Before Claim Exists) ──
+    console.log(
+      "\n--- Scenario 10: Disposable-Postgres Concurrent Race ---",
+    );
+    const raceSubmissionKey = "sub_race_" + randomUUID();
+    const raceContent = "رسالة سباق التزامن المتوازي الفريدة";
+    const callsBeforeRace = providerCallCount;
+    const staffMessagesBeforeRace = await db.message.count({
+      where: {
+        conversationId: conv1Id,
+        senderType: "STAFF",
+        content: raceContent,
+      },
+    });
+
+    // Controlled fake provider with a brief 50ms wire delay ensuring
+    // Request 1 is actively in-flight with provider when Request 2 attempts claim
+    const controlledFakeApi = {
+      fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+        await new Promise((r) => setTimeout(r, 50));
+        return fakeFetchImpl(input, init);
+      },
+      apiHost: fakeApi.apiHost,
+      credentialsResolver: testCredentialsResolver,
+    };
+
+    // Both requests start concurrently before either claim exists in DB
+    const [raceRes1, raceRes2] = await Promise.all([
+      submitStaffReply({
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        staffUserId: STAFF_USER_A_ID,
+        content: raceContent,
+        clientSubmissionId: raceSubmissionKey,
+        deps: {
+          api: controlledFakeApi,
+          credentialsResolver: testCredentialsResolver,
+        },
+      }),
+      submitStaffReply({
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        staffUserId: STAFF_USER_A_ID,
+        content: raceContent,
+        clientSubmissionId: raceSubmissionKey,
+        deps: {
+          api: controlledFakeApi,
+          credentialsResolver: testCredentialsResolver,
+        },
+      }),
+    ]);
+
+    const callsAfterRace = providerCallCount;
+    const raceCallsIssued = callsAfterRace - callsBeforeRace;
+
+    check(
+      "10.1 Exactly one provider network call made across concurrent race",
+      raceCallsIssued === 1,
+      { raceCallsIssued },
+    );
+
+    const staffMessagesAfterRace = await db.message.count({
+      where: {
+        conversationId: conv1Id,
+        senderType: "STAFF",
+        content: raceContent,
+      },
+    });
+    const newStaffRows = staffMessagesAfterRace - staffMessagesBeforeRace;
+
+    check(
+      "10.2 At most one (exactly 1) accepted STAFF row created in database",
+      newStaffRows === 1,
+      { newStaffRows },
+    );
+
+    const raceOutcomes = [raceRes1.outcome, raceRes2.outcome];
+    check(
+      "10.3 One request accepted and concurrent request handled safely without duplicate send",
+      raceOutcomes.includes("accepted"),
+      { raceRes1, raceRes2 },
+    );
   } finally {
     // Cleanup test data
     console.log("\nCleaning up test data...");

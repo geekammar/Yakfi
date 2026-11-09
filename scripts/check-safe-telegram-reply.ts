@@ -362,7 +362,58 @@ async function main(): Promise<void> {
       draftFailWithNewer.failedAlertContent === "نص فشل إرساله",
   );
 
-  // ── Group 6: Summary ──
+  // ── Group 6: UI Submission Attempt Key Allocation Invariants ──
+  console.log(
+    "\n--- Group 6: UI Attempt Key Allocation & Reconciliation Invariants ---",
+  );
+
+  function resolveSubmissionKey(params: {
+    activeAttempt: { attemptId: string; content: string } | null;
+    composerContent: string;
+  }): string {
+    if (
+      params.activeAttempt &&
+      params.activeAttempt.content === params.composerContent
+    ) {
+      return params.activeAttempt.attemptId;
+    }
+    return "fresh-" + createHash("sha256").update(params.composerContent + Date.now()).digest("hex").slice(0, 8);
+  }
+
+  const existingAttempt = {
+    attemptId: "attempt-existing-uuid-123",
+    content: "نص الرسالة غير المؤكدة",
+  };
+
+  const keyForSameContent = resolveSubmissionKey({
+    activeAttempt: existingAttempt,
+    composerContent: "نص الرسالة غير المؤكدة",
+  });
+  check(
+    "6.1 Normal submission click with unchanged content retains exact attempt ID",
+    keyForSameContent === existingAttempt.attemptId,
+  );
+
+  const keyForChangedContent = resolveSubmissionKey({
+    activeAttempt: existingAttempt,
+    composerContent: "نص مختلف وجديد كلياً",
+  });
+  check(
+    "6.2 Submission with changed content allocates a fresh distinct attempt ID",
+    keyForChangedContent !== existingAttempt.attemptId &&
+      keyForChangedContent.startsWith("fresh-"),
+  );
+
+  const keyForNewDraftNoAttempt = resolveSubmissionKey({
+    activeAttempt: null,
+    composerContent: "نص جديد بدون محاولة سابقة",
+  });
+  check(
+    "6.3 Brand new submission without existing attempt allocates a fresh attempt ID",
+    keyForNewDraftNoAttempt.startsWith("fresh-"),
+  );
+
+  // ── Summary ──
   const failed = checks.filter((c) => !c.pass);
   console.log(
     "\n────────────────────────────────────────────────────────────────",

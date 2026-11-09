@@ -29,11 +29,18 @@
 - **Staff Ownership & Draft Recovery**:
   - Preserves existing staff assignment (`assignedUserId`) without stealing ownership from other staff members.
   - Submitted draft is cleared only upon confirmed provider acceptance (`outcome === "accepted"`).
-  - Newer text typed while reply is pending is preserved.
-  - Failed or unconfirmed drafts remain recoverable in the UI with truthful outcome banners.
+  - Newer text typed while reply is pending is preserved without concatenation.
+  - Attempt identity (`clientSubmissionId`) and submitted snapshot are retained across uncertain outcomes (`unknown`, `in-progress`, lost client responses) and reload/reopen.
+  - Normal submit click after uncertain outcome reuses existing attempt ID so server reconciles without re-dispatching network calls; changing draft allocates a fresh independent attempt ID.
+  - Failed or unconfirmed drafts remain recoverable in the UI with distinct truthful outcome states (`accepted`, `rejected`, `unconfirmed`, `in-progress`).
+- **Release, Rollout & Rollback Governance**:
+  - Automatic Main-to-Vercel Deployment: Pushing/merging to `main` automatically triggers immediate Vercel deployment.
+  - Migration-Before-Activation Gate: The additive migration `20261108200000_safe_telegram_staff_reply_delivery` must be applied and verified on the target database via `.github/workflows/production-db-migrate.yml` before or in lockstep with activating the release commit on Vercel.
+  - Normal Rollback Runbook: Normal rollback reverts the application commit on Vercel (or Git revert on `main`). The additive tables `ConversationDeliveryRoute` and `StaffReplySubmission` are backward-compatible and harmless to older code. Preserving these tables maintains immutable audit logs and delivery proof; **do NOT execute DROP TABLE** during normal rollback.
 - **Verification Suite Evidence**:
-  - Offline unit suite `scripts/check-safe-telegram-reply.ts` (22 checks).
-  - Disposable PostgreSQL integration suite `scripts/check-safe-telegram-reply-db.ts` (9 scenarios with physical provider call count assertions).
+  - Offline unit suite `scripts/check-safe-telegram-reply.ts` (25 checks passing).
+  - Disposable PostgreSQL integration suite `scripts/check-safe-telegram-reply-db.ts` (10 scenarios including concurrent race with controlled fake provider, asserting exactly 1 provider network call and at most 1 accepted STAFF row).
+  - Component unit suite `src/features/conversations/components/conversation-detail.test.tsx` (29 tests passing, covering real action/UI boundary, uncertain outcome recovery, retry after reload, and newer draft independence).
   - Wired into `.github/workflows/pr-validation.yml`.
 
 **Product version: v0.79.7 (main baseline; merged PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.6 (commit `4644f37`). Branch: `fix/unknown-information-handoff`. Merged PR: [#74](https://github.com/geekammar/Yakfi/pull/74). Commit `8d12aa2`.
