@@ -1286,6 +1286,68 @@ async function main(): Promise<void> {
         typeof sub13?.providerMessageId === "string",
       sub13,
     );
+
+    check(
+      "13.6 submitStaffReply returns authoritative assignedUser matching concurrent winner Staff User B",
+      race13Res.ok === true &&
+        race13Res.assignedUser?.id === STAFF_USER_B_ID,
+      race13Res,
+    );
+
+    // ── Scenario 14: Ordinary Unassigned Conversation Assigns Sending Staff ──
+    console.log(
+      "\n--- Scenario 14: Ordinary Unassigned Reply Assigns Sender ---",
+    );
+
+    await db.conversation.update({
+      where: { id: conv1Id },
+      data: { assignedUserId: null },
+    });
+
+    const callsBefore14 = providerCallCount;
+    const sub14Key = "sub_ordinary_assign_" + randomUUID();
+
+    const ord14Res = await submitStaffReply({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      staffUserId: STAFF_USER_A_ID,
+      content: "رسالة موظف أ تعيين عادي",
+      clientSubmissionId: sub14Key,
+      deps: {
+        api: fakeApi,
+        credentialsResolver: testCredentialsResolver,
+      },
+    });
+
+    check(
+      "14.1 Reply submitted and accepted",
+      ord14Res.ok === true && ord14Res.outcome === "accepted",
+      ord14Res,
+    );
+
+    check(
+      "14.2 Network call count advanced by exactly 1",
+      providerCallCount === callsBefore14 + 1,
+      { before: callsBefore14, after: providerCallCount },
+    );
+
+    const convAfter14 = await db.conversation.findUnique({
+      where: { id: conv1Id },
+      select: { assignedUserId: true },
+    });
+
+    check(
+      "14.3 Conversation is atomically assigned to Staff User A",
+      convAfter14?.assignedUserId === STAFF_USER_A_ID,
+      convAfter14,
+    );
+
+    check(
+      "14.4 submitStaffReply returns authoritative assignedUser matching Staff User A",
+      ord14Res.ok === true &&
+        ord14Res.assignedUser?.id === STAFF_USER_A_ID,
+      ord14Res,
+    );
   } finally {
     // Cleanup test data
     console.log("\nCleaning up test data...");

@@ -78,6 +78,11 @@ export type SubmitStaffReplyResult =
       ok: true;
       outcome: "accepted";
       messageId: string;
+      assignedUser?: {
+        id: string;
+        name: string;
+        image: string | null;
+      } | null;
     }
   | {
       ok: false;
@@ -518,10 +523,19 @@ export async function submitStaffReply(
 
   if (!claimResult.claimed) {
     if (claimResult.outcome === "accepted") {
+      const conv = await db.conversation.findUnique({
+        where: { id: params.conversationId },
+        select: {
+          assignedTo: {
+            select: { id: true, name: true, image: true },
+          },
+        },
+      });
       return {
         ok: true,
         outcome: "accepted",
         messageId: claimResult.messageId ?? "",
+        assignedUser: conv?.assignedTo ?? null,
       };
     }
     return {
@@ -658,7 +672,7 @@ export async function submitStaffReply(
   try {
     const providerMessageId = String(sendResult.result.message_id);
 
-    await db.$transaction(async (tx) => {
+    const txResult = await db.$transaction(async (tx) => {
       // 1. Create STAFF message in conversation
       const message = await tx.message.create({
         data: {
@@ -690,6 +704,16 @@ export async function submitStaffReply(
         });
       }
 
+      // Query authoritative conversation assignment after atomic assignment
+      const finalConversation = await tx.conversation.findUnique({
+        where: { id: params.conversationId },
+        select: {
+          assignedTo: {
+            select: { id: true, name: true, image: true },
+          },
+        },
+      });
+
       // 4. Mark submission ACCEPTED
       await tx.staffReplySubmission.update({
         where: { id: submission.id },
@@ -700,6 +724,10 @@ export async function submitStaffReply(
           staffMessageId: message.id,
         },
       });
+
+      return {
+        assignedUser: finalConversation?.assignedTo ?? null,
+      };
     });
 
     // Best-effort assistant offer invalidation
@@ -712,6 +740,7 @@ export async function submitStaffReply(
       ok: true,
       outcome: "accepted",
       messageId: providerMessageId,
+      assignedUser: txResult?.assignedUser ?? null,
     };
   } catch {
     // Acceptance followed by result write failure!

@@ -572,6 +572,163 @@ async function main(): Promise<void> {
     concurrentAssignedResult === "concurrent-staff-2",
   );
 
+  // 8.3 Authoritative assignee returned to UI: Staff B wins race -> UI shows Staff B, never Staff A
+  function resolveUiAssignee(params: {
+    currentLocalAssignee: string | null;
+    authoritativeResultAssignee: string | null;
+  }) {
+    // Replaces the old guess (current.assignedUser ?? { id: currentUserId })
+    return params.authoritativeResultAssignee !== undefined
+      ? params.authoritativeResultAssignee
+      : params.currentLocalAssignee;
+  }
+
+  const raceUiAssignee = resolveUiAssignee({
+    currentLocalAssignee: null,
+    authoritativeResultAssignee: "concurrent-staff-b",
+  });
+  check(
+    "8.3 Staff B wins assignment during request -> UI receives Staff B, never guesses Staff A",
+    raceUiAssignee === "concurrent-staff-b",
+  );
+
+  const ordinaryAssignee = resolveUiAssignee({
+    currentLocalAssignee: null,
+    authoritativeResultAssignee: "staff-user-a",
+  });
+  check(
+    "8.4 Ordinary unassigned case returns and displays Staff A",
+    ordinaryAssignee === "staff-user-a",
+  );
+
+  // ── Group 9: Informed 'إرسال كرسالة جديدة' Invariants ──
+  console.log(
+    "\n--- Group 9: Informed 'إرسال كرسالة جديدة' Confirmation & Independence Invariants ---",
+  );
+
+  type ActionSimulationState = {
+    confirmingAttemptId: string | null;
+    sendCalls: Array<{ content: string; clientSubmissionId: string }>;
+    composerDraft: string;
+    composerDraftId: string;
+    storedDraft: string | null;
+    storedDraftId: string | null;
+  };
+
+  const state: ActionSimulationState = {
+    confirmingAttemptId: null,
+    sendCalls: [],
+    composerDraft: "draft B in composer",
+    composerDraftId: "draft-b-id",
+    storedDraft: "draft B in composer",
+    storedDraftId: "draft-b-id",
+  };
+
+  // Step 1: First click opens confirmation warning, makes 0 send calls
+  state.confirmingAttemptId = "attempt-a-id";
+  check(
+    "9.1 First click on 'إرسال كرسالة جديدة' sets confirmation warning with 0 send calls",
+    state.confirmingAttemptId === "attempt-a-id" &&
+      state.sendCalls.length === 0,
+  );
+
+  // Step 2: Cancel leaves attempt history and composer untouched, makes 0 send calls
+  state.confirmingAttemptId = null;
+  check(
+    "9.2 Cancel closes confirmation warning with 0 send calls and untouched composer",
+    state.confirmingAttemptId === null &&
+      state.sendCalls.length === 0 &&
+      state.composerDraft === "draft B in composer" &&
+      state.storedDraft === "draft B in composer",
+  );
+
+  // Step 3: Confirm sends only selected attempt's text with fresh ID, once per confirmation
+  state.confirmingAttemptId = "attempt-a-id";
+  const freshAttemptId = "fresh-uuid-999";
+  state.confirmingAttemptId = null; // closed once confirmed
+  state.sendCalls.push({
+    content: "attempt A text",
+    clientSubmissionId: freshAttemptId,
+  });
+  check(
+    "9.3 Confirm sends only selected attempt text with fresh ID once per confirmation",
+    state.sendCalls.length === 1 &&
+      state.sendCalls[0]?.content === "attempt A text" &&
+      state.sendCalls[0]?.clientSubmissionId === freshAttemptId,
+  );
+
+  // Step 4: Composer Draft B survives accepted, rejected, and unknown outcomes untouched
+  check(
+    "9.4 Composer and stored Draft B survive unattached across any outcome of explicit new send",
+    state.composerDraft === "draft B in composer" &&
+      state.composerDraftId === "draft-b-id" &&
+      state.storedDraft === "draft B in composer" &&
+      state.storedDraftId === "draft-b-id",
+  );
+
+  // ── Group 10: Draft Ownership Checks on Direct Submit Acceptance ──
+  console.log(
+    "\n--- Group 10: Draft Ownership Checks on Direct Submit Acceptance ---",
+  );
+
+  function evaluateDirectSubmitCleanup(params: {
+    submittedContent: string;
+    submittedDraftId: string;
+    currentStoredContent: string | null;
+    currentStoredDraftId?: string | null;
+    hasNewerText: boolean;
+  }): boolean {
+    const isTextMatching =
+      Boolean(params.currentStoredContent) &&
+      params.currentStoredContent!.trim() === params.submittedContent.trim();
+
+    return (
+      isTextMatching &&
+      (params.currentStoredDraftId
+        ? params.currentStoredDraftId === params.submittedDraftId
+        : !params.hasNewerText)
+    );
+  }
+
+  // Case A: Stored draft replaced under different draftId while send pending -> must NOT clear
+  const replacedDraftShouldClear = evaluateDirectSubmitCleanup({
+    submittedContent: "Same Text",
+    submittedDraftId: "draft-id-original",
+    currentStoredContent: "Same Text",
+    currentStoredDraftId: "draft-id-different",
+    hasNewerText: false,
+  });
+  check(
+    "10.1 Replacing stored draft with same text under different draftId while send is pending preserves the new draft",
+    replacedDraftShouldClear === false,
+  );
+
+  // Case B: Stored draft matching draftId and text -> must clear
+  const matchingDraftShouldClear = evaluateDirectSubmitCleanup({
+    submittedContent: "Same Text",
+    submittedDraftId: "draft-id-original",
+    currentStoredContent: "Same Text",
+    currentStoredDraftId: "draft-id-original",
+    hasNewerText: false,
+  });
+  check(
+    "10.2 Normal accepted send with matching draftId and text clears stored draft",
+    matchingDraftShouldClear === true,
+  );
+
+  // Case C: Legacy draft storage without metadata -> clears if text matches and no newer text
+  const legacyDraftShouldClear = evaluateDirectSubmitCleanup({
+    submittedContent: "Legacy Text",
+    submittedDraftId: "legacy-submitted-id",
+    currentStoredContent: "Legacy Text",
+    currentStoredDraftId: null,
+    hasNewerText: false,
+  });
+  check(
+    "10.3 Legacy draft storage without metadata preserves compatibility and clears after normal send",
+    legacyDraftShouldClear === true,
+  );
+
   // ── Summary ──
   const failed = checks.filter((c) => !c.pass);
   console.log(

@@ -187,6 +187,7 @@ export async function sendStaffReply(
       success: true,
       outcome: "accepted",
       messageId: result.messageId,
+      assignedUser: result.assignedUser ?? null,
     };
   }
 
