@@ -388,27 +388,26 @@ export function ConversationDetail({
       effectiveUserId,
       data.id,
     );
-    if (savedDraft) {
-      setReply(savedDraft);
-    }
 
     const savedAttempt = getStoredReplyAttempt(
       effectiveBusinessId,
       effectiveUserId,
       data.id,
     );
+
+    let attemptState: StoredReplyAttempt | null = null;
     if (savedAttempt) {
       // If was pending when page was reloaded or closed, the client response was lost.
       // Treat truthfully as unknown (unconfirmed outcome) without auto-resend.
       const resolvedStatus =
         savedAttempt.status === "pending" ? "unknown" : savedAttempt.status;
-      const attemptState: StoredReplyAttempt = {
+      attemptState = {
         ...savedAttempt,
         status: resolvedStatus,
         message:
           savedAttempt.status === "pending"
             ? "انقطعت الاستجابة قبل تأكيد حالة الرد"
-            : (savedAttempt.message || "حالة الإرسال غير مؤكدة"),
+            : savedAttempt.message || "حالة الإرسال غير مؤكدة",
       };
       if (savedAttempt.status === "pending") {
         setStoredReplyAttempt(
@@ -418,12 +417,20 @@ export function ConversationDetail({
           attemptState,
         );
       }
-      setActiveAttempt(attemptState);
-      // If textarea has no draft, make submitted text available in textarea
-      if (!savedDraft && attemptState.content) {
-        setReply(attemptState.content);
-      }
     }
+
+    queueMicrotask(() => {
+      if (savedDraft) {
+        setReply(savedDraft);
+      }
+      if (attemptState) {
+        setActiveAttempt(attemptState);
+        // If textarea has no draft, make submitted text available in textarea
+        if (!savedDraft && attemptState.content) {
+          setReply(attemptState.content);
+        }
+      }
+    });
   }, [effectiveBusinessId, effectiveUserId, data.id]);
 
   const handleReplyTextChange = (text: string) => {
@@ -786,11 +793,7 @@ export function ConversationDetail({
       };
       setActiveAttempt(rejectedAttempt);
       if (effectiveBusinessId && effectiveUserId) {
-        removeStoredReplyAttempt(
-          effectiveBusinessId,
-          effectiveUserId,
-          data.id,
-        );
+        removeStoredReplyAttempt(effectiveBusinessId, effectiveUserId, data.id);
       }
 
       if (!hasNewerText && submission?.rawDraft) {
@@ -1020,7 +1023,9 @@ export function ConversationDetail({
                 <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
                   <AlertCircleIcon className="size-4 shrink-0 text-warning" />
                   <span className="truncate">
-                    حالة الإرسال غير مؤكدة: &ldquo;{activeAttempt.content.trim()}&rdquo;{activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                    حالة الإرسال غير مؤكدة: &ldquo;
+                    {activeAttempt.content.trim()}&rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5 ms-auto">
@@ -1057,7 +1062,9 @@ export function ConversationDetail({
                 <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
                   <LoaderCircleIcon className="size-4 shrink-0 animate-spin" />
                   <span className="truncate">
-                    الطلب قيد المعالجة: &ldquo;{activeAttempt.content.trim()}&rdquo;{activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                    الطلب قيد المعالجة: &ldquo;{activeAttempt.content.trim()}
+                    &rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5 ms-auto">
@@ -1094,7 +1101,8 @@ export function ConversationDetail({
                 <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
                   <AlertCircleIcon className="size-4 shrink-0" />
                   <span className="truncate">
-                    تم رفض الإرسال: &ldquo;{activeAttempt.content.trim()}&rdquo;{activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                    تم رفض الإرسال: &ldquo;{activeAttempt.content.trim()}&rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
                   </span>
                 </div>
                 <Button
@@ -1110,7 +1118,8 @@ export function ConversationDetail({
               </div>
             ) : null}
 
-            {failedSubmission && (!activeAttempt || activeAttempt.status !== "unknown") ? (
+            {failedSubmission &&
+            (!activeAttempt || activeAttempt.status !== "unknown") ? (
               <div
                 role="alert"
                 aria-label="تنبيه تعذر إرسال الرد"

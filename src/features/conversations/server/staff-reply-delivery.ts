@@ -407,7 +407,8 @@ export async function submitStaffReply(
   } catch {
     // Network / unhandled client failure before or during transmission.
     // Safe typed error: never leak raw transport/network/credential details.
-    const safeErrorMsg = "تعذر تأكيد تسليم الرد بسبب انقطاع الاتصال بمزود الخدمة";
+    const safeErrorMsg =
+      "تعذر تأكيد تسليم الرد بسبب انقطاع الاتصال بمزود الخدمة";
     await db.staffReplySubmission.update({
       where: { id: submission.id },
       data: {

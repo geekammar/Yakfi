@@ -945,9 +945,7 @@ async function main(): Promise<void> {
     );
 
     // ── Scenario 10: Disposable-Postgres Race (Two Requests Starting Before Claim Exists) ──
-    console.log(
-      "\n--- Scenario 10: Disposable-Postgres Concurrent Race ---",
-    );
+    console.log("\n--- Scenario 10: Disposable-Postgres Concurrent Race ---");
     const raceSubmissionKey = "sub_race_" + randomUUID();
     const raceContent = "رسالة سباق التزامن المتوازي الفريدة";
     const callsBeforeRace = providerCallCount;

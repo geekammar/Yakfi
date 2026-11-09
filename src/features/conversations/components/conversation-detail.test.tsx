@@ -1038,9 +1038,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
           'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
         ),
       ).toBeNull();
-      expect(
-        getStoredReplyAttempt(testBiz, userA, mockData.id),
-      ).toBeNull();
+      expect(getStoredReplyAttempt(testBiz, userA, mockData.id)).toBeNull();
 
       // Accepted feedback is visible
       const acceptedStatus = container.querySelector(
@@ -1092,7 +1090,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       });
 
       expect(sendStaffReply).toHaveBeenCalledTimes(1);
-      expect(sendStaffReply.mock.calls[0]![0].clientSubmissionId).toBe(activeId);
+      expect(sendStaffReply.mock.calls[0]![0].clientSubmissionId).toBe(
+        activeId,
+      );
 
       await act(async () => {
         resolvePart1({

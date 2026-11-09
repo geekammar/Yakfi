@@ -377,7 +377,13 @@ async function main(): Promise<void> {
     ) {
       return params.activeAttempt.attemptId;
     }
-    return "fresh-" + createHash("sha256").update(params.composerContent + Date.now()).digest("hex").slice(0, 8);
+    return (
+      "fresh-" +
+      createHash("sha256")
+        .update(params.composerContent + Date.now())
+        .digest("hex")
+        .slice(0, 8)
+    );
   }
 
   const existingAttempt = {
