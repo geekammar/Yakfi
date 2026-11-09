@@ -1132,9 +1132,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       );
 
       // Confirm button sends with a different ID
-      const confirmBtn = Array.from(confirmAlert?.querySelectorAll("button") ?? []).find(
-        (b) => b.textContent?.includes("تأكيد الإرسال"),
-      );
+      const confirmBtn = Array.from(
+        confirmAlert?.querySelectorAll("button") ?? [],
+      ).find((b) => b.textContent?.includes("تأكيد الإرسال"));
       expect(confirmBtn).not.toBeNull();
 
       await act(async () => {
@@ -1796,10 +1796,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         businessId: testBiz,
         currentUserId: userA,
         assignedUser: null,
-        team: [
-          { id: userA, name: "الموظف أ", image: null },
-          staffBUser,
-        ],
+        team: [{ id: userA, name: "الموظف أ", image: null }, staffBUser],
       };
 
       const root = createRoot(container);
@@ -1855,7 +1852,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(updatedBadge?.textContent).toContain("الموظف ب");
       expect(updatedBadge?.textContent).not.toContain("أنت");
 
-      const select = container.querySelector("#conversation-assignee") as HTMLElement;
+      const select = container.querySelector(
+        "#conversation-assignee",
+      ) as HTMLElement;
       expect(select?.textContent).toContain("الموظف ب");
     });
 
@@ -1878,10 +1877,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         businessId: testBiz,
         currentUserId: userA,
         assignedUser: null,
-        team: [
-          staffAUser,
-          { id: userB, name: "الموظف ب", image: null },
-        ],
+        team: [staffAUser, { id: userB, name: "الموظف ب", image: null }],
       };
 
       const root = createRoot(container);
@@ -1930,7 +1926,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'span[aria-label^="المسؤول الحالي"]',
       );
       expect(updatedBadge).not.toBeNull();
-      expect(updatedBadge?.getAttribute("aria-label")).toBe("المسؤول الحالي: أنت");
+      expect(updatedBadge?.getAttribute("aria-label")).toBe(
+        "المسؤول الحالي: أنت",
+      );
       expect(updatedBadge?.textContent).toContain("أنت");
     });
 
@@ -2021,7 +2019,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         draftBId,
       );
       // Attempt A is untouched
-      expect(getStoredReplyAttempts(testBiz, userA, mockData.id).length).toBe(1);
+      expect(getStoredReplyAttempts(testBiz, userA, mockData.id).length).toBe(
+        1,
+      );
 
       // 3. CONFIRM: Re-open confirmation and confirm send
       const forceNewBtnAgain = Array.from(
@@ -2041,8 +2041,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       ).find((b) => b.textContent?.includes("تأكيد الإرسال"));
       expect(confirmBtn).not.toBeNull();
 
-      let resolveConfirmedSend: (value: StaffReplyActionResult) => void =
-        () => {};
+      let resolveConfirmedSend: (
+        value: StaffReplyActionResult,
+      ) => void = () => {};
       const confirmedSendPromise = new Promise<StaffReplyActionResult>(
         (res) => {
           resolveConfirmedSend = res;
@@ -2192,9 +2193,9 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       // Stored draft MUST SURVIVE because draftId does NOT match the submitted draft!
       expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(sharedContent);
-      expect(
-        getStoredDraftMeta(testBiz, userA, mockData.id)?.draftId,
-      ).toBe(differentDraftId);
+      expect(getStoredDraftMeta(testBiz, userA, mockData.id)?.draftId).toBe(
+        differentDraftId,
+      );
 
       // 4. Reload: Unmount and remount -> prove new draft survives
       await act(async () => {

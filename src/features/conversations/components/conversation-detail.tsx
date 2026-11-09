@@ -367,8 +367,9 @@ export function ConversationDetail({
   );
   const [attempts, setAttempts] = useState<StoredReplyAttempt[]>([]);
   const [acceptedNotice, setAcceptedNotice] = useState<string | null>(null);
-  const [confirmingNewSendAttemptId, setConfirmingNewSendAttemptId] =
-    useState<string | null>(null);
+  const [confirmingNewSendAttemptId, setConfirmingNewSendAttemptId] = useState<
+    string | null
+  >(null);
 
   const activeAttempt = attempts.find((a) => !a.dismissed) ?? null;
 
@@ -917,7 +918,9 @@ export function ConversationDetail({
           dismissed: false,
         };
         setAttempts((current) => {
-          const filtered = current.filter((a) => a.attemptId !== freshAttemptId);
+          const filtered = current.filter(
+            (a) => a.attemptId !== freshAttemptId,
+          );
           return [...filtered, unknownAttempt];
         });
         if (effectiveBusinessId && effectiveUserId) {
@@ -943,7 +946,9 @@ export function ConversationDetail({
           dismissed: false,
         };
         setAttempts((current) => {
-          const filtered = current.filter((a) => a.attemptId !== freshAttemptId);
+          const filtered = current.filter(
+            (a) => a.attemptId !== freshAttemptId,
+          );
           return [...filtered, inProgressAttempt];
         });
         if (effectiveBusinessId && effectiveUserId) {
@@ -1162,11 +1167,11 @@ export function ConversationDetail({
       const storedIsNewer =
         Boolean(
           currentStoredMeta?.updatedAt &&
-            currentStoredMeta.updatedAt > submittedTimestamp,
+          currentStoredMeta.updatedAt > submittedTimestamp,
         ) ||
         Boolean(
           currentStoredMeta?.draftId &&
-            currentStoredMeta.draftId !== submittedDraftId,
+          currentStoredMeta.draftId !== submittedDraftId,
         );
 
       if (result.outcome === "unknown") {
@@ -1562,7 +1567,8 @@ export function ConversationDetail({
                     className="w-full mt-2 rounded-lg border border-warning/50 bg-background/90 p-2.5 text-xs space-y-2"
                   >
                     <p className="font-medium text-warning-foreground">
-                      قد يكون الرد السابق قد وصل إلى العميل بالفعل. هل أنت متأكد من رغبتك في إرسال هذا الرد كرسالة جديدة؟
+                      قد يكون الرد السابق قد وصل إلى العميل بالفعل. هل أنت متأكد
+                      من رغبتك في إرسال هذا الرد كرسالة جديدة؟
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
@@ -1597,7 +1603,9 @@ export function ConversationDetail({
                       size="sm"
                       className="h-11 min-h-[44px] px-3 text-xs"
                       disabled={isPending}
-                      onClick={() => handleRetryAttempt(activeAttempt.attemptId)}
+                      onClick={() =>
+                        handleRetryAttempt(activeAttempt.attemptId)
+                      }
                     >
                       إعادة التحقق من الإرسال
                     </Button>

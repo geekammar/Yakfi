@@ -1289,8 +1289,7 @@ async function main(): Promise<void> {
 
     check(
       "13.6 submitStaffReply returns authoritative assignedUser matching concurrent winner Staff User B",
-      race13Res.ok === true &&
-        race13Res.assignedUser?.id === STAFF_USER_B_ID,
+      race13Res.ok === true && race13Res.assignedUser?.id === STAFF_USER_B_ID,
       race13Res,
     );
 
@@ -1344,8 +1343,7 @@ async function main(): Promise<void> {
 
     check(
       "14.4 submitStaffReply returns authoritative assignedUser matching Staff User A",
-      ord14Res.ok === true &&
-        ord14Res.assignedUser?.id === STAFF_USER_A_ID,
+      ord14Res.ok === true && ord14Res.assignedUser?.id === STAFF_USER_A_ID,
       ord14Res,
     );
   } finally {
