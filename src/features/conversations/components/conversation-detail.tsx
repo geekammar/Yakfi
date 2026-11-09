@@ -2,6 +2,7 @@
 
 import {
   assignConversation,
+  checkStaffReplyStatus,
   sendStaffReply,
   transitionConversation,
   updateAiSummary,
@@ -21,6 +22,7 @@ import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/han
 import type {
   ConversationDetailData,
   StaffReplyActionResult,
+  StaffReplyStatusActionResult,
 } from "@/features/conversations/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -425,10 +427,6 @@ export function ConversationDetail({
       }
       if (attemptState) {
         setActiveAttempt(attemptState);
-        // If textarea has no draft, make submitted text available in textarea
-        if (!savedDraft && attemptState.content) {
-          setReply(attemptState.content);
-        }
       }
     });
   }, [effectiveBusinessId, effectiveUserId, data.id]);
@@ -551,27 +549,118 @@ export function ConversationDetail({
 
   function handleRetryAttempt() {
     if (!activeAttempt || isPending) return;
-    executeSubmission(activeAttempt.content, activeAttempt.attemptId);
+    const attempt = activeAttempt;
+
+    setError(null);
+    setAcceptedNotice(null);
+
+    startTransition(async () => {
+      let result: StaffReplyStatusActionResult;
+      try {
+        result = await checkStaffReplyStatus({
+          id: data.id,
+          clientSubmissionId: attempt.attemptId,
+        });
+      } catch {
+        result = {
+          success: false,
+          status: "unknown",
+          message: "انقطع الاتصال بالخادم أثناء التحقق من حالة الرد",
+        };
+      }
+
+      if (result.status === "accepted") {
+        setActiveAttempt(null);
+        if (effectiveBusinessId && effectiveUserId) {
+          removeStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+          );
+          // Only clear stored draft if it matches the exact submitted content of attempt
+          const currentStoredDraft = getStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+          );
+          if (
+            currentStoredDraft &&
+            currentStoredDraft.trim() === attempt.content.trim()
+          ) {
+            removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
+          }
+        }
+        // Only clear composer reply if it matches the exact submitted content of attempt
+        setReply((current) =>
+          current.trim() === attempt.content.trim() ? "" : current,
+        );
+
+        setAcceptedNotice("تم تأكيد قبول الإرسال من مزود الخدمة");
+        return;
+      }
+
+      if (result.status === "in-progress") {
+        const inProgressAttempt: StoredReplyAttempt = {
+          ...attempt,
+          status: "in-progress",
+          message: result.message || "الطلب قيد المعالجة حالياً",
+          code: result.code,
+        };
+        setActiveAttempt(inProgressAttempt);
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            inProgressAttempt,
+          );
+        }
+        return;
+      }
+
+      if (result.status === "rejected") {
+        const rejectedAttempt: StoredReplyAttempt = {
+          ...attempt,
+          status: "rejected",
+          message: result.message || "تم رفض الإرسال من مزود الخدمة",
+          code: result.code,
+        };
+        setActiveAttempt(rejectedAttempt);
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            rejectedAttempt,
+          );
+        }
+        return;
+      }
+
+      // unknown / not found
+      const unknownAttempt: StoredReplyAttempt = {
+        ...attempt,
+        status: "unknown",
+        message: result.message || "حالة الإرسال غير مؤكدة",
+        code: result.code,
+      };
+      setActiveAttempt(unknownAttempt);
+      if (effectiveBusinessId && effectiveUserId) {
+        setStoredReplyAttempt(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          unknownAttempt,
+        );
+      }
+    });
   }
 
   function handleDismissAttempt() {
     if (!activeAttempt) return;
-    const abandoned = activeAttempt;
     setActiveAttempt(null);
     if (effectiveBusinessId && effectiveUserId) {
       removeStoredReplyAttempt(effectiveBusinessId, effectiveUserId, data.id);
-    }
-    // If textarea is currently empty, preserve abandoned text so it's not lost
-    if (!reply.trim()) {
-      setReply(abandoned.content);
-      if (effectiveBusinessId && effectiveUserId) {
-        setStoredDraft(
-          effectiveBusinessId,
-          effectiveUserId,
-          data.id,
-          abandoned.content,
-        );
-      }
     }
   }
 
@@ -679,10 +768,22 @@ export function ConversationDetail({
             effectiveUserId,
             data.id,
           );
-          if (!hasNewerText) {
+          const currentStoredDraft = getStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+          );
+          if (
+            !hasNewerText &&
+            currentStoredDraft &&
+            currentStoredDraft.trim() === content.trim()
+          ) {
             removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
           }
         }
+        setReply((current) =>
+          !hasNewerText && current.trim() === content.trim() ? "" : current,
+        );
         setAcceptedNotice("تم إرسال الرد بنجاح");
 
         if (result.messageId) {

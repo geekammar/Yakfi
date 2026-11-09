@@ -26,6 +26,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import {
+  lookupStaffReplyStatus,
   resolveConversationRoute,
   submitStaffReply,
 } from "@/features/conversations/server/staff-reply-delivery";
@@ -1023,6 +1024,181 @@ async function main(): Promise<void> {
       "10.3 One request accepted and concurrent request handled safely without duplicate send",
       raceOutcomes.includes("accepted"),
       { raceRes1, raceRes2 },
+    );
+
+    // ────────────────────────────────────────────────────────────────
+    // Scenario 11: Read-Only Recheck with Missing Claim (Zero DB Writes & Zero Provider Calls)
+    // ────────────────────────────────────────────────────────────────
+    console.log(
+      "\n▶ Scenario 11: Read-Only Recheck with Missing Claim (0 DB writes, 0 provider calls)",
+    );
+
+    const submissionsCountBefore11 = await db.staffReplySubmission.count();
+    const messagesCountBefore11 = await db.message.count();
+    const convBefore11 = await db.conversation.findUnique({
+      where: { id: conv1Id },
+      select: { status: true, assignedUserId: true, lastMessageAt: true },
+    });
+    const fakeApiCallsBefore11 = providerCallCount;
+
+    const missingKey = "missing-attempt-" + randomUUID();
+    const missingLookupResult = await lookupStaffReplyStatus({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: missingKey,
+    });
+
+    check(
+      "11.1 Missing claim returns found: false and NO_CLAIM_FOUND",
+      !missingLookupResult.found &&
+        missingLookupResult.code === "NO_CLAIM_FOUND",
+      missingLookupResult,
+    );
+
+    const submissionsCountAfter11 = await db.staffReplySubmission.count();
+    const messagesCountAfter11 = await db.message.count();
+    const convAfter11 = await db.conversation.findUnique({
+      where: { id: conv1Id },
+      select: { status: true, assignedUserId: true, lastMessageAt: true },
+    });
+    const fakeApiCallsAfter11 = providerCallCount;
+
+    check(
+      "11.2 Recheck missing claim performs ZERO provider calls",
+      fakeApiCallsAfter11 === fakeApiCallsBefore11,
+      { before: fakeApiCallsBefore11, after: fakeApiCallsAfter11 },
+    );
+
+    check(
+      "11.3 Recheck missing claim performs ZERO DB writes to submissions, messages, or conversation",
+      submissionsCountAfter11 === submissionsCountBefore11 &&
+        messagesCountAfter11 === messagesCountBefore11 &&
+        convAfter11?.status === convBefore11?.status &&
+        convAfter11?.assignedUserId === convBefore11?.assignedUserId,
+      {
+        submissionsDiff: submissionsCountAfter11 - submissionsCountBefore11,
+        messagesDiff: messagesCountAfter11 - messagesCountBefore11,
+      },
+    );
+
+    // ────────────────────────────────────────────────────────────────
+    // Scenario 12: Read-Only Recheck of Active, Stale, and Accepted Claims (Bounded Window & Tenant Isolation)
+    // ────────────────────────────────────────────────────────────────
+    console.log(
+      "\n▶ Scenario 12: Read-Only Recheck of Active, Stale, and Accepted Claims",
+    );
+
+    const fixedNow = new Date("2026-11-09T14:00:00.000Z");
+
+    // 1. Active claim within window (<60s)
+    const activeKey = "active-attempt-" + randomUUID();
+    await db.staffReplySubmission.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        submissionKey: activeKey,
+        payloadHash: createHash("sha256").update("active text").digest("hex"),
+        content: "active text",
+        status: "CLAIMED",
+        provider: "telegram",
+        claimedAt: new Date(fixedNow.getTime() - 15_000), // 15s ago
+      },
+    });
+
+    const activeLookup = await lookupStaffReplyStatus({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: activeKey,
+      deps: { now: () => fixedNow },
+    });
+
+    check(
+      "12.1 Active claim (<60s) evaluated as in-progress",
+      activeLookup.found && activeLookup.status === "in-progress",
+      activeLookup,
+    );
+
+    // 2. Stale/aged claim (>60s)
+    const staleKey = "stale-attempt-" + randomUUID();
+    await db.staffReplySubmission.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        submissionKey: staleKey,
+        payloadHash: createHash("sha256").update("stale text").digest("hex"),
+        content: "stale text",
+        status: "CLAIMED",
+        provider: "telegram",
+        claimedAt: new Date(fixedNow.getTime() - 75_000), // 75s ago
+      },
+    });
+
+    const staleLookup = await lookupStaffReplyStatus({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: staleKey,
+      deps: { now: () => fixedNow },
+    });
+
+    check(
+      "12.2 Stale claim (>60s) evaluated as unknown (ABANDONED_CLAIM) without allowing redispatch",
+      staleLookup.found &&
+        staleLookup.status === "unknown" &&
+        staleLookup.code === "ABANDONED_CLAIM",
+      staleLookup,
+    );
+
+    // 3. Accepted claim
+    const acceptedKey = "accepted-attempt-" + randomUUID();
+    await db.staffReplySubmission.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        submissionKey: acceptedKey,
+        payloadHash: createHash("sha256").update("accepted text").digest("hex"),
+        content: "accepted text",
+        status: "ACCEPTED",
+        provider: "telegram",
+        providerMessageId: "tg-msg-accepted-12345",
+        completedAt: fixedNow,
+      },
+    });
+
+    const acceptedLookup = await lookupStaffReplyStatus({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: acceptedKey,
+      deps: { now: () => fixedNow },
+    });
+
+    check(
+      "12.3 Accepted claim evaluated as accepted with messageId",
+      acceptedLookup.found &&
+        acceptedLookup.status === "accepted" &&
+        acceptedLookup.messageId === "tg-msg-accepted-12345",
+      acceptedLookup,
+    );
+
+    // 4. Tenant isolation: foreign business cannot find accepted claim
+    const foreignLookup = await lookupStaffReplyStatus({
+      businessId: FOREIGN_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: acceptedKey,
+      deps: { now: () => fixedNow },
+    });
+
+    check(
+      "12.4 Tenant isolation: lookup with foreign businessId fails closed (NO_CLAIM_FOUND)",
+      !foreignLookup.found && foreignLookup.code === "NO_CLAIM_FOUND",
+      foreignLookup,
+    );
+
+    // Assert zero provider network calls during all status lookups
+    const fakeApiFinal = providerCallCount;
+    check(
+      "12.5 Zero provider network calls issued during all status reconciliations",
+      fakeApiFinal === fakeApiCallsAfter11,
+      { before: fakeApiCallsAfter11, final: fakeApiFinal },
     );
   } finally {
     // Cleanup test data

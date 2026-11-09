@@ -60,6 +60,7 @@ export type StaffReplyDeliveryDeps = {
   >;
   credentialsResolver?: CredentialsResolver;
   now?: () => Date;
+  claimWindowMs?: number;
   onBeforeResultWrite?: () => Promise<void> | void;
 };
 
@@ -209,16 +210,38 @@ export type SubmissionClaimResult =
     };
 
 /**
+ * Bounded status window for an active in-flight staff reply claim.
+ *
+ * In the send path, an HTTP call to Telegram Bot API plus retry/transport
+ * resolution finishes well within 30-60 seconds. A claim in `CLAIMED` status
+ * within this window is actively being processed (`in-progress`).
+ *
+ * If a process crashed, timed out, or dropped connection without persisting a
+ * terminal outcome, claims older than this window are considered aged/abandoned.
+ * They are presented truthfully as `unknown` (unconfirmed outcome) without
+ * allowing redispatch, preserving pre-dispatch uniqueness and preventing duplicate sends.
+ */
+export const STAFF_REPLY_CLAIM_WINDOW_MS = 60_000;
+
+export type ClaimStaffReplyDeps = {
+  now?: () => Date;
+  claimWindowMs?: number;
+};
+
+/**
  * Step 2: Durably claim submission before calling provider.
  * Binds key to payload and business/thread. Deduplicates concurrent / replayed attempts.
  */
-export async function claimStaffReplySubmission(params: {
-  businessId: string;
-  conversationId: string;
-  submissionKey: string;
-  payloadHash: string;
-  content: string;
-}): Promise<SubmissionClaimResult> {
+export async function claimStaffReplySubmission(
+  params: {
+    businessId: string;
+    conversationId: string;
+    submissionKey: string;
+    payloadHash: string;
+    content: string;
+  },
+  deps?: ClaimStaffReplyDeps,
+): Promise<SubmissionClaimResult> {
   try {
     const submission = await db.staffReplySubmission.create({
       data: {
@@ -260,6 +283,21 @@ export async function claimStaffReplySubmission(params: {
 
       // Replayed or concurrent submission: return existing outcome with 0 network calls
       if (existing.status === "CLAIMED") {
+        const now = deps?.now ? deps.now() : new Date();
+        const claimWindowMs =
+          deps?.claimWindowMs ?? STAFF_REPLY_CLAIM_WINDOW_MS;
+        const isAged =
+          now.getTime() - existing.claimedAt.getTime() > claimWindowMs;
+
+        if (isAged) {
+          return {
+            claimed: false,
+            outcome: "unknown",
+            code: "ABANDONED_CLAIM",
+            message: "حالة الإرسال غير مؤكدة - تجاوز الطلب مهلة المعالجة",
+          };
+        }
+
         return {
           claimed: false,
           outcome: "in-progress",
@@ -296,6 +334,125 @@ export async function claimStaffReplySubmission(params: {
     }
     throw error;
   }
+}
+
+export type LookupStaffReplyStatusParams = {
+  businessId: string;
+  conversationId: string;
+  clientSubmissionId: string;
+  deps?: {
+    now?: () => Date;
+    claimWindowMs?: number;
+  };
+};
+
+export type StaffReplyLookupResult =
+  | {
+      found: true;
+      status: "in-progress" | "accepted" | "rejected" | "unknown";
+      code?: string;
+      message: string;
+      messageId?: string;
+    }
+  | {
+      found: false;
+      status: "unknown";
+      code?: string;
+      message: string;
+    };
+
+/**
+ * Pure read-only status lookup for an existing staff reply attempt.
+ *
+ * Invariants:
+ *  - Authenticated and tenant/thread scoped (businessId, conversationId, submissionKey).
+ *  - ZERO database writes: never creates a claim, never writes messages, never modifies conversation.
+ *  - ZERO provider network calls: never calls Telegram.
+ *  - Missing claim is a truthful lookup result (`NO_CLAIM_FOUND`), never permission to send.
+ *  - Distinguishes active `in-progress` processing from aged/abandoned claims using bounded window.
+ *  - Cannot race or overwrite later accepted results.
+ */
+export async function lookupStaffReplyStatus(
+  params: LookupStaffReplyStatusParams,
+): Promise<StaffReplyLookupResult> {
+  const submissionKey = params.clientSubmissionId.trim();
+  if (!submissionKey) {
+    return {
+      found: false,
+      status: "unknown",
+      code: "INVALID_KEY",
+      message: "معرّف المحاولة غير صالح",
+    };
+  }
+
+  const existing = await db.staffReplySubmission.findUnique({
+    where: {
+      businessId_conversationId_submissionKey: {
+        businessId: params.businessId,
+        conversationId: params.conversationId,
+        submissionKey,
+      },
+    },
+  });
+
+  if (!existing) {
+    return {
+      found: false,
+      status: "unknown",
+      code: "NO_CLAIM_FOUND",
+      message: "لم يتم العثور على سجل إرسال لهذه المحاولة",
+    };
+  }
+
+  if (existing.status === "ACCEPTED") {
+    return {
+      found: true,
+      status: "accepted",
+      messageId:
+        existing.providerMessageId ?? existing.staffMessageId ?? undefined,
+      message: "تم تأكيد قبول الرد من مزود الخدمة",
+    };
+  }
+
+  if (existing.status === "REJECTED") {
+    return {
+      found: true,
+      status: "rejected",
+      code: existing.errorCode ?? "REJECTED",
+      message: existing.errorMessage ?? "تم رفض الإرسال من مزود الخدمة",
+    };
+  }
+
+  if (existing.status === "UNCONFIRMED") {
+    return {
+      found: true,
+      status: "unknown",
+      code: existing.errorCode ?? "UNCONFIRMED",
+      message: existing.errorMessage ?? "تعذر تأكيد تسليم الرد سابقاً",
+    };
+  }
+
+  // existing.status === "CLAIMED"
+  const now = params.deps?.now ? params.deps.now() : new Date();
+  const claimWindowMs =
+    params.deps?.claimWindowMs ?? STAFF_REPLY_CLAIM_WINDOW_MS;
+  const isAged = now.getTime() - existing.claimedAt.getTime() > claimWindowMs;
+
+  if (isAged) {
+    return {
+      found: true,
+      status: "unknown",
+      code: "ABANDONED_CLAIM",
+      message: "حالة الإرسال غير مؤكدة - تجاوز الطلب مهلة المعالجة",
+    };
+  }
+
+  return {
+    found: true,
+    status: "in-progress",
+    code: "IN_PROGRESS",
+    message: "الطلب قيد المعالجة حالياً",
+  };
 }
 
 /**
@@ -348,13 +505,16 @@ export async function submitStaffReply(
 
   const payloadHash = createHash("sha256").update(text).digest("hex");
 
-  const claimResult = await claimStaffReplySubmission({
-    businessId: params.businessId,
-    conversationId: params.conversationId,
-    submissionKey,
-    payloadHash,
-    content: text,
-  });
+  const claimResult = await claimStaffReplySubmission(
+    {
+      businessId: params.businessId,
+      conversationId: params.conversationId,
+      submissionKey,
+      payloadHash,
+      content: text,
+    },
+    { now: deps.now, claimWindowMs: deps.claimWindowMs },
+  );
 
   if (!claimResult.claimed) {
     if (claimResult.outcome === "accepted") {

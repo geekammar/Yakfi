@@ -20,6 +20,7 @@ import {
 import type {
   ConversationDetailData,
   StaffReplyActionResult,
+  StaffReplyStatusActionResult,
 } from "@/features/conversations/types";
 
 import { createRoot } from "react-dom/client";
@@ -28,11 +29,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   assignConversation,
+  checkStaffReplyStatus,
   sendStaffReply,
   transitionConversation,
   updateAiSummary,
 } = vi.hoisted(() => ({
   assignConversation: vi.fn(),
+  checkStaffReplyStatus: vi.fn(),
   sendStaffReply: vi.fn(),
   transitionConversation: vi.fn(),
   updateAiSummary: vi.fn(),
@@ -40,6 +43,7 @@ const {
 
 vi.mock("@/features/conversations/actions/conversation-actions", () => ({
   assignConversation,
+  checkStaffReplyStatus,
   sendStaffReply,
   transitionConversation,
   updateAiSummary,
@@ -98,6 +102,11 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     vi.clearAllMocks();
     assignConversation.mockResolvedValue({ success: true });
     sendStaffReply.mockResolvedValue({ success: true });
+    checkStaffReplyStatus.mockResolvedValue({
+      success: false,
+      status: "unknown",
+      message: "غير مؤكد",
+    });
     transitionConversation.mockResolvedValue({ success: true });
     updateAiSummary.mockResolvedValue({ success: true });
   });
@@ -1000,12 +1009,14 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(unconfirmedAlert).not.toBeNull();
       expect(unconfirmedAlert?.textContent).toContain(existingContent);
 
-      // Click "إعادة التحقق من الإرسال"
-      let resolveRetry: (value: StaffReplyActionResult) => void = () => {};
-      const retryPromise = new Promise<StaffReplyActionResult>((res) => {
+      // Click "إعادة التحقق من الإرسال" — must use read-only status check only, NEVER dispatch
+      let resolveRetry: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const retryPromise = new Promise<StaffReplyStatusActionResult>((res) => {
         resolveRetry = res;
       });
-      sendStaffReply.mockReturnValue(retryPromise);
+      checkStaffReplyStatus.mockReturnValue(retryPromise);
 
       const retryBtn = Array.from(container.querySelectorAll("button")).find(
         (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
@@ -1016,18 +1027,21 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         retryBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
-      // MUST use the exact same attempt ID to reconcile without dispatching again
-      expect(sendStaffReply).toHaveBeenCalledTimes(1);
-      const retryArgs = sendStaffReply.mock.calls[0]![0];
-      expect(retryArgs.clientSubmissionId).toBe(existingAttemptId);
-      expect(retryArgs.content).toBe(existingContent);
+      // MUST NOT call sendStaffReply — pure read-only check
+      expect(sendStaffReply).not.toHaveBeenCalled();
+      expect(checkStaffReplyStatus).toHaveBeenCalledTimes(1);
+      expect(checkStaffReplyStatus).toHaveBeenCalledWith({
+        id: mockData.id,
+        clientSubmissionId: existingAttemptId,
+      });
 
-      // Provider confirms acceptance
+      // Status check confirms acceptance
       await act(async () => {
         resolveRetry({
           success: true,
-          outcome: "accepted",
+          status: "accepted",
           messageId: "provider-accepted-msg-999",
+          message: "تم تأكيد قبول الإرسال من مزود الخدمة",
         });
         await retryPromise;
       });
@@ -1161,6 +1175,234 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         });
         await sendPromise;
       });
+    });
+
+    it("UI recheck: Missing claim truthfully preserves unconfirmed notice without redispatching", async () => {
+      const missingAttemptId = "attempt-missing-claim-777";
+      const missingContent = "رسالة محاولة غير موجودة كطلب";
+
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: missingAttemptId,
+        content: missingContent,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      let resolveStatus: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const statusPromise = new Promise<StaffReplyStatusActionResult>((res) => {
+        resolveStatus = res;
+      });
+      checkStaffReplyStatus.mockReturnValue(statusPromise);
+
+      const retryBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
+      );
+      expect(retryBtn).not.toBeNull();
+
+      await act(async () => {
+        retryBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      // Pure read-only status check: ZERO dispatch calls
+      expect(sendStaffReply).not.toHaveBeenCalled();
+      expect(checkStaffReplyStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveStatus({
+          success: false,
+          status: "unknown",
+          code: "NO_CLAIM_FOUND",
+          message: "لم يتم العثور على سجل إرسال لهذه المحاولة",
+        });
+        await statusPromise;
+      });
+
+      // Still unconfirmed, notice updated truthfully, no new send issued
+      expect(sendStaffReply).not.toHaveBeenCalled();
+      const alert = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+      );
+      expect(alert).not.toBeNull();
+      expect(alert?.textContent).toContain("لم يتم العثور على سجل إرسال");
+    });
+
+    it("UI recheck: Preserve newer draft across reconciliation and two reloads", async () => {
+      const attemptAId = "attempt-a-444";
+      const attemptAContent = "نص المحاولة الأولى أ";
+      const newerDraftBContent = "مسودة أحدث كتبها الموظف ب";
+
+      // 1. Persist attempt A as unknown and newer draft B
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: attemptAId,
+        content: attemptAContent,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+      setStoredDraft(testBiz, userA, mockData.id, newerDraftBContent);
+
+      // 2. Reload 1: Mount component
+      const root1 = createRoot(container);
+      await act(async () => {
+        root1.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const textarea1 = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea1.value).toBe(newerDraftBContent);
+
+      const alert1 = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+      );
+      expect(alert1).not.toBeNull();
+      expect(alert1?.textContent).toContain(attemptAContent);
+
+      // 3. Recheck A and get accepted
+      let resolveCheck: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const checkPromise = new Promise<StaffReplyStatusActionResult>((res) => {
+        resolveCheck = res;
+      });
+      checkStaffReplyStatus.mockReturnValue(checkPromise);
+
+      const retryBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
+      );
+      expect(retryBtn).not.toBeNull();
+
+      await act(async () => {
+        retryBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(sendStaffReply).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveCheck({
+          success: true,
+          status: "accepted",
+          messageId: "msg-provider-a-confirmed",
+          message: "تم تأكيد قبول الإرسال من مزود الخدمة",
+        });
+        await checkPromise;
+      });
+
+      // Attempt A removed, alert dismissed, composer and storage retain draft B
+      expect(getStoredReplyAttempt(testBiz, userA, mockData.id)).toBeNull();
+      expect(textarea1.value).toBe(newerDraftBContent);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        newerDraftBContent,
+      );
+
+      // 4. Reload 2: Unmount and remount
+      await act(async () => {
+        root1.unmount();
+      });
+
+      const root2 = createRoot(container);
+      await act(async () => {
+        root2.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Draft B MUST still be in the composer and storage after second reload
+      const textarea2 = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea2.value).toBe(newerDraftBContent);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(
+        newerDraftBContent,
+      );
+
+      // Unconfirmed alert for A is gone
+      expect(
+        container.querySelector(
+          'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+        ),
+      ).toBeNull();
+    });
+
+    it("UI recheck: Dismissing unconfirmed notice does not silently paste abandoned text into composer", async () => {
+      const abandonedAttemptId = "attempt-abandoned-888";
+      const abandonedContent = "نص محاولة تم تجاهلها";
+
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: abandonedAttemptId,
+        content: abandonedContent,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+      // Ensure no prior draft
+      removeStoredDraft(testBiz, userA, mockData.id);
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Unconfirmed alert is visible
+      const dismissBtn = container.querySelector(
+        'button[aria-label="تجاهل الرد غير المؤكد"]',
+      );
+      expect(dismissBtn).not.toBeNull();
+
+      await act(async () => {
+        dismissBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      // Alert dismissed and stored attempt removed
+      expect(getStoredReplyAttempt(testBiz, userA, mockData.id)).toBeNull();
+      expect(
+        container.querySelector(
+          'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+        ),
+      ).toBeNull();
+
+      // Composer MUST NOT have been silently populated with abandoned content
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe("");
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBeNull();
+      expect(sendStaffReply).not.toHaveBeenCalled();
     });
   });
 

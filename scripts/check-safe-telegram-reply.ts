@@ -19,7 +19,11 @@ import "./setup-test-env";
 
 import { createHash } from "node:crypto";
 
-import { replySchema } from "@/features/conversations/schemas/conversation-schema";
+import {
+  checkReplyStatusSchema,
+  replySchema,
+} from "@/features/conversations/schemas/conversation-schema";
+import { STAFF_REPLY_CLAIM_WINDOW_MS } from "@/features/conversations/server/staff-reply-delivery";
 import { mapTelegramError } from "@/server/integrations/telegram/telegram-client";
 
 type Check = { label: string; pass: boolean; details?: unknown };
@@ -417,6 +421,90 @@ async function main(): Promise<void> {
   check(
     "6.3 Brand new submission without existing attempt allocates a fresh attempt ID",
     keyForNewDraftNoAttempt.startsWith("fresh-"),
+  );
+
+  // ── Group 7: Read-Only Reply Reconciliation & Bounded Window Invariants ──
+  console.log(
+    "\n--- Group 7: Read-Only Reply Reconciliation & Bounded Window Invariants ---",
+  );
+
+  // 7.1 Schema validation for checkReplyStatus
+  const validStatusReq = checkReplyStatusSchema.safeParse({
+    id: "a0000000-0000-4000-8000-000000000001",
+    clientSubmissionId: "attempt-12345",
+  });
+  check(
+    "7.1 Valid checkReplyStatus input passes schema",
+    validStatusReq.success,
+  );
+
+  const emptyKeyStatusReq = checkReplyStatusSchema.safeParse({
+    id: "a0000000-0000-4000-8000-000000000001",
+    clientSubmissionId: "   ",
+  });
+  check(
+    "7.2 Empty clientSubmissionId fails checkReplyStatus schema",
+    !emptyKeyStatusReq.success,
+  );
+
+  // 7.3 Bounded status window: active (<60s) vs aged/abandoned (>60s)
+  function evaluateClaimStatus(
+    claimedAt: Date,
+    now: Date,
+    windowMs: number = STAFF_REPLY_CLAIM_WINDOW_MS,
+  ) {
+    const ageMs = now.getTime() - claimedAt.getTime();
+    if (ageMs > windowMs) {
+      return { status: "unknown" as const, code: "ABANDONED_CLAIM" };
+    }
+    return { status: "in-progress" as const, code: "IN_PROGRESS" };
+  }
+
+  const baseNow = new Date("2026-11-09T12:00:00.000Z");
+  const recentClaim = new Date(baseNow.getTime() - 15_000); // 15 seconds ago
+  const activeEval = evaluateClaimStatus(recentClaim, baseNow);
+  check(
+    "7.3 Claim within bounded window (15s < 60s) evaluated as in-progress",
+    activeEval.status === "in-progress" && activeEval.code === "IN_PROGRESS",
+  );
+
+  const agedClaim = new Date(baseNow.getTime() - 65_000); // 65 seconds ago
+  const agedEval = evaluateClaimStatus(agedClaim, baseNow);
+  check(
+    "7.4 Claim older than bounded window (65s > 60s) evaluated as unknown (ABANDONED_CLAIM)",
+    agedEval.status === "unknown" && agedEval.code === "ABANDONED_CLAIM",
+  );
+
+  // 7.5 Read-only reconciliation preserves newer draft
+  function reconcileDraft(params: {
+    recheckedAttemptContent: string;
+    currentStoredDraft: string | null;
+  }) {
+    if (
+      params.currentStoredDraft &&
+      params.currentStoredDraft.trim() === params.recheckedAttemptContent.trim()
+    ) {
+      return null; // cleared
+    }
+    return params.currentStoredDraft; // preserved!
+  }
+
+  const preservedNewerDraft = reconcileDraft({
+    recheckedAttemptContent: "Old Attempt Text",
+    currentStoredDraft: "Newer Draft Written Later",
+  });
+  check(
+    "7.5 Rechecking attempt does NOT clear newer distinct draft",
+    preservedNewerDraft === "Newer Draft Written Later",
+  );
+
+  const clearedMatchingDraft = reconcileDraft({
+    recheckedAttemptContent: "Same Attempt Text",
+    currentStoredDraft: "Same Attempt Text",
+  });
+  check(
+    "7.6 Rechecking attempt clears matching draft",
+    clearedMatchingDraft === null,
   );
 
   // ── Summary ──

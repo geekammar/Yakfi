@@ -24,6 +24,11 @@ export const replySchema = z.object({
   clientSubmissionId: z.string().trim().min(1).max(128).optional(),
 });
 
+export const checkReplyStatusSchema = z.object({
+  id: uuidSchema,
+  clientSubmissionId: z.string().trim().min(1, "معرّف المحاولة مطلوب").max(128),
+});
+
 export const summarySchema = z.object({
   id: uuidSchema,
   aiSummary: z.string().trim().max(4000, "الملخص طويل جداً"),

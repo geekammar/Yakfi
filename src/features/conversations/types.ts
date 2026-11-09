@@ -96,3 +96,17 @@ export type StaffReplyActionResult =
       message: string;
       code?: string;
     };
+
+export type StaffReplyStatusActionResult =
+  | {
+      success: true;
+      status: "accepted";
+      messageId?: string;
+      message: string;
+    }
+  | {
+      success: false;
+      status: "in-progress" | "rejected" | "unknown";
+      code?: string;
+      message: string;
+    };
