@@ -22,7 +22,7 @@ import "./setup-test-env";
  *     pnpm check:safe-telegram-reply-db
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import {
@@ -108,8 +108,8 @@ async function main(): Promise<void> {
   const DEFAULT_BRANCH_ID = randomUUID();
   const FOREIGN_BRANCH_ID = randomUUID();
 
-  const BOT_EXTERNAL_ID = `bot_${Date.now()}`;
-  const FOREIGN_BOT_EXTERNAL_ID = `foreign_bot_${Date.now()}`;
+  const BOT_EXTERNAL_ID = String(Date.now());
+  const FOREIGN_BOT_EXTERNAL_ID = String(Date.now() + 100000);
   const TELEGRAM_CHAT_ID = "987654321";
   const TEST_TOKEN = "test_bot_token_secret_123";
 
@@ -704,13 +704,15 @@ async function main(): Promise<void> {
 
     // Concurrent in-progress duplicate check:
     // Create pre-existing CLAIMED row
+    const inProgText = "رسالة قيد الإرسال";
+    const inProgHash = createHash("sha256").update(inProgText).digest("hex");
     await db.staffReplySubmission.create({
       data: {
         businessId: TEST_BUSINESS_ID,
         conversationId: conv1Id,
         submissionKey: "sub_in_prog_key",
-        payloadHash: "hash_of_in_progress",
-        content: "رسالة قيد الإرسال",
+        payloadHash: inProgHash,
+        content: inProgText,
         status: "CLAIMED",
         provider: "telegram",
       },
