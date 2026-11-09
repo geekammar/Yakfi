@@ -17,7 +17,10 @@ import {
   setStoredDraft,
   setStoredReplyAttempt,
 } from "@/features/conversations/lib/storage";
-import type { ConversationDetailData } from "@/features/conversations/types";
+import type {
+  ConversationDetailData,
+  StaffReplyActionResult,
+} from "@/features/conversations/types";
 
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -894,8 +897,8 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     });
 
     it("UI submission path: Retains attempt ID and shows unconfirmed state across unknown or lost response", async () => {
-      let resolveReply: (value: any) => void = () => {};
-      const replyPromise = new Promise((res) => {
+      let resolveReply: (value: StaffReplyActionResult) => void = () => {};
+      const replyPromise = new Promise<StaffReplyActionResult>((res) => {
         resolveReply = res;
       });
       sendStaffReply.mockReturnValue(replyPromise);
@@ -998,8 +1001,8 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(unconfirmedAlert?.textContent).toContain(existingContent);
 
       // Click "إعادة التحقق من الإرسال"
-      let resolveRetry: (value: any) => void = () => {};
-      const retryPromise = new Promise((res) => {
+      let resolveRetry: (value: StaffReplyActionResult) => void = () => {};
+      const retryPromise = new Promise<StaffReplyActionResult>((res) => {
         resolveRetry = res;
       });
       sendStaffReply.mockReturnValue(retryPromise);
@@ -1075,8 +1078,8 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         typeInTextarea(textarea, submittedText);
       });
 
-      let resolvePart1: (value: any) => void = () => {};
-      const promise1 = new Promise((res) => {
+      let resolvePart1: (value: StaffReplyActionResult) => void = () => {};
+      const promise1 = new Promise<StaffReplyActionResult>((res) => {
         resolvePart1 = res;
       });
       sendStaffReply.mockReturnValue(promise1);
@@ -1126,8 +1129,8 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       ) as HTMLTextAreaElement;
       expect(textarea).not.toBeNull();
 
-      let resolveSend: (value: any) => void = () => {};
-      const sendPromise = new Promise((res) => {
+      let resolveSend: (value: StaffReplyActionResult) => void = () => {};
+      const sendPromise = new Promise<StaffReplyActionResult>((res) => {
         resolveSend = res;
       });
       sendStaffReply.mockReturnValue(sendPromise);
