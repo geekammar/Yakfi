@@ -11,11 +11,14 @@ import { ConversationActions } from "@/features/conversations/components/convers
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
 import {
   getStoredDraft,
-  getStoredReplyAttempt,
+  getStoredDraftMeta,
+  getStoredReplyAttempts,
+  markStoredReplyAttemptDismissed,
   removeStoredDraft,
-  removeStoredReplyAttempt,
+  removeStoredReplyAttemptById,
   setStoredDraft,
   setStoredReplyAttempt,
+  setStoredReplyAttempts,
   type StoredReplyAttempt,
 } from "@/features/conversations/lib/storage";
 import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
@@ -351,19 +354,21 @@ export function ConversationDetail({
   const savedScrollTopRef = useRef<number>(0);
 
   const draftRevisionRef = useRef(0);
+  const currentDraftIdRef = useRef<string>("");
   const activeSubmissionRef = useRef<{
     rawDraft: string;
     revision: number;
+    draftId?: string;
     attemptId?: string;
     content?: string;
   } | null>(null);
   const [failedSubmission, setFailedSubmission] = useState<string | null>(
     initialFailedSubmission,
   );
-  const [activeAttempt, setActiveAttempt] = useState<StoredReplyAttempt | null>(
-    null,
-  );
+  const [attempts, setAttempts] = useState<StoredReplyAttempt[]>([]);
   const [acceptedNotice, setAcceptedNotice] = useState<string | null>(null);
+
+  const activeAttempt = attempts.find((a) => !a.dismissed) ?? null;
 
   const effectiveBusinessId = propBusinessId ?? initialData.businessId;
   const effectiveUserId = initialData.currentUserId;
@@ -390,52 +395,66 @@ export function ConversationDetail({
       effectiveUserId,
       data.id,
     );
-
-    const savedAttempt = getStoredReplyAttempt(
+    const savedMeta = getStoredDraftMeta(
       effectiveBusinessId,
       effectiveUserId,
       data.id,
     );
 
-    let attemptState: StoredReplyAttempt | null = null;
-    if (savedAttempt) {
-      // If was pending when page was reloaded or closed, the client response was lost.
-      // Treat truthfully as unknown (unconfirmed outcome) without auto-resend.
-      const resolvedStatus =
-        savedAttempt.status === "pending" ? "unknown" : savedAttempt.status;
-      attemptState = {
-        ...savedAttempt,
-        status: resolvedStatus,
-        message:
-          savedAttempt.status === "pending"
-            ? "انقطعت الاستجابة قبل تأكيد حالة الرد"
-            : savedAttempt.message || "حالة الإرسال غير مؤكدة",
-      };
-      if (savedAttempt.status === "pending") {
-        setStoredReplyAttempt(
+    const savedAttempts = getStoredReplyAttempts(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+
+    let updatedAttempts: StoredReplyAttempt[] = [];
+    if (savedAttempts.length > 0) {
+      let needsSave = false;
+      updatedAttempts = savedAttempts.map((attempt) => {
+        if (attempt.status === "pending") {
+          needsSave = true;
+          return {
+            ...attempt,
+            status: "unknown" as const,
+            message: "انقطعت الاستجابة قبل تأكيد حالة الرد",
+          };
+        }
+        return attempt;
+      });
+      if (needsSave) {
+        setStoredReplyAttempts(
           effectiveBusinessId,
           effectiveUserId,
           data.id,
-          attemptState,
+          updatedAttempts,
         );
       }
     }
 
     queueMicrotask(() => {
+      if (savedMeta?.draftId) {
+        currentDraftIdRef.current = savedMeta.draftId;
+      } else if (savedDraft) {
+        currentDraftIdRef.current = crypto.randomUUID();
+      }
       if (savedDraft) {
         setReply(savedDraft);
       }
-      if (attemptState) {
-        setActiveAttempt(attemptState);
+      if (updatedAttempts.length > 0) {
+        setAttempts(updatedAttempts);
       }
     });
   }, [effectiveBusinessId, effectiveUserId, data.id]);
 
   const handleReplyTextChange = (text: string) => {
     draftRevisionRef.current += 1;
+    currentDraftIdRef.current = crypto.randomUUID();
     setReply(text);
     if (effectiveBusinessId && effectiveUserId) {
-      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
+      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text, {
+        draftId: currentDraftIdRef.current,
+        updatedAt: Date.now(),
+      });
     }
   };
   // Initial scroll to bottom on mount
@@ -547,9 +566,10 @@ export function ConversationDetail({
     });
   }
 
-  function handleRetryAttempt() {
-    if (!activeAttempt || isPending) return;
-    const attempt = activeAttempt;
+  function handleRetryAttempt(attemptId?: string) {
+    const targetAttemptId = attemptId ?? activeAttempt?.attemptId;
+    const attempt = attempts.find((a) => a.attemptId === targetAttemptId);
+    if (!attempt || isPending) return;
 
     setError(null);
     setAcceptedNotice(null);
@@ -570,30 +590,48 @@ export function ConversationDetail({
       }
 
       if (result.status === "accepted") {
-        setActiveAttempt(null);
+        setAttempts((current) =>
+          current.filter((a) => a.attemptId !== attempt.attemptId),
+        );
         if (effectiveBusinessId && effectiveUserId) {
-          removeStoredReplyAttempt(
+          removeStoredReplyAttemptById(
             effectiveBusinessId,
             effectiveUserId,
             data.id,
+            attempt.attemptId,
           );
-          // Only clear stored draft if it matches the exact submitted content of attempt
-          const currentStoredDraft = getStoredDraft(
-            effectiveBusinessId,
-            effectiveUserId,
-            data.id,
-          );
-          if (
-            currentStoredDraft &&
-            currentStoredDraft.trim() === attempt.content.trim()
-          ) {
+        }
+
+        // Repro C & Draft Ownership Check:
+        // Only clear stored draft if ownership can be PROVEN to belong to this attempt!
+        const currentStoredDraft = getStoredDraft(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+        );
+        const currentMeta = getStoredDraftMeta(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+        );
+
+        const draftOwnedByAttempt = Boolean(
+          currentStoredDraft &&
+          currentStoredDraft.trim() === attempt.content.trim() &&
+          currentMeta?.draftId &&
+          attempt.draftId &&
+          currentMeta.draftId === attempt.draftId,
+        );
+
+        if (draftOwnedByAttempt) {
+          if (effectiveBusinessId && effectiveUserId) {
             removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
           }
+          setReply((current) =>
+            current.trim() === attempt.content.trim() ? "" : current,
+          );
         }
-        // Only clear composer reply if it matches the exact submitted content of attempt
-        setReply((current) =>
-          current.trim() === attempt.content.trim() ? "" : current,
-        );
+        // If ownership cannot be proven (e.g. newer draft B composed), PRESERVE THE DRAFT!
 
         setAcceptedNotice("تم تأكيد قبول الإرسال من مزود الخدمة");
         return;
@@ -606,7 +644,11 @@ export function ConversationDetail({
           message: result.message || "الطلب قيد المعالجة حالياً",
           code: result.code,
         };
-        setActiveAttempt(inProgressAttempt);
+        setAttempts((current) =>
+          current.map((a) =>
+            a.attemptId === attempt.attemptId ? inProgressAttempt : a,
+          ),
+        );
         if (effectiveBusinessId && effectiveUserId) {
           setStoredReplyAttempt(
             effectiveBusinessId,
@@ -625,7 +667,11 @@ export function ConversationDetail({
           message: result.message || "تم رفض الإرسال من مزود الخدمة",
           code: result.code,
         };
-        setActiveAttempt(rejectedAttempt);
+        setAttempts((current) =>
+          current.map((a) =>
+            a.attemptId === attempt.attemptId ? rejectedAttempt : a,
+          ),
+        );
         if (effectiveBusinessId && effectiveUserId) {
           setStoredReplyAttempt(
             effectiveBusinessId,
@@ -644,7 +690,11 @@ export function ConversationDetail({
         message: result.message || "حالة الإرسال غير مؤكدة",
         code: result.code,
       };
-      setActiveAttempt(unknownAttempt);
+      setAttempts((current) =>
+        current.map((a) =>
+          a.attemptId === attempt.attemptId ? unknownAttempt : a,
+        ),
+      );
       if (effectiveBusinessId && effectiveUserId) {
         setStoredReplyAttempt(
           effectiveBusinessId,
@@ -656,11 +706,51 @@ export function ConversationDetail({
     });
   }
 
-  function handleDismissAttempt() {
-    if (!activeAttempt) return;
-    setActiveAttempt(null);
+  function handleDismissAttempt(attemptId?: string) {
+    const id = attemptId ?? activeAttempt?.attemptId;
+    if (!id) return;
+    setAttempts((current) =>
+      current.map((a) => (a.attemptId === id ? { ...a, dismissed: true } : a)),
+    );
     if (effectiveBusinessId && effectiveUserId) {
-      removeStoredReplyAttempt(effectiveBusinessId, effectiveUserId, data.id);
+      markStoredReplyAttemptDismissed(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        id,
+        true,
+      );
+    }
+  }
+
+  function handleUndismissAttempt(attemptId: string) {
+    setAttempts((current) =>
+      current.map((a) =>
+        a.attemptId === attemptId ? { ...a, dismissed: false } : a,
+      ),
+    );
+    if (effectiveBusinessId && effectiveUserId) {
+      markStoredReplyAttemptDismissed(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        attemptId,
+        false,
+      );
+    }
+  }
+
+  function handleDismissRejectedAttempt(attemptId?: string) {
+    const id = attemptId ?? activeAttempt?.attemptId;
+    if (!id) return;
+    setAttempts((current) => current.filter((a) => a.attemptId !== id));
+    if (effectiveBusinessId && effectiveUserId) {
+      removeStoredReplyAttemptById(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        id,
+      );
     }
   }
 
@@ -669,18 +759,38 @@ export function ConversationDetail({
     const content = reply.trim();
     if (!content || isPending) return;
 
-    // Retain attempt ID for the same logical reply across uncertain outcomes
-    // A normal click after an uncertain outcome must not create a new send for that same attempt.
-    // Keep genuinely new submissions independent with a fresh ID.
-    const attemptId =
-      activeAttempt && activeAttempt.content === content
-        ? activeAttempt.attemptId
-        : crypto.randomUUID();
+    // Repro A check: If an unresolved attempt exists for this content,
+    // ordinary Send MUST NOT allocate a fresh ID or dispatch A again!
+    const unresolvedAttempt = attempts.find(
+      (a) =>
+        (a.status === "unknown" || a.status === "in-progress") &&
+        a.content.trim() === content,
+    );
 
-    executeSubmission(content, attemptId);
+    if (unresolvedAttempt) {
+      if (unresolvedAttempt.dismissed) {
+        handleUndismissAttempt(unresolvedAttempt.attemptId);
+      }
+      setError(
+        "هذا الرد معلق وغير مؤكد الإرسال مسبقاً. يُرجى التحقق من حالة الإرسال أولاً لتجنب التكرار.",
+      );
+      return;
+    }
+
+    executeSubmission(content, crypto.randomUUID());
   }
 
-  function executeSubmission(content: string, attemptId: string) {
+  function handleForceNewSubmission(content: string) {
+    if (!content || isPending) return;
+    executeSubmission(content, crypto.randomUUID(), { forceNew: true });
+  }
+
+  function executeSubmission(
+    content: string,
+    attemptId: string,
+    options?: { forceNew?: boolean },
+  ) {
+    void options;
     ownSendPendingRef.current = true;
     setPendingMessageId(attemptId);
     setError(null);
@@ -689,9 +799,13 @@ export function ConversationDetail({
     // Keep recoverable raw draft snapshot and revision until confirmed success.
     const rawDraftSnapshot = reply;
     const submittedRevision = draftRevisionRef.current;
+    const submittedDraftId = currentDraftIdRef.current || crypto.randomUUID();
+    const submittedTimestamp = Date.now();
+
     activeSubmissionRef.current = {
       rawDraft: rawDraftSnapshot,
       revision: submittedRevision,
+      draftId: submittedDraftId,
       attemptId,
       content,
     };
@@ -701,9 +815,16 @@ export function ConversationDetail({
       attemptId,
       content,
       status: "pending",
-      timestamp: Date.now(),
+      timestamp: submittedTimestamp,
+      draftId: submittedDraftId,
+      dismissed: false,
     };
-    setActiveAttempt(inFlightAttempt);
+
+    setAttempts((current) => {
+      const filtered = current.filter((a) => a.attemptId !== attemptId);
+      return [...filtered, inFlightAttempt];
+    });
+
     if (effectiveBusinessId && effectiveUserId) {
       setStoredReplyAttempt(
         effectiveBusinessId,
@@ -761,12 +882,15 @@ export function ConversationDetail({
 
       if (result.success) {
         // ACCEPTED: draft cleared, stored attempt cleared, confirmed success visible
-        setActiveAttempt(null);
+        setAttempts((current) =>
+          current.filter((a) => a.attemptId !== attemptId),
+        );
         if (effectiveBusinessId && effectiveUserId) {
-          removeStoredReplyAttempt(
+          removeStoredReplyAttemptById(
             effectiveBusinessId,
             effectiveUserId,
             data.id,
+            attemptId,
           );
           const currentStoredDraft = getStoredDraft(
             effectiveBusinessId,
@@ -821,8 +945,13 @@ export function ConversationDetail({
           message: result.message || "حالة الإرسال غير مؤكدة",
           code: result.code,
           timestamp: Date.now(),
+          draftId: submittedDraftId,
+          dismissed: false,
         };
-        setActiveAttempt(unknownAttempt);
+        setAttempts((current) => {
+          const filtered = current.filter((a) => a.attemptId !== attemptId);
+          return [...filtered, unknownAttempt];
+        });
         if (effectiveBusinessId && effectiveUserId) {
           setStoredReplyAttempt(
             effectiveBusinessId,
@@ -833,6 +962,7 @@ export function ConversationDetail({
         }
 
         if (!hasNewerText && submission?.rawDraft) {
+          currentDraftIdRef.current = submittedDraftId;
           setReply(submission.rawDraft);
           if (effectiveBusinessId && effectiveUserId) {
             setStoredDraft(
@@ -840,6 +970,10 @@ export function ConversationDetail({
               effectiveUserId,
               data.id,
               submission.rawDraft,
+              {
+                draftId: submittedDraftId,
+                updatedAt: Date.now(),
+              },
             );
           }
         } else if (submission?.rawDraft) {
@@ -856,8 +990,13 @@ export function ConversationDetail({
           message: result.message || "الطلب قيد المعالجة حالياً",
           code: result.code,
           timestamp: Date.now(),
+          draftId: submittedDraftId,
+          dismissed: false,
         };
-        setActiveAttempt(inProgressAttempt);
+        setAttempts((current) => {
+          const filtered = current.filter((a) => a.attemptId !== attemptId);
+          return [...filtered, inProgressAttempt];
+        });
         if (effectiveBusinessId && effectiveUserId) {
           setStoredReplyAttempt(
             effectiveBusinessId,
@@ -868,6 +1007,7 @@ export function ConversationDetail({
         }
 
         if (!hasNewerText && submission?.rawDraft) {
+          currentDraftIdRef.current = submittedDraftId;
           setReply(submission.rawDraft);
           if (effectiveBusinessId && effectiveUserId) {
             setStoredDraft(
@@ -875,6 +1015,10 @@ export function ConversationDetail({
               effectiveUserId,
               data.id,
               submission.rawDraft,
+              {
+                draftId: submittedDraftId,
+                updatedAt: Date.now(),
+              },
             );
           }
         } else if (submission?.rawDraft) {
@@ -891,10 +1035,20 @@ export function ConversationDetail({
         message: result.message || "تم رفض الإرسال من مزود الخدمة",
         code: result.code,
         timestamp: Date.now(),
+        draftId: submittedDraftId,
+        dismissed: false,
       };
-      setActiveAttempt(rejectedAttempt);
+      setAttempts((current) => {
+        const filtered = current.filter((a) => a.attemptId !== attemptId);
+        return [...filtered, rejectedAttempt];
+      });
       if (effectiveBusinessId && effectiveUserId) {
-        removeStoredReplyAttempt(effectiveBusinessId, effectiveUserId, data.id);
+        removeStoredReplyAttemptById(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          attemptId,
+        );
       }
 
       if (!hasNewerText && submission?.rawDraft) {
@@ -1115,6 +1269,41 @@ export function ConversationDetail({
               </div>
             ) : null}
 
+            {attempts.some(
+              (a) =>
+                a.dismissed &&
+                (a.status === "unknown" || a.status === "in-progress"),
+            ) && !activeAttempt ? (
+              <div
+                role="status"
+                aria-label="ردود معلقة سابقة"
+                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-1.5 text-xs text-warning-foreground"
+              >
+                <div className="flex items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0 text-warning" />
+                  <span>يوجد رد معلق غير مؤكد الإرسال</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs"
+                  onClick={() => {
+                    const firstDismissed = attempts.find(
+                      (a) =>
+                        a.dismissed &&
+                        (a.status === "unknown" || a.status === "in-progress"),
+                    );
+                    if (firstDismissed) {
+                      handleUndismissAttempt(firstDismissed.attemptId);
+                    }
+                  }}
+                >
+                  عرض وإعادة التحقق
+                </Button>
+              </div>
+            ) : null}
+
             {activeAttempt && activeAttempt.status === "unknown" ? (
               <div
                 role="alert"
@@ -1136,7 +1325,7 @@ export function ConversationDetail({
                     size="sm"
                     className="h-11 min-h-[44px] px-3 text-xs"
                     disabled={isPending}
-                    onClick={handleRetryAttempt}
+                    onClick={() => handleRetryAttempt(activeAttempt.attemptId)}
                   >
                     إعادة التحقق من الإرسال
                   </Button>
@@ -1144,9 +1333,23 @@ export function ConversationDetail({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="h-11 min-h-[44px] px-2 text-xs text-muted-foreground hover:text-foreground"
+                    disabled={isPending}
+                    onClick={() =>
+                      handleForceNewSubmission(activeAttempt.content)
+                    }
+                  >
+                    إرسال كرسالة جديدة
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
                     className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                     aria-label="تجاهل الرد غير المؤكد"
-                    onClick={handleDismissAttempt}
+                    onClick={() =>
+                      handleDismissAttempt(activeAttempt.attemptId)
+                    }
                   >
                     <XIcon className="size-4" />
                   </Button>
@@ -1175,7 +1378,7 @@ export function ConversationDetail({
                     size="sm"
                     className="h-11 min-h-[44px] px-3 text-xs"
                     disabled={isPending}
-                    onClick={handleRetryAttempt}
+                    onClick={() => handleRetryAttempt(activeAttempt.attemptId)}
                   >
                     تحديث الحالة
                   </Button>
@@ -1185,7 +1388,9 @@ export function ConversationDetail({
                     size="sm"
                     className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                     aria-label="تجاهل الرد قيد المعالجة"
-                    onClick={handleDismissAttempt}
+                    onClick={() =>
+                      handleDismissAttempt(activeAttempt.attemptId)
+                    }
                   >
                     <XIcon className="size-4" />
                   </Button>
@@ -1212,7 +1417,9 @@ export function ConversationDetail({
                   size="sm"
                   className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                   aria-label="تجاهل الرد المرفوض"
-                  onClick={handleDismissAttempt}
+                  onClick={() =>
+                    handleDismissRejectedAttempt(activeAttempt.attemptId)
+                  }
                 >
                   <XIcon className="size-4" />
                 </Button>

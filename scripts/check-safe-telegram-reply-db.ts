@@ -1200,6 +1200,92 @@ async function main(): Promise<void> {
       fakeApiFinal === fakeApiCallsAfter11,
       { before: fakeApiCallsAfter11, final: fakeApiFinal },
     );
+
+    // ── Scenario 13: Controlled PostgreSQL Assignment Race ──
+    console.log("\n--- Scenario 13: Controlled PostgreSQL Assignment Race ---");
+
+    // 1. Reset conv1 to unassigned (assignedUserId: null)
+    await db.conversation.update({
+      where: { id: conv1Id },
+      data: { assignedUserId: null },
+    });
+
+    const callsBeforeRace13 = providerCallCount;
+    const race13Key = "sub_race_assignment_" + randomUUID();
+
+    // 2. Staff User A submits reply. In onBeforeResultWrite hook (after provider accepts, right before write),
+    // Staff User B concurrently assigns the conversation.
+    const race13Res = await submitStaffReply({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      staffUserId: STAFF_USER_A_ID,
+      content: "رسالة موظف أ أثناء سباق التعيين",
+      clientSubmissionId: race13Key,
+      deps: {
+        api: fakeApi,
+        credentialsResolver: testCredentialsResolver,
+        onBeforeResultWrite: async () => {
+          // Concurrent assignment occurs right before accepted-write transaction
+          await db.conversation.update({
+            where: { id: conv1Id },
+            data: { assignedUserId: STAFF_USER_B_ID },
+          });
+        },
+      },
+    });
+
+    check(
+      "13.1 Reply submitted and accepted by provider",
+      race13Res.ok === true && race13Res.outcome === "accepted",
+      race13Res,
+    );
+
+    check(
+      "13.2 Network call count advanced by exactly 1",
+      providerCallCount === callsBeforeRace13 + 1,
+      { before: callsBeforeRace13, after: providerCallCount },
+    );
+
+    const convAfterRace13 = await db.conversation.findUnique({
+      where: { id: conv1Id },
+      select: { assignedUserId: true },
+    });
+
+    check(
+      "13.3 Concurrent assignment to Staff User B is preserved (NOT overwritten by User A)",
+      convAfterRace13?.assignedUserId === STAFF_USER_B_ID,
+      convAfterRace13,
+    );
+
+    const messages13 = await db.message.findMany({
+      where: {
+        conversationId: conv1Id,
+        content: "رسالة موظف أ أثناء سباق التعيين",
+      },
+    });
+
+    check(
+      "13.4 Exactly one STAFF message row exists in DB",
+      messages13.length === 1 && messages13[0]?.senderType === "STAFF",
+      messages13,
+    );
+
+    const sub13 = await db.staffReplySubmission.findUnique({
+      where: {
+        businessId_conversationId_submissionKey: {
+          businessId: TEST_BUSINESS_ID,
+          conversationId: conv1Id,
+          submissionKey: race13Key,
+        },
+      },
+    });
+
+    check(
+      "13.5 Submission record persisted as ACCEPTED with providerMessageId",
+      sub13?.status === "ACCEPTED" &&
+        typeof sub13?.providerMessageId === "string",
+      sub13,
+    );
   } finally {
     // Cleanup test data
     console.log("\nCleaning up test data...");

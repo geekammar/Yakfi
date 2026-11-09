@@ -476,35 +476,100 @@ async function main(): Promise<void> {
   );
 
   // 7.5 Read-only reconciliation preserves newer draft
-  function reconcileDraft(params: {
+  function reconcileDraftWithOwner(params: {
     recheckedAttemptContent: string;
+    attemptDraftId?: string;
     currentStoredDraft: string | null;
+    currentDraftId?: string;
   }) {
-    if (
+    const isOwned = Boolean(
       params.currentStoredDraft &&
-      params.currentStoredDraft.trim() === params.recheckedAttemptContent.trim()
-    ) {
+      params.currentStoredDraft.trim() ===
+        params.recheckedAttemptContent.trim() &&
+      params.currentDraftId &&
+      params.attemptDraftId &&
+      params.currentDraftId === params.attemptDraftId,
+    );
+    if (isOwned) {
       return null; // cleared
     }
     return params.currentStoredDraft; // preserved!
   }
 
-  const preservedNewerDraft = reconcileDraft({
+  const preservedNewerDraft = reconcileDraftWithOwner({
     recheckedAttemptContent: "Old Attempt Text",
+    attemptDraftId: "draft-a",
     currentStoredDraft: "Newer Draft Written Later",
+    currentDraftId: "draft-b",
   });
   check(
     "7.5 Rechecking attempt does NOT clear newer distinct draft",
     preservedNewerDraft === "Newer Draft Written Later",
   );
 
-  const clearedMatchingDraft = reconcileDraft({
+  const clearedMatchingDraft = reconcileDraftWithOwner({
     recheckedAttemptContent: "Same Attempt Text",
+    attemptDraftId: "draft-orig",
     currentStoredDraft: "Same Attempt Text",
+    currentDraftId: "draft-orig",
   });
   check(
-    "7.6 Rechecking attempt clears matching draft",
+    "7.6 Rechecking attempt clears matching draft with proven ownership",
     clearedMatchingDraft === null,
+  );
+
+  const reproCPreservedIdenticalDraft = reconcileDraftWithOwner({
+    recheckedAttemptContent: "Identical Content Repro C",
+    attemptDraftId: "draft-attempt-a",
+    currentStoredDraft: "Identical Content Repro C",
+    currentDraftId: "draft-newer-b",
+  });
+  check(
+    "7.7 Repro C: Newer draft with identical text but distinct draftId survives accepted recheck",
+    reproCPreservedIdenticalDraft === "Identical Content Repro C",
+  );
+
+  const unprovenOwnershipPreserved = reconcileDraftWithOwner({
+    recheckedAttemptContent: "Identical Content",
+    currentStoredDraft: "Identical Content",
+  });
+  check(
+    "7.8 Unproven draft ownership preserves draft by default",
+    unprovenOwnershipPreserved === "Identical Content",
+  );
+
+  // ── Group 8: Conditional Atomic Staff Assignment Invariant ──
+  console.log(
+    "\n--- Group 8: Conditional Atomic Staff Assignment Invariant ---",
+  );
+
+  function simulateAtomicAssignment(params: {
+    currentAssignee: string | null;
+    sendingStaffId: string;
+  }) {
+    // Mimics atomic `UPDATE conversations SET assigned_user_id = $1 WHERE id = $2 AND assigned_user_id IS NULL`
+    if (params.currentAssignee === null) {
+      return params.sendingStaffId;
+    }
+    return params.currentAssignee; // preserved!
+  }
+
+  const unassignedResult = simulateAtomicAssignment({
+    currentAssignee: null,
+    sendingStaffId: "staff-user-1",
+  });
+  check(
+    "8.1 Unassigned conversation atomically assigned to sending staff",
+    unassignedResult === "staff-user-1",
+  );
+
+  const concurrentAssignedResult = simulateAtomicAssignment({
+    currentAssignee: "concurrent-staff-2",
+    sendingStaffId: "staff-user-1",
+  });
+  check(
+    "8.2 Concurrently assigned conversation preserves existing assignee without overwrite",
+    concurrentAssignedResult === "concurrent-staff-2",
   );
 
   // ── Summary ──

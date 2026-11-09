@@ -668,24 +668,29 @@ export async function submitStaffReply(
         },
       });
 
-      // 2. Update conversation: preserve assigned user if already owned
-      const conv = await tx.conversation.findUnique({
-        where: { id: params.conversationId },
-        select: { assignedUserId: true },
-      });
-
+      // 2. Update conversation: update lastMessageAt and status
       await tx.conversation.update({
         where: { id: params.conversationId },
         data: {
           lastMessageAt: message.createdAt,
           status: "NEED_HUMAN",
-          ...(conv?.assignedUserId
-            ? {}
-            : { assignedUserId: params.staffUserId }),
         },
       });
 
-      // 3. Mark submission ACCEPTED
+      // 3. Atomically assign sending user ONLY if conversation is still unassigned at write time
+      if (params.staffUserId) {
+        await tx.conversation.updateMany({
+          where: {
+            id: params.conversationId,
+            assignedUserId: null,
+          },
+          data: {
+            assignedUserId: params.staffUserId,
+          },
+        });
+      }
+
+      // 4. Mark submission ACCEPTED
       await tx.staffReplySubmission.update({
         where: { id: submission.id },
         data: {

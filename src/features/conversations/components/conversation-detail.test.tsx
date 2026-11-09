@@ -12,7 +12,9 @@ import {
   clearConversationStorage,
   getDraftStorageKey,
   getStoredDraft,
+  getStoredDraftMeta,
   getStoredReplyAttempt,
+  getStoredReplyAttempts,
   removeStoredDraft,
   setStoredDraft,
   setStoredReplyAttempt,
@@ -1061,7 +1063,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(acceptedStatus).not.toBeNull();
     });
 
-    it("UI submission path: Normal submit click with same content reuses existing attempt ID", async () => {
+    it("UI submission path: Normal submit click on unresolved attempt does not redispatch and requires distinct action for new send", async () => {
       const activeId = "attempt-normal-click-456";
       const submittedText = "نص المحاولة الأصلية";
 
@@ -1096,6 +1098,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       });
       sendStaffReply.mockReturnValue(promise1);
 
+      // Normal submit click: ordinary Send MUST NOT redispatch unresolved attempt!
       const form = container.querySelector("form");
       await act(async () => {
         form?.dispatchEvent(
@@ -1103,8 +1106,23 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         );
       });
 
+      expect(sendStaffReply).not.toHaveBeenCalled();
+      expect(container.textContent).toContain(
+        "هذا الرد معلق وغير مؤكد الإرسال مسبقاً",
+      );
+
+      // Distinct, informed user action explicitly sends as a new message
+      const forceNewBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إرسال كرسالة جديدة"),
+      );
+      expect(forceNewBtn).not.toBeNull();
+
+      await act(async () => {
+        forceNewBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
       expect(sendStaffReply).toHaveBeenCalledTimes(1);
-      expect(sendStaffReply.mock.calls[0]![0].clientSubmissionId).toBe(
+      expect(sendStaffReply.mock.calls[0]![0].clientSubmissionId).not.toBe(
         activeId,
       );
 
@@ -1403,6 +1421,340 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       expect(textarea.value).toBe("");
       expect(getStoredDraft(testBiz, userA, mockData.id)).toBeNull();
       expect(sendStaffReply).not.toHaveBeenCalled();
+    });
+
+    it("Repro A: Dismissing unconfirmed notice, reload, then normal send on restored draft does not redispatch and reveals recheck", async () => {
+      const attemptAId = "attempt-repro-a-111";
+      const replyContent = "نص الرد غير المؤكد أ";
+
+      // 1. Provider may have accepted reply A, but UI received unknown
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: attemptAId,
+        content: replyContent,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+      setStoredDraft(testBiz, userA, mockData.id, replyContent);
+
+      // 2. Mount component
+      const root1 = createRoot(container);
+      await act(async () => {
+        root1.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Alert is visible
+      const dismissBtn = container.querySelector(
+        'button[aria-label="تجاهل الرد غير المؤكد"]',
+      );
+      expect(dismissBtn).not.toBeNull();
+
+      // Click "تجاهل" (dismiss notice)
+      await act(async () => {
+        dismissBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      // Notice is hidden, but unresolved attempt identity is preserved in storage!
+      const attemptsAfterDismiss = getStoredReplyAttempts(
+        testBiz,
+        userA,
+        mockData.id,
+      );
+      expect(attemptsAfterDismiss.length).toBe(1);
+      expect(attemptsAfterDismiss[0]?.attemptId).toBe(attemptAId);
+      expect(attemptsAfterDismiss[0]?.dismissed).toBe(true);
+
+      // 3. Reload component
+      await act(async () => {
+        root1.unmount();
+      });
+
+      const root2 = createRoot(container);
+      await act(async () => {
+        root2.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Draft survived in textarea
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea.value).toBe(replyContent);
+
+      // 4. Click ordinary Send on the restored draft
+      const form = container.querySelector("form");
+      await act(async () => {
+        form?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      });
+
+      // MUST NOT allocate a fresh ID or dispatch A again!
+      expect(sendStaffReply).not.toHaveBeenCalled();
+
+      // Alert notice is revealed again and provides read-only recheck access
+      const revealedAlert = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+      );
+      expect(revealedAlert).not.toBeNull();
+      expect(revealedAlert?.textContent).toContain(replyContent);
+
+      // Click "إعادة التحقق من الإرسال" — pure read-only check
+      let resolveCheck: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const checkPromise = new Promise<StaffReplyStatusActionResult>((res) => {
+        resolveCheck = res;
+      });
+      checkStaffReplyStatus.mockReturnValue(checkPromise);
+
+      const recheckBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
+      );
+      expect(recheckBtn).not.toBeNull();
+
+      await act(async () => {
+        recheckBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(sendStaffReply).not.toHaveBeenCalled();
+      expect(checkStaffReplyStatus).toHaveBeenCalledTimes(1);
+      expect(checkStaffReplyStatus).toHaveBeenCalledWith({
+        id: mockData.id,
+        clientSubmissionId: attemptAId,
+      });
+
+      await act(async () => {
+        resolveCheck({
+          success: true,
+          status: "accepted",
+          messageId: "msg-repro-a-confirmed",
+          message: "تم تأكيد قبول الإرسال",
+        });
+        await checkPromise;
+      });
+    });
+
+    it("Repro B: Unresolved attempt A is preserved and independent when new draft B is composed and submitted", async () => {
+      const attemptAId = "attempt-repro-b-1";
+      const attemptAContent = "نص المحاولة أ المعلقة";
+      const independentDraftB = "رسالة مستقلة تماماً ب";
+
+      // 1. Attempt A is unresolved
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: attemptAId,
+        content: attemptAContent,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+
+      // 2. Mount component
+      const root1 = createRoot(container);
+      await act(async () => {
+        root1.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // 3. User types genuinely independent draft B
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      await act(async () => {
+        typeInTextarea(textarea, independentDraftB);
+      });
+
+      let resolveSendB: (value: StaffReplyActionResult) => void = () => {};
+      const sendBPromise = new Promise<StaffReplyActionResult>((res) => {
+        resolveSendB = res;
+      });
+      sendStaffReply.mockReturnValue(sendBPromise);
+
+      // Submit B
+      const form = container.querySelector("form");
+      await act(async () => {
+        form?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      });
+
+      expect(sendStaffReply).toHaveBeenCalledTimes(1);
+      const submittedBId = sendStaffReply.mock.calls[0]![0].clientSubmissionId;
+      expect(submittedBId).not.toBe(attemptAId);
+
+      // 4. In storage, Attempt A is NOT overwritten! Both A and B are preserved
+      const storedAttempts = getStoredReplyAttempts(
+        testBiz,
+        userA,
+        mockData.id,
+      );
+      expect(storedAttempts.some((a) => a.attemptId === attemptAId)).toBe(true);
+      expect(storedAttempts.some((a) => a.attemptId === submittedBId)).toBe(
+        true,
+      );
+
+      // Resolve B as accepted
+      await act(async () => {
+        resolveSendB({
+          success: true,
+          outcome: "accepted",
+          messageId: "msg-b-accepted",
+        });
+        await sendBPromise;
+      });
+
+      // 5. Reload: Attempt A MUST still be in storage and recheckable!
+      await act(async () => {
+        root1.unmount();
+      });
+
+      const root2 = createRoot(container);
+      await act(async () => {
+        root2.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const storedAfterReload = getStoredReplyAttempts(
+        testBiz,
+        userA,
+        mockData.id,
+      );
+      expect(storedAfterReload.some((a) => a.attemptId === attemptAId)).toBe(
+        true,
+      );
+
+      const alertA = container.querySelector(
+        'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+      );
+      expect(alertA).not.toBeNull();
+      expect(alertA?.textContent).toContain(attemptAContent);
+    });
+
+    it("Repro C: Newer draft B with identical text survives reconciliation of attempt A and reload", async () => {
+      const attemptAId = "attempt-repro-c-orig";
+      const identicalText = "رسالة متطابقة النص";
+      const draftAId = "draft-id-a";
+      const draftBId = "draft-id-b";
+
+      // 1. Attempt A is unresolved with draftId A
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId: attemptAId,
+        content: identicalText,
+        status: "unknown",
+        draftId: draftAId,
+        timestamp: Date.now() - 10000,
+      });
+
+      // Newer draft B is composed with identical text but belongs to draftId B
+      setStoredDraft(testBiz, userA, mockData.id, identicalText, {
+        draftId: draftBId,
+        updatedAt: Date.now(),
+      });
+
+      // 2. Reload 1: Mount component
+      const root1 = createRoot(container);
+      await act(async () => {
+        root1.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const textarea1 = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea1.value).toBe(identicalText);
+
+      // 3. Recheck Attempt A -> accepted
+      let resolveCheck: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const checkPromise = new Promise<StaffReplyStatusActionResult>((res) => {
+        resolveCheck = res;
+      });
+      checkStaffReplyStatus.mockReturnValue(checkPromise);
+
+      const retryBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
+      );
+      expect(retryBtn).not.toBeNull();
+
+      await act(async () => {
+        retryBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      await act(async () => {
+        resolveCheck({
+          success: true,
+          status: "accepted",
+          messageId: "msg-c-accepted-999",
+          message: "تم تأكيد قبول الإرسال من مزود الخدمة",
+        });
+        await checkPromise;
+      });
+
+      // Draft B MUST SURVIVE because draft ownership belongs to B, not A!
+      expect(textarea1.value).toBe(identicalText);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(identicalText);
+      expect(getStoredDraftMeta(testBiz, userA, mockData.id)?.draftId).toBe(
+        draftBId,
+      );
+
+      // 4. Reload 2: Unmount and remount
+      await act(async () => {
+        root1.unmount();
+      });
+
+      const root2 = createRoot(container);
+      await act(async () => {
+        root2.render(
+          <ConversationDetail
+            data={{ ...mockData, businessId: testBiz, currentUserId: userA }}
+          />,
+        );
+      });
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      const textarea2 = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      expect(textarea2.value).toBe(identicalText);
+      expect(getStoredDraft(testBiz, userA, mockData.id)).toBe(identicalText);
     });
   });
 
