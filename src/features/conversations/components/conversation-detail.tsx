@@ -365,6 +365,9 @@ export function ConversationDetail({
   const [failedSubmission, setFailedSubmission] = useState<string | null>(
     initialFailedSubmission,
   );
+  const [restoreBlockedNotice, setRestoreBlockedNotice] = useState<
+    string | null
+  >(null);
   const [attempts, setAttempts] = useState<StoredReplyAttempt[]>([]);
   const [acceptedNotice, setAcceptedNotice] = useState<string | null>(null);
   const [confirmingNewSendAttemptId, setConfirmingNewSendAttemptId] = useState<
@@ -466,6 +469,9 @@ export function ConversationDetail({
     draftRevisionRef.current += 1;
     currentDraftIdRef.current = crypto.randomUUID();
     setReply(text);
+    if (!text.trim()) {
+      setRestoreBlockedNotice(null);
+    }
     if (effectiveBusinessId && effectiveUserId) {
       setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text, {
         draftId: currentDraftIdRef.current,
@@ -775,6 +781,43 @@ export function ConversationDetail({
     }
   }
 
+  function handleRestoreFailedSubmission() {
+    if (!failedSubmission) return;
+    const latestStoredDraft = getStoredDraft(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+    const hasComposerDraft = Boolean(reply.trim());
+    const hasStoredDraft = Boolean(
+      latestStoredDraft && latestStoredDraft.trim(),
+    );
+
+    if (hasComposerDraft || hasStoredDraft) {
+      setRestoreBlockedNotice("امسح المسودة الحالية أولاً لاستعادة الرد");
+      return;
+    }
+
+    setRestoreBlockedNotice(null);
+    const newRestoredDraftId = crypto.randomUUID();
+    draftRevisionRef.current += 1;
+    currentDraftIdRef.current = newRestoredDraftId;
+    setReply(failedSubmission);
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredDraft(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        failedSubmission,
+        {
+          draftId: newRestoredDraftId,
+          updatedAt: Date.now(),
+        },
+      );
+    }
+    setFailedSubmission(null);
+  }
+
   function handleReply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = reply.trim();
@@ -1043,6 +1086,7 @@ export function ConversationDetail({
       setReply("");
     }
     setFailedSubmission(null);
+    setRestoreBlockedNotice(null);
 
     // Optimistic message append if not already in message log
     setData((current) => {
@@ -1111,11 +1155,12 @@ export function ConversationDetail({
             Boolean(currentStoredDraft) &&
             currentStoredDraft!.trim() === content.trim();
 
-          const isStorageOwned =
+          const isStorageOwned = Boolean(
             isTextMatching &&
-            (currentMeta?.draftId
-              ? currentMeta.draftId === submittedDraftId
-              : !hasNewerText);
+            currentMeta?.draftId &&
+            submittedDraftId &&
+            currentMeta.draftId === submittedDraftId,
+          );
 
           if (isStorageOwned) {
             removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
@@ -1720,31 +1765,19 @@ export function ConversationDetail({
                     تعذر إرسال: &ldquo;{failedSubmission.trim()}&rdquo;
                   </span>
                 </div>
+                {restoreBlockedNotice || reply.trim() ? (
+                  <p className="w-full text-xs font-medium text-destructive">
+                    {restoreBlockedNotice ||
+                      "امسح المسودة الحالية أولاً لاستعادة الرد"}
+                  </p>
+                ) : null}
                 <div className="flex shrink-0 items-center gap-1.5 ms-auto">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="h-11 min-h-[44px] min-w-[44px] px-3 text-xs"
-                    onClick={() => {
-                      const newRestoredDraftId = crypto.randomUUID();
-                      draftRevisionRef.current += 1;
-                      currentDraftIdRef.current = newRestoredDraftId;
-                      setReply(failedSubmission);
-                      if (effectiveBusinessId && effectiveUserId) {
-                        setStoredDraft(
-                          effectiveBusinessId,
-                          effectiveUserId,
-                          data.id,
-                          failedSubmission,
-                          {
-                            draftId: newRestoredDraftId,
-                            updatedAt: Date.now(),
-                          },
-                        );
-                      }
-                      setFailedSubmission(null);
-                    }}
+                    onClick={handleRestoreFailedSubmission}
                   >
                     استعادة الرد
                   </Button>
@@ -1754,7 +1787,10 @@ export function ConversationDetail({
                     size="sm"
                     className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                     aria-label="تجاهل الرد المتعثر"
-                    onClick={() => setFailedSubmission(null)}
+                    onClick={() => {
+                      setFailedSubmission(null);
+                      setRestoreBlockedNotice(null);
+                    }}
                   >
                     <XIcon className="size-4" />
                   </Button>

@@ -682,11 +682,11 @@ async function main(): Promise<void> {
       Boolean(params.currentStoredContent) &&
       params.currentStoredContent!.trim() === params.submittedContent.trim();
 
-    return (
+    return Boolean(
       isTextMatching &&
-      (params.currentStoredDraftId
-        ? params.currentStoredDraftId === params.submittedDraftId
-        : !params.hasNewerText)
+      params.currentStoredDraftId &&
+      params.submittedDraftId &&
+      params.currentStoredDraftId === params.submittedDraftId,
     );
   }
 
@@ -716,17 +716,86 @@ async function main(): Promise<void> {
     matchingDraftShouldClear === true,
   );
 
-  // Case C: Legacy draft storage without metadata -> clears if text matches and no newer text
-  const legacyDraftShouldClear = evaluateDirectSubmitCleanup({
-    submittedContent: "Legacy Text",
-    submittedDraftId: "legacy-submitted-id",
-    currentStoredContent: "Legacy Text",
+  // Case C: Missing metadata while send is pending -> preserves stored draft
+  const missingMetaDraftShouldClear = evaluateDirectSubmitCleanup({
+    submittedContent: "Pending Send Content",
+    submittedDraftId: "submitted-draft-id-1",
+    currentStoredContent: "Pending Send Content",
     currentStoredDraftId: null,
     hasNewerText: false,
   });
   check(
-    "10.3 Legacy draft storage without metadata preserves compatibility and clears after normal send",
-    legacyDraftShouldClear === true,
+    "10.3 Missing metadata while send is pending preserves stored draft",
+    missingMetaDraftShouldClear === false,
+  );
+
+  // Case D: Legacy draft storage upgraded on open establishes matching draftId -> clears after normal send
+  const legacyUpgradedId = "legacy-upgraded-uuid";
+  const legacyUpgradedDraftShouldClear = evaluateDirectSubmitCleanup({
+    submittedContent: "Legacy Upgraded Text",
+    submittedDraftId: legacyUpgradedId,
+    currentStoredContent: "Legacy Upgraded Text",
+    currentStoredDraftId: legacyUpgradedId,
+    hasNewerText: false,
+  });
+  check(
+    "10.4 Legacy draft storage upgraded on open establishes matching draftId and clears after normal send",
+    legacyUpgradedDraftShouldClear === true,
+  );
+
+  // ── Group 11: Guard 'استعادة الرد' from Overwriting Newer Drafts ──
+  console.log(
+    "\n--- Group 11: Guard 'استعادة الرد' from Overwriting Newer Drafts ---",
+  );
+
+  function evaluateRestoreAvailability(params: {
+    composerText: string;
+    latestStoredContent: string | null;
+  }): { allowed: boolean; guidance?: string } {
+    const hasComposerDraft = Boolean(params.composerText.trim());
+    const hasStoredDraft = Boolean(
+      params.latestStoredContent && params.latestStoredContent.trim(),
+    );
+
+    if (hasComposerDraft || hasStoredDraft) {
+      return {
+        allowed: false,
+        guidance: "امسح المسودة الحالية أولاً لاستعادة الرد",
+      };
+    }
+    return { allowed: true };
+  }
+
+  // 11.1 Restoration blocked when composer draft is non-empty
+  const blockedByComposer = evaluateRestoreAvailability({
+    composerText: "مسودة جديدة في صندوق الكتابة",
+    latestStoredContent: null,
+  });
+  check(
+    "11.1 Restoration blocked when composer draft is non-empty; concise Arabic guidance shown",
+    blockedByComposer.allowed === false &&
+      blockedByComposer.guidance === "امسح المسودة الحالية أولاً لاستعادة الرد",
+  );
+
+  // 11.2 Restoration blocked when stored draft written after render is non-empty
+  const blockedByStored = evaluateRestoreAvailability({
+    composerText: "",
+    latestStoredContent: "مسودة كُتبت في التخزين بعد العرض",
+  });
+  check(
+    "11.2 Restoration blocked when stored draft written after render is non-empty; concise Arabic guidance shown",
+    blockedByStored.allowed === false &&
+      blockedByStored.guidance === "امسح المسودة الحالية أولاً لاستعادة الرد",
+  );
+
+  // 11.3 Restoration allowed only when both composer and storage are empty
+  const allowedRestore = evaluateRestoreAvailability({
+    composerText: "   ",
+    latestStoredContent: "",
+  });
+  check(
+    "11.3 Restoration allowed only when both composer and storage are empty",
+    allowedRestore.allowed === true && allowedRestore.guidance === undefined,
   );
 
   // ── Summary ──
