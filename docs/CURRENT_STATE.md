@@ -1,101 +1,29 @@
-# FlowPilot — Current State
+# Yakfi — Current State
 
-> **Tier 0 cold-start snapshot** — read with `docs/AGENT_RULES.md` and
-> `docs/DECISIONS_INDEX.md`. This is a concise orientation document, NOT a
-> source of truth: canonical topic documents and the repository code override
-> it. Implementation details live in `docs/BUILD_STATE.md`; decisions in
-> `docs/DECISIONS.md`.
+> Reviewed on 12 November 2026 Cairo. Refresh remote and runtime facts before execution. Use AGENT_RULES.md and DECISIONS_INDEX.md for rules, BUILD_STATE.md for implementation history, and ISS-018_ACCEPTANCE.md for the active acceptance procedure.
 
-## 1. Verified Baseline & Production Status
+## Release and acceptance
 
-- **Repository State (Verified):**
-  - Branch: `feat/core-04b-global-ai-stop-execution-limits` (candidate PR for CORE-04B, branched from `main` at PR #28 merged baseline, commit `acf540e39708408374d5f3df3838599fb3f0e67d`).
-  - Package Version: `v0.70.0` (SemVer minor increment over v0.69.0 baseline).
-  - Baseline Commit: `acf540e39708408374d5f3df3838599fb3f0e67d` (PR #28 merged baseline).
-  - Working Tree: Global external-model stop and shared per-turn execution limits — focused deadline enforcement, attempt-ceiling repair, and final-attempt completion deadline repair (CORE-04B). Establishes authoritative operational execution controls without creating a second AI gateway: server-owned operational kill-switch `FLOWPILOT_AI_GLOBAL_STOP` (`"1"`, `"true"`, `"yes"`, `"on"` case-insensitive; disabled by `"0"`, `"false"`, `"no"`, `"off"`, `""`) halting all external serving LLM, serving JEV, and shadow model HTTP dispatches through the factory path (fail-closed on malformed config via `INVALID_CONTROL_CONFIG`, preserving mechanical selection routes with 0 calls and gracefully failing model-required turns with 0 unintended appointments; honestly stated to require process restart/redeployment on Vercel, and preventing future dispatches without aborting in-flight requests); shared per-execution serving-attempt allowance via request-scoped `ServingExecutionSession` coordinating physical HTTP dispatch limits across initial dispatch, Conversation Control retries, and secondary provider fallback, defaulting to 3 (2 primary + 1 secondary) with operator lower bound via `FLOWPILOT_AI_MAX_SERVING_ATTEMPTS` (1 or 2, ceiling clamped to 3, failing closed on invalid input) and physical reservation immediately before wire fetch; programmatic overrides strictly validated to only tighten (never weaken) operator limit; shared non-resetting serving deadline bounding retry/fallback execution time without timeout reset; deadline protection extended through response body reading (`await response.text()`) with reliable `finally` cleanup of timers and abort listeners; response completion validity decoupled from request dispatch permission via explicit predicate `evaluateResponseCompletion`, guaranteeing late responses on final allowed attempts (limit 1 or limit 3) are rejected as TIMEOUT even when remaining attempt allowance is exhausted, while in-time completions succeed normally; JEV boundary enforcement forwarding execution options and reserving attempt immediately before wire fetch without double-recording; strict JEV serving allowance consumption (1 attempt, strictly blocking subsequent serving LLM) and shadow isolation (halting shadow under global stop, bounding total per-turn physical exposure to 4 requests max); and truthful machine-readable stop reasons (`GLOBAL_STOP`, `ATTEMPT_LIMIT_EXHAUSTED`, `DEADLINE_EXHAUSTED`, `INVALID_CONTROL_CONFIG`) attached to `AiTelemetry`, `TurnObservability`, and `TurnEvidence` (`flowpilot.turn.evidence@v1`). Verified by dedicated acceptance suite `check:core-04b` (159/159 PASS across 18 groups A–R) wired into CI (`.github/workflows/pr-validation.yml`).
-- **Production Status (Read-Only Health Verified):**
-  - Production health check `GET https://flowpilot-prod.vercel.app/api/health` returned:
-    - `status: "ok"`
-    - `version: "0.63.0"`
-    - `commitSha: "3f87cf8a9e4ab4dfcc78529778b523fdcca64c41"`
-    - `database: "connected"`
-    - `deploymentReady: true`
-  - Production database migrations and deployments are operator-authorized via GitHub Actions. No production config or database changes made.
+- Deployed main reference is `8d12aa2a72169bb2563e624e89045858d090e8f3`, version 0.79.7. PR #79 remains open. Current Preview metadata matches candidate `bae04fcdd45374b043ec22fc5149de743a2a0ada`, version 0.79.8.
+- PR #79 implements Telegram staff delivery, authenticated route authority, durable attempt claiming, read-only status lookup, draft ownership protection, authoritative assignment, and the reviewed explicit operator `--switch` tool. CI run 43247833509 passed with 141 Telegram checks, 48 reply checks, 45 component tests, 14 disposable PostgreSQL scenarios, and Playwright 183 passed / 12 skipped.
+- CREDENTIAL_MASTER_KEY was configured in Vercel Preview metadata (scoped to branch `fix/safe-telegram-staff-reply-delivery` as Secret) and the preview was redeployed (`dpl_48Hc8d79vCE2wgXUf7Yu85HZekvP`, deployment READY at `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`). Test admin sign-in via `/api/auth/sign-in/email` is verified functional (HTTP 200, session issued, user `6c8fa983-b255-4e40-9146-fa62d0c4c260` in business `f5314115-ae8c-46ea-9d7e-080ef5e7366d`).
+- The remaining blocker is credential decryption for the existing customer bot `@Drafnanafnanbot`: server action `checkTelegramConnectionAction` on Preview invokes `defaultCredentialsResolver.resolve(connection.credentialsRef)` and fails closed with `code: "CREDENTIALS_UNAVAILABLE"` (`"بيانات الاعتماد غير متاحة"`). Candidate keys from GitHub Secrets and `.env.local` both fail GCM tag validation or reference lookup in test DB `br-plain-smoke-a5k0bivr`. Because decryption cannot be established from the stored package and key rotation is unauthorized, provider `getMe` verification and live `--switch --apply` remain held. Historical Executions row 249 remains preserved. See `docs/ISS-018_ACCEPTANCE.md` for exact restoration commands and Muse acceptance handoff.
+- AGY reports healthy Preview and successful test admin sign-in. Reviewer verified deployment metadata, source and CI, but did not independently repeat sign-in or a customer delivery. Muse acceptance is pending. Historical Executions row 249 remains the original UI-29 / ISS-018 FAIL; append a new execution at the next free row.
+- PR #77 is a separate P2 candidate at `42f58dd02130543664f3feb886a0aa17316ef5eb`. BK-41 A/C/D and part of B have prior evidence; exact inactive-service Step B acceptance remains pending. Both #77 and #79 propose 0.79.8, so recheck main and SemVer when ordering merges.
+- ISS-017 clean and valid-session paths passed live. Invalid-cookie testing was tool-blocked. Booking BK-03/33/34 have prior post-#69 results to reconcile. TG-22 / ISS-012 is deployed through #74 with live acceptance pending.
 
-## 2. Architecture & Invariants
+## Execution order
 
-- **Stack:** Feature-based modular monolith on Next.js 16 (App Router) + Prisma 7 with driver adapter (`@prisma/adapter-pg`) + Neon PostgreSQL + Vercel.
-- **Tenancy & Isolation:** Tenancy enforced via `businessId` in repositories. UI visibility is not authorization.
-- **Booking Invariants:** The `availability-service` is the sole booking authority and returns only genuinely selectable slots. Booking is strictly server-authoritative. Never build a second availability engine.
-- **AI Trust Boundary:** AI interprets customer intent; domain rules decide availability and eligibility; conversation orchestrates. AI output is never authoritative for booking execution (DECISIONS #33).
-- **Presentation:** Arabic-first, RTL-by-default (`dir="rtl" lang="ar"`), responsive shell (desktop right sidebar / mobile bottom nav), vertical-agnostic discovery copy.
-- **Conversation Playground Alignment & Integrity Repair (CORE-03C1):**
-  - CLI `pnpm convo:playground --mode current_engine` executes the real merged engine pipeline: `receiveInboundMessage` → structured capability routing → `createPolicyBackedAi` / provider adapter → turn planner / reconciliation → Booking Core → `InMemoryConversationStateStore` with CAS revision semantics.
-  - Run-level `CurrentEngineExecutionSession` enforces whole-run physical HTTP attempt ceiling across multiple scenarios with hard request blocking on ceiling exhaustion.
-  - Physical HTTP attempt counting at injected `fetchImpl` boundary (separates offline fixtures, live provider calls, estimates, and unknown tokens; never reports 0 for unknown usage).
-  - Outbound `max_tokens` setting enforced in actual adapter payload to prevent runaway completions.
-  - Model outputs (`modelExtraction`, `modelFactUpdates`) recorded separately from durable reconciled state (`reconciledKnownFacts`).
-  - Offer replacement detected by offer identity (`offerBefore.id !== offerAfter.id` -> `OFFER_REPLACED`).
-  - Full trace sanitization & deep redaction (`redactTrace`) creating a single public projection for both terminal display and disk export; preserves numeric token counts, usage structures, and completeness metadata while redacting credentials, authorization headers, arbitrary offer IDs, claim nonces, and callback payloads (`fp:<id>:<action>`) using stable local references for cross-turn identity comparison.
-  - Forwarded `getLastTelemetry()` on `instrumentedAi` wrapper, ensuring the conversation engine receives real gateway/adapter telemetry, and strictly sourcing observed provider/model from execution telemetry rather than configured defaults.
-  - Usage completeness tracked honestly per attempt within turns (`COMPLETE`, `PARTIAL`, `UNKNOWN`, `NOT_APPLICABLE`), keeping missing components, compatibility fields (`tokenUsageEstimate`), and totalTokens `null` when partial/unknown attempts exist, while preserving genuine zero-call counts for non-generative turns and retaining `knownTokensSubtotal`.
-  - Evaluation verdict integrity: removed truthiness gate on `result.intent` so missing expected intents fail immediately, verified passing scenarios exit 0, and failing evaluations reach the failed-evaluation exit path with code 1.
-  - Historical modes (`baseline`, `goal_driven`, `typesafe_jev`, `agent_c`) remain available and are strictly labeled by their respective architectures (`HYBRID_B`, `GOAL_DRIVEN_HYBRID`, `TYPESAFE_JEV_GOAL_DRIVEN`), preventing misattribution.
-  - 13 Egyptian Arabic scenarios (`CE-01` to `CE-13`, 21 turns total) covering relative dates, Cairo/UTC date boundary, date/provider corrections, provider/time/date REMOVE semantics, FAQ interruptions, explicit factUpdates precedence, mechanical selection zero-call execution, invalid proposal clarification, and tracked known defect `CE-13` (false sensitive handoff on dialectal phrase 'مش مشكلة' due to sensitive keyword detector).
-  - Verified by 76/76 offline automated acceptance checks (`pnpm check:conv-core-03c1`).
-- **Quick Real JEV + LLM Smoke Evaluation (CORE-03C2):**
-  - Authorized live envelope enforced: max 24 physical provider attempts ceiling, max 600 output tokens per generative request, 15-second per-attempt timeout, $0.10 planning budget.
-  - Fail-closed operator opt-in (`--allow-paid` / `allowLivePaidCalls: true`); offline fixtures remain the default. Missing API keys fail before network.
-  - Dual-mode usage normalization supporting both OpenAI (`prompt_tokens`/`completion_tokens`) and JEV (`input_tokens`/`output_tokens`).
-  - Track A (Real JEV Decisions API: `typesafe/jev-1.13` via OpenRouter): 1 attempt, 230ms latency, $0.0000126 USD; bookingRequested evaluated with probability 0.97 against predeclared threshold >= 0.70 (separates transport and semantic checks; fails closed on low confidence, invalid type, missing answer, or provider error). Confirmed JEV contract is atomic question routing; structured entity extraction and SET/REMOVE fact updates are UNSUPPORTED by contract design. Findings describe our tested integration contract, not universal model incapability; single positive sample is a contract connectivity smoke test, not a statistical benchmark.
-  - Track B (Real LLM: `deepseek/deepseek-chat` via OpenRouter): 11 attempts, max 204 output tokens, latencies <6.0s, $0.008104 USD (rate-based calculation). Direct booking (Case A), relative dates under Cairo timezone (Case B), date correction (Case C), FAQ interruption with state preservation (Case F), known sensitive defect reproduction (Case G; reproduces known application defect, not customer behavior success), and mechanical confirmation with 0 model calls (Case H) all passed.
-  - Cases D and E stopped on Turn 1 (D on provider catalog resolution when service is omitted; E on scenario test assertion expecting canonical "morning" while schema accepted "الصبح"), so their live REMOVE continuations were not tested live.
-  - Combined live campaign: 12 total physical attempts, $0.008117 USD expenditure (well within 24 attempt ceiling and $0.10 planning budget; note monetary estimates are not guaranteed provider-side dollar limits). Complete in-memory state and booking isolation. Reviewable evidence bundle preserved in `docs/conversation/CORE-03C2-SMOKE-EVALUATION-EVIDENCE.md`.
-  - Strict repair boundary maintained: recorded provider catalog resolution, canonical time values, and legacy sensitive filtering as follow-up issues for evidence-based implementation (no phrase dictionaries or heuristic regexes).
-  - Verified by 45/45 offline automated acceptance checks (`pnpm check:conv-core-03c2`) and 76/76 regression checks (`pnpm check:conv-core-03c1`).
+1. Recover the original key on the owner's VPS in a fresh AGY session. Follow ISS-018_ACCEPTANCE.md to configure Preview, verify credentials, dry-run and apply the authorized customer bot switch. Then a fresh Muse session verifies inbound /start and one staff reply arriving once.
+2. After acceptance and owner approval, execute the exact reviewed production migration before merging because main auto-deploys. Preserve route and submission tables during application rollback. Complete high-impact TG-22 and booking evidence gaps.
+3. UX Conversation Lab acceptance with an authorized Platform Operator and isolated welcome.intro verification.
+4. Cost & Price. Review the frozen design and implement the smallest cost-evidence persistence slice.
+5. Real-business pilot and Spec A exit. Spec B evidence and Spec C vertical selection follow. Defer P2/P3 polish until after Lab and Cost & Price.
 
-## 3. Completed Capabilities (Verified in Repository)
+## Binding constraints
 
-1. **Spec A Core & Operations:** Dashboard, appointments agenda, Smart Create 1–6, customer directory, services catalog, knowledge authoring, and settings.
-2. **Messaging Channels:**
-   - **WhatsApp:** Meta Cloud API adapter, inbound webhook, identity resolution, provider-neutral transport contract.
-   - **Telegram:** Provider-neutral transport sibling, Manager Bot provisioning (`@FlowPilotManagerBot`), customer `/start` welcome handler, Android standard-Telegram launcher.
-3. **AI Orchestration & Observability:** Provider-agnostic adapter (Atria, CodeCraft, OpenRouter), minimal context builder (knowledge visibility), disclosure gate, turn evidence telemetry sink.
-4. **JEV Operational Work (Completed):** JEV semantic strategy, shadow strategy, decisions provider, and offline evaluation harnesses (`scripts/check-jev-semantic.ts`, `scripts/check-jev-shadow.ts`) are fully built and tested. Lifecycle is closed; no open implementation tasks remain.
-5. **Platform Conversation Lab:** Copy override registry, override services, and founder review UI at `/platform/conversation-lab`.
-6. **Test Ingress Harness:** Synthetic inbound test business harness (`scripts/check-test-ingress.ts`, `src/features/conversations/server/test-business.ts`) for offline regression validation.
+One ConversationEngine and server-authoritative Booking Core. Egyptian Arabic free text uses structured semantic decisions. No keyword lists, dictionaries, regex, substring or token-overlap intent heuristics. Formal commands, IDs, dates and permissions may use deterministic validation.
 
-## 4. Current Boundaries & Inactive Holds
+AGY implements and supplies technical evidence. Muse records black-box outcomes. The reviewer maintains checkpoints and recommends acceptance. The owner approves decisions and merges.
 
-- **Meta WhatsApp Embedded Signup:** Implemented in code but kept on **DEFERRED / HOLD** awaiting external Meta App Dashboard configuration (`docs/INTEGRATION_CHECKPOINTS.md`).
-- **Deferred Areas:** Billing, subscriptions, payments (DECISIONS #36); Spec B instrumentation/economics; multi-tenant branch routing beyond selective scoping.
-
-## 5. Upcoming Direction: UX001 Workstreams & Welcome/Button UX Constraints
-
-FlowPilot is currently in Product Discovery. The approved upcoming direction is **UX001**.
-The immediate next product change following baseline conversation engine evaluation is the **Welcome and Button UX**.
-The intended constraints are established here as architectural boundaries:
-
-1. **Proactive /start welcome with contextual inline choices:** Welcomes incoming customers with contextual actions/buttons where channel supports it.
-2. **Free text remains supported:** Customer may choose to type naturally at any point; buttons are assistive, never coercive.
-3. **One state, planner, and Booking Core:** The existing single `ConversationEngine`, `resolveFinishedTurn`, and Booking Core remain authoritative.
-4. **No parallel wizard:** Do not construct a second wizard or alternative conversation state machine for button clicks.
-5. **No greeting keyword dictionary:** Greetings are recognized organically; do not build fragile regex/keyword greeting dictionaries.
-6. **No reset of active tasks on greeting or /start:** A customer saying hello or re-triggering `/start` mid-conversation must not wipe active booking tasks or known facts.
-7. **Valid default service skips redundant service questions:** When a business has a single service or an unambiguous default, skip asking "which service?" and proceed directly to scheduling.
-8. **Staff ownership remains authoritative:** Handed-off or staff-assigned conversations stay assigned to staff; incoming buttons/messages do not silently unassign or override human staff.
-
-Implementation tasks follow this planned sequence:
-
-1. **BOOK-UX-00 — Booking Core Validation:** Validating booking creation flow, provider eligibility, availability coherence, and slot presentation.
-2. **Receptionist Booking UX:** Receptionist booking workflow and availability-guided actions.
-3. **Customer Chatbot Booking UX:** Conversational booking selection, mapper, provider-aware options, and confirmation.
-4. **Founder Conversation Lab:** Platform copy overrides, prompt copy experimentation, and founder tuning.
-
-_(Do not implement UX001 workstreams during documentation phases.)_
-
-## 6. How to Continue
-
-1. Read `docs/AGENT_RULES.md` for tier-based loading and task-scoped reading rules.
-2. Locate the closest context via `docs/CONTEXT_MAP.md` or `pnpm context <name>`.
-3. Open only the mapped doorway files and follow direct imports outward as needed.
+[PR #79](https://github.com/geekammar/Yakfi/pull/79) · [QA register](https://docs.google.com/spreadsheets/d/1ywijLhpIrr3BCkMHil2voeiZoW4LiLc8Sd-4oB0qvDU/edit) · [Recovery folder](https://drive.google.com/drive/folders/1limgPzcq_CykylK4kaC0OwzgxGGr3jWo)

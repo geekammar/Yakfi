@@ -1,5 +1,8 @@
 # FlowPilot — Telegram (Second Channel)
 
+> Existing-bot acceptance checkpoint, 12 November 2026. Follow ISS-018_ACCEPTANCE.md for PR #79. The existing managed customer bot can be reused with its matching credential key. Manager provisioning is not required for this reply-delivery journey. Older deployment and onboarding status notes below are historical.
+
+
 > **The canonical Telegram document.** Telegram is a TRANSPORT SIBLING of
 > WhatsApp, not a second product (DECISIONS #63): the ONE conversation
 > engine, the ONE provider-neutral transport seam, the ONE customer

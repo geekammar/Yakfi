@@ -132,11 +132,18 @@ The map is a STARTING-POINT INDEX, not a dependency graph and not a second
 architecture document. When you add or move a mapped file, update the entry and
 run `pnpm context:check`.
 
+## Documentation Ownership
+
+- The independent reviewer owns the verified `CURRENT_STATE.md` snapshot, recovery handoff, roadmap changes, and canonical product or architecture decision wording. The owner approves product decisions and merges. Verify source, CI, deployment, and acceptance evidence before changing the status.
+- AGY/OpenCode records the candidate implementation, changed technical contracts, test evidence, and remaining checks in the implementation PR. Treat product, roadmap, and architectural decisions from an implementation report as proposals until the reviewer and owner approve them.
+- Muse records black-box execution evidence in the shared QA register. The reviewer owns acceptance. Preserve the distinctions between candidate, merged, deployed, tested, and accepted.
+- Keep changes focused. Use a documentation PR for reviewer-owned changes outside the implementation PR. After a verified milestone or priority decision, refresh the project recovery folder and the relevant canonical docs.
+
 ## Before Making Any Changes
 
 1. Read the Tier 0 triple (`AGENT_RULES.md` + `CURRENT_STATE.md` + `DECISIONS_INDEX.md`).
 2. Follow the loading protocol: Tier 1 by task; Tier 2 only on conflict/decision; Tier 3 only on explicit historical need.
-3. Read `docs/BUILD_STATE.md → Current State + Next Step` and do exactly that.
+3. Read `docs/BUILD_STATE.md → Current State + Next Step`; reconcile it with Git and the reviewer-scoped task.
 4. Authority order on conflict: latest `DECISIONS.md` entry → `BUILD_STATE.md` → canonical topic docs → derived summaries. The repository code is the implementation truth.
 
 ## NEVER
@@ -161,7 +168,7 @@ run `pnpm context:check`.
 
 ## ALWAYS
 
-- ✅ Update `BUILD_STATE.md` after every prompt — MINIMALLY: status, completed work (one entry), known issues, next step.
+- ✅ For an implementation PR, update `BUILD_STATE.md` minimally with candidate status, implementation evidence, known issues, and remaining checks.
 - ✅ Append to `DECISIONS.md` when a decision is made (never overwrite).
 - ✅ Create a new document ONLY when a real long-term need exists and no canonical file covers the topic.
 - ✅ Preserve strategy: when in conflict, vision > strategy > scope > implementation detail.
@@ -177,7 +184,7 @@ run `pnpm context:check`.
 3. **Plan** against `BUILD_STATE.md → Next Step`; produce a concise plan before editing.
 4. **Implement** ONLY the current prompt's scope, following `ARCHITECTURE.md` dependency rules.
 5. **Verify** with the lightweight gate: targeted domain checks (`pnpm check:<module>`) + `pnpm verify:local` (or `pnpm verify:fast`). Full build is delegated to GitHub Actions CI upon PR push.
-6. **Update docs** — `BUILD_STATE.md` always (minimal); `DECISIONS.md` when a decision was made.
+6. **Record implementation evidence** — update `BUILD_STATE.md` minimally for implementation changes. The reviewer owns canonical decision wording after owner approval.
 7. **Report honestly** and leave the repository ready for the next fresh session.
 
 ## CI-First PR Workflow & VPS Safety (DEVOPS-01E)

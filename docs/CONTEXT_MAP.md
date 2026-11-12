@@ -57,6 +57,7 @@ transport/adapter over the unchanged Conversation Engine, the deterministic
 Docs:
 
 - docs/TELEGRAM.md
+- docs/ISS-018_ACCEPTANCE.md
   Code:
 - src/server/integrations/telegram/telegram-webhook.ts
 - src/server/integrations/telegram/telegram-webhook-handler.ts
