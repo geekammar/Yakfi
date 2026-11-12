@@ -23,3 +23,5 @@
 - AGY/OpenCode implements and provides technical evidence. Muse records black-box outcomes. The reviewer maintains the verified checkpoint and canonical documentation. The owner approves decisions and merges.
 
 [Recovery folder](https://drive.google.com/drive/folders/1limgPzcq_CykylK4kaC0OwzgxGGr3jWo) · [Shared QA](https://docs.google.com/spreadsheets/d/1ywijLhpIrr3BCkMHil2voeiZoW4LiLc8Sd-4oB0qvDU/edit) · [Trello](https://trello.com/b/IgK6SV7K/yakfi)
+
+- Operator tooling correction, 12 November. Source review confirms telegram-repair.ts rejects WEBHOOK_URL_MISMATCH before setWebhook. The report's repair commands cannot retarget the existing bot. Use or implement an explicit controlled switch with expected-current and destination verification, preserving default repair behavior and destination database secret consistency. Review resulting code and CI before Muse.
