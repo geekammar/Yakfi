@@ -6,6 +6,20 @@ on:
       - "prisma/**"
       - ".github/workflows/test-db-migrate.yml"
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operation mode ('validate-migrations' or 'transfer-secret')"
+        required: true
+        default: "validate-migrations"
+        type: choice
+        options:
+          - "validate-migrations"
+          - "transfer-secret"
+      expected_commit_sha:
+        description: "Expected full commit SHA (required for transfer-secret; must match github.sha)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -17,6 +31,7 @@ concurrency:
 jobs:
   validate-migrations:
     name: Validate pending Prisma migrations (disposable test DB)
+    if: github.event_name != 'workflow_dispatch' || (inputs.operation != 'transfer-secret' && github.event.inputs.operation != 'transfer-secret')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -118,3 +133,171 @@ jobs:
           fi
           echo '::error::Post-migration status on test DB does not report up to date'
           exit 1
+
+  transfer-secret:
+    name: Transfer CREDENTIAL_MASTER_KEY to Vercel Preview
+    if: github.event_name == 'workflow_dispatch' && (inputs.operation == 'transfer-secret' || github.event.inputs.operation == 'transfer-secret') && github.ref == 'refs/heads/ops/transfer-credential-master-key-vercel'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Transfer secret to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha || github.event.inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          node -e '
+          async function run() {
+            const eventName = process.env.GITHUB_EVENT_NAME;
+            const ref = process.env.GITHUB_REF;
+            const expectedRef = "refs/heads/ops/transfer-credential-master-key-vercel";
+
+            if (eventName !== "workflow_dispatch") {
+              console.error(`::error::Invalid trigger event "${eventName}". Secret transfer is restricted to workflow_dispatch.`);
+              process.exit(1);
+            }
+            if (ref !== expectedRef) {
+              console.error(`::error::Invalid branch ref "${ref}". Secret transfer is restricted to ${expectedRef}.`);
+              process.exit(1);
+            }
+
+            const PROJECT_ID = "prj_CjKh6Qt6IAKEc9EB4StaJJxnP0Fp";
+            const PROJECT_NAME = "flowpilot-prod";
+            const TARGET_ENV = "preview";
+            const TARGET_BRANCH = "fix/safe-telegram-staff-reply-delivery";
+            const TARGET_KEY = "CREDENTIAL_MASTER_KEY";
+            const TARGET_TYPE = "sensitive";
+
+            const expectedSha = (process.env.EXPECTED_COMMIT_SHA || "").trim();
+            const githubSha = (process.env.GITHUB_SHA || "").trim();
+
+            if (!expectedSha) {
+              console.error("::error::Missing expected_commit_sha input. Operator must provide the exact commit SHA.");
+              process.exit(1);
+            }
+            if (expectedSha !== githubSha) {
+              console.error(`::error::Commit SHA mismatch. Expected: "${expectedSha}", Actual: "${githubSha}". Transfer aborted.`);
+              process.exit(1);
+            }
+
+            const vercelToken = (process.env.VERCEL_TOKEN || "").trim();
+            const credentialKey = (process.env.CREDENTIAL_MASTER_KEY || "").trim();
+
+            if (!vercelToken) {
+              console.error("::error::VERCEL_TOKEN secret is unavailable or empty. Please ensure the Actions secret is configured.");
+              process.exit(1);
+            }
+            if (!credentialKey) {
+              console.error("::error::CREDENTIAL_MASTER_KEY secret is unavailable or empty. Please ensure the Actions secret is configured.");
+              process.exit(1);
+            }
+
+            console.log("==========================================");
+            console.log("Vercel Secret Transfer Configuration");
+            console.log(`- Project:     ${PROJECT_NAME} (${PROJECT_ID})`);
+            console.log(`- Target:      ${TARGET_ENV}`);
+            console.log(`- Git Branch:  ${TARGET_BRANCH}`);
+            console.log(`- Key:         ${TARGET_KEY}`);
+            console.log(`- Type:        ${TARGET_TYPE}`);
+            console.log(`- Commit SHA:  ${githubSha}`);
+            console.log("==========================================");
+
+            console.log("Fetching existing project environment variables from Vercel...");
+            const listUrl = `https://api.vercel.com/v10/projects/${PROJECT_ID}/env`;
+            const listRes = await fetch(listUrl, {
+              headers: {
+                Authorization: `Bearer ${vercelToken}`,
+              },
+            });
+
+            if (!listRes.ok) {
+              console.error(`::error::Failed to list Vercel environment variables (HTTP status ${listRes.status}).`);
+              process.exit(1);
+            }
+
+            const listData = await listRes.json();
+            const envs = Array.isArray(listData?.envs) ? listData.envs : [];
+
+            const exactBranchMatch = envs.find((e) => {
+              if (e.key !== TARGET_KEY) return false;
+              if (e.gitBranch !== TARGET_BRANCH) return false;
+              if (Array.isArray(e.target)) return e.target.includes(TARGET_ENV);
+              return e.target === TARGET_ENV;
+            });
+
+            if (exactBranchMatch) {
+              console.log(`Found existing branch-specific record for ${TARGET_BRANCH}. Updating via PATCH...`);
+              const patchUrl = `https://api.vercel.com/v9/projects/${PROJECT_ID}/env/${exactBranchMatch.id}`;
+              const patchRes = await fetch(patchUrl, {
+                method: "PATCH",
+                headers: {
+                  Authorization: `Bearer ${vercelToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  value: credentialKey,
+                  type: TARGET_TYPE,
+                  target: [TARGET_ENV],
+                  gitBranch: TARGET_BRANCH,
+                }),
+              });
+
+              if (!patchRes.ok) {
+                console.error(`::error::Failed to update Vercel environment variable (HTTP status ${patchRes.status}).`);
+                process.exit(1);
+              }
+              console.log(`Successfully updated existing branch-specific secret "${TARGET_KEY}" on branch "${TARGET_BRANCH}" (HTTP status ${patchRes.status}).`);
+            } else {
+              console.log(`No existing record found for branch "${TARGET_BRANCH}". Creating via POST...`);
+              const postUrl = `https://api.vercel.com/v10/projects/${PROJECT_ID}/env`;
+              const postRes = await fetch(postUrl, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${vercelToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  key: TARGET_KEY,
+                  value: credentialKey,
+                  type: TARGET_TYPE,
+                  target: [TARGET_ENV],
+                  gitBranch: TARGET_BRANCH,
+                }),
+              });
+
+              if (!postRes.ok) {
+                console.error(`::error::Failed to create Vercel environment variable (HTTP status ${postRes.status}).`);
+                process.exit(1);
+              }
+              console.log(`Successfully created branch-specific secret "${TARGET_KEY}" on branch "${TARGET_BRANCH}" (HTTP status ${postRes.status}).`);
+            }
+
+            if (process.env.GITHUB_STEP_SUMMARY) {
+              const fs = require("node:fs");
+              fs.appendFileSync(
+                process.env.GITHUB_STEP_SUMMARY,
+                `### Vercel Secret Transfer Summary\n\n` +
+                `- **Status**: Success\n` +
+                `- **Project**: \`${PROJECT_NAME}\` (\`${PROJECT_ID}\`)\n` +
+                `- **Target**: \`${TARGET_ENV}\`\n` +
+                `- **Git Branch**: \`${TARGET_BRANCH}\`\n` +
+                `- **Key**: \`${TARGET_KEY}\`\n` +
+                `- **Type**: \`${TARGET_TYPE}\`\n` +
+                `- **Verified Commit SHA**: \`${githubSha}\`\n` +
+                `- **Action Taken**: ${exactBranchMatch ? "Updated existing branch-scoped variable" : "Created new branch-scoped variable"}\n`
+              );
+            }
+
+            console.log("Transfer operation completed successfully. Production and unrelated environment variables preserved.");
+          }
+
+          run().catch(() => {
+            console.error("::error::Transfer script execution failed.");
+            process.exit(1);
+          });
+          '
+
