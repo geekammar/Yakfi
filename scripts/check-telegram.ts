@@ -4570,6 +4570,343 @@ async function main(): Promise<void> {
       ),
   );
 
+  // ─── Explicit Webhook Switching Tests (R20 - R25) ──────────────────────────
+  const repairMod =
+    await import("@/server/integrations/telegram/telegram-repair");
+  const switchTelegramBotWebhook = repairMod.switchTelegramBotWebhook;
+
+  const switchBusinessId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+  const switchConnectionId = "d3b07384-d113-460d-a0b4-3fa32b000001";
+  const prodCustomerWebhookUrl =
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook";
+  const previewCustomerWebhookUrl =
+    "https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook";
+
+  let switchMockDbRow: FakeConnection = {
+    ...fakeConnection({
+      id: switchConnectionId,
+      businessId: switchBusinessId,
+      branchId: null,
+      botExternalId: "123456789",
+      status: "CONNECTED",
+      isActive: true,
+      credentialsRef: "fp:test-cred-ref-switch",
+    }),
+    botUsername: "Drafnanafnanbot",
+    webhookSecretHash: "initial-hash-value-1234567890abcdef1234567890abcdef",
+  };
+
+  let switchTelegramCalls: Array<{
+    method: string;
+    body: {
+      url?: string;
+      allowed_updates?: string[];
+      secret_token?: string;
+      [key: string]: unknown;
+    };
+  }> = [];
+  let switchDbUpdateCalls: Array<{
+    webhookSecretHash?: string | null;
+    [key: string]: unknown;
+  }> = [];
+  let switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  let switchRemoteAllowedUpdates = ["message"];
+
+  const makeSwitchDeps = (
+    overrides: {
+      transportError?: boolean;
+      dbUpdateFails?: boolean;
+    } = {},
+  ) => {
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const method = String(_url).split("/").pop() ?? "";
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      switchTelegramCalls.push({ method, body });
+
+      if (method === "getMe") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: 123456789,
+              is_bot: true,
+              first_name: "Customer Bot",
+              username: "Drafnanafnanbot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (method === "getWebhookInfo") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: switchRemoteWebhookUrl,
+              has_custom_certificate: false,
+              pending_update_count: 3,
+              allowed_updates: switchRemoteAllowedUpdates,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (method === "setWebhook") {
+        if (overrides.transportError) {
+          throw new TypeError("fetch failed: socket hang up");
+        }
+        switchRemoteWebhookUrl = body.url;
+        switchRemoteAllowedUpdates = body.allowed_updates ?? [];
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: false }), { status: 400 });
+    };
+
+    const resolver = {
+      async resolve() {
+        return {
+          ok: true as const,
+          kind: "RUNTIME" as const,
+          reference: "fp:test-cred-ref-switch",
+          value: "123456789:ABCDefGhIJKlmNoPQRsTUVwxyZ",
+        };
+      },
+    };
+
+    return {
+      api: {
+        fetchImpl,
+        apiHost: "https://api.telegram.org",
+        credentialsResolver: resolver,
+      },
+      connectionRepository: {
+        async findByIdWithinBusiness(id: string, bId: string) {
+          if (id === switchConnectionId && bId === switchBusinessId) {
+            return { ...switchMockDbRow };
+          }
+          return null;
+        },
+        async update(
+          _id: string,
+          _bId: string,
+          data: { webhookSecretHash?: string | null; [key: string]: unknown },
+        ) {
+          if (overrides.dbUpdateFails) {
+            throw new Error("Simulated database failure");
+          }
+          switchDbUpdateCalls.push(data);
+          switchMockDbRow = {
+            ...switchMockDbRow,
+            webhookSecretHash: data.webhookSecretHash ?? "",
+          };
+          return { ...switchMockDbRow };
+        },
+        async updateWebhookSecretHash(
+          _id: string,
+          _bId: string,
+          hash: string,
+          _opts?: { expectedPreviousHash?: string | null },
+        ) {
+          if (overrides.dbUpdateFails) {
+            throw new Error("Simulated database failure");
+          }
+          switchDbUpdateCalls.push({ webhookSecretHash: hash });
+          switchMockDbRow = { ...switchMockDbRow, webhookSecretHash: hash };
+          return { ...switchMockDbRow };
+        },
+      },
+      credentialsResolver: resolver,
+      generateWebhookSecret: () => "mock-generated-secret-switch-12345",
+      hashWebhookSecret: (s: string) => `hashed-${s}`,
+    };
+  };
+
+  // R20. Dry run: verifies bot identity, expected URL matching, target updates, restoration procedure, and 0 mutations
+  switchTelegramCalls = [];
+  switchDbUpdateCalls = [];
+  switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  switchRemoteAllowedUpdates = ["message"];
+  const dryRunDeps = makeSwitchDeps();
+
+  const dryRunOutcome = await switchTelegramBotWebhook(dryRunDeps, {
+    businessId: switchBusinessId,
+    connectionId: switchConnectionId,
+    expectedCurrentUrl: prodCustomerWebhookUrl,
+    destinationUrl: previewCustomerWebhookUrl,
+    apply: false,
+  });
+
+  check(
+    "R20. Explicit switch dry run defaults to no mutation, validates URLs, preserves updates, and provides restoration procedure",
+    dryRunOutcome.ok === true &&
+      dryRunOutcome.status === "SWITCH_DRY_RUN" &&
+      dryRunOutcome.dryRun === true &&
+      dryRunOutcome.currentWebhookUrl === prodCustomerWebhookUrl &&
+      dryRunOutcome.destinationWebhookUrl === previewCustomerWebhookUrl &&
+      dryRunOutcome.allowedUpdates.includes("message") &&
+      dryRunOutcome.allowedUpdates.includes("callback_query") &&
+      dryRunOutcome.pendingUpdateCount === 3 &&
+      dryRunOutcome.restorationProcedure.includes(
+        `--expected-current-url ${previewCustomerWebhookUrl}`,
+      ) &&
+      dryRunOutcome.restorationProcedure.includes(
+        `--destination-url ${prodCustomerWebhookUrl}`,
+      ) &&
+      switchTelegramCalls.filter((c) => c.method === "setWebhook").length ===
+        0 &&
+      switchDbUpdateCalls.length === 0,
+  );
+
+  // R21. Valid explicit switch with apply: coordinates provider retargeting, secret rotation, and DB hash persistence
+  switchTelegramCalls = [];
+  switchDbUpdateCalls = [];
+  switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  switchRemoteAllowedUpdates = ["message"];
+  const applyDeps = makeSwitchDeps();
+
+  const switchApplyOutcome = await switchTelegramBotWebhook(applyDeps, {
+    businessId: switchBusinessId,
+    connectionId: switchConnectionId,
+    expectedCurrentUrl: prodCustomerWebhookUrl,
+    destinationUrl: previewCustomerWebhookUrl,
+    apply: true,
+  });
+
+  const appliedSetWebhookCall = switchTelegramCalls.find(
+    (c) => c.method === "setWebhook",
+  );
+
+  check(
+    "R21. Explicit switch with apply coordinates provider retargeting, secret rotation, and DB hash persistence",
+    switchApplyOutcome.ok === true &&
+      switchApplyOutcome.status === "SWITCHED" &&
+      switchApplyOutcome.dryRun === false &&
+      switchApplyOutcome.previousWebhookUrl === prodCustomerWebhookUrl &&
+      switchApplyOutcome.webhookUrl === previewCustomerWebhookUrl &&
+      switchApplyOutcome.allowedUpdates.includes("message") &&
+      switchApplyOutcome.allowedUpdates.includes("callback_query") &&
+      switchApplyOutcome.webhookSecretHashPersisted === true &&
+      Boolean(appliedSetWebhookCall) &&
+      appliedSetWebhookCall?.body?.url === previewCustomerWebhookUrl &&
+      appliedSetWebhookCall?.body?.secret_token ===
+        "mock-generated-secret-switch-12345" &&
+      switchDbUpdateCalls.length === 1 &&
+      switchDbUpdateCalls[0]?.webhookSecretHash ===
+        "hashed-mock-generated-secret-switch-12345" &&
+      switchApplyOutcome.restorationProcedure.includes(
+        `--expected-current-url ${previewCustomerWebhookUrl}`,
+      ) &&
+      switchApplyOutcome.restorationProcedure.includes(
+        `--destination-url ${prodCustomerWebhookUrl}`,
+      ),
+  );
+
+  // R22. Current-URL mismatch rejection
+  switchTelegramCalls = [];
+  switchDbUpdateCalls = [];
+  switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  const mismatchDeps = makeSwitchDeps();
+
+  const mismatchOutcome = await switchTelegramBotWebhook(mismatchDeps, {
+    businessId: switchBusinessId,
+    connectionId: switchConnectionId,
+    expectedCurrentUrl:
+      "https://wrong-hostname.vercel.app/api/telegram/webhook",
+    destinationUrl: previewCustomerWebhookUrl,
+    apply: true,
+  });
+
+  check(
+    "R22. Explicit switch strictly refuses when actual remote URL differs from expectedCurrentUrl",
+    mismatchOutcome.ok === false &&
+      mismatchOutcome.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      switchTelegramCalls.filter((c) => c.method === "setWebhook").length ===
+        0 &&
+      switchDbUpdateCalls.length === 0,
+  );
+
+  // R23. Unchanged ordinary repair behavior: still rejects mismatched expected-url with WEBHOOK_URL_MISMATCH
+  const ordinaryRepairOutcome = await repairTelegramBotWebhook(
+    makeSwitchDeps(),
+    {
+      businessId: switchBusinessId,
+      connectionId: switchConnectionId,
+      expectedWebhookUrl: previewCustomerWebhookUrl,
+      apply: true,
+    },
+  );
+
+  check(
+    "R23. Ordinary repair retains unchanged guard rejecting WEBHOOK_URL_MISMATCH (does not permit retargeting)",
+    ordinaryRepairOutcome.ok === false &&
+      ordinaryRepairOutcome.code === "WEBHOOK_URL_MISMATCH",
+  );
+
+  // R24. Provider transport uncertainty reports truthful recovery state
+  switchTelegramCalls = [];
+  switchDbUpdateCalls = [];
+  switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  const uncertainDeps = makeSwitchDeps({
+    transportError: true,
+  });
+
+  const switchUncertainOutcome = await switchTelegramBotWebhook(uncertainDeps, {
+    businessId: switchBusinessId,
+    connectionId: switchConnectionId,
+    expectedCurrentUrl: prodCustomerWebhookUrl,
+    destinationUrl: previewCustomerWebhookUrl,
+    apply: true,
+  });
+
+  check(
+    "R24. Explicit switch partial failure handling: provider transport uncertainty reports truthful recovery state",
+    switchUncertainOutcome.ok === false &&
+      switchUncertainOutcome.status === "PARTIAL_FAILURE" &&
+      switchUncertainOutcome.code ===
+        "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" &&
+      switchUncertainOutcome.remoteStateMayHaveChanged === true &&
+      Boolean(switchUncertainOutcome.reconciliationCommand) &&
+      Boolean(switchUncertainOutcome.restorationProcedure) &&
+      switchDbUpdateCalls.length === 0,
+  );
+
+  // R25. DB update failure after successful setWebhook returns recovery command and restoration procedure
+  switchTelegramCalls = [];
+  switchDbUpdateCalls = [];
+  switchRemoteWebhookUrl = prodCustomerWebhookUrl;
+  switchRemoteAllowedUpdates = ["message"];
+  switchMockDbRow = {
+    ...switchMockDbRow,
+    webhookSecretHash: "old-unmodified-hash-12345",
+  };
+  const dbFailDeps = makeSwitchDeps({ dbUpdateFails: true });
+
+  const dbFailOutcome = await switchTelegramBotWebhook(dbFailDeps, {
+    businessId: switchBusinessId,
+    connectionId: switchConnectionId,
+    expectedCurrentUrl: prodCustomerWebhookUrl,
+    destinationUrl: previewCustomerWebhookUrl,
+    apply: true,
+  });
+
+  check(
+    "R25. Explicit switch partial failure handling: DB update failure after successful setWebhook returns recovery command and restoration procedure",
+    dbFailOutcome.ok === false &&
+      dbFailOutcome.status === "PARTIAL_FAILURE" &&
+      dbFailOutcome.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED" &&
+      switchTelegramCalls.filter((c) => c.method === "setWebhook").length ===
+        1 &&
+      Boolean(dbFailOutcome.reconciliationCommand) &&
+      Boolean(dbFailOutcome.restorationProcedure),
+  );
+
   let failed = 0;
   for (const { label, pass } of checks) {
     if (pass) console.log(`✔ ${label}`);

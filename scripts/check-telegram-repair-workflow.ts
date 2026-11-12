@@ -460,6 +460,93 @@ fi
       ),
   );
 
+  // ─── 4. Switch CLI Boundary Enforcement ───────────────────────────────────
+  // T17. CLI --switch requires --expected-current-url and --destination-url
+  const switchMissingUrls = runCli([
+    "--switch",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+  ]);
+  check(
+    "T17. CLI --switch fails closed when expected-current-url or destination-url is omitted",
+    switchMissingUrls.status === 1 &&
+      switchMissingUrls.stderr.includes(
+        "Both --expected-current-url and --destination-url are required",
+      ),
+  );
+
+  // T18. CLI --switch rejects non-UUID IDs
+  const switchBadUuid = runCli([
+    "--switch",
+    "--business-id",
+    "invalid-uuid",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T18. CLI --switch strictly rejects non-UUID business-id or connection-id",
+    switchBadUuid.status === 1 &&
+      switchBadUuid.stderr.includes("must be valid UUIDs"),
+  );
+
+  // T19. CLI --switch rejects combination with --lookup or --reconcile-secret
+  const switchWithLookup = runCli([
+    "--switch",
+    "--lookup",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  const switchWithReconcile = runCli([
+    "--switch",
+    "--reconcile-secret",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T19. CLI --switch rejects conflicting modes (--lookup, --reconcile-secret)",
+    switchWithLookup.status === 1 &&
+      switchWithLookup.stderr.includes("cannot be combined with --lookup") &&
+      switchWithReconcile.status === 1 &&
+      switchWithReconcile.stderr.includes(
+        "cannot be combined with --reconcile-secret",
+      ),
+  );
+
+  // T20. Passing switch flags without --switch fails
+  const flagsWithoutSwitch = runCli([
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T20. Passing --expected-current-url or --destination-url without --switch is rejected",
+    flagsWithoutSwitch.status === 1 &&
+      flagsWithoutSwitch.stderr.includes("only valid with --switch"),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {

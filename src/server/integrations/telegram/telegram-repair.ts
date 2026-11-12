@@ -742,6 +742,594 @@ export async function repairTelegramBotWebhookDefault(
   );
 }
 
+const SWITCH_UUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export type SwitchTelegramWebhookParams = {
+  businessId: string;
+  connectionId: string;
+  expectedCurrentUrl: string;
+  destinationUrl: string;
+  apply?: boolean;
+};
+
+export type SwitchTelegramWebhookOutcome =
+  | {
+      ok: true;
+      status: "SWITCH_DRY_RUN";
+      dryRun: true;
+      botExternalId: string;
+      botUsername?: string | null;
+      currentWebhookUrl: string;
+      destinationWebhookUrl: string;
+      allowedUpdates: string[];
+      pendingUpdateCount: number;
+      restorationProcedure: string;
+      message: string;
+    }
+  | {
+      ok: true;
+      status: "SWITCHED";
+      dryRun: false;
+      botExternalId: string;
+      botUsername?: string | null;
+      previousWebhookUrl: string;
+      webhookUrl: string;
+      allowedUpdates: string[];
+      previousAllowedUpdates: string[];
+      pendingUpdateCount: number;
+      webhookSecretHashPersisted: true;
+      restorationProcedure: string;
+      verifiedAt: string;
+    }
+  | {
+      ok: false;
+      code:
+        | "PARTIAL_APPLICATION_RECOVERY_REQUIRED"
+        | "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED"
+        | "POST_APPLY_VERIFICATION_FAILED"
+        | "POST_APPLY_INSPECTION_FAILED"
+        | "POST_APPLY_REGISTRATION_MISMATCH"
+        | "CONCURRENT_MODIFICATION_CONFLICT"
+        | "POST_APPLY_CONNECTION_NOT_FOUND"
+        | "POST_APPLY_CONNECTION_INACTIVE";
+      status: "PARTIAL_FAILURE";
+      botExternalId: string;
+      botUsername?: string | null;
+      webhookUrl: string;
+      targetAllowedUpdates: string[];
+      pendingUpdateCount: number;
+      reconciliationCommand: string;
+      restorationProcedure?: string;
+      remoteStateMayHaveChanged?: boolean;
+      message: string;
+    }
+  | {
+      ok: false;
+      status?: "REFUSED";
+      code:
+        | "CONNECTION_NOT_FOUND"
+        | "CONNECTION_INACTIVE"
+        | "UNSUPPORTED_PROVIDER"
+        | "MANAGER_BOT_TARGET_REJECTED"
+        | "CREDENTIALS_UNAVAILABLE"
+        | "BOT_IDENTITY_VERIFICATION_FAILED"
+        | "BOT_IDENTITY_MISMATCH"
+        | "WEBHOOK_INFO_FAILED"
+        | "MISSING_WEBHOOK_URL"
+        | "CURRENT_WEBHOOK_URL_MISMATCH"
+        | "MALFORMED_WEBHOOK_URL"
+        | "NON_HTTPS_WEBHOOK_URL"
+        | "UNSUPPORTED_WEBHOOK_URL_COMPONENTS"
+        | "INVALID_CUSTOMER_WEBHOOK_PATH"
+        | "SET_WEBHOOK_FAILED"
+        | "DATABASE_UPDATE_FAILED"
+        | "INVALID_SWITCH_PARAMETERS";
+      message: string;
+      reconciliationCommand?: string;
+      restorationProcedure?: string;
+    };
+
+/**
+ * Explicit webhook switching operator tool for existing connected customer Telegram bots.
+ * Defaults strictly to a dry run unless `apply: true` is provided.
+ *
+ * Requirements:
+ * 1. Requires exact businessId, connectionId, expectedCurrentUrl and destinationUrl.
+ * 2. Validates both URLs against HTTPS customer webhook protocol/path rules.
+ * 3. Verifies connection existence, CONNECTED status, and non-manager bot identity before mutation.
+ * 4. Refuses if the remote registered URL differs from expectedCurrentUrl.
+ * 5. In dry run: returns planned change and valid restoration procedure without network/DB mutation.
+ * 6. In apply: sets new webhook URL with rotated secret, updates DB digest, verifies both,
+ *    and produces a valid restoration procedure targeting original destination.
+ */
+export async function switchTelegramBotWebhook(
+  deps: RepairTelegramWebhookDeps,
+  params: SwitchTelegramWebhookParams,
+): Promise<SwitchTelegramWebhookOutcome> {
+  if (
+    !params.businessId ||
+    !params.connectionId ||
+    !SWITCH_UUID_REGEX.test(params.businessId) ||
+    !SWITCH_UUID_REGEX.test(params.connectionId)
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_SWITCH_PARAMETERS",
+      message:
+        "يجب تحديد معرف منشأة ومعرف اتصال صحيحين بصيغة UUID للتحويل الصريح",
+    };
+  }
+
+  if (!params.expectedCurrentUrl || !params.destinationUrl) {
+    return {
+      ok: false,
+      code: "INVALID_SWITCH_PARAMETERS",
+      message:
+        "يجب تحديد الرابط الحالي المتوقع ورابط الوجهة المقصود للتحويل الصريح",
+    };
+  }
+
+  const currentValidation = validateCustomerWebhookUrl(
+    params.expectedCurrentUrl,
+    "الرابط الحالي المتوقع",
+  );
+  if (!currentValidation.ok) {
+    return currentValidation;
+  }
+  const expectedCurrentUrlClean = currentValidation.normalizedUrl;
+
+  const destValidation = validateCustomerWebhookUrl(
+    params.destinationUrl,
+    "رابط الوجهة المقصود",
+  );
+  if (!destValidation.ok) {
+    return destValidation;
+  }
+  const destinationUrlClean = destValidation.normalizedUrl;
+
+  // 1. Resolve connection within its business
+  const connection = await deps.connectionRepository.findByIdWithinBusiness(
+    params.connectionId,
+    params.businessId,
+  );
+  if (!connection) {
+    return {
+      ok: false,
+      code: "CONNECTION_NOT_FOUND",
+      message: "اتصال تيليجرام غير موجود ضمن هذه المنشأة",
+    };
+  }
+
+  // 2. Operational state & provider validation
+  if (connection.status !== "CONNECTED" || !connection.isActive) {
+    return {
+      ok: false,
+      code: "CONNECTION_INACTIVE",
+      message: "اتصال تيليجرام غير نشط أو مفصول، لا يمكن تطبيق التحويل عليه",
+    };
+  }
+
+  if (connection.provider !== "telegram_managed") {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_PROVIDER",
+      message: "مزود الاتصال غير مدعوم للتحويل التلقائي",
+    };
+  }
+
+  // 3. Manager bot rejection
+  if (
+    connection.managerBotId &&
+    connection.botExternalId === connection.managerBotId
+  ) {
+    return {
+      ok: false,
+      code: "MANAGER_BOT_TARGET_REJECTED",
+      message: "لا يمكن تطبيق تحويل بوت العملاء على بوت إدارة المنصة",
+    };
+  }
+
+  // 4. Resolve credentials safely
+  const tokenRes = await resolveTelegramBotToken(
+    { credentialsResolver: deps.credentialsResolver },
+    connection.credentialsRef,
+  );
+  if (!tokenRes.ok) {
+    return {
+      ok: false,
+      code: "CREDENTIALS_UNAVAILABLE",
+      message: tokenRes.error.message,
+    };
+  }
+  const botToken = tokenRes.token;
+
+  // 5. Verify bot identity before mutation
+  const meRes = await telegramGetMe(deps.api, botToken);
+  if (!meRes.ok) {
+    return {
+      ok: false,
+      code: "BOT_IDENTITY_VERIFICATION_FAILED",
+      message: meRes.error.message,
+    };
+  }
+  if (String(meRes.result.id) !== connection.botExternalId) {
+    return {
+      ok: false,
+      code: "BOT_IDENTITY_MISMATCH",
+      message: "معرف البوت من تيليجرام لا يطابق معرف الاتصال المسجل",
+    };
+  }
+  if (meRes.result.can_manage_bots === true) {
+    return {
+      ok: false,
+      code: "MANAGER_BOT_TARGET_REJECTED",
+      message: "لا يمكن تطبيق تحويل بوت العملاء على بوت إدارة المنصة",
+    };
+  }
+
+  // 6. Read getWebhookInfo
+  const infoRes = await telegramGetWebhookInfo(deps.api, botToken);
+  if (!infoRes.ok) {
+    return {
+      ok: false,
+      code: "WEBHOOK_INFO_FAILED",
+      message: infoRes.error.message,
+    };
+  }
+  const info = infoRes.result;
+  if (!info.url || info.url.trim().length === 0) {
+    return {
+      ok: false,
+      code: "MISSING_WEBHOOK_URL",
+      message: "لا يوجد رابط ويبهوك مسجل للبوت لدى تيليجرام",
+    };
+  }
+  if (info.url.includes("/api/telegram/manager/webhook")) {
+    return {
+      ok: false,
+      code: "MANAGER_BOT_TARGET_REJECTED",
+      message: "رابط الويبهوك المسجل يشير إلى نقطة المدير وليس بوت العملاء",
+    };
+  }
+
+  const actualCheck = validateCustomerWebhookUrl(
+    info.url,
+    "رابط الويبهوك المسجل لدى تيليجرام",
+  );
+  if (!actualCheck.ok) {
+    return actualCheck;
+  }
+  if (actualCheck.normalizedUrl !== expectedCurrentUrlClean) {
+    return {
+      ok: false,
+      code: "CURRENT_WEBHOOK_URL_MISMATCH",
+      message: `رابط الويبهوك المسجل حالياً لدى تيليجرام (${info.url}) لا يطابق الرابط الحالي المتوقع الممرر (${expectedCurrentUrlClean}). تم رفض التحويل لمنع التوجيه الخاطئ أو التغيير غير المقصود.`,
+    };
+  }
+
+  const currentUpdates = info.allowed_updates ?? [];
+  const targetUpdates = Array.from(
+    new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
+  );
+
+  const restorationCmd = `pnpm telegram:repair-webhook --switch --business-id ${connection.businessId} --connection-id ${connection.id} --expected-current-url ${destinationUrlClean} --destination-url ${actualCheck.normalizedUrl} --apply`;
+
+  // 7. Dry run mode: default
+  if (!params.apply) {
+    return {
+      ok: true,
+      status: "SWITCH_DRY_RUN",
+      dryRun: true,
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      currentWebhookUrl: actualCheck.normalizedUrl,
+      destinationWebhookUrl: destinationUrlClean,
+      allowedUpdates: targetUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      restorationProcedure: restorationCmd,
+      message:
+        "فحص تشغيل تجريبي لتحويل الويبهوك (Dry Run) ناجح. لم يتم إجراء أي تعديل على تيليجرام أو قاعدة البيانات. لتطبيق التحويل فعلياً، أضف خيار --apply.",
+    };
+  }
+
+  // 8. Apply mode: coordinated provider retargeting + database secret persistence
+  const secretGen = deps.generateWebhookSecret ?? generateWebhookSecret;
+  const secretHasher = deps.hashWebhookSecret ?? hashTelegramWebhookSecret;
+  const candidateSecret = secretGen();
+  const candidateHash = secretHasher(candidateSecret);
+  const targetAllowedUpdates = [...targetUpdates];
+  const reconciliationCmd = `pnpm telegram:repair-webhook --business-id ${connection.businessId} --connection-id ${connection.id} --apply --reconcile-secret --expected-url ${destinationUrlClean}`;
+
+  const setRes = await telegramSetWebhook(deps.api, botToken, {
+    url: destinationUrlClean,
+    secretToken: candidateSecret,
+    allowedUpdates: targetUpdates,
+  });
+
+  if (!setRes.ok) {
+    const isTransportUncertainty =
+      setRes.error.code === "TRANSIENT_TRANSPORT_FAILURE" ||
+      setRes.error.code === "MALFORMED_PROVIDER_PAYLOAD";
+
+    if (isTransportUncertainty) {
+      return {
+        ok: false,
+        code: "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED",
+        status: "PARTIAL_FAILURE",
+        botExternalId: connection.botExternalId,
+        botUsername: connection.botUsername,
+        webhookUrl: destinationUrlClean,
+        targetAllowedUpdates,
+        pendingUpdateCount: info.pending_update_count,
+        reconciliationCommand: reconciliationCmd,
+        restorationProcedure: restorationCmd,
+        remoteStateMayHaveChanged: true,
+        message: `تعذر التأكد من استجابة تيليجرام عند تحويل الويبهوك (${setRes.error.message}). قد يكون تيليجرام طبق التغيير جزئياً دون تأكيد؛ يُرجى التحقق من حالة الويبهوك.`,
+      };
+    }
+
+    return {
+      ok: false,
+      code: "SET_WEBHOOK_FAILED",
+      message: setRes.error.message,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+    };
+  }
+
+  // 9. Bounded database persistence retries with tenant & concurrency guards
+  const MAX_DB_ATTEMPTS = 3;
+  let persisted = false;
+
+  for (let attempt = 1; attempt <= MAX_DB_ATTEMPTS; attempt++) {
+    try {
+      let updated: TelegramConnection | null = null;
+      if (deps.connectionRepository.updateWebhookSecretHash) {
+        updated = await deps.connectionRepository.updateWebhookSecretHash(
+          connection.id,
+          connection.businessId,
+          candidateHash,
+          { expectedPreviousHash: connection.webhookSecretHash },
+        );
+      } else {
+        const currentCheck =
+          await deps.connectionRepository.findByIdWithinBusiness(
+            connection.id,
+            connection.businessId,
+          );
+        if (
+          !currentCheck ||
+          currentCheck.status !== "CONNECTED" ||
+          !currentCheck.isActive ||
+          (currentCheck.webhookSecretHash !== connection.webhookSecretHash &&
+            currentCheck.webhookSecretHash !== candidateHash)
+        ) {
+          break;
+        }
+        updated = await deps.connectionRepository.update(
+          connection.id,
+          connection.businessId,
+          { webhookSecretHash: candidateHash },
+        );
+      }
+
+      if (updated && updated.webhookSecretHash === candidateHash) {
+        persisted = true;
+        break;
+      }
+    } catch {
+      // transient database error; fall through to read-back verification
+    }
+
+    try {
+      const readBack = await deps.connectionRepository.findByIdWithinBusiness(
+        connection.id,
+        connection.businessId,
+      );
+      if (readBack?.webhookSecretHash === candidateHash) {
+        persisted = true;
+        break;
+      }
+      if (readBack && (readBack.status !== "CONNECTED" || !readBack.isActive)) {
+        break;
+      }
+    } catch {
+      // ignore read-back error during retry
+    }
+
+    if (attempt < MAX_DB_ATTEMPTS && deps.sleepImpl) {
+      await deps.sleepImpl(50 * attempt);
+    }
+  }
+
+  if (!persisted) {
+    return {
+      ok: false,
+      code: "PARTIAL_APPLICATION_RECOVERY_REQUIRED",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message:
+        "تم تحويل رابط تيليجرام بنجاح إلى الوجهة الجديدة، ولكن تعذر تأكيد حفظ ملخص سر الويبهوك في قاعدة البيانات. قد تُرفض طلبات الويبهوك برمز 401 حتى تتم المصالحة.",
+    };
+  }
+
+  // 10. Final database verification
+  let finalRow: TelegramConnection | null = null;
+  try {
+    finalRow = await deps.connectionRepository.findByIdWithinBusiness(
+      connection.id,
+      connection.businessId,
+    );
+  } catch {
+    return {
+      ok: false,
+      code: "POST_APPLY_VERIFICATION_FAILED",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message:
+        "حدث خطأ أثناء القراءة النهائية للتحقق من حفظ سر الويبهوك في قاعدة البيانات بعد التحويل. يُرجى تشغيل أمر المصالحة.",
+    };
+  }
+
+  if (!finalRow) {
+    return {
+      ok: false,
+      code: "POST_APPLY_CONNECTION_NOT_FOUND",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message:
+        "لم يتم العثور على اتصال تيليجرام أثناء التحقق النهائي بعد تطبيق التحويل.",
+    };
+  }
+
+  if (finalRow.status !== "CONNECTED" || !finalRow.isActive) {
+    return {
+      ok: false,
+      code: "POST_APPLY_CONNECTION_INACTIVE",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message: "تم فصل اتصال تيليجرام أثناء أو بعد تطبيق التحويل.",
+    };
+  }
+
+  if (finalRow.webhookSecretHash !== candidateHash) {
+    return {
+      ok: false,
+      code: "CONCURRENT_MODIFICATION_CONFLICT",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message:
+        "ملخص سر الويبهوك النهائي في قاعدة البيانات لا يطابق السر المطبق لدى تيليجرام بعد التحويل (ربما حدث تعديل متزامن). يُرجى تشغيل أمر المصالحة.",
+    };
+  }
+
+  // 11. Post-application Telegram registration inspection
+  const postInfoRes = await telegramGetWebhookInfo(deps.api, botToken);
+  if (!postInfoRes.ok) {
+    return {
+      ok: false,
+      code: "POST_APPLY_INSPECTION_FAILED",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: destinationUrlClean,
+      targetAllowedUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message: `تعذر قراءة تسجيل تيليجرام بعد تطبيق التحويل للتحقق منه (${postInfoRes.error.message}).`,
+    };
+  }
+
+  const postInfo = postInfoRes.result;
+  const postActualValidation = validateCustomerWebhookUrl(
+    postInfo.url,
+    "رابط الويبهوك المسجل في تيليجرام بعد التحويل",
+  );
+  if (
+    !postActualValidation.ok ||
+    postActualValidation.normalizedUrl !== destinationUrlClean
+  ) {
+    return {
+      ok: false,
+      code: "POST_APPLY_REGISTRATION_MISMATCH",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: postInfo.url,
+      targetAllowedUpdates,
+      pendingUpdateCount: postInfo.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message: `رابط الويبهوك المسجل في تيليجرام بعد التحويل (${postInfo.url}) لا يطابق رابط الوجهة المطلوب (${destinationUrlClean}).`,
+    };
+  }
+
+  const postUpdates = postInfo.allowed_updates ?? [];
+  const postHasMessage = postUpdates.includes("message");
+  const postHasCallbackQuery = postUpdates.includes("callback_query");
+  if (!postHasMessage || !postHasCallbackQuery) {
+    return {
+      ok: false,
+      code: "POST_APPLY_REGISTRATION_MISMATCH",
+      status: "PARTIAL_FAILURE",
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      webhookUrl: postInfo.url,
+      targetAllowedUpdates,
+      pendingUpdateCount: postInfo.pending_update_count,
+      reconciliationCommand: reconciliationCmd,
+      restorationProcedure: restorationCmd,
+      message: `تسجيل تيليجرام بعد التحويل لا يتضمن أنواع التحديثات المطلوبة (${JSON.stringify(postUpdates)}).`,
+    };
+  }
+
+  return {
+    ok: true,
+    status: "SWITCHED",
+    dryRun: false,
+    botExternalId: connection.botExternalId,
+    botUsername: connection.botUsername,
+    previousWebhookUrl: actualCheck.normalizedUrl,
+    webhookUrl: postInfo.url,
+    allowedUpdates: postUpdates,
+    previousAllowedUpdates: currentUpdates,
+    pendingUpdateCount: postInfo.pending_update_count,
+    webhookSecretHashPersisted: true,
+    restorationProcedure: restorationCmd,
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
+/** Default production boundary wiring for webhook switching */
+export async function switchTelegramBotWebhookDefault(
+  params: SwitchTelegramWebhookParams,
+): Promise<SwitchTelegramWebhookOutcome> {
+  const { telegramConnectionRepository } =
+    await import("@/server/repositories");
+  return switchTelegramBotWebhook(
+    {
+      api: defaultTelegramApiDeps,
+      connectionRepository: telegramConnectionRepository,
+      credentialsResolver: defaultCredentialsResolver,
+      generateWebhookSecret,
+      hashWebhookSecret: hashTelegramWebhookSecret,
+    },
+    params,
+  );
+}
+
 export type TelegramBotTargetMatch = {
   businessId: string;
   connectionId: string;
