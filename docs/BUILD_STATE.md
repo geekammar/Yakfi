@@ -1,5 +1,8 @@
 # FlowPilot — Build State
 
+> Current acceptance checkpoint, 12 November 2026. Use CURRENT_STATE.md and ISS-018_ACCEPTANCE.md for the active queue. Later sections retain historical implementation evidence and may describe superseded next steps. PR #79 is reviewed through bae04fc; live acceptance is waiting on local recovery of the existing Preview credential key.
+
+
 > **THE authoritative implementation ledger** — the single answer to "what is
 > the state of FlowPilot?". Read the `Current State` summary + `Next Step`
 > only; everything else is reference. Keep updates MINIMAL: status, completed
