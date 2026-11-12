@@ -25,3 +25,5 @@
 [Recovery folder](https://drive.google.com/drive/folders/1limgPzcq_CykylK4kaC0OwzgxGGr3jWo) · [Shared QA](https://docs.google.com/spreadsheets/d/1ywijLhpIrr3BCkMHil2voeiZoW4LiLc8Sd-4oB0qvDU/edit) · [Trello](https://trello.com/b/IgK6SV7K/yakfi)
 
 - Operator tooling correction, 12 November. Source review confirms telegram-repair.ts rejects WEBHOOK_URL_MISMATCH before setWebhook. The report's repair commands cannot retarget the existing bot. Use or implement an explicit controlled switch with expected-current and destination verification, preserving default repair behavior and destination database secret consistency. Review resulting code and CI before Muse.
+
+- Scope correction from delivery source review: existing managed customer bot delivery resolves credentialsRef directly and does not consume the Manager token. Existing-bot ISS-018 acceptance requires the test DB, matching master key, origin/auth configuration and explicit customer webhook switching. Manager provisioning is not a readiness gate unless a new connection is needed.
