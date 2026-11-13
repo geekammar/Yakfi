@@ -45,22 +45,15 @@ export function validateProductionDatabaseUrl(raw: string): void {
   } catch {
     throw new RecoveryError("INVALID_DATABASE_URL");
   }
-  const testHosts = [
-    "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
-    "ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech",
+  const productionHosts = [
+    "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+    "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech",
   ];
-  if (testHosts.includes(url.hostname)) {
-    throw new RecoveryError("TEST_DATABASE_REJECTED_FOR_PRODUCTION_RESTORE");
-  }
-  const loopbackHosts = ["localhost", "127.0.0.1", "0.0.0.0", "::1"];
-  if (loopbackHosts.includes(url.hostname)) {
-    throw new RecoveryError("LOOPBACK_DATABASE_REJECTED");
+  if (!productionHosts.includes(url.hostname) || url.pathname !== "/neondb") {
+    throw new RecoveryError("PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED");
   }
   if (!["postgres:", "postgresql:"].includes(url.protocol)) {
     throw new RecoveryError("DATABASE_PROTOCOL_NOT_AUTHORIZED");
-  }
-  if (!url.pathname || url.pathname === "/" || url.pathname.length < 2) {
-    throw new RecoveryError("DATABASE_NAME_REQUIRED");
   }
   if (url.port && url.port !== "5432") {
     throw new RecoveryError("DATABASE_PORT_NOT_AUTHORIZED");
@@ -69,7 +62,10 @@ export function validateProductionDatabaseUrl(raw: string): void {
     throw new RecoveryError("DATABASE_HASH_NOT_AUTHORIZED");
   }
   for (const [name, value] of url.searchParams) {
-    if (name === "sslmode" && !["require", "verify-full"].includes(value)) {
+    if (!(
+      (name === "sslmode" && ["require", "verify-full"].includes(value)) ||
+      (name === "channel_binding" && value === "require")
+    )) {
       throw new RecoveryError("DATABASE_OPTIONS_NOT_AUTHORIZED");
     }
   }
@@ -111,7 +107,7 @@ export async function executeGuardedSwitch(
     )
   ) {
     out.error(
-      `❌ Preflight Refused: [UNKNOWN_OPERATION] Operation '${operation}' is not recognized. Allowed: ${ALLOWED_OPERATIONS.join(", ")}`,
+      "❌ Preflight Refused: [UNKNOWN_OPERATION] Operation is not recognized.",
     );
     return { ok: false, code: "UNKNOWN_OPERATION" };
   }
@@ -184,6 +180,7 @@ export async function executeGuardedSwitch(
     const outcome = await switchImpl({
       businessId: FIXED_TARGETS.businessId,
       connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: FIXED_TARGETS.botExternalId,
       expectedCurrentUrl,
       destinationUrl,
       apply: isApply,

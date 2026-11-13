@@ -10,6 +10,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import type { ResolvedCredential } from "../src/server/credentials/credentials-resolver";
@@ -757,7 +758,7 @@ fi
   } catch (err1: unknown) {
     if (
       err1 instanceof RecoveryError &&
-      err1.code === "TEST_DATABASE_REJECTED_FOR_PRODUCTION_RESTORE"
+      err1.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
     ) {
       try {
         validateProductionDatabaseUrl(
@@ -766,7 +767,7 @@ fi
       } catch (err2: unknown) {
         if (
           err2 instanceof RecoveryError &&
-          err2.code === "LOOPBACK_DATABASE_REJECTED"
+          err2.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
         ) {
           prodValidatorGuardsPass = true;
         }
@@ -822,6 +823,8 @@ fi
       dryRunCapture.current.apply === false &&
       dryRunCapture.current.businessId === FIXED_TARGETS.businessId &&
       dryRunCapture.current.connectionId === FIXED_TARGETS.connectionId &&
+      dryRunCapture.current.expectedBotExternalId ===
+        FIXED_TARGETS.botExternalId &&
       dryRunCapture.current.expectedCurrentUrl ===
         FIXED_TARGETS.mainWebhookUrl &&
       dryRunCapture.current.destinationUrl ===
@@ -1101,7 +1104,8 @@ fi
     forwardStepResult.status === "SWITCHED" &&
     telegramRemoteUrl === (FIXED_TARGETS.previewWebhookUrl as string) &&
     telegramRemoteSecret !== null &&
-    testDbConnection.webhookSecretHash !== "initial-test-db-secret-hash" &&
+    testDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
     mainDbConnection.webhookSecretHash === "initial-main-db-secret-hash";
 
   const testDbHashAfterForward = testDbConnection.webhookSecretHash;
@@ -1126,12 +1130,89 @@ fi
     reverseStepResult.ok === true &&
     reverseStepResult.status === "SWITCHED" &&
     telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
-    mainDbConnection.webhookSecretHash !== "initial-main-db-secret-hash" &&
+    mainDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret!).digest("hex") &&
     testDbConnection.webhookSecretHash === testDbHashAfterForward;
 
   check(
     "T35. Offline multi-database switch and restoration regression: forward switch synchronizes Test DB, restoration synchronizes Main DB without cross-database interference",
     forwardSuccess && reverseSuccess,
+  );
+
+  let validMainTargets = true;
+  for (const host of [
+    "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+    "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(
+        `postgresql://${host}/neondb?sslmode=require`,
+      );
+    } catch {
+      validMainTargets = false;
+    }
+  }
+  check(
+    "T36. Restoration accepts only the known main endpoint direct/pooler targets",
+    validMainTargets,
+  );
+  let rejectedMainTargets = true;
+  for (const uri of [
+    "postgresql://unrelated.example/neondb?sslmode=require",
+    "postgresql://[::1]/neondb?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/other?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require&host=localhost",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=disable",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(uri);
+      rejectedMainTargets = false;
+    } catch {
+      /* Expected refusal. */
+    }
+  }
+  check(
+    "T37. Restoration rejects wrong host/database, IPv6 loopback and query transport overrides",
+    rejectedMainTargets,
+  );
+  const deniedIdentityHash = mainDbConnection.webhookSecretHash;
+  const deniedIdentitySecret = telegramRemoteSecret;
+  const deniedIdentity = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(mainDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: "999999999",
+      expectedCurrentUrl: FIXED_TARGETS.mainWebhookUrl,
+      destinationUrl: FIXED_TARGETS.previewWebhookUrl,
+      apply: true,
+    },
+  );
+  check(
+    "T38. Wrong operator-pinned bot ID is rejected before webhook or database mutation",
+    !deniedIdentity.ok &&
+      deniedIdentity.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === deniedIdentitySecret &&
+      mainDbConnection.webhookSecretHash === deniedIdentityHash,
+  );
+  const unknownOpLog: string[] = [];
+  await executeGuardedSwitch(
+    { OPERATION: SYNTHETIC_SECRET },
+    {
+      out: {
+        log: (...args) => unknownOpLog.push(args.join(" ")),
+        error: (...args) => unknownOpLog.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T39. Unknown-operation error does not echo arbitrary input",
+    !unknownOpLog.join(" ").includes(SYNTHETIC_SECRET),
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

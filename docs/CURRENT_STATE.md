@@ -16,6 +16,8 @@ Current candidate is PR #79 v0.79.8 on `fix/safe-telegram-staff-reply-delivery`.
 4. Safe error output: removed raw error messages from switch/maintenance boundaries, outputting safe fixed error codes (`UNEXPECTED_SWITCH_FAILURE`) with zero leak of tokens, URLs, bodies, or ciphertext.
    Status: REVIEW_REQUIRED before live execution; live Muse acceptance remains pending. Older baseline descriptions below are historical.
 
+Reviewer follow-up: final restore-target and fixed-bot guards are hardened. Independent authorization is for a read-only forward dry run first; no live switch or Muse acceptance is recorded. See BUILD_STATE and TROUBLESHOOTING.
+
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**

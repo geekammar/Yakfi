@@ -138,7 +138,7 @@ A dedicated, guarded restoration operation is prepared in `.github/workflows/tes
    - Workflow: `.github/workflows/test-db-migrate.yml`
    - Branch: `fix/safe-telegram-staff-reply-delivery`
    - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
-   - Action: Validates `PRODUCTION_DATABASE_URL` (rejects loopback and test Neon hosts), checks live bot identity, confirms current Telegram registration points to Preview URL, and plans return to main webhook with 0 mutations.
+   - Action: Validates `PRODUCTION_DATABASE_URL` against the exact main Neon direct/pooler hosts (`ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech` or `ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech`), database `/neondb`, port and TLS/query policy, checks live bot identity, confirms current Telegram registration points to Preview URL, and plans return to main webhook with 0 mutations.
 
 2. **Guarded Apply (Mutation — Operator Authorized)**:
    - Operation: `restore-main-webhook-apply`
@@ -151,3 +151,5 @@ A dedicated, guarded restoration operation is prepared in `.github/workflows/tes
 3. **Post-Restoration Verification**:
    - Inspect bot webhook via read-only check to ensure `url` equals `https://flowpilot-prod.vercel.app/api/telegram/webhook` and allowed updates include `message` and `callback_query`.
    - Verify Production database secret hash is confirmed.
+
+Reviewer follow-up: restoration is restricted to the known main Neon endpoint and `/neondb`; arbitrary external hosts and connection-target query overrides are rejected. Both switch directions pass the fixed bot ID to the existing service and reject another identity before mutation. Forward/reverse offline tests verify each destination's stored hash equals the secret sent to fake Telegram, not merely that the hash changed.

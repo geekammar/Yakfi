@@ -750,6 +750,8 @@ export type SwitchTelegramWebhookParams = {
   connectionId: string;
   expectedCurrentUrl: string;
   destinationUrl: string;
+  /** Optional operator-owned identity constraint, checked before any mutation. */
+  expectedBotExternalId?: string;
   apply?: boolean;
 };
 
@@ -953,7 +955,11 @@ export async function switchTelegramBotWebhook(
       message: meRes.error.message,
     };
   }
-  if (String(meRes.result.id) !== connection.botExternalId) {
+  if (
+    String(meRes.result.id) !== connection.botExternalId ||
+    (params.expectedBotExternalId !== undefined &&
+      String(meRes.result.id) !== params.expectedBotExternalId)
+  ) {
     return {
       ok: false,
       code: "BOT_IDENTITY_MISMATCH",
