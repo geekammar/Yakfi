@@ -1,5 +1,9 @@
 # FlowPilot — Current State
 
+## Production restoration credential checkpoint — 13 November 2026
+
+Forward read-only run43504118788 succeeded (`SWITCH_DRY_RUN`) on `6c0c60a`; reverse read-only run43504704679 stopped with `CREDENTIALS_UNAVAILABLE` before getMe/URL validation. No webhook or database mutation occurred. Main's old encrypted credential remains present and unchanged. Restoration now uses the separate masked Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` as the application `CREDENTIAL_MASTER_KEY`, without fallback to the working Preview key. Owner must supply the original Production-key candidate and rerun the read-only reverse preflight on the reviewed new HEAD. Forward apply, reverse apply, merge and live acceptance remain unapproved. See TROUBLESHOOTING for expected URL-mismatch interpretation.
+
 > **Tier 0 cold-start snapshot** — read with `docs/AGENT_RULES.md` and
 > `docs/DECISIONS_INDEX.md`. This is a concise orientation document, NOT a
 > source of truth: canonical topic documents and the repository code override

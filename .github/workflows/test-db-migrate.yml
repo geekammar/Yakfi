@@ -265,7 +265,7 @@ jobs:
       - name: Execute guarded customer webhook restoration (prepare-only)
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY }}
           OPERATION: ${{ inputs.operation }}
         run: |
           node --import tsx scripts/switch-test-bot-webhook.ts

@@ -121,7 +121,7 @@ Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch`
 
 ### Restoration Runbook (Reverting to Production)
 
-Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key (`CREDENTIAL_MASTER_KEY`). Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
+Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key. The guarded restoration job injects the separate Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` into the application variable `CREDENTIAL_MASTER_KEY`; it never falls back to the Preview/repository key. Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
 
 > [!IMPORTANT]
 > **Why ordinary repair cannot restore across origins**:
@@ -153,3 +153,9 @@ A dedicated, guarded restoration operation is prepared in `.github/workflows/tes
    - Verify Production database secret hash is confirmed.
 
 Reviewer follow-up: restoration is restricted to the known main Neon endpoint and `/neondb`; arbitrary external hosts and connection-target query overrides are rejected. Both switch directions pass the fixed bot ID to the existing service and reject another identity before mutation. Forward/reverse offline tests verify each destination's stored hash equals the secret sent to fake Telegram, not merely that the hash changed.
+
+### Production credential preflight checkpoint — 13 November 2026
+
+Forward dry run 43504118788 on `6c0c60a` returned `SWITCH_DRY_RUN` for the correct bot and main-to-Preview URLs, with no mutations. Reverse preflight 43504704679 failed earlier with `CREDENTIALS_UNAVAILABLE`, not the expected current-URL mismatch. Main's credential row exists, belongs to the target business and matches the retained old test package; metadata alone cannot establish whether the execution key or ciphertext is wrong.
+
+Do not switch forward until main credential resolution and bot identity can be verified. The owner can provide the original Production-key candidate using masked `gh secret set YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY --repo geekammar/Yakfi`, then rerun `restore-main-webhook-dry-run` on the new reviewed SHA. Do not replace `CREDENTIAL_MASTER_KEY`, change Vercel Production settings, or re-encrypt Production records to make this check pass. Missing separate secret fails closed through the existing runner. Before any forward switch, the reverse dry run is expected to refuse with `CURRENT_WEBHOOK_URL_MISMATCH` (actual main, expected Preview) only AFTER credential resolution and live identity verification; that result proves those read-only prerequisites, not a completed live restoration.

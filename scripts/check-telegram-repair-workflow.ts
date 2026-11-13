@@ -1215,6 +1215,30 @@ fi
     !unknownOpLog.join(" ").includes(SYNTHETIC_SECRET),
   );
 
+  // T40. Production restoration must never inherit the Preview encryption key.
+  const restorationJob =
+    workflowYaml.split("\n  restore-main-webhook:")[1] ?? "";
+  const forwardJob =
+    (workflowYaml.split("\n  switch-test-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T40. Workflow isolates Production restoration key from the unchanged Preview key without fallback",
+    restorationJob.includes(
+      "CREDENTIAL_MASTER_KEY: ${{ secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY }}",
+    ) &&
+      restorationJob.includes(
+        "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+      ) &&
+      !restorationJob.includes("secrets.CREDENTIAL_MASTER_KEY") &&
+      !restorationJob.includes("secrets.TEST_DATABASE_URL") &&
+      forwardJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      forwardJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      !forwardJob.includes("secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY"),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {
