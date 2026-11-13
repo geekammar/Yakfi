@@ -101,12 +101,14 @@ The health endpoint is now read-only. It no longer aligns database schema or cre
 Use the reviewed switch path to retarget customer bot `@Drafnanafnanbot` (numeric ID `8926541123`) from production (`https://flowpilot-prod.vercel.app/api/telegram/webhook`) to the stable Preview origin (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook`).
 
 ### Target & Preflight Verification
+
 - Fixed Business ID: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
 - Fixed Connection ID: `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`
 - Authorized Test DB: `ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech` / `ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech`, database `neondb`
 - Branch-scoped Preview configuration: `NEXT_PUBLIC_APP_URL` and `BETTER_AUTH_URL` pinned to `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app` on branch `fix/safe-telegram-staff-reply-delivery`.
 
 ### Guarded Workflow Execution (GitHub Actions)
+
 Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch` on branch `fix/safe-telegram-staff-reply-delivery` with `expected_commit_sha` set to the exact candidate commit SHA:
 
 1. **Dry-Run Inspection (Default / Read-Only)**:
@@ -118,9 +120,11 @@ Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch`
    - Executes Telegram `setWebhook` with the stable Preview URL, rotates webhook secret, persists and verifies SHA-256 secret hash in the test Neon database, and outputs verified metadata.
 
 ### Restoration Runbook (Reverting to Production)
+
 Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key (`CREDENTIAL_MASTER_KEY`). Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
 
 To restore production webhook routing:
+
 1. Run `.github/workflows/production-telegram-repair.yml` on `refs/heads/main` using `workflow_dispatch`:
    - `mode`: `apply-reconcile`
    - `business_id`: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
