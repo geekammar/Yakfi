@@ -824,7 +824,8 @@ fi
       dryRunCapture.current.connectionId === FIXED_TARGETS.connectionId &&
       dryRunCapture.current.expectedCurrentUrl ===
         FIXED_TARGETS.mainWebhookUrl &&
-      dryRunCapture.current.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
+      dryRunCapture.current.destinationUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
       loggedLines.some((l) => l.includes("mode=DRY RUN")),
   );
 
