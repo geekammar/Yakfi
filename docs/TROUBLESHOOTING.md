@@ -95,3 +95,35 @@ On 13 November, direct policy inspection showed OpenRouter model `deepseek/deeps
 Retest a fresh or explicitly resumed AI-owned conversation. Existing NEED_HUMAN conversations correctly remain with staff; sending another greeting must not steal ownership. Require an actual successful model turn before declaring recovery. Provider failures with typed telemetry now select technical-failure copy; malformed semantic output remains a separate case. No keyword or greeting dictionary is introduced.
 
 The health endpoint is now read-only. It no longer aligns database schema or creates a default test account. `previewDiagnostics.migrationApplied` reads the completed PR #79 migration record; false is no longer an ambiguous "this request did not perform DDL" signal. Missing test accounts must be provisioned by an explicit reviewed operator action. Existing accounts previously provisioned with a public default password require password/access review before Pilot exposure; removing the provisioning code does not rotate those credentials.
+
+## Guarded customer-bot webhook switching & restoration runbook — PR #79
+
+Use the reviewed switch path to retarget customer bot `@Drafnanafnanbot` (numeric ID `8926541123`) from production (`https://flowpilot-prod.vercel.app/api/telegram/webhook`) to the stable Preview origin (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook`).
+
+### Target & Preflight Verification
+- Fixed Business ID: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
+- Fixed Connection ID: `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`
+- Authorized Test DB: `ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech` / `ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech`, database `neondb`
+- Branch-scoped Preview configuration: `NEXT_PUBLIC_APP_URL` and `BETTER_AUTH_URL` pinned to `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app` on branch `fix/safe-telegram-staff-reply-delivery`.
+
+### Guarded Workflow Execution (GitHub Actions)
+Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch` on branch `fix/safe-telegram-staff-reply-delivery` with `expected_commit_sha` set to the exact candidate commit SHA:
+
+1. **Dry-Run Inspection (Default / Read-Only)**:
+   - Operation: `switch-webhook-dry-run`
+   - Validates bot identity via `getMe`, verifies remote registration matches `https://flowpilot-prod.vercel.app/api/telegram/webhook`, checks allowed updates (`message`, `callback_query`), reads pending update count, and reports planned change with 0 mutations.
+
+2. **Guarded Apply (Mutation)**:
+   - Operation: `switch-webhook-apply`
+   - Executes Telegram `setWebhook` with the stable Preview URL, rotates webhook secret, persists and verifies SHA-256 secret hash in the test Neon database, and outputs verified metadata.
+
+### Restoration Runbook (Reverting to Production)
+Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key (`CREDENTIAL_MASTER_KEY`). Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
+
+To restore production webhook routing:
+1. Run `.github/workflows/production-telegram-repair.yml` on `refs/heads/main` using `workflow_dispatch`:
+   - `mode`: `apply-reconcile`
+   - `business_id`: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
+   - `connection_id`: `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`
+   - `expected_url`: `https://flowpilot-prod.vercel.app/api/telegram/webhook`
+2. Verify production health and Telegram webhook registration via `getWebhookInfo`.

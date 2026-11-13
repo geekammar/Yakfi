@@ -8,7 +8,7 @@
 
 ## Active reviewer checkpoint — 13 November 2026
 
-Current candidate is PR #79 v0.79.8 (base `bae04fc`), not the older versions below. Reviewer recovery work is on `fix/reviewer-credential-recovery`; see the latest checkpoint in BUILD_STATE.md and the fixed-target runbook in TROUBLESHOOTING.md. Credential repair and live acceptance remain pending. The stale OpenRouter endpoint pin was removed from pilot/test policies; a real successful turn is still required. Older baseline descriptions below are historical and must not drive deployment decisions.
+Current candidate is PR #79 v0.79.8 on `fix/safe-telegram-staff-reply-delivery`. Stable Preview origin is configured and verified (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`), healthy and connected to the authorized Neon test DB. Guarded webhook switch operations (`switch-webhook-dry-run` and `switch-webhook-apply`) prepared in `.github/workflows/test-db-migrate.yml` and verified offline. Status: REVIEW_REQUIRED before live execution; live Muse acceptance remains pending. Older baseline descriptions below are historical.
 
 ## 1. Verified Baseline & Production Status
 

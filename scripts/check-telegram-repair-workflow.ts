@@ -547,6 +547,110 @@ fi
       flagsWithoutSwitch.stderr.includes("only valid with --switch"),
   );
 
+  // ─── 5. Switch Workflow Step Bash Logic Validation ──────────────────────────
+  const SWITCH_WORKFLOW_BASH = `
+set -euo pipefail
+
+if [ -z "\${DATABASE_URL:-}" ] || [ -z "\${CREDENTIAL_MASTER_KEY:-}" ]; then
+  echo '::error::Required test database or master key secret is unavailable.'
+  exit 1
+fi
+
+case "\$DATABASE_URL" in
+  *"@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb"*|*"@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb"*)
+    ;;
+  *)
+    echo '::error::DATABASE_URL host or database name is not authorized for test webhook operations.'
+    exit 1
+    ;;
+esac
+
+FIXED_BUSINESS_ID="f5314115-ae8c-46ea-9d7e-080ef5e7366d"
+FIXED_CONNECTION_ID="1d2cdf87-2bee-4f26-aad5-5ab9efd1c716"
+EXPECTED_CURRENT_URL="https://flowpilot-prod.vercel.app/api/telegram/webhook"
+DESTINATION_URL="https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook"
+
+APPLY_FLAG=""
+if [ "\${OPERATION:-}" = "switch-webhook-apply" ]; then
+  APPLY_FLAG="--apply"
+fi
+
+printf 'EXECUTED_SWITCH_COMMAND: node --import tsx scripts/repair-telegram-webhook.ts --switch --business-id %s --connection-id %s --expected-current-url %s --destination-url %s%s\\n' \\
+  "\$FIXED_BUSINESS_ID" "\$FIXED_CONNECTION_ID" "\$EXPECTED_CURRENT_URL" "\$DESTINATION_URL" "\${APPLY_FLAG:+ \$APPLY_FLAG}"
+`;
+
+  // T21. Switch workflow refuses unauthorized database URL
+  const switchBadDbRun = runBashScript(SWITCH_WORKFLOW_BASH, {
+    DATABASE_URL: "postgresql://postgres:pass@localhost:5432/flowpilot_test",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    OPERATION: "switch-webhook-dry-run",
+  });
+  check(
+    "T21. Switch workflow step strictly refuses unauthorized database target host",
+    switchBadDbRun.status === 1 &&
+      switchBadDbRun.stdout.includes(
+        "DATABASE_URL host or database name is not authorized",
+      ),
+  );
+
+  // T22. Switch workflow refuses missing secrets
+  const switchMissingSecretRun = runBashScript(SWITCH_WORKFLOW_BASH, {
+    DATABASE_URL: "",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    OPERATION: "switch-webhook-dry-run",
+  });
+  check(
+    "T22. Switch workflow step fails closed on missing secrets",
+    switchMissingSecretRun.status === 1 &&
+      switchMissingSecretRun.stdout.includes(
+        "Required test database or master key secret is unavailable",
+      ),
+  );
+
+  // T23. Switch workflow dry run constructs dry run invocation
+  const switchDryRun = runBashScript(SWITCH_WORKFLOW_BASH, {
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    OPERATION: "switch-webhook-dry-run",
+  });
+  check(
+    "T23. Switch workflow dry run constructs exact dry run invocation without --apply",
+    switchDryRun.status === 0 &&
+      switchDryRun.stdout.includes("EXECUTED_SWITCH_COMMAND:") &&
+      switchDryRun.stdout.includes(
+        "--business-id f5314115-ae8c-46ea-9d7e-080ef5e7366d",
+      ) &&
+      switchDryRun.stdout.includes(
+        "--connection-id 1d2cdf87-2bee-4f26-aad5-5ab9efd1c716",
+      ) &&
+      switchDryRun.stdout.includes(
+        "--expected-current-url https://flowpilot-prod.vercel.app/api/telegram/webhook",
+      ) &&
+      switchDryRun.stdout.includes(
+        "--destination-url https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook",
+      ) &&
+      !switchDryRun.stdout.includes("--apply"),
+  );
+
+  // T24. Switch workflow apply constructs apply invocation
+  const switchApplyRun = runBashScript(SWITCH_WORKFLOW_BASH, {
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    OPERATION: "switch-webhook-apply",
+  });
+  check(
+    "T24. Switch workflow apply constructs invocation with --apply",
+    switchApplyRun.status === 0 &&
+      switchApplyRun.stdout.includes("EXECUTED_SWITCH_COMMAND:") &&
+      switchApplyRun.stdout.includes("--apply"),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {
