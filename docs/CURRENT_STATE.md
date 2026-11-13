@@ -8,7 +8,13 @@
 
 ## Active reviewer checkpoint — 13 November 2026
 
-Current candidate is PR #79 v0.79.8 on `fix/safe-telegram-staff-reply-delivery`. Stable Preview origin is configured and verified (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`), healthy and connected to the authorized Neon test DB. Guarded webhook switch operations (`switch-webhook-dry-run` and `switch-webhook-apply`) prepared in `.github/workflows/test-db-migrate.yml` and verified offline. Status: REVIEW_REQUIRED before live execution; live Muse acceptance remains pending. Older baseline descriptions below are historical.
+Current candidate is PR #79 v0.79.8 on `fix/safe-telegram-staff-reply-delivery`. Stable Preview origin is configured and verified (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`), healthy and connected to the authorized Neon test DB. Addressed all 4 independent reviewer findings:
+
+1. Strict database target validation implemented via reviewed `validateDatabaseUrl` (structured URL parsing, exact host, exact path `/neondb`, port 5432, sslmode=require, no fragments or overrides; loopback and backup names rejected).
+2. Prepared explicit restoration switch path using `switch-test-bot-webhook.ts` targeting `PRODUCTION_DATABASE_URL` with `CREDENTIAL_MASTER_KEY` via prepare-only workflow operations `restore-main-webhook-dry-run` and `restore-main-webhook-apply` (eliminates flawed ordinary repair runbook).
+3. Replaced bash-string tests with comprehensive tests of the actual runner script and workflow delegation (35/35 checks passing in `scripts/check-telegram-repair-workflow.ts`, including offline forward switch and restoration regression across separate DB stores).
+4. Safe error output: removed raw error messages from switch/maintenance boundaries, outputting safe fixed error codes (`UNEXPECTED_SWITCH_FAILURE`) with zero leak of tokens, URLs, bodies, or ciphertext.
+   Status: REVIEW_REQUIRED before live execution; live Muse acceptance remains pending. Older baseline descriptions below are historical.
 
 ## 1. Verified Baseline & Production Status
 

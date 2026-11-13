@@ -16,6 +16,8 @@ on:
           - repair-credential
           - switch-webhook-dry-run
           - switch-webhook-apply
+          - restore-main-webhook-dry-run
+          - restore-main-webhook-apply
       expected_commit_sha:
         type: string
         required: false
@@ -225,35 +227,45 @@ jobs:
           CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
           OPERATION: ${{ inputs.operation }}
         run: |
-          set -euo pipefail
+          node --import tsx scripts/switch-test-bot-webhook.ts
 
-          if [ -z "$DATABASE_URL" ] || [ -z "$CREDENTIAL_MASTER_KEY" ]; then
-            echo '::error::Required test database or master key secret is unavailable.'
+  restore-main-webhook:
+    name: Restore customer bot webhook to Production (guarded prepare-only)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing webhook restoration operation.'
             exit 1
           fi
-
-          case "$DATABASE_URL" in
-            *"@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb"*|*"@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb"*)
-              ;;
-            *)
-              echo '::error::DATABASE_URL host or database name is not authorized for test webhook operations.'
-              exit 1
-              ;;
-          esac
-
-          FIXED_BUSINESS_ID="f5314115-ae8c-46ea-9d7e-080ef5e7366d"
-          FIXED_CONNECTION_ID="1d2cdf87-2bee-4f26-aad5-5ab9efd1c716"
-          EXPECTED_CURRENT_URL="https://flowpilot-prod.vercel.app/api/telegram/webhook"
-          DESTINATION_URL="https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook"
-
-          APPLY_FLAG=""
-          if [ "$OPERATION" = "switch-webhook-apply" ]; then
-            APPLY_FLAG="--apply"
-          fi
-
-          node --import tsx scripts/repair-telegram-webhook.ts --switch \
-            --business-id "$FIXED_BUSINESS_ID" \
-            --connection-id "$FIXED_CONNECTION_ID" \
-            --expected-current-url "$EXPECTED_CURRENT_URL" \
-            --destination-url "$DESTINATION_URL" \
-            $APPLY_FLAG
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded customer webhook restoration (prepare-only)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts

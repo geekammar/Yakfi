@@ -217,63 +217,72 @@ async function handleLookup(params: {
   const { lookupTelegramBotTargetDefault } =
     await import("../src/server/integrations/telegram/telegram-repair");
 
-  const outcome = await lookupTelegramBotTargetDefault(params);
+  try {
+    const outcome = await lookupTelegramBotTargetDefault(params);
 
-  if (!outcome.ok) {
-    console.error(`\n❌ Lookup Refused: [${outcome.code}] ${outcome.message}`);
-    process.exit(1);
-  }
-
-  console.log("\n================ Target Lookup Result ================");
-  console.log(`Status:              ${outcome.status}`);
-  console.log(`Query:               ${JSON.stringify(outcome.query)}`);
-
-  if (outcome.status === "NO_MATCH") {
-    console.log(`Message:             ${outcome.message}`);
-    console.log(
-      "Verdict:             No matching Telegram bot connection was found in the database.",
-    );
-    console.log("====================================================\n");
-    process.exit(0);
-  }
-
-  if (outcome.status === "AMBIGUOUS_MATCH") {
-    console.log(`Message:             ${outcome.message}`);
-    console.log(`Found Matches:       ${outcome.matches.length}`);
-    console.log("Candidates:");
-    for (let i = 0; i < outcome.matches.length; i++) {
-      const m = outcome.matches[i]!;
-      console.log(
-        `  [${i + 1}] businessId: ${m.businessId} | connectionId: ${m.connectionId} | botExternalId: ${m.botExternalId} | botUsername: @${m.botUsername ?? "unknown"} | status: ${m.status} | isActive: ${m.isActive}`,
+    if (!outcome.ok) {
+      console.error(
+        `\n❌ Lookup Refused: [${outcome.code}] ${outcome.message}`,
       );
+      process.exit(1);
     }
+
+    console.log("\n================ Target Lookup Result ================");
+    console.log(`Status:              ${outcome.status}`);
+    console.log(`Query:               ${JSON.stringify(outcome.query)}`);
+
+    if (outcome.status === "NO_MATCH") {
+      console.log(`Message:             ${outcome.message}`);
+      console.log(
+        "Verdict:             No matching Telegram bot connection was found in the database.",
+      );
+      console.log("====================================================\n");
+      process.exit(0);
+    }
+
+    if (outcome.status === "AMBIGUOUS_MATCH") {
+      console.log(`Message:             ${outcome.message}`);
+      console.log(`Found Matches:       ${outcome.matches.length}`);
+      console.log("Candidates:");
+      for (let i = 0; i < outcome.matches.length; i++) {
+        const m = outcome.matches[i]!;
+        console.log(
+          `  [${i + 1}] businessId: ${m.businessId} | connectionId: ${m.connectionId} | botExternalId: ${m.botExternalId} | botUsername: @${m.botUsername ?? "unknown"} | status: ${m.status} | isActive: ${m.isActive}`,
+        );
+      }
+      console.log(
+        "Verdict:             Multiple candidate connections matched. Choose explicit IDs before running check or apply.",
+      );
+      console.log("====================================================\n");
+      process.exit(1);
+    }
+
+    // EXACT_MATCH
+    console.log(`Business ID:         ${outcome.target.businessId}`);
+    console.log(`Connection ID:       ${outcome.target.connectionId}`);
+    console.log(`Bot External ID:     ${outcome.target.botExternalId}`);
     console.log(
-      "Verdict:             Multiple candidate connections matched. Choose explicit IDs before running check or apply.",
+      `Bot Username:        @${outcome.target.botUsername ?? "unknown"}`,
     );
+    console.log(`Status:              ${outcome.target.status}`);
+    console.log(`Is Active:           ${outcome.target.isActive}`);
     console.log("====================================================\n");
+
+    console.log("Next Step (Read-Only Check):");
+    console.log(
+      `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL>\n`,
+    );
+    console.log("Targeted Repair (when callback_query missing):");
+    console.log(
+      `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
+    );
+    process.exit(0);
+  } catch (_err: unknown) {
+    console.error(
+      "\n❌ Lookup Refused: [UNEXPECTED_LOOKUP_FAILURE] Operation failed without disclosing raw error or secrets.",
+    );
     process.exit(1);
   }
-
-  // EXACT_MATCH
-  console.log(`Business ID:         ${outcome.target.businessId}`);
-  console.log(`Connection ID:       ${outcome.target.connectionId}`);
-  console.log(`Bot External ID:     ${outcome.target.botExternalId}`);
-  console.log(
-    `Bot Username:        @${outcome.target.botUsername ?? "unknown"}`,
-  );
-  console.log(`Status:              ${outcome.target.status}`);
-  console.log(`Is Active:           ${outcome.target.isActive}`);
-  console.log("====================================================\n");
-
-  console.log("Next Step (Read-Only Check):");
-  console.log(
-    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL>\n`,
-  );
-  console.log("Targeted Repair (when callback_query missing):");
-  console.log(
-    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
-  );
-  process.exit(0);
 }
 
 async function handleSwitch(params: {
@@ -367,10 +376,9 @@ async function handleSwitch(params: {
       );
     }
     console.log("=======================================================\n");
-  } catch (err) {
+  } catch (_err: unknown) {
     console.error(
-      "\n❌ Unexpected Switch Error:",
-      err instanceof Error ? err.message : String(err),
+      "\n❌ Switch Refused / Failed: [UNEXPECTED_SWITCH_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
     process.exit(1);
   }
@@ -605,10 +613,9 @@ async function main() {
       );
     }
     console.log("====================================================\n");
-  } catch (err) {
+  } catch (_err: unknown) {
     console.error(
-      "\n❌ Unexpected Maintenance Error:",
-      err instanceof Error ? err.message : String(err),
+      "\n❌ Maintenance Refused / Failed: [UNEXPECTED_MAINTENANCE_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
     process.exit(1);
   }

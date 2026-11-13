@@ -123,11 +123,31 @@ Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch`
 
 Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key (`CREDENTIAL_MASTER_KEY`). Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
 
-To restore production webhook routing:
+> [!IMPORTANT]
+> **Why ordinary repair cannot restore across origins**:
+> `production-telegram-repair.yml` (and ordinary repair) enforces `--expected-url` matching the current registration. When the customer bot is registered to Preview, ordinary repair aborts with `WEBHOOK_URL_MISMATCH` before mutation and refuses to retarget.
+>
+> Restoration requires the **explicit switch runner** targeting the Production database, with `expectedCurrentUrl` set to the verified Preview URL and `destinationUrl` set to the main customer webhook.
 
-1. Run `.github/workflows/production-telegram-repair.yml` on `refs/heads/main` using `workflow_dispatch`:
-   - `mode`: `apply-reconcile`
-   - `business_id`: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
-   - `connection_id`: `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`
-   - `expected_url`: `https://flowpilot-prod.vercel.app/api/telegram/webhook`
-2. Verify production health and Telegram webhook registration via `getWebhookInfo`.
+#### Prepared Manual Restoration Path (Prepare-Only)
+
+A dedicated, guarded restoration operation is prepared in `.github/workflows/test-db-migrate.yml` on `refs/heads/fix/safe-telegram-staff-reply-delivery`:
+
+1. **Dry-Run Inspection (Read-Only)**:
+   - Operation: `restore-main-webhook-dry-run`
+   - Workflow: `.github/workflows/test-db-migrate.yml`
+   - Branch: `fix/safe-telegram-staff-reply-delivery`
+   - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
+   - Action: Validates `PRODUCTION_DATABASE_URL` (rejects loopback and test Neon hosts), checks live bot identity, confirms current Telegram registration points to Preview URL, and plans return to main webhook with 0 mutations.
+
+2. **Guarded Apply (Mutation — Operator Authorized)**:
+   - Operation: `restore-main-webhook-apply`
+   - Workflow: `.github/workflows/test-db-migrate.yml`
+   - Branch: `fix/safe-telegram-staff-reply-delivery`
+   - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
+   - Action: Coordinates Telegram `setWebhook` returning to `https://flowpilot-prod.vercel.app/api/telegram/webhook`, rotates webhook secret, and persists the confirmed secret hash into the Production database.
+   - Output: Sanitized result with verified registration and zero secret disclosures.
+
+3. **Post-Restoration Verification**:
+   - Inspect bot webhook via read-only check to ensure `url` equals `https://flowpilot-prod.vercel.app/api/telegram/webhook` and allowed updates include `message` and `callback_query`.
+   - Verify Production database secret hash is confirmed.
