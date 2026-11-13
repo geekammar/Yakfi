@@ -61,6 +61,7 @@ jobs:
       - name: Test bot recovery and provider failure regression
         run: |
           pnpm check:test-bot-recovery
+          pnpm test:health-readonly
           pnpm check:provider-failure-lexical-authority
 
       - name: AI prompt contract check

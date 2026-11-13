@@ -50,6 +50,7 @@
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
     "check:meta-embedded-signup": "tsx scripts/check-meta-embedded-signup.ts",
     "check:whatsapp-onboarding": "tsx scripts/check-whatsapp-onboarding.ts",
+    "test:health-readonly": "vitest run --config vitest.config.ts src/app/api/health/route.test.tsx",
     "check:test-bot-recovery": "node --import tsx scripts/check-test-bot-recovery.ts",
     "check:credentials-runtime": "tsx scripts/check-credentials-runtime.ts",
     "check:ai-prompts": "tsx scripts/generate-ai-prompts.ts --check && tsx scripts/check-ai-prompts.ts",
