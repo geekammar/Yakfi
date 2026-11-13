@@ -277,7 +277,7 @@ async function handleLookup(params: {
       `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
     );
     process.exit(0);
-  } catch (_err: unknown) {
+  } catch {
     console.error(
       "\n❌ Lookup Refused: [UNEXPECTED_LOOKUP_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
@@ -376,7 +376,7 @@ async function handleSwitch(params: {
       );
     }
     console.log("=======================================================\n");
-  } catch (_err: unknown) {
+  } catch {
     console.error(
       "\n❌ Switch Refused / Failed: [UNEXPECTED_SWITCH_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
@@ -613,7 +613,7 @@ async function main() {
       );
     }
     console.log("====================================================\n");
-  } catch (_err: unknown) {
+  } catch {
     console.error(
       "\n❌ Maintenance Refused / Failed: [UNEXPECTED_MAINTENANCE_FAILURE] Operation failed without disclosing raw error or secrets.",
     );

@@ -255,7 +255,7 @@ export async function executeGuardedSwitch(
     out.log("=======================================================\n");
 
     return { ok: true, status: outcome.status };
-  } catch (_err: unknown) {
+  } catch {
     // Strict output boundary: NEVER print raw error message, stack trace, tokens, or URLs
     out.error(
       "\n❌ Switch Refused / Failed: [UNEXPECTED_SWITCH_FAILURE] Operation failed without disclosing raw error or secrets.",

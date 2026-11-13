@@ -12,7 +12,13 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import type { TelegramBotTargetMatch } from "../src/server/integrations/telegram/telegram-repair";
+import type { ResolvedCredential } from "../src/server/credentials/credentials-resolver";
+import type { TelegramApiDeps } from "../src/server/integrations/telegram/telegram-client";
+import type {
+  SwitchTelegramWebhookParams,
+  TelegramBotTargetMatch,
+} from "../src/server/integrations/telegram/telegram-repair";
+import type { TelegramConnection } from "../src/types/domain";
 
 // Seed offline dummy env vars before importing repo layers
 process.env.DATABASE_URL ??=
@@ -773,7 +779,7 @@ fi
   );
 
   // T31. Guarded runner dry run executes without mutation and with apply=false
-  let switchParamsCaptured: any = null;
+  const dryRunCapture = { current: null as SwitchTelegramWebhookParams | null };
   const loggedLines: string[] = [];
   const testOut = {
     log: (...args: unknown[]) => loggedLines.push(args.map(String).join(" ")),
@@ -790,7 +796,7 @@ fi
     },
     {
       switchFn: async (params) => {
-        switchParamsCaptured = params;
+        dryRunCapture.current = params;
         return {
           ok: true,
           status: "SWITCH_DRY_RUN",
@@ -812,18 +818,18 @@ fi
     "T31. Guarded runner dry run passes apply=false, pins fixed targets, and logs planned procedure",
     dryRunOutcome.ok === true &&
       dryRunOutcome.status === "SWITCH_DRY_RUN" &&
-      switchParamsCaptured !== null &&
-      switchParamsCaptured.apply === false &&
-      switchParamsCaptured.businessId === FIXED_TARGETS.businessId &&
-      switchParamsCaptured.connectionId === FIXED_TARGETS.connectionId &&
-      switchParamsCaptured.expectedCurrentUrl ===
+      dryRunCapture.current !== null &&
+      dryRunCapture.current.apply === false &&
+      dryRunCapture.current.businessId === FIXED_TARGETS.businessId &&
+      dryRunCapture.current.connectionId === FIXED_TARGETS.connectionId &&
+      dryRunCapture.current.expectedCurrentUrl ===
         FIXED_TARGETS.mainWebhookUrl &&
-      switchParamsCaptured.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
+      dryRunCapture.current.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
       loggedLines.some((l) => l.includes("mode=DRY RUN")),
   );
 
   // T32. Guarded runner apply executes with apply=true
-  let applyParamsCaptured: any = null;
+  const applyCapture = { current: null as SwitchTelegramWebhookParams | null };
   const applyLoggedLines: string[] = [];
   const applyOut = {
     log: (...args: unknown[]) =>
@@ -842,7 +848,7 @@ fi
     },
     {
       switchFn: async (params) => {
-        applyParamsCaptured = params;
+        applyCapture.current = params;
         return {
           ok: true,
           status: "SWITCHED",
@@ -866,10 +872,11 @@ fi
     "T32. Guarded runner apply passes apply=true, pins fixed targets, and logs switched confirmation",
     applyOutcome.ok === true &&
       applyOutcome.status === "SWITCHED" &&
-      applyParamsCaptured !== null &&
-      applyParamsCaptured.apply === true &&
-      applyParamsCaptured.expectedCurrentUrl === FIXED_TARGETS.mainWebhookUrl &&
-      applyParamsCaptured.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
+      applyCapture.current !== null &&
+      applyCapture.current.apply === true &&
+      applyCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      applyCapture.current.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
       applyLoggedLines.some((l) => l.includes("mode=APPLY (explicit switch)")),
   );
 
@@ -952,7 +959,7 @@ fi
   let telegramRemoteUpdates = ["message"];
 
   const mockCredentialsResolver = {
-    async resolve(): Promise<any> {
+    async resolve(): Promise<ResolvedCredential> {
       return {
         ok: true,
         kind: "RUNTIME",
@@ -962,7 +969,7 @@ fi
     },
   };
 
-  const mockTelegramApi: any = {
+  const mockTelegramApi: TelegramApiDeps = {
     apiHost: "https://api.telegram.org",
     credentialsResolver: mockCredentialsResolver,
     async fetchImpl(input: RequestInfo | URL, init?: RequestInit) {
@@ -1039,9 +1046,12 @@ fi
   };
 
   const createRepoFor = (connRef: typeof testDbConnection) => ({
-    async findByIdWithinBusiness(id: string, businessId: string) {
+    async findByIdWithinBusiness(
+      id: string,
+      businessId: string,
+    ): Promise<TelegramConnection | null> {
       if (id === connRef.id && businessId === connRef.businessId) {
-        return { ...connRef } as any;
+        return { ...connRef } as unknown as TelegramConnection;
       }
       return null;
     },
@@ -1049,17 +1059,21 @@ fi
       id: string,
       businessId: string,
       webhookSecretHash: string,
-    ) {
+    ): Promise<TelegramConnection | null> {
       if (id === connRef.id && businessId === connRef.businessId) {
         connRef.webhookSecretHash = webhookSecretHash;
-        return { ...connRef } as any;
+        return { ...connRef } as unknown as TelegramConnection;
       }
       return null;
     },
-    async update(id: string, businessId: string, data: any) {
+    async update(
+      id: string,
+      businessId: string,
+      data: Partial<TelegramConnection>,
+    ): Promise<TelegramConnection | null> {
       if (id === connRef.id && businessId === connRef.businessId) {
         Object.assign(connRef, data);
-        return { ...connRef } as any;
+        return { ...connRef } as unknown as TelegramConnection;
       }
       return null;
     },
