@@ -6414,6 +6414,7 @@ async function runInboundTurn(
         controlHandoffReason:
           turnTelemetry?.conversationControl?.handoffReason ?? null,
         failureCause,
+        providerErrorCode: turnErrorCode,
       });
       const assistantMessage = await persistAssistantReply(
         deps,

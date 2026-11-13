@@ -6,6 +6,10 @@
 > it. Implementation details live in `docs/BUILD_STATE.md`; decisions in
 > `docs/DECISIONS.md`.
 
+## Active reviewer checkpoint — 13 November 2026
+
+Current candidate is PR #79 v0.79.8 (base `bae04fc`), not the older versions below. Reviewer recovery work is on `fix/reviewer-credential-recovery`; see the latest checkpoint in BUILD_STATE.md and the fixed-target runbook in TROUBLESHOOTING.md. Credential repair and live acceptance remain pending. The stale OpenRouter endpoint pin was removed from pilot/test policies; a real successful turn is still required. Older baseline descriptions below are historical and must not drive deployment decisions.
+
 ## 1. Verified Baseline & Production Status
 
 - **Repository State (Verified):**

@@ -69,3 +69,23 @@
 1. `pnpm run doctor` — read every `→ fix:` line; it covers the common cases.
 2. `docs/BUILD_STATE.md` → Key Known Limitations (incl. device limitations).
 3. `docs/AGENT_RULES.md` — binding rules and lifecycle process.
+
+## Fixed test-bot credential recovery — PR #79
+
+Use the reviewed replacement files together. The old untracked Python script queried `is_active` although Prisma maps the real column as `"isActive"`; it also could report HEALTHY without matching bot identity. Do not run that old copy.
+
+From the repository root, run `python3 scripts/repair-test-bot-credential.py` for read-only diagnosis. It asks for the authorized test DATABASE_URL and the **exact current Preview** master key using masked terminal input. Both hex and base64 keys use the application's existing decoder. It never reads a potentially stale .env key, rewrites .env, changes webhooks, rotates the master key, or touches the Manager Bot.
+
+If diagnosis reports repair needed and the existing customer bot token is available, run `python3 scripts/repair-test-bot-credential.py --apply`. Only the fixed customer bot/tenant/connection can be repaired. The token must pass live getMe identity validation. The tool writes a fresh encrypted record and guarded connection reference in one transaction, reads the saved ciphertext back, verifies it before commit, and preserves the previous row for recovery. A concurrent connection edit aborts the transaction.
+
+If the exact Preview key is not available, stop at that prerequisite; do not invent or rotate it. The launcher also supports `--from-environment` for an authorized secret-bearing runner using `DATABASE_URL`, `CREDENTIAL_MASTER_KEY`, and (apply only) `TEST_BOT_TOKEN`. Supply it through that environment or masked terminal, never chat, logs, CLI arguments, or committed files. `HEALTHY_LOCAL_KEY` / `REPAIRED_LOCAL_KEY` does not establish Preview compatibility: the actual application credential resolver must pass there before switching Telegram.
+
+On timeout or connection loss, outcome may be unknown. Re-run read-only diagnosis and inspect the target reference before any apply retry. A failed GCM check means key/data authentication failed; it does not prove which key encrypted the original record.
+
+For return routing, use the destination environment's own database/key and reconcile its webhook secret. Do not reuse Preview credentials blindly for a Production destination. Do not alter historical QA row 249 or mark ISS-018 accepted before the customer's real staff reply arrives.
+
+## Provider 404 with an apparently healthy deployment
+
+On 13 November, direct policy inspection showed OpenRouter model `deepseek/deepseek-v4.1-flash` pinned to `decart/fp4`. The public model endpoint catalog listed 38 endpoints and no Decart endpoint. The adapter intentionally emits `provider.only` plus `allow_fallbacks: false`, so a stale pin can eliminate all eligible routes. The reviewer cleared only this pin in pilot and test policies; no model, key, budget, or fallback setting was changed. Policy is read from DB at runtime; a code rollback does not undo it.
+
+Retest a fresh or explicitly resumed AI-owned conversation. Existing NEED_HUMAN conversations correctly remain with staff; sending another greeting must not steal ownership. Require an actual successful model turn before declaring recovery. Provider failures with typed telemetry now select technical-failure copy; malformed semantic output remains a separate case. No keyword or greeting dictionary is introduced.

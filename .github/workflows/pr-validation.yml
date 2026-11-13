@@ -58,6 +58,11 @@ jobs:
       - name: Security scan (secrets hygiene)
         run: pnpm security
 
+      - name: Test bot recovery and provider failure regression
+        run: |
+          pnpm check:test-bot-recovery
+          pnpm check:provider-failure-lexical-authority
+
       - name: AI prompt contract check
         run: pnpm check:ai-prompts
 

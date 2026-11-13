@@ -36,7 +36,10 @@ import {
 import type { AiRoutingDecision } from "@/features/conversations/server/ai-observability";
 import type { HandoffCause } from "@/features/conversations/server/handoff-cause";
 import type { HandoffReason as ControlHandoffReason } from "@/server/integrations/ai/conversation-control/types";
-import type { AiTelemetry } from "@/server/integrations/ai/types";
+import type {
+  AiProviderErrorCode,
+  AiTelemetry,
+} from "@/server/integrations/ai/types";
 
 export type {
   AiIntent,
@@ -1120,6 +1123,7 @@ export const SAFE_HANDOFF_REPLIES = {
 export type SafeFailureReplyInput = {
   controlHandoffReason?: ControlHandoffReason | null;
   failureCause?: HandoffCause | null;
+  providerErrorCode?: AiProviderErrorCode | null;
 };
 
 /**
@@ -1140,7 +1144,12 @@ export function resolveSafeFailureReply(input: SafeFailureReplyInput): string {
     reason === "QUOTA_EXHAUSTED" ||
     reason === "AUTH_OR_CONFIGURATION_FAILURE" ||
     input.failureCause === "PROVIDER_FAILURE" ||
-    input.failureCause === "RETRY_EXHAUSTED"
+    input.failureCause === "RETRY_EXHAUSTED" ||
+    (!reason &&
+      (input.providerErrorCode === "PERMANENT" ||
+        input.providerErrorCode === "RETRYABLE" ||
+        input.providerErrorCode === "TIMEOUT" ||
+        input.providerErrorCode === "CONFIG_ERROR"))
   ) {
     return SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE;
   }

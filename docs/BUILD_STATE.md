@@ -9,6 +9,16 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
+## Reviewer recovery checkpoint — 13 November 2026
+
+- Based on PR #79 `bae04fcdd45374b043ec22fc5149de743a2a0ada`; no merge or production migration.
+- Direct test-DB inspection: target bot `8926541123` / `Drafnanafnanbot` is CONNECTED and active; runtime credential exists, belongs to the same business, and has AES-256-GCM/v1 metadata. Decryption remains unverified from this reviewer environment.
+- Fixed-target recovery tool replaces the untracked VPS Python implementation: canonical application crypto, Prisma schema mapping, strict tenant/bot checks, guarded transactional reference replacement, actual DB readback before commit, old ciphertext retained, masked input, no .env rewriting or raw exception output. Local-key success is explicitly NOT Preview acceptance.
+- Direct AI-policy inspection found `deepseek/deepseek-v4.1-flash` pinned to `decart/fp4`, absent from the current public model endpoint catalog (38 endpoints). Removed only that pin from the current pilot and test DB policies, preserving model/provider and all other policy fields. This is a configuration repair; end-to-end recovery is not yet proven.
+- Provider failure reply now consumes typed error telemetry when Conversation Control metadata is absent; HTTP 404 no longer receives generic invalid-output copy. No customer keyword matching added; handoff/ownership behavior preserved.
+- Validation: recovery synthetic tests and provider engine regressions; exact final counts recorded in PR. No live credential repair, Telegram switch, or Muse acceptance claimed.
+- Next: verify the current Preview key and existing bot token via masked recovery; confirm resolution in Preview; perform reviewed webhook switch and Muse staff-reply acceptance. Separately test AI on a new or explicitly resumed conversation after the pin correction. Keep historical QA row 249 intact.
+
 **Product version: v0.79.8 (feature branch; candidate PR)** — `Safe Telegram Staff Reply Delivery & Route Authority (ISS-018 / UI-29)`. Baseline: v0.79.7 (commit `8d12aa2a72169bb2563e624e89045858d090e8f3`). Branch: `fix/safe-telegram-staff-reply-delivery`.
 
 - **Feature Scope**: Ensures one authorized staff submission can send at most one reply through the verified Telegram customer route, with durable and truthful outcomes (ISS-018 / UI-29).
@@ -356,6 +366,8 @@ adapter, webhook, and Conversation-Engine bridge — is now BUILT too
 boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
+
+See the reviewer recovery checkpoint above for the active task. The older narrative below is historical.
 
 **IN-FLIGHT (PR ready on branch `feat/conv-core-03c2-smoke-eval`) — QUICK REAL JEV + LLM SMOKE EVALUATION, THEN HANDOFF TO GUIDED BUTTONS UX (CORE-03C2)**:
 A small, timeboxed live evaluation slice connecting the existing `current_engine` conversation playground and existing JEV integration to real provider transports under strict envelope limits, verifying real provider contracts and establishing the handoff to the Welcome and Contextual Buttons UX:
@@ -3011,6 +3023,8 @@ E2E` from a FRESH launch and record whether the whole
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
+
+Current next step: follow the reviewer recovery checkpoint above. The entries below are historical, not new execution instructions.
 
 **AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03d2-semantic-safety) CORE-03D2**:
 Branch `feat/conv-core-03d2-semantic-safety` ready with Semantic Safety Ownership and False-Handoff Repair (v0.67.0).
