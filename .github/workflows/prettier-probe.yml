@@ -1,0 +1,36 @@
+name: Prettier probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Prettier diff probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Format probe files
+        run: pnpm exec prettier --write scripts/check-unknown-information-handoff.ts src/features/conversations/server/ai-contract.ts
+
+      - name: Show exact formatting diff
+        run: git diff -- scripts/check-unknown-information-handoff.ts src/features/conversations/server/ai-contract.ts
