@@ -16,6 +16,9 @@
 
 ## GitHub Actions & CI Status (DEVOPS-01D/E)
 
+> Verification policy authority: `AGENT_RULES.md` §4. The full gate runs in
+> CI, never on the VPS.
+
 - **PR Validation & UX QA (`pr-validation.yml`):** Runs on every PR targeting `main`.
   Executes security scan, AI prompt contract, full `pnpm verify` (lint, typecheck, format,
   Next.js production build), release guard verification, SemVer version increment check,
@@ -32,7 +35,7 @@ FlowPilot uses a GitHub PR-based workflow optimized for lightweight VPS developm
 
 1. **Development on VPS:** Agent or operator writes code on a feature branch (`feat/*`, `fix/*`, `chore/*`).
 2. **Lightweight Local Check:** Run `pnpm verify:local` (or `pnpm verify:fast`). Do **not** run full production builds locally.
-3. **Version Bump:** Increment SemVer via `pnpm version:bump patch` (or `minor`) before pushing.
+3. **Version Bump:** Increment SemVer via `pnpm version:bump patch` (or `minor`) before pushing application changes. Documentation-only changes do not bump the application version unless an existing mandatory gate requires it.
 4. **Push & PR:** Push to origin and open a PR via `gh pr create`.
 5. **CI & Vercel Preview:** GitHub Actions runs complete quality gates and Playwright suites; Vercel deploys preview.
 6. **Operator Review & Merge:** Operator reviews PR summary and preview on mobile phone, then merges to `main`.

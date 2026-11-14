@@ -14,7 +14,9 @@
   - `docs/DECISIONS_INDEX.md` before anything else. Those three are global and
     are NOT repeated in each context below.
 - **Then resolve ONE context** matching the task (`pnpm context <name>`).
-- Read the context's mapped docs, then its mapped code, then its focused tests.
+- Read only the mapped docs, code and focused tests that the symptom needs. The
+  entry is a menu of candidates, not a mandatory full-file list; do not read
+  every listed file in full.
 - **Expand only when a real dependency is discovered** — follow an actual
   `import`/reference from a mapped file outward; never pre-load "to be safe".
 - The mapped files are the DOORWAY, not the whole room. Most tasks touch only a

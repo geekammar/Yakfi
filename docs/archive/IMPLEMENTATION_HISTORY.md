@@ -164,6 +164,32 @@ core); webhook `GET` invalid→403 / valid→200 challenge; signed `POST`
 was never delivered at that checkpoint. These numbers are HISTORICAL —
 production has since moved past v0.19.0 and its current version is unprobed.
 
+### DEVOPS-01E — Lightweight VPS development and CI-first verification (DECISIONS #93)
+
+Preserved from the former `docs/DECISIONS_INDEX.md` row because this detail
+existed only there. This is historical implementation evidence, not a current
+instruction; the current verification policy is `docs/AGENT_RULES.md` §4.
+
+**LIGHTWEIGHT VPS DEVELOPMENT, CI-FIRST VERIFICATION & AGENT WORKFLOW
+OPTIMIZATION (DEVOPS-01E; zero reduction in CI quality; zero production
+migration; preserves existing deployment and pre-ship contracts
+byte-for-byte):** eliminates VPS memory exhaustion and session unresponsiveness
+by decoupling local developer feedback loops from heavy production builds and
+browser test suites.
+
+1. Excluded `playwright-report/**` and `test-results/**` in `eslint.config.mjs`
+   and `.prettierignore` (dropping ESLint RSS by 72% from 3.5GB to 980MB).
+2. Introduced `pnpm verify:local` (`scripts/verify-local.mjs`): runs security
+   check, ai-prompts contract, typecheck (`tsc --noEmit`), lint (`eslint .`),
+   and format check (`prettier --check .`) in about 40s without `next build`.
+3. Added `pnpm verify:fast`: runs security, ai-prompts, and typecheck in about
+   14s and under 850MB RSS for rapid iteration.
+4. Updated agent instructions in `docs/AGENT_RULES.md`, `AGENTS.md`,
+   `docs/QUALITY_CHECKS.md`, `docs/DEVELOPMENT.md`,
+   `docs/GITHUB_WORKFLOW.md`, `docs/TROUBLESHOOTING.md`.
+5. Full production build and Playwright UX QA remain strictly mandatory in
+   GitHub Actions CI (`pr-validation.yml`) and Vercel.
+
 ## How to use this file
 
 - Only retrieve it when historical context, forensics, migration reasoning, or

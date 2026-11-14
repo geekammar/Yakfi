@@ -56,8 +56,9 @@ Each bootstrap script:
   `bad interpreter`. `bootstrap-termux.sh` verifies `pnpm --version` first and
   only repairs it when broken, by installing a small `node` wrapper at
   `$PREFIX/bin/pnpm`. Nothing is reinstalled if pnpm already works.
-- **Turbopack has no Android bindings** — always use `scripts/dev-termux.sh`
-  and `pnpm verify` (both automatically add `--webpack`).
+- **Turbopack has no Android bindings** — use `scripts/dev-termux.sh`. Run the
+  full `pnpm verify` in CI; if it must run on Termux, it automatically adds
+  `--webpack`.
 - **The Prisma schema engine cannot run on-device**, so `prisma migrate dev` /
   `db push` may fail on Termux. Sync the database from desktop/CI
   (`pnpm db:deploy`) when needed; the dev server still runs.
@@ -126,7 +127,8 @@ Reinstall after a fresh clone: `pnpm run hooks:install`.
 
 ## Quality Gates & Verification Model (DEVOPS-01E)
 
-Per `AGENT_RULES.md`, FlowPilot follows a **CI-first verification strategy**:
+Authoritative policy: `AGENT_RULES.md` §4. FlowPilot follows a **CI-first
+verification strategy**:
 
 - **Local VPS Iteration:** Use lightweight commands (`pnpm verify:local` or `pnpm verify:fast`). Do **NOT** invoke `next build` or run Playwright test suites locally during routine edits.
 - **CI Ownership:** GitHub Actions (`pr-validation.yml`) executes the full quality gate (`pnpm verify` including production Next.js build) and automated browser UX QA in isolated CI runners.

@@ -133,7 +133,9 @@ pnpm deploy:preview           # preview deployment (auth may not work on preview
 ```
 
 Every push to `main` (GitHub flow) then redeploys automatically — that is the
-"easy to redeploy" loop: `pnpm verify` → commit → push → Vercel builds.
+"easy to redeploy" loop: full `pnpm verify` in CI (or an authorized
+workstation) → commit → push → Vercel builds. Do not run the full gate on the
+VPS; use the lightweight local gates described in `AGENT_RULES.md` §4.
 
 ## SECTION 3 — Configure Environment Variables
 
@@ -220,8 +222,8 @@ pnpm deploy             # full gate → production deployment URL (deploy:produc
 3. **PWA** — on Android Chrome: install prompt appears, home-screen icon is
    the FlowPilot mark, offline page shows in airplane mode.
 4. **RTL/Arabic** — pages render `dir="rtl"`, Arabic copy, IBM Plex Sans Arabic.
-5. **Redeploy loop** — make a change → `pnpm verify` → commit → push →
-   Vercel rebuilds → `/api/health` shows the new version after you bump
+5. **Redeploy loop** — make a change → full `pnpm verify` in CI → commit →
+   push → Vercel rebuilds → `/api/health` shows the new version after you bump
    `version` in `package.json`.
 
 ## SECTION 6 — Troubleshooting

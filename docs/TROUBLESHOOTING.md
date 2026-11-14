@@ -1,7 +1,7 @@
 # FlowPilot — Troubleshooting
 
 > Symptom → fix, ordered by how often they bite. Setup and daily workflow:
-> `DEVELOPMENT.md`.
+> `DEVELOPMENT.md`. Verification policy authority: `AGENT_RULES.md` §4.
 
 ## Setup & Tooling
 
@@ -38,11 +38,12 @@
 
 ## Build & Runtime
 
+<!-- prettier-ignore -->
 | Symptom                                    | Fix                                                                                                                                                                      |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Port 3000 already in use                   | `next dev` picks 3001 automatically; or kill the stale process (`lsof -ti:3000                                                                                           | xargs kill` on Unix). |
-| Build works locally but fails in CI/Vercel | Run `pnpm verify` locally (same gate); check that `src/generated/prisma` is generated in CI (`pnpm db:generate` runs via install? No — call it explicitly before build). |
-| `pnpm verify` format step fails            | Run `pnpm format`, commit the result.                                                                                                                                    |
+| Build works locally but fails in CI/Vercel | Run the full `pnpm verify` in GitHub Actions CI (or an authorized workstation), not on the VPS; check that `src/generated/prisma` is generated in CI (`pnpm db:generate` runs via install? No — call it explicitly before build). |
+| `pnpm verify` format step fails            | Fix formatting on a workstation or in CI, then commit the result. On the VPS use `pnpm verify:local`; do not run a formatter as part of a documentation-only task. |
 | Stale service worker / old UI after deploy | Service worker caches static assets; bump the cache version in `public/sw.js` (or unregister the SW in DevTools → Application).                                          |
 
 ## Git & Security

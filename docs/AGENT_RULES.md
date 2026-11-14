@@ -1,228 +1,176 @@
 # FlowPilot — Agent Rules (Mandatory)
 
-> Binding rules for every AI agent (and human contributor) working on
-> FlowPilot. They exist so any agent can continue safely after total
-> context loss. Every prompt runs in a FRESH OpenCode/AGY session with NO
-> prior conversation memory — recover context through the tier model
-> below and read as FEW lines as possible. Token efficiency is a hard
-> requirement, not a preference.
+> Binding rules for every AI agent and human contributor. Every prompt runs in a
+> FRESH session with no prior memory: recover through the tier model below.
+> This file is the authoritative rules source; other guides reference it with
+> short links. Last updated: 14 November 2026 (documentation maintenance).
+>
+> **Soft target:** the three Tier 0 files (`AGENT_RULES.md` +
+> `CURRENT_STATE.md` + `DECISIONS_INDEX.md`) stay at or below about 30 KB
+> combined. Safety, correctness and recoverability take precedence over size.
 
-## Context Tiers (the reading policy)
+## 1. Context tiers (the reading policy)
 
-**COLD-START RULE:** A fresh Agent session must NOT read the entire repository
-or all documentation merely to initialize. It must recover only enough trusted
-context to classify the requested work and enforce safety constraints.
+**COLD-START RULE:** never read the repository or all documentation merely to
+initialize. Recover only enough trusted context to classify the work and
+enforce safety constraints.
 
-**TIER 0 — COLD START (always, every session):**
-Read strictly:
+**Tier 0 — every session (read only these three):**
 
-1. `docs/AGENT_RULES.md` (this file — safety invariants & loading contract)
-2. `docs/CURRENT_STATE.md` (compact baseline & current orientation)
-3. `docs/DECISIONS_INDEX.md` (one-line decision router — read INSTEAD of `DECISIONS.md`)
+1. `docs/AGENT_RULES.md` — this file: invariants, verification policy, routing.
+2. `docs/CURRENT_STATE.md` — dated baseline, candidate/Production separation,
+   blockers, next action.
+3. `docs/DECISIONS_INDEX.md` — decision router; read this instead of the full
+   `docs/DECISIONS.md` ledger.
 
-_Tier 0 Purpose:_ Identify repository identity, current baseline, hard safety
-rules, available decisions, and context-routing instructions. Nothing else by
-default. Avoid automatically loading full historical narratives or large decision
-tables. Target total mandatory Tier 0 reading volume below 70 KB where safely
-achievable.
+**Tier 1 — task-specific (when work begins):**
 
-**TIER 1 — TASK-SPECIFIC CONTEXT (only when implementation work begins):**
-Identify ONE primary task context via `docs/CONTEXT_MAP.md` or
-`pnpm context <name>`. Read only the `Current State` summary + `Next Step`
-from `docs/BUILD_STATE.md` (never read the entire ledger), plus at most ONE
-canonical topic document matching the task:
+- Select ONE relevant entry in `docs/CONTEXT_MAP.md` and read only the mapped
+  docs/code/tests needed for the symptom. The map is a menu of starting
+  points, not a command to read every listed file.
+- Read the task's canonical contract (one topic document or section), as
+  needed.
+- Read only `Current State` and `Next Step` from `docs/BUILD_STATE.md`; never
+  read the entire ledger.
+- **Canonical contract by task (choose one):** architecture/code →
+  `ARCHITECTURE.md`; DB/schema/repos → `DATABASE.md`; product scope →
+  `SPEC_A.md`; UX → `DESIGN_SYSTEM.md`; economics → `ECONOMICS.md`; AI →
+  `docs/ai/README.md` + `docs/ai/ARCHITECTURE.md`; release/ops → the required
+  `RELEASE_PROCESS.md`, `VERCEL_DEPLOYMENT.md`, `GITHUB_WORKFLOW.md`,
+  `DEVELOPMENT.md`, `QUALITY_CHECKS.md`, `ENVIRONMENT_VARIABLES.md` or
+  `TROUBLESHOOTING.md`; external holds → `INTEGRATION_CHECKPOINTS.md`.
 
-| Task                       | Document                                                                                                                                                                                                                                                                      |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Architecture / code        | `docs/ARCHITECTURE.md`                                                                                                                                                                                                                                                        |
-| Database / schema / repos  | `docs/DATABASE.md`                                                                                                                                                                                                                                                            |
-| Product scope              | `docs/SPEC_A.md`                                                                                                                                                                                                                                                              |
-| UX                         | `docs/DESIGN_SYSTEM.md`                                                                                                                                                                                                                                                       |
-| Economics / cost           | `docs/ECONOMICS.md`                                                                                                                                                                                                                                                           |
-| Roadmap / plan sequence    | `docs/ROADMAP.md`                                                                                                                                                                                                                                                             |
-| AI / context               | `docs/ai/README.md` (rules) → `docs/ai/ARCHITECTURE.md` (boundary); only the `…@v1` definition being changed in `docs/ai/PROMPTS.md`; `docs/ai/PROVIDERS.md` / `EVALUATIONS.md` only when directly relevant; general boundary also in `docs/ARCHITECTURE.md` + `ECONOMICS.md` |
-| Release / deploy / ops     | ONLY the required ops document (`RELEASE_PROCESS.md`, `VERCEL_DEPLOYMENT.md`, `GITHUB_WORKFLOW.md`, `DEVELOPMENT.md`, `QUALITY_CHECKS.md`, `ENVIRONMENT_VARIABLES.md`, `TROUBLESHOOTING.md`)                                                                                  |
-| External integration holds | `docs/INTEGRATION_CHECKPOINTS.md` (one entry per external provider whose completion boundary is owned by an outside party — e.g. Meta WhatsApp Embedded Signup DEFERRED/HOLD)                                                                                                 |
+**Tier 2 — decision deep dive (on demand):** load an individual entry from
+`docs/DECISIONS.md` by ID or heading only when the changed files are governed
+by it, an architectural constraint is ambiguous/conflicting, or a requirement
+contradicts documentation. Add dependency contracts and source context only
+when concrete evidence requires them.
 
-Use metadata, headings, and targeted line ranges before opening large documents.
+**Tier 3 — historical archive (never automatic):** Git history, tags, release
+notes and `docs/archive/IMPLEMENTATION_HISTORY.md` are for regressions,
+forensics, or recovering past implementation details.
 
-**TIER 2 — DECISION DEEP DIVE (on demand only):**
-Load individual entries from `docs/DECISIONS.md` ONLY when:
+There is **no** `DOCS_INDEX.md`, `CORE_CONTEXT.md` or `CONTEXT_RECOVERY.md`.
+Do not recreate them. Do not create a second documentation framework,
+retrieval service, graph or index generator.
 
-- The files being changed are directly governed by that decision.
-- An architectural constraint is in conflict or ambiguous.
-- A requirement contradicts existing documentation.
+## 2. Task-scoped source reading
 
-Never load the entire append-only `DECISIONS.md` log by default.
+1. Identify the exact symptom, contract and expected behavior.
+2. Select ONE relevant `docs/CONTEXT_MAP.md` entry.
+3. Locate the relevant symbol with scoped searches (`rg -n`, `rg --files`,
+   `git diff`).
+4. Read the affected function/component plus the relevant callers, types,
+   repository contracts and tests needed to make a safe change.
+5. Follow real dependencies one hop at a time when needed.
+6. Before expanding, state briefly which contract is missing and why the extra
+   file or section is necessary.
+7. Reuse unchanged context instead of rereading it.
 
-**TIER 3 — HISTORICAL ARCHIVE (never read automatically):**
-Git history, tags, release notes, and `docs/archive/IMPLEMENTATION_HISTORY.md`
-are accessed ONLY when:
+No arbitrary file-count cap applies; do not skip security analysis. Auth,
+tenant, isolation, idempotency, concurrency, booking or shared-schema changes
+require the affected callers and invariants.
 
-- Investigating regressions or forensics.
-- Resolving historical architectural decisions.
-- Recovering relevant past implementation details.
+**Prohibited:** whole-repository source dumps; recursive `cat`; automatic
+all-history reading; automatic traversal of every transitive import; rereading
+unchanged files without a reason; dumping large source or history into reports.
 
-There is NO `DOCS_INDEX.md`, NO `CORE_CONTEXT.md`, NO `CONTEXT_RECOVERY.md`.
-Do not recreate them.
+**Example — staff-delivery bug:** start with the delivery contract and the
+exact failing route/submission path, then the relevant callers and tests. Do
+not begin by loading every conversation, provider and booking source file.
 
-## Task-Scoped Source Reading Rules
+## 3. Hard project invariants
 
-This is a mandatory workflow rule for every implementation task, not a new
-context framework:
+- **No free-text intent matching:** no keywords, dictionaries, regex or
+  substring matching to interpret free-text user intent. Formal protocol, ID
+  and schema validation remains allowed.
+- **One conversation engine and booking authority.** AI interprets; Domain
+  decides and executes; Conversation orchestrates. Never add a second
+  availability engine, planner or conversation state machine.
+- **Tenant isolation and server-side authorization.** UI visibility is not
+  authorization. Never trust client-provided tenant identity. Keep feature
+  isolation, repository-only DB access and Zod-validated DTOs.
+- **Selective branch scoping.** Never add `branchId` everywhere, never use
+  `User.branchId`, and never hard-code "one Business = one WhatsApp number".
+- **No secret values** in documents, logs, PRs or reports. Real credentials
+  stay in local `.env*`, Vercel environment variables or the provider console.
+- **No automatic merge, deploy or Production migration.** Production
+  migrations are operator-authorized through the existing workflow.
+- **Executor and tester reports require reviewer verification.** Ammar and the
+  reviewer decide acceptance and merge; an agent report is evidence, not
+  acceptance.
+- **Preserve R5 evidence and historical QA outcomes.** Keep historical FAIL
+  executions (for example QA249/QA250) and accepted results visible; do not
+  rewrite or erase history to make a status look cleaner.
+- **Preserve existing user work and unrelated documentation.**
+- **`docs/DECISIONS.md` is append-only.** Never rewrite or delete historical
+  entries; reversals are new entries referencing the old one.
+- **No duplicate documentation or competing summaries.** Extend the existing
+  canonical files instead. Create a new document only when a real long-term
+  need exists and no canonical file covers the topic. On strategy conflict:
+  vision > strategy > scope > implementation detail.
+- **Stay inside accepted Spec A scope and the recorded stack** (Next.js 16 +
+  Prisma 7 + Neon PostgreSQL + Vercel). No microservices, queues, Redis,
+  message brokers, extra ORMs, RAG/vector stores or generic workflow engines.
+  Billing, subscriptions, invoices and payments remain deferred.
+- **Arabic-first, RTL-by-default** (`dir="rtl" lang="ar"`), accessible UI copy.
+- **The repository code is implementation truth.** Docs do not override code;
+  state honestly whether work is BUILT, DOCUMENTED or NOT built.
 
-### Required Task Workflow
+## 4. Verification, CI and VPS safety (DEVOPS-01E)
 
-1. **Identify the exact task** and expected behavior.
-2. **Select the closest existing context entrypoint** using `pnpm context <name>` or `docs/CONTEXT_MAP.md`.
-3. **Inspect repository paths** and narrow search results with targeted tools (`rg -n`, `rg --files`, `git diff`).
-4. **Read the primary files** likely to be modified.
-5. **Read direct dependencies ONLY** when needed to understand contracts (follow real imports one hop at a time).
-6. **Read related tests** and relevant architectural decisions.
-7. **Expand scope ONLY** when concrete evidence requires additional files.
-8. **Implement the smallest safe change**.
-9. **Run focused tests** for changed modules (`pnpm check:<module>`) and lightweight local verification (`pnpm verify:local` or `pnpm verify:fast`). Do NOT automatically run full `pnpm verify` or `next build` after every edit on the VPS.
-10. **Report changed files** and scope justification in the final report.
+FlowPilot is **CI-first**. Full production builds and browser testing are
+owned by GitHub Actions CI and Vercel, not the VPS.
 
-### Prohibited Default Behaviors
+- **Normal implementation work on the VPS:** run targeted module checks
+  (`pnpm check:<module>`) and the lightweight gates `pnpm verify:local` or
+  `pnpm verify:fast`. Do **not** run full `pnpm verify`, `next build`, local
+  Playwright/browser suites or a local production server. Do not run heavy
+  processes concurrently or repeatedly run unchanged suites.
+- **Full gate:** GitHub Actions (`pr-validation.yml`) runs `pnpm verify`
+  (lint, typecheck, format, production build) and Playwright UX QA in isolated
+  runners. Vercel owns Preview/Production builds.
+- **Documentation-only changes:** do not run package installation, code
+  generation, formatter, lint, typecheck, tests or builds on the VPS. Use
+  existing CI docs/format checks. Report a check as
+  `PASS` / `FAIL` / `BLOCKED` / `NOT RUN`; never claim an unexecuted check
+  passed.
+- **Database:** dev migrations may run locally; Production migrations are
+  operator-authorized via `.github/workflows/production-db-migrate.yml` and are
+  never automatic. Never reset or seed Production data from local development.
+- **Versions:** follow the existing release rules. A documentation-only change
+  does not bump the application version. If a proven mandatory gate demands a
+  non-documentation change, report the exact evidence instead of making it.
+- **Resource inspection:** `free -h`, `ps aux --sort=-%mem | head -n 10`,
+  `pgrep -af "next|eslint|tsc|playwright|node"`; use
+  `ps -o pid,stat,time,%cpu,comm -p <PID>` over 3–5 seconds to distinguish slow
+  work from a freeze (VPS swap is 0 B).
 
-- ❌ Reading every source file in the repository.
-- ❌ Recursively loading entire directories into context.
-- ❌ Reading all documentation on every fresh session.
-- ❌ Re-reading large files unnecessarily.
-- ❌ Loading unrelated features or context boundaries.
-- ❌ Dumping full Git history or large git logs.
-- ❌ Running broad repository searches when a precise path is known.
-- ❌ Copying large source files into task reports.
-- ❌ Automatically expanding every import transitively.
-- ❌ Running `next build` or full production `pnpm verify` locally after every edit.
-- ❌ Running multiple resource-intensive build/typecheck/lint processes concurrently on the VPS.
-- ❌ Repeating an unchanged test suite unnecessarily.
-- ❌ Starting local headless browser/Playwright suites or redundant dev servers unless strictly required.
+## 5. Change lifecycle
 
-### Allowed Scope Expansion (Exceptions)
+1. **Recover:** Tier 0, then one task context and the canonical contract.
+2. **Inspect:** read the current implementation before changing anything.
+3. **Plan:** align with `BUILD_STATE.md → Current State + Next Step` or the
+   approved task contract; produce a concise plan.
+4. **Implement:** the smallest safe change, only within the current scope.
+5. **Verify:** targeted checks + the lightweight gate locally, then the full
+   gate in CI. Do not claim completion before required CI checks pass.
+6. **Document:** update `BUILD_STATE.md` minimally (status, completed work,
+   known issues, next step); append to `DECISIONS.md` when a decision is made.
+7. **Report honestly** and leave the repository ready for the next fresh
+   session.
 
-This is not a rigid maximum-file-count limit. Agents may read additional files
-when justified by:
+**Never:** add unapproved features or infrastructure; redesign the recorded
+architecture; redo completed work; commit secrets; commit/tag/push/release
+unless explicitly instructed; skip verification; execute Production
+migrations automatically; recreate removed documentation files.
 
-- Security and authentication boundaries.
-- Multi-tenant data isolation (`businessId`).
-- Booking correctness and scheduling concurrency invariants.
-- Database schema and repository contracts.
-- Cross-feature shared APIs and shared TypeScript types.
-- Regression investigation.
-- Explicitly requested comprehensive audits.
+## 6. Authority order and escalation
 
-_Requirement:_ When a task expands beyond its initial context entrypoint, provide
-a clear scope justification in the task report.
+On conflict: latest `DECISIONS.md` entry → `BUILD_STATE.md` → canonical topic
+docs → derived summaries. The repository code remains implementation truth.
 
-### Preferred Retrieval Techniques
-
-- Use targeted commands: `rg -n`, `rg --files`, `sed -n`, `git diff`, `git log -- <path>`, `wc -c`, `pnpm context <name>`.
-- Use bounded outputs (e.g. `head -n`, line ranges) rather than full dumps.
-- Do not introduce artificial context budgets that prevent necessary engineering investigation.
-
-## Context Map — Code-Level Entrypoints (DECISIONS #75)
-
-`docs/CONTEXT_MAP.md` provides code-level starting points (`pnpm context <name>`)
-for each feature boundary. It tells you which handful of source files, docs, and
-focused tests to START from so you do not re-scan `src/`.
-
-The map is a STARTING-POINT INDEX, not a dependency graph and not a second
-architecture document. When you add or move a mapped file, update the entry and
-run `pnpm context:check`.
-
-## Before Making Any Changes
-
-1. Read the Tier 0 triple (`AGENT_RULES.md` + `CURRENT_STATE.md` + `DECISIONS_INDEX.md`).
-2. Follow the loading protocol: Tier 1 by task; Tier 2 only on conflict/decision; Tier 3 only on explicit historical need.
-3. Read `docs/BUILD_STATE.md → Current State + Next Step` and do exactly that.
-4. Authority order on conflict: latest `DECISIONS.md` entry → `BUILD_STATE.md` → canonical topic docs → derived summaries. The repository code is the implementation truth.
-
-## NEVER
-
-- ❌ Add features outside `SPEC_A.md` / the current accepted scope.
-- ❌ Redesign the architecture or stack recorded in `ARCHITECTURE.md` / `DECISIONS.md`.
-- ❌ Introduce complexity: no microservices, event buses, queues, Redis, message brokers, global stores, new ORMs, extra API layers, RAG/vector DBs, generic workflow engines.
-- ❌ Add infrastructure not approved in `ARCHITECTURE.md` (Vercel + Neon only).
-- ❌ Treat AI output as authoritative for availability, provider eligibility, conflicts, or booking (AI interprets; Domain decides and executes; Conversation orchestrates — DECISIONS #33).
-- ❌ Add `branchId` to tables outside the selective scoping list, use `User.branchId`, or hard-code "one Business = one WhatsApp number" (DECISIONS #30–#32).
-- ❌ Build billing, subscriptions, invoices, payments, or hard-code plan limits in business logic (DECISIONS #36; `ECONOMICS.md`).
-- ❌ Modify or delete historical entries in `DECISIONS.md` (append-only; reversals are new entries referencing the old one).
-- ❌ Redo or reimplement completed work recorded in `BUILD_STATE.md`.
-- ❌ Break RTL/Arabic-first behavior or accessibility guarantees.
-- ❌ Commit secrets or real credentials; `.env` stays local (pre-commit hook active).
-- ❌ Skip verification: `pnpm verify:local` (or targeted checks + `pnpm verify:fast`) must pass locally before committing or opening a PR. Full `pnpm verify` runs in GitHub Actions CI.
-- ❌ Run multiple resource-heavy processes concurrently on the VPS (e.g., simultaneous builds/typechecks/test suites).
-- ❌ Recreate duplicate documentation or competing summaries.
-- ❌ Commit, tag, push, or run GitHub publishing operations (`pnpm ship`, `pnpm release`) — the human operator owns all shipping/versioning/release actions unless explicitly instructed.
-- ❌ Claim a feature or PR is complete before relevant required GitHub Actions CI checks pass.
-- ❌ Execute production database migrations automatically from local development.
-
-## ALWAYS
-
-- ✅ Update `BUILD_STATE.md` after every prompt — MINIMALLY: status, completed work (one entry), known issues, next step.
-- ✅ Append to `DECISIONS.md` when a decision is made (never overwrite).
-- ✅ Create a new document ONLY when a real long-term need exists and no canonical file covers the topic.
-- ✅ Preserve strategy: when in conflict, vision > strategy > scope > implementation detail.
-- ✅ Keep feature isolation, repository-only DB access, Zod-validated DTOs, server-side tenant scoping.
-- ✅ Write Arabic-first, vertical-agnostic UI copy (rules: `DESIGN_SYSTEM.md`; terms: `PRODUCT_GLOSSARY.md`).
-- ✅ Report final status honestly — distinguish BUILT code from DOCUMENTED or NOT built.
-- ✅ Ask/escalate instead of guessing when scope is ambiguous.
-
-## Prompt Lifecycle Process
-
-1. **Recover** via context tiers: Tier 0 cold start, then task-selective Tier 1.
-2. **Inspect the current implementation** before changing anything.
-3. **Plan** against `BUILD_STATE.md → Next Step`; produce a concise plan before editing.
-4. **Implement** ONLY the current prompt's scope, following `ARCHITECTURE.md` dependency rules.
-5. **Verify** with the lightweight gate: targeted domain checks (`pnpm check:<module>`) + `pnpm verify:local` (or `pnpm verify:fast`). Full build is delegated to GitHub Actions CI upon PR push.
-6. **Update docs** — `BUILD_STATE.md` always (minimal); `DECISIONS.md` when a decision was made.
-7. **Report honestly** and leave the repository ready for the next fresh session.
-
-## CI-First PR Workflow & VPS Safety (DEVOPS-01E)
-
-FlowPilot operates on a resource-constrained Linux VPS. Full Next.js production builds and browser testing are owned by GitHub Actions CI and Vercel, not the local VPS.
-
-### During Active Development
-
-- Run targeted checks for touched modules (e.g. `pnpm check:booking-ux`, `pnpm check:eligibility`).
-- Run lightweight local verification (`pnpm verify:local` or `pnpm verify:fast`).
-- **Do NOT** automatically run `next build` or full production `pnpm verify` after every edit.
-- **Do NOT** repeat unchanged test suites unnecessarily.
-- **Do NOT** run multiple resource-intensive verification processes concurrently.
-
-### Before Creating or Updating a PR
-
-- Ensure targeted checks pass locally.
-- Validate version increment with `pnpm check:version`.
-- Push changes to the feature branch.
-- Allow GitHub Actions CI (`pr-validation.yml`) to execute the full quality gate (`pnpm verify` including production build) and Playwright browser UX QA in isolated CI runners.
-- **Do NOT** claim a feature is accepted until required CI checks pass.
-
-### For UI/UX Changes
-
-- Use GitHub Actions automated Playwright UX QA and Vercel Preview deployments.
-- Review generated screenshots and authenticated workflow artifacts.
-- Avoid running local production servers or local browser suites unless strictly necessary.
-- Preserve mobile-first Arabic RTL requirements.
-
-### For Database Changes
-
-- Preserve safe migration process: dev migrations locally (`pnpm db:migrate`), never execute production migrations automatically from VPS.
-- Note schema changes in the PR; operator applies production migrations via `.github/workflows/production-db-migrate.yml`.
-
-### VPS Resource Inspection Guidelines
-
-When checking VPS load or diagnosing apparent freezes:
-
-- Memory: `free -h` (check `available` memory; note swap is 0B).
-- Top memory processes: `ps aux --sort=-%mem | head -n 10`
-- Active Node/build processes: `pgrep -af "next|eslint|tsc|playwright|node"`
-- Distinguish slow progress from freezes: check if CPU time is advancing (`ps -o pid,stat,time,%cpu,comm -p <PID>` over a 3-5s window). If time ticks up, process is computing, not hung.
-
-## Escalation Path
-
-If a task seems to require something marked ❌ above or outside the accepted scope,
-STOP. Record the request as a candidate decision in your response to the human
-operator and wait for approval.
+If a task requires something marked prohibited, a scope change, a
+contradictory product interpretation or an unverified live action: **STOP**.
+Record the blocker or candidate decision in the response and wait for the
+reviewer/operator. Do not guess.
