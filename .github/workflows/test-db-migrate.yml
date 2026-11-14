@@ -16,6 +16,7 @@ on:
           - repair-credential
           - switch-webhook-dry-run
           - switch-webhook-apply
+          - restore-main-webhook-reconcile
           - restore-main-webhook-preflight
           - restore-main-webhook-dry-run
           - restore-main-webhook-apply
@@ -235,7 +236,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
-      (inputs.operation == 'restore-main-webhook-preflight' || inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
+      (inputs.operation == 'restore-main-webhook-reconcile' || inputs.operation == 'restore-main-webhook-preflight' || inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

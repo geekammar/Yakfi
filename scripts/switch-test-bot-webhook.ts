@@ -35,6 +35,7 @@ export const ALLOWED_OPERATIONS = [
   "switch-webhook-dry-run",
   "switch-webhook-apply",
   "restore-main-webhook-preflight",
+  "restore-main-webhook-reconcile",
   "restore-main-webhook-dry-run",
   "restore-main-webhook-apply",
 ] as const;
@@ -146,7 +147,8 @@ export async function executeGuardedSwitch(
   }
 
   const isRestore = operation.startsWith("restore-main-webhook-");
-  const isApply = operation.endsWith("-apply");
+  const isReconcile = operation === "restore-main-webhook-reconcile";
+  const isApply = operation.endsWith("-apply") || isReconcile;
   const isRestorePreflight = operation === "restore-main-webhook-preflight";
   const masterKey = (env.CREDENTIAL_MASTER_KEY ?? "").trim();
   const restoreToken = (env.RESTORE_BOT_TOKEN ?? "").trim();
@@ -179,7 +181,7 @@ export async function executeGuardedSwitch(
   if (!isRestore) process.env.CREDENTIAL_MASTER_KEY = masterKey;
 
   const expectedCurrentUrl =
-    isRestore && !isRestorePreflight
+    isRestore && !isRestorePreflight && !isReconcile
       ? FIXED_TARGETS.previewWebhookUrl
       : FIXED_TARGETS.mainWebhookUrl;
 
@@ -201,6 +203,11 @@ export async function executeGuardedSwitch(
   out.log(
     `Credential source:    ${isRestore ? "owner-provided fixed-bot maintenance token; stored credential unchanged" : "application runtime credential"}`,
   );
+
+  const restorationGuidance =
+    "Reviewed workflow: restore-main-webhook-dry-run then restore-main-webhook-apply against Production when the current URL is Preview. Use the exact reviewed SHA.";
+  const reconciliationGuidance =
+    "If Telegram is already on main but its database hash is unconfirmed, use reviewed restore-main-webhook-reconcile against Production. Inspect partial failure first; never retry blindly.";
 
   try {
     let switchImpl = deps.switchFn;
@@ -233,11 +240,11 @@ export async function executeGuardedSwitch(
         }
         if (outcome.reconciliationCommand) {
           out.error("\nReconciliation Command:");
-          out.error(`  ${outcome.reconciliationCommand}`);
+          out.error(`  ${reconciliationGuidance}`);
         }
         if (outcome.restorationProcedure) {
           out.error("\nRestoration Procedure (revert switch):");
-          out.error(`  ${outcome.restorationProcedure}\n`);
+          out.error(`  ${restorationGuidance}\n`);
         }
         return {
           ok: false,
@@ -251,7 +258,7 @@ export async function executeGuardedSwitch(
       );
       if (outcome.restorationProcedure) {
         out.error("\nRestoration Procedure:");
-        out.error(`  ${outcome.restorationProcedure}\n`);
+        out.error(`  ${restorationGuidance}\n`);
       }
       return { ok: false, code: outcome.code };
     }
@@ -273,9 +280,14 @@ export async function executeGuardedSwitch(
       out.log(`Destination URL:     ${outcome.destinationWebhookUrl}`);
       out.log(`Target Updates:      ${JSON.stringify(outcome.allowedUpdates)}`);
       out.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
-      out.log(`Message:             ${outcome.message}`);
-      out.log("\nPlanned Restoration Procedure (after apply):");
-      out.log(`  ${outcome.restorationProcedure}`);
+      out.log(
+        `Message:             ${isRestorePreflight ? "Owner token and main registration verified; zero changes. Stored encryption key has not been recovered." : outcome.message}`,
+      );
+      if (!isRestorePreflight) {
+        out.log("\nReviewed Restoration Procedure:");
+        out.log(`  ${restorationGuidance}`);
+        out.log(`  ${reconciliationGuidance}`);
+      }
     } else if (outcome.status === "SWITCHED") {
       out.log(`Previous URL:        ${outcome.previousWebhookUrl}`);
       out.log(`New Webhook URL:     ${outcome.webhookUrl}`);
@@ -286,7 +298,7 @@ export async function executeGuardedSwitch(
       );
       out.log(`Verified At:         ${outcome.verifiedAt}`);
       out.log("\nRestoration Procedure (revert switch):");
-      out.log(`  ${outcome.restorationProcedure}\n`);
+      out.log(`  ${restorationGuidance}\n  ${reconciliationGuidance}\n`);
     }
     out.log("=======================================================\n");
 

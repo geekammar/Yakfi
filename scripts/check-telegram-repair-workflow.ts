@@ -1454,6 +1454,29 @@ fi
     ) && workflowYaml.includes("- restore-main-webhook-preflight"),
   );
 
+  // Model a remote-main/local-hash mismatch left by a partial restoration.
+  mainDbConnection.webhookSecretHash = "unconfirmed-old-main-hash";
+  const beforeReconcileRef = mainDbConnection.credentialsRef;
+  const beforeReconcileTestHash = testDbConnection.webhookSecretHash;
+  const reconciledOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-reconcile" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T51. Explicit owner-token reconciliation repairs a main/hash mismatch without moving the URL or touching ciphertext/test DB",
+    reconciledOwner.ok &&
+      reconciledOwner.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeReconcileRef &&
+      testDbConnection.webhookSecretHash === beforeReconcileTestHash &&
+      restorationJob.includes(
+        "inputs.operation == 'restore-main-webhook-reconcile'",
+      ),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {
