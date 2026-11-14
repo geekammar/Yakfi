@@ -63,20 +63,14 @@
 
 ## VPS Process Safety (current boundary)
 
-The diagnostics below are read-only. They do not authorize package execution on
-the VPS. Historical DEVOPS-01E local-check guidance is superseded by
-`AGENT_RULES.md` §4.
-
-<!-- prettier-ignore -->
-| Symptom                                             | Cause                                                                            | Diagnostic Command                                | Fix                                                                                                                                              |
-| --------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Terminal or AGY session lags / becomes unresponsive | VPS memory saturation; zero swap space means Linux freezes under memory pressure | `free -h`                                         | The approved rule prohibits all package execution on the VPS. Do not start builds/tests/checks; stop any stray package process and report. Use existing CI or an authorized isolated cloud runner. |
-| Stray ESLint process on the VPS consumes RAM        | Package work should not run on the VPS                                            | `ps aux --sort=-%mem \| head -n 10`               | Stop the stray process and report; do not run ESLint on the VPS. Keep `playwright-report/**` and `test-results/**` in `globalIgnores` for authorized runners. |
-| Cannot tell if build is frozen or just slow         | Long Next.js compilation or TypeScript check                                     | `ps -o pid,stat,time,%cpu,comm -p <PID>`          | Check if `time` advances over 3-5 seconds. If advancing, process is active. If stalled and `available` memory < 100MB, process may be thrashing. |
-| Duplicate / runaway Node processes                  | Stray package process that should not run on the VPS                             | `pgrep -af "next\|eslint\|tsc\|playwright\|node"` | Stop the stale process and report it; do not start builds, tests or a dev server on the VPS. Never kill an active database or AGY session.       |
+The approved rule allows source/text inspection, editing and Git on the VPS.
+If the VPS becomes unresponsive, stop and report; do not start package commands,
+builds, tests, a formatter or a dev server. Historical DEVOPS-01E local-check
+guidance is superseded by `AGENT_RULES.md` §4.
 
 ## Still stuck?
 
-1. `pnpm run doctor` — read every `→ fix:` line; it covers the common cases.
+1. On an authorized non-VPS environment or CI, run `pnpm run doctor` — read
+   every `→ fix:` line; it covers the common cases.
 2. `docs/BUILD_STATE.md` → Key Known Limitations (incl. device limitations).
 3. `docs/AGENT_RULES.md` — binding rules and lifecycle process.
