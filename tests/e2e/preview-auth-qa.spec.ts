@@ -40,20 +40,14 @@ async function waitForSignInFormHydration(page: Page): Promise<void> {
   // type proves React hydration finished, so controlled-input fills below
   // cannot be discarded when hydration completes.
   await expect
-    .poll(
-      async () => {
-        const hidePassword = page.locator(
-          'button[aria-label="إخفاء كلمة المرور"]',
-        );
-        if (await hidePassword.isVisible()) return "text";
-        await revealPassword.click();
-        return passwordInput.getAttribute("type");
-      },
-      {
-        message: "sign-in form did not become interactive after hydration",
-        timeout: 10_000,
-      },
-    )
+    .poll(async () => {
+      const hidePassword = page.locator(
+        'button[aria-label="إخفاء كلمة المرور"]',
+      );
+      if (await hidePassword.isVisible()) return "text";
+      await revealPassword.click();
+      return passwordInput.getAttribute("type");
+    })
     .toBe("text");
 
   await page.locator('button[aria-label="إخفاء كلمة المرور"]').click();
@@ -420,7 +414,7 @@ test.describe("Authenticated Preview QA", () => {
       document.documentElement.scrollTop = y;
     }, preInboxScreenshotScrollY);
 
-    // Inspect conversation items in inbox — deterministic long thread requirement
+    // Inspect real conversation items in the inbox before opening the first one
     const conversationLinks = page.locator('a[href^="/conversations/"]');
     await expect(conversationLinks.first()).toBeVisible({ timeout: 10_000 });
     const conversationCount = await conversationLinks.count();
@@ -504,9 +498,8 @@ test.describe("Authenticated Preview QA", () => {
       'header[data-testid="conversation-persistent-header"]',
     );
     await expect(fixtureHeader).toBeVisible();
-    await expect(fixtureHeader.locator('p[dir="ltr"]')).toHaveText(
-      LONG_THREAD_FIXTURE_PHONE,
-    );
+    const fixturePhone = fixtureHeader.locator('p[dir="ltr"]');
+    await expect(fixturePhone).toHaveText(LONG_THREAD_FIXTURE_PHONE);
 
     // U06: Independently scrollable message history (deterministic long fixture)
     const fixtureMessageLog = fixturePage.locator('div[role="log"]');
@@ -518,14 +511,7 @@ test.describe("Authenticated Preview QA", () => {
 
     // Wait for the client-side mount scroll instead of a fixed sleep.
     await expect
-      .poll(
-        async () => fixtureMessageLog.evaluate((el) => el.scrollTop),
-        {
-          message:
-            "long-thread fixture did not auto-scroll to the latest message",
-          timeout: 5_000,
-        },
-      )
+      .poll(async () => fixtureMessageLog.evaluate((el) => el.scrollTop))
       .toBeGreaterThan(0);
 
     const fixtureHeaderBox = await fixtureHeader.boundingBox();
