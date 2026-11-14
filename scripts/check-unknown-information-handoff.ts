@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import { buildAiContext } from "../src/features/conversations/server/ai-context-builder";
 import {
   parseAiResponse,
   type AiResponse,
@@ -12,7 +13,6 @@ import {
   buildServiceDescriptionContent,
   enforceDisclosure,
 } from "../src/features/conversations/server/ai-disclosure";
-import { buildAiContext } from "../src/features/conversations/server/ai-context-builder";
 import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
@@ -2294,7 +2294,8 @@ async function runSuite(): Promise<void> {
     const r6ShapedReply: AiResponse = {
       intent: "FAQ",
       action: "reply",
-      content: "الخدمات المتاحة: استشارة أسنان، جلسة تجميلية، حشو عصب، وكشف جراحة.",
+      content:
+        "الخدمات المتاحة: استشارة أسنان، جلسة تجميلية، حشو عصب، وكشف جراحة.",
       extraction: emptyExtraction,
       handoffReason: null,
       summary: null,
@@ -2453,10 +2454,7 @@ async function runSuite(): Promise<void> {
         }),
       ],
     });
-    const resPrice = await hPrice.runInbound(
-      "بكام الاستشارة؟",
-      "ext-15-price",
-    );
+    const resPrice = await hPrice.runInbound("بكام الاستشارة؟", "ext-15-price");
     check(
       "15.E Valid service price -> authoritative price rendered, invented number dropped",
       resPrice.ok === true &&
@@ -2544,10 +2542,12 @@ async function runSuite(): Promise<void> {
         resCrossTenant.assistantAction === "AI_HANDOFF" &&
         resCrossTenant.conversationStatus === "NEED_HUMAN" &&
         resCrossTenant.handoffCause === "POLICY_REFUSED" &&
-        !hCrossTenant.getSent().some(
-          (message) =>
-            message.includes("999") || message.includes("خدمة منشأة أخرى"),
-        ),
+        !hCrossTenant
+          .getSent()
+          .some(
+            (message) =>
+              message.includes("999") || message.includes("خدمة منشأة أخرى"),
+          ),
       { resCrossTenant, sent: hCrossTenant.getSent() },
     );
 
@@ -2762,8 +2762,7 @@ async function runSuite(): Promise<void> {
         emptyFaqEvidence.disclosureDeclaredIntent === "FAQ" &&
         emptyFaqEvidence.disclosureProposedFamily === "business.faqs" &&
         emptyFaqEvidence.disclosureProposalStatus === "RESOLVED" &&
-        emptyFaqEvidence.disclosureRefusalReason ===
-          "UNAVAILABLE_IN_REQUEST" &&
+        emptyFaqEvidence.disclosureRefusalReason === "UNAVAILABLE_IN_REQUEST" &&
         emptyFaqEvidence.disclosureLedgerIncluded === true,
       emptyFaqEvidence,
     );
