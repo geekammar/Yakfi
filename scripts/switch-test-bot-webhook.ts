@@ -10,6 +10,8 @@
  */
 import { fileURLToPath } from "node:url";
 
+import { isRuntimeCredentialReference } from "../src/lib/validation";
+import type { CredentialsResolver } from "../src/server/credentials/credentials-resolver";
 import {
   RecoveryError,
   validateDatabaseUrl,
@@ -32,6 +34,7 @@ export const FIXED_TARGETS = {
 export const ALLOWED_OPERATIONS = [
   "switch-webhook-dry-run",
   "switch-webhook-apply",
+  "restore-main-webhook-preflight",
   "restore-main-webhook-dry-run",
   "restore-main-webhook-apply",
 ] as const;
@@ -79,12 +82,34 @@ export type SwitchRunnerDeps = {
   validateProdDbUrl?: (url: string) => void;
   switchFn?: (
     params: SwitchTelegramWebhookParams,
+    credentialsResolver?: Pick<CredentialsResolver, "resolve">,
   ) => Promise<SwitchTelegramWebhookOutcome>;
   out?: {
     log: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
   };
 };
+
+/** Explicit operator credential for this fixed-bot maintenance job only.
+ * This neither decrypts nor replaces the application's stored credentials.
+ * Live getMe + the operator-pinned bot ID remain mandatory in the switch service.
+ */
+export function createOwnerRestoreResolver(
+  token: string,
+): Pick<CredentialsResolver, "resolve"> {
+  return {
+    async resolve(reference) {
+      if (!isRuntimeCredentialReference(reference)) {
+        return {
+          ok: false,
+          code: "UNRESOLVED_REFERENCE",
+          message: "Runtime reference required",
+        };
+      }
+      return { ok: true, kind: "RUNTIME", reference, value: token };
+    },
+  };
+}
 
 export async function executeGuardedSwitch(
   env: {
@@ -120,16 +145,20 @@ export async function executeGuardedSwitch(
     return { ok: false, code: "MISSING_DATABASE_URL" };
   }
 
-  const masterKey = (env.CREDENTIAL_MASTER_KEY ?? "").trim();
-  if (!masterKey) {
-    out.error(
-      "❌ Preflight Refused: [MISSING_CREDENTIAL_MASTER_KEY] Required master key secret is unavailable.",
-    );
-    return { ok: false, code: "MISSING_CREDENTIAL_MASTER_KEY" };
-  }
-
   const isRestore = operation.startsWith("restore-main-webhook-");
   const isApply = operation.endsWith("-apply");
+  const isRestorePreflight = operation === "restore-main-webhook-preflight";
+  const masterKey = (env.CREDENTIAL_MASTER_KEY ?? "").trim();
+  const restoreToken = (env.RESTORE_BOT_TOKEN ?? "").trim();
+  if (isRestore ? !restoreToken : !masterKey) {
+    const code = isRestore
+      ? "MISSING_RESTORE_BOT_TOKEN"
+      : "MISSING_CREDENTIAL_MASTER_KEY";
+    out.error(
+      `❌ Preflight Refused: [${code}] Required maintenance credential is unavailable.`,
+    );
+    return { ok: false, code };
+  }
 
   try {
     if (isRestore) {
@@ -147,11 +176,12 @@ export async function executeGuardedSwitch(
   }
 
   process.env.DATABASE_URL = databaseUrl;
-  process.env.CREDENTIAL_MASTER_KEY = masterKey;
+  if (!isRestore) process.env.CREDENTIAL_MASTER_KEY = masterKey;
 
-  const expectedCurrentUrl = isRestore
-    ? FIXED_TARGETS.previewWebhookUrl
-    : FIXED_TARGETS.mainWebhookUrl;
+  const expectedCurrentUrl =
+    isRestore && !isRestorePreflight
+      ? FIXED_TARGETS.previewWebhookUrl
+      : FIXED_TARGETS.mainWebhookUrl;
 
   const destinationUrl = isRestore
     ? FIXED_TARGETS.mainWebhookUrl
@@ -168,6 +198,9 @@ export async function executeGuardedSwitch(
   );
   out.log(`Expected Current URL: ${expectedCurrentUrl}`);
   out.log(`Destination URL:      ${destinationUrl}`);
+  out.log(
+    `Credential source:    ${isRestore ? "owner-provided fixed-bot maintenance token; stored credential unchanged" : "application runtime credential"}`,
+  );
 
   try {
     let switchImpl = deps.switchFn;
@@ -177,14 +210,17 @@ export async function executeGuardedSwitch(
       switchImpl = switchTelegramBotWebhookDefault;
     }
 
-    const outcome = await switchImpl({
-      businessId: FIXED_TARGETS.businessId,
-      connectionId: FIXED_TARGETS.connectionId,
-      expectedBotExternalId: FIXED_TARGETS.botExternalId,
-      expectedCurrentUrl,
-      destinationUrl,
-      apply: isApply,
-    });
+    const outcome = await switchImpl(
+      {
+        businessId: FIXED_TARGETS.businessId,
+        connectionId: FIXED_TARGETS.connectionId,
+        expectedBotExternalId: FIXED_TARGETS.botExternalId,
+        expectedCurrentUrl,
+        destinationUrl,
+        apply: isApply,
+      },
+      isRestore ? createOwnerRestoreResolver(restoreToken) : undefined,
+    );
 
     if (!outcome.ok) {
       if (outcome.status === "PARTIAL_FAILURE") {
@@ -222,7 +258,10 @@ export async function executeGuardedSwitch(
 
     // Whitelisted safe output projection
     out.log("\n================ Webhook Switch Result ================");
-    out.log(`Status:              ${outcome.status}`);
+    const status = isRestorePreflight
+      ? "RESTORE_PREFLIGHT_READY"
+      : outcome.status;
+    out.log(`Status:              ${status}`);
     out.log(
       `Mode:                ${outcome.dryRun ? "DRY RUN (no changes made)" : "APPLIED (switched)"}`,
     );
@@ -251,7 +290,7 @@ export async function executeGuardedSwitch(
     }
     out.log("=======================================================\n");
 
-    return { ok: true, status: outcome.status };
+    return { ok: true, status };
   } catch {
     // Strict output boundary: NEVER print raw error message, stack trace, tokens, or URLs
     out.error(

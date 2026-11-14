@@ -1321,6 +1321,7 @@ export async function switchTelegramBotWebhook(
 /** Default production boundary wiring for webhook switching */
 export async function switchTelegramBotWebhookDefault(
   params: SwitchTelegramWebhookParams,
+  credentialsResolver: RepairTelegramWebhookDeps["credentialsResolver"] = defaultCredentialsResolver,
 ): Promise<SwitchTelegramWebhookOutcome> {
   const { telegramConnectionRepository } =
     await import("@/server/repositories");
@@ -1328,7 +1329,7 @@ export async function switchTelegramBotWebhookDefault(
     {
       api: defaultTelegramApiDeps,
       connectionRepository: telegramConnectionRepository,
-      credentialsResolver: defaultCredentialsResolver,
+      credentialsResolver,
       generateWebhookSecret,
       hashWebhookSecret: hashTelegramWebhookSecret,
     },

@@ -16,6 +16,7 @@ on:
           - repair-credential
           - switch-webhook-dry-run
           - switch-webhook-apply
+          - restore-main-webhook-preflight
           - restore-main-webhook-dry-run
           - restore-main-webhook-apply
       expected_commit_sha:
@@ -234,7 +235,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
-      (inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
+      (inputs.operation == 'restore-main-webhook-preflight' || inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -265,7 +266,7 @@ jobs:
       - name: Execute guarded customer webhook restoration (prepare-only)
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-          CREDENTIAL_MASTER_KEY: ${{ secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY }}
+          RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
           OPERATION: ${{ inputs.operation }}
         run: |
           node --import tsx scripts/switch-test-bot-webhook.ts

@@ -1,5 +1,9 @@
 # FlowPilot — Current State
 
+## Owner-token restoration checkpoint — 14 November 2026
+
+Production candidate-key run43508566171 failed with CREDENTIALS_UNAVAILABLE. The fixed-target restoration runner now uses the existing owner customer-bot token explicitly, with a resolve-only dependency and live pinned-ID/non-manager verification. `restore-main-webhook-preflight` checks readiness while the bot remains on main and performs no writes. The actual reverse dry run still requires Preview as current URL; apply retains all database/URL/identity guards and updates only the destination webhook hash. Forward routing and application credential decryption are unchanged. Unknown Production master-key recovery/rebaseline remains a separate pre-Pilot requirement; this is not a successful key recovery. Owner confirms test assets; inventory found one runtime row, three Telegram and two WhatsApp connections. Do not reset all variables or delete historical QA evidence. No live mutation or acceptance is recorded.
+
 ## Production restoration credential checkpoint — 13 November 2026
 
 Forward read-only run43504118788 succeeded (`SWITCH_DRY_RUN`) on `6c0c60a`; reverse read-only run43504704679 stopped with `CREDENTIALS_UNAVAILABLE` before getMe/URL validation. No webhook or database mutation occurred. Main's old encrypted credential remains present and unchanged. Restoration now uses the separate masked Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` as the application `CREDENTIAL_MASTER_KEY`, without fallback to the working Preview key. Owner must supply the original Production-key candidate and rerun the read-only reverse preflight on the reviewed new HEAD. Forward apply, reverse apply, merge and live acceptance remain unapproved. See TROUBLESHOOTING for expected URL-mismatch interpretation.

@@ -13,7 +13,10 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import type { ResolvedCredential } from "../src/server/credentials/credentials-resolver";
+import type {
+  CredentialsResolver,
+  ResolvedCredential,
+} from "../src/server/credentials/credentials-resolver";
 import type { TelegramApiDeps } from "../src/server/integrations/telegram/telegram-client";
 import type {
   SwitchTelegramWebhookParams,
@@ -582,8 +585,12 @@ fi
   );
 
   // ─── 5. Guarded Switch Runner & Restoration Workflow Execution Tests ───────
-  const { executeGuardedSwitch, validateProductionDatabaseUrl, FIXED_TARGETS } =
-    await import("./switch-test-bot-webhook");
+  const {
+    executeGuardedSwitch,
+    validateProductionDatabaseUrl,
+    FIXED_TARGETS,
+    createOwnerRestoreResolver,
+  } = await import("./switch-test-bot-webhook");
   const { validateDatabaseUrl, RecoveryError } =
     await import("../src/server/credentials/test-bot-recovery");
   const { switchTelegramBotWebhook } =
@@ -1223,20 +1230,228 @@ fi
       "\n  restore-main-webhook:",
     )[0] ?? "";
   check(
-    "T40. Workflow isolates Production restoration key from the unchanged Preview key without fallback",
+    "T40. Workflow binds explicit owner token for restoration and keeps the Preview key isolated",
     restorationJob.includes(
-      "CREDENTIAL_MASTER_KEY: ${{ secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY }}",
+      "RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}",
     ) &&
       restorationJob.includes(
         "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
       ) &&
-      !restorationJob.includes("secrets.CREDENTIAL_MASTER_KEY") &&
+      !restorationJob.includes("CREDENTIAL_MASTER_KEY:") &&
       !restorationJob.includes("secrets.TEST_DATABASE_URL") &&
       forwardJob.includes(
         "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
       ) &&
       forwardJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
-      !forwardJob.includes("secrets.YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY"),
+      !forwardJob.includes("RESTORE_BOT_TOKEN:"),
+  );
+
+  // Exercise the real runner and switch service with an explicit owner token.
+  const ownerToken = `${FIXED_TARGETS.botExternalId}:owner_token_regression_only_123456789`;
+  const ownerEnv = {
+    DATABASE_URL:
+      "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    OPERATION: "restore-main-webhook-dry-run",
+    RESTORE_BOT_TOKEN: ownerToken,
+  };
+  const ownerLines: string[] = [];
+  const ownerOut = {
+    log: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+    error: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+  };
+  let ownerApiMode: "valid" | "wrong-bot" | "manager" | "unauthorized" =
+    "valid";
+  let ownerRequests = 0;
+  const ownerApi: TelegramApiDeps = {
+    ...mockTelegramApi,
+    async fetchImpl(input, init) {
+      const url = String(input);
+      if (!url.startsWith(`https://api.telegram.org/bot${ownerToken}/`)) {
+        throw new Error("Unexpected credential source");
+      }
+      ownerRequests++;
+      if (url.endsWith("/getMe") && ownerApiMode !== "valid") {
+        if (ownerApiMode === "unauthorized") {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error_code: 401,
+              description: "Unauthorized",
+            }),
+            { status: 401 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id:
+                ownerApiMode === "wrong-bot"
+                  ? 999999999
+                  : Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              can_manage_bots: ownerApiMode === "manager",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return mockTelegramApi.fetchImpl(input, init);
+    },
+  };
+  const ownerSwitch = async (
+    params: SwitchTelegramWebhookParams,
+    resolver?: Pick<CredentialsResolver, "resolve">,
+  ) => {
+    if (!resolver) throw new Error("Explicit owner resolver missing");
+    return switchTelegramBotWebhook(
+      {
+        api: ownerApi,
+        credentialsResolver: resolver,
+        connectionRepository: createRepoFor(mainDbConnection),
+      },
+      params,
+    );
+  };
+  const missingOwner = await executeGuardedSwitch(
+    { ...ownerEnv, RESTORE_BOT_TOKEN: "", CREDENTIAL_MASTER_KEY: "unused" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T41. Missing restoration token fails before execution and never falls back to a master key",
+    !missingOwner.ok &&
+      missingOwner.code === "MISSING_RESTORE_BOT_TOKEN" &&
+      ownerRequests === 0,
+  );
+
+  const beforeOwnerRef = mainDbConnection.credentialsRef;
+  const beforeOwnerHash = mainDbConnection.webhookSecretHash;
+  const beforeOwnerSecret = telegramRemoteSecret;
+  const readonlyOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T42. Owner-token preflight reaches current-URL refusal without master key, ciphertext access or mutations",
+    !readonlyOwner.ok &&
+      readonlyOwner.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      ownerRequests >= 2 &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl,
+  );
+
+  // Fake remote is now at Preview, as it would be after an authorized forward switch.
+  telegramRemoteUrl = FIXED_TARGETS.previewWebhookUrl;
+  ownerApiMode = "wrong-bot";
+  const wrongOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T43. Wrong owner-token identity is rejected before writes or webhook retargeting",
+    !wrongOwner.ok &&
+      wrongOwner.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.previewWebhookUrl &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "manager";
+  const managerOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T44. Owner-token path preserves the Manager Bot exclusion",
+    !managerOwner.ok && managerOwner.code === "MANAGER_BOT_TARGET_REJECTED",
+  );
+
+  ownerApiMode = "unauthorized";
+  const rejectedOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T45. Telegram-rejected owner token fails closed before mutation",
+    !rejectedOwner.ok &&
+      rejectedOwner.code === "BOT_IDENTITY_VERIFICATION_FAILED" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "valid";
+  const ownerDry = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T46. Owner-token dry run with Preview current URL has zero writes",
+    ownerDry.ok &&
+      ownerDry.status === "SWITCH_DRY_RUN" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret,
+  );
+
+  const beforeOwnerTestHash = testDbConnection.webhookSecretHash;
+  const ownerApplied = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T47. Owner-token restoration synchronizes main hash, retains credential reference and leaves test DB untouched",
+    ownerApplied.ok &&
+      ownerApplied.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      testDbConnection.webhookSecretHash === beforeOwnerTestHash,
+  );
+
+  const readonlyResolver = createOwnerRestoreResolver(ownerToken);
+  const invalidReference = await readonlyResolver.resolve(
+    "UNRELATED_ENV_TOKEN",
+  );
+  const beforeOwnerLeaks = ownerLines.join("\n");
+  await executeGuardedSwitch(ownerEnv, {
+    switchFn: async () => {
+      throw new Error(`Sensitive source ${ownerToken}`);
+    },
+    out: ownerOut,
+  });
+  check(
+    "T48. Owner resolver cannot store/delete credentials and secret-bearing failures are sanitized",
+    !("store" in readonlyResolver) &&
+      !("delete" in readonlyResolver) &&
+      !invalidReference.ok &&
+      !beforeOwnerLeaks.includes(ownerToken) &&
+      !ownerLines.join("\n").includes(ownerToken) &&
+      ownerLines.join("\n").includes("UNEXPECTED_SWITCH_FAILURE"),
+  );
+
+  const beforePreflightRequests = ownerRequests;
+  const beforePreflightHash = mainDbConnection.webhookSecretHash;
+  const beforePreflightSecret = telegramRemoteSecret;
+  const readyPreflight = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-preflight" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T49. Pre-switch restoration preflight returns READY on main with exactly two read requests and no mutations",
+    readyPreflight.ok &&
+      readyPreflight.status === "RESTORE_PREFLIGHT_READY" &&
+      ownerRequests - beforePreflightRequests === 2 &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === beforePreflightSecret &&
+      mainDbConnection.webhookSecretHash === beforePreflightHash &&
+      mainDbConnection.credentialsRef === beforeOwnerRef,
+  );
+  check(
+    "T50. Read-only restoration preflight is explicitly routed to the guarded restoration job",
+    restorationJob.includes(
+      "inputs.operation == 'restore-main-webhook-preflight'",
+    ) && workflowYaml.includes("- restore-main-webhook-preflight"),
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

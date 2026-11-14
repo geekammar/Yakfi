@@ -121,7 +121,7 @@ Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch`
 
 ### Restoration Runbook (Reverting to Production)
 
-Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) with its matching key. The guarded restoration job injects the separate Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` into the application variable `CREDENTIAL_MASTER_KEY`; it never falls back to the Preview/repository key. Reversing URL arguments against the Preview database alone leaves the production database out of sync, causing HTTP 401 authentication failures on inbound traffic.
+Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) and the new webhook secret hash. This fixed-bot maintenance job uses the existing owner-provided customer-bot token (`YAKFI_TEST_CUSTOMER_BOT_TOKEN` injected as `RESTORE_BOT_TOKEN`) explicitly, with no fallback to an encryption key. It verifies live `getMe`, the operator-pinned bot ID, the tenant/connection, non-manager status and the expected current URL before any mutation. This changes only operational credential sourcing: the application still resolves its encrypted credential normally. No ciphertext, credential reference or master key is replaced by a webhook switch.
 
 > [!IMPORTANT]
 > **Why ordinary repair cannot restore across origins**:
@@ -133,14 +133,19 @@ Restoration must synchronize the destination environment's database (`PRODUCTION
 
 A dedicated, guarded restoration operation is prepared in `.github/workflows/test-db-migrate.yml` on `refs/heads/fix/safe-telegram-staff-reply-delivery`:
 
-1. **Dry-Run Inspection (Read-Only)**:
+1. **Pre-Switch Credential Readiness (Read-Only)**:
+   - Operation: `restore-main-webhook-preflight`.
+   - Uses the main destination database and the owner's existing fixed-bot token, without any master key. Requires the bot still registered to main.
+   - Returns `RESTORE_PREFLIGHT_READY` after live identity/registration verification; zero database writes, zero `setWebhook` calls, no encrypted-store decryption. This is not evidence that the unknown Production encryption key has been recovered.
+
+2. **Post-Switch Dry-Run Inspection (Read-Only)**:
    - Operation: `restore-main-webhook-dry-run`
    - Workflow: `.github/workflows/test-db-migrate.yml`
    - Branch: `fix/safe-telegram-staff-reply-delivery`
    - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
    - Action: Validates `PRODUCTION_DATABASE_URL` against the exact main Neon direct/pooler hosts (`ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech` or `ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech`), database `/neondb`, port and TLS/query policy, checks live bot identity, confirms current Telegram registration points to Preview URL, and plans return to main webhook with 0 mutations.
 
-2. **Guarded Apply (Mutation — Operator Authorized)**:
+3. **Guarded Apply (Mutation — Operator Authorized)**:
    - Operation: `restore-main-webhook-apply`
    - Workflow: `.github/workflows/test-db-migrate.yml`
    - Branch: `fix/safe-telegram-staff-reply-delivery`
@@ -148,7 +153,7 @@ A dedicated, guarded restoration operation is prepared in `.github/workflows/tes
    - Action: Coordinates Telegram `setWebhook` returning to `https://flowpilot-prod.vercel.app/api/telegram/webhook`, rotates webhook secret, and persists the confirmed secret hash into the Production database.
    - Output: Sanitized result with verified registration and zero secret disclosures.
 
-3. **Post-Restoration Verification**:
+4. **Post-Restoration Verification**:
    - Inspect bot webhook via read-only check to ensure `url` equals `https://flowpilot-prod.vercel.app/api/telegram/webhook` and allowed updates include `message` and `callback_query`.
    - Verify Production database secret hash is confirmed.
 
@@ -158,4 +163,10 @@ Reviewer follow-up: restoration is restricted to the known main Neon endpoint an
 
 Forward dry run 43504118788 on `6c0c60a` returned `SWITCH_DRY_RUN` for the correct bot and main-to-Preview URLs, with no mutations. Reverse preflight 43504704679 failed earlier with `CREDENTIALS_UNAVAILABLE`, not the expected current-URL mismatch. Main's credential row exists, belongs to the target business and matches the retained old test package; metadata alone cannot establish whether the execution key or ciphertext is wrong.
 
-Do not switch forward until main credential resolution and bot identity can be verified. The owner can provide the original Production-key candidate using masked `gh secret set YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY --repo geekammar/Yakfi`, then rerun `restore-main-webhook-dry-run` on the new reviewed SHA. Do not replace `CREDENTIAL_MASTER_KEY`, change Vercel Production settings, or re-encrypt Production records to make this check pass. Missing separate secret fails closed through the existing runner. Before any forward switch, the reverse dry run is expected to refuse with `CURRENT_WEBHOOK_URL_MISMATCH` (actual main, expected Preview) only AFTER credential resolution and live identity verification; that result proves those read-only prerequisites, not a completed live restoration.
+Candidate-key run43508566171 also returned `CREDENTIALS_UNAVAILABLE`; the candidate did not establish Production credential resolution. Do not continue guessing keys. Vercel metadata confirms the current Production master key is sensitive and not readable back. The explicit maintenance-token path above supersedes the earlier instructions to set `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` for routing. That candidate secret is no longer used by the restoration job; retain or clean up temporary secrets only under the approved post-acceptance cleanup.
+
+### Test assets and secret recovery — 14 November 2026
+
+Owner confirms current messages/accounts are test assets. Read-only inventory found one runtime credential row owned by the fixed target, three Telegram connections and two WhatsApp connections. Do not infer that every setting can be rotated together. For acceptance routing, reuse the existing customer-bot token and preserve all runtime records. Before Pilot, separately rebaseline only the Production encryption key and its one credential with a reviewed re-encryption/configuration/redeployment/verification plan; the present change does not implement that rotation or prove the current Production app credential is healthy.
+
+Keep recoverable original secrets in an encrypted password-manager vault with separate Production/Preview entries, source, owner and date. GitHub Actions and Vercel are runtime distribution stores, not the only backup. Documentation/Drive stores names, scopes and recovery steps only, never values. Do not rotate database URLs/passwords, auth signing secrets, manager-bot token or other working integrations merely to repair this one credential. Re-inventory immediately before any future key rotation and preserve rollback references.
