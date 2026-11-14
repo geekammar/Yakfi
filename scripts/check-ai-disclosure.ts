@@ -55,6 +55,7 @@ import {
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
 } from "../src/features/conversations/server/ai-disclosure";
+import { SAFE_HANDOFF_REPLIES } from "../src/features/conversations/server/conversation-ai";
 import {
   AI_MUST_NOT_RESOLVE_CONFLICTS,
   mostRestrictive,
@@ -740,9 +741,10 @@ async function main(): Promise<void> {
         "domain.availability",
       ),
   );
-  // Same availability supplied, but the turn is NOT a booking ask and the
-  // knowledge store carries nothing → the fact is excluded, so a reply
-  // declaring it cannot be emitted.
+  // The builder treats supplied domain availability as an active booking
+  // signal (hasActiveBooking in the legacy relevance path), so the fact is
+  // carried. The gate MUST still refuse a model-authored availability reply:
+  // being carried never transfers domain authority to the model.
   const offTaskTurn = gateReply({
     message: "بماذا تفعلون؟",
     sources: {
@@ -754,12 +756,15 @@ async function main(): Promise<void> {
     }),
   });
   check(
-    "3b. حقيقة شرطية بلا صلة بالمهمة لا تُفصح (استبعاد، لا تحميل استباقي)",
+    "3b. التوفر المحمّل يبقى مملوكاً للنطاق: رد النموذج يُرفض رغم تضمينه",
     eq(offTaskTurn.decision.kind, "requires-human") &&
-      eq(record(offTaskTurn, "domain.availability")?.included, false) &&
+      eq(record(offTaskTurn, "domain.availability")?.included, true) &&
+      eq(record(offTaskTurn, "domain.availability")?.disclosable, true) &&
       eq(
-        record(offTaskTurn, "domain.availability")?.omissionReason,
-        "NOT_TASK_RELEVANT",
+        offTaskTurn.decision.kind === "requires-human"
+          ? offTaskTurn.decision.reason
+          : null,
+        "NOT_DISCLOSABLE",
       ),
   );
 
@@ -1306,7 +1311,7 @@ async function main(): Promise<void> {
       !refused.aiMessages.includes(LEAKY_REPLY) &&
       // …but exactly one safe deterministic acknowledgment is persisted…
       eq(refused.aiMessages.length, 1) &&
-      refused.aiMessages[0]!.includes("سيرد عليك أحد أعضاء الفريق") &&
+      refused.aiMessages[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED &&
       // …and delivered (never silence).
       eq(refused.sent.length, 1) &&
       refused.sent[0] === refused.aiMessages[0],
@@ -1352,20 +1357,24 @@ async function main(): Promise<void> {
   // (e) GREETING (DECISIONS #61) — a knowledge-free social protocol. The
   //     gate passes it by DECLARED INTENT, never by inspecting text: even
   //     on an EMPTY knowledge store the turn stays AI_ACTIVE and answers
-  //     with the fixed acknowledgment (no invention, no handoff). The
-  //     engine's deterministic bypass produced it, so ZERO LLM calls were
-  //     spent and no AI_TURN usage fact exists.
+  //     (no invention, no handoff). The production default is the structured
+  //     generative path, so this fixture spends at most the one allowed call;
+  //     the disclosure decision is still intent-based, not lexical.
   const greeting = await runTurn({
     text: "السلام عليكم",
     faqs: [], // no knowledge store at all — still safe to greet
-    ai: { kind: "reply", content: "رد ترحيبي", intent: "GREETING" },
+    ai: {
+      kind: "reply",
+      content: "وعليكم السلام ورحمة الله وبركاته",
+      intent: "GREETING",
+    },
   });
   check(
     "13e. GREETING تُفصح بلا معرفة مساندة — AI_REPLY + AI_ACTIVE ولا تحويل",
     eq(greeting.assistantAction, "AI_REPLY") &&
       eq(greeting.conversationStatus, "AI_ACTIVE") &&
       greeting.aiMessages.length === 1 &&
-      greeting.aiCalls === 0, // deterministic bypass: no provider call
+      greeting.aiCalls <= 1, // zero-or-one model-call invariant
   );
   check(
     "13f. ترحيب GREETING لا يدّعي البشرية ولا يخترع معلومات",

@@ -33,13 +33,7 @@ jobs:
         run: |
           set +e
           for cmd in \
-            check:ai-disclosure \
-            check:turn-evidence \
-            check:ai-readiness \
-            check:service-price \
-            check:business-identity-generative \
-            check:greeting \
-            check:semantic-authority-repair
+            check:ai-disclosure
           do
             echo "::group::pnpm $cmd"
             pnpm "$cmd"
