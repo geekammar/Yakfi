@@ -36,7 +36,7 @@ inspection, editing and Git only; all verification runs in CI:
 
 1. **Development on VPS:** Agent or operator writes code on a feature branch (`feat/*`, `fix/*`, `chore/*`).
 2. **Required Checks:** Do **not** run package commands on the VPS. Verification is CI-owned; push the branch and open the PR in step 4. If an authorized isolated cloud runner is provided, run the lightweight gate there, never on the VPS.
-3. **Version Gate:** Application changes follow the existing SemVer process. Documentation-only changes must **not** bump the application version. The current mandatory `pnpm check:version` gate has no docs-only exemption and will fail; this is an unresolved release-tooling scope decision — do not bypass, disable or falsely mark it.
+3. **Version Gate:** The current mandatory `pnpm check:version` requires a strictly greater version and has no docs-only exemption. A documentation PR must follow the actual gate (carry the required version metadata increment) or obtain an explicit reviewed scope decision; do not document an unconditional rule that forbids the increment while requiring this gate to pass. PR81 carries `0.79.7 → 0.79.8` under this rule. Do not bypass, disable or falsely mark the gate.
 4. **Push & PR:** Push to origin and open a PR via `gh pr create`.
 5. **CI & Vercel Preview:** GitHub Actions runs complete quality gates and Playwright suites; Vercel deploys preview.
 6. **Operator Review & Merge:** Operator reviews PR summary and preview on mobile phone, then merges to `main`.

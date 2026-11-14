@@ -139,11 +139,14 @@ and tests is allowed; executing package scripts is not.
   database work belongs in an authorized non-VPS environment or CI. Production
   migrations are operator-authorized via
   `.github/workflows/production-db-migrate.yml` and are never automatic.
-- **Version gate:** the approved policy is no application version bump for
-  documentation-only changes. The current mandatory `pnpm check:version`
+- **Version gate:** the current mandatory `pnpm check:version`
   (`scripts/check-pr-version.mjs`) requires a strictly greater version and has
-  **no docs-only exemption**. This is an unresolved release-tooling scope
-  decision: do not bypass, disable or falsely mark the gate.
+  **no docs-only exemption**. A documentation PR must follow the actual gate
+  (carry the required version metadata increment) or obtain an explicit
+  reviewed scope decision; do not document an unconditional rule that forbids
+  the increment while requiring this gate to pass. PR81 is documentation
+  maintenance plus the required `0.79.7 → 0.79.8` metadata increment. Do not
+  bypass, disable or falsely mark the gate.
 - **Historical guidance:** older DEVOPS-01E VPS-local check text is archived as
   dated evidence only; it is **not** an operative permission and does not
   override this section.

@@ -2,10 +2,10 @@
 
 > **Tier 0 orientation snapshot — as of 14 November 2026.** Read with
 > `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. This file separates what
-> is on `main`, what was verified in Production, and what exists only on the
-> open PR #79 candidate. It is not a substitute for code, the canonical topic
-> docs or `docs/BUILD_STATE.md`. No live deployment or provider probe was run
-> for this documentation update.
+> is on `main`, what was verified in Production, what exists only on the open
+> PR #79 candidate, and what PR #81 proposes. It is not a substitute for code,
+> the canonical topic docs or `docs/BUILD_STATE.md`. No live deployment or
+> provider probe was run for this documentation update.
 
 ## 1. Main code baseline
 
@@ -55,9 +55,9 @@ Arabic-first RTL; no free-text keyword/regex intent matching.
 - Last verified Preview deployment: `dpl_5QmJjbBCSvH1xhwfKSWtpQH29xso`,
   READY, same reviewed candidate SHA, test database connected,
   `isProductionDb=false`, migrations applied.
-- **R5 staff-reply acceptance (remains valid):** QA251 / R5-UI-29-A1 **PASS**.
-  The reviewer independently confirmed one **ACCEPTED** Telegram submission,
-  `providerMessageId` 605.
+- **R5 staff-reply acceptance (remains valid):** QA251 / R5-UI-29-A1 **PASS**,
+  tied to the tested candidate SHA. The reviewer independently confirmed one
+  **ACCEPTED** Telegram submission, `providerMessageId` 605.
 - **Historical QA outcomes preserved:** QA249 and QA250 remain historical
   **FAIL** executions. The live uncertain-send recheck remains **NOT TESTED**.
 - `OPENROUTER_API_KEY` was added as a sensitive secret for all Preview
@@ -78,7 +78,8 @@ Arabic-first RTL; no free-text keyword/regex intent matching.
 - The application recorded `POLICY_REFUSED`:
   `disclosureChannel=business.faqs`, `disclosureAllowed=false`,
   `disclosureRefusalReason=EXCLUDED_FROM_CONTEXT`.
-- Final outcome: `AI_HANDOFF` / `NEED_HUMAN`.
+- Final outcome: `AI_HANDOFF` / `NEED_HUMAN`: the provider call succeeded, but
+  the customer journey failed at the disclosure-policy decision.
 - Trace ID: `51854b4fb26d4c1488926059ab08b481`.
 - **Exact root cause remains pending targeted code/contract review.** Provider
   success does not establish AI availability, booking success or R6
@@ -118,13 +119,21 @@ acceptance remains valid.
   Reconciliation of the candidate's #105 entry and its dated checkpoints is a
   reviewer decision after an explicit merge approval; a clean Git merge alone
   is not proof of correct combined documentation.
-- **Release-tooling scope decision (unresolved):** `pnpm check:version` runs
-  unconditionally and requires a strictly greater version; no docs-only
-  exemption exists. The approved policy forbids a docs-only version bump, so
-  PR #81's gate fails. Do not bypass or falsely mark it; reviewer/operator
-  decision required.
-- **Current task:** documentation review repairs applied; draft PR pending
-  reviewer re-inspection.
+- **PR81 proposal (draft, not merged, not deployed):** documentation
+  maintenance plus the version metadata increment `0.79.7 → 0.79.8` required by
+  the current mandatory `pnpm check:version`. This is a separate proposal from
+  PR79's `0.79.8` candidate; the shared version number does not merge the two.
+- **Version-gate decision (PR81):** no docs-only CI exemption was implemented.
+  A documentation PR must follow the actual gate (carry the required version
+  metadata increment) or obtain an explicit reviewed scope decision. Do not
+  document an unconditional rule that forbids the increment while requiring
+  this gate to pass, and do not bypass or falsely mark the gate. CI remains
+  authoritative; this statement does not mean the gate has passed.
+- **Merge-order implication:** if PR81 merges first at `0.79.8`, PR79 will need
+  a later reviewed version increment, documentation reconciliation and checks
+  before its eventual merge. That work is not performed in this task.
+- **Current task:** documentation maintenance plus required version metadata
+  increment; draft PR pending CI and reviewer inspection.
 - **Product next action:** reviewer/Ammar decide PR #79 reconciliation and the
   targeted R6 root-cause review. Do not merge, deploy, migrate, rerun R6 or
   modify the candidate as part of this documentation task.

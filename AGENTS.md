@@ -27,8 +27,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
    - Push the feature branch and open a PR; CI is the verification authority.
    - Do not claim a feature or PR is complete until required GitHub Actions CI checks pass.
 4. **Version gate**:
-   - Do not bump the application version for documentation-only changes.
-   - The current mandatory `pnpm check:version` gate has no docs-only exemption; this is an unresolved release-tooling scope decision. Do not bypass, disable or falsely mark it.
+   - The current mandatory `pnpm check:version` gate requires a strictly greater version and has no docs-only exemption. A documentation PR must follow the actual gate (carry the required version metadata increment) or obtain an explicit reviewed scope decision; do not document an unconditional rule that forbids the increment while requiring this gate to pass.
+   - Do not bypass, disable or falsely mark the gate.
 5. **Database Safety**:
    - Do not execute database commands on the VPS.
    - Production migrations are operator-authorized and triggered via `.github/workflows/production-db-migrate.yml`; never automatic.
