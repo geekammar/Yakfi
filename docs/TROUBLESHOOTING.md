@@ -1,15 +1,19 @@
 # FlowPilot — Troubleshooting
 
 > Symptom → fix, ordered by how often they bite. Setup and daily workflow:
-> `DEVELOPMENT.md`.
+> `DEVELOPMENT.md`. Verification policy authority: `AGENT_RULES.md` §4.
+> Package commands here are supported tools for an authorized **non-VPS**
+> environment or CI. On the VPS, use source/text inspection, editing and Git
+> only; do not execute package or database commands.
 
 ## Setup & Tooling
 
+<!-- prettier-ignore -->
 | Symptom                                                                  | Fix                                                                                                                                                                         |
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm: /usr/bin/env: bad interpreter` (Termux)                           | Stock pnpm shim is broken on Termux. Run `bash scripts/bootstrap-termux.sh` — it installs a node wrapper at `$PREFIX/bin/pnpm` (only when `pnpm --version` actually fails). |
 | `pnpm setup` / `pnpm doctor` prints pnpm's own diagnostics               | Those are pnpm **built-in** commands. Use `pnpm run setup` / `pnpm run doctor` for the project scripts.                                                                     |
-| `next dev` crashes mentioning Turbopack/native bindings (Termux/Android) | Turbopack has no Android bindings. Use `bash scripts/dev-termux.sh` or `pnpm exec next dev --webpack`. `pnpm verify` does this automatically.                               |
+| `next dev` crashes mentioning Turbopack/native bindings (Termux/Android) | Turbopack has no Android bindings. On an authorized non-VPS Termux workstation, use `bash scripts/dev-termux.sh` or `pnpm exec next dev --webpack`. The full gate runs in CI; never on the VPS. |
 | node "too old" per doctor                                                | Install Node.js ≥ 20 (LTS). Re-run a bootstrap script afterwards.                                                                                                           |
 | Scripts can't find newly installed tools (Windows)                       | PATH changes need a NEW terminal — reopen and re-run.                                                                                                                       |
 | `pnpm install` warns about build scripts                                 | Expected: `pnpm-workspace.yaml` allowlists the safe postinstall builders (prisma, esbuild, better-auth…).                                                                   |
@@ -28,21 +32,23 @@
 
 ## Database & Prisma
 
+<!-- prettier-ignore -->
 | Symptom                                                       | Fix                                                                                                                                 |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `prisma migrate`/`db push` fails on Termux                    | The schema engine can't run on Android. Apply schema from desktop/CI: `pnpm db:deploy`. Dev server itself runs fine.                |
-| `tsc`/editor can't find Prisma types (`src/generated/prisma`) | Client is generated & gitignored. Run `pnpm db:generate`.                                                                           |
+| `tsc`/editor can't find Prisma types (`src/generated/prisma`) | Client is generated & gitignored. Run `pnpm db:generate` in CI or an authorized non-VPS environment; never on the VPS.              |
 | `prisma` CLI reads wrong `DATABASE_URL`                       | `prisma.config.ts` loads `.env.local` before `.env` (real env vars still win). Check for stray shell exports: `echo $DATABASE_URL`. |
-| Seed fails to connect                                         | Same as "database unreachable" above — `pnpm db:seed` uses the same env chain.                                                      |
+| Seed fails to connect                                         | Same as "database unreachable" above — `pnpm db:seed` uses the same env chain. Run it in an authorized non-VPS environment; never on the VPS. |
 | Dev script skips `db push` with a warning                     | `DATABASE_URL` is missing/placeholder — that's intentional; set it and re-run.                                                      |
 
 ## Build & Runtime
 
+<!-- prettier-ignore -->
 | Symptom                                    | Fix                                                                                                                                                                      |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Port 3000 already in use                   | `next dev` picks 3001 automatically; or kill the stale process (`lsof -ti:3000                                                                                           | xargs kill` on Unix). |
-| Build works locally but fails in CI/Vercel | Run `pnpm verify` locally (same gate); check that `src/generated/prisma` is generated in CI (`pnpm db:generate` runs via install? No — call it explicitly before build). |
-| `pnpm verify` format step fails            | Run `pnpm format`, commit the result.                                                                                                                                    |
+| Build fails in CI/Vercel | Run the full `pnpm verify` in existing GitHub Actions CI or an authorized isolated cloud runner; never on the VPS. Check that `src/generated/prisma` is generated in CI (`pnpm db:generate` runs via install? No — call it explicitly before build). |
+| `pnpm verify` format step fails            | Fix formatting in CI or an authorized isolated cloud runner, then commit the result. Never run a formatter on the VPS. |
 | Stale service worker / old UI after deploy | Service worker caches static assets; bump the cache version in `public/sw.js` (or unregister the SW in DevTools → Application).                                          |
 
 ## Git & Security
@@ -55,17 +61,16 @@
 | Secret was committed anyway                         | Rotate it immediately (Neon password, auth secret, tokens), then remove from tracking: `git rm --cached .env.local`. History scrubbing is only needed for real credentials — ask the operator.               |
 | Hooks not running after clone                       | `pnpm run hooks:install` (also runs automatically in `pnpm run setup`). Check: `git config core.hooksPath` → `.githooks`.                                                                                    |
 
-## VPS Performance & Memory Diagnostics (DEVOPS-01E)
+## VPS Process Safety (current boundary)
 
-| Symptom                                             | Cause                                                                            | Diagnostic Command                                | Fix                                                                                                                                              |
-| --------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Terminal or AGY session lags / becomes unresponsive | VPS memory saturation; zero swap space means Linux freezes under memory pressure | `free -h`                                         | Avoid running full `next build` or full `pnpm verify` locally; use `pnpm verify:local` or `pnpm verify:fast`.                                    |
-| ESLint consumes excessive RAM (>1GB) or pegs CPU    | Parsing large generated assets (e.g. `playwright-report` trace bundles)          | `ps aux --sort=-%mem \| head -n 10`               | Ensure `playwright-report/**` and `test-results/**` are in `globalIgnores` in `eslint.config.mjs` and in `.prettierignore`.                      |
-| Cannot tell if build is frozen or just slow         | Long Next.js compilation or TypeScript check                                     | `ps -o pid,stat,time,%cpu,comm -p <PID>`          | Check if `time` advances over 3-5 seconds. If advancing, process is active. If stalled and `available` memory < 100MB, process may be thrashing. |
-| Duplicate / runaway Node processes                  | Background or abandoned build/dev processes                                      | `pgrep -af "next\|eslint\|tsc\|playwright\|node"` | Gracefully terminate specific stale process: `kill <PID>` (or `kill -9 <PID>` as last resort). Never kill active database or AGY session.        |
+The approved rule allows source/text inspection, editing and Git on the VPS.
+If the VPS becomes unresponsive, stop and report; do not start package commands,
+builds, tests, a formatter or a dev server. Historical DEVOPS-01E local-check
+guidance is superseded by `AGENT_RULES.md` §4.
 
 ## Still stuck?
 
-1. `pnpm run doctor` — read every `→ fix:` line; it covers the common cases.
+1. On an authorized non-VPS environment or CI, run `pnpm run doctor` — read
+   every `→ fix:` line; it covers the common cases.
 2. `docs/BUILD_STATE.md` → Key Known Limitations (incl. device limitations).
 3. `docs/AGENT_RULES.md` — binding rules and lifecycle process.

@@ -13,8 +13,12 @@
 - **Tier 0 first, always.** Read `docs/AGENT_RULES.md` + `docs/CURRENT_STATE.md`
   - `docs/DECISIONS_INDEX.md` before anything else. Those three are global and
     are NOT repeated in each context below.
-- **Then resolve ONE context** matching the task (`pnpm context <name>`).
-- Read the context's mapped docs, then its mapped code, then its focused tests.
+- **Then select ONE context** matching the task. On the VPS, read this file as
+  text and do not invoke `pnpm context`; on an authorized non-VPS environment or
+  CI, `pnpm context <name>` is a supported tool.
+- Read only the mapped docs, code and focused tests that the symptom needs. The
+  entry is a menu of candidates, not a mandatory full-file list; do not read
+  every listed file in full.
 - **Expand only when a real dependency is discovered** — follow an actual
   `import`/reference from a mapped file outward; never pre-load "to be safe".
 - The mapped files are the DOORWAY, not the whole room. Most tasks touch only a
@@ -40,12 +44,17 @@ the start; the code defines the truth (authority order in
 
 ## Tooling
 
+These are supported tools for an authorized **non-VPS** environment or CI. On
+the VPS, inspect this file as text and verify paths manually; do not execute
+package scripts.
+
 - `pnpm context <name>` — print the docs / code / tests for a context.
 - `pnpm context <name> --verbose` — also list the direct first-hop imports
   discovered from the mapped source files (best-effort, read-only).
 - `pnpm context <name> --stats` — also print file count + approximate text size
   (a diagnostic only; NOT a token budget).
-- `pnpm context:check` — validate every mapped path exists and names are unique.
+- `pnpm context:check` — validate every mapped path exists and names are
+  unique; run in existing CI or an authorized cloud runner, never on the VPS.
 
 ## Contexts
 
@@ -259,8 +268,9 @@ precise map entry. Add one only when a task proves the boundary:
 
 - Add a context ONLY for a boundary that already exists and is obviously useful.
 - Keep each context to a small set of START files (the doorway), not every file.
-- When a mapped file moves or is deleted, update the entry and run
-  `pnpm context:check`.
+- When a mapped file moves or is deleted, update the entry and verify the paths
+  by text inspection; `pnpm context:check` runs in existing CI or an authorized
+  cloud runner, never on the VPS.
 - Never copy code, decisions, or architecture prose into this file — link to the
   canonical doc instead.
 - This map is append-friendly but not append-only; it may be edited freely

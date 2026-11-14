@@ -10,24 +10,25 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # FlowPilot Agent Guidelines & Execution Rules
 
-> Authoritative project rules: [docs/AGENT_RULES.md](file:///root/projects/flowpilot/docs/AGENT_RULES.md).
-> Follow context tiers and lightweight development practices.
+> Authoritative project rules: [docs/AGENT_RULES.md](docs/AGENT_RULES.md).
+> Follow context tiers and the VPS execution boundary.
 
-## Mandatory Development & Verification Rules (DEVOPS-01E)
+## Mandatory Development & Verification Rules (DEVOPS-01E / VPS boundary)
 
-1. **Lightweight Local Verification**:
-   - Use `pnpm verify:local` (or `pnpm verify:fast`) during local iteration.
-   - **Do NOT** execute `pnpm build` or full `pnpm verify` locally after edits on the VPS. Full production compilation is delegated to GitHub Actions CI and Vercel.
-2. **Resource-Safe Execution**:
-   - Never run multiple heavy processes (build, typecheck, lint, or test suites) concurrently on the VPS.
-   - VPS has 0B Swap; monitor available memory with `free -h` and active processes with `ps aux --sort=-%mem | head -n 10`.
-   - Distinguish slow progress from freezes by observing CPU execution time progression (`ps -o pid,stat,time,%cpu,comm -p <PID>`).
+1. **VPS execution boundary (all tasks)**:
+   - On the VPS, use source/text inspection, editing and Git only.
+   - Do NOT run package installation, code generation, app runtime or a development server, formatter, lint, typecheck, tests, builds, or database commands (migrations, push, seed, studio) on the VPS.
+   - Do NOT invoke package scripts such as `pnpm verify`, `pnpm verify:local`, `pnpm verify:fast`, `pnpm check:*`, `pnpm context`, `pnpm lint`, `pnpm typecheck`, `pnpm format`, `pnpm build`, `pnpm db:*` or `next` on the VPS.
+2. **Authorized check execution**:
+   - Required checks run in existing GitHub Actions CI or an authorized isolated cloud runner.
+   - Full quality gating (`pnpm verify`, Next.js build, and Playwright UX QA) is owned by GitHub Actions (`pr-validation.yml`) and Vercel.
+   - Do not claim a check passed unless it actually ran in the authorized environment.
 3. **CI-First PR Verification**:
-   - Verify targeted domain suites (`pnpm check:<module>`) and lightweight local checks (`pnpm verify:local`) before committing.
-   - Ensure SemVer is incremented (`pnpm check:version`).
-   - Push to feature branch and open a PR.
-   - Full quality gating (`pnpm verify`, Next.js build, and Playwright UX QA) is owned by GitHub Actions (`pr-validation.yml`).
-   - Do not claim a feature or PR is complete until GitHub Actions CI checks pass.
-4. **Database Safety**:
-   - Never execute production database migrations automatically from local development.
-   - Production migrations are operator-authorized and triggered via `.github/workflows/production-db-migrate.yml`.
+   - Push the feature branch and open a PR; CI is the verification authority.
+   - Do not claim a feature or PR is complete until required GitHub Actions CI checks pass.
+4. **Version gate**:
+   - The current mandatory `pnpm check:version` gate requires a strictly greater version and has no docs-only exemption. A documentation PR must follow the actual gate (carry the required version metadata increment) or obtain an explicit reviewed scope decision; do not document an unconditional rule that forbids the increment while requiring this gate to pass.
+   - Do not bypass, disable or falsely mark the gate.
+5. **Database Safety**:
+   - Do not execute database commands on the VPS.
+   - Production migrations are operator-authorized and triggered via `.github/workflows/production-db-migrate.yml`; never automatic.

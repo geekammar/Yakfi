@@ -5,6 +5,14 @@
 > merging `ENVIRONMENT_SETUP.md` + `LOCAL_DEVELOPMENT.md`. Companion
 > scripts live in `scripts/`. Env var reference:
 > `ENVIRONMENT_VARIABLES.md` · errors: `TROUBLESHOOTING.md`.
+>
+> **Current approved VPS execution boundary (14 November 2026):** the VPS is
+> for source/text inspection, editing and Git only. Do not run any package or
+> application command in this guide there. Run bootstrap, install, generate,
+> dev-server and database commands only on an authorized non-VPS development
+> workstation. Required checks run in existing CI or an authorized isolated
+> cloud runner. Historical local-check guidance below is retained for non-VPS
+> use and does not authorize VPS execution.
 
 ## TL;DR — First Run
 
@@ -56,8 +64,9 @@ Each bootstrap script:
   `bad interpreter`. `bootstrap-termux.sh` verifies `pnpm --version` first and
   only repairs it when broken, by installing a small `node` wrapper at
   `$PREFIX/bin/pnpm`. Nothing is reinstalled if pnpm already works.
-- **Turbopack has no Android bindings** — always use `scripts/dev-termux.sh`
-  and `pnpm verify` (both automatically add `--webpack`).
+- **Turbopack has no Android bindings** — use `scripts/dev-termux.sh`. Run the
+  full `pnpm verify` in CI; if it must run on Termux, it automatically adds
+  `--webpack`.
 - **The Prisma schema engine cannot run on-device**, so `prisma migrate dev` /
   `db push` may fail on Termux. Sync the database from desktop/CI
   (`pnpm db:deploy`) when needed; the dev server still runs.
@@ -82,11 +91,14 @@ Each bootstrap script:
 
 ## Daily Workflow
 
+Run the commands below only on an authorized **non-VPS** development workstation
+or in existing CI / an authorized isolated cloud runner. Never on the VPS.
+
 ```bash
 pnpm run doctor      # health check: tools, env, DB connection, build readiness
 bash scripts/dev.sh  # or dev.ps1 / dev-termux.sh — install→generate→db push→dev
-pnpm verify:local    # lightweight local quality gate (security + prompt + types + lint + format)
-pnpm verify:fast     # ultra-fast iteration gate (security + prompt + types, sub-15s)
+pnpm verify:local    # lightweight gate (security + prompt + types + lint + format); non-VPS/CI only
+pnpm verify:fast     # ultra-fast iteration gate (security + prompt + types, sub-15s); non-VPS/CI only
 pnpm security        # secret scan (also runs automatically on every commit)
 ```
 
@@ -101,9 +113,13 @@ pnpm security        # secret scan (also runs automatically on every commit)
 
 ## Database Work
 
+Run these only on an authorized **non-VPS** environment or in CI. Never execute
+database commands on the VPS. Production migrations remain operator-authorized
+and are never automatic.
+
 ```bash
-pnpm db:migrate      # create + apply a dev migration (preferred for schema changes)
-pnpm db:deploy       # apply committed migrations (prod/CI/shared Neon)
+pnpm db:migrate      # create + apply a dev migration (non-VPS dev environment)
+pnpm db:deploy       # apply committed migrations (CI/shared Neon; operator-authorized for Production)
 pnpm db:push         # quick prototype sync (never on shared environments)
 pnpm db:seed         # Arabic demo data (idempotent, demo-business-scoped wipe)
 pnpm db:studio       # browse data
@@ -126,20 +142,18 @@ Reinstall after a fresh clone: `pnpm run hooks:install`.
 
 ## Quality Gates & Verification Model (DEVOPS-01E)
 
-Per `AGENT_RULES.md`, FlowPilot follows a **CI-first verification strategy**:
+Authoritative policy: `AGENT_RULES.md` §4. FlowPilot follows a **CI-first
+verification strategy**:
 
-- **Local VPS Iteration:** Use lightweight commands (`pnpm verify:local` or `pnpm verify:fast`). Do **NOT** invoke `next build` or run Playwright test suites locally during routine edits.
+- **VPS boundary:** source/text inspection, editing and Git only. Do **not** run package commands, checks, tests, builds or database work on the VPS.
 - **CI Ownership:** GitHub Actions (`pr-validation.yml`) executes the full quality gate (`pnpm verify` including production Next.js build) and automated browser UX QA in isolated CI runners.
 - **Vercel Ownership:** Vercel builds and deploys Preview environments upon PR updates, and Production releases upon merge to `main`.
 
-## VPS Resource Safety & Process Inspection
+## VPS Process Safety
 
-The VPS runs with limited RAM and 0B Swap. To avoid memory starvation and unresponsive sessions:
-
-- **Never run concurrent heavy builds**: Avoid running `next build`, `typecheck`, and `eslint` concurrently.
-- **Inspect Memory:** `free -h` (check `available` memory; beware of available < 200MB).
-- **Inspect Processes:** `ps aux --sort=-%mem | head -n 10` (find memory-heavy processes).
-- **Check Running Jobs:** `pgrep -af "next|eslint|tsc|playwright|node"`
-- **Distinguish Slow Build vs Freeze:** Use `ps -o pid,stat,time,%cpu,comm -p <PID>` over a 3-5 second interval. If the `time` counter is progressing or `%cpu` is active, the process is making steady CPU progress and is NOT hung.
+The current approved rule prohibits starting package work on the VPS. If a
+stray package process is already running, do **not** start a replacement; stop
+it and report it. Never start `next build`, `typecheck`, `eslint`, tests or a
+dev server on the VPS.
 
 What each check covers: `QUALITY_CHECKS.md`. Stuck? `TROUBLESHOOTING.md`.

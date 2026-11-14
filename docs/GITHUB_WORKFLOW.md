@@ -16,6 +16,9 @@
 
 ## GitHub Actions & CI Status (DEVOPS-01D/E)
 
+> Verification policy authority: `AGENT_RULES.md` §4. The full gate runs in
+> CI, never on the VPS.
+
 - **PR Validation & UX QA (`pr-validation.yml`):** Runs on every PR targeting `main`.
   Executes security scan, AI prompt contract, full `pnpm verify` (lint, typecheck, format,
   Next.js production build), release guard verification, SemVer version increment check,
@@ -28,11 +31,12 @@
 
 ## Branch & PR Model (Mobile-First Developer Experience)
 
-FlowPilot uses a GitHub PR-based workflow optimized for lightweight VPS development:
+FlowPilot uses a GitHub PR-based workflow. The VPS is for source/text
+inspection, editing and Git only; all verification runs in CI:
 
 1. **Development on VPS:** Agent or operator writes code on a feature branch (`feat/*`, `fix/*`, `chore/*`).
-2. **Lightweight Local Check:** Run `pnpm verify:local` (or `pnpm verify:fast`). Do **not** run full production builds locally.
-3. **Version Bump:** Increment SemVer via `pnpm version:bump patch` (or `minor`) before pushing.
+2. **Required Checks:** Do **not** run package commands on the VPS. Verification is CI-owned; push the branch and open the PR in step 4. If an authorized isolated cloud runner is provided, run the lightweight gate there, never on the VPS.
+3. **Version Gate:** The current mandatory `pnpm check:version` requires a strictly greater version and has no docs-only exemption. A documentation PR must follow the actual gate (carry the required version metadata increment) or obtain an explicit reviewed scope decision; do not document an unconditional rule that forbids the increment while requiring this gate to pass. PR81 carries `0.79.7 → 0.79.8` under this rule. Do not bypass, disable or falsely mark the gate.
 4. **Push & PR:** Push to origin and open a PR via `gh pr create`.
 5. **CI & Vercel Preview:** GitHub Actions runs complete quality gates and Playwright suites; Vercel deploys preview.
 6. **Operator Review & Merge:** Operator reviews PR summary and preview on mobile phone, then merges to `main`.
@@ -45,9 +49,10 @@ FlowPilot uses a GitHub PR-based workflow optimized for lightweight VPS developm
   **NOT** deploy to Vercel and does **NOT** run database migrations.
 - **Vercel Production Deployment:** Operator-owned action. Do not assume Vercel
   Git auto-deployment is active; verify and promote via Vercel dashboard or
-  `pnpm deploy:production`.
-- **Production Migrations:** Separately authorized and executed by the operator,
-  either via the manual GitHub Action (`workflow_dispatch`) or `pnpm db:deploy`.
+  `pnpm deploy:production` in an authorized non-VPS environment.
+- **Production Migrations:** Separately authorized and executed by the operator
+  via the manual GitHub Action (`workflow_dispatch`) or `pnpm db:deploy` in an
+  authorized non-VPS environment; never on the VPS.
 
 ## When collaboration starts (future)
 

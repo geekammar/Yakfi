@@ -5,6 +5,10 @@
 > Companion reference: `ENVIRONMENT_VARIABLES.md`.
 > Requirements: a [Neon](https://neon.tech) PostgreSQL database and (for the
 > GitHub-connected flow) the repo pushed to GitHub (`pnpm release` handles that).
+>
+> **Execution boundary:** run deployment, build, database and CLI commands in
+> Vercel, existing CI, or an authorized isolated cloud runner — never on the
+> VPS. On the VPS, use source/text inspection, editing and Git only.
 
 ## TL;DR
 
@@ -133,7 +137,9 @@ pnpm deploy:preview           # preview deployment (auth may not work on preview
 ```
 
 Every push to `main` (GitHub flow) then redeploys automatically — that is the
-"easy to redeploy" loop: `pnpm verify` → commit → push → Vercel builds.
+"easy to redeploy" loop: full `pnpm verify` in existing CI or an authorized
+isolated cloud runner → commit → push → Vercel builds. Do not run package
+commands on the VPS.
 
 ## SECTION 3 — Configure Environment Variables
 
@@ -164,7 +170,7 @@ Rules that bite:
   pnpm db:deploy     # prisma migrate deploy — run from desktop (not Termux)
   ```
 
-Sanity-check locally first — the same validation the deploy gate runs:
+Sanity-check in an authorized non-VPS environment or CI first — the same validation the deploy gate runs:
 
 ```bash
 pnpm vercel:check
@@ -216,19 +222,20 @@ pnpm deploy             # full gate → production deployment URL (deploy:produc
    Neon project before demoing (idle-suspended databases are the usual cause).
 
 2. **Database** — sign in at `/sign-in` (needs seeded demo users on the DB:
-   `pnpm db:seed` from desktop). If login works, Better Auth ↔ Neon are wired.
+   `pnpm db:seed` from an authorized non-VPS environment). If login works, Better Auth ↔ Neon are wired.
 3. **PWA** — on Android Chrome: install prompt appears, home-screen icon is
    the FlowPilot mark, offline page shows in airplane mode.
 4. **RTL/Arabic** — pages render `dir="rtl"`, Arabic copy, IBM Plex Sans Arabic.
-5. **Redeploy loop** — make a change → `pnpm verify` → commit → push →
-   Vercel rebuilds → `/api/health` shows the new version after you bump
+5. **Redeploy loop** — make a change → full `pnpm verify` in CI → commit →
+   push → Vercel rebuilds → `/api/health` shows the new version after you bump
    `version` in `package.json`.
 
 ## SECTION 6 — Troubleshooting
 
+<!-- prettier-ignore -->
 | Symptom                                                             | Fix                                                                                                                                                                                                   |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build fails: `Invalid server environment variables` (Arabic output) | One of the 4 env vars is missing/invalid **in Vercel project settings**. Add it (Section 3), then Redeploy. Verify locally with `pnpm vercel:check`.                                                  |
+| Build fails: `Invalid server environment variables` (Arabic output) | One of the 4 env vars is missing/invalid **in Vercel project settings**. Add it (Section 3), then Redeploy. Verify with `pnpm vercel:check` in an authorized non-VPS environment or CI.              |
 | Build fails: cannot find `@/generated/prisma/client`                | Should not happen (postinstall + buildCommand both generate). If you overrode the build command, ensure it runs `prisma generate` before `next build`.                                                |
 | Build succeeds, every page errors at runtime (`P1001` / connection) | `DATABASE_URL` unreachable from Vercel: check Neon project is alive (idle-suspended — wake in console), the string ends with `?sslmode=require`, and Neon's network access allows Vercel.             |
 | Login/redirect loops or 403 on auth routes                          | `BETTER_AUTH_URL` ≠ actual domain. Set it to the exact production URL (https, no trailing slash) and redeploy.                                                                                        |

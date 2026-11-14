@@ -1,27 +1,35 @@
 # FlowPilot — Quality Checks
 
 > The binding verification commands, what each covers, and when to run it.
-> Encoded from `AGENT_RULES.md`; enforced by scripts in `scripts/`.
+> Authoritative policy: `AGENT_RULES.md` §4 (Verification, CI and VPS execution
+> boundary); enforced by scripts in `scripts/`. Commands are supported tools:
+> run them in existing CI, an authorized non-VPS environment, or an authorized
+> isolated cloud runner. On the VPS, do not execute package commands; use
+> source/text inspection, editing and Git only.
 
 ## Command Map
 
+Execution location for every command below: existing CI, an authorized non-VPS
+environment, or an authorized isolated cloud runner; never the VPS.
+
+<!-- prettier-ignore -->
 | Command               | What it is                                                                                                                                                                                                                                                                             | When to run                                                                          |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `pnpm pre-ship`       | **Canonical pre-release gate**: git baseline + exact release candidate + `git diff --check` + security (tracked **and** untracked candidate files) + prompt-contract + `pnpm verify` + non-mutation witness → `PRE_SHIP_GREEN` / `PRE_SHIP_BLOCKED` / `MANUAL_RELEASE_REVIEW_REQUIRED` | Before EVERY release; `ship` enforces it automatically                               |
 | `pnpm check:pre-ship` | Non-vacuous regression proof of the gate + ship integration (throwaway fixture repos; real CLIs and real secret scanner; real tree untouched)                                                                                                                                          | After touching release tooling (`ship`/`pre-ship`/gate)                              |
 | `pnpm check:services` | Service Catalog + authoring boundary (offline, in-memory): list/create/edit/remove, tenant isolation, duplicate guard, duration-is-operational                                                                                                                                         | After touching `/services` or the service domain                                     |
-| `pnpm verify`         | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                                                                                                                                                       | In GitHub Actions CI (PR validation & release cutover) and optional full local gate  |
-| `pnpm verify:local`   | **Lightweight local quality gate**: security + ai-prompts + typecheck + lint + format:check (never invokes `next build`, no browser startup)                                                                                                                                           | Before pushing feature branch or opening PR; during local VPS development            |
-| `pnpm verify:fast`    | **Ultra-fast local quality gate**: security + ai-prompts + typecheck (sub-15s, <850MB RSS, skips lint/format)                                                                                                                                                                          | During rapid coding iteration loops on VPS                                           |
+| `pnpm verify`         | Full quality gate: lint → typecheck → format → build (+ summary)                                                                                                                                                                                                                     | In GitHub Actions CI (PR validation & release cutover); never on the VPS             |
+| `pnpm verify:local`   | **Lightweight local quality gate**: security + ai-prompts + typecheck + lint + format:check (never invokes `next build`, no browser startup)                                                                                                                                           | Authorized non-VPS environment or CI; never on the VPS                               |
+| `pnpm verify:fast`    | **Ultra-fast local quality gate**: security + ai-prompts + typecheck (sub-15s, <850MB RSS, skips lint/format)                                                                                                                                                                          | Authorized non-VPS environment or CI; never on the VPS                               |
 | `pnpm run doctor`     | Project health: OS, node, pnpm, git, gh, env, Prisma, DB connection, deps, build readiness → READY / NOT READY                                                                                                                                                                         | After setup, after env changes, when anything feels off                              |
 | `pnpm security`       | Secret scan: env-file hygiene, secret quality, secret-shaped content in committable files                                                                                                                                                                                              | Before pushing; runs automatically pre-commit                                        |
 | `pnpm vercel:check`   | Deployment env validation (4 required vars, per-var fixes)                                                                                                                                                                                                                             | Before configuring Vercel / part of every deploy                                     |
 | `pnpm deploy:check`   | Pre-deploy gate: env + database + Prisma + auth + demo data + build → READY / NOT READY                                                                                                                                                                                                | Before every deploy; `-- --fast` skips the build step                                |
 | `pnpm deploy`         | Full pre-deploy gate → Vercel production deploy → deployment URL                                                                                                                                                                                                                       | Sharing a demo-able URL with a prospect                                              |
 | `pnpm ship`           | Lightweight operator release: canonical pre-ship gate → candidate-fingerprint re-check → publish validation → version bump → `git add -A` (stage must be exactly the reviewed candidate + the bump) → commit → annotated tag → push → GitHub Release. Never deploys or migrates        | Human operator, after `pnpm pre-ship` is green (or reviewed + `--ack-manual-review`) |
-| `pnpm lint`           | `eslint .`                                                                                                                                                                                                                                                                             | While coding (or `lint:fix`)                                                         |
-| `pnpm typecheck`      | `tsc --noEmit`                                                                                                                                                                                                                                                                         | While coding                                                                         |
-| `pnpm format:check`   | `prettier --check .`                                                                                                                                                                                                                                                                   | Before verify (or run `pnpm format`)                                                 |
+| `pnpm lint`           | `eslint .`                                                                                                                                                                                                                                                                             | Authorized non-VPS environment or CI; never on the VPS                               |
+| `pnpm typecheck`      | `tsc --noEmit`                                                                                                                                                                                                                                                                         | Authorized non-VPS environment or CI; never on the VPS                               |
+| `pnpm format:check`   | `prettier --check .`                                                                                                                                                                                                                                                                   | Authorized non-VPS environment or CI; never on the VPS                               |
 
 > `pnpm run doctor` (not `pnpm doctor`) — the latter is pnpm's built-in.
 
@@ -29,7 +37,8 @@
 
 Every suite is a deterministic `tsx` harness under `scripts/check-*.ts` — no
 DB, no network, no LLM, no secrets. Run the suite that matches the surface you
-touched; a green suite is the evidence that belongs in `BUILD_STATE.md`. All
+touched in existing CI or an authorized isolated cloud runner; never on the
+VPS. A green suite is the evidence that belongs in `BUILD_STATE.md`. All
 scripts are listed in `package.json`.
 
 | Surface                   | Command                            | Run after touching                                 |
@@ -66,8 +75,9 @@ scripts are listed in `package.json`.
 
 ## verify — the gate
 
-`scripts/verify.mjs` runs, in order, stopping at the first failure with a
-summary table (step, pass/fail, duration, exit code):
+`scripts/verify.mjs` runs in existing CI or an authorized isolated cloud
+runner; never on the VPS. It runs, in order, stopping at the first failure with
+a summary table (step, pass/fail, duration, exit code):
 
 1. **lint** — `eslint .`
 2. **typecheck** — `tsc --noEmit` (strict TS incl. `noUncheckedIndexedAccess`)
@@ -77,9 +87,12 @@ summary table (step, pass/fail, duration, exit code):
 
 Exit code is non-zero if any step fails — mandatory in GitHub Actions CI (`pr-validation.yml`).
 
-## verify:local & verify:fast — lightweight local development gates (DEVOPS-01E)
+## verify:local & verify:fast — supported non-VPS gates (historical DEVOPS-01E)
 
-`scripts/verify-local.mjs` runs fast, memory-safe checks on the VPS without triggering `next build` or launching browsers:
+`scripts/verify-local.mjs` provides fast, memory-safe checks for an authorized
+**non-VPS** environment or CI. Under the current approved rule it is **not**
+executed on the VPS. The historical DEVOPS-01E rationale is preserved in the
+Tier 3 archive; it does not authorize VPS execution.
 
 1. **security** — `pnpm security` (secret scanning)
 2. **ai-prompts** — `pnpm check:ai-prompts` (prompt contract verification)
@@ -87,8 +100,9 @@ Exit code is non-zero if any step fails — mandatory in GitHub Actions CI (`pr-
 4. **lint** — `pnpm lint` (`eslint .`, style and React hooks checks; skipped in `--fast`)
 5. **format** — `pnpm format:check` (`prettier --check .`; skipped in `--fast`)
 
-- `pnpm verify:local` — full lightweight gate (~40s).
-- `pnpm verify:fast` — ultra-fast iteration gate (~14s, skips lint/format).
+- `pnpm verify:local` — full lightweight gate (~40s); non-VPS/CI only.
+- `pnpm verify:fast` — ultra-fast iteration gate (~14s, skips lint/format);
+  non-VPS/CI only.
 
 ## doctor — health verification
 
@@ -145,8 +159,8 @@ that slips through).
 
 ## CI Notes
 
-No CI pipeline exists yet (deliberate — see `DECISIONS.md` #18). When one is
-approved, the gate is simply:
+The CI gate runs in existing GitHub Actions or an authorized isolated cloud
+runner, never on the VPS:
 
 ```sh
 pnpm install --frozen-lockfile
