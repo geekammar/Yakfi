@@ -58,6 +58,12 @@ jobs:
       - name: Security scan (secrets hygiene)
         run: pnpm security
 
+      - name: Test bot recovery and provider failure regression
+        run: |
+          pnpm check:test-bot-recovery
+          pnpm test:health-readonly
+          pnpm check:provider-failure-lexical-authority
+
       - name: AI prompt contract check
         run: pnpm check:ai-prompts
 
@@ -133,6 +139,7 @@ jobs:
           pnpm check:semantic-date-ranges
           pnpm check:temporal-correction-authority
           pnpm check:unknown-information-handoff
+          pnpm check:safe-telegram-reply
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics
@@ -179,6 +186,7 @@ jobs:
           pnpm check:customer-time-display-db
           pnpm check:stale-session-db
           pnpm check:unknown-information-handoff-db
+          pnpm check:safe-telegram-reply-db
 
       - name: Base-versus-HEAD handoff-cause reconciliation
         run: pnpm check:compare-handoff-cause

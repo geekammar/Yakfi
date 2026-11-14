@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.7",
+  "version": "0.79.8",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -46,9 +46,12 @@
     "check:semantic-date-ranges": "tsx scripts/check-semantic-date-ranges.ts",
     "check:temporal-correction-authority": "tsx scripts/check-temporal-correction-authority.ts",
     "check:unknown-information-handoff": "tsx scripts/check-unknown-information-handoff.ts",
+    "check:safe-telegram-reply": "tsx scripts/check-safe-telegram-reply.ts",
     "check:meta-whatsapp": "tsx scripts/check-meta-whatsapp.ts",
     "check:meta-embedded-signup": "tsx scripts/check-meta-embedded-signup.ts",
     "check:whatsapp-onboarding": "tsx scripts/check-whatsapp-onboarding.ts",
+    "test:health-readonly": "vitest run --config vitest.config.ts src/app/api/health/route.test.tsx",
+    "check:test-bot-recovery": "node --import tsx scripts/check-test-bot-recovery.ts",
     "check:credentials-runtime": "tsx scripts/check-credentials-runtime.ts",
     "check:ai-prompts": "tsx scripts/generate-ai-prompts.ts --check && tsx scripts/check-ai-prompts.ts",
     "generate:ai-prompts": "tsx scripts/generate-ai-prompts.ts",
@@ -88,6 +91,7 @@
     "check:booking-acceptance-db": "tsx scripts/check-booking-acceptance-db.ts",
     "check:customer-time-display-db": "tsx scripts/check-customer-time-display-db.ts",
     "check:unknown-information-handoff-db": "tsx scripts/check-unknown-information-handoff-db.ts",
+    "check:safe-telegram-reply-db": "tsx scripts/check-safe-telegram-reply-db.ts",
     "check:conversation-state": "tsx scripts/check-conversation-state.ts",
     "check:conv-core-01": "tsx scripts/check-conv-core-01.ts",
     "check:conv-core-02": "tsx scripts/check-conv-core-02.ts",

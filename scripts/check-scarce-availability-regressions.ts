@@ -77,6 +77,7 @@ function check(label: string, pass: boolean, details?: string): void {
 // ── Deterministic Fixtures & In-Memory Repositories ─────────────────────────
 
 const TEST_DATE = "2026-11-03"; // Tuesday
+const TEST_NOW = () => new Date(`${TEST_DATE}T00:00:00Z`);
 const BIZ_ID = PLAYGROUND_IDS.BIZ_ID;
 const BRANCH_ID = PLAYGROUND_IDS.BRANCH_ID;
 
@@ -401,6 +402,7 @@ async function runSuite(): Promise<void> {
     // 1. Authoritative availability-service check
     const availResult = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
@@ -694,6 +696,7 @@ async function runSuite(): Promise<void> {
     // 1. Authoritative availability-service check
     const availResult = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
@@ -844,6 +847,7 @@ async function runSuite(): Promise<void> {
     // 1. Authoritative availability-service check
     const availResult = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
@@ -1055,6 +1059,7 @@ async function runSuite(): Promise<void> {
 
     const sameProvAvail = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: sameProvRepo,
@@ -1116,6 +1121,7 @@ async function runSuite(): Promise<void> {
 
     const p1AvailWithP2Blocked = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => business16 },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: independentProvRepo,
@@ -1243,6 +1249,7 @@ async function runSuite(): Promise<void> {
     const repo5A1 = createMockAppointmentRepo(block1000to1045);
     const avail5A1 = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => biz15Free },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5A1,
@@ -1294,6 +1301,7 @@ async function runSuite(): Promise<void> {
     const repo5A2 = createMockAppointmentRepo(blockWithNextOverlap);
     const avail5A2 = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => biz15Free },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5A2,
@@ -1349,6 +1357,7 @@ async function runSuite(): Promise<void> {
     const repo5B = createMockAppointmentRepo(block1000to1045);
     const avail5B = await getAvailability(
       {
+        now: TEST_NOW,
         businessRepository: { findById: async () => biz30 },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5B,

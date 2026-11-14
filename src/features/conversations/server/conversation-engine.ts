@@ -3722,6 +3722,19 @@ async function runInboundTurn(
   // resolved one) — carried into every outbound delivery for tenancy.
   const outboundConnectionId = resolvedIdentity?.connectionId ?? null;
 
+  // This identity comes from the authenticated adapter, never message text.
+  // Resolve thread compatibility BEFORE selecting a customer's latest thread.
+  const deliveryRoute =
+    inbound.externalId?.startsWith(`tg:${inbound.to}:`) &&
+    resolvedIdentity?.connectionId
+      ? {
+          channel: "telegram" as const,
+          connectionId: resolvedIdentity.connectionId,
+          botExternalId: inbound.to,
+          recipientExternalId: inbound.from,
+        }
+      : undefined;
+
   // 2. Claim the external message key (DURABLE, tenant-scoped) BEFORE
   //    any irreversible processing. A redelivery of an already-processed
   //    message stops here with zero side effects; a redelivery of a
@@ -3746,14 +3759,21 @@ async function runInboundTurn(
       phone: canonicalPhone(inbound.from),
     });
 
-    // 4. Find or create the conversation (latest thread per customer —
-    //    no second conversation system, no duplicate active threads).
+    // 4. Find or create a compatible thread for this authenticated connection.
+    //    Mixed legacy history remains intact and unroutable; fresh ingress
+    //    starts a separate thread rather than guessing its old destination.
     //    New threads are Branch-aware: the Business's Default Branch,
     //    resolved server-side (DECISIONS #30 — never client input).
-    const latest = await deps.conversationRepository.findLatestByCustomer(
-      business.id,
-      customer.id,
-    );
+    const latest = deliveryRoute
+      ? await deps.conversationRepository.findLatestByCustomer(
+          business.id,
+          customer.id,
+          deliveryRoute,
+        )
+      : await deps.conversationRepository.findLatestByCustomer(
+          business.id,
+          customer.id,
+        );
     let conversation: Conversation | null = latest
       ? await deps.conversationRepository.findById(latest.id)
       : null;
@@ -3830,6 +3850,7 @@ async function runInboundTurn(
             : {}
           : { status: "NEED_HUMAN" },
         { claimId: claim.claimId },
+        deliveryRoute,
       );
     } catch (error) {
       if (error instanceof InboundDuplicateError) {
@@ -6403,6 +6424,7 @@ async function runInboundTurn(
         controlHandoffReason:
           turnTelemetry?.conversationControl?.handoffReason ?? null,
         failureCause,
+        providerErrorCode: turnErrorCode,
       });
       const assistantMessage = await persistAssistantReply(
         deps,

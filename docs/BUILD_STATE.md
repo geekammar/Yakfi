@@ -1,5 +1,19 @@
 # FlowPilot — Build State
 
+## Muse R4 ingress/thread selection repair — 14 November 2026
+
+Muse R4-UI-29-A1 (QA row250) FAILED on reviewed43a16ad: authenticated inbound, draft navigation/reload and takeover passed; composer refused before dispatch because the mixed legacy conversation had no authoritative route. Independent DB inspection found one historic linked claim from bot8644293921 and current claims from8926541123 on the same thread. addMessage correctly refused binding mixed history; the engine had selected the latest customer thread without connection compatibility. New authenticated Telegram ingress now selects a compatible bound or safe legacy thread, otherwise creates a separate thread through the existing path. Mixed history, routes, old assignment and claims remain unchanged; sending from the old mixed thread remains refused. No secret reset, schema change, manual route insertion or webhook switch is required. Real-PostgreSQL regression covers the observed two-bot history, preserved old owner, new bound route, dedupe/reuse, correct single-send target and safe legacy reuse. Live acceptance is still pending a fresh probe on the new candidate; do not resend the rejected old draft or change QA249/250.
+
+Separate verified AI blocker: R4 turn evidence had PROVIDER_FAILURE / CONFIG_ERROR with httpAttempts=0 and model deepseek/deepseek-v4.1-flash. Vercel metadata shows OPENROUTER_API_KEY only in Production, absent from Preview. Add an authorized key as a sensitive Preview variable scoped to this feature branch before AI-specific retesting; no plaintext in docs/chat and no broadening of Production secrets. Staff-reply acceptance is independent of AI response quality.
+
+## Owner-token restoration checkpoint — 14 November 2026
+
+Production candidate-key run43508566171 failed with CREDENTIALS_UNAVAILABLE. The fixed-target restoration runner now uses the existing owner customer-bot token explicitly, with a resolve-only dependency and live pinned-ID/non-manager verification. `restore-main-webhook-preflight` checks readiness while the bot remains on main and performs no writes. The actual reverse dry run still requires Preview as current URL; apply retains all database/URL/identity guards and updates only the destination webhook hash. Forward routing and application credential decryption are unchanged. Unknown Production master-key recovery/rebaseline remains a separate pre-Pilot requirement; this is not a successful key recovery. Owner confirms test assets; inventory found one runtime row, three Telegram and two WhatsApp connections. Do not reset all variables or delete historical QA evidence. No live mutation or acceptance is recorded.
+
+## Production restoration credential checkpoint — 13 November 2026
+
+Forward read-only run43504118788 succeeded (`SWITCH_DRY_RUN`) on `6c0c60a`; reverse read-only run43504704679 stopped with `CREDENTIALS_UNAVAILABLE` before getMe/URL validation. No webhook or database mutation occurred. Main's old encrypted credential remains present and unchanged. Restoration now uses the separate masked Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` as the application `CREDENTIAL_MASTER_KEY`, without fallback to the working Preview key. Owner must supply the original Production-key candidate and rerun the read-only reverse preflight on the reviewed new HEAD. Forward apply, reverse apply, merge and live acceptance remain unapproved. See TROUBLESHOOTING for expected URL-mismatch interpretation.
+
 > **THE authoritative implementation ledger** — the single answer to "what is
 > the state of FlowPilot?". Read the `Current State` summary + `Next Step`
 > only; everything else is reference. Keep updates MINIMAL: status, completed
@@ -9,7 +23,60 @@
 > per-slice history is in `docs/archive/IMPLEMENTATION_HISTORY.md` (Tier 3).
 > Reading policy: the context tiers in `docs/AGENT_RULES.md`.
 
-**Product version: v0.79.5 (feature branch; candidate PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.4 (merged PR #75, commit `99df8b2`). Branch: `fix/unknown-information-handoff`.
+## Reviewer recovery checkpoint — 13 November 2026
+
+- Based on PR #79 `bae04fcdd45374b043ec22fc5149de743a2a0ada`; no merge or production migration.
+- Direct test-DB inspection: target bot `8926541123` / `Drafnanafnanbot` is CONNECTED and active; runtime credential exists, belongs to the same business, and has AES-256-GCM/v1 metadata. Decryption remains unverified from this reviewer environment.
+- Fixed-target recovery tool replaces the untracked VPS Python implementation: canonical application crypto, Prisma schema mapping, strict tenant/bot checks, guarded transactional reference replacement, actual DB readback before commit, old ciphertext retained, masked input, no .env rewriting or raw exception output. Local-key success is explicitly NOT Preview acceptance.
+- Direct AI-policy inspection found `deepseek/deepseek-v4.1-flash` pinned to `decart/fp4`, absent from the current public model endpoint catalog (38 endpoints). Removed only that pin from the current pilot and test DB policies, preserving model/provider and all other policy fields. This is a configuration repair; end-to-end recovery is not yet proven.
+- Provider failure reply now consumes typed error telemetry when Conversation Control metadata is absent; HTTP 404 no longer receives generic invalid-output copy. No customer keyword matching added; handoff/ownership behavior preserved.
+- Validation: 19/19 recovery tests, 38/38 provider regressions (including actual engine HTTP-404 telemetry), 36/36 credential regressions, 151/151 prompt checks; typecheck, lint (0 errors, existing warnings), formatting, security and version gates passed locally. Used node --import tsx because the sandbox blocks the tsx CLI IPC socket. No live credential repair, Telegram switch, or Muse acceptance claimed.
+- Existing manual test-db workflow now offers fixed-branch/exact-SHA diagnosis and repair using the existing GitHub master key, so the owner need not retrieve its plaintext. Repair additionally requires the existing customer token in a temporary masked GitHub secret; migration job skips during credential operations.
+- Health route repair: public GET is now read-only; removed schema DDL and automatic known-password account provisioning. Preview migrationApplied reads the actual PR #79 migration record rather than reporting whether this request just modified schema. Existing preview test accounts still need an operator credential review before Pilot exposure.
+- Next: verify the current Preview key and existing bot token via masked recovery; confirm resolution in Preview; perform reviewed webhook switch and Muse staff-reply acceptance. Separately test AI on a new or explicitly resumed conversation after the pin correction. Keep historical QA row 249 intact.
+- Stable Preview origin configuration: pinned `NEXT_PUBLIC_APP_URL` and `BETTER_AUTH_URL` to `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app` via branch-scoped Preview variables on `fix/safe-telegram-staff-reply-delivery`. Redeployed exact candidate SHA to Vercel (deployment `dpl_8JFsvwdmdohJm6ennnR6Z55W5YpS`, status: Ready). Live health check verified: version 0.79.8, commitSha matching candidate, test database connected, migration applied.
+- Manual workflow extension for webhook switching: added `switch-webhook-dry-run` and `switch-webhook-apply` operations and `switch-test-webhook` job to `.github/workflows/test-db-migrate.yml`. Guarded by exact feature branch, required matching `expected_commit_sha`, authorized Neon test DB host check, fixed tenant/connection/bot constants, dry-run by default, locked dependency install without secrets, and isolated secret injection. Added tests T21–T24 in `scripts/check-telegram-repair-workflow.ts` (24/24 passing). Full fast local gate passed. Status: REVIEW_REQUIRED before live execution.
+- Reviewer findings repair (PR #79): addressed all 4 reviewer findings: (1) replaced shell substring matching with structured PostgreSQL URL validation reusing reviewed `validateDatabaseUrl` from `test-bot-recovery.ts` (exact protocol, exact host, exact path `/neondb`, port 5432, sslmode=require, no fragments/overrides; loopback and `/neondb_backup` rejected); (2) prepared explicit restoration switch path using dedicated runner `scripts/switch-test-bot-webhook.ts` targeting `PRODUCTION_DATABASE_URL` with `CREDENTIAL_MASTER_KEY` via prepare-only workflow operations `restore-main-webhook-dry-run` and `restore-main-webhook-apply`, documenting why ordinary repair cannot retarget across origins; (3) replaced duplicate bash tests with comprehensive actual runner and workflow tests T21–T35 in `scripts/check-telegram-repair-workflow.ts` (35/35 passing, including complete bidirectional multi-DB forward switch and reverse switch regression cycle without database cross-talk); (4) eliminated raw `err.message` / `String(err)` output across switch/maintenance CLI boundaries, outputting safe fixed error codes (`UNEXPECTED_SWITCH_FAILURE`, `UNEXPECTED_MAINTENANCE_FAILURE`, `UNEXPECTED_LOOKUP_FAILURE`) with zero leak of tokens, URLs, bodies, or ciphertext. Local fast gate passed (`pnpm verify:fast`). Status: REVIEW_REQUIRED before live execution.
+
+- Final reviewer guard repair: exact main endpoint/database/TLS allowlist for restoration; operator-pinned bot ID enforced inside the switch service before mutation; arbitrary unknown operation input is no longer echoed. Offline round-trip assertions compare each stored hash to the actual fake Telegram secret. Live dry run, switch, restoration and Muse acceptance remain pending.
+
+**Product version: v0.79.8 (feature branch; candidate PR)** — `Safe Telegram Staff Reply Delivery & Route Authority (ISS-018 / UI-29)`. Baseline: v0.79.7 (commit `8d12aa2a72169bb2563e624e89045858d090e8f3`). Branch: `fix/safe-telegram-staff-reply-delivery`.
+
+- **Feature Scope**: Ensures one authorized staff submission can send at most one reply through the verified Telegram customer route, with durable and truthful outcomes (ISS-018 / UI-29).
+- **Route Authority & Ingress Linkage**:
+  - Established server-authoritative route binding via additive `ConversationDeliveryRoute` model (`conversation_id` unique, `channel`, `connection_id`, `bot_external_id`, `recipient_external_id`).
+  - Authenticated inbound Telegram turns bind route atomically during `ConversationRepository.addMessage`. Routes are immutable and never overwritten by subsequent inbound connections.
+  - Cross-checks route against `InboundMessageDedupe` and active tenant connection credentials (`resolveTelegramConnectionForSend`). Fails closed on missing or conflicting evidence (e.g. cross-channel or multi-bot handle collisions).
+  - Routes are determined strictly by the server. Never inferred from customer phone numbers, regexes, UI labels, or "first active connection".
+- **Durable Submission Claiming**:
+  - Atomic claim via additive `StaffReplySubmission` table with unique constraint `@@unique([businessId, conversationId, submissionKey])` and SHA-256 `payloadHash` binding.
+  - Concurrent or replayed submissions claim atomically at the DB layer without duplicate network calls.
+  - Replays with modified payloads fail closed as `definite_rejection` (`PAYLOAD_MISMATCH`).
+- **Typed Outcomes & Blanket 5xx Isolation**:
+  - Returns 5 typed outcomes: `unroutable`, `in-progress`, `accepted`, `definite_rejection`, `unknown`.
+  - Telegram Bot API 400/403/404 are classified as `definite_rejection`.
+  - Blanket 5xx, timeouts, network drops, and post-acceptance persistence write failures strictly remain `unknown` (unconfirmed, no auto-resend).
+  - Provider acceptance is treated truthfully as provider dispatch, not proof of customer receipt.
+- **Staff Ownership, Read-Only Reconciliation & Draft Recovery**:
+  - Preserves existing staff assignment (`assignedUserId`) without stealing ownership from other staff members.
+  - Conditional Atomic Staff Assignment & Authoritative Assignee: Accepted-write transaction uses conditional atomic update (`updateMany({ where: { id: conversationId, assignedUserId: null }, data: { assignedUserId: staffUserId } })`). Server action and delivery logic return the authoritative post-write assignee across both initial send and replay paths. Component UI eliminates the client-side sender guess, rendering the actual assignee (e.g. concurrent winner Staff B) or sender Staff A. Status recheck performs zero assignment writes.
+  - Read-Only Status Reconciliation: "إعادة التحقق من الإرسال" calls `checkStaffReplyStatus` / `lookupStaffReplyStatus` exclusively. Never creates claims, calls Telegram, changes conversation ownership, or writes `STAFF` messages. A missing claim returns `NO_CLAIM_FOUND` as a truthful lookup result, never permission to dispatch.
+  - Bounded Claim Window (`STAFF_REPLY_CLAIM_WINDOW_MS = 60_000`): Differentiates live in-flight processing (`in-progress`) from aged/abandoned claims (`unknown` with `ABANDONED_CLAIM`) without allowing redispatch.
+  - Unresolved Attempt Identity (Repro A): Dismissing an unconfirmed notice hides the visual alert (`dismissed: true`) without discarding the unresolved attempt identity from storage. Ordinary Send on the restored draft is guarded against silent redispatch; it reveals the notice with read-only recheck access.
+  - Informed, Separate "إرسال كرسالة جديدة" Operation: First click opens an accessible confirmation warning in Arabic stating earlier reply may have reached customer, making zero send calls. Cancel leaves attempt history and composer untouched. Confirm sends only selected attempt's text with fresh ID once per confirmation. Draft B in composer survives accepted, rejected, and unknown outcomes without being attached to attempt A; unresolved attempts remain independently recheckable and recoverable after reload.
+  - Multiple Unresolved Attempt Tracking (Repro B): Storage tracks all unresolved attempts (`getStoredReplyAttempts`); composing and submitting an independent draft B does not overwrite unresolved attempt A. Both remain tracked and recheckable across reloads.
+  - Stable Draft Ownership & Identical Text Survival (Repro C, Issue 1): Drafts are tracked with stable ownership metadata (`StoredDraftMeta` with `draftId`). Direct submit acceptance and read-only recheck require positive draft ownership, clearing drafts only when current stored draftId matches submitted draftId and text matches. Missing or mismatched metadata preserves stored draft. Legacy storage without metadata is upgraded on mount to preserve compatibility.
+  - Guard 'استعادة الرد' Against Overwriting Newer Drafts (Issue 2): Restoration is available only when both composer and persisted draft are empty. Re-reads persisted storage in click handler before writing to protect drafts written after render; blocked attempts display concise Arabic guidance (`امسح المسودة الحالية أولاً لاستعادة الرد`), keep failed response visible, make zero send calls, and preserve newer composer and stored drafts across reloads. Empty composer restoration allocates a fresh draftId and saves cleanly without send calls.
+- **Release, Rollout & Rollback Governance**:
+  - Automatic Main-to-Vercel Deployment: Pushing/merging to `main` automatically triggers immediate Vercel deployment. Because there is no proven separate runtime activation gate, the additive migration `20261108200000_safe_telegram_staff_reply_delivery` must be executed and verified on the target database via `.github/workflows/production-db-migrate.yml` before merging to `main`.
+  - Normal Rollback Runbook: Normal rollback reverts the application commit on Vercel (or Git revert on `main`). The additive tables `ConversationDeliveryRoute` and `StaffReplySubmission` are backward-compatible and harmless to older code. Preserving these tables maintains immutable audit logs and delivery proof; **do NOT execute DROP TABLE** during normal rollback.
+- **Verification Suite Evidence**:
+  - Offline unit suite `scripts/check-safe-telegram-reply.ts` (48 checks passing across 11 groups, including draft ownership, positive ownership cleanup, restoration guards, and conditional atomic assignment rules).
+  - Disposable PostgreSQL integration suite `scripts/check-safe-telegram-reply-db.ts` (14 scenarios including concurrent same-key race with controlled fake provider, missing claim zero-writes check, bounded status window, tenant isolation, and Scenarios 13-14: controlled PostgreSQL assignment race preserving concurrent assignee and ordinary sender assignment).
+  - Component unit suite `src/features/conversations/components/conversation-detail.test.tsx` (45 tests passing, covering real action/UI boundary, uncertain outcome recovery, retry after reload via read-only check, draft preservation across two reloads, dismiss safety, Repros A, B, and C, Issues 1, 2, and 3 regressions, positive draft ownership with missing metadata, restore guard invariants, and explicit fresh-send accepted/rejected outcomes with identical text).
+  - Wired into `.github/workflows/pr-validation.yml`.
+
+**Product version: v0.79.7 (main baseline; merged PR #74)** — `Truthful Unknown-Information Replies, Server-Authoritative Handoff Consistency & Disclosure Authority (ISS-012 / TG-22)`. Baseline: v0.79.6 (commit `4644f37`). Branch: `fix/unknown-information-handoff`. Merged PR: [#74](https://github.com/geekammar/Yakfi/pull/74). Commit `8d12aa2`.
 
 - **Feature Scope**: Fixes false handoff promises under `AI_ACTIVE` and unbacked reply leaks on unknown clinic facts or unpublished prices observed in production v0.78.5 (ISS-012 / TG-22).
 - **Structured Authority Boundary in Disclosure Gate**:
@@ -320,6 +387,8 @@ adapter, webhook, and Conversation-Engine bridge — is now BUILT too
 boundary of what this slice does NOT claim).**
 
 ## Current State (summary)
+
+See the reviewer recovery checkpoint above for the active task. The older narrative below is historical.
 
 **IN-FLIGHT (PR ready on branch `feat/conv-core-03c2-smoke-eval`) — QUICK REAL JEV + LLM SMOKE EVALUATION, THEN HANDOFF TO GUIDED BUTTONS UX (CORE-03C2)**:
 A small, timeboxed live evaluation slice connecting the existing `current_engine` conversation playground and existing JEV integration to real provider transports under strict envelope limits, verifying real provider contracts and establishing the handoff to the Welcome and Contextual Buttons UX:
@@ -2975,6 +3044,8 @@ E2E` from a FRESH launch and record whether the whole
    WhatsApp number inside the 24h window to observe a `200` delivery.
 
 ## Next Step
+
+Current next step: follow the reviewer recovery checkpoint above. The entries below are historical, not new execution instructions.
 
 **AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03d2-semantic-safety) CORE-03D2**:
 Branch `feat/conv-core-03d2-semantic-safety` ready with Semantic Safety Ownership and False-Handoff Repair (v0.67.0).

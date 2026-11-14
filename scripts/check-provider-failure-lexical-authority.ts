@@ -445,6 +445,47 @@ async function main(): Promise<void> {
     );
   }
 
+  // Production-shaped failure: adapter telemetry exists without Control metadata.
+  {
+    const harness = createPlaygroundHarness({ channel: "WHATSAPP" });
+    harness.deps.ai = {
+      providerName: "openrouter",
+      respond: async () => null,
+      getLastTelemetry: () => ({
+        finalProvider: "openrouter",
+        finalModel: "synthetic-model",
+        attempts: [
+          {
+            provider: "openrouter",
+            model: "synthetic-model",
+            latencyMs: 1,
+            status: "FAILURE",
+            errorCode: "PERMANENT",
+            httpStatus: 404,
+            httpAttempts: 1,
+          },
+        ],
+      }),
+    } as any;
+    const res = await receiveInboundMessage(harness.deps, {
+      to: harness.business.whatsappNumber ?? "+201001111111",
+      from: "+201011112222",
+      text: "اهلا",
+      receivedAt: new Date().toISOString(),
+      externalId: "provider-404-no-control",
+    });
+    check(
+      "5b.5 Bare provider 404 preserves NEED_HUMAN",
+      res.ok && (res as any).conversationStatus === "NEED_HUMAN",
+    );
+    const sent = harness.messages.filter((m) => m.senderType === "AI");
+    check(
+      "5b.6 Bare provider 404 produces technical failure copy",
+      sent.length === 1 &&
+        sent[0]?.content === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
+    );
+  }
+
   // 5c. Engine Missing safetyAssessment (Schema / Validation Failure)
   {
     const harness = createPlaygroundHarness({ channel: "WHATSAPP" });
@@ -585,6 +626,35 @@ async function main(): Promise<void> {
       }) === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
     );
   }
+
+  for (const providerErrorCode of [
+    "PERMANENT",
+    "RETRYABLE",
+    "TIMEOUT",
+    "CONFIG_ERROR",
+  ] as const) {
+    check(
+      `6.4 ${providerErrorCode} without Control uses technical failure copy`,
+      resolveSafeFailureReply({
+        failureCause: "AI_FAILURE",
+        providerErrorCode,
+      }) === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
+    );
+  }
+  check(
+    "6.5 Invalid model output remains distinct from transport failure",
+    resolveSafeFailureReply({
+      failureCause: "AI_FAILURE",
+      providerErrorCode: "INVALID_RESPONSE",
+    }) === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
+  );
+  check(
+    "6.6 Explicit human request retains priority",
+    resolveSafeFailureReply({
+      controlHandoffReason: "CUSTOMER_REQUESTED_HUMAN",
+      providerErrorCode: "PERMANENT",
+    }) === SAFE_HANDOFF_REPLIES.HUMAN_REQUEST,
+  );
 
   // ── Summary ─────────────────────────────────────────────────────────────────
   console.log(

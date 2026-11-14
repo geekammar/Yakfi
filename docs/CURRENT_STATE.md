@@ -1,10 +1,36 @@
 # FlowPilot — Current State
 
+## Muse R4 ingress/thread selection repair — 14 November 2026
+
+Muse R4-UI-29-A1 (QA row250) FAILED on reviewed43a16ad: authenticated inbound, draft navigation/reload and takeover passed; composer refused before dispatch because the mixed legacy conversation had no authoritative route. Independent DB inspection found one historic linked claim from bot8644293921 and current claims from8926541123 on the same thread. addMessage correctly refused binding mixed history; the engine had selected the latest customer thread without connection compatibility. New authenticated Telegram ingress now selects a compatible bound or safe legacy thread, otherwise creates a separate thread through the existing path. Mixed history, routes, old assignment and claims remain unchanged; sending from the old mixed thread remains refused. No secret reset, schema change, manual route insertion or webhook switch is required. Real-PostgreSQL regression covers the observed two-bot history, preserved old owner, new bound route, dedupe/reuse, correct single-send target and safe legacy reuse. Live acceptance is still pending a fresh probe on the new candidate; do not resend the rejected old draft or change QA249/250.
+
+Separate verified AI blocker: R4 turn evidence had PROVIDER_FAILURE / CONFIG_ERROR with httpAttempts=0 and model deepseek/deepseek-v4.1-flash. Vercel metadata shows OPENROUTER_API_KEY only in Production, absent from Preview. Add an authorized key as a sensitive Preview variable scoped to this feature branch before AI-specific retesting; no plaintext in docs/chat and no broadening of Production secrets. Staff-reply acceptance is independent of AI response quality.
+
+## Owner-token restoration checkpoint — 14 November 2026
+
+Production candidate-key run43508566171 failed with CREDENTIALS_UNAVAILABLE. The fixed-target restoration runner now uses the existing owner customer-bot token explicitly, with a resolve-only dependency and live pinned-ID/non-manager verification. `restore-main-webhook-preflight` checks readiness while the bot remains on main and performs no writes. The actual reverse dry run still requires Preview as current URL; apply retains all database/URL/identity guards and updates only the destination webhook hash. Forward routing and application credential decryption are unchanged. Unknown Production master-key recovery/rebaseline remains a separate pre-Pilot requirement; this is not a successful key recovery. Owner confirms test assets; inventory found one runtime row, three Telegram and two WhatsApp connections. Do not reset all variables or delete historical QA evidence. No live mutation or acceptance is recorded.
+
+## Production restoration credential checkpoint — 13 November 2026
+
+Forward read-only run43504118788 succeeded (`SWITCH_DRY_RUN`) on `6c0c60a`; reverse read-only run43504704679 stopped with `CREDENTIALS_UNAVAILABLE` before getMe/URL validation. No webhook or database mutation occurred. Main's old encrypted credential remains present and unchanged. Restoration now uses the separate masked Actions secret `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` as the application `CREDENTIAL_MASTER_KEY`, without fallback to the working Preview key. Owner must supply the original Production-key candidate and rerun the read-only reverse preflight on the reviewed new HEAD. Forward apply, reverse apply, merge and live acceptance remain unapproved. See TROUBLESHOOTING for expected URL-mismatch interpretation.
+
 > **Tier 0 cold-start snapshot** — read with `docs/AGENT_RULES.md` and
 > `docs/DECISIONS_INDEX.md`. This is a concise orientation document, NOT a
 > source of truth: canonical topic documents and the repository code override
 > it. Implementation details live in `docs/BUILD_STATE.md`; decisions in
 > `docs/DECISIONS.md`.
+
+## Active reviewer checkpoint — 13 November 2026
+
+Current candidate is PR #79 v0.79.8 on `fix/safe-telegram-staff-reply-delivery`. Stable Preview origin is configured and verified (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`), healthy and connected to the authorized Neon test DB. Addressed all 4 independent reviewer findings:
+
+1. Strict database target validation implemented via reviewed `validateDatabaseUrl` (structured URL parsing, exact host, exact path `/neondb`, port 5432, sslmode=require, no fragments or overrides; loopback and backup names rejected).
+2. Prepared explicit restoration switch path using `switch-test-bot-webhook.ts` targeting `PRODUCTION_DATABASE_URL` with `CREDENTIAL_MASTER_KEY` via prepare-only workflow operations `restore-main-webhook-dry-run` and `restore-main-webhook-apply` (eliminates flawed ordinary repair runbook).
+3. Replaced bash-string tests with comprehensive tests of the actual runner script and workflow delegation (35/35 checks passing in `scripts/check-telegram-repair-workflow.ts`, including offline forward switch and restoration regression across separate DB stores).
+4. Safe error output: removed raw error messages from switch/maintenance boundaries, outputting safe fixed error codes (`UNEXPECTED_SWITCH_FAILURE`) with zero leak of tokens, URLs, bodies, or ciphertext.
+   Status: REVIEW_REQUIRED before live execution; live Muse acceptance remains pending. Older baseline descriptions below are historical.
+
+Reviewer follow-up: final restore-target and fixed-bot guards are hardened. Independent authorization is for a read-only forward dry run first; no live switch or Muse acceptance is recorded. See BUILD_STATE and TROUBLESHOOTING.
 
 ## 1. Verified Baseline & Production Status
 

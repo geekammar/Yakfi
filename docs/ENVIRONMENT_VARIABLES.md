@@ -296,3 +296,10 @@ check before sharing a deployment (`docs/CLIENT_DEMO.md` Section 1).
 
 Full step-by-step: `VERCEL_DEPLOYMENT.md` · What each check covers:
 `QUALITY_CHECKS.md`.
+
+## Fixed test-bot maintenance credentials (14 November 2026)
+
+- Preview switch: `TEST_DATABASE_URL` and the existing `CREDENTIAL_MASTER_KEY`; the application resolver remains authoritative.
+- Main restoration/preflight: `PRODUCTION_DATABASE_URL` and the existing Actions secret `YAKFI_TEST_CUSTOMER_BOT_TOKEN`, injected only into the maintenance step as `RESTORE_BOT_TOKEN`. A resolve-only operator dependency supplies this token to the existing switch service; live pinned bot identity is mandatory before mutation. It cannot store/delete a credential or change a credential reference.
+- `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` was a failed recovery candidate and is no longer consumed by the routing job. The Production application's `CREDENTIAL_MASTER_KEY` in Vercel is unchanged. Do not assume the candidate is its backup.
+- Keep an encrypted password-manager backup for original secrets, with separate environment entries and a non-secret inventory of name/scope/source/date. Do not put secret values in Drive, Git, notes shared with agents, logs or chat. Plan the one-record Production key rebaseline before Pilot, not a blanket reset of working integrations.

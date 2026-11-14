@@ -67,10 +67,12 @@ Docs:
 - src/features/telegram-connection/server/telegram-connection-service.ts
 - src/features/telegram-connection/telegram-app-launcher.ts
 - src/server/repositories/telegram-connection.repository.ts
+- src/features/conversations/server/staff-reply-delivery.ts
 - src/lib/public-paths.ts
   Tests:
 - scripts/check-telegram.ts
 - scripts/check-telegram-onboarding.ts
+- scripts/check-safe-telegram-reply.ts
 
 ### telegram.managed-bot
 
@@ -88,10 +90,12 @@ Docs:
 - src/app/api/telegram/manager/webhook/route.ts
 - src/server/repositories/telegram-provisioning-ledger.repository.ts
 - src/server/repositories/telegram-connection.repository.ts
+- src/features/conversations/server/staff-reply-delivery.ts
 - src/lib/public-paths.ts
   Tests:
 - scripts/check-telegram.ts
 - scripts/check-telegram-onboarding.ts
+- scripts/check-safe-telegram-reply.ts
 
 ### whatsapp.connection
 
@@ -235,11 +239,13 @@ Docs:
 - src/features/customers/server/customer-service.ts
 - src/server/repositories/conversation.repository.ts
 - src/server/repositories/customer.repository.ts
+- src/features/conversations/server/staff-reply-delivery.ts
   Tests:
 - scripts/check-conversation-ux.ts
 - scripts/check-conversation-handoff.ts
 - scripts/check-operator-attention.ts
 - scripts/check-appointment-calendar-dates.ts
+- scripts/check-safe-telegram-reply.ts
 
 ## Boundaries needing later refinement
 

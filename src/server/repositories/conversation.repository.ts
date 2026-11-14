@@ -19,6 +19,13 @@ import type {
 
 const notDeleted = { deletedAt: null } as const;
 
+export type TelegramConversationScope = {
+  channel: "telegram";
+  connectionId: string;
+  botExternalId: string;
+  recipientExternalId: string;
+};
+
 export class ConversationRepository {
   async findById(id: string): Promise<Conversation | null> {
     return db.conversation.findFirst({ where: { id, ...notDeleted } });
@@ -89,7 +96,38 @@ export class ConversationRepository {
     });
   }
 
-  async findLatestByCustomer(businessId: string, customerId: string) {
+  async findLatestByCustomer(
+    businessId: string,
+    customerId: string,
+    scope?: TelegramConversationScope,
+  ) {
+    if (scope) {
+      // Authenticated ingress may reuse only a compatible thread. Never
+      // rebind a mixed historical thread or erase its conflicting evidence.
+      const prefix = `tg:${scope.botExternalId}:`;
+      const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT c.id
+        FROM conversations c
+        LEFT JOIN conversation_delivery_routes r ON r.conversation_id = c.id
+        WHERE c.business_id = ${businessId} AND c.customer_id = ${customerId}
+          AND c.deleted_at IS NULL
+          AND (r.id IS NULL OR (
+            r.business_id = c.business_id AND r.channel = ${scope.channel}
+            AND r.connection_id = ${scope.connectionId}
+            AND r.bot_external_id = ${scope.botExternalId}
+            AND r.recipient_external_id = ${scope.recipientExternalId}
+          ))
+          AND NOT EXISTS (
+            SELECT 1 FROM inbound_message_dedupe d
+            WHERE d.conversation_id = c.id AND d.customer_message_id IS NOT NULL
+              AND (d.business_id <> c.business_id
+                OR NOT starts_with(d.external_key, ${prefix}))
+          )
+        ORDER BY c.last_message_at DESC, c.created_at DESC
+        LIMIT 1
+      `);
+      return rows[0] ?? null;
+    }
     return db.conversation.findFirst({
       where: { businessId, customerId, ...notDeleted },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
@@ -193,6 +231,12 @@ export class ConversationRepository {
     dedupe?: {
       claimId: string;
     },
+    deliveryRoute?: {
+      channel: string;
+      connectionId: string;
+      botExternalId: string;
+      recipientExternalId: string;
+    },
   ): Promise<Message> {
     return db.$transaction(async (tx) => {
       const message = await tx.message.create({
@@ -212,6 +256,42 @@ export class ConversationRepository {
         where: { id: input.conversationId },
         data: { lastMessageAt: message.createdAt, ...workflow },
       });
+      if (deliveryRoute) {
+        const existingRoute = await tx.conversationDeliveryRoute.findUnique({
+          where: { conversationId: input.conversationId },
+        });
+        if (!existingRoute) {
+          const conflicting = await tx.inboundMessageDedupe.findFirst({
+            where: {
+              conversationId: input.conversationId,
+              customerMessageId: { not: null },
+              NOT: {
+                externalKey: {
+                  startsWith: `tg:${deliveryRoute.botExternalId}:`,
+                },
+              },
+            },
+          });
+          if (!conflicting) {
+            const conv = await tx.conversation.findUnique({
+              where: { id: input.conversationId },
+              select: { businessId: true },
+            });
+            if (conv) {
+              await tx.conversationDeliveryRoute.create({
+                data: {
+                  businessId: conv.businessId,
+                  conversationId: input.conversationId,
+                  channel: deliveryRoute.channel,
+                  connectionId: deliveryRoute.connectionId,
+                  botExternalId: deliveryRoute.botExternalId,
+                  recipientExternalId: deliveryRoute.recipientExternalId,
+                },
+              });
+            }
+          }
+        }
+      }
       if (dedupe) {
         const won = await tx.inboundMessageDedupe.updateMany({
           where: { id: dedupe.claimId, customerMessageId: null },
