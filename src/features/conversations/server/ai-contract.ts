@@ -726,12 +726,16 @@ export type ProposedKnowledgeFamilyObservation =
   | "UNKNOWN"
   | null;
 
+const modelAuthorableKnowledgeFamilyKeys =
+  modelAuthorableKnowledgeFamilyValues.join(", ");
+
 /**
  * Shared, provider-neutral model instruction generated from the ONE canonical
  * vocabulary above. `buildPromptMessages` appends it to the existing system
  * instructions for every adapter; no provider-specific prompt copy exists.
  */
-export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyValues.join(", ")}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
+export const knowledgeFamilyPromptDirective =
+  `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyKeys}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
 
 /**
  * Structured source reference proposed by the model (ISS-012).

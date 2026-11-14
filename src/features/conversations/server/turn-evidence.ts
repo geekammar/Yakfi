@@ -298,14 +298,10 @@ export function buildTurnEvidence(
     disclosureChannel: observability?.disclosure?.channel ?? null,
     disclosureAllowed: observability?.disclosure?.allowed ?? null,
     disclosureRefusalReason: observability?.disclosure?.refusalReason ?? null,
-    disclosureDeclaredIntent:
-      observability?.disclosure?.declaredIntent ?? null,
-    disclosureProposedFamily:
-      observability?.disclosure?.proposedFamily ?? null,
-    disclosureProposalStatus:
-      observability?.disclosure?.proposalStatus ?? null,
-    disclosureLedgerIncluded:
-      observability?.disclosure?.ledgerIncluded ?? null,
+    disclosureDeclaredIntent: observability?.disclosure?.declaredIntent ?? null,
+    disclosureProposedFamily: observability?.disclosure?.proposedFamily ?? null,
+    disclosureProposalStatus: observability?.disclosure?.proposalStatus ?? null,
+    disclosureLedgerIncluded: observability?.disclosure?.ledgerIncluded ?? null,
     disclosureLedgerDisclosable:
       observability?.disclosure?.ledgerDisclosable ?? null,
     knowledgeGapCategory: input.knowledgeGap?.category ?? null,

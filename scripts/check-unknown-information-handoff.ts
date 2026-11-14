@@ -2332,19 +2332,23 @@ async function runSuite(): Promise<void> {
         resCatalog.observability?.disclosure?.channel === "service.name" &&
         resCatalog.observability?.disclosure?.declaredIntent === "FAQ" &&
         sentCatalog.length === 1 &&
-        fourServices.every((service) => sentCatalog[0]!.includes(service.name)) &&
+        fourServices.every((service) =>
+          sentCatalog[0]!.includes(service.name),
+        ) &&
         hCatalog.getProviderInvocations() === 1 &&
         hCatalog.getAppointmentWrites() === 0,
       { resCatalog, sentCatalog },
     );
+    const catalogObservability =
+      resCatalog.ok && !resCatalog.duplicate ? resCatalog.observability : null;
     check(
       "15.B Services answer + booking continuation preserves one send/model call and the pending booking goal",
-      resCatalog.observability?.answerAndContinue === true &&
-        resCatalog.observability?.pendingGoals?.some(
+      catalogObservability?.answerAndContinue === true &&
+        catalogObservability?.pendingGoals?.some(
           (goal) => goal.kind === "DOMAIN_ACTION" && goal.intent === "BOOKING",
         ) === true &&
-        resCatalog.observability?.contextChannels?.servicesCount === 4,
-      resCatalog.observability,
+        catalogObservability?.contextChannels?.servicesCount === 4,
+      catalogObservability,
     );
 
     // 15.C FAQ ledger EXCLUDED while the service catalog is authorized:
