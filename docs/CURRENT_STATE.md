@@ -30,7 +30,10 @@
   a model-authored reply; a distinct `UNKNOWN_KNOWLEDGE_FAMILY` refusal; and
   additive refusal evidence (`declaredIntent`, `proposedFamily`,
   `proposalStatus`, ledger verdicts) that preserves the legacy
-  `disclosureChannel` semantics.
+  `disclosureChannel` semantics. An explicit identity goal no longer clears a
+  contradictory or unknown structured declaration; `business.cancellationPolicy`
+  is recognized by the resolver but remains domain/handoff-owned (its gate case
+  returns the explicit no-channel refusal, never `UNKNOWN_KNOWLEDGE_FAMILY`).
 - This does **not** claim the historical R6 proposal is known or that R6 is
   accepted. The original structured model response is unavailable.
 

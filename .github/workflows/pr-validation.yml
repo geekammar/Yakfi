@@ -133,6 +133,7 @@ jobs:
           pnpm check:semantic-date-ranges
           pnpm check:temporal-correction-authority
           pnpm check:unknown-information-handoff
+          pnpm check:ai-disclosure
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics

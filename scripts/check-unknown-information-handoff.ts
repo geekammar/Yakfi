@@ -3,6 +3,8 @@ import "./setup-test-env";
 
 import { buildAiContext } from "../src/features/conversations/server/ai-context-builder";
 import {
+  knowledgeFamilyValues,
+  modelAuthorableKnowledgeFamilyValues,
   parseAiResponse,
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
@@ -12,6 +14,7 @@ import {
   buildBusinessIdentityContent,
   buildServiceDescriptionContent,
   enforceDisclosure,
+  supportFamilyForProposedKnowledge,
 } from "../src/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
@@ -2815,6 +2818,243 @@ async function runSuite(): Promise<void> {
         serviceFamilyEvidence.disclosureLedgerIncluded === false &&
         serviceFamilyEvidence.disclosureLedgerDisclosable === false,
       serviceFamilyEvidence,
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 16. IDENTITY PROPOSAL AUTHORITY + CANONICAL VOCABULARY CONSISTENCY
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    const identityBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: {
+        business: {
+          businessId: TENANT_A,
+          name: "مركز رعاية الأسنان التخصصي",
+          about: null,
+          address: null,
+          faqs: [],
+        },
+        services: [],
+        conversation: {
+          id: "conv-gate-identity",
+          status: "AI_ACTIVE" as const,
+          recentMessages: [],
+        },
+        message: "ما اسم العيادة؟",
+        requiredSemanticCapability: "structured_turn",
+      },
+    });
+
+    const identityReply = (
+      overrides: Partial<AiResponse> = {},
+    ): AiResponse => ({
+      intent: "FAQ",
+      action: "reply",
+      content: "اسم العيادة هو مركز رعاية الأسنان التخصصي.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      safetyAssessment: "safe",
+      goals: [
+        {
+          kind: "ANSWER",
+          intent: "FAQ",
+          requiredKnowledge: "business.identity",
+        },
+      ],
+      ...overrides,
+    });
+    const identityDecision = (overrides: Partial<AiResponse> = {}) =>
+      enforceDisclosure({
+        response: identityReply(overrides),
+        context: {
+          request: identityBuilt.request,
+          facts: identityBuilt.facts,
+          scope: { businessId: TENANT_A },
+        },
+      });
+
+    // A. Compatible top-level identity declaration + identity goal.
+    const validIdentity = identityDecision({
+      requiredKnowledge: "business.identity",
+    });
+    check(
+      "16.A Compatible identity goal + top-level declaration -> authoritative identity answer",
+      validIdentity.kind === "disclosed" &&
+        validIdentity.support.includes("business.identity") &&
+        validIdentity.renderedContent?.includes(
+          "مركز رعاية الأسنان التخصصي",
+        ) === true,
+      validIdentity,
+    );
+
+    // B. Identity goal + contradictory top-level family -> conflict, not identity.
+    const conflictingIdentity = identityDecision({
+      requiredKnowledge: "business.faqs",
+    });
+    check(
+      "16.B Identity goal + contradictory top-level family -> AMBIGUOUS_MATCH / CONFLICT",
+      conflictingIdentity.kind === "requires-human" &&
+        conflictingIdentity.reason === "AMBIGUOUS_MATCH" &&
+        conflictingIdentity.diagnostics.proposalStatus === "CONFLICT" &&
+        conflictingIdentity.diagnostics.proposedFamily === null &&
+        !("content" in conflictingIdentity),
+      conflictingIdentity,
+    );
+
+    // C. Identity goal + unknown top-level family -> unknown-family refusal.
+    const unknownIdentity = identityDecision({
+      requiredKnowledge: "service.availability",
+    });
+    check(
+      "16.C Identity goal + unknown top-level family -> UNKNOWN_KNOWLEDGE_FAMILY",
+      unknownIdentity.kind === "requires-human" &&
+        unknownIdentity.reason === "UNKNOWN_KNOWLEDGE_FAMILY" &&
+        unknownIdentity.diagnostics.proposalStatus === "UNKNOWN_FAMILY" &&
+        unknownIdentity.diagnostics.proposedFamily === "UNKNOWN" &&
+        !("content" in unknownIdentity),
+      unknownIdentity,
+    );
+
+    // D. Identity goal + conflicting structured source references -> conflict.
+    const sourceConflictIdentity = identityDecision({
+      sourceId: "foreign-source",
+      goals: [
+        {
+          kind: "ANSWER",
+          intent: "FAQ",
+          requiredKnowledge: "business.identity",
+          knowledgeRef: {
+            family: "business.identity",
+            sourceId: "business.identity",
+          },
+        },
+      ],
+    });
+    check(
+      "16.D Identity goal + conflicting structured source references -> AMBIGUOUS_MATCH / CONFLICT",
+      sourceConflictIdentity.kind === "requires-human" &&
+        sourceConflictIdentity.reason === "AMBIGUOUS_MATCH" &&
+        sourceConflictIdentity.diagnostics.proposalStatus === "CONFLICT" &&
+        !("content" in sourceConflictIdentity),
+      sourceConflictIdentity,
+    );
+
+    // E. Identity goal + foreign/invalid singleton source -> safe refusal.
+    const foreignSourceIdentity = identityDecision({
+      requiredKnowledge: "business.identity",
+      sourceId: "foreign-source",
+    });
+    check(
+      "16.E Identity goal + foreign/invalid source -> UNAVAILABLE_IN_REQUEST",
+      foreignSourceIdentity.kind === "requires-human" &&
+        foreignSourceIdentity.reason === "UNAVAILABLE_IN_REQUEST" &&
+        foreignSourceIdentity.diagnostics.proposalStatus === "RESOLVED" &&
+        foreignSourceIdentity.diagnostics.proposedFamily ===
+          "business.identity" &&
+        foreignSourceIdentity.diagnostics.ledgerIncluded === true,
+      foreignSourceIdentity,
+    );
+
+    // Engine-level coverage of the important refusal path: the conflicting
+    // identity proposal must produce one safe acknowledgment and never the
+    // model-authored identity text or an appointment write.
+    const hIdentityConflict = createEngineHarness({
+      faqs: [],
+      services: [],
+      responders: [
+        async () => identityReply({ requiredKnowledge: "business.faqs" }),
+      ],
+    });
+    const resIdentityConflict = await hIdentityConflict.runInbound(
+      "ما اسم العيادة؟",
+      "ext-16-identity-conflict",
+    );
+    const sentIdentityConflict = hIdentityConflict.getSent();
+    check(
+      "16.F Engine identity conflict -> POLICY_REFUSED, one safe ack, no model text, zero appointment writes",
+      resIdentityConflict.ok === true &&
+        !resIdentityConflict.duplicate &&
+        resIdentityConflict.assistantAction === "AI_HANDOFF" &&
+        resIdentityConflict.conversationStatus === "NEED_HUMAN" &&
+        resIdentityConflict.handoffCause === "POLICY_REFUSED" &&
+        sentIdentityConflict.length === 1 &&
+        sentIdentityConflict[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED &&
+        !sentIdentityConflict[0]!.includes("اسم العيادة هو") &&
+        hIdentityConflict.getAppointmentWrites() === 0,
+      { resIdentityConflict, sentIdentityConflict },
+    );
+
+    // Exhaustive canonical vocabulary/resolver consistency, using the
+    // canonical definitions directly (no duplicated unchecked list).
+    const unresolvedFamilies = knowledgeFamilyValues.filter((family) => {
+      const resolved = supportFamilyForProposedKnowledge(family);
+      return (
+        !resolved ||
+        resolved === "GENERIC_FAQ" ||
+        resolved.family !== family
+      );
+    });
+    check(
+      "16.G Every canonical knowledgeFamilyValues entry resolves to itself",
+      unresolvedFamilies.length === 0,
+      unresolvedFamilies,
+    );
+    check(
+      "16.H Model-authorable families are a supported subset and exclude domain-owned families",
+      modelAuthorableKnowledgeFamilyValues.every((family) =>
+        (knowledgeFamilyValues as readonly string[]).includes(family),
+      ) &&
+        !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+          "domain.availability",
+        ) &&
+        !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+          "business.cancellationPolicy",
+        ),
+    );
+    const serviceCatalogAlias =
+      supportFamilyForProposedKnowledge("service.catalog");
+    check(
+      "16.I Existing service.catalog alias still resolves to service.name",
+      typeof serviceCatalogAlias === "object" &&
+        serviceCatalogAlias !== null &&
+        serviceCatalogAlias.family === "service.name",
+    );
+    check(
+      "16.J Unsupported structured label still resolves as unknown",
+      supportFamilyForProposedKnowledge("service.availability") === null,
+    );
+
+    // Cancellation policy is a RECOGNIZED family (not UNKNOWN) but remains
+    // domain/handoff-owned: the gate must return its explicit safe refusal.
+    const cancellationReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "يمكنك إلغاء الموعد قبل 24 ساعة.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      safetyAssessment: "safe",
+      requiredKnowledge: "business.cancellationPolicy",
+    };
+    const cancellationDecision = enforceDisclosure({
+      response: cancellationReply,
+      context: {
+        request: identityBuilt.request,
+        facts: identityBuilt.facts,
+        scope: { businessId: TENANT_A },
+      },
+    });
+    check(
+      "16.K cancellationPolicy -> recognized safe refusal, not UNKNOWN_KNOWLEDGE_FAMILY",
+      cancellationDecision.kind === "requires-human" &&
+        cancellationDecision.reason === "UNAVAILABLE_IN_REQUEST" &&
+        cancellationDecision.diagnostics.proposalStatus === "RESOLVED" &&
+        cancellationDecision.diagnostics.proposedFamily ===
+          "business.cancellationPolicy" &&
+        cancellationDecision.diagnostics.ledgerIncluded === false,
+      cancellationDecision,
     );
   }
 

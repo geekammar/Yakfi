@@ -21,6 +21,7 @@ export {
   isExplicitIdentityGoal,
   isExplicitIdentityResponse,
   resolveKnowledgeProposal,
+  supportFamilyForProposedKnowledge,
   buildBusinessAboutContent,
   buildBusinessAddressContent,
   buildBusinessIdentityContent,

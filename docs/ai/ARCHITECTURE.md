@@ -662,8 +662,18 @@ never sent.
   domain/handoff-owned; they are not model-authorable reply sources. The
   parser deliberately keeps the field a bounded string so an unknown label
   still reaches the gate and is classified (never converted into a generic
-  provider failure). A legacy string `knowledgeRef` is treated as a SOURCE
-  REFERENCE, never guessed to be a family identifier.
+  provider failure). Every canonical value resolves to itself, including
+  `business.cancellationPolicy`; its gate case returns the explicit no-channel
+  safe refusal. A legacy string `knowledgeRef` still accepts the established
+  family aliases; otherwise it is treated as a SOURCE REFERENCE, never guessed
+  to be a family identifier.
+
+  **Identity never erases a conflict.** An explicit identity goal is resolved
+  through the same structured proposal. It does not clear a contradictory
+  top-level family or an unknown declared family: conflicts stay
+  `AMBIGUOUS_MATCH`, unknown labels stay `UNKNOWN_KNOWLEDGE_FAMILY`, and the
+  identity source/provenance/ledger checks still decide whether the reply is
+  disclosed.
 
   **Availability is domain-owned.** A model-authored `action=reply` that
   declares `domain.availability` is explicitly refused: if the family was not

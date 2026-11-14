@@ -309,6 +309,10 @@ export function supportFamilyForProposedKnowledge(
     case "domain.availability":
     case "availability":
       return { family: "domain.availability", channel: "availability" };
+    // Recognized but domain/handoff-owned: the gate refuses a model-authored
+    // reply with its explicit no-channel reason; it is never model-authorable.
+    case "business.cancellationPolicy":
+      return { family: "business.cancellationPolicy", channel: null };
     case "faq":
     case "none":
       return "GENERIC_FAQ";
@@ -359,9 +363,10 @@ function extractEntityProposal(
     } else if (familyCandidate === "GENERIC_FAQ") {
       family = "business.faqs";
     } else {
-      // A legacy string knowledgeRef is a SOURCE REFERENCE, never a family
-      // identifier. Dots are valid inside source ids ("svc.1"), so they
-      // cannot be used to guess that an unknown string is a family label.
+      // A legacy string knowledgeRef is a SOURCE REFERENCE unless it exactly
+      // matches one of the established family aliases above. Dots are valid
+      // inside source ids ("svc.1"), so they cannot be used to guess that an
+      // unknown string is a family label.
       sourceId = raw;
     }
   } else if (entity.knowledgeRef && typeof entity.knowledgeRef === "object") {
@@ -537,15 +542,12 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   const goals = synthesizeDecisionGoals(response);
   const currentAnswerGoal =
     goals.find((g) => g.kind === "ANSWER") ?? goals[0] ?? null;
-  const isIdentity = isExplicitIdentityGoal(currentAnswerGoal);
 
+  // An explicit identity goal is already represented by the structured
+  // proposal resolver. Do NOT overwrite its conflict/unknown verdicts here:
+  // contradictory or unrecognized top-level declarations must still fail
+  // closed instead of being erased by the identity label.
   const proposal = resolveKnowledgeProposal(response, currentAnswerGoal);
-  if (isIdentity) {
-    proposal.family = "business.identity";
-    proposal.conflict = false;
-    proposal.invalidFamily = false;
-    proposal.status = "RESOLVED";
-  }
   proposalStatus = proposal.status;
   proposedFamily =
     proposal.status === "RESOLVED"
