@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // Enforce valid dynamic preview URL. Never fall back to unrelated deployments.
 const PREVIEW_URL = process.env.PLAYWRIGHT_PREVIEW_URL?.trim();
@@ -22,6 +22,43 @@ const SCREENSHOT_DIR = path.join(
   "screenshots",
   "preview",
 );
+
+const LONG_THREAD_FIXTURE_PATH =
+  "/qa/conversation-header?fixture=need_human_unassigned";
+const LONG_THREAD_FIXTURE_PHONE = "+966501234567";
+const LONG_THREAD_FIXTURE_READY_TEXT =
+  "السلام عليكم ورحمة الله وبركاته، أود الاستفسار عن المواعيد المتاحة هذا الأسبوع.";
+
+async function waitForSignInFormHydration(page: Page): Promise<void> {
+  const passwordInput = page.locator('input[id="password"]');
+  const revealPassword = page.locator(
+    'button[aria-label="إظهار كلمة المرور"]',
+  );
+  await expect(revealPassword).toBeVisible();
+
+  // The reveal toggle is a client-only handler: observing it change the input
+  // type proves React hydration finished, so controlled-input fills below
+  // cannot be discarded when hydration completes.
+  await expect
+    .poll(
+      async () => {
+        const hidePassword = page.locator(
+          'button[aria-label="إخفاء كلمة المرور"]',
+        );
+        if (await hidePassword.isVisible()) return "text";
+        await revealPassword.click();
+        return passwordInput.getAttribute("type");
+      },
+      {
+        message: "sign-in form did not become interactive after hydration",
+        timeout: 10_000,
+      },
+    )
+    .toBe("text");
+
+  await page.locator('button[aria-label="إخفاء كلمة المرور"]').click();
+  await expect(passwordInput).toHaveAttribute("type", "password");
+}
 
 test.beforeAll(() => {
   if (!fs.existsSync(SCREENSHOT_DIR)) {
@@ -125,6 +162,8 @@ test.describe("Authenticated Preview QA", () => {
       return document.documentElement.scrollWidth > window.innerWidth;
     });
     expect(isOverflowing).toBe(false);
+
+    await waitForSignInFormHydration(page);
 
     // Fill login form using credentials from environment
     await page.fill('input[id="email"]', ADMIN_EMAIL);
@@ -450,13 +489,50 @@ test.describe("Authenticated Preview QA", () => {
       expect(initialHeaderBox.height).toBeLessThanOrEqual(160);
     }
 
-    // U06: Independently scrollable message history
-    const messageLog = page.locator('div[role="log"]');
-    await expect(messageLog).toBeVisible();
-    expect(await messageLog.getAttribute("tabindex")).toBe("0");
+    // U06 precondition: the first conversation in the shared Preview inbox is
+    // mutable data and can be shorter than the tested viewport (the PR81 CI
+    // trace showed 4 messages with scrollHeight === clientHeight at tablet).
+    // Inspect the existing isolated QA conversation fixture on the same
+    // Preview — known identity, 15 messages — in a second page, leaving the
+    // authenticated real conversation untouched for composer/draft checks
+    // below. No shared Preview data is seeded, edited or deleted.
+    const fixturePage = await page.context().newPage();
+    await fixturePage.goto(LONG_THREAD_FIXTURE_PATH, {
+      waitUntil: "domcontentloaded",
+    });
+    const fixtureHeader = fixturePage.locator(
+      'header[data-testid="conversation-persistent-header"]',
+    );
+    await expect(fixtureHeader).toBeVisible();
+    await expect(fixtureHeader.locator('p[dir="ltr"]')).toHaveText(
+      LONG_THREAD_FIXTURE_PHONE,
+    );
+
+    // U06: Independently scrollable message history (deterministic long fixture)
+    const fixtureMessageLog = fixturePage.locator('div[role="log"]');
+    await expect(fixtureMessageLog).toBeVisible();
+    await expect(fixtureMessageLog).toContainText(
+      LONG_THREAD_FIXTURE_READY_TEXT,
+    );
+    expect(await fixtureMessageLog.getAttribute("tabindex")).toBe("0");
+
+    // Wait for the client-side mount scroll instead of a fixed sleep.
+    await expect
+      .poll(
+        async () => fixtureMessageLog.evaluate((el) => el.scrollTop),
+        {
+          message:
+            "long-thread fixture did not auto-scroll to the latest message",
+          timeout: 5_000,
+        },
+      )
+      .toBeGreaterThan(0);
+
+    const fixtureHeaderBox = await fixtureHeader.boundingBox();
+    expect(fixtureHeaderBox).not.toBeNull();
 
     // Require deterministic long conversation: content height must strictly exceed view container height
-    const initialMetrics = await messageLog.evaluate((el) => ({
+    const initialMetrics = await fixtureMessageLog.evaluate((el) => ({
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
       scrollTop: el.scrollTop,
@@ -469,27 +545,27 @@ test.describe("Authenticated Preview QA", () => {
     expect(initialMetrics.scrollTop).toBeGreaterThan(0);
 
     // Check Top: Scroll to top (scrollTop = 0)
-    await messageLog.evaluate((el) => {
+    await fixtureMessageLog.evaluate((el) => {
       el.scrollTop = 0;
     });
-    await page.waitForTimeout(150);
-    const topScroll = await messageLog.evaluate((el) => el.scrollTop);
+    await fixturePage.waitForTimeout(150);
+    const topScroll = await fixtureMessageLog.evaluate((el) => el.scrollTop);
     expect(topScroll).toBe(0);
 
     // Verify Persistent Header remains visible and pinned at top
-    const topHeaderBox = await persistentHeader.boundingBox();
+    const topHeaderBox = await fixtureHeader.boundingBox();
     expect(topHeaderBox).not.toBeNull();
-    if (topHeaderBox && initialHeaderBox) {
-      expect(Math.abs(topHeaderBox.y - initialHeaderBox.y)).toBeLessThanOrEqual(
+    if (topHeaderBox && fixtureHeaderBox) {
+      expect(Math.abs(topHeaderBox.y - fixtureHeaderBox.y)).toBeLessThanOrEqual(
         5,
       );
     }
 
     // Screenshot Conversation Detail Top
-    const preTopScreenshotScrollY = await page.evaluate(
+    const preTopScreenshotScrollY = await fixturePage.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
-    await page.screenshot({
+    await fixturePage.screenshot({
       path: path.join(
         SCREENSHOT_DIR,
         `${vpName}-08-conversation-detail-top.png`,
@@ -497,47 +573,47 @@ test.describe("Authenticated Preview QA", () => {
       fullPage: true,
     });
     // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
-    await page.evaluate((y) => {
+    await fixturePage.evaluate((y) => {
       window.scrollTo({ top: y, behavior: "instant" });
       document.documentElement.scrollTop = y;
     }, preTopScreenshotScrollY);
 
-    const postTopScreenshotScrollY = await page.evaluate(
+    const postTopScreenshotScrollY = await fixturePage.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
     console.log(
-      `[QA-DIAG] ${vpName} | preTopScrollY=${preTopScreenshotScrollY} postTopScrollY=${postTopScreenshotScrollY} | topHeaderY=${topHeaderBox?.y}`,
+      `[QA-DIAG] ${vpName} | fixturePreTopScrollY=${preTopScreenshotScrollY} fixturePostTopScrollY=${postTopScreenshotScrollY} | topHeaderY=${topHeaderBox?.y}`,
     );
 
     // Check Middle: Scroll to middle reading position
-    const middleTarget = Math.floor(
+    const fixtureMiddleTarget = Math.floor(
       (initialMetrics.scrollHeight - initialMetrics.clientHeight) / 2,
     );
-    await messageLog.evaluate((el, target) => {
+    await fixtureMessageLog.evaluate((el, target) => {
       el.scrollTop = target;
-    }, middleTarget);
-    await page.waitForTimeout(150);
-    const middleScroll = await messageLog.evaluate((el) => el.scrollTop);
-    expect(Math.abs(middleScroll - middleTarget)).toBeLessThanOrEqual(5);
+    }, fixtureMiddleTarget);
+    await fixturePage.waitForTimeout(150);
+    const middleScroll = await fixtureMessageLog.evaluate((el) => el.scrollTop);
+    expect(Math.abs(middleScroll - fixtureMiddleTarget)).toBeLessThanOrEqual(5);
 
     // Verify Persistent Header remains pinned
-    const middleHeaderBox = await persistentHeader.boundingBox();
+    const middleHeaderBox = await fixtureHeader.boundingBox();
     expect(middleHeaderBox).not.toBeNull();
     console.log(
-      `[QA-DIAG] ${vpName} | middleScroll=${middleScroll} middleTarget=${middleTarget} | middleHeaderY=${middleHeaderBox?.y} initialHeaderY=${initialHeaderBox?.y}`,
+      `[QA-DIAG] ${vpName} | fixtureMiddleScroll=${middleScroll} fixtureMiddleTarget=${fixtureMiddleTarget} | middleHeaderY=${middleHeaderBox?.y} fixtureHeaderY=${fixtureHeaderBox?.y}`,
     );
-    if (middleHeaderBox && initialHeaderBox) {
+    if (middleHeaderBox && fixtureHeaderBox) {
       expect(
-        Math.abs(middleHeaderBox.y - initialHeaderBox.y),
+        Math.abs(middleHeaderBox.y - fixtureHeaderBox.y),
       ).toBeLessThanOrEqual(5);
     }
 
-    const preScreenshotScrollY = await page.evaluate(
+    const preScreenshotScrollY = await fixturePage.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
 
     // Screenshot Conversation Detail Scrolled (Middle)
-    await page.screenshot({
+    await fixturePage.screenshot({
       path: path.join(
         SCREENSHOT_DIR,
         `${vpName}-09-conversation-detail-scrolled.png`,
@@ -546,32 +622,46 @@ test.describe("Authenticated Preview QA", () => {
     });
 
     // Restore pre-screenshot window scroll offset if Playwright fullPage altered it
-    await page.evaluate((y) => window.scrollTo(0, y), preScreenshotScrollY);
-    await page.waitForTimeout(50);
+    await fixturePage.evaluate(
+      (y) => window.scrollTo(0, y),
+      preScreenshotScrollY,
+    );
+    await fixturePage.waitForTimeout(50);
 
     // Check Bottom: Scroll to bottom
-    await messageLog.evaluate((el) => {
+    await fixtureMessageLog.evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
-    await page.waitForTimeout(150);
-    const bottomScroll = await messageLog.evaluate((el) => el.scrollTop);
-    expect(bottomScroll).toBeGreaterThan(middleTarget);
+    await fixturePage.waitForTimeout(150);
+    const bottomScroll = await fixtureMessageLog.evaluate((el) => el.scrollTop);
+    expect(bottomScroll).toBeGreaterThan(fixtureMiddleTarget);
 
-    const bottomHeaderBox = await persistentHeader.boundingBox();
+    const bottomHeaderBox = await fixtureHeader.boundingBox();
     expect(bottomHeaderBox).not.toBeNull();
-    if (bottomHeaderBox && initialHeaderBox) {
+    if (bottomHeaderBox && fixtureHeaderBox) {
       expect(
-        Math.abs(bottomHeaderBox.y - initialHeaderBox.y),
+        Math.abs(bottomHeaderBox.y - fixtureHeaderBox.y),
       ).toBeLessThanOrEqual(5);
     }
 
     // Verify document window itself has not scrolled away (no document runaway / window scroll trap)
-    const windowScrollY = await page.evaluate(
+    const windowScrollY = await fixturePage.evaluate(
       () => window.scrollY || document.documentElement.scrollTop,
     );
     expect(windowScrollY).toBeLessThanOrEqual(10);
 
+    await fixturePage.close();
+
     // U07: Composer usable & positioned above bottom navigation
+    const messageLog = page.locator('div[role="log"]');
+    await expect(messageLog).toBeVisible();
+    const realMetrics = await messageLog.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+    const middleTarget = Math.floor(
+      (realMetrics.scrollHeight - realMetrics.clientHeight) / 2,
+    );
     const replyTextarea = page.locator('textarea[aria-label="رد على العميل"]');
     await expect(replyTextarea).toBeVisible();
     const sendButton = page.locator('button[aria-label="إرسال الرد"]');
@@ -737,6 +827,8 @@ test.describe("Authenticated Preview QA", () => {
     await expect(emailInput).toBeVisible();
     await expect(passwordInput).toBeVisible();
     await expect(submitBtn).toBeVisible();
+
+    await waitForSignInFormHydration(page);
 
     // 4. Fill credentials and sign in again in the SAME browser context
     await emailInput.fill(ADMIN_EMAIL);

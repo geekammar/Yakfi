@@ -77,6 +77,10 @@ function check(label: string, pass: boolean, details?: string): void {
 // ── Deterministic Fixtures & In-Memory Repositories ─────────────────────────
 
 const TEST_DATE = "2026-11-03"; // Tuesday
+// Fixed reference clock: 05:00 Africa/Cairo on TEST_DATE, before the 09:00
+// opening. Injected into every availability dependency below so the suite
+// never depends on the runner's real current date.
+const TEST_NOW = new Date("2026-11-03T03:00:00.000Z");
 const BIZ_ID = PLAYGROUND_IDS.BIZ_ID;
 const BRANCH_ID = PLAYGROUND_IDS.BRANCH_ID;
 
@@ -404,6 +408,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -697,6 +702,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -847,6 +853,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service },
         appointmentRepository: apptRepo,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -1058,6 +1065,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => business },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: sameProvRepo,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -1119,6 +1127,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => business16 },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: independentProvRepo,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [
             PROVIDER_1 as any,
@@ -1246,6 +1255,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => biz15Free },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5A1,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -1297,6 +1307,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => biz15Free },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5A2,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
@@ -1352,6 +1363,7 @@ async function runSuite(): Promise<void> {
         businessRepository: { findById: async () => biz30 },
         serviceRepository: { findById: async () => service45 },
         appointmentRepository: repo5B,
+        now: () => TEST_NOW,
         providerRepository: {
           listEligibleForService: async () => [PROVIDER_1 as any],
           listAssignmentSeams: async () => [
