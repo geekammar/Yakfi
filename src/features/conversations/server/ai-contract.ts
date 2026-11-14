@@ -659,6 +659,80 @@ export type AiGoalKind = (typeof aiGoalKindValues)[number];
 
 export const aiGoalKindSchema = z.enum(aiGoalKindValues);
 
+// ─── Canonical knowledge families (B-03 disclosure contract) ─────────────────
+//
+// ONE canonical machine vocabulary shared by the structured contract docs,
+// the model instructions and the disclosure proposal resolver. The response
+// fields (`requiredKnowledge` / `knowledgeRef.family`) intentionally remain
+// bounded strings at parse time: an unknown label is NOT a provider failure —
+// the gate classifies it as UNKNOWN_KNOWLEDGE_FAMILY and fails closed. Making
+// the schema a strict enum here would turn that useful refusal classification
+// into a generic AI/provider failure, so the closed vocabulary is exported for
+// every CONSUMER (prompt/resolver) while the parser stays compatibility-safe.
+
+/** Every knowledge family the server can resolve for disclosure. */
+export const knowledgeFamilyValues = [
+  "business.identity",
+  "business.address",
+  "business.about",
+  "business.faqs",
+  "service.name",
+  "service.price",
+  "service.description",
+  "domain.availability",
+  "business.cancellationPolicy",
+] as const;
+
+export type KnowledgeFamily = (typeof knowledgeFamilyValues)[number];
+
+export const knowledgeFamilySchema = z.enum(knowledgeFamilyValues);
+
+/**
+ * The subset a model-authored `action=reply` may propose. Availability and
+ * cancellation policy are domain/handoff families, never model-authored
+ * reply sources.
+ */
+export const modelAuthorableKnowledgeFamilyValues = [
+  "business.identity",
+  "business.address",
+  "business.about",
+  "business.faqs",
+  "service.name",
+  "service.price",
+  "service.description",
+] as const;
+
+export type ModelAuthorableKnowledgeFamily =
+  (typeof modelAuthorableKnowledgeFamilyValues)[number];
+
+export const modelAuthorableKnowledgeFamilySchema = z.enum(
+  modelAuthorableKnowledgeFamilyValues,
+);
+
+/** Bounded outcome of resolving the model's structured family proposal. */
+export const disclosureProposalStatusValues = [
+  "RESOLVED",
+  "MISSING",
+  "UNKNOWN_FAMILY",
+  "CONFLICT",
+] as const;
+
+export type DisclosureProposalStatus =
+  (typeof disclosureProposalStatusValues)[number];
+
+/** Closed observation value: canonical family, unknown sentinel, or missing. */
+export type ProposedKnowledgeFamilyObservation =
+  | KnowledgeFamily
+  | "UNKNOWN"
+  | null;
+
+/**
+ * Shared, provider-neutral model instruction generated from the ONE canonical
+ * vocabulary above. `buildPromptMessages` appends it to the existing system
+ * instructions for every adapter; no provider-specific prompt copy exists.
+ */
+export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyValues.join(", ")}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
+
 /**
  * Structured source reference proposed by the model (ISS-012).
  * Allows the model to declare the explicit source entity (FAQ id/question,

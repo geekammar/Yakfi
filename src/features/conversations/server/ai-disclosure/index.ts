@@ -29,6 +29,7 @@ export {
   buildServicePriceContent,
   type DisclosureDecision,
   type DisclosureInput,
+  type DisclosureRefusalDiagnostics,
   type DisclosureRefusalReason,
   type DisclosureResult,
   type ResolvedKnowledgeProposal,

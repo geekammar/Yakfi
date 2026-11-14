@@ -39,6 +39,9 @@ import {
   type AiIntent,
   type AiRequest,
   type AiResponse,
+  type DisclosureProposalStatus,
+  type KnowledgeFamily,
+  type ProposedKnowledgeFamilyObservation,
 } from "@/features/conversations/server/ai-contract";
 import {
   buildBusinessAboutContent,
@@ -100,6 +103,12 @@ export const DISCLOSURE_REFUSAL_REASONS = [
    */
   "UNAVAILABLE_IN_REQUEST",
   /**
+   * The proposal supplied a structured family label outside the canonical
+   * machine vocabulary. Fails closed with a distinct diagnostic instead of
+   * being conflated with an excluded ledger family.
+   */
+  "UNKNOWN_KNOWLEDGE_FAMILY",
+  /**
    * The proposal matched multiple distinct records or supplied conflicting
    * references (ISS-012). Fails closed rather than arbitrarily guessing.
    */
@@ -124,9 +133,29 @@ export type SupportChannel =
 
 export type TaskSupportFamily = {
   /** The disclosure-ledger key this task draws its answer from. */
-  readonly family: string | null;
+  readonly family: KnowledgeFamily | null;
   /** The `AiRequest` field that carries the family, if any. */
   readonly channel: SupportChannel;
+};
+
+/**
+ * Bounded operator evidence for ONE disclosure refusal. It never carries the
+ * raw model label, reply text, source content, customer text or a secret:
+ * `unknownFamily`/`conflict`/`missing` are collapsed into the closed
+ * `proposalStatus`, and only a canonical family (or the closed `UNKNOWN`
+ * sentinel) is exposed.
+ */
+export type DisclosureRefusalDiagnostics = {
+  /** The validated declared intent that proposed the reply. */
+  readonly declaredIntent: AiIntent;
+  /** How the structured family proposal resolved. */
+  readonly proposalStatus: DisclosureProposalStatus;
+  /** Canonical resolved family, the closed UNKNOWN sentinel, or null. */
+  readonly proposedFamily: ProposedKnowledgeFamilyObservation;
+  /** The relevant ledger record's included verdict, when applicable. */
+  readonly ledgerIncluded: boolean | null;
+  /** The relevant ledger record's disclosable verdict, when applicable. */
+  readonly ledgerDisclosable: boolean | null;
 };
 
 export const KNOWLEDGE_FREE_REPLY_INTENTS: ReadonlyArray<AiIntent> = [
@@ -196,6 +225,8 @@ export type DisclosureResult =
   | {
       readonly kind: "requires-human";
       readonly reason: DisclosureRefusalReason;
+      /** Bounded, content-free refinement of the refusal (see above). */
+      readonly diagnostics: DisclosureRefusalDiagnostics;
     };
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -287,10 +318,11 @@ export function supportFamilyForProposedKnowledge(
 }
 
 export type ResolvedKnowledgeProposal = {
-  family: string | null;
+  family: KnowledgeFamily | null;
   sourceId: string | null;
-  conflict?: boolean;
-  invalidFamily?: boolean;
+  conflict: boolean;
+  invalidFamily: boolean;
+  status: DisclosureProposalStatus;
 };
 
 function extractEntityProposal(
@@ -304,12 +336,12 @@ function extractEntityProposal(
     | null
     | undefined,
 ): {
-  family: string | null;
+  family: KnowledgeFamily | null;
   sourceId: string | null;
   conflict: boolean;
   invalidFamily: boolean;
 } {
-  let family: string | null = null;
+  let family: KnowledgeFamily | null = null;
   let sourceId: string | null = null;
   let conflict = false;
   let invalidFamily = false;
@@ -326,9 +358,10 @@ function extractEntityProposal(
       family = familyCandidate.family;
     } else if (familyCandidate === "GENERIC_FAQ") {
       family = "business.faqs";
-    } else if (raw.includes(".")) {
-      invalidFamily = true;
     } else {
+      // A legacy string knowledgeRef is a SOURCE REFERENCE, never a family
+      // identifier. Dots are valid inside source ids ("svc.1"), so they
+      // cannot be used to guess that an unknown string is a family label.
       sourceId = raw;
     }
   } else if (entity.knowledgeRef && typeof entity.knowledgeRef === "object") {
@@ -365,7 +398,7 @@ function extractEntityProposal(
   ) {
     const rawReq = entity.requiredKnowledge.trim();
     const familyCandidate = supportFamilyForProposedKnowledge(rawReq);
-    let reqFamily: string | null = null;
+    let reqFamily: KnowledgeFamily | null = null;
     if (familyCandidate && familyCandidate !== "GENERIC_FAQ") {
       reqFamily = familyCandidate.family;
     } else if (familyCandidate === "GENERIC_FAQ") {
@@ -416,8 +449,15 @@ export function resolveKnowledgeProposal(
 
   const family = goalProp.family ?? respProp.family ?? null;
   const sourceId = goalProp.sourceId ?? respProp.sourceId ?? null;
+  const status: DisclosureProposalStatus = conflict
+    ? "CONFLICT"
+    : invalidFamily
+      ? "UNKNOWN_FAMILY"
+      : family
+        ? "RESOLVED"
+        : "MISSING";
 
-  return { family, sourceId, conflict, invalidFamily };
+  return { family, sourceId, conflict, invalidFamily, status };
 }
 
 /**
@@ -453,9 +493,29 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   const { response, context } = input;
   const ledger = context.facts;
 
+  // Diagnostics accumulate as the structural proposal is resolved. They are
+  // closed machine values only: no raw model label, reply text or source id.
+  let proposalStatus: DisclosureProposalStatus = "MISSING";
+  let proposedFamily: ProposedKnowledgeFamilyObservation = null;
+
+  const refuse = (
+    reason: DisclosureRefusalReason,
+    record?: ContextFactRecord | null,
+  ): DisclosureResult => ({
+    kind: "requires-human",
+    reason,
+    diagnostics: {
+      declaredIntent: response.intent,
+      proposalStatus,
+      proposedFamily,
+      ledgerIncluded: record ? record.included : null,
+      ledgerDisclosable: record ? record.disclosable : null,
+    },
+  });
+
   // ── Invariant: FORBIDDEN material never backs a reply (defense in depth).
   if (ledger.some((fact) => fact.visibility === "FORBIDDEN" && fact.included)) {
-    return { kind: "requires-human", reason: "FORBIDDEN_FACT_IN_CONTEXT" };
+    return refuse("FORBIDDEN_FACT_IN_CONTEXT");
   }
 
   // ── Routing actions are the fallback channel: they disclose no knowledge.
@@ -471,7 +531,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   // ── A routing intent declaring a `reply` discloses nothing it may stand behind.
   const primarySupport = TASK_SUPPORT_FAMILIES[response.intent];
   if (!primarySupport.family) {
-    return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+    return refuse("EXCLUDED_FROM_CONTEXT");
   }
 
   const goals = synthesizeDecisionGoals(response);
@@ -482,21 +542,34 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   const proposal = resolveKnowledgeProposal(response, currentAnswerGoal);
   if (isIdentity) {
     proposal.family = "business.identity";
+    proposal.conflict = false;
+    proposal.invalidFamily = false;
+    proposal.status = "RESOLVED";
   }
+  proposalStatus = proposal.status;
+  proposedFamily =
+    proposal.status === "RESOLVED"
+      ? proposal.family
+      : proposal.status === "UNKNOWN_FAMILY"
+        ? "UNKNOWN"
+        : null;
 
   if (proposal.conflict) {
-    return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+    return refuse("AMBIGUOUS_MATCH");
   }
   if (proposal.invalidFamily) {
-    return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+    return refuse("UNKNOWN_KNOWLEDGE_FAMILY");
   }
   if (!proposal.family) {
-    return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+    return refuse("UNAVAILABLE_IN_REQUEST");
   }
 
   // ── Unambiguous structured knowledge-family/operation selection
   switch (proposal.family) {
     case "business.identity": {
+      const record = ledger.find(
+        (f) => f.key === "business.identity" || f.key === "business.name",
+      );
       if (proposal.sourceId) {
         const sId = proposal.sourceId.trim();
         const validRefs = [
@@ -507,23 +580,20 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           "identity",
         ].filter(Boolean);
         if (!validRefs.includes(sId)) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+          return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
         }
       }
-      const record = ledger.find(
-        (f) => f.key === "business.identity" || f.key === "business.name",
-      );
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       if (
         !context.request.businessName ||
         context.request.businessName.trim().length === 0
       ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       return {
         kind: "disclosed",
@@ -535,6 +605,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       };
     }
     case "business.address": {
+      const record = ledger.find((f) => f.key === "business.address");
       if (proposal.sourceId) {
         const sId = proposal.sourceId.trim();
         const validRefs = [
@@ -544,21 +615,20 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           "address",
         ].filter(Boolean);
         if (!validRefs.includes(sId)) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+          return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
         }
       }
-      const record = ledger.find((f) => f.key === "business.address");
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       if (
         !context.request.businessAddress ||
         context.request.businessAddress.trim().length === 0
       ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       return {
         kind: "disclosed",
@@ -570,6 +640,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       };
     }
     case "business.about": {
+      const record = ledger.find((f) => f.key === "business.about");
       if (proposal.sourceId) {
         const sId = proposal.sourceId.trim();
         const validRefs = [
@@ -579,21 +650,20 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           "about",
         ].filter(Boolean);
         if (!validRefs.includes(sId)) {
-          return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+          return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
         }
       }
-      const record = ledger.find((f) => f.key === "business.about");
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       if (
         !context.request.businessAbout ||
         context.request.businessAbout.trim().length === 0
       ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       return {
         kind: "disclosed",
@@ -604,17 +674,16 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         ),
       };
     }
-    case "service.name":
-    case "service.catalog": {
+    case "service.name": {
       const record = ledger.find((f) => f.key === "service.name");
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       if (context.request.services.length === 0) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       if (proposal.sourceId) {
         const sId = proposal.sourceId.trim();
@@ -630,10 +699,10 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
             (s) => s.id === sId || s.name.trim() === sId,
           );
           if (matches.length === 0) {
-            return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+            return refuse("UNAVAILABLE_IN_REQUEST", record);
           }
           if (matches.length > 1) {
-            return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+            return refuse("AMBIGUOUS_MATCH", record);
           }
           return {
             kind: "disclosed",
@@ -651,36 +720,37 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       };
     }
     case "service.price": {
+      const aggregateRecord = ledger.find((f) => f.key === "service.price");
       if (!proposal.sourceId) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }
       const sId = proposal.sourceId.trim();
       const matches = context.request.services.filter(
         (s) => s.id === sId || s.name.trim() === sId,
       );
       if (matches.length === 0) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }
       if (matches.length > 1) {
-        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null);
       }
       const matchedService = matches[0]!;
-      if (
-        typeof matchedService.price !== "string" ||
-        matchedService.price.trim().length === 0
-      ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-      }
       const record = ledger.find(
         (f) =>
           f.key === "service.price" ||
           f.key === `service.price:${matchedService.id}`,
       );
+      if (
+        typeof matchedService.price !== "string" ||
+        matchedService.price.trim().length === 0
+      ) {
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+      }
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       return {
         kind: "disclosed",
@@ -693,36 +763,39 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       };
     }
     case "service.description": {
+      const aggregateRecord = ledger.find(
+        (f) => f.key === "service.description",
+      );
       if (!proposal.sourceId) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }
       const sId = proposal.sourceId.trim();
       const matches = context.request.services.filter(
         (s) => s.id === sId || s.name.trim() === sId,
       );
       if (matches.length === 0) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }
       if (matches.length > 1) {
-        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null);
       }
       const matchedService = matches[0]!;
-      if (
-        typeof matchedService.description !== "string" ||
-        matchedService.description.trim().length === 0
-      ) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-      }
       const record = ledger.find(
         (f) =>
           f.key === "service.description" ||
           f.key === `service.description:${matchedService.id}`,
       );
+      if (
+        typeof matchedService.description !== "string" ||
+        matchedService.description.trim().length === 0
+      ) {
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+      }
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       return {
         kind: "disclosed",
@@ -735,29 +808,29 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       };
     }
     case "business.faqs": {
-      if (!proposal.sourceId) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
-      }
       const record = ledger.find((f) => f.key === "business.faqs");
+      if (!proposal.sourceId) {
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+      }
       if (!record || !record.included) {
-        return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
       }
       if (!record.disclosable) {
-        return { kind: "requires-human", reason: "NOT_DISCLOSABLE" };
+        return refuse("NOT_DISCLOSABLE", record);
       }
       const sId = proposal.sourceId.trim();
       const matches = context.request.faqs.filter(
         (f) => (f.id && f.id === sId) || f.question.trim() === sId,
       );
       if (matches.length === 0) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       if (matches.length > 1) {
-        return { kind: "requires-human", reason: "AMBIGUOUS_MATCH" };
+        return refuse("AMBIGUOUS_MATCH", record);
       }
       const matchedFaq = matches[0]!;
       if (!matchedFaq.answer || matchedFaq.answer.trim().length === 0) {
-        return { kind: "requires-human", reason: "UNAVAILABLE_IN_REQUEST" };
+        return refuse("UNAVAILABLE_IN_REQUEST", record);
       }
       return {
         kind: "disclosed",
@@ -766,8 +839,31 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         renderedContent: matchedFaq.answer.trim(),
       };
     }
+    case "domain.availability": {
+      const record = ledger.find((f) => f.key === "domain.availability");
+      if (!record || !record.included) {
+        // No domain-computed availability was carried for this turn.
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+      }
+      // Availability is DOMAIN-owned. Even when it was carried, a
+      // model-authored reply must never re-author or invent slots; the
+      // existing domain booking/availability path owns that response.
+      return refuse("NOT_DISCLOSABLE", record);
+    }
+    case "business.cancellationPolicy": {
+      // No AiRequest channel exists for this CONDITIONAL family today; the
+      // existing cancellation/reschedule handoff path remains authoritative.
+      const record = ledger.find(
+        (f) => f.key === "business.cancellationPolicy",
+      );
+      return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+    }
     default: {
-      return { kind: "requires-human", reason: "EXCLUDED_FROM_CONTEXT" };
+      // Defense in depth: a canonical family that this switch does not know
+      // is still classified as an unknown family, never as a ledger exclusion.
+      proposalStatus = "UNKNOWN_FAMILY";
+      proposedFamily = "UNKNOWN";
+      return refuse("UNKNOWN_KNOWLEDGE_FAMILY");
     }
   }
 }

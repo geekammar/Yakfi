@@ -51,6 +51,12 @@ because it is genuinely sent to the LLM. The provider's
 **execution/wiring/validation** (endpoint, secretRef, timeout, response
 normalization) stays inside the adapter and is never a prompt.
 
+The shared `buildPromptMessages()` also appends a provider-neutral
+**knowledge-family contract directive** derived at runtime from the canonical
+`knowledgeFamilyValues` in `ai-contract.ts`. It is not a second prompt body, has
+no provider-specific copy or synonym list, and does not change the generated
+`.prompt` artifact.
+
 ## Deterministic classifier behavior (NOT LLM prompts)
 
 These five specs document the deterministic classifier. They are **not**

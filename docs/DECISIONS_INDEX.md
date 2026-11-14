@@ -119,6 +119,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 102 | Temporal correction authority + structured calendar clarification | dates/offers/leap years | [#102](DECISIONS.md) |
 | 103 | Stale-session sign-in redirect loop repair (ISS-017) | auth screens/proxy/session | [#103](DECISIONS.md) |
 | 104 | Truthful unknown-information replies + disclosure/handoff boundary | unknown info/disclosure/handoff | [#104](DECISIONS.md) |
+| 106 | Knowledge-family contract, domain-availability handling, bounded refusal evidence | AI disclosure/contract/availability/evidence | [#106](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -135,3 +136,6 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   see `AGENT_RULES.md` §4.
 - Decision #105 exists only on the open PR #79 branch and is intentionally not
   listed here as a `main` decision. See `docs/CURRENT_STATE.md` §3 and §7.
+- Decision #106 is a DRAFT repair proposal on
+  `fix/knowledge-family-disclosure-contract`, not a merged `main` decision.
+  R6 historical attribution remains unproven.
