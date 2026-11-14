@@ -2846,27 +2846,27 @@ async function runSuite(): Promise<void> {
       },
     });
 
-    const identityReply = (
-      overrides: Partial<AiResponse> = {},
-    ): AiResponse => ({
-      intent: "FAQ",
-      action: "reply",
-      content: "اسم العيادة هو مركز رعاية الأسنان التخصصي.",
-      extraction: emptyExtraction,
-      handoffReason: null,
-      summary: null,
-      safetyAssessment: "safe",
-      goals: [
-        {
-          kind: "ANSWER",
-          intent: "FAQ",
-          requiredKnowledge: "business.identity",
-        },
-      ],
-      ...overrides,
-    });
-    const identityDecision = (overrides: Partial<AiResponse> = {}) =>
-      enforceDisclosure({
+    function identityReply(overrides: Partial<AiResponse> = {}): AiResponse {
+      return {
+        intent: "FAQ",
+        action: "reply",
+        content: "اسم العيادة هو مركز رعاية الأسنان التخصصي.",
+        extraction: emptyExtraction,
+        handoffReason: null,
+        summary: null,
+        safetyAssessment: "safe",
+        goals: [
+          {
+            kind: "ANSWER",
+            intent: "FAQ",
+            requiredKnowledge: "business.identity",
+          },
+        ],
+        ...overrides,
+      };
+    }
+    function identityDecision(overrides: Partial<AiResponse> = {}) {
+      return enforceDisclosure({
         response: identityReply(overrides),
         context: {
           request: identityBuilt.request,
@@ -2874,6 +2874,7 @@ async function runSuite(): Promise<void> {
           scope: { businessId: TENANT_A },
         },
       });
+    }
 
     // A. Compatible top-level identity declaration + identity goal.
     const validIdentity = identityDecision({
@@ -2988,38 +2989,46 @@ async function runSuite(): Promise<void> {
 
     // Exhaustive canonical vocabulary/resolver consistency, using the
     // canonical definitions directly (no duplicated unchecked list).
-    const unresolvedFamilies = knowledgeFamilyValues.filter((family) => {
+    const unresolvedFamilies: string[] = [];
+    for (const family of knowledgeFamilyValues) {
       const resolved = supportFamilyForProposedKnowledge(family);
-      return (
+      if (
         !resolved ||
         resolved === "GENERIC_FAQ" ||
         resolved.family !== family
-      );
-    });
+      ) {
+        unresolvedFamilies.push(family);
+      }
+    }
     check(
       "16.G Every canonical knowledgeFamilyValues entry resolves to itself",
       unresolvedFamilies.length === 0,
       unresolvedFamilies,
     );
-    check(
-      "16.H Model-authorable families are a supported subset and exclude domain-owned families",
+    const authorableFamiliesAreCanonical =
       modelAuthorableKnowledgeFamilyValues.every((family) =>
         (knowledgeFamilyValues as readonly string[]).includes(family),
+      );
+    const authorableFamiliesExcludeDomain =
+      !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+        "domain.availability",
       ) &&
-        !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
-          "domain.availability",
-        ) &&
-        !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
-          "business.cancellationPolicy",
-        ),
+      !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+        "business.cancellationPolicy",
+      );
+    check(
+      "16.H Model-authorable families are a supported subset and exclude domain-owned families",
+      authorableFamiliesAreCanonical && authorableFamiliesExcludeDomain,
     );
     const serviceCatalogAlias =
       supportFamilyForProposedKnowledge("service.catalog");
+    const serviceCatalogAliasIsCanonical =
+      typeof serviceCatalogAlias === "object" &&
+      serviceCatalogAlias !== null &&
+      serviceCatalogAlias.family === "service.name";
     check(
       "16.I Existing service.catalog alias still resolves to service.name",
-      typeof serviceCatalogAlias === "object" &&
-        serviceCatalogAlias !== null &&
-        serviceCatalogAlias.family === "service.name",
+      serviceCatalogAliasIsCanonical,
     );
     check(
       "16.J Unsupported structured label still resolves as unknown",
