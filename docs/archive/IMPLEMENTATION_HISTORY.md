@@ -170,6 +170,12 @@ Preserved from the former `docs/DECISIONS_INDEX.md` row because this detail
 existed only there. This is historical implementation evidence, not a current
 instruction; the current verification policy is `docs/AGENT_RULES.md` §4.
 
+**Current supersession (14 November 2026):** the approved VPS rule makes the
+VPS source/text inspection, editing and Git only. The VPS-local
+`verify:local`/`verify:fast` behavior described below is historical evidence;
+those commands remain supported tools only in existing CI or an authorized
+isolated cloud runner. This archived text does not reactivate VPS execution.
+
 **LIGHTWEIGHT VPS DEVELOPMENT, CI-FIRST VERIFICATION & AGENT WORKFLOW
 OPTIMIZATION (DEVOPS-01E; zero reduction in CI quality; zero production
 migration; preserves existing deployment and pre-ship contracts

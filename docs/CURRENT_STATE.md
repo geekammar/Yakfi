@@ -84,10 +84,11 @@ Arabic-first RTL; no free-text keyword/regex intent matching.
   success does not establish AI availability, booking success or R6
   acceptance.
 
-**Boundaries for R6:** no rerun, application fix, configuration change or
-PR #79 modification is authorized by this finding. R6 remains an independent
-product verification; it can continue independently only if Muse already
-started it. R5 Preview staff-reply acceptance remains valid.
+**Boundaries for R6:** R6 was executed and its report received; no new customer
+probe or rerun is authorized. No application fix, configuration change or
+PR #79 modification is authorized by this finding. R6 remains an open product
+finding pending targeted code/contract review. R5 Preview staff-reply
+acceptance remains valid.
 
 ## 6. Blockers, unknowns and historical evidence
 
@@ -117,7 +118,13 @@ started it. R5 Preview staff-reply acceptance remains valid.
   Reconciliation of the candidate's #105 entry and its dated checkpoints is a
   reviewer decision after an explicit merge approval; a clean Git merge alone
   is not proof of correct combined documentation.
-- **Current task:** documentation draft PR pending reviewer inspection.
+- **Release-tooling scope decision (unresolved):** `pnpm check:version` runs
+  unconditionally and requires a strictly greater version; no docs-only
+  exemption exists. The approved policy forbids a docs-only version bump, so
+  PR #81's gate fails. Do not bypass or falsely mark it; reviewer/operator
+  decision required.
+- **Current task:** documentation review repairs applied; draft PR pending
+  reviewer re-inspection.
 - **Product next action:** reviewer/Ammar decide PR #79 reconciliation and the
   targeted R6 root-cause review. Do not merge, deploy, migrate, rerun R6 or
   modify the candidate as part of this documentation task.

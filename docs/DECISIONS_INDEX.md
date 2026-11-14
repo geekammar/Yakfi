@@ -107,7 +107,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 90 | Live pilot/product loop with Atria; READY_FOR_PILOT_EVIDENCE; no code change | pilot loop with Atria | [#90](DECISIONS.md) |
 | 91 | Assistant readiness + settings + low-friction setup; bounded name/style | assistant settings/readiness | [#91](DECISIONS.md) |
 | 92 | OpenRouter provider pin: Superadmin-only, OpenRouter-only; default unchanged | OpenRouter cost routing | [#92](DECISIONS.md) |
-| 93 | Lightweight VPS development + CI-first verification (DEVOPS-01E) | local verification/VPS safety | [#93](archive/IMPLEMENTATION_HISTORY.md) |
+| 93 | DEVOPS-01E VPS development (historical; superseded by AGENT_RULES §4) | history only; not a VPS permission | [#93](archive/IMPLEMENTATION_HISTORY.md) |
 | 94 | Reliable appointment reminders, configurable hours, safe customization | reminders/scheduler | [#94](DECISIONS.md) |
 | 95 | Semantic safety ownership + false-handoff repair; `safetyAssessment` | turn control/sensitive handoff | [#95](DECISIONS.md) |
 | 96 | Physical-attempt accounting and control audit (CORE-04A) | attempt accounting/telemetry | [#96](DECISIONS.md) |
@@ -130,6 +130,8 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 ## Notes
 
 - `#93` is preserved in the Tier 3 archive because its detailed implementation
-  narrative existed only in the former index row, not in `DECISIONS.md`.
+  narrative existed only in the former index row, not in `DECISIONS.md`. Its
+  VPS-local check behavior is historical and does not authorize VPS execution;
+  see `AGENT_RULES.md` §4.
 - Decision #105 exists only on the open PR #79 branch and is intentionally not
   listed here as a `main` decision. See `docs/CURRENT_STATE.md` §3 and §7.

@@ -117,34 +117,36 @@ not begin by loading every conversation, provider and booking source file.
 - **The repository code is implementation truth.** Docs do not override code;
   state honestly whether work is BUILT, DOCUMENTED or NOT built.
 
-## 4. Verification, CI and VPS safety (DEVOPS-01E)
+## 4. Verification, CI and VPS execution boundary
 
-FlowPilot is **CI-first**. Full production builds and browser testing are
-owned by GitHub Actions CI and Vercel, not the VPS.
+**Current approved rule (supersedes conflicting historical guidance):** on the
+VPS, perform **source/text inspection, editing and Git only**. Do **not**
+execute package installation, code generation, app runtime/dev server,
+formatter, lint, typecheck, tests, builds, or database commands on the VPS; do
+not invoke any package script (`pnpm *`, `next`, `tsx`) there. Reading source
+and tests is allowed; executing package scripts is not.
 
-- **Normal implementation work on the VPS:** run targeted module checks
-  (`pnpm check:<module>`) and the lightweight gates `pnpm verify:local` or
-  `pnpm verify:fast`. Do **not** run full `pnpm verify`, `next build`, local
-  Playwright/browser suites or a local production server. Do not run heavy
-  processes concurrently or repeatedly run unchanged suites.
-- **Full gate:** GitHub Actions (`pr-validation.yml`) runs `pnpm verify`
-  (lint, typecheck, format, production build) and Playwright UX QA in isolated
-  runners. Vercel owns Preview/Production builds.
-- **Documentation-only changes:** do not run package installation, code
-  generation, formatter, lint, typecheck, tests or builds on the VPS. Use
-  existing CI docs/format checks. Report a check as
-  `PASS` / `FAIL` / `BLOCKED` / `NOT RUN`; never claim an unexecuted check
-  passed.
-- **Database:** dev migrations may run locally; Production migrations are
-  operator-authorized via `.github/workflows/production-db-migrate.yml` and are
-  never automatic. Never reset or seed Production data from local development.
-- **Versions:** follow the existing release rules. A documentation-only change
-  does not bump the application version. If a proven mandatory gate demands a
-  non-documentation change, report the exact evidence instead of making it.
-- **Resource inspection:** `free -h`, `ps aux --sort=-%mem | head -n 10`,
-  `pgrep -af "next|eslint|tsc|playwright|node"`; use
-  `ps -o pid,stat,time,%cpu,comm -p <PID>` over 3–5 seconds to distinguish slow
-  work from a freeze (VPS swap is 0 B).
+- **Required checks:** run in existing GitHub Actions CI (`pr-validation.yml`)
+  or an authorized isolated cloud runner. The full gate is `pnpm verify`
+  (lint, typecheck, format, production build) plus Playwright UX QA. Vercel
+  owns Preview/Production builds.
+- **CI-first:** push the branch/PR and let the existing gate run. Do not claim
+  completion before required CI checks pass. Report `PASS` / `FAIL` /
+  `BLOCKED` / `NOT RUN`; never claim an unexecuted check passed.
+- **Documentation-only changes:** same VPS boundary; run docs/format checks in
+  existing CI or an authorized cloud runner.
+- **Database:** do not execute database commands on the VPS. Development
+  database work belongs in an authorized non-VPS environment or CI. Production
+  migrations are operator-authorized via
+  `.github/workflows/production-db-migrate.yml` and are never automatic.
+- **Version gate:** the approved policy is no application version bump for
+  documentation-only changes. The current mandatory `pnpm check:version`
+  (`scripts/check-pr-version.mjs`) requires a strictly greater version and has
+  **no docs-only exemption**. This is an unresolved release-tooling scope
+  decision: do not bypass, disable or falsely mark the gate.
+- **Historical guidance:** older DEVOPS-01E VPS-local check text is archived as
+  dated evidence only; it is **not** an operative permission and does not
+  override this section.
 
 ## 5. Change lifecycle
 
@@ -153,8 +155,9 @@ owned by GitHub Actions CI and Vercel, not the VPS.
 3. **Plan:** align with `BUILD_STATE.md → Current State + Next Step` or the
    approved task contract; produce a concise plan.
 4. **Implement:** the smallest safe change, only within the current scope.
-5. **Verify:** targeted checks + the lightweight gate locally, then the full
-   gate in CI. Do not claim completion before required CI checks pass.
+5. **Verify:** run required checks in existing CI or an authorized isolated
+   cloud runner. Do not execute package commands on the VPS. Do not claim
+   completion before required CI checks pass.
 6. **Document:** update `BUILD_STATE.md` minimally (status, completed work,
    known issues, next step); append to `DECISIONS.md` when a decision is made.
 7. **Report honestly** and leave the repository ready for the next fresh
@@ -162,13 +165,17 @@ owned by GitHub Actions CI and Vercel, not the VPS.
 
 **Never:** add unapproved features or infrastructure; redesign the recorded
 architecture; redo completed work; commit secrets; commit/tag/push/release
-unless explicitly instructed; skip verification; execute Production
-migrations automatically; recreate removed documentation files.
+unless explicitly instructed; skip required CI verification; execute
+Production migrations automatically; recreate removed documentation files.
 
 ## 6. Authority order and escalation
 
-On conflict: latest `DECISIONS.md` entry → `BUILD_STATE.md` → canonical topic
-docs → derived summaries. The repository code remains implementation truth.
+On product/documentation conflict: latest `DECISIONS.md` entry →
+`BUILD_STATE.md` → canonical topic docs → derived summaries. The repository
+code remains implementation truth. For **current operational permissions**, this
+file's approved VPS boundary overrides older guides and historical text; old
+docs are evidence, not active permissions. Do not let the old authority chain
+silently reactivate obsolete VPS execution.
 
 If a task requires something marked prohibited, a scope change, a
 contradictory product interpretation or an unverified live action: **STOP**.
