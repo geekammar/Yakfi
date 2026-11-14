@@ -31,9 +31,7 @@ const LONG_THREAD_FIXTURE_READY_TEXT =
 
 async function waitForSignInFormHydration(page: Page): Promise<void> {
   const passwordInput = page.locator('input[id="password"]');
-  const revealPassword = page.locator(
-    'button[aria-label="إظهار كلمة المرور"]',
-  );
+  const revealPassword = page.locator('button[aria-label="إظهار كلمة المرور"]');
   await expect(revealPassword).toBeVisible();
 
   // The reveal toggle is a client-only handler: observing it change the input
