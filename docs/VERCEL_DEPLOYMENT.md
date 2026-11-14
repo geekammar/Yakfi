@@ -232,6 +232,7 @@ pnpm deploy             # full gate → production deployment URL (deploy:produc
 
 ## SECTION 6 — Troubleshooting
 
+<!-- prettier-ignore -->
 | Symptom                                                             | Fix                                                                                                                                                                                                   |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Build fails: `Invalid server environment variables` (Arabic output) | One of the 4 env vars is missing/invalid **in Vercel project settings**. Add it (Section 3), then Redeploy. Verify with `pnpm vercel:check` in an authorized non-VPS environment or CI.              |

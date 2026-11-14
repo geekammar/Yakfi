@@ -8,6 +8,7 @@
 
 ## Setup & Tooling
 
+<!-- prettier-ignore -->
 | Symptom                                                                  | Fix                                                                                                                                                                         |
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm: /usr/bin/env: bad interpreter` (Termux)                           | Stock pnpm shim is broken on Termux. Run `bash scripts/bootstrap-termux.sh` — it installs a node wrapper at `$PREFIX/bin/pnpm` (only when `pnpm --version` actually fails). |
@@ -31,6 +32,7 @@
 
 ## Database & Prisma
 
+<!-- prettier-ignore -->
 | Symptom                                                       | Fix                                                                                                                                 |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `prisma migrate`/`db push` fails on Termux                    | The schema engine can't run on Android. Apply schema from desktop/CI: `pnpm db:deploy`. Dev server itself runs fine.                |
@@ -65,6 +67,7 @@ The diagnostics below are read-only. They do not authorize package execution on
 the VPS. Historical DEVOPS-01E local-check guidance is superseded by
 `AGENT_RULES.md` §4.
 
+<!-- prettier-ignore -->
 | Symptom                                             | Cause                                                                            | Diagnostic Command                                | Fix                                                                                                                                              |
 | --------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Terminal or AGY session lags / becomes unresponsive | VPS memory saturation; zero swap space means Linux freezes under memory pressure | `free -h`                                         | The approved rule prohibits all package execution on the VPS. Do not start builds/tests/checks; stop any stray package process and report. Use existing CI or an authorized isolated cloud runner. |
