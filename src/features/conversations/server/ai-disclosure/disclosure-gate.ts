@@ -34,6 +34,7 @@
 
 import type { ContextFactRecord } from "@/features/conversations/server/ai-context-builder";
 import {
+  knowledgeFamilyValues,
   synthesizeDecisionGoals,
   type AiGoal,
   type AiIntent,
@@ -136,6 +137,21 @@ export type TaskSupportFamily = {
   readonly family: KnowledgeFamily | null;
   /** The `AiRequest` field that carries the family, if any. */
   readonly channel: SupportChannel;
+};
+
+/** The canonical family → request-channel map (single source for resolution). */
+const CANONICAL_KNOWLEDGE_FAMILY_CHANNELS: Readonly<
+  Record<KnowledgeFamily, SupportChannel>
+> = {
+  "business.identity": "businessName",
+  "business.address": "businessAddress",
+  "business.about": "businessAbout",
+  "business.faqs": "faqs",
+  "service.name": "serviceNames",
+  "service.price": "services",
+  "service.description": "serviceDescriptions",
+  "domain.availability": "availability",
+  "business.cancellationPolicy": null,
 };
 
 /**
@@ -283,36 +299,35 @@ export function channelCarried(
 export function supportFamilyForProposedKnowledge(
   key: string,
 ): TaskSupportFamily | "GENERIC_FAQ" | null {
-  const norm = key.toLowerCase().trim();
+  const raw = key.trim();
+  // Every canonical value resolves to itself, including camelCase keys that a
+  // case-insensitive alias check would otherwise miss (cancellationPolicy).
+  const canonical = knowledgeFamilyValues.find(
+    (family) => family.toLowerCase() === raw.toLowerCase(),
+  );
+  if (canonical) {
+    return {
+      family: canonical,
+      channel: CANONICAL_KNOWLEDGE_FAMILY_CHANNELS[canonical],
+    };
+  }
+  const norm = raw.toLowerCase();
   switch (norm) {
-    case "business.identity":
     case "identity":
       return { family: "business.identity", channel: "businessName" };
-    case "business.address":
     case "address":
       return { family: "business.address", channel: "businessAddress" };
-    case "business.about":
     case "about":
       return { family: "business.about", channel: "businessAbout" };
-    case "service.price":
     case "price":
       return { family: "service.price", channel: "services" };
-    case "service.description":
     case "description":
       return { family: "service.description", channel: "serviceDescriptions" };
-    case "service.name":
     case "service.catalog":
     case "catalog":
       return { family: "service.name", channel: "serviceNames" };
-    case "business.faqs":
-      return { family: "business.faqs", channel: "faqs" };
-    case "domain.availability":
     case "availability":
       return { family: "domain.availability", channel: "availability" };
-    // Recognized but domain/handoff-owned: the gate refuses a model-authored
-    // reply with its explicit no-channel reason; it is never model-authorable.
-    case "business.cancellationPolicy":
-      return { family: "business.cancellationPolicy", channel: null };
     case "faq":
     case "none":
       return "GENERIC_FAQ";
