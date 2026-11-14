@@ -128,7 +128,8 @@ acceptance remains valid.
   metadata increment) or obtain an explicit reviewed scope decision. Do not
   document an unconditional rule that forbids the increment while requiring
   this gate to pass, and do not bypass or falsely mark the gate. CI remains
-  authoritative; this statement does not mean the gate has passed.
+  authoritative for the actual result; do not infer gate status from this
+  document.
 - **Merge-order implication:** if PR81 merges first at `0.79.8`, PR79 will need
   a later reviewed version increment, documentation reconciliation and checks
   before its eventual merge. That work is not performed in this task.
