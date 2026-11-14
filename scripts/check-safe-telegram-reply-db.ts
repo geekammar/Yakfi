@@ -1346,6 +1346,220 @@ async function main(): Promise<void> {
       ord14Res.ok === true && ord14Res.assignedUser?.id === STAFF_USER_A_ID,
       ord14Res,
     );
+    // Scenario 15: real legacy history from two bots must not poison new ingress.
+    const legacyChat = "987654399";
+    const legacyCustomer = await db.customer.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        name: "عميل تاريخ مختلط",
+        phone: legacyChat,
+      },
+    });
+    const legacyThread = await db.conversation.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        branchId: DEFAULT_BRANCH_ID,
+        customerId: legacyCustomer.id,
+        assignedUserId: STAFF_USER_B_ID,
+        status: "NEED_HUMAN",
+        lastMessageAt: new Date(),
+      },
+    });
+    for (const historicalBot of [
+      BOT_EXTERNAL_ID,
+      String(Number(BOT_EXTERNAL_ID) + 77),
+    ]) {
+      const historicalMessage = await db.message.create({
+        data: {
+          conversationId: legacyThread.id,
+          senderType: "CUSTOMER",
+          content: "دليل قديم محفوظ",
+        },
+      });
+      await db.inboundMessageDedupe.create({
+        data: {
+          businessId: TEST_BUSINESS_ID,
+          externalKey: `tg:${historicalBot}:legacy15`,
+          conversationId: legacyThread.id,
+          customerMessageId: historicalMessage.id,
+        },
+      });
+    }
+    const freshInput = {
+      to: BOT_EXTERNAL_ID,
+      from: legacyChat,
+      text: "رسالة واردة موثقة جديدة",
+      receivedAt: new Date().toISOString(),
+      externalId: `tg:${BOT_EXTERNAL_ID}:fresh15`,
+    };
+    const freshIdentity = {
+      businessId: TEST_BUSINESS_ID,
+      branchId: DEFAULT_BRANCH_ID,
+      connectionId: connection.id,
+    };
+    const isolatedIngress = await receiveInboundMessage(
+      engineDeps,
+      freshInput,
+      freshIdentity,
+    );
+    const isolatedId = isolatedIngress.ok ? isolatedIngress.conversationId : "";
+    check(
+      "15.1 Fresh authenticated ingress starts a separate thread from mixed-bot legacy history",
+      isolatedIngress.ok &&
+        !isolatedIngress.duplicate &&
+        isolatedId !== legacyThread.id,
+    );
+    const isolatedRoute = await db.conversationDeliveryRoute.findUnique({
+      where: { conversationId: isolatedId },
+    });
+    check(
+      "15.2 New thread route is bound atomically to the current verified bot, connection and recipient",
+      isolatedRoute?.businessId === TEST_BUSINESS_ID &&
+        isolatedRoute.connectionId === connection.id &&
+        isolatedRoute.botExternalId === BOT_EXTERNAL_ID &&
+        isolatedRoute.recipientExternalId === legacyChat,
+    );
+    const legacyAfterIngress = await db.conversation.findUnique({
+      where: { id: legacyThread.id },
+      include: { messages: true },
+    });
+    const legacyRoute = await db.conversationDeliveryRoute.findUnique({
+      where: { conversationId: legacyThread.id },
+    });
+    check(
+      "15.3 Legacy history, ownership and absent route remain unchanged",
+      legacyAfterIngress?.messages.length === 2 &&
+        legacyAfterIngress.assignedUserId === STAFF_USER_B_ID &&
+        legacyRoute === null,
+    );
+    const legacyGuard = await resolveConversationRoute(
+      legacyThread.id,
+      TEST_BUSINESS_ID,
+    );
+    check(
+      "15.4 Mixed legacy thread remains safely unroutable; no route guard is weakened",
+      !legacyGuard.routable && legacyGuard.code === "MISSING_ROUTE",
+    );
+    const duplicateIngress = await receiveInboundMessage(
+      engineDeps,
+      freshInput,
+      freshIdentity,
+    );
+    const continuedIngress = await receiveInboundMessage(
+      engineDeps,
+      { ...freshInput, externalId: `tg:${BOT_EXTERNAL_ID}:fresh15_next` },
+      freshIdentity,
+    );
+    check(
+      "15.5 Same update stays idempotent and subsequent updates reuse the compatible thread",
+      duplicateIngress.ok &&
+        duplicateIngress.duplicate &&
+        duplicateIngress.conversationId === isolatedId &&
+        continuedIngress.ok &&
+        continuedIngress.conversationId === isolatedId &&
+        (await db.message.count({
+          where: { conversationId: isolatedId, senderType: "CUSTOMER" },
+        })) === 2,
+    );
+    const beforeIsolatedSend = providerCallCount;
+    const isolatedReply = await submitStaffReply({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: isolatedId,
+      staffUserId: STAFF_USER_A_ID,
+      content: "رد الموظف على المسار الجديد",
+      clientSubmissionId: `isolated15_${randomUUID()}`,
+      deps: { api: fakeApi, credentialsResolver: testCredentialsResolver },
+    });
+    check(
+      "15.6 Staff reply on the isolated thread reaches the exact recipient with one physical provider request",
+      isolatedReply.ok &&
+        providerCallCount === beforeIsolatedSend + 1 &&
+        providerCalls.at(-1)?.body.chat_id === legacyChat &&
+        providerCalls.at(-1)?.body.text === "رد الموظف على المسار الجديد",
+    );
+    const scope = {
+      channel: "telegram" as const,
+      connectionId: connection.id,
+      botExternalId: BOT_EXTERNAL_ID,
+      recipientExternalId: legacyChat,
+    };
+    check(
+      "15.7 A different connection, recipient or tenant cannot reuse the bound thread",
+      (await conversationRepository.findLatestByCustomer(
+        TEST_BUSINESS_ID,
+        legacyCustomer.id,
+        { ...scope, connectionId: randomUUID() },
+      )) === null &&
+        (await conversationRepository.findLatestByCustomer(
+          TEST_BUSINESS_ID,
+          legacyCustomer.id,
+          { ...scope, recipientExternalId: "different-recipient" },
+        )) === null &&
+        (await conversationRepository.findLatestByCustomer(
+          FOREIGN_BUSINESS_ID,
+          legacyCustomer.id,
+          scope,
+        )) === null,
+    );
+    check(
+      "15.8 Legacy staff ownership remains intact after the new thread's accepted reply",
+      (await db.conversation.findUnique({ where: { id: legacyThread.id } }))
+        ?.assignedUserId === STAFF_USER_B_ID,
+    );
+
+    const cleanChat = "987654398";
+    const cleanCustomer = await db.customer.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        name: "عميل تاريخ متوافق",
+        phone: cleanChat,
+      },
+    });
+    const cleanThread = await db.conversation.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        branchId: DEFAULT_BRANCH_ID,
+        customerId: cleanCustomer.id,
+        assignedUserId: STAFF_USER_B_ID,
+        status: "NEED_HUMAN",
+      },
+    });
+    const cleanMessage = await db.message.create({
+      data: {
+        conversationId: cleanThread.id,
+        senderType: "CUSTOMER",
+        content: "دليل من نفس البوت",
+      },
+    });
+    await db.inboundMessageDedupe.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        externalKey: `tg:${BOT_EXTERNAL_ID}:clean15_old`,
+        conversationId: cleanThread.id,
+        customerMessageId: cleanMessage.id,
+      },
+    });
+    const cleanIngress = await receiveInboundMessage(
+      engineDeps,
+      {
+        ...freshInput,
+        from: cleanChat,
+        externalId: `tg:${BOT_EXTERNAL_ID}:clean15_new`,
+      },
+      freshIdentity,
+    );
+    check(
+      "15.9 Compatible legacy thread is reused and gains its verified route without losing its human owner",
+      cleanIngress.ok &&
+        cleanIngress.conversationId === cleanThread.id &&
+        (
+          await db.conversationDeliveryRoute.findUnique({
+            where: { conversationId: cleanThread.id },
+          })
+        )?.recipientExternalId === cleanChat &&
+        (await db.conversation.findUnique({ where: { id: cleanThread.id } }))
+          ?.assignedUserId === STAFF_USER_B_ID,
+    );
   } finally {
     // Cleanup test data
     console.log("\nCleaning up test data...");
