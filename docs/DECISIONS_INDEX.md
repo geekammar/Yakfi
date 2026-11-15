@@ -122,6 +122,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 105 | Safe Telegram staff reply delivery, route authority, reconciliation and attempt identity | staff reply delivery/routes/idempotency | [#105](DECISIONS.md) |
 | 106 | Knowledge-family contract, domain-availability handling, bounded refusal evidence | AI disclosure/contract/availability/evidence | [#106](DECISIONS.md) |
 | 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
+| 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -136,7 +137,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   narrative existed only in the former index row, not in `DECISIONS.md`. Its
   VPS-local check behavior is historical and does not authorize VPS execution;
   see `AGENT_RULES.md` §4.
-- Decisions #105 and #106 are carried by the draft integration candidate from
-  PR #79 and PR #82 respectively; neither is a merged `main` decision. R6
-  historical attribution remains unproven. Decision #107 is prepared in draft
-  PR #83 and is not executed; see `docs/CURRENT_STATE.md` §9.
+- Decisions #105–#107 were merged to `main` through PR #83
+  (`f15deded`, `v0.79.10`); #107's runtime consolidation itself remains prepared,
+  not executed. R6 historical attribution remains unproven. Decision #108 is a
+  draft live-refresh repair candidate and is not merged or deployed.

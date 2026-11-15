@@ -7,8 +7,15 @@ import {
   transitionConversation,
   updateAiSummary,
 } from "@/features/conversations/actions/conversation-actions";
+import { refreshConversationDetail } from "@/features/conversations/actions/conversation-refresh-actions";
 import { ConversationActions } from "@/features/conversations/components/conversation-actions";
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
+import {
+  CONVERSATION_REFRESH_INTERVAL_MS,
+  conversationRefreshDelay,
+  mergeConversationRefresh,
+  replaceConversationMessageId,
+} from "@/features/conversations/lib/live-refresh";
 import {
   getStoredDraft,
   getStoredDraftMeta,
@@ -338,6 +345,9 @@ export function ConversationDetail({
   const [data, setData] = useState(initialData);
   const [reply, setReply] = useState("");
   const [summary, setSummary] = useState(initialData.aiSummary);
+  const summaryRef = useRef(initialData.aiSummary);
+  const serverSummaryRef = useRef(initialData.aiSummary);
+  const summaryRevisionRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"messages" | "context">(
@@ -346,6 +356,15 @@ export function ConversationDetail({
   const [isPending, startTransition] = useTransition();
   const messageEndRef = useRef<HTMLDivElement>(null);
   const messageLogRef = useRef<HTMLDivElement>(null);
+  const activeConversationIdRef = useRef(initialData.id);
+  const optimisticMessageIdsRef = useRef<Set<string>>(new Set());
+  const mutationVersionRef = useRef(0);
+  const localMutationInFlightRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshFailuresRef = useRef(0);
+  const refreshStoppedRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const NEAR_BOTTOM_THRESHOLD_PX = 100;
   const initialScrolledRef = useRef(false);
@@ -378,6 +397,27 @@ export function ConversationDetail({
 
   const effectiveBusinessId = propBusinessId ?? initialData.businessId;
   const effectiveUserId = initialData.currentUserId;
+
+  function beginServerMutation(): () => void {
+    mutationVersionRef.current += 1;
+    localMutationInFlightRef.current += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      localMutationInFlightRef.current = Math.max(
+        0,
+        localMutationInFlightRef.current - 1,
+      );
+      mutationVersionRef.current += 1;
+    };
+  }
+
+  function handleSummaryChange(value: string) {
+    summaryRevisionRef.current += 1;
+    summaryRef.current = value;
+    setSummary(value);
+  }
 
   // Track scroll position and proximity to bottom
   const handleLogScroll = () => {
@@ -465,6 +505,141 @@ export function ConversationDetail({
     });
   }, [effectiveBusinessId, effectiveUserId, data.id]);
 
+  // Lightweight live refresh while this thread stays open. The server action
+  // is a pure read (no attention acknowledgment, no ownership/message/booking
+  // writes). Requests never overlap, hidden tabs stop scheduling, focus/online
+  // triggers an immediate read, failures back off and keep the last good data.
+  useEffect(() => {
+    const conversationId = initialData.id;
+    let cancelled = false;
+    mountedRef.current = true;
+    refreshInFlightRef.current = false;
+    refreshStoppedRef.current = false;
+    refreshFailuresRef.current = 0;
+    activeConversationIdRef.current = conversationId;
+
+    const canRun = () =>
+      !cancelled &&
+      mountedRef.current &&
+      !refreshStoppedRef.current &&
+      document.visibilityState !== "hidden";
+
+    const clearTimer = () => {
+      if (refreshTimerRef.current !== null) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+
+    const schedule = (delayMs: number) => {
+      clearTimer();
+      if (!canRun()) return;
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        void run();
+      }, delayMs);
+    };
+
+    const run = async () => {
+      if (!canRun() || refreshInFlightRef.current) return;
+      refreshInFlightRef.current = true;
+      const requestConversationId = conversationId;
+      const requestMutationVersion = mutationVersionRef.current;
+
+      try {
+        const result = await refreshConversationDetail({
+          id: requestConversationId,
+        });
+
+        if (
+          !canRun() ||
+          activeConversationIdRef.current !== requestConversationId
+        ) {
+          return;
+        }
+
+        if (!result.success) {
+          if (
+            result.code === "UNAUTHENTICATED" ||
+            result.code === "FORBIDDEN" ||
+            result.code === "NOT_FOUND"
+          ) {
+            // Authorization/thread authority is gone: stop rather than hammer.
+            refreshStoppedRef.current = true;
+            return;
+          }
+          refreshFailuresRef.current += 1;
+          return;
+        }
+
+        // A newer local action (send/assignment/transition/summary) owns the
+        // screen now — never let an older read overwrite its result, and never
+        // apply a snapshot while a local mutation is still unresolved.
+        if (mutationVersionRef.current !== requestMutationVersion) return;
+        if (localMutationInFlightRef.current > 0) {
+          refreshFailuresRef.current = 0;
+          return;
+        }
+        if (result.data.id !== requestConversationId) return;
+
+        const previousServerSummary = serverSummaryRef.current;
+        const hasUnsavedSummary = summaryRef.current !== previousServerSummary;
+
+        setData((current) =>
+          mergeConversationRefresh(
+            current,
+            result.data,
+            optimisticMessageIdsRef.current,
+          ),
+        );
+
+        serverSummaryRef.current = result.data.aiSummary;
+        if (!hasUnsavedSummary) {
+          summaryRef.current = result.data.aiSummary;
+          setSummary(result.data.aiSummary);
+        }
+
+        refreshFailuresRef.current = 0;
+      } catch {
+        // Transient failure: retain the last good snapshot and back off.
+        refreshFailuresRef.current += 1;
+      } finally {
+        refreshInFlightRef.current = false;
+        schedule(conversationRefreshDelay(refreshFailuresRef.current));
+      }
+    };
+
+    const requestImmediateRefresh = () => {
+      if (!canRun()) return;
+      clearTimer();
+      void run();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+        return;
+      }
+      requestImmediateRefresh();
+    };
+
+    const handleFocusOrOnline = () => requestImmediateRefresh();
+
+    schedule(CONVERSATION_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocusOrOnline);
+    window.addEventListener("online", handleFocusOrOnline);
+
+    return () => {
+      cancelled = true;
+      mountedRef.current = false;
+      clearTimer();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocusOrOnline);
+      window.removeEventListener("online", handleFocusOrOnline);
+    };
+  }, [initialData.id]);
+
   const handleReplyTextChange = (text: string) => {
     draftRevisionRef.current += 1;
     currentDraftIdRef.current = crypto.randomUUID();
@@ -541,12 +716,18 @@ export function ConversationDetail({
   function handleTransition(
     transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF",
   ) {
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
-      const success = await runAction(() =>
-        onTransition
-          ? onTransition({ id: data.id, transition })
-          : transitionConversation({ id: data.id, transition }),
-      );
+      let success = false;
+      try {
+        success = await runAction(() =>
+          onTransition
+            ? onTransition({ id: data.id, transition })
+            : transitionConversation({ id: data.id, transition }),
+        );
+      } finally {
+        finishMutation();
+      }
       if (!success) return;
       const nextStatus = {
         TAKE_OVER: "NEED_HUMAN",
@@ -572,11 +753,17 @@ export function ConversationDetail({
   }
 
   function handleAssignment(value: string) {
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
       const assignedUserId = value === "UNASSIGNED" ? null : value;
-      const success = await runAction(() =>
-        assignConversation({ id: data.id, assignedUserId }),
-      );
+      let success = false;
+      try {
+        success = await runAction(() =>
+          assignConversation({ id: data.id, assignedUserId }),
+        );
+      } finally {
+        finishMutation();
+      }
       if (!success) return;
       const assignee =
         data.team.find((user) => user.id === assignedUserId) ?? null;
@@ -876,7 +1063,9 @@ export function ConversationDetail({
     setPendingMessageId(freshAttemptId);
     setError(null);
     setAcceptedNotice(null);
+    const finishMutation = beginServerMutation();
 
+    optimisticMessageIdsRef.current.add(freshAttemptId);
     setData((current) => ({
       ...current,
       messages: [
@@ -904,6 +1093,8 @@ export function ConversationDetail({
           outcome: "unknown",
           message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
         };
+      } finally {
+        finishMutation();
       }
 
       setPendingMessageId(null);
@@ -924,10 +1115,23 @@ export function ConversationDetail({
         setAcceptedNotice("تم إرسال الرد بنجاح");
 
         if (result.messageId) {
+          optimisticMessageIdsRef.current.delete(freshAttemptId);
           setData((current) => ({
             ...current,
-            messages: current.messages.map((m) =>
-              m.id === freshAttemptId ? { ...m, id: result.messageId! } : m,
+            messages: replaceConversationMessageId(
+              current.messages,
+              freshAttemptId,
+              result.messageId!,
+            ),
+          }));
+        } else {
+          // No authoritative id was returned: drop the local-only row and let
+          // the next refresh supply the confirmed server row.
+          optimisticMessageIdsRef.current.delete(freshAttemptId);
+          setData((current) => ({
+            ...current,
+            messages: current.messages.filter(
+              (message) => message.id !== freshAttemptId,
             ),
           }));
         }
@@ -944,6 +1148,7 @@ export function ConversationDetail({
       }
 
       // Rollback optimistic message if not accepted
+      optimisticMessageIdsRef.current.delete(freshAttemptId);
       setData((current) => ({
         ...current,
         messages: current.messages.filter((m) => m.id !== freshAttemptId),
@@ -1042,6 +1247,7 @@ export function ConversationDetail({
     setPendingMessageId(attemptId);
     setError(null);
     setAcceptedNotice(null);
+    const finishMutation = beginServerMutation();
 
     // Keep recoverable raw draft snapshot and revision until confirmed success.
     const rawDraftSnapshot = reply;
@@ -1089,6 +1295,7 @@ export function ConversationDetail({
     setRestoreBlockedNotice(null);
 
     // Optimistic message append if not already in message log
+    optimisticMessageIdsRef.current.add(attemptId);
     setData((current) => {
       const exists = current.messages.some((m) => m.id === attemptId);
       if (exists) return current;
@@ -1120,6 +1327,8 @@ export function ConversationDetail({
           outcome: "unknown",
           message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
         };
+      } finally {
+        finishMutation();
       }
 
       setPendingMessageId(null);
@@ -1179,10 +1388,23 @@ export function ConversationDetail({
         setAcceptedNotice("تم إرسال الرد بنجاح");
 
         if (result.messageId) {
+          optimisticMessageIdsRef.current.delete(attemptId);
           setData((current) => ({
             ...current,
-            messages: current.messages.map((m) =>
-              m.id === attemptId ? { ...m, id: result.messageId! } : m,
+            messages: replaceConversationMessageId(
+              current.messages,
+              attemptId,
+              result.messageId!,
+            ),
+          }));
+        } else {
+          // No authoritative id was returned: drop the local-only row and let
+          // the next refresh supply the confirmed server row.
+          optimisticMessageIdsRef.current.delete(attemptId);
+          setData((current) => ({
+            ...current,
+            messages: current.messages.filter(
+              (message) => message.id !== attemptId,
             ),
           }));
         }
@@ -1199,6 +1421,7 @@ export function ConversationDetail({
       }
 
       // Rollback optimistic message if not accepted
+      optimisticMessageIdsRef.current.delete(attemptId);
       setData((current) => ({
         ...current,
         messages: current.messages.filter((m) => m.id !== attemptId),
@@ -1355,12 +1578,32 @@ export function ConversationDetail({
   }
 
   function handleSummarySave() {
+    const submittedSummary = summary;
+    const submittedRevision = summaryRevisionRef.current;
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
-      const success = await runAction(() =>
-        updateAiSummary({ id: data.id, aiSummary: summary }),
-      );
-      if (success) {
-        setData((current) => ({ ...current, aiSummary: summary.trim() }));
+      let success = false;
+      try {
+        success = await runAction(() =>
+          updateAiSummary({ id: data.id, aiSummary: submittedSummary }),
+        );
+      } catch {
+        setError("تعذر حفظ الملخص الآن");
+      } finally {
+        finishMutation();
+      }
+      if (!success) return;
+
+      const savedSummary = submittedSummary.trim();
+      serverSummaryRef.current = savedSummary;
+      setData((current) => ({ ...current, aiSummary: savedSummary }));
+
+      // Only write back to the editor when it still belongs to the revision
+      // that was submitted. A newer operator edit stays untouched and visibly
+      // unsaved.
+      if (summaryRevisionRef.current === submittedRevision) {
+        summaryRef.current = savedSummary;
+        setSummary(savedSummary);
       }
     });
   }
@@ -1446,7 +1689,7 @@ export function ConversationDetail({
             <ContextCards
               data={data}
               summary={summary}
-              setSummary={setSummary}
+              setSummary={handleSummaryChange}
               isPending={isPending}
               handleAssignment={handleAssignment}
               handleSummarySave={handleSummarySave}
@@ -1841,7 +2084,7 @@ export function ConversationDetail({
         <ContextCards
           data={data}
           summary={summary}
-          setSummary={setSummary}
+          setSummary={handleSummaryChange}
           isPending={isPending}
           handleAssignment={handleAssignment}
           handleSummarySave={handleSummarySave}

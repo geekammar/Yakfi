@@ -1,18 +1,61 @@
 # FlowPilot — Current State
 
 > **Tier 0 orientation snapshot — as of 15 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. This file separates:
-> (1) what is on `main` and the last verified Production release;
-> (2) preserved R5 evidence from the original PR #79 candidate;
-> (3) the original R6 failure; and (4) the NEW draft integration candidate,
-> which is not accepted live. It is not a substitute for code, the canonical
-> topic docs or `docs/BUILD_STATE.md`. No live deployment, provider probe,
-> migration, webhook move or paid call was performed for this snapshot.
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 is the current
+> accepted baseline and the live-refresh repair candidate. Preserved evidence
+> follows: historical `main` context, the integration/R5 record, the original
+> R6 failure, and the Y83 delivery failure. This file is not a substitute for
+> code, the canonical topic docs or `docs/BUILD_STATE.md`. No live deployment,
+> provider probe, migration, webhook move or paid call was performed for this
+> snapshot.
+
+## 0. Current release and live-refresh defect — 15 November 2026
+
+- **Current `main` / Production acceptance baseline:** `f15deded0b2295b9c5fc016aa77486d71e40dab3`
+  (merge of PR #83), package version `v0.79.10`.
+- **Production 0.79.10 / `f15deded` acceptance passed:** AI customer-visible
+  delivery, one staff reply, and one complete conversational booking were
+  verified. Sections 3–6 retain the historical candidate/R5/R6/Y83 evidence and
+  are not rewritten by this acceptance.
+- **Separate live-refresh defect (this candidate):** an already-open
+  conversation did not automatically show incoming customer/AI messages,
+  updated status or ownership, or a new appointment; they appeared only after a
+  manual reload.
+- **Root cause:** `ConversationDetail` initialized local state once from
+  `initialData` and had no external-update fetching path. The existing
+  `getConversationDetail` is deliberately write-on-open (it acknowledges
+  operator attention), so it is not a pure read.
+- **Fix candidate `v0.79.11` on `fix/conversation-live-refresh` (draft PR):**
+  authenticated read-only `refreshConversationDetail` server action backed by
+  `getConversationRefresh`; 5-second visible-tab polling with no overlapping
+  requests, hidden-page pause, focus/online refresh, unmount cleanup, bounded
+  failure backoff and last-good-data retention; merge preserves the unsent draft
+  and draft identity, pending/unknown submissions, unsaved summary edits,
+  mobile tab and reading position; stale or post-navigation responses are
+  ignored.
+- **Identity-safe review repair:** message identity is the authoritative `id`
+  only. No sender/content/timestamp inference is used to match an optimistic
+  row to a server row; snapshots are deferred while a local send/mutation is
+  unresolved and optimistic rows reconcile only through the returned
+  `messageId`. Summary saves capture the submitted value and edit revision; a
+  newer in-flight edit survives success, and failures release the refresh gate
+  without discarding editor text.
+- Opening/attention acknowledgment remains unchanged. Polling performs no
+  attention, ownership, message, appointment or delivery writes.
+- No migration, AI prompt/intent, booking/availability rule, Telegram
+  transport, credential, price presentation or existing-appointment change.
+- **Automated verification:** GitHub Actions run `43751606013` on the
+  implementation HEAD passed both gates — PR Quality Gates & Regression Suite
+  and Automated Browser UX QA (200 Playwright tests: 185 passed, 15 skipped,
+  0 failed). The documentation-only evidence update is revalidated by the final
+  PR CI run. The later Muse Production acceptance is not performed or claimed
+  here.
 
 ## 1. Main code baseline
 
-- `main`: `49d58c52f11e6600d783206cd423c6a7861eb907` — merge of PR #81,
-  package version `v0.79.8` (14 November 2026).
+- Historical baseline at this snapshot: `49d58c52f11e6600d783206cd423c6a7861eb907`
+  — merge of PR #81, package version `v0.79.8` (14 November 2026). Superseded
+  by the accepted `f15deded` / `v0.79.10` baseline in §0; retained as history.
 - Main includes the truthful unknown-information reply and handoff-consistency
   repair (ISS-012 / TG-22), PR #81's compact Tier 0 rules and test-reliability
   repairs, the Telegram customer/manager-bot foundation, the single

@@ -33,12 +33,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const {
   assignConversation,
   checkStaffReplyStatus,
+  refreshConversationDetail,
   sendStaffReply,
   transitionConversation,
   updateAiSummary,
 } = vi.hoisted(() => ({
   assignConversation: vi.fn(),
   checkStaffReplyStatus: vi.fn(),
+  refreshConversationDetail: vi.fn(),
   sendStaffReply: vi.fn(),
   transitionConversation: vi.fn(),
   updateAiSummary: vi.fn(),
@@ -51,6 +53,10 @@ vi.mock("@/features/conversations/actions/conversation-actions", () => ({
   transitionConversation,
   updateAiSummary,
 }));
+
+vi.mock("@/features/conversations/actions/conversation-refresh-actions", () => {
+  return { refreshConversationDetail };
+});
 
 const mockData: ConversationDetailData = {
   id: "conv-test-1",
@@ -112,6 +118,11 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     });
     transitionConversation.mockResolvedValue({ success: true });
     updateAiSummary.mockResolvedValue({ success: true });
+    refreshConversationDetail.mockResolvedValue({
+      success: false,
+      code: "UNKNOWN",
+      message: "transient",
+    });
   });
 
   afterEach(() => {

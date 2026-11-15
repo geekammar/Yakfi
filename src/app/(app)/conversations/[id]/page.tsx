@@ -24,5 +24,5 @@ export default async function ConversationDetailPage({
   );
   if (!data) notFound();
 
-  return <ConversationDetail data={data} />;
+  return <ConversationDetail key={data.id} data={data} />;
 }

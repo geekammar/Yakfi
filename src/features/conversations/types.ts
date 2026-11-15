@@ -32,6 +32,38 @@ export type InboxConversation = {
   hasAttention: boolean;
 };
 
+/**
+ * Authorized read-only snapshot for an OPEN conversation.
+ *
+ * Deliberately smaller than `ConversationDetailData`: it carries only the
+ * values that can change while the operator is reading (messages, bookings,
+ * status, ownership and the team list needed by the assignment control).
+ * Opening/attention acknowledgment is NOT part of this snapshot.
+ */
+export type ConversationRefreshData = Pick<
+  ConversationDetailData,
+  | "id"
+  | "status"
+  | "aiSummary"
+  | "assignedUser"
+  | "messages"
+  | "appointments"
+  | "team"
+>;
+
+export type ConversationRefreshResult =
+  | { success: true; data: ConversationRefreshData }
+  | {
+      success: false;
+      code:
+        | "INVALID_INPUT"
+        | "UNAUTHENTICATED"
+        | "FORBIDDEN"
+        | "NOT_FOUND"
+        | "UNKNOWN";
+      message: string;
+    };
+
 export type ConversationDetailData = {
   id: string;
   businessId?: string;
