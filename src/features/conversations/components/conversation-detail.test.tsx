@@ -2910,7 +2910,6 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
   });
 });
 
-
 describe("ConversationDetail live refresh (open thread)", () => {
   let container: HTMLDivElement;
   let visibility: DocumentVisibilityState = "visible";

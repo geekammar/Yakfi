@@ -2,10 +2,9 @@ import "./setup-test-env";
 
 import { randomUUID } from "node:crypto";
 
-import { createLocalAccountIssuer } from "better-auth/db";
-import { hashPassword } from "better-auth/crypto";
-
 import { db } from "../src/server/db";
+import { hashPassword } from "better-auth/crypto";
+import { createLocalAccountIssuer } from "better-auth/db";
 
 function isDisposableDatabase(url: string | undefined): boolean {
   if (!url) return false;
