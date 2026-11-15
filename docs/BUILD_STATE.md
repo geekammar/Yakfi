@@ -15,11 +15,24 @@
 - PR #79's additive migration `20261108200000_safe_telegram_staff_reply_delivery`
   remains unapplied on shared Preview/Production. PR #79 maintenance jobs
   remain guarded to the original branch/SHA and are not widened here.
+- Guarded Preview-to-Preview maintenance was prepared in
+  `test-db-migrate.yml`/`switch-test-bot-webhook.ts`: fixed
+  old→integrated and integrated→old operations, exact integration branch/SHA,
+  test-DB allowlist, fixed identity/URLs and destination health/candidate/DB
+  checks. Dry-run is read-only; apply was not executed; the return path uses
+  the SAME test DB and has not been live-tested. Regression coverage T52–T62.
 - R5 acceptance and the original R6 failure remain tied to their original
   candidates; this integration candidate requires its own CI and live
   acceptance. R6 historical attribution remains unproven.
-- Next: reviewer-approved bounded acceptance (AI/services trace first, then
-  staff-delivery smoke, then booking path only if earlier steps pass).
+- Correct reporting: `check:ai-disclosure` 54/54; `check:exact-time-requests`
+  166/166 (not scarce-availability); `check:scarce-availability` 59/59. The
+  `TEST_DATABASE_URL` workflow uses the shared Neon test DB (last run: no
+  pending migrations); disposable PostgreSQL suites are separate. Production
+  migration remains pending/operator-authorized.
+- Next: reviewer-approved read-only forward Preview-transfer dry run on the
+  exact final HEAD, then bounded acceptance (AI/services trace first, then
+  staff-delivery smoke, then booking path only if earlier steps pass). Apply
+  and return require separate approval.
 
 ## Muse R4 ingress/thread selection repair — 14 November 2026
 

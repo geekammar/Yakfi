@@ -185,3 +185,54 @@ If inspection confirms Telegram is already registered to main while the main dat
 Do not insert a route manually or delete dedupe history. The reported conversation f217cf5e-f417-4db1-b074-d5e531198285 has linked ingress evidence from two Telegram bots. The route binder and staff sender correctly fail closed. The repaired selector checks the authenticated connection/bot/recipient and historic claim compatibility before reusing a thread. New ingress may create a separate thread under the same customer; old mixed history and staff ownership remain intact and unroutable. Retest with one new uniquely marked Telegram inbound on the deployed reviewed SHA, then use the thread containing that new message. Preserve old rejected drafts and QA rows249/250; do not retry an old rejection or recreate a customer to conceal the failure.
 
 The R4 temporary AI reply is separately explained by CONFIG_ERROR before any provider HTTP dispatch. OPENROUTER_API_KEY exists only for Production in the reviewed Vercel metadata. An authorized operator may add the key to Preview ONLY for branch fix/safe-telegram-staff-reply-delivery and redeploy the exact reviewed candidate through Vercel. Never copy secret values into reports, change Production scope, or treat a missing provider key as user intent. This credential is independent of CREDENTIAL_MASTER_KEY and the Telegram webhook secret.
+
+## Guarded Preview-to-Preview transfer — PR #83
+
+This path moves the fixed customer bot between the two fixed Previews only. It
+never targets Production and never switches to main:
+
+- Old Preview: `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`
+- Integrated Preview: `https://flowpilot-prod-git-integration-staff-delivery-kn-d54181-ammarj1.vercel.app`
+
+Both Previews use the SAME authorized Neon test database
+(`ep-little-mouse-a5nh644n[-pooler].us-east-2.aws.neon.tech`, database
+`neondb`). The existing switch service rotates the webhook secret and persists
+its hash in that database; the destination Preview reads the same hash, so
+incoming webhook authentication stays canonical. Do not copy credentials, reset
+the master key, regenerate the bot token or clear pending updates to bypass a
+mismatch.
+
+The workflow operation is fixed by name; there is no destination URL input.
+It requires the exact integration branch
+`refs/heads/integration/staff-delivery-knowledge-contract` and a full
+`expected_commit_sha` equal to the checked-out SHA. The runner also rejects
+Production/wrong databases, arbitrary destination input and mismatched bot,
+business or connection identities.
+
+### Forward (old Preview → integrated Preview)
+
+1. Read-only dry run on the exact reviewed integration SHA:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=transfer-integration-preview-dry-run -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+2. Confirm the dry run reports the expected current old-Preview URL, the fixed
+   integrated destination, destination version/SHA matching the reviewed
+   candidate, `isProductionDb=false`, `migrationApplied=true`, and the same
+   authorized test database host.
+3. Apply only after reviewer/Ammar approval:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=transfer-integration-preview-apply -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+
+### Return (integrated Preview → old Preview)
+
+Use the corresponding fixed operations on the same integration branch/SHA and
+the SAME test database. Do not change the database or copy a secret.
+
+1. Read-only dry run:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=return-old-preview-dry-run -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+2. Apply only after approval:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=return-old-preview-apply -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+
+If the bot is already at the fixed destination, the run returns an explicit
+read-only `ALREADY_AT_DESTINATION` outcome with zero `setWebhook` calls and zero
+database writes. Otherwise a different current URL is refused; do not weaken
+the expected-current check. Dry runs perform no `setWebhook` and no database
+writes. The return path is prepared and offline-tested; a live rollback has NOT
+been tested. Production migration remains pending and operator-authorized.

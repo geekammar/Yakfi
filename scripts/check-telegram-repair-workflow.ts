@@ -588,6 +588,7 @@ fi
   const {
     executeGuardedSwitch,
     validateProductionDatabaseUrl,
+    verifyPreviewDestinationReadiness,
     FIXED_TARGETS,
     createOwnerRestoreResolver,
   } = await import("./switch-test-bot-webhook");
@@ -952,7 +953,11 @@ fi
     workflowYaml.includes("switch-webhook-dry-run") &&
     workflowYaml.includes("switch-webhook-apply") &&
     workflowYaml.includes("restore-main-webhook-dry-run") &&
-    workflowYaml.includes("restore-main-webhook-apply");
+    workflowYaml.includes("restore-main-webhook-apply") &&
+    workflowYaml.includes("transfer-integration-preview-dry-run") &&
+    workflowYaml.includes("transfer-integration-preview-apply") &&
+    workflowYaml.includes("return-old-preview-dry-run") &&
+    workflowYaml.includes("return-old-preview-apply");
 
   check(
     "T34. Workflow file strictly delegates to switch runner with branch gate, SHA check, and isolated secret scopes",
@@ -1475,6 +1480,575 @@ fi
       restorationJob.includes(
         "inputs.operation == 'restore-main-webhook-reconcile'",
       ),
+  );
+
+
+  // ─── 6. Fixed Preview-to-Preview Transfer Guards ────────────────────────────
+  const transferJob =
+    (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  const integrationBranchGuard =
+    "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'";
+  check(
+    "T52. Preview transfer workflow is pinned to the exact integration branch/SHA and test-only secrets",
+    transferJob.includes(integrationBranchGuard) &&
+      !transferJob.includes(
+        "github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery'",
+      ) &&
+      transferJob.includes(
+        "EXPECTED_SHA: ${{ inputs.expected_commit_sha }}",
+      ) &&
+      transferJob.includes(
+        "if ! printf '%s' \"$EXPECTED_SHA\" | grep -Eq '^[0-9a-f]{40}$'",
+      ) &&
+      transferJob.includes('[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]') &&
+      transferJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      transferJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      transferJob.includes("EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}") &&
+      !transferJob.includes("PRODUCTION_DATABASE_URL") &&
+      !transferJob.includes("RESTORE_BOT_TOKEN") &&
+      transferJob.includes("transfer-integration-preview-dry-run") &&
+      transferJob.includes("return-old-preview-apply"),
+  );
+
+  const previewTestDbUrl =
+    "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const previewIntegrationSha = "a".repeat(40);
+  const previewOtherSha = "b".repeat(40);
+  const makeHealthResponse = (args: {
+    version?: string;
+    commitSha?: string;
+    dbHost?: string;
+    isProductionDb?: boolean;
+    migrationApplied?: boolean;
+    deploymentReady?: boolean;
+    database?: string;
+  } = {}): Response =>
+    new Response(
+      JSON.stringify({
+        status: "ok",
+        version: args.version ?? FIXED_TARGETS.integratedPreviewVersion,
+        commitSha: args.commitSha ?? previewIntegrationSha,
+        deploymentReady: args.deploymentReady ?? true,
+        database: args.database ?? "connected",
+        previewDiagnostics: {
+          dbHost:
+            args.dbHost ??
+            "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+          isProductionDb: args.isProductionDb ?? false,
+          migrationApplied: args.migrationApplied ?? true,
+        },
+      }),
+      { status: 200 },
+    );
+
+  const integratedReadiness = await verifyPreviewDestinationReadiness(
+    {
+      kind: "integrated-preview",
+      expectedCommitSha: previewIntegrationSha,
+      databaseUrl: previewTestDbUrl,
+    },
+    { fetchImpl: async () => makeHealthResponse() },
+  );
+  const oldReadiness = await verifyPreviewDestinationReadiness(
+    {
+      kind: "old-preview",
+      expectedCommitSha: previewIntegrationSha,
+      databaseUrl: previewTestDbUrl,
+    },
+    {
+      fetchImpl: async () =>
+        makeHealthResponse({
+          version: FIXED_TARGETS.oldPreviewVersion,
+          commitSha: FIXED_TARGETS.oldPreviewCommitSha,
+        }),
+    },
+  );
+  check(
+    "T53. Readiness pins integrated and old Preview candidate identities",
+    integratedReadiness.ok &&
+      integratedReadiness.kind === "integrated-preview" &&
+      integratedReadiness.commitSha === previewIntegrationSha &&
+      integratedReadiness.version ===
+        FIXED_TARGETS.integratedPreviewVersion &&
+      oldReadiness.ok &&
+      oldReadiness.kind === "old-preview" &&
+      oldReadiness.commitSha === FIXED_TARGETS.oldPreviewCommitSha &&
+      oldReadiness.version === FIXED_TARGETS.oldPreviewVersion,
+  );
+
+  const readinessFailures = await Promise.all([
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse({ commitSha: previewOtherSha }) },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      {
+        fetchImpl: async () =>
+          makeHealthResponse({
+            dbHost: "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+            isProductionDb: true,
+          }),
+      },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse({ migrationApplied: false }) },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse({ deploymentReady: false }) },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: "",
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse() },
+    ),
+  ]);
+  check(
+    "T54. Readiness fails closed on candidate mismatch, Production DB, pending migration, unready deployment and missing SHA",
+    readinessFailures[0]?.ok === false &&
+      readinessFailures[0]?.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      readinessFailures[1]?.ok === false &&
+      readinessFailures[1]?.code === "DESTINATION_DATABASE_MISMATCH" &&
+      readinessFailures[2]?.ok === false &&
+      readinessFailures[2]?.code === "DESTINATION_MIGRATION_NOT_APPLIED" &&
+      readinessFailures[3]?.ok === false &&
+      readinessFailures[3]?.code === "DESTINATION_NOT_READY" &&
+      readinessFailures[4]?.ok === false &&
+      readinessFailures[4]?.code === "MISSING_EXPECTED_COMMIT_SHA",
+  );
+
+  const transferRemote = {
+    url: FIXED_TARGETS.previewWebhookUrl as string,
+    secret: "dummy-existing-preview-secret",
+    updates: ["message"],
+    setCalls: 0,
+  };
+  const transferConnection = {
+    ...testDbConnection,
+    webhookSecretHash: "transfer-start-hash",
+  };
+  const transferWrites = { count: 0 };
+  const transferRepo = {
+    async findByIdWithinBusiness(
+      id: string,
+      businessId: string,
+    ): Promise<TelegramConnection | null> {
+      return id === transferConnection.id &&
+        businessId === transferConnection.businessId
+        ? ({ ...transferConnection } as unknown as TelegramConnection)
+        : null;
+    },
+    async updateWebhookSecretHash(
+      id: string,
+      businessId: string,
+      webhookSecretHash: string,
+    ): Promise<TelegramConnection | null> {
+      if (
+        id !== transferConnection.id ||
+        businessId !== transferConnection.businessId
+      ) {
+        return null;
+      }
+      transferWrites.count += 1;
+      transferConnection.webhookSecretHash = webhookSecretHash;
+      return { ...transferConnection } as unknown as TelegramConnection;
+    },
+    async update(
+      id: string,
+      businessId: string,
+      data: Partial<TelegramConnection>,
+    ): Promise<TelegramConnection | null> {
+      if (
+        id !== transferConnection.id ||
+        businessId !== transferConnection.businessId
+      ) {
+        return null;
+      }
+      transferWrites.count += 1;
+      Object.assign(transferConnection, data);
+      return { ...transferConnection } as unknown as TelegramConnection;
+    },
+  };
+  const transferApi: TelegramApiDeps = {
+    ...mockTelegramApi,
+    async fetchImpl(input, init) {
+      const urlStr = String(input);
+      if (urlStr.includes("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              username: "Drafnanafnanbot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/getWebhookInfo")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: transferRemote.url,
+              has_custom_certificate: false,
+              pending_update_count: 0,
+              allowed_updates: transferRemote.updates,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/setWebhook")) {
+        const body = JSON.parse(init?.body as string);
+        transferRemote.setCalls += 1;
+        transferRemote.url = body.url;
+        transferRemote.secret = body.secret_token;
+        transferRemote.updates = body.allowed_updates;
+        return new Response(
+          JSON.stringify({ ok: true, result: true }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 404 });
+    },
+  };
+
+  const transferState = {
+    healthCalls: [] as Array<{
+      kind: string;
+      expectedCommitSha: string;
+      databaseUrl: string;
+    }>,
+    switchCalls: 0,
+    lastParams: undefined as SwitchTelegramWebhookParams | undefined,
+    out: [] as string[],
+  };
+  const transferOut = {
+    log: (...args: unknown[]) => transferState.out.push(args.join(" ")),
+    error: (...args: unknown[]) => transferState.out.push(args.join(" ")),
+  };
+  const transferDeps = (ready = true) => ({
+    verifyDestination: async (params: {
+      kind: string;
+      expectedCommitSha: string;
+      databaseUrl: string;
+    }) => {
+      transferState.healthCalls.push(params);
+      return ready
+        ? {
+            ok: true as const,
+            kind: params.kind as "old-preview" | "integrated-preview",
+            origin:
+              params.kind === "integrated-preview"
+                ? FIXED_TARGETS.integratedPreviewOrigin
+                : FIXED_TARGETS.oldPreviewOrigin,
+            version:
+              params.kind === "integrated-preview"
+                ? FIXED_TARGETS.integratedPreviewVersion
+                : FIXED_TARGETS.oldPreviewVersion,
+            commitSha:
+              params.kind === "integrated-preview"
+                ? previewIntegrationSha
+                : FIXED_TARGETS.oldPreviewCommitSha,
+            dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+          }
+        : { ok: false as const, code: "DESTINATION_NOT_READY" as const };
+    },
+    switchFn: async (
+      params: SwitchTelegramWebhookParams,
+      resolver?: Pick<CredentialsResolver, "resolve">,
+    ) => {
+      transferState.switchCalls += 1;
+      transferState.lastParams = params;
+      return switchTelegramBotWebhook(
+        {
+          api: transferApi,
+          credentialsResolver: resolver ?? mockCredentialsResolver,
+          connectionRepository: transferRepo,
+        },
+        params,
+      );
+    },
+    out: transferOut,
+  });
+  const transferEnv = (
+    operation: string,
+    overrides: Record<string, string> = {},
+  ) => ({
+    DATABASE_URL: previewTestDbUrl,
+    CREDENTIAL_MASTER_KEY: "test-only-master-key",
+    EXPECTED_COMMIT_SHA: previewIntegrationSha,
+    GITHUB_SHA: previewIntegrationSha,
+    OPERATION: operation,
+    ...overrides,
+  });
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  const transferStartHash = transferConnection.webhookSecretHash;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferState.lastParams = undefined;
+  const forwardDry = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      DESTINATION_URL: "https://arbitrary.example/api/telegram/webhook",
+    }),
+    transferDeps(),
+  );
+  check(
+    "T55. Forward dry run pins old->integrated URLs, ignores arbitrary destination input, applies nothing and writes nothing",
+    forwardDry.ok &&
+      forwardDry.status === "SWITCH_DRY_RUN" &&
+      transferState.healthCalls.length === 1 &&
+      transferState.healthCalls[0]?.kind === "integrated-preview" &&
+      transferState.healthCalls[0]?.expectedCommitSha === previewIntegrationSha &&
+      transferState.lastParams?.expectedCurrentUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      transferState.lastParams?.destinationUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      transferState.lastParams?.apply === false &&
+      transferState.lastParams?.allowAlreadyAtDestination === true &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0 &&
+      transferConnection.webhookSecretHash === transferStartHash,
+  );
+
+  transferRemote.url = FIXED_TARGETS.integratedPreviewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferState.lastParams = undefined;
+  const returnDry = await executeGuardedSwitch(
+    transferEnv("return-old-preview-dry-run"),
+    transferDeps(),
+  );
+  check(
+    "T56. Return dry run pins integrated->old URLs and reads old Preview readiness with zero writes",
+    returnDry.ok &&
+      returnDry.status === "SWITCH_DRY_RUN" &&
+      transferState.healthCalls[0]?.kind === "old-preview" &&
+      transferState.healthCalls[0]?.expectedCommitSha === previewIntegrationSha &&
+      transferState.lastParams?.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      transferState.lastParams?.destinationUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      transferState.lastParams?.apply === false &&
+      transferRemote.url === FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.integratedPreviewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const alreadyAtDestination = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-apply"),
+    transferDeps(),
+  );
+  check(
+    "T57. An already-complete transfer returns an explicit read-only no-op with zero setWebhook and zero DB writes",
+    alreadyAtDestination.ok &&
+      alreadyAtDestination.status === "ALREADY_AT_DESTINATION" &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0 &&
+      transferState.switchCalls === 1,
+  );
+
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const missingExpectedSha = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      EXPECTED_COMMIT_SHA: "",
+      GITHUB_SHA: "",
+    }),
+    transferDeps(),
+  );
+  const mismatchedExpectedSha = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      GITHUB_SHA: previewOtherSha,
+    }),
+    transferDeps(),
+  );
+  check(
+    "T58. Preview transfer rejects missing or mismatched expected/checked-out SHA before readiness or provider calls",
+    !missingExpectedSha.ok &&
+      missingExpectedSha.code === "MISSING_EXPECTED_COMMIT_SHA" &&
+      !mismatchedExpectedSha.ok &&
+      mismatchedExpectedSha.code === "COMMIT_SHA_MISMATCH" &&
+      transferState.healthCalls.length === 0 &&
+      transferState.switchCalls === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const productionDbAttempt = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    }),
+    transferDeps(),
+  );
+  const unreadyDestination = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run"),
+    transferDeps(false),
+  );
+  check(
+    "T59. Preview transfer rejects Production/wrong DB and a failed destination-secret consistency check before provider calls",
+    !productionDbAttempt.ok &&
+      productionDbAttempt.code === "DATABASE_TARGET_NOT_AUTHORIZED" &&
+      !unreadyDestination.ok &&
+      unreadyDestination.code === "DESTINATION_NOT_READY" &&
+      transferState.switchCalls === 0 &&
+      transferRemote.setCalls === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  const wrongBot = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: "999999999",
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  const wrongBusiness = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: "11111111-1111-4111-8111-111111111111",
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  const wrongConnection = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: "22222222-2222-4222-8222-222222222222",
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  check(
+    "T60. Wrong bot, business or connection is rejected before webhook or database mutation",
+    !wrongBot.ok &&
+      wrongBot.code === "BOT_IDENTITY_MISMATCH" &&
+      !wrongBusiness.ok &&
+      wrongBusiness.code === "CONNECTION_NOT_FOUND" &&
+      !wrongConnection.ok &&
+      wrongConnection.code === "CONNECTION_NOT_FOUND" &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.mainWebhookUrl;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  const unexpectedCurrent = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run"),
+    transferDeps(),
+  );
+  check(
+    "T61. Unexpected current webhook URL is refused without setWebhook or DB writes",
+    !unexpectedCurrent.ok &&
+      unexpectedCurrent.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      transferRemote.url === FIXED_TARGETS.mainWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferConnection.webhookSecretHash = "same-test-db-start-hash";
+  const sameTestDbCredentialRef = transferConnection.credentialsRef;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const forwardApply = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-apply"),
+    transferDeps(),
+  );
+  const afterForwardHash = transferConnection.webhookSecretHash;
+  const forwardSecret = transferRemote.secret;
+  const returnApply = await executeGuardedSwitch(
+    transferEnv("return-old-preview-apply", {
+      GITHUB_SHA: previewIntegrationSha,
+    }),
+    transferDeps(),
+  );
+  check(
+    "T62. Forward and return apply operations share the SAME test DB, rotate the canonical secret hash, and preserve credentials",
+    forwardApply.ok &&
+      forwardApply.status === "SWITCHED" &&
+      afterForwardHash ===
+        createHash("sha256").update(forwardSecret).digest("hex") &&
+      returnApply.ok &&
+      returnApply.status === "SWITCHED" &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferConnection.webhookSecretHash ===
+        createHash("sha256").update(transferRemote.secret).digest("hex") &&
+      transferConnection.credentialsRef === sameTestDbCredentialRef &&
+      transferRemote.setCalls === 2 &&
+      transferWrites.count === 2,
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

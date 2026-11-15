@@ -29,6 +29,15 @@ export const FIXED_TARGETS = {
   mainWebhookUrl: "https://flowpilot-prod.vercel.app/api/telegram/webhook",
   previewWebhookUrl:
     "https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook",
+  oldPreviewOrigin:
+    "https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app",
+  oldPreviewCommitSha: "1a11f35bf53b11f1ebb5da364b4205524353cf1c",
+  oldPreviewVersion: "0.79.8",
+  integratedPreviewOrigin:
+    "https://flowpilot-prod-git-integration-staff-delivery-kn-d54181-ammarj1.vercel.app",
+  integratedPreviewWebhookUrl:
+    "https://flowpilot-prod-git-integration-staff-delivery-kn-d54181-ammarj1.vercel.app/api/telegram/webhook",
+  integratedPreviewVersion: "0.79.10",
 } as const;
 
 export const ALLOWED_OPERATIONS = [
@@ -38,6 +47,10 @@ export const ALLOWED_OPERATIONS = [
   "restore-main-webhook-reconcile",
   "restore-main-webhook-dry-run",
   "restore-main-webhook-apply",
+  "transfer-integration-preview-dry-run",
+  "transfer-integration-preview-apply",
+  "return-old-preview-dry-run",
+  "return-old-preview-apply",
 ] as const;
 
 export type SwitchOperation = (typeof ALLOWED_OPERATIONS)[number];
@@ -78,9 +91,171 @@ export function validateProductionDatabaseUrl(raw: string): void {
   }
 }
 
+export type PreviewDestinationKind = "old-preview" | "integrated-preview";
+
+export type PreviewDestinationReadiness =
+  | {
+      ok: true;
+      kind: PreviewDestinationKind;
+      origin: string;
+      version: string;
+      commitSha: string;
+      dbHost: string;
+    }
+  | {
+      ok: false;
+      code:
+        | "MISSING_EXPECTED_COMMIT_SHA"
+        | "DESTINATION_HEALTH_UNAVAILABLE"
+        | "DESTINATION_NOT_READY"
+        | "DESTINATION_IDENTITY_MISMATCH"
+        | "DESTINATION_DATABASE_MISMATCH"
+        | "DESTINATION_MIGRATION_NOT_APPLIED";
+    };
+
+const AUTHORIZED_TEST_DB_HOSTS = [
+  "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+  "ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech",
+] as const;
+
+function canonicalDbHost(hostname: string): string {
+  return hostname.replace(/-pooler\./, ".");
+}
+
+function parseDbHost(databaseUrl: string): string | null {
+  try {
+    return new URL(databaseUrl).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorizedTestDbHost(hostname: string): boolean {
+  const canonical = canonicalDbHost(hostname);
+  return AUTHORIZED_TEST_DB_HOSTS.some(
+    (host) => canonicalDbHost(host) === canonical,
+  );
+}
+
+/**
+ * Bounded read-only readiness check for the fixed Preview destinations.
+ * It verifies the deployed candidate identity, preview database safety and the
+ * canonical test DB binding needed for webhook-secret verification. It never
+ * reads or returns secrets, raw bodies or provider tokens.
+ */
+export async function verifyPreviewDestinationReadiness(
+  params: {
+    kind: PreviewDestinationKind;
+    expectedCommitSha: string;
+    databaseUrl: string;
+  },
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<PreviewDestinationReadiness> {
+  const expected = params.expectedCommitSha.trim();
+  if (!/^[0-9a-f]{40}$/.test(expected)) {
+    return { ok: false, code: "MISSING_EXPECTED_COMMIT_SHA" };
+  }
+
+  const isIntegrated = params.kind === "integrated-preview";
+  const origin = isIntegrated
+    ? FIXED_TARGETS.integratedPreviewOrigin
+    : FIXED_TARGETS.oldPreviewOrigin;
+  const expectedCommitSha = isIntegrated
+    ? expected
+    : FIXED_TARGETS.oldPreviewCommitSha;
+  const expectedVersion = isIntegrated
+    ? FIXED_TARGETS.integratedPreviewVersion
+    : FIXED_TARGETS.oldPreviewVersion;
+
+  let response: Response;
+  try {
+    response = await (deps.fetchImpl ?? globalThis.fetch)(
+      `${origin}/api/health`,
+      {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(deps.timeoutMs ?? 5000),
+      },
+    );
+  } catch {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+  if (!response.ok) {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+
+  let body: {
+    status?: unknown;
+    version?: unknown;
+    commitSha?: unknown;
+    deploymentReady?: unknown;
+    database?: unknown;
+    previewDiagnostics?: {
+      dbHost?: unknown;
+      isProductionDb?: unknown;
+      migrationApplied?: unknown;
+    };
+  };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+
+  if (
+    body.status !== "ok" ||
+    body.deploymentReady !== true ||
+    body.database !== "connected"
+  ) {
+    return { ok: false, code: "DESTINATION_NOT_READY" };
+  }
+  if (
+    body.version !== expectedVersion ||
+    body.commitSha !== expectedCommitSha
+  ) {
+    return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
+  }
+
+  const diagnostics = body.previewDiagnostics;
+  if (
+    !diagnostics ||
+    diagnostics.isProductionDb !== false ||
+    typeof diagnostics.dbHost !== "string" ||
+    !isAuthorizedTestDbHost(diagnostics.dbHost)
+  ) {
+    return { ok: false, code: "DESTINATION_DATABASE_MISMATCH" };
+  }
+  if (diagnostics.migrationApplied !== true) {
+    return { ok: false, code: "DESTINATION_MIGRATION_NOT_APPLIED" };
+  }
+
+  const sourceHost = parseDbHost(params.databaseUrl);
+  if (
+    !sourceHost ||
+    !isAuthorizedTestDbHost(sourceHost) ||
+    canonicalDbHost(sourceHost) !== canonicalDbHost(diagnostics.dbHost)
+  ) {
+    return { ok: false, code: "DESTINATION_DATABASE_MISMATCH" };
+  }
+
+  return {
+    ok: true,
+    kind: params.kind,
+    origin,
+    version: expectedVersion,
+    commitSha: expectedCommitSha,
+    dbHost: diagnostics.dbHost,
+  };
+}
+
 export type SwitchRunnerDeps = {
   validateTestDbUrl?: (url: string) => void;
   validateProdDbUrl?: (url: string) => void;
+  verifyDestination?: (params: {
+    kind: PreviewDestinationKind;
+    expectedCommitSha: string;
+    databaseUrl: string;
+  }) => Promise<PreviewDestinationReadiness>;
   switchFn?: (
     params: SwitchTelegramWebhookParams,
     credentialsResolver?: Pick<CredentialsResolver, "resolve">,
@@ -180,19 +355,69 @@ export async function executeGuardedSwitch(
   process.env.DATABASE_URL = databaseUrl;
   if (!isRestore) process.env.CREDENTIAL_MASTER_KEY = masterKey;
 
-  const expectedCurrentUrl =
-    isRestore && !isRestorePreflight && !isReconcile
-      ? FIXED_TARGETS.previewWebhookUrl
-      : FIXED_TARGETS.mainWebhookUrl;
+  const isIntegratedPreviewTransfer =
+    operation === "transfer-integration-preview-dry-run" ||
+    operation === "transfer-integration-preview-apply";
+  const isOldPreviewReturn =
+    operation === "return-old-preview-dry-run" ||
+    operation === "return-old-preview-apply";
+  const isPreviewToPreview = isIntegratedPreviewTransfer || isOldPreviewReturn;
 
-  const destinationUrl = isRestore
-    ? FIXED_TARGETS.mainWebhookUrl
-    : FIXED_TARGETS.previewWebhookUrl;
+  let expectedCurrentUrl = FIXED_TARGETS.mainWebhookUrl;
+  let destinationUrl = FIXED_TARGETS.previewWebhookUrl;
+
+  if (isRestore && !isRestorePreflight && !isReconcile) {
+    expectedCurrentUrl = FIXED_TARGETS.previewWebhookUrl;
+  }
+  if (isIntegratedPreviewTransfer) {
+    expectedCurrentUrl = FIXED_TARGETS.previewWebhookUrl;
+    destinationUrl = FIXED_TARGETS.integratedPreviewWebhookUrl;
+  } else if (isOldPreviewReturn) {
+    expectedCurrentUrl = FIXED_TARGETS.integratedPreviewWebhookUrl;
+    destinationUrl = FIXED_TARGETS.previewWebhookUrl;
+  }
+
+  const expectedCommitSha = (env.EXPECTED_COMMIT_SHA ?? "").trim();
+  if (isPreviewToPreview) {
+    if (!/^[0-9a-f]{40}$/.test(expectedCommitSha)) {
+      out.error(
+        "❌ Preflight Refused: [MISSING_EXPECTED_COMMIT_SHA] Full reviewed commit SHA is required for Preview transfer.",
+      );
+      return { ok: false, code: "MISSING_EXPECTED_COMMIT_SHA" };
+    }
+    const actualCheckedOutSha = (env.GITHUB_SHA ?? "").trim();
+    if (actualCheckedOutSha && actualCheckedOutSha !== expectedCommitSha) {
+      out.error(
+        "❌ Preflight Refused: [COMMIT_SHA_MISMATCH] Expected commit SHA does not match the checked-out SHA.",
+      );
+      return { ok: false, code: "COMMIT_SHA_MISMATCH" };
+    }
+  }
+
+  const destinationReadiness = isPreviewToPreview
+    ? await (deps.verifyDestination ?? verifyPreviewDestinationReadiness)(
+        {
+          kind: isIntegratedPreviewTransfer
+            ? "integrated-preview"
+            : "old-preview",
+          expectedCommitSha,
+          databaseUrl,
+        },
+      )
+    : null;
+  if (destinationReadiness && !destinationReadiness.ok) {
+    out.error(
+      `❌ Preflight Refused: [${destinationReadiness.code}] Fixed Preview destination readiness failed.`,
+    );
+    return { ok: false, code: destinationReadiness.code };
+  }
 
   const modeLabel = isApply ? "APPLY (explicit switch)" : "DRY RUN (read-only)";
   const actionLabel = isRestore
     ? "Production Restoration"
-    : "Preview Webhook Switch";
+    : isPreviewToPreview
+      ? "Preview-to-Preview Transfer"
+      : "Preview Webhook Switch";
 
   out.log(`[FlowPilot] Telegram ${actionLabel}: mode=${modeLabel}`);
   out.log(
@@ -203,11 +428,20 @@ export async function executeGuardedSwitch(
   out.log(
     `Credential source:    ${isRestore ? "owner-provided fixed-bot maintenance token; stored credential unchanged" : "application runtime credential"}`,
   );
+  if (destinationReadiness?.ok) {
+    out.log(
+      `Destination check:    version=${destinationReadiness.version}, commitSha=${destinationReadiness.commitSha}, dbHost=${destinationReadiness.dbHost}, migrationApplied=true, isProductionDb=false`,
+    );
+  }
 
   const restorationGuidance =
     "Reviewed workflow: restore-main-webhook-dry-run then restore-main-webhook-apply against Production when the current URL is Preview. Use the exact reviewed SHA.";
   const reconciliationGuidance =
     "If Telegram is already on main but its database hash is unconfirmed, use reviewed restore-main-webhook-reconcile against Production. Inspect partial failure first; never retry blindly.";
+  const previewReturnGuidance =
+    "Return path: reviewed workflow return-old-preview-dry-run then return-old-preview-apply on the exact integration SHA. It uses the SAME test database and does not touch Production.";
+  const previewForwardGuidance =
+    "Forward path: reviewed workflow transfer-integration-preview-dry-run then transfer-integration-preview-apply on the exact integration SHA. It uses the SAME test database and does not touch Production.";
 
   try {
     let switchImpl = deps.switchFn;
@@ -225,6 +459,7 @@ export async function executeGuardedSwitch(
         expectedCurrentUrl,
         destinationUrl,
         apply: isApply,
+        allowAlreadyAtDestination: isPreviewToPreview,
       },
       isRestore ? createOwnerRestoreResolver(restoreToken) : undefined,
     );
@@ -270,7 +505,13 @@ export async function executeGuardedSwitch(
       : outcome.status;
     out.log(`Status:              ${status}`);
     out.log(
-      `Mode:                ${outcome.dryRun ? "DRY RUN (no changes made)" : "APPLIED (switched)"}`,
+      `Mode:                ${
+        outcome.status === "ALREADY_AT_DESTINATION"
+          ? "READ-ONLY NO-OP (already at destination)"
+          : outcome.dryRun
+            ? "DRY RUN (no changes made)"
+            : "APPLIED (switched)"
+      }`,
     );
     out.log(`Bot External ID:     ${outcome.botExternalId}`);
     out.log(`Bot Username:        @${outcome.botUsername ?? "unknown"}`);
@@ -283,11 +524,23 @@ export async function executeGuardedSwitch(
       out.log(
         `Message:             ${isRestorePreflight ? "Owner token and main registration verified; zero changes. Stored encryption key has not been recovered." : outcome.message}`,
       );
-      if (!isRestorePreflight) {
+      if (isPreviewToPreview) {
+        out.log("\nReviewed Transfer Procedure:");
+        out.log(
+          `  ${isIntegratedPreviewTransfer ? previewReturnGuidance : previewForwardGuidance}`,
+        );
+      } else if (!isRestorePreflight) {
         out.log("\nReviewed Restoration Procedure:");
         out.log(`  ${restorationGuidance}`);
         out.log(`  ${reconciliationGuidance}`);
       }
+    } else if (outcome.status === "ALREADY_AT_DESTINATION") {
+      out.log(`Current URL:         ${outcome.currentWebhookUrl}`);
+      out.log(`Destination URL:     ${outcome.destinationWebhookUrl}`);
+      out.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
+      out.log(
+        "Message:             Fixed destination is already active; zero provider and database writes were performed.",
+      );
     } else if (outcome.status === "SWITCHED") {
       out.log(`Previous URL:        ${outcome.previousWebhookUrl}`);
       out.log(`New Webhook URL:     ${outcome.webhookUrl}`);
@@ -297,8 +550,15 @@ export async function executeGuardedSwitch(
         "Webhook Secret Hash: Persisted & verified in destination database",
       );
       out.log(`Verified At:         ${outcome.verifiedAt}`);
-      out.log("\nRestoration Procedure (revert switch):");
-      out.log(`  ${restorationGuidance}\n  ${reconciliationGuidance}\n`);
+      if (isPreviewToPreview) {
+        out.log("\nReviewed Return Procedure:");
+        out.log(
+          `  ${isIntegratedPreviewTransfer ? previewReturnGuidance : previewForwardGuidance}\n`,
+        );
+      } else {
+        out.log("\nRestoration Procedure (revert switch):");
+        out.log(`  ${restorationGuidance}\n  ${reconciliationGuidance}\n`);
+      }
     }
     out.log("=======================================================\n");
 

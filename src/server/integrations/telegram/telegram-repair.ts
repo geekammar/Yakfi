@@ -753,6 +753,13 @@ export type SwitchTelegramWebhookParams = {
   /** Optional operator-owned identity constraint, checked before any mutation. */
   expectedBotExternalId?: string;
   apply?: boolean;
+  /**
+   * Fixed Preview-to-Preview transfers may encounter an already-completed
+   * move. When enabled, an exact destination registration is reported as a
+   * read-only no-op instead of a current-URL mismatch. Existing Production
+   * switch/restoration operations leave this disabled.
+   */
+  allowAlreadyAtDestination?: boolean;
 };
 
 export type SwitchTelegramWebhookOutcome =
@@ -767,6 +774,18 @@ export type SwitchTelegramWebhookOutcome =
       allowedUpdates: string[];
       pendingUpdateCount: number;
       restorationProcedure: string;
+      message: string;
+    }
+  | {
+      ok: true;
+      status: "ALREADY_AT_DESTINATION";
+      dryRun: true;
+      botExternalId: string;
+      botUsername?: string | null;
+      currentWebhookUrl: string;
+      destinationWebhookUrl: string;
+      allowedUpdates: string[];
+      pendingUpdateCount: number;
       message: string;
     }
   | {
@@ -1006,6 +1025,30 @@ export async function switchTelegramBotWebhook(
   if (!actualCheck.ok) {
     return actualCheck;
   }
+  const currentUpdates = info.allowed_updates ?? [];
+  const targetUpdates = Array.from(
+    new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
+  );
+
+  if (
+    params.allowAlreadyAtDestination === true &&
+    actualCheck.normalizedUrl === destinationUrlClean
+  ) {
+    return {
+      ok: true,
+      status: "ALREADY_AT_DESTINATION",
+      dryRun: true,
+      botExternalId: connection.botExternalId,
+      botUsername: connection.botUsername,
+      currentWebhookUrl: actualCheck.normalizedUrl,
+      destinationWebhookUrl: destinationUrlClean,
+      allowedUpdates: targetUpdates,
+      pendingUpdateCount: info.pending_update_count,
+      message:
+        "رابط الويبهوك المسجل يطابق الوجهة الثابتة المطلوبة بالفعل. لم يتم إجراء أي تعديل على تيليجرام أو قاعدة البيانات.",
+    };
+  }
+
   if (actualCheck.normalizedUrl !== expectedCurrentUrlClean) {
     return {
       ok: false,
@@ -1013,11 +1056,6 @@ export async function switchTelegramBotWebhook(
       message: `رابط الويبهوك المسجل حالياً لدى تيليجرام (${info.url}) لا يطابق الرابط الحالي المتوقع الممرر (${expectedCurrentUrlClean}). تم رفض التحويل لمنع التوجيه الخاطئ أو التغيير غير المقصود.`,
     };
   }
-
-  const currentUpdates = info.allowed_updates ?? [];
-  const targetUpdates = Array.from(
-    new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
-  );
 
   const restorationCmd = `pnpm telegram:repair-webhook --switch --business-id ${connection.businessId} --connection-id ${connection.id} --expected-current-url ${destinationUrlClean} --destination-url ${actualCheck.normalizedUrl} --apply`;
 

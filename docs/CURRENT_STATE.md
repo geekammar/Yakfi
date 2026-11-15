@@ -38,7 +38,9 @@ no free-text keyword/regex/substring intent matching.
 ## 3. Draft integration candidate — NOT MERGED, NOT ACCEPTED LIVE
 
 - Branch: `integration/staff-delivery-knowledge-contract`, based on `main`
-  `49d58c5`, package version `v0.79.10` (draft PR, not merged or deployed).
+  `49d58c5`, package version `v0.79.10` (draft PR #83, not merged or
+  live-accepted). The exact final HEAD and Preview deployment are recorded on
+  PR #83; do not reuse an older candidate SHA for readiness claims.
 - Integrated reviewed commits: PR #79
   `1a11f35bf53b11f1ebb5da364b4205524353cf1c`
   (`fix/safe-telegram-staff-reply-delivery`) and PR #82
@@ -62,6 +64,22 @@ no free-text keyword/regex/substring intent matching.
   shared Preview or Production. Applying it remains an operator decision.
 - The integration candidate does **not** transfer R5 or R6 acceptance. It has
   its own CI/Preview evidence and requires its own live acceptance.
+- **Guarded Preview-to-Preview maintenance (prepared, not applied):** the
+  reviewed maintenance workflow now has fixed
+  `transfer-integration-preview-*` and `return-old-preview-*` operations. They
+  are restricted to this integration branch, a full expected SHA, the fixed
+  test database and fixed old/integrated Preview URLs. Readiness verifies the
+  destination version/SHA, preview database safety, migration marker and that
+  both sides use the same canonical test DB for webhook-secret verification.
+  Dry-run is read-only; apply was not executed. The return path uses the SAME
+  test DB; no live rollback has been tested.
+- **CI/reporting facts:** the reviewed integration HEAD passed required CI.
+  `check:ai-disclosure` is **54/54**; `check:exact-time-requests` is
+  **166/166** and is not scarce-availability coverage;
+  `check:scarce-availability` is **59/59**. The `TEST_DATABASE_URL` migration
+  workflow validates the shared Neon test DB (last run: no pending
+  migrations); disposable PostgreSQL regression suites are a separate path.
+  Production migration remains pending and operator-authorized.
 
 ## 4. Preserved R5 staff-reply acceptance evidence
 
@@ -121,12 +139,14 @@ preparation.
 3. The R6 exact historical proposal remains unproven; the integrated repair is
    not live-accepted.
 4. The live uncertain-send recheck is NOT TESTED.
-5. PR #79's operational maintenance jobs are guarded to
+5. PR #79's original credential/webhook/restoration jobs remain guarded to
    `refs/heads/fix/safe-telegram-staff-reply-delivery` plus an exact expected
-   SHA. They will not run from this integration branch; do not widen guards,
-   change branch filters or move the bot to work around that. Any operational
-   acceptance run needs a reviewer-approved follow-up.
-6. Production was not independently re-probed for this snapshot; the last
+   SHA. The new fixed-Preview transfer job is guarded only to this integration
+   branch plus an exact SHA. Do not widen either guard, change branch filters
+   or move the bot to work around them.
+6. The new Preview-to-Preview apply/return operations are prepared and tested
+   offline only; no live webhook move or live rollback has been executed.
+7. Production was not independently re-probed for this snapshot; the last
    verified deployment is the dated handoff above.
 
 **Dated evidence history (retained, not current status):**
@@ -143,6 +163,10 @@ preparation.
 - Ammar and the reviewer decide whether to accept, roll out or merge the
   integration candidate. This snapshot does not merge, tag, release, migrate,
   deploy, move the webhook, send Telegram messages or call a paid model.
+- The next maintenance step is a bounded, reviewer-approved read-only dry run
+  of `transfer-integration-preview-*` on the exact final HEAD. Apply and the
+  return path require separate reviewer approval; the current acceptance bot
+  remains on the old Preview until then.
 - The proposed acceptance sequence is bounded: first an AI/services question
   with trace verification, then the affected staff-delivery smoke, then the
   critical booking path only if the earlier steps pass.
