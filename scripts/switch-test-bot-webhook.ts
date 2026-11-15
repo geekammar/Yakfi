@@ -333,10 +333,7 @@ export async function verifyProductionDestinationReadiness(
     return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
   }
   const expectedVersion = params.expectedVersion?.trim();
-  if (
-    expectedVersion &&
-    body.version !== expectedVersion
-  ) {
+  if (expectedVersion && body.version !== expectedVersion) {
     return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
   }
 
@@ -487,9 +484,7 @@ export async function executeGuardedSwitch(
   }
   if (isCutover) {
     const kind = (env.EXPECTED_CURRENT_KIND ?? "").trim();
-    if (
-      !CUTOVER_CURRENT_KINDS.includes(kind as CutoverCurrentKind)
-    ) {
+    if (!CUTOVER_CURRENT_KINDS.includes(kind as CutoverCurrentKind)) {
       out.error(
         "❌ Preflight Refused: [INVALID_EXPECTED_CURRENT_KIND] Expected current webhook kind is missing or not authorized.",
       );
@@ -532,8 +527,9 @@ export async function executeGuardedSwitch(
       })
     : null;
   const productionReadiness = isCutover
-    ? await (deps.verifyProductionDestination ??
-        verifyProductionDestinationReadiness)({
+    ? await (
+        deps.verifyProductionDestination ?? verifyProductionDestinationReadiness
+      )({
         expectedCommitSha,
         ...(expectedVersion ? { expectedVersion } : {}),
       })
@@ -618,7 +614,9 @@ export async function executeGuardedSwitch(
         }
         if (outcome.reconciliationCommand) {
           out.error("\nReconciliation Command:");
-          out.error(`  ${isCutover ? cutoverGuidance : reconciliationGuidance}`);
+          out.error(
+            `  ${isCutover ? cutoverGuidance : reconciliationGuidance}`,
+          );
         }
         if (outcome.restorationProcedure) {
           out.error("\nRestoration Procedure (revert switch):");

@@ -2083,7 +2083,6 @@ fi
       manualTestJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}"),
   );
 
-
   // T64. Production runtime cutover dry-run maps the fixed current URL to Production.
   const cutoverIntegrationSha = "c".repeat(40);
   const cutoverDryCapture = {
@@ -2139,9 +2138,12 @@ fi
       cutoverDryCapture.current.apply === false &&
       cutoverDryCapture.current.expectedCurrentUrl ===
         FIXED_TARGETS.integratedPreviewWebhookUrl &&
-      cutoverDryCapture.current.destinationUrl === FIXED_TARGETS.mainWebhookUrl &&
+      cutoverDryCapture.current.destinationUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
       cutoverDryCapture.current.allowAlreadyAtDestination === true &&
-      cutoverDryLines.some((line) => line.includes("Production Runtime Cutover")),
+      cutoverDryLines.some((line) =>
+        line.includes("Production Runtime Cutover"),
+      ),
   );
 
   // T65. Cutover rejects arbitrary current kinds, missing SHAs and unhealthy destinations.
@@ -2268,7 +2270,8 @@ fi
       cutoverApplyCapture.current.apply === true &&
       cutoverApplyCapture.current.expectedCurrentUrl ===
         FIXED_TARGETS.integratedPreviewWebhookUrl &&
-      cutoverApplyCapture.current.destinationUrl === FIXED_TARGETS.mainWebhookUrl &&
+      cutoverApplyCapture.current.destinationUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
       cutoverApplyLines.some((line) => line.includes("mode=APPLY")),
   );
 
@@ -2373,7 +2376,9 @@ fi
       runtimeEnvYaml.includes("preflight") &&
       runtimeEnvYaml.includes("apply") &&
       runtimeEnvYaml.includes("VERCEL_TOKEN") &&
-      runtimeEnvYaml.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      runtimeEnvYaml.includes(
+        "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
+      ) &&
       runtimeEnvYaml.includes(
         "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
       ) &&

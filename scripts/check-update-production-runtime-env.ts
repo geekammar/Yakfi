@@ -19,7 +19,12 @@ const DATABASE_VALUE = [
   "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
   "/neondb?sslmode=require",
 ].join("");
-const MASTER_VALUE = ["master-key", "secret", "sentinel", "0123456789abcdef"].join("-");
+const MASTER_VALUE = [
+  "master-key",
+  "secret",
+  "sentinel",
+  "0123456789abcdef",
+].join("-");
 
 type RecordShape = VercelEnv & {
   id: string;
@@ -137,7 +142,10 @@ async function main(): Promise<void> {
         expectedSha: SHA,
         githubSha: OTHER_SHA,
         token: AUTH_SENTINEL,
-        values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: MASTER_VALUE },
+        values: {
+          DATABASE_URL: DATABASE_VALUE,
+          CREDENTIAL_MASTER_KEY: MASTER_VALUE,
+        },
       },
       shaDeps,
     );
@@ -157,7 +165,10 @@ async function main(): Promise<void> {
       expectedSha: SHA,
       githubSha: SHA,
       token: AUTH_SENTINEL,
-      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: MASTER_VALUE },
+      values: {
+        DATABASE_URL: DATABASE_VALUE,
+        CREDENTIAL_MASTER_KEY: MASTER_VALUE,
+      },
     },
     {
       log: (line) => preflightLines.push(line),
@@ -171,7 +182,9 @@ async function main(): Promise<void> {
     "P5. Preflight lists metadata only and performs no mutation",
     preflightCalls.length === 1 &&
       preflightCalls[0]!.init?.method === "GET" &&
-      preflightLines.includes("PREFLIGHT_OK key=DATABASE_URL scope=production") &&
+      preflightLines.includes(
+        "PREFLIGHT_OK key=DATABASE_URL scope=production",
+      ) &&
       preflightLines.includes(
         "PREFLIGHT_OK key=CREDENTIAL_MASTER_KEY scope=production",
       ) &&
@@ -191,7 +204,10 @@ async function main(): Promise<void> {
       expectedSha: SHA,
       githubSha: SHA,
       token: AUTH_SENTINEL,
-      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: MASTER_VALUE },
+      values: {
+        DATABASE_URL: DATABASE_VALUE,
+        CREDENTIAL_MASTER_KEY: MASTER_VALUE,
+      },
     },
     {
       log: (line) => applyLines.push(line),
@@ -224,7 +240,9 @@ async function main(): Promise<void> {
           body.target[0] === "production" &&
           !("gitBranch" in body),
       ) &&
-      applyLines.includes("APPLY_OK keys=DATABASE_URL,CREDENTIAL_MASTER_KEY scope=production") &&
+      applyLines.includes(
+        "APPLY_OK keys=DATABASE_URL,CREDENTIAL_MASTER_KEY scope=production",
+      ) &&
       applyLines.every(
         (line) =>
           !line.includes("db-secret-sentinel") &&
@@ -266,9 +284,9 @@ async function main(): Promise<void> {
   }
   check(
     "P7. A partial second update stops once with no automatic retry",
-    partialCode ===
-      "PARTIAL_ENV_UPDATE_CREDENTIAL_MASTER_KEY" &&
-      partialCalls.filter((call) => call.init?.method === "PATCH").length === 2 &&
+    partialCode === "PARTIAL_ENV_UPDATE_CREDENTIAL_MASTER_KEY" &&
+      partialCalls.filter((call) => call.init?.method === "PATCH").length ===
+        2 &&
       partialCalls.filter(
         (call) =>
           call.init?.method === "PATCH" &&
