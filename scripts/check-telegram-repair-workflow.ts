@@ -1402,6 +1402,20 @@ fi
     { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
     { switchFn: ownerSwitch, out: ownerOut },
   );
+  console.log("T47 DEBUG", {
+    ok: ownerApplied.ok,
+    status: ownerApplied.status,
+    code: ownerApplied.ok ? null : ownerApplied.code,
+    remoteMain: telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl,
+    remotePreview: telegramRemoteUrl === FIXED_TARGETS.previewWebhookUrl,
+    mainHashMatches:
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex"),
+    testHashUnchanged:
+      testDbConnection.webhookSecretHash === beforeOwnerTestHash,
+    credRefUnchanged: mainDbConnection.credentialsRef === beforeOwnerRef,
+  });
   check(
     "T47. Owner-token restoration synchronizes main hash, retains credential reference and leaves test DB untouched",
     ownerApplied.ok &&
