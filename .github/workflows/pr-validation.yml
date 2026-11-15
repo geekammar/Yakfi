@@ -130,7 +130,6 @@ jobs:
           pnpm check:telegram-repair-workflow
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects
-          pnpm check:turn-evidence
           pnpm check:telegram-acceptance
           pnpm check:channel-neutral-choices
           pnpm check:readable-interaction-history

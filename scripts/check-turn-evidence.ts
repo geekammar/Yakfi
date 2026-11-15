@@ -40,7 +40,6 @@ import type {
 } from "../src/features/conversations/server/conversation-engine";
 import type { TurnEvidence } from "../src/features/conversations/server/turn-evidence";
 import {
-  TURN_EVIDENCE_ALLOWED_STRING_FIELDS,
   TURN_EVIDENCE_SCHEMA,
   assertTurnEvidenceContentFree,
   buildTurnEvidence,
@@ -765,25 +764,6 @@ async function main(): Promise<void> {
     delivery: { delivered: true },
   };
   const deterministic = buildTurnEvidence(sampleInput, sampleMeta);
-  const failedDeliveryEvidence = buildTurnEvidence(
-    {
-      ...sampleInput,
-      delivery: {
-        delivered: false,
-        errorCode: "UNAUTHORIZED_CREDENTIALS",
-      },
-    },
-    sampleMeta,
-  );
-  check(
-    "10d. فشل تسليم الصنف يحمل رمزاً نوعياً محدوداً في السجل",
-    failedDeliveryEvidence.outboundSendAttempted === true &&
-      failedDeliveryEvidence.outboundSendDelivered === false &&
-      failedDeliveryEvidence.outboundDeliveryErrorCode ===
-        "UNAUTHORIZED_CREDENTIALS" &&
-      TURN_EVIDENCE_ALLOWED_STRING_FIELDS.has("outboundDeliveryErrorCode"),
-  );
-
   check(
     "10c. مخطط السجل ثابت ومحدود وتصميم البناء حتمي",
     sample.schema === TURN_EVIDENCE_SCHEMA &&

@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { offerCallbackData } from "@/features/conversations/server/channel-choice";
 import * as engine from "@/features/conversations/server/conversation-engine";
 import { emptyConversationState } from "@/features/conversations/server/conversation-state";
+import { buildTurnEvidence } from "@/features/conversations/server/turn-evidence";
 import { createPrismaProxy } from "@/server/db";
 import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
 import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
@@ -1034,6 +1035,39 @@ async function main(): Promise<void> {
         throwingOutcome.error === "UNKNOWN_ERROR" &&
         !JSON.stringify(throwingDelivery).includes(RAW_THROWN_ERROR) &&
         !JSON.stringify(throwingOutcome).includes(RAW_THROWN_ERROR),
+    );
+
+    const failedDeliveryEvidence = buildTurnEvidence(
+      {
+        ok: true,
+        duplicate: false,
+        businessId: B_ID,
+        conversationId: "conv-delivery-evidence",
+        customerMessageId: "msg-delivery-evidence",
+        assistantAction: "AI_REPLY",
+        intent: "FAQ",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: "fake-ai",
+        observability: null,
+        knowledgeGap: null,
+        delivery: {
+          delivered: false,
+          errorCode: "UNAUTHORIZED_CREDENTIALS",
+        },
+      },
+      {
+        environment: "test",
+        appVersion: "0.0.0",
+        emittedAt: SIMULATED_NOW,
+      },
+    );
+    check(
+      "3b.5. Turn evidence records the bounded outbound delivery error code",
+      failedDeliveryEvidence.outboundSendAttempted === true &&
+        failedDeliveryEvidence.outboundSendDelivered === false &&
+        failedDeliveryEvidence.outboundDeliveryErrorCode ===
+          "UNAUTHORIZED_CREDENTIALS",
     );
   }
 
