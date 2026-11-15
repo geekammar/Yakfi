@@ -1,7 +1,11 @@
 name: Format Probe
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - integration/staff-delivery-knowledge-contract
+    paths:
+      - .github/workflows/format-probe.yml
 
 permissions:
   contents: read
