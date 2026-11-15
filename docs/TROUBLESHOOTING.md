@@ -236,3 +236,25 @@ database writes. Otherwise a different current URL is refused; do not weaken
 the expected-current check. Dry runs perform no `setWebhook` and no database
 writes. The return path is prepared and offline-tested; a live rollback has NOT
 been tested. Production migration remains pending and operator-authorized.
+
+## Y83 automated reply delivery failure — 15 November 2026
+
+The customer reply was persisted and AI/provider evidence was healthy, but
+Telegram delivery failed (`outboundSendDelivered=false`). The webhook logger
+showed `DELIVERY_FAILURE` / `UNKNOWN_ERROR`; the typed transport code was lost
+by the old delivery projection.
+
+Check the Vercel Preview environment scope before retesting: the integrated
+Preview branch must receive the existing `CREDENTIAL_MASTER_KEY` used by the
+fixed test bot. A key scoped only to the old PR79 feature branch is not visible
+to the integrated deployment, so runtime credential decryption fails before
+`sendMessage`. Do not rotate the key, copy a different key, or switch the bot
+to make delivery pass. The reviewer/operator must scope the existing key to the
+intended Preview branch and redeploy the exact reviewed SHA.
+
+The diagnostic repair in PR83 now carries a bounded `errorCode` (for example
+`UNAUTHORIZED_CREDENTIALS`, `PERMANENT_TRANSPORT_FAILURE`,
+`TRANSIENT_TRANSPORT_FAILURE`, `MALFORMED_PROVIDER_PAYLOAD`, or a bounded
+`UNKNOWN_ERROR` for thrown non-typed failures) through engine delivery,
+webhook logging and turn evidence. It does not resend Y83, retry blindly, or
+claim delivery without a fresh live retest.

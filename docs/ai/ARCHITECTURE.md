@@ -318,7 +318,8 @@ server/turn-evidence.ts`): bounded machine-safe fields only —
   `model`, `providerAttempts`, `providerStatus`, `providerLatencyMs`,
   `parseSuccess`, `disclosureChannel`, `disclosureAllowed`,
   `disclosureRefusalReason`, `knowledgeGapCategory`, `finalOutcome`,
-  `outboundSendAttempted`, `outboundSendDelivered`, `emittedAt`.
+  `outboundSendAttempted`, `outboundSendDelivered`,
+  `outboundDeliveryErrorCode`, `emittedAt`.
   **Never** customer message text, phone numbers, keys/tokens/secretRefs,
   prompts, chain-of-thought, raw provider payloads, or PII. A structural
   content-freeness guard is exported and asserted by the deterministic check.

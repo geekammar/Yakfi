@@ -235,6 +235,11 @@ import type {
 } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
+import {
+  TransportError,
+  type TransportSendResult,
+  type WhatsAppTransportErrorCode,
+} from "@/server/transport/whatsapp-transport";
 import type {
   AiTelemetry,
   AiTelemetryAttempt,
@@ -526,6 +531,24 @@ export type AssistantAction =
   /** The thread is not AI-eligible; the message went to staff attention. */
   | "DEFERRED_TO_STAFF";
 
+export type InboundDeliveryFailureCode =
+  | WhatsAppTransportErrorCode
+  | "UNKNOWN_ERROR";
+
+/**
+ * Bounded outbound delivery projection carried by a successful inbound turn.
+ * `error` stays for legacy human-readable consumers; `errorCode` is the
+ * authoritative typed classification for evidence/logging. Raw transport
+ * exception messages are never copied here.
+ */
+export type InboundDelivery = {
+  provider: string;
+  delivered: boolean;
+  error?: string;
+  errorCode?: InboundDeliveryFailureCode;
+  providerMessageId?: string;
+};
+
 export type InboundSuccess = {
   ok: true;
   /** False — this delivery was processed (not a duplicate). */
@@ -568,7 +591,7 @@ export type InboundSuccess = {
    */
   knowledgeGap?: { id: string; category: KnowledgeGapCategory } | null;
   /** Best-effort outbound delivery report (null when nothing was sent). */
-  delivery: { provider: string; delivered: boolean; error?: string } | null;
+  delivery: InboundDelivery | null;
 };
 
 /**
@@ -1384,6 +1407,33 @@ function resumeBookingExtraction(
   };
 }
 
+function projectTransportDelivery(
+  sent: TransportSendResult,
+): InboundDelivery {
+  return {
+    provider: sent.provider,
+    delivered: sent.delivered,
+    ...(sent.error ? { error: sent.error } : {}),
+    ...(sent.errorCode ? { errorCode: sent.errorCode } : {}),
+    ...(sent.providerMessageId
+      ? { providerMessageId: sent.providerMessageId }
+      : {}),
+  };
+}
+
+function projectTransportException(
+  provider: string,
+  error: unknown,
+): InboundDelivery {
+  return {
+    provider,
+    delivered: false,
+    ...(error instanceof TransportError
+      ? { errorCode: error.code }
+      : { errorCode: "UNKNOWN_ERROR" }),
+  };
+}
+
 async function persistAssistantReply(
   deps: ConversationEngineDeps,
   conversationId: string,
@@ -1419,17 +1469,12 @@ async function deliverAssistantReply(
       ...(choices ? { choices } : {}),
       ...(replyMarkup ? { replyMarkup } : {}),
     });
-    delivery = {
-      provider: sent.provider,
-      delivered: sent.delivered,
-      ...(sent.error ? { error: sent.error } : {}),
-    };
+    delivery = projectTransportDelivery(sent);
   } catch (error) {
-    delivery = {
-      provider: deps.transport.providerName,
-      delivered: false,
-      error: error instanceof Error ? error.message : "transport error",
-    };
+    delivery = projectTransportException(
+      deps.transport.providerName,
+      error,
+    );
   }
   await recordUsage(deps, {
     businessId,
@@ -9389,17 +9434,12 @@ async function runInboundTurn(
         connectionId: outboundConnectionId ?? undefined,
         ...(choices ? { choices } : {}),
       });
-      delivery = {
-        provider: sent.provider,
-        delivered: sent.delivered,
-        ...(sent.error ? { error: sent.error } : {}),
-      };
+      delivery = projectTransportDelivery(sent);
     } catch (error) {
-      delivery = {
-        provider: deps.transport.providerName,
-        delivered: false,
-        error: error instanceof Error ? error.message : "transport error",
-      };
+      delivery = projectTransportException(
+        deps.transport.providerName,
+        error,
+      );
     }
     await recordUsage(deps, {
       businessId: business.id,

@@ -128,7 +128,37 @@ no free-text keyword/regex/substring intent matching.
 probe or rerun is authorized. Do not rerun R5 or R6 as part of this candidate
 preparation.
 
-## 6. Blockers, unknowns and dated evidence
+## 6. Y83 automated-reply delivery failure — 15 November 2026
+
+- Conversation `b56c9e2c-cb33-4872-bfdd-82c9a11dea58`, customer message
+  `4aeb2cd2-dab0-4de0-94b3-062431d8901e`, trace
+  `aecf13988e9b4ce2af5b3821684ba182`, Telegram update `588849908`.
+- Authenticated ingress and the OpenRouter reply succeeded; the persisted
+  response was an `AI_REPLY` / `AI_ACTIVE` four-service answer with
+  `disclosureAllowed=true`.
+- Delivery failed: `outboundSendAttempted=true`,
+  `outboundSendDelivered=false`, webhook outcome `DELIVERY_FAILURE` with
+  `UNKNOWN_ERROR`.
+- **Proven runtime cause:** the integrated Preview deployment did not receive
+  the branch-scoped `CREDENTIAL_MASTER_KEY` (Vercel shows it scoped only to the
+  old `fix/safe-telegram-staff-reply-delivery` Preview branch). Runtime
+  credential resolution therefore cannot decrypt the fixed bot token, so the
+  outbound transport fails before any Telegram send. The exact old transport
+  code was lost by the diagnostic projection; the code path classifies this as
+  `UNAUTHORIZED_CREDENTIALS`.
+- **Diagnostic repair in this candidate:** typed `errorCode` is retained from
+  transport to engine delivery, webhook outcome and turn evidence;
+  `providerMessageId` is preserved on success; thrown exceptions become
+  bounded `UNKNOWN_ERROR` without raw message logging. This does not itself
+  fix delivery and has not been live-retested.
+- **Required runtime action (not executed):** reviewer/operator must add the
+  existing `CREDENTIAL_MASTER_KEY` as a Preview secret scoped to
+  `integration/staff-delivery-knowledge-contract` (or the intended Preview
+  scope) without rotating its value, then redeploy the reviewed SHA and retest.
+- Y83 remains a historical **FAIL**; it is not accepted or closed. R5 PASS and
+  R6 FAIL remain unchanged.
+
+## 7. Blockers, unknowns and dated evidence
 
 **Open blockers/unknowns:**
 
@@ -139,14 +169,17 @@ preparation.
 3. The R6 exact historical proposal remains unproven; the integrated repair is
    not live-accepted.
 4. The live uncertain-send recheck is NOT TESTED.
-5. PR #79's original credential/webhook/restoration jobs remain guarded to
+5. Y83 delivery failed because the integrated Preview runtime lacks the
+   branch-scoped `CREDENTIAL_MASTER_KEY`; the environment fix and live retest
+   remain pending.
+6. PR #79's original credential/webhook/restoration jobs remain guarded to
    `refs/heads/fix/safe-telegram-staff-reply-delivery` plus an exact expected
    SHA. The new fixed-Preview transfer job is guarded only to this integration
    branch plus an exact SHA. Do not widen either guard, change branch filters
    or move the bot to work around them.
-6. The new Preview-to-Preview apply/return operations are prepared and tested
+7. The new Preview-to-Preview apply/return operations are prepared and tested
    offline only; no live webhook move or live rollback has been executed.
-7. Production was not independently re-probed for this snapshot; the last
+8. Production was not independently re-probed for this snapshot; the last
    verified deployment is the dated handoff above.
 
 **Dated evidence history (retained, not current status):**
@@ -158,7 +191,7 @@ preparation.
 - R5 Preview acceptance and the historical QA249/QA250 failures remain part of
   the evidence record; do not erase them.
 
-## 7. Next action
+## 8. Next action
 
 - Ammar and the reviewer decide whether to accept, roll out or merge the
   integration candidate. This snapshot does not merge, tag, release, migrate,
