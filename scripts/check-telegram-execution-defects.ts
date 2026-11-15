@@ -5,9 +5,8 @@ import { offerCallbackData } from "@/features/conversations/server/channel-choic
 import * as engine from "@/features/conversations/server/conversation-engine";
 import { emptyConversationState } from "@/features/conversations/server/conversation-state";
 import { createPrismaProxy } from "@/server/db";
-import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
-import type { MessageTransport } from "@/server/transport/whatsapp-transport";
 import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
+import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
 import {
   hashTelegramWebhookSecret,
   parseTelegramUpdate,
@@ -18,6 +17,7 @@ import {
   mapEngineResultToTelegramOutcome,
   type TelegramWebhookLogEvent,
 } from "@/server/integrations/telegram/telegram-webhook-handler";
+import type { MessageTransport } from "@/server/transport/whatsapp-transport";
 
 import {
   createProductionTelegramWebhookDeps,
@@ -356,41 +356,39 @@ async function main(): Promise<void> {
           };
         },
       },
-      transport:
-        opts?.transport ??
-        {
-          providerName: "telegram",
-          send: async (input: {
-            to: string;
-            content: string;
-            choices?: any;
-            replyMarkup?: Record<string, unknown>;
-          }) => {
-            // Assert AT SEND TIME: inspect stateStore at the exact moment of delivery
-            let persistedAtSendTime: any = null;
-            if (input.choices?.offerId) {
-              try {
-                persistedAtSendTime = (await stateStore.load(B_ID, convId))
-                  ?.state;
-              } catch {
-                persistedAtSendTime = null;
-              }
+      transport: opts?.transport ?? {
+        providerName: "telegram",
+        send: async (input: {
+          to: string;
+          content: string;
+          choices?: any;
+          replyMarkup?: Record<string, unknown>;
+        }) => {
+          // Assert AT SEND TIME: inspect stateStore at the exact moment of delivery
+          let persistedAtSendTime: any = null;
+          if (input.choices?.offerId) {
+            try {
+              persistedAtSendTime = (await stateStore.load(B_ID, convId))
+                ?.state;
+            } catch {
+              persistedAtSendTime = null;
             }
-            const replyMarkup =
-              input.replyMarkup ??
-              (input.choices
-                ? renderTelegramInlineKeyboard(input.choices)
-                : undefined);
-            sentMessages.push({
-              to: input.to,
-              content: input.content,
-              choices: input.choices,
-              replyMarkup,
-              persistedAtSendTime,
-            });
-            return { provider: "telegram", delivered: true };
-          },
+          }
+          const replyMarkup =
+            input.replyMarkup ??
+            (input.choices
+              ? renderTelegramInlineKeyboard(input.choices)
+              : undefined);
+          sentMessages.push({
+            to: input.to,
+            content: input.content,
+            choices: input.choices,
+            replyMarkup,
+            persistedAtSendTime,
+          });
+          return { provider: "telegram", delivered: true };
         },
+      },
       conversationStateRepository: stateStore,
     };
 
@@ -766,7 +764,8 @@ async function main(): Promise<void> {
   // TEST 3b: Typed delivery diagnostics through the REAL Telegram transport
   // ──────────────────────────────────────────────────────────────────────────
   {
-    const DUMMY_TOKEN = "8926541123:dummy_token_for_offline_delivery_diagnostics";
+    const DUMMY_TOKEN =
+      "8926541123:dummy_token_for_offline_delivery_diagnostics";
     const connection = {
       id: "conn-tg-1",
       businessId: B_ID,
@@ -813,10 +812,7 @@ async function main(): Promise<void> {
 
     const makeRealTransport = (opts: {
       available?: boolean;
-      handler: (
-        url: string,
-        init?: RequestInit,
-      ) => Promise<Response>;
+      handler: (url: string, init?: RequestInit) => Promise<Response>;
     }) => {
       const calls: Array<{
         url: string;
@@ -902,9 +898,7 @@ async function main(): Promise<void> {
       conversationId: "conv-delivery-credential-fail",
       transport: credentialFailTransport.transport,
     });
-    const credentialFailTurn = await credentialFailHarness.sendInbound(
-      "مرحبا",
-    );
+    const credentialFailTurn = await credentialFailHarness.sendInbound("مرحبا");
     const credentialFailDelivery =
       credentialFailTurn.ok && !credentialFailTurn.duplicate
         ? credentialFailTurn.delivery
@@ -937,9 +931,7 @@ async function main(): Promise<void> {
         credentialFailOutcome.error === "UNAUTHORIZED_CREDENTIALS" &&
         credentialFailOutcome.code === "UNAUTHORIZED_CREDENTIALS" &&
         loggedCredentialFailure[0]?.error === "UNAUTHORIZED_CREDENTIALS" &&
-        !JSON.stringify(credentialFailOutcome).includes(
-          "UNRESOLVED_REFERENCE",
-        ),
+        !JSON.stringify(credentialFailOutcome).includes("UNRESOLVED_REFERENCE"),
     );
 
     const permanentTransport = makeRealTransport({
@@ -1028,10 +1020,10 @@ async function main(): Promise<void> {
     });
     const throwingTurn = await throwingHarness.sendInbound("مرحبا");
     const throwingDelivery =
-      throwingTurn.ok && !throwingTurn.duplicate
-        ? throwingTurn.delivery
-        : null;
-    const throwingOutcome = mapEngineResultToTelegramOutcome(throwingTurn as any);
+      throwingTurn.ok && !throwingTurn.duplicate ? throwingTurn.delivery : null;
+    const throwingOutcome = mapEngineResultToTelegramOutcome(
+      throwingTurn as any,
+    );
     check(
       "3b.4. A thrown transport exception becomes UNKNOWN_ERROR without raw error-message leakage",
       throwingDelivery?.delivered === false &&

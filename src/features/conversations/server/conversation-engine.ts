@@ -235,11 +235,6 @@ import type {
 } from "@/lib/validation";
 import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
-import {
-  TransportError,
-  type TransportSendResult,
-  type WhatsAppTransportErrorCode,
-} from "@/server/transport/whatsapp-transport";
 import type {
   AiTelemetry,
   AiTelemetryAttempt,
@@ -276,6 +271,11 @@ import {
   usageRepository,
 } from "@/server/repositories";
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
+import {
+  TransportError,
+  type TransportSendResult,
+  type WhatsAppTransportErrorCode,
+} from "@/server/transport/whatsapp-transport";
 import type { Conversation, ConversationStatus } from "@/types/domain";
 
 import pkg from "../../../../package.json";
@@ -532,8 +532,7 @@ export type AssistantAction =
   | "DEFERRED_TO_STAFF";
 
 export type InboundDeliveryFailureCode =
-  | WhatsAppTransportErrorCode
-  | "UNKNOWN_ERROR";
+  WhatsAppTransportErrorCode | "UNKNOWN_ERROR";
 
 /**
  * Bounded outbound delivery projection carried by a successful inbound turn.
@@ -1407,9 +1406,7 @@ function resumeBookingExtraction(
   };
 }
 
-function projectTransportDelivery(
-  sent: TransportSendResult,
-): InboundDelivery {
+function projectTransportDelivery(sent: TransportSendResult): InboundDelivery {
   return {
     provider: sent.provider,
     delivered: sent.delivered,
@@ -1471,10 +1468,7 @@ async function deliverAssistantReply(
     });
     delivery = projectTransportDelivery(sent);
   } catch (error) {
-    delivery = projectTransportException(
-      deps.transport.providerName,
-      error,
-    );
+    delivery = projectTransportException(deps.transport.providerName, error);
   }
   await recordUsage(deps, {
     businessId,
@@ -9436,10 +9430,7 @@ async function runInboundTurn(
       });
       delivery = projectTransportDelivery(sent);
     } catch (error) {
-      delivery = projectTransportException(
-        deps.transport.providerName,
-        error,
-      );
+      delivery = projectTransportException(deps.transport.providerName, error);
     }
     await recordUsage(deps, {
       businessId: business.id,
