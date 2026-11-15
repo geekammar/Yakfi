@@ -43,8 +43,7 @@ export function buildPromptMessages(
         // structured disclosure contract requires; it is rendered next to the
         // name but is never a customer-visible knowledge fact.
         .map((s) => {
-          const label =
-            s.id !== undefined ? `[id: ${s.id}] ${s.name}` : s.name;
+          const label = s.id !== undefined ? `[id: ${s.id}] ${s.name}` : s.name;
           const details: string[] = [];
           if (s.durationMinutes !== undefined)
             details.push(`${s.durationMinutes}m`);
