@@ -9,30 +9,18 @@ export const CONVERSATION_REFRESH_INTERVAL_MS = 5_000;
 export const CONVERSATION_REFRESH_MAX_BACKOFF_MS = 60_000;
 
 /**
- * Merge authoritative refresh data without losing local-only optimistic
- * messages.
+ * Merge authoritative refresh data without losing local-only messages.
  *
- * Confirmed messages are unioned by id (messages are immutable/append-only in
- * this product), so a slower snapshot can never remove a newer confirmed
- * result. An optimistic message is preserved only while it is not yet present
- * in the server snapshot; if a NEWLY arrived server message has the same
- * sender/content it is treated as the confirmed copy, preventing a duplicate.
+ * Identity is the message id only. Two independent STAFF messages may carry
+ * identical text, so sender/content/timestamp are NEVER used to infer that an
+ * optimistic row and a server row are the same message. Callers defer message
+ * snapshots while a local send is unresolved; confirmation then arrives
+ * through the authoritative `messageId` returned by the send contract.
  */
 export function mergeConversationRefreshMessages(
   currentMessages: ConversationDetailData["messages"],
   refreshedMessages: ConversationDetailData["messages"],
-  optimisticIds: ReadonlySet<string>,
 ): ConversationDetailData["messages"] {
-  const previousServerIds = new Set(
-    currentMessages
-      .filter((message) => !optimisticIds.has(message.id))
-      .map((message) => message.id),
-  );
-  const refreshedIds = new Set(refreshedMessages.map((message) => message.id));
-  const newlyArrived = refreshedMessages.filter(
-    (message) => !previousServerIds.has(message.id),
-  );
-
   const merged: ConversationDetailData["messages"] = [];
   const seen = new Set<string>();
 
@@ -45,20 +33,7 @@ export function mergeConversationRefreshMessages(
   // Keep already-confirmed local messages the snapshot has not caught up with
   // (read-after-write safety), but never duplicate a server id.
   for (const message of currentMessages) {
-    if (optimisticIds.has(message.id) || seen.has(message.id)) continue;
-    seen.add(message.id);
-    merged.push(message);
-  }
-
-  for (const message of currentMessages) {
-    if (!optimisticIds.has(message.id) || seen.has(message.id)) continue;
-    const confirmedCopyArrived = newlyArrived.some(
-      (incoming) =>
-        incoming.senderType === message.senderType &&
-        incoming.content === message.content,
-    );
-    const stillMissingFromServer = !refreshedIds.has(message.id);
-    if (confirmedCopyArrived || !stillMissingFromServer) continue;
+    if (seen.has(message.id)) continue;
     seen.add(message.id);
     merged.push(message);
   }
@@ -102,11 +77,13 @@ export function mergeConversationRefresh(
     status: refresh.status,
     aiSummary: refresh.aiSummary,
     assignedUser: refresh.assignedUser,
-    messages: mergeConversationRefreshMessages(
-      current.messages,
-      refresh.messages,
-      optimisticIds,
-    ),
+    messages:
+      optimisticIds.size > 0
+        ? current.messages
+        : mergeConversationRefreshMessages(
+            current.messages,
+            refresh.messages,
+          ),
     appointments: refresh.appointments,
     team: refresh.team,
   };

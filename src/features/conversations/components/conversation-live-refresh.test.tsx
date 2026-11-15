@@ -1,4 +1,5 @@
 import { ConversationDetail } from "@/features/conversations/components/conversation-detail";
+import { mergeConversationRefreshMessages } from "@/features/conversations/lib/live-refresh";
 import type {
   ConversationDetailData,
   ConversationRefreshData,
@@ -512,6 +513,418 @@ describe("ConversationDetail live refresh (open thread)", () => {
     await act(async () => root.unmount());
     await advance(60_000);
     expect(refreshConversationDetail).toHaveBeenCalledTimes(2);
+  });
+
+
+  it("never conflates independent STAFF messages that share identical text", () => {
+    const optimistic = {
+      id: "optimistic-staff-1",
+      senderType: "STAFF" as const,
+      content: "نص متطابق تماماً",
+      createdAt: "2026-10-27T10:10:00Z",
+    };
+    const independent = {
+      id: "independent-staff-1",
+      senderType: "STAFF" as const,
+      content: "نص متطابق تماماً",
+      createdAt: "2026-10-27T10:11:00Z",
+    };
+
+    const merged = mergeConversationRefreshMessages(
+      [...mockData.messages, optimistic],
+      [...mockData.messages, independent],
+    );
+
+    expect(merged.map((message) => message.id)).toEqual(
+      expect.arrayContaining([optimistic.id, independent.id]),
+    );
+    expect(merged).toHaveLength(mockData.messages.length + 2);
+  });
+
+  it("defers snapshots during an unresolved send and confirms via the authoritative messageId", async () => {
+    let resolveSend: (value: StaffReplyActionResult) => void = () => {};
+    const sendPromise = new Promise<StaffReplyActionResult>((res) => {
+      resolveSend = res;
+    });
+    sendStaffReply.mockReturnValue(sendPromise);
+
+    const content = "رسالة فريق بنفس النص";
+    const independent = {
+      id: "independent-server-staff",
+      senderType: "STAFF" as const,
+      content,
+      createdAt: "2026-10-27T10:12:00Z",
+    };
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({
+        status: "NEED_HUMAN",
+        messages: [
+          ...mockData.messages,
+          {
+            id: "authoritative-staff-row",
+            senderType: "STAFF" as const,
+            content,
+            createdAt: "2026-10-27T10:11:30Z",
+          },
+          independent,
+        ],
+      }),
+    });
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const replyBox = container.querySelector(
+      'textarea[aria-label="رد على العميل"]',
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      typeInTextarea(replyBox, content);
+    });
+    const form = container.querySelector("form");
+    await act(async () => {
+      form?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    const attemptId = sendStaffReply.mock.calls[0]![0].clientSubmissionId;
+    expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
+      1,
+    );
+
+    // A snapshot completing before the send result must not identify or
+    // replace the optimistic row.
+    await advance(5_000);
+    expect(
+      container.querySelector('[aria-label="حالة المحادثة: المساعد الذكي نشط"]'),
+    ).not.toBeNull();
+    expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
+      1,
+    );
+
+    await act(async () => {
+      resolveSend({
+        success: true,
+        outcome: "accepted",
+        messageId: "authoritative-staff-row",
+      });
+      await sendPromise;
+    });
+
+    // The authoritative confirmation is one row, not a duplicate.
+    expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
+      1,
+    );
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({
+        status: "NEED_HUMAN",
+        messages: [
+          ...mockData.messages,
+          {
+            id: "authoritative-staff-row",
+            senderType: "STAFF" as const,
+            content,
+            createdAt: "2026-10-27T10:11:30Z",
+          },
+          independent,
+        ],
+      }),
+    });
+    await advance(5_000);
+
+    // One confirmed row for the send + one independent identical-text row.
+    expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
+      2,
+    );
+    expect(
+      container.querySelector('[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]'),
+    ).not.toBeNull();
+    expect(attemptId).not.toBe("authoritative-staff-row");
+
+    await act(async () => root.unmount());
+  });
+
+  it("retains an unknown attempt identity and recovery UI across refresh", async () => {
+    let resolveSend: (value: StaffReplyActionResult) => void = () => {};
+    const sendPromise = new Promise<StaffReplyActionResult>((res) => {
+      resolveSend = res;
+    });
+    sendStaffReply.mockReturnValue(sendPromise);
+
+    const content = "رد غير مؤكد الهوية";
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const replyBox = container.querySelector(
+      'textarea[aria-label="رد على العميل"]',
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      typeInTextarea(replyBox, content);
+    });
+    const form = container.querySelector("form");
+    await act(async () => {
+      form?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    const attemptId = sendStaffReply.mock.calls[0]![0].clientSubmissionId;
+
+    await act(async () => {
+      resolveSend({
+        success: false,
+        outcome: "unknown",
+        message: "حالة الإرسال غير مؤكدة",
+      });
+      await sendPromise;
+    });
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({
+        status: "NEED_HUMAN",
+        messages: [
+          ...mockData.messages,
+          {
+            id: "server-unknown-staff-row",
+            senderType: "STAFF" as const,
+            content,
+            createdAt: "2026-10-27T10:13:00Z",
+          },
+        ],
+      }),
+    });
+    await advance(5_000);
+
+    expect(
+      container.querySelector(
+        'div[role="alert"][aria-label="تنبيه حالة الإرسال غير مؤكدة"]',
+      ),
+    ).not.toBeNull();
+    expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
+      1,
+    );
+
+    const recheck = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("إعادة التحقق من الإرسال"),
+    );
+    expect(recheck).not.toBeNull();
+    await act(async () => {
+      recheck?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(checkStaffReplyStatus).toHaveBeenCalledWith({
+      id: mockData.id,
+      clientSubmissionId: attemptId,
+    });
+
+    await act(async () => root.unmount());
+  });
+
+  it("retains an in-progress attempt identity and recovery UI across refresh", async () => {
+    let resolveSend: (value: StaffReplyActionResult) => void = () => {};
+    const sendPromise = new Promise<StaffReplyActionResult>((res) => {
+      resolveSend = res;
+    });
+    sendStaffReply.mockReturnValue(sendPromise);
+
+    const content = "رد قيد المعالجة";
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const replyBox = container.querySelector(
+      'textarea[aria-label="رد على العميل"]',
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      typeInTextarea(replyBox, content);
+    });
+    const form = container.querySelector("form");
+    await act(async () => {
+      form?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    const attemptId = sendStaffReply.mock.calls[0]![0].clientSubmissionId;
+
+    await act(async () => {
+      resolveSend({
+        success: false,
+        outcome: "in-progress",
+        message: "الطلب قيد المعالجة حالياً",
+      });
+      await sendPromise;
+    });
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({ status: "NEED_HUMAN" }),
+    });
+    await advance(5_000);
+
+    expect(
+      container.querySelector(
+        'div[role="status"][aria-label="حالة الطلب قيد المعالجة"]',
+      ),
+    ).not.toBeNull();
+
+    const recheck = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("تحديث الحالة"),
+    );
+    expect(recheck).not.toBeNull();
+    await act(async () => {
+      recheck?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(checkStaffReplyStatus).toHaveBeenCalledWith({
+      id: mockData.id,
+      clientSubmissionId: attemptId,
+    });
+
+    await act(async () => root.unmount());
+  });
+
+  it("preserves a newer summary edit when an in-flight save resolves", async () => {
+    let resolveSave: (value: { success: boolean }) => void = () => {};
+    const savePromise = new Promise<{ success: boolean }>((res) => {
+      resolveSave = res;
+    });
+    updateAiSummary.mockReturnValueOnce(savePromise);
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const summaryBox = container.querySelector(
+      'textarea[aria-label="ملخص المساعد"]',
+    ) as HTMLTextAreaElement;
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الملخص"),
+    );
+    expect(saveButton).not.toBeNull();
+
+    await act(async () => {
+      typeInTextarea(summaryBox, "ملخص أ");
+    });
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(updateAiSummary).toHaveBeenCalledWith({
+      id: mockData.id,
+      aiSummary: "ملخص أ",
+    });
+
+    await act(async () => {
+      typeInTextarea(summaryBox, "ملخص ب الأحدث");
+    });
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({ status: "NEED_HUMAN", aiSummary: "ملخص أ" }),
+    });
+    await advance(5_000);
+    expect(
+      container.querySelector('[aria-label="حالة المحادثة: المساعد الذكي نشط"]'),
+    ).not.toBeNull();
+
+    await act(async () => {
+      resolveSave({ success: true });
+      await savePromise;
+    });
+
+    expect(summaryBox.value).toBe("ملخص ب الأحدث");
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({ aiSummary: "ملخص أ" }),
+    });
+    await advance(5_000);
+    expect(summaryBox.value).toBe("ملخص ب الأحدث");
+
+    await act(async () => root.unmount());
+  });
+
+  it("updates the summary baseline normally when no newer edit intervened", async () => {
+    updateAiSummary.mockResolvedValueOnce({ success: true });
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const summaryBox = container.querySelector(
+      'textarea[aria-label="ملخص المساعد"]',
+    ) as HTMLTextAreaElement;
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الملخص"),
+    );
+
+    await act(async () => {
+      typeInTextarea(summaryBox, "ملخص محفوظ");
+    });
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await advance(0);
+    expect(updateAiSummary).toHaveBeenCalledWith({
+      id: mockData.id,
+      aiSummary: "ملخص محفوظ",
+    });
+    expect(summaryBox.value).toBe("ملخص محفوظ");
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({ aiSummary: "ملخص محدث من الخادم" }),
+    });
+    await advance(5_000);
+    expect(summaryBox.value).toBe("ملخص محدث من الخادم");
+
+    await act(async () => root.unmount());
+  });
+
+  it("preserves editor text after a failed save and resumes refresh", async () => {
+    updateAiSummary.mockRejectedValueOnce(new Error("network"));
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={mockData} />);
+    });
+
+    const summaryBox = container.querySelector(
+      'textarea[aria-label="ملخص المساعد"]',
+    ) as HTMLTextAreaElement;
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("حفظ الملخص"),
+    );
+
+    await act(async () => {
+      typeInTextarea(summaryBox, "ملخص غير محفوظ");
+    });
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await advance(0);
+    expect(summaryBox.value).toBe("ملخص غير محفوظ");
+    expect(container.textContent).toContain("تعذر حفظ الملخص الآن");
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({ status: "NEED_HUMAN" }),
+    });
+    await advance(5_000);
+    expect(
+      container.querySelector(
+        '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
+      ),
+    ).not.toBeNull();
+
+    await act(async () => root.unmount());
   });
 
   it("retains the last good snapshot and backs off transient failures", async () => {

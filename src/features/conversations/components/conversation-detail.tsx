@@ -347,6 +347,7 @@ export function ConversationDetail({
   const [summary, setSummary] = useState(initialData.aiSummary);
   const summaryRef = useRef(initialData.aiSummary);
   const serverSummaryRef = useRef(initialData.aiSummary);
+  const summaryRevisionRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<"messages" | "context">(
@@ -358,6 +359,7 @@ export function ConversationDetail({
   const activeConversationIdRef = useRef(initialData.id);
   const optimisticMessageIdsRef = useRef<Set<string>>(new Set());
   const mutationVersionRef = useRef(0);
+  const localMutationInFlightRef = useRef(0);
   const refreshInFlightRef = useRef(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshFailuresRef = useRef(0);
@@ -396,15 +398,23 @@ export function ConversationDetail({
   const effectiveBusinessId = propBusinessId ?? initialData.businessId;
   const effectiveUserId = initialData.currentUserId;
 
-  function beginServerMutation() {
+  function beginServerMutation(): () => void {
     mutationVersionRef.current += 1;
-  }
-
-  function endServerMutation() {
-    mutationVersionRef.current += 1;
+    localMutationInFlightRef.current += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      localMutationInFlightRef.current = Math.max(
+        0,
+        localMutationInFlightRef.current - 1,
+      );
+      mutationVersionRef.current += 1;
+    };
   }
 
   function handleSummaryChange(value: string) {
+    summaryRevisionRef.current += 1;
     summaryRef.current = value;
     setSummary(value);
   }
@@ -563,8 +573,13 @@ export function ConversationDetail({
         }
 
         // A newer local action (send/assignment/transition/summary) owns the
-        // screen now — never let an older read overwrite its result.
+        // screen now — never let an older read overwrite its result, and never
+        // apply a snapshot while a local mutation is still unresolved.
         if (mutationVersionRef.current !== requestMutationVersion) return;
+        if (localMutationInFlightRef.current > 0) {
+          refreshFailuresRef.current = 0;
+          return;
+        }
         if (result.data.id !== requestConversationId) return;
 
         const previousServerSummary = serverSummaryRef.current;
@@ -701,14 +716,18 @@ export function ConversationDetail({
   function handleTransition(
     transition: "TAKE_OVER" | "RETURN_TO_AI" | "MARK_BOOKED" | "HANDOFF",
   ) {
-    beginServerMutation();
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
-      const success = await runAction(() =>
-        onTransition
-          ? onTransition({ id: data.id, transition })
-          : transitionConversation({ id: data.id, transition }),
-      );
-      endServerMutation();
+      let success = false;
+      try {
+        success = await runAction(() =>
+          onTransition
+            ? onTransition({ id: data.id, transition })
+            : transitionConversation({ id: data.id, transition }),
+        );
+      } finally {
+        finishMutation();
+      }
       if (!success) return;
       const nextStatus = {
         TAKE_OVER: "NEED_HUMAN",
@@ -734,13 +753,17 @@ export function ConversationDetail({
   }
 
   function handleAssignment(value: string) {
-    beginServerMutation();
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
       const assignedUserId = value === "UNASSIGNED" ? null : value;
-      const success = await runAction(() =>
-        assignConversation({ id: data.id, assignedUserId }),
-      );
-      endServerMutation();
+      let success = false;
+      try {
+        success = await runAction(() =>
+          assignConversation({ id: data.id, assignedUserId }),
+        );
+      } finally {
+        finishMutation();
+      }
       if (!success) return;
       const assignee =
         data.team.find((user) => user.id === assignedUserId) ?? null;
@@ -1040,7 +1063,7 @@ export function ConversationDetail({
     setPendingMessageId(freshAttemptId);
     setError(null);
     setAcceptedNotice(null);
-    beginServerMutation();
+    const finishMutation = beginServerMutation();
 
     optimisticMessageIdsRef.current.add(freshAttemptId);
     setData((current) => ({
@@ -1070,10 +1093,11 @@ export function ConversationDetail({
           outcome: "unknown",
           message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
         };
+      } finally {
+        finishMutation();
       }
 
       setPendingMessageId(null);
-      endServerMutation();
 
       // Composer (reply) and stored draft are NEVER touched here!
       if (result.success) {
@@ -1098,6 +1122,16 @@ export function ConversationDetail({
               current.messages,
               freshAttemptId,
               result.messageId!,
+            ),
+          }));
+        } else {
+          // No authoritative id was returned: drop the local-only row and let
+          // the next refresh supply the confirmed server row.
+          optimisticMessageIdsRef.current.delete(freshAttemptId);
+          setData((current) => ({
+            ...current,
+            messages: current.messages.filter(
+              (message) => message.id !== freshAttemptId,
             ),
           }));
         }
@@ -1213,7 +1247,7 @@ export function ConversationDetail({
     setPendingMessageId(attemptId);
     setError(null);
     setAcceptedNotice(null);
-    beginServerMutation();
+    const finishMutation = beginServerMutation();
 
     // Keep recoverable raw draft snapshot and revision until confirmed success.
     const rawDraftSnapshot = reply;
@@ -1293,10 +1327,11 @@ export function ConversationDetail({
           outcome: "unknown",
           message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
         };
+      } finally {
+        finishMutation();
       }
 
       setPendingMessageId(null);
-      endServerMutation();
       const submission = activeSubmissionRef.current;
       activeSubmissionRef.current = null;
 
@@ -1360,6 +1395,16 @@ export function ConversationDetail({
               current.messages,
               attemptId,
               result.messageId!,
+            ),
+          }));
+        } else {
+          // No authoritative id was returned: drop the local-only row and let
+          // the next refresh supply the confirmed server row.
+          optimisticMessageIdsRef.current.delete(attemptId);
+          setData((current) => ({
+            ...current,
+            messages: current.messages.filter(
+              (message) => message.id !== attemptId,
             ),
           }));
         }
@@ -1533,18 +1578,32 @@ export function ConversationDetail({
   }
 
   function handleSummarySave() {
-    beginServerMutation();
+    const submittedSummary = summary;
+    const submittedRevision = summaryRevisionRef.current;
+    const finishMutation = beginServerMutation();
     startTransition(async () => {
-      const success = await runAction(() =>
-        updateAiSummary({ id: data.id, aiSummary: summary }),
-      );
-      endServerMutation();
-      if (success) {
-        const savedSummary = summary.trim();
+      let success = false;
+      try {
+        success = await runAction(() =>
+          updateAiSummary({ id: data.id, aiSummary: submittedSummary }),
+        );
+      } catch {
+        setError("تعذر حفظ الملخص الآن");
+      } finally {
+        finishMutation();
+      }
+      if (!success) return;
+
+      const savedSummary = submittedSummary.trim();
+      serverSummaryRef.current = savedSummary;
+      setData((current) => ({ ...current, aiSummary: savedSummary }));
+
+      // Only write back to the editor when it still belongs to the revision
+      // that was submitted. A newer operator edit stays untouched and visibly
+      // unsaved.
+      if (summaryRevisionRef.current === submittedRevision) {
         summaryRef.current = savedSummary;
-        serverSummaryRef.current = savedSummary;
         setSummary(savedSummary);
-        setData((current) => ({ ...current, aiSummary: savedSummary }));
       }
     });
   }
