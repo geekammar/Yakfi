@@ -2276,7 +2276,7 @@ fi
   );
 
   // T67. Cutover is a read-only no-op when the bot is already on canonical Production.
-  const alreadyAtDestination = await executeGuardedSwitch(
+  const cutoverAlreadyAtDestination = await executeGuardedSwitch(
     {
       DATABASE_URL:
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
@@ -2310,8 +2310,8 @@ fi
   );
   check(
     "T67. Cutover dry-run on an already-correct Production URL is an explicit read-only no-op",
-    alreadyAtDestination.ok === true &&
-      alreadyAtDestination.status === "ALREADY_AT_DESTINATION",
+    cutoverAlreadyAtDestination.ok === true &&
+      cutoverAlreadyAtDestination.status === "ALREADY_AT_DESTINATION",
   );
 
   // T68. Workflow definitions pin selected-database and cutover operations.
