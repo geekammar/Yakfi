@@ -144,6 +144,10 @@ and tests is allowed; executing package scripts is not.
 - **CI data isolation:** automatic PR checks use disposable or local databases
   and must never apply migrations to the selected live runtime database.
   Runtime migrations remain explicit, target-verified operator operations.
+- **Sensitive value recovery:** Vercel does not expose sensitive values for
+  readback, and a deployment ID, health response or Git SHA is not a secret or
+  configuration backup. Never replace a Production secret until its recovery
+  source is confirmed; otherwise record the rollback blocker honestly.
 - **Database:** do not execute database commands on the VPS. Development
   database work belongs in an authorized non-VPS environment or CI. Production
   migrations are operator-authorized via

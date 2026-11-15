@@ -34,6 +34,7 @@
     "check:whatsapp-inbound": "tsx scripts/check-whatsapp-inbound.ts",
     "check:telegram": "tsx scripts/check-telegram.ts",
     "check:telegram-repair-workflow": "tsx scripts/check-telegram-repair-workflow.ts",
+    "check:update-production-runtime-env": "tsx scripts/check-update-production-runtime-env.ts",
     "check:telegram-onboarding": "tsx scripts/check-telegram-onboarding.ts",
     "check:telegram-ux001": "tsx scripts/check-telegram-ux001.ts",
     "check:telegram-execution-defects": "tsx scripts/check-telegram-execution-defects.ts",

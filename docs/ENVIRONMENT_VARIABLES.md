@@ -389,9 +389,11 @@ settings remain canonical.
   exact-SHA guarded and are now explicit runtime maintenance, not PR CI. Do not
   dispatch them casually.
 - `production-db-migrate.yml` is the only runtime migration workflow. It now
-  requires `expected_db_host` and refuses to run when `PRODUCTION_DATABASE_URL`
-  resolves to a different host. The operator must repoint the Actions secret to
-  the selected active database during the transition.
+  requires `expected_db_host` and `expected_commit_sha`, refuses a mismatched
+  host/SHA, and rejects the known legacy Production Neon hosts in apply mode.
+  The operator must repoint the effective environment-scoped
+  `PRODUCTION_DATABASE_URL` to the selected active database during the
+  transition.
 - `pr-validation.yml` already uses a disposable local PostgreSQL service.
 - Migration status on the selected target is read-only until an approved
   migration is pending. The PR #79 marker is already present; do not reapply it.
@@ -399,16 +401,52 @@ settings remain canonical.
 ### Owner-assisted secure reuse
 
 Vercel does not expose sensitive environment values for reading back. The
-owner-authorized step is one of:
+owner must first confirm the existing test-compatible `DATABASE_URL` and
+`CREDENTIAL_MASTER_KEY` are available from the encrypted vault. If they are,
+re-enter only those two values into the Production scope without printing or
+committing them.
 
-1. re-enter the existing test-compatible `DATABASE_URL` and
-   `CREDENTIAL_MASTER_KEY` into the Production scope from the encrypted
-   password-manager vault, without printing or committing them; or
-2. authorize a separately reviewed one-shot transfer that copies the existing
-   GitHub Actions secrets `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY` to
-   the Production scope through the existing `VERCEL_TOKEN`, without outputting
-   the values.
+If the owner cannot re-enter them, use the reviewed one-shot
+`production-runtime-env.yml` workflow with `operation=preflight` then
+`operation=apply`. It reuses the repository secrets `TEST_DATABASE_URL` and
+`CREDENTIAL_MASTER_KEY` with `VERCEL_TOKEN`, requires the exact reviewed SHA,
+and updates only the existing Production `DATABASE_URL` and
+`CREDENTIAL_MASTER_KEY` records. It does not create secrets, copy Preview
+variables, or touch auth/AI/channel settings.
 
-This patch does not implement that transfer. If neither source is available,
-stop; do not invent a key or rotate unrelated credentials. Exact transition
-order and rollback are in `TROUBLESHOOTING.md`.
+The current Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` are sensitive
+and cannot be read back through Vercel. A deployment ID or health response is
+not a substitute for a recoverable configuration backup. If the old values are
+not in the owner vault, a full configuration rollback is not available and must
+be recorded as a blocker; do not replace the secrets as though rollback were
+guaranteed.
+
+### Effective secret scopes
+
+- `production-db-migrate.yml` and `production-telegram-repair.yml` use the
+  `Production` GitHub environment, so the environment-scoped
+  `PRODUCTION_DATABASE_URL` overrides the repository-scoped secret of the same
+  name. Repoint and verify the effective scope before relying on either.
+- `test-db-migrate.yml` manual operations and `production-runtime-env.yml` do
+  not set a GitHub environment; they use the repository-scoped
+  `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
+- `production-telegram-repair.yml` does not enforce `expected_db_host`; it is
+  not the cutover gate. Use the guarded cutover operations instead.
+- Matching secret names do not prove equal values. Verify the target scope and
+  non-secret host identity, never the value.
+
+### Prepared execution mechanisms
+
+- `test-db-migrate.yml` / `verify-selected-runtime`: read-only selected DB
+  migration status plus fixed-bot credential/getMe verification using
+  `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
+- `production-runtime-env.yml` / `preflight` or `apply`: updates only the two
+  fixed Production environment records, exact-SHA guarded.
+- `test-db-migrate.yml` / `cutover-main-runtime-dry-run` then
+  `cutover-main-runtime-apply`: fixed-bot switch to canonical Production using
+  the selected test DB/key, deployed commit/health checks, explicit current
+  webhook kind, separate dry-run/apply, and no automatic retry.
+- Read-only postcheck: repeat `verify-selected-runtime`, repeat the cutover
+  dry-run with `expected_current=main`, and inspect `/api/health`.
+
+Exact order and rollback are in `TROUBLESHOOTING.md`.

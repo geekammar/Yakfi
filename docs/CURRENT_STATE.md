@@ -233,8 +233,21 @@ preparation.
   settings stay unchanged. No key is generated, rotated or re-encrypted.
 - CI isolation: automatic PR migration validation now uses a disposable
   PostgreSQL service, never the shared runtime database. Manual maintenance
-  remains exact-branch/SHA guarded. `production-db-migrate.yml` now requires an
-  `expected_db_host` preflight before status or apply.
+  remains exact-branch/SHA guarded. `production-db-migrate.yml` now requires
+  `expected_db_host` and `expected_commit_sha` and rejects the legacy Production
+  hosts in apply mode.
+- Prepared runners: `test-db-migrate.yml` adds read-only
+  `verify-selected-runtime` and guarded `cutover-main-runtime-dry-run` /
+  `cutover-main-runtime-apply`; `production-runtime-env.yml` is a one-shot
+  exact-SHA update of only the Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` from existing Actions secrets.
+  `production-telegram-repair.yml` does not enforce `expected_db_host` and is
+  not the cutover gate.
+- Recovery limit: the current Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` are sensitive and cannot be read back through Vercel.
+  A deployment ID is not a secret backup. If the old values are not in the
+  owner vault, a full configuration rollback is not available and must be
+  recorded as a blocker.
 - Not executed: no Production environment write, migration, webhook move,
   merge, branch deletion, credential rotation, paid model request or Telegram
   send. The old Preview key scope is not the consolidation solution.

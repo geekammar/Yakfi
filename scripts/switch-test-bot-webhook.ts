@@ -51,7 +51,17 @@ export const ALLOWED_OPERATIONS = [
   "transfer-integration-preview-apply",
   "return-old-preview-dry-run",
   "return-old-preview-apply",
+  "cutover-main-runtime-dry-run",
+  "cutover-main-runtime-apply",
 ] as const;
+
+export const CUTOVER_CURRENT_KINDS = [
+  "integrated-preview",
+  "old-preview",
+  "main",
+] as const;
+
+export type CutoverCurrentKind = (typeof CUTOVER_CURRENT_KINDS)[number];
 
 export type SwitchOperation = (typeof ALLOWED_OPERATIONS)[number];
 
@@ -248,6 +258,96 @@ export async function verifyPreviewDestinationReadiness(
   };
 }
 
+export type ProductionDestinationReadiness =
+  | {
+      ok: true;
+      origin: string;
+      version: string | null;
+      commitSha: string;
+    }
+  | {
+      ok: false;
+      code:
+        | "MISSING_EXPECTED_COMMIT_SHA"
+        | "DESTINATION_HEALTH_UNAVAILABLE"
+        | "DESTINATION_NOT_READY"
+        | "DESTINATION_IDENTITY_MISMATCH";
+    };
+
+/**
+ * Bounded read-only readiness check for the canonical Production runtime.
+ * It verifies the deployed commit SHA and ready/connected health before any
+ * cutover mutation. It never reads or returns secrets, raw bodies or tokens.
+ */
+export async function verifyProductionDestinationReadiness(
+  params: {
+    expectedCommitSha: string;
+    expectedVersion?: string;
+  },
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<ProductionDestinationReadiness> {
+  const expected = params.expectedCommitSha.trim();
+  if (!/^[0-9a-f]{40}$/.test(expected)) {
+    return { ok: false, code: "MISSING_EXPECTED_COMMIT_SHA" };
+  }
+
+  const origin = new URL(FIXED_TARGETS.mainWebhookUrl).origin;
+  let response: Response;
+  try {
+    response = await (deps.fetchImpl ?? globalThis.fetch)(
+      `${origin}/api/health`,
+      {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(deps.timeoutMs ?? 5000),
+      },
+    );
+  } catch {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+  if (!response.ok) {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+
+  let body: {
+    status?: unknown;
+    version?: unknown;
+    commitSha?: unknown;
+    deploymentReady?: unknown;
+    database?: unknown;
+  };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+  }
+
+  if (
+    body.status !== "ok" ||
+    body.deploymentReady !== true ||
+    body.database !== "connected"
+  ) {
+    return { ok: false, code: "DESTINATION_NOT_READY" };
+  }
+  if (body.commitSha !== expected) {
+    return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
+  }
+  const expectedVersion = params.expectedVersion?.trim();
+  if (
+    expectedVersion &&
+    body.version !== expectedVersion
+  ) {
+    return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
+  }
+
+  return {
+    ok: true,
+    origin,
+    version: typeof body.version === "string" ? body.version : null,
+    commitSha: expected,
+  };
+}
+
 export type SwitchRunnerDeps = {
   validateTestDbUrl?: (url: string) => void;
   validateProdDbUrl?: (url: string) => void;
@@ -256,6 +356,10 @@ export type SwitchRunnerDeps = {
     expectedCommitSha: string;
     databaseUrl: string;
   }) => Promise<PreviewDestinationReadiness>;
+  verifyProductionDestination?: (params: {
+    expectedCommitSha: string;
+    expectedVersion?: string;
+  }) => Promise<ProductionDestinationReadiness>;
   switchFn?: (
     params: SwitchTelegramWebhookParams,
     credentialsResolver?: Pick<CredentialsResolver, "resolve">,
@@ -362,6 +466,9 @@ export async function executeGuardedSwitch(
     operation === "return-old-preview-dry-run" ||
     operation === "return-old-preview-apply";
   const isPreviewToPreview = isIntegratedPreviewTransfer || isOldPreviewReturn;
+  const isCutover =
+    operation === "cutover-main-runtime-dry-run" ||
+    operation === "cutover-main-runtime-apply";
 
   let expectedCurrentUrl: string = FIXED_TARGETS.mainWebhookUrl;
   let destinationUrl: string = isRestore
@@ -378,12 +485,30 @@ export async function executeGuardedSwitch(
     expectedCurrentUrl = FIXED_TARGETS.integratedPreviewWebhookUrl;
     destinationUrl = FIXED_TARGETS.previewWebhookUrl;
   }
+  if (isCutover) {
+    const kind = (env.EXPECTED_CURRENT_KIND ?? "").trim();
+    if (
+      !CUTOVER_CURRENT_KINDS.includes(kind as CutoverCurrentKind)
+    ) {
+      out.error(
+        "❌ Preflight Refused: [INVALID_EXPECTED_CURRENT_KIND] Expected current webhook kind is missing or not authorized.",
+      );
+      return { ok: false, code: "INVALID_EXPECTED_CURRENT_KIND" };
+    }
+    expectedCurrentUrl =
+      kind === "integrated-preview"
+        ? FIXED_TARGETS.integratedPreviewWebhookUrl
+        : kind === "old-preview"
+          ? FIXED_TARGETS.previewWebhookUrl
+          : FIXED_TARGETS.mainWebhookUrl;
+    destinationUrl = FIXED_TARGETS.mainWebhookUrl;
+  }
 
   const expectedCommitSha = (env.EXPECTED_COMMIT_SHA ?? "").trim();
-  if (isPreviewToPreview) {
+  if (isPreviewToPreview || isCutover) {
     if (!/^[0-9a-f]{40}$/.test(expectedCommitSha)) {
       out.error(
-        "❌ Preflight Refused: [MISSING_EXPECTED_COMMIT_SHA] Full reviewed commit SHA is required for Preview transfer.",
+        "❌ Preflight Refused: [MISSING_EXPECTED_COMMIT_SHA] Full reviewed commit SHA is required.",
       );
       return { ok: false, code: "MISSING_EXPECTED_COMMIT_SHA" };
     }
@@ -396,7 +521,8 @@ export async function executeGuardedSwitch(
     }
   }
 
-  const destinationReadiness = isPreviewToPreview
+  const expectedVersion = (env.EXPECTED_VERSION ?? "").trim();
+  const previewReadiness = isPreviewToPreview
     ? await (deps.verifyDestination ?? verifyPreviewDestinationReadiness)({
         kind: isIntegratedPreviewTransfer
           ? "integrated-preview"
@@ -405,9 +531,17 @@ export async function executeGuardedSwitch(
         databaseUrl,
       })
     : null;
+  const productionReadiness = isCutover
+    ? await (deps.verifyProductionDestination ??
+        verifyProductionDestinationReadiness)({
+        expectedCommitSha,
+        ...(expectedVersion ? { expectedVersion } : {}),
+      })
+    : null;
+  const destinationReadiness = previewReadiness ?? productionReadiness;
   if (destinationReadiness && !destinationReadiness.ok) {
     out.error(
-      `❌ Preflight Refused: [${destinationReadiness.code}] Fixed Preview destination readiness failed.`,
+      `❌ Preflight Refused: [${destinationReadiness.code}] Destination readiness failed.`,
     );
     return { ok: false, code: destinationReadiness.code };
   }
@@ -417,7 +551,9 @@ export async function executeGuardedSwitch(
     ? "Production Restoration"
     : isPreviewToPreview
       ? "Preview-to-Preview Transfer"
-      : "Preview Webhook Switch";
+      : isCutover
+        ? "Production Runtime Cutover"
+        : "Preview Webhook Switch";
 
   out.log(`[FlowPilot] Telegram ${actionLabel}: mode=${modeLabel}`);
   out.log(
@@ -428,9 +564,14 @@ export async function executeGuardedSwitch(
   out.log(
     `Credential source:    ${isRestore ? "owner-provided fixed-bot maintenance token; stored credential unchanged" : "application runtime credential"}`,
   );
-  if (destinationReadiness?.ok) {
+  if (previewReadiness?.ok) {
     out.log(
-      `Destination check:    version=${destinationReadiness.version}, commitSha=${destinationReadiness.commitSha}, dbHost=${destinationReadiness.dbHost}, migrationApplied=true, isProductionDb=false`,
+      `Destination check:    version=${previewReadiness.version}, commitSha=${previewReadiness.commitSha}, dbHost=${previewReadiness.dbHost}, migrationApplied=true, isProductionDb=false`,
+    );
+  }
+  if (productionReadiness?.ok) {
+    out.log(
+      `Destination check:    origin=${productionReadiness.origin}, version=${productionReadiness.version ?? "unknown"}, commitSha=${productionReadiness.commitSha}, database=connected`,
     );
   }
 
@@ -442,6 +583,8 @@ export async function executeGuardedSwitch(
     "Return path: reviewed workflow return-old-preview-dry-run then return-old-preview-apply on the exact integration SHA. It uses the SAME test database and does not touch Production.";
   const previewForwardGuidance =
     "Forward path: reviewed workflow transfer-integration-preview-dry-run then transfer-integration-preview-apply on the exact integration SHA. It uses the SAME test database and does not touch Production.";
+  const cutoverGuidance =
+    "Cutover path: test-db-migrate.yml cutover-main-runtime-dry-run then cutover-main-runtime-apply on main with the exact merged SHA. Do not use restore-main-webhook-* against the selected test database.";
 
   try {
     let switchImpl = deps.switchFn;
@@ -459,7 +602,7 @@ export async function executeGuardedSwitch(
         expectedCurrentUrl,
         destinationUrl,
         apply: isApply,
-        allowAlreadyAtDestination: isPreviewToPreview,
+        allowAlreadyAtDestination: isPreviewToPreview || isCutover,
       },
       isRestore ? createOwnerRestoreResolver(restoreToken) : undefined,
     );
@@ -475,11 +618,11 @@ export async function executeGuardedSwitch(
         }
         if (outcome.reconciliationCommand) {
           out.error("\nReconciliation Command:");
-          out.error(`  ${reconciliationGuidance}`);
+          out.error(`  ${isCutover ? cutoverGuidance : reconciliationGuidance}`);
         }
         if (outcome.restorationProcedure) {
           out.error("\nRestoration Procedure (revert switch):");
-          out.error(`  ${restorationGuidance}\n`);
+          out.error(`  ${isCutover ? cutoverGuidance : restorationGuidance}\n`);
         }
         return {
           ok: false,
@@ -493,7 +636,7 @@ export async function executeGuardedSwitch(
       );
       if (outcome.restorationProcedure) {
         out.error("\nRestoration Procedure:");
-        out.error(`  ${restorationGuidance}\n`);
+        out.error(`  ${isCutover ? cutoverGuidance : restorationGuidance}\n`);
       }
       return { ok: false, code: outcome.code };
     }

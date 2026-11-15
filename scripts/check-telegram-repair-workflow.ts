@@ -2083,6 +2083,315 @@ fi
       manualTestJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}"),
   );
 
+
+  // T64. Production runtime cutover dry-run maps the fixed current URL to Production.
+  const cutoverIntegrationSha = "c".repeat(40);
+  const cutoverDryCapture = {
+    current: null as SwitchTelegramWebhookParams | null,
+  };
+  const cutoverDryLines: string[] = [];
+  const cutoverDryOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+      EXPECTED_VERSION: "0.79.10",
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+      }),
+      switchFn: async (params) => {
+        cutoverDryCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCH_DRY_RUN",
+          dryRun: true,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          currentWebhookUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+          destinationWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          restorationProcedure: "test cutover restoration",
+          message: "Cutover dry run successful",
+        };
+      },
+      out: {
+        log: (...args) => cutoverDryLines.push(args.join(" ")),
+        error: (...args) => cutoverDryLines.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T64. Cutover dry-run maps integrated Preview to canonical Production with apply=false",
+    cutoverDryOutcome.ok === true &&
+      cutoverDryOutcome.status === "SWITCH_DRY_RUN" &&
+      cutoverDryCapture.current !== null &&
+      cutoverDryCapture.current.apply === false &&
+      cutoverDryCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      cutoverDryCapture.current.destinationUrl === FIXED_TARGETS.mainWebhookUrl &&
+      cutoverDryCapture.current.allowAlreadyAtDestination === true &&
+      cutoverDryLines.some((line) => line.includes("Production Runtime Cutover")),
+  );
+
+  // T65. Cutover rejects arbitrary current kinds, missing SHAs and unhealthy destinations.
+  let cutoverRefusalCalls = 0;
+  const cutoverRefusalDeps = {
+    verifyProductionDestination: async () => ({
+      ok: true as const,
+      origin: "https://flowpilot-prod.vercel.app",
+      version: "0.79.10",
+      commitSha: cutoverIntegrationSha,
+    }),
+    switchFn: async () => {
+      cutoverRefusalCalls += 1;
+      throw new Error("must not execute");
+    },
+  };
+  const invalidCurrent = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "arbitrary-url",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    cutoverRefusalDeps,
+  );
+  const missingSha = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+    },
+    cutoverRefusalDeps,
+  );
+  const unhealthyDestination = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    {
+      verifyProductionDestination: async () => ({
+        ok: false as const,
+        code: "DESTINATION_IDENTITY_MISMATCH" as const,
+      }),
+      switchFn: async () => {
+        cutoverRefusalCalls += 1;
+        throw new Error("must not execute");
+      },
+    },
+  );
+  check(
+    "T65. Cutover refuses arbitrary current kinds, missing SHA and unhealthy Production destination before mutation",
+    invalidCurrent.code === "INVALID_EXPECTED_CURRENT_KIND" &&
+      missingSha.code === "MISSING_EXPECTED_COMMIT_SHA" &&
+      unhealthyDestination.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      cutoverRefusalCalls === 0,
+  );
+
+  // T66. Cutover apply uses the application credential and the fixed Production destination.
+  const cutoverApplyCapture = {
+    current: null as SwitchTelegramWebhookParams | null,
+  };
+  const cutoverApplyLines: string[] = [];
+  const cutoverApplyOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-apply",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+      EXPECTED_VERSION: "0.79.10",
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+      }),
+      switchFn: async (params) => {
+        cutoverApplyCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCHED",
+          dryRun: false,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          previousWebhookUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+          webhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          previousAllowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          webhookSecretHashPersisted: true,
+          restorationProcedure: "test rollback procedure",
+          verifiedAt: new Date().toISOString(),
+        };
+      },
+      out: {
+        log: (...args) => cutoverApplyLines.push(args.join(" ")),
+        error: (...args) => cutoverApplyLines.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T66. Cutover apply uses the selected DB application credential and writes only the fixed Production destination",
+    cutoverApplyOutcome.ok === true &&
+      cutoverApplyOutcome.status === "SWITCHED" &&
+      cutoverApplyCapture.current !== null &&
+      cutoverApplyCapture.current.apply === true &&
+      cutoverApplyCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      cutoverApplyCapture.current.destinationUrl === FIXED_TARGETS.mainWebhookUrl &&
+      cutoverApplyLines.some((line) => line.includes("mode=APPLY")),
+  );
+
+  // T67. Cutover is a read-only no-op when the bot is already on canonical Production.
+  const alreadyAtDestination = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "main",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+      }),
+      switchFn: async () => ({
+        ok: true,
+        status: "ALREADY_AT_DESTINATION",
+        dryRun: true,
+        botExternalId: FIXED_TARGETS.botExternalId,
+        botUsername: FIXED_TARGETS.botUsername,
+        currentWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+        destinationWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+        allowedUpdates: ["message", "callback_query"],
+        pendingUpdateCount: 0,
+        message: "Already at destination",
+      }),
+    },
+  );
+  check(
+    "T67. Cutover dry-run on an already-correct Production URL is an explicit read-only no-op",
+    alreadyAtDestination.ok === true &&
+      alreadyAtDestination.status === "ALREADY_AT_DESTINATION",
+  );
+
+  // T68. Workflow definitions pin selected-database and cutover operations.
+  const selectedRuntimeJob =
+    (workflowYaml.split("\n  verify-selected-runtime:")[1] ?? "").split(
+      "\n  recover-test-credential:",
+    )[0] ?? "";
+  const cutoverJob =
+    (workflowYaml.split("\n  cutover-main-runtime:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T68. Selected-runtime verification is read-only and cutover is main/SHA guarded with test-only secrets",
+    selectedRuntimeJob.includes(
+      "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'",
+    ) &&
+      selectedRuntimeJob.includes("github.ref == 'refs/heads/main'") &&
+      selectedRuntimeJob.includes(
+        "python3 scripts/repair-test-bot-credential.py --from-environment",
+      ) &&
+      selectedRuntimeJob.includes("pnpm exec prisma migrate status") &&
+      !selectedRuntimeJob.includes("db:deploy") &&
+      !selectedRuntimeJob.includes("--apply") &&
+      cutoverJob.includes("github.ref == 'refs/heads/main'") &&
+      cutoverJob.includes("EXPECTED_CURRENT_KIND") &&
+      cutoverJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      cutoverJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      !cutoverJob.includes("PRODUCTION_DATABASE_URL") &&
+      !cutoverJob.includes("RESTORE_BOT_TOKEN") &&
+      !cutoverJob.includes("environment: Production"),
+  );
+
+  // T69. Runtime migration and environment workflows are narrowly target-guarded.
+  const productionMigrateYaml = readFileSync(
+    ".github/workflows/production-db-migrate.yml",
+    "utf-8",
+  );
+  const runtimeEnvYaml = readFileSync(
+    ".github/workflows/production-runtime-env.yml",
+    "utf-8",
+  );
+  const runtimeEnvScript = readFileSync(
+    "scripts/update-production-runtime-env.ts",
+    "utf-8",
+  );
+  check(
+    "T69. Runtime migration requires exact SHA/host and rejects the legacy Production database; env cutover updates only the fixed Production pair",
+    productionMigrateYaml.includes("expected_db_host:") &&
+      productionMigrateYaml.includes("expected_commit_sha:") &&
+      productionMigrateYaml.includes(
+        "Legacy Production database host is inactive",
+      ) &&
+      productionMigrateYaml.includes(
+        "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+      ) &&
+      runtimeEnvYaml.includes(
+        "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'",
+      ) &&
+      runtimeEnvYaml.includes("github.ref == 'refs/heads/main'") &&
+      runtimeEnvYaml.includes("preflight") &&
+      runtimeEnvYaml.includes("apply") &&
+      runtimeEnvYaml.includes("VERCEL_TOKEN") &&
+      runtimeEnvYaml.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      runtimeEnvYaml.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      runtimeEnvYaml.includes(
+        "node --import tsx scripts/update-production-runtime-env.ts",
+      ) &&
+      !runtimeEnvYaml.includes("environment: Production") &&
+      !runtimeEnvYaml.includes("NEXT_PUBLIC_APP_URL") &&
+      !runtimeEnvYaml.includes("BETTER_AUTH_SECRET") &&
+      runtimeEnvScript.includes(
+        'TARGET_KEYS = ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"] as const',
+      ) &&
+      runtimeEnvScript.includes("decrypt=false") &&
+      runtimeEnvScript.includes('type: "sensitive"') &&
+      !runtimeEnvScript.includes("NEXT_PUBLIC_APP_URL") &&
+      !runtimeEnvScript.includes("BETTER_AUTH_SECRET"),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {

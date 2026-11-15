@@ -22,8 +22,20 @@
 - CI isolation: automatic PR migration validation in `test-db-migrate.yml` now
   uses a job-local `postgres:16` service and never binds runtime database
   secrets. Manual fixed-target operations remain exact-branch/SHA guarded.
-  `production-db-migrate.yml` now requires `expected_db_host` and verifies it
-  before status or apply.
+  `production-db-migrate.yml` now requires `expected_db_host` and
+  `expected_commit_sha` and rejects the legacy Production hosts in apply mode.
+- Prepared runners: read-only `verify-selected-runtime` (selected DB migration
+  status plus fixed-bot credential/getMe), exact-main-SHA
+  `cutover-main-runtime-dry-run` / `cutover-main-runtime-apply` (fixed bot to
+  canonical Production using the selected test DB/key), and the one-shot
+  `production-runtime-env.yml` (only Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY`). `production-telegram-repair.yml` does not enforce
+  `expected_db_host` and is not the cutover gate.
+- Recovery limit: the current Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` are sensitive and cannot be read back through Vercel.
+  A deployment ID is not a secret backup; if the old values are not in the
+  owner vault, full configuration rollback is unavailable and is recorded as a
+  blocker.
 - Evidence: current Production `dpl_7JM2re7GuiGHrPwNQXZUBQpg4m3H` (SHA
   `49d58c5`, v0.79.8) is healthy on its existing DB; integrated Preview
   `dpl_8SDviwrK2PEg7HTwXdkMojzUgWkL` (SHA `a566a10`, v0.79.10) health reports
