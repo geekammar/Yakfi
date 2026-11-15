@@ -2063,6 +2063,28 @@ fi
       transferWrites.count === 2,
   );
 
+  // T63. Automatic PR migration validation is isolated from the shared runtime DB.
+  const validateMigrationsJob =
+    (workflowYaml.split("\n  validate-migrations:")[1] ?? "").split(
+      "\n  recover-test-credential:",
+    )[0] ?? "";
+  const manualTestJob =
+    (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T63. Automatic PR migration validation uses a disposable PostgreSQL service and never binds runtime database secrets",
+    validateMigrationsJob.includes("image: postgres:16") &&
+      validateMigrationsJob.includes(
+        "DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test",
+      ) &&
+      !validateMigrationsJob.includes("secrets.TEST_DATABASE_URL") &&
+      !validateMigrationsJob.includes("secrets.PRODUCTION_DATABASE_URL") &&
+      manualTestJob.includes(
+        "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
+      ),
+  );
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   let failed = 0;
   for (const { label, pass } of checks) {

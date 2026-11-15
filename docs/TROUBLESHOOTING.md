@@ -237,6 +237,107 @@ the expected-current check. Dry runs perform no `setWebhook` and no database
 writes. The return path is prepared and offline-tested; a live rollback has NOT
 been tested. Production migration remains pending and operator-authorized.
 
+## Single Production runtime consolidation — prepared runbook (not executed)
+
+This runbook is approved preparation only. It performs no Production
+environment write, migration, webhook move, merge, deletion, rotation, paid
+model call or Telegram send by itself. Reviewer and Ammar approve each
+mutation. Current baseline: Production `dpl_7JM2re7GuiGHrPwNQXZUBQpg4m3H`
+(SHA `49d58c5`, v0.79.8); integrated Preview
+`dpl_8SDviwrK2PEg7HTwXdkMojzUgWkL` (SHA `a566a10`, v0.79.10). The final PR #83
+HEAD is recorded on the PR; use that exact SHA for the merge.
+
+### Preconditions (read-only)
+
+1. Reviewer and Ammar approve the consolidated configuration and the exact
+   transition window.
+2. Owner confirms the selected users/data remain experimental, and confirms the
+   existing test DB URL and test-compatible `CREDENTIAL_MASTER_KEY` are
+   recoverable from the vault (or authorizes the separately reviewed one-shot
+   transfer).
+3. Read-only bot check confirms the fixed bot `8926541123`
+   (`@Drafnanafnanbot`), business `f5314115-...`, connection `1d2cdf87-...`,
+   and its current webhook URL. If the current URL is not the old Preview,
+   integrated Preview, or canonical Production URL, stop; do not weaken the
+   guard.
+4. No open PR with `prisma/**` changes is pending validation during the
+   transition window.
+
+### Ordered transition
+
+1. **Preserve recovery references (owner, no agent access).** Export the
+   current Production `DATABASE_URL`, `CREDENTIAL_MASTER_KEY`,
+   `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_SECRET` and channel
+   secrets to the encrypted vault. Record the old Production DB host, the
+   current Production deployment `dpl_7JM2...`, and the current bot webhook URL
+   in a non-secret inventory. Do not delete, reset or overwrite the old
+   Production database.
+2. **Verify the selected target read-only.** In an authorized isolated runner,
+   run `pnpm exec prisma migrate status` with the selected test DB URL. Confirm
+   it reports up to date. The PR #79 marker
+   `20261108200000_safe_telegram_staff_reply_delivery` is already present
+   (`migrationApplied=true`); do not reapply it. If another migration is
+   pending, stop and apply it only through the approved
+   `production-db-migrate.yml` with `expected_db_host=<test host>` and
+   `ref=<final PR #83 HEAD>` before any merge. Never run migration commands on
+   the VPS.
+3. **Repoint the runtime migration secret.** Owner updates the GitHub Actions
+   `PRODUCTION_DATABASE_URL` to the selected test DB, preserving the old value
+   in the vault. This makes `production-db-migrate.yml` and
+   `production-telegram-repair.yml` target the active runtime; their names are
+   not proof, so verify the `expected_db_host` preflight.
+4. **Update only the two Production application values.** Owner sets the
+   Vercel Production `DATABASE_URL` to the selected test DB and
+   `CREDENTIAL_MASTER_KEY` to the existing test-compatible key. Do not change
+   `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_SECRET`, AI keys or
+   channel settings. Do not copy unrelated Preview variables. Do not generate or
+   rotate a key. Perform steps 3–5 in one approved window and freeze other
+   merges; do not leave the active DB selected while old automatic PR migration
+   validation can still run.
+5. **Merge PR #83 and deploy normally.** Merge the reviewed draft to `main`,
+   record the exact merge commit SHA, and let the normal Vercel Production
+   deployment build it. Verify `/api/health` reports that exact `commitSha`,
+   version `0.79.10`, `deploymentReady=true`, `database=connected` and
+   `missingEnvVars=[]`. Do not accept a different SHA or an older deployment.
+6. **Verify runtime consistency before bot traffic.** In an authorized
+   read-only runner, confirm the fixed tenant/connection and runtime credential
+   resolve in the selected DB. Do not send a Telegram message and do not call a
+   paid model.
+7. **Move the fixed bot once.** If the verified current URL is the old or
+   integrated Preview, run the reviewed explicit switch in an authorized
+   isolated runner (dry run first, then `--apply`) with the selected DB and
+   test-compatible key:
+   `pnpm telegram:repair-webhook --switch --business-id f5314115-... --connection-id 1d2cdf87-... --expected-current-url <verified current URL> --destination-url https://flowpilot-prod.vercel.app/api/telegram/webhook`.
+   If the bot is already on the canonical Production URL, do not switch; run
+   the explicit `production-telegram-repair.yml` `check` then
+   `apply-reconcile` with `expected_url` set to the canonical URL to persist a
+   coherent hash in the selected DB. Do not use `restore-main-webhook-*` for a
+   newly selected database: its guard only allows the old Production host and it
+   uses the owner token, not the application credential.
+8. **Read-only postcheck.** Verify `/api/health`, `prisma migrate status`, the
+   bot `getWebhookInfo` URL/allowed updates, the selected DB webhook secret
+   hash, and the connection's CONNECTED/active state. Confirm no pending update
+   replay is required. Do not resend an old customer message.
+9. **One later authorized customer test.** After separate approval, send one
+   uniquely marked customer message and verify ingress, one reply, and truthful
+   delivery evidence. A paid model turn is a separate approval.
+
+### Rollback to the preserved configuration (prepared, not live-tested)
+
+- **Before the bot move:** revert the Vercel Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` to the preserved values, restore the GitHub Actions
+  `PRODUCTION_DATABASE_URL`, and promote/restore the preserved Production
+  deployment `dpl_7JM2...` (or the previous verified main deployment). The old
+  Production DB was never modified; no migration rollback or `DROP TABLE` is
+  involved.
+- **After the bot move:** first move the bot back to the old Preview with the
+  old PR #79 guarded switch on its exact branch/SHA using `TEST_DATABASE_URL`
+  and the test-compatible key; verify the hash in the test DB. Then revert the
+  Production environment and promote the preserved deployment. Do not run
+  `restore-main-webhook-*` against the test DB.
+- Rollback has not been executed live. Additive tables remain; never drop them
+  to simulate a rollback.
+
 ## Y83 automated reply delivery failure — 15 November 2026
 
 The customer reply was persisted and AI/provider evidence was healthy, but
@@ -244,13 +345,14 @@ Telegram delivery failed (`outboundSendDelivered=false`). The webhook logger
 showed `DELIVERY_FAILURE` / `UNKNOWN_ERROR`; the typed transport code was lost
 by the old delivery projection.
 
-Check the Vercel Preview environment scope before retesting: the integrated
-Preview branch must receive the existing `CREDENTIAL_MASTER_KEY` used by the
-fixed test bot. A key scoped only to the old PR79 feature branch is not visible
-to the integrated deployment, so runtime credential decryption fails before
-`sendMessage`. Do not rotate the key, copy a different key, or switch the bot
-to make delivery pass. The reviewer/operator must scope the existing key to the
-intended Preview branch and redeploy the exact reviewed SHA.
+Historical Y83 Preview remedy, not the consolidation: the integrated Preview
+branch would need the existing test-compatible `CREDENTIAL_MASTER_KEY` used by
+the fixed test bot. A key scoped only to the old PR79 feature branch is not
+visible to the integrated deployment, so runtime credential decryption fails
+before `sendMessage`. Per the approved single-runtime decision, do not treat
+moving that Preview scope as the final fix. The consolidation path in the
+section above reuses the key in Production scope. Do not rotate the key, copy a
+different key, or switch the bot to make delivery pass.
 
 The diagnostic repair in PR83 now carries a bounded `errorCode` (for example
 `UNAUTHORIZED_CREDENTIALS`, `PERMANENT_TRANSPORT_FAILURE`,

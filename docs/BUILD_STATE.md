@@ -1,5 +1,40 @@
 # FlowPilot — Build State
 
+## Single Production runtime consolidation preparation — 15 November 2026
+
+- Approved operating decision: one primary Vercel runtime for development-stage
+  live acceptance — Production from `main`, one fixed bot, one explicitly
+  selected active database. Git branches/PRs remain the development process;
+  Preview is optional, not mandatory per task. No merge, Production environment
+  write, migration, webhook move, deletion, rotation, paid model call or
+  Telegram send was performed for this preparation.
+- Selected dataset: the existing Neon test DB
+  `ep-little-mouse-a5nh644n[-pooler].us-east-2.aws.neon.tech` / `neondb`,
+  paired with the existing test-compatible `CREDENTIAL_MASTER_KEY`. It holds
+  the fixed bot runtime credential and already reports the PR #79 additive
+  migration marker (`migrationApplied=true`). Do not reapply that migration.
+  The old Production DB is preserved intact as an inactive recovery source.
+- Prepared configuration: Vercel Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` move to the selected test pairing; Production URLs,
+  auth secret and channel settings stay canonical. No key is generated,
+  rotated or re-encrypted. Secure value reuse is owner-assisted; sensitive
+  values were not read, decrypted or printed in this pass.
+- CI isolation: automatic PR migration validation in `test-db-migrate.yml` now
+  uses a job-local `postgres:16` service and never binds runtime database
+  secrets. Manual fixed-target operations remain exact-branch/SHA guarded.
+  `production-db-migrate.yml` now requires `expected_db_host` and verifies it
+  before status or apply.
+- Evidence: current Production `dpl_7JM2re7GuiGHrPwNQXZUBQpg4m3H` (SHA
+  `49d58c5`, v0.79.8) is healthy on its existing DB; integrated Preview
+  `dpl_8SDviwrK2PEg7HTwXdkMojzUgWkL` (SHA `a566a10`, v0.79.10) health reports
+  the test DB and migration marker. The integrated Preview still lacks the
+  key, so Y83 remains a real failure; moving the old Preview key scope is not
+  the consolidation solution.
+- Exact ordered transition and prepared rollback are in
+  `docs/TROUBLESHOOTING.md`; rollback was not live-tested. R5 PASS, R6 FAIL,
+  Y83 FAIL and all historical deployments remain preserved. PR #83 stays draft
+  until reviewer/Ammar approval.
+
 ## Draft integration candidate — 15 November 2026
 
 - Branch `integration/staff-delivery-knowledge-contract`, based on `main`
@@ -13,8 +48,10 @@
   branches' checks retained) and `check-scarce-availability-regressions.ts`
   (main's fixed reference clock retained).
 - PR #79's additive migration `20261108200000_safe_telegram_staff_reply_delivery`
-  remains unapplied on shared Preview/Production. PR #79 maintenance jobs
-  remain guarded to the original branch/SHA and are not widened here.
+  is present on the shared test DB used by both fixed Previews
+  (`migrationApplied=true`); it is not verified/applied on the old Production
+  DB. Do not reapply it to the test DB. PR #79 maintenance jobs remain guarded
+  to the original branch/SHA and are not widened here.
 - Guarded Preview-to-Preview maintenance was prepared in
   `test-db-migrate.yml`/`switch-test-bot-webhook.ts`: fixed
   old→integrated and integrated→old operations, exact integration branch/SHA,
@@ -25,14 +62,13 @@
   candidates; this integration candidate requires its own CI and live
   acceptance. R6 historical attribution remains unproven.
 - Correct reporting: `check:ai-disclosure` 54/54; `check:exact-time-requests`
-  166/166 (not scarce-availability); `check:scarce-availability` 59/59. The
-  `TEST_DATABASE_URL` workflow uses the shared Neon test DB (last run: no
-  pending migrations); disposable PostgreSQL suites are separate. Production
-  migration remains pending/operator-authorized.
-- Next: reviewer-approved read-only forward Preview-transfer dry run on the
-  exact final HEAD, then bounded acceptance (AI/services trace first, then
-  staff-delivery smoke, then booking path only if earlier steps pass). Apply
-  and return require separate approval.
+  166/166 (not scarce-availability); `check:scarce-availability` 59/59.
+  Automatic PR migration validation now uses a disposable PostgreSQL service;
+  the shared Neon test DB is reserved for explicit runtime/maintenance
+  operations. Production migration remains pending/operator-authorized.
+- Next: reviewer/Ammar approval of the single-runtime consolidation
+  preparation, then the ordered transition in `docs/TROUBLESHOOTING.md`. The
+  earlier Preview-transfer dry run is optional and is not a mandatory gate.
 
 ## Y83 automated-reply delivery failure — 15 November 2026
 

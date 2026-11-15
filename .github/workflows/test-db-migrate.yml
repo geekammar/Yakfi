@@ -37,11 +37,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Automatic PR validation must never mutate the shared runtime database.
   validate-migrations:
-    name: Validate pending Prisma migrations (disposable test DB)
+    name: Validate pending Prisma migrations (ephemeral CI PostgreSQL)
     if: github.event_name != 'workflow_dispatch' || inputs.operation == 'validate-migrations'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flowpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout pull request ref
         uses: actions/checkout@v4
@@ -63,26 +78,17 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      - name: Fail closed if TEST_DATABASE_URL is missing
-        shell: bash
-        run: |
-          if [ -z "${{ secrets.TEST_DATABASE_URL }}" ]; then
-            echo "::error::TEST_DATABASE_URL secret is not configured. Migration validation fails closed to prevent unverified schema changes from entering main."
-            exit 1
-          fi
-
       - name: Pre-migration status check
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
-          # Neon pooler endpoints use PgBouncer in transaction mode which does not support session advisory locks cleanly.
-          # Prisma Migrate documentation requires a direct connection: strip '-pooler.' to connect directly.
+          # Job-local disposable PostgreSQL: no shared pooler or runtime lock is involved.
           MIGRATE_URL="${DATABASE_URL/-pooler./.}"
           DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-pre.raw.txt > status-pre.txt
-          echo "### Pre-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Pre-migration status (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-pre.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -90,12 +96,12 @@ jobs:
           if grep -qiE 'up to date|have not yet been applied' status-pre.txt; then
             exit 0
           fi
-          echo '::error::prisma migrate status could not read the test database — aborting'
+          echo '::error::prisma migrate status could not read the ephemeral CI database — aborting'
           exit 1
 
-      - name: Apply migrations to test database
+      - name: Apply migrations to ephemeral CI database
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
@@ -114,7 +120,7 @@ jobs:
             break
           done
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' deploy.raw.txt > deploy.txt
-          echo "### Migration deploy output (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Migration deploy output (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat deploy.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -123,23 +129,23 @@ jobs:
 
       - name: Post-migration status verification
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
           MIGRATE_URL="${DATABASE_URL/-pooler./.}"
           DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-post.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-post.raw.txt > status-post.txt
-          echo "### Post-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Post-migration status (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-post.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-post.txt
           if grep -qi 'Database schema is up to date' status-post.txt; then
-            echo '✅ Test migration validated: schema is up to date'
+            echo '✅ CI migration validated: schema is up to date'
             exit 0
           fi
-          echo '::error::Post-migration status on test DB does not report up to date'
+          echo '::error::Post-migration status on ephemeral CI DB does not report up to date'
           exit 1
 
   recover-test-credential:

@@ -28,6 +28,12 @@
   and publishes an immutable GitHub Release with the corresponding version tag.
 - **Manual Production DB Migration (`production-db-migrate.yml`):** Dedicated operator-dispatched
   workflow (`workflow_dispatch`) targeting specified branch/commit for Neon production database migrations.
+  It now requires `expected_db_host` and refuses to apply when `PRODUCTION_DATABASE_URL` resolves to a
+  different host.
+- **Single runtime and CI isolation:** branches/PRs remain the development process; Production is the
+  normal live-test destination and Preview is optional. Automatic PR migration validation uses a
+  disposable PostgreSQL service and must never mutate the selected runtime database. Runtime migrations
+  remain explicit, target-verified operator actions.
 
 ## Branch & PR Model (Mobile-First Developer Experience)
 

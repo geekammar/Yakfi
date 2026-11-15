@@ -30,8 +30,11 @@ no free-text keyword/regex/substring intent matching.
 
 - Last verified Production release in the dated handoff: **v0.79.7 /
   `8d12aa2a72169bb2563e624e89045858d090e8f3`**.
-- This is a dated handoff fact, not a fresh probe. Do not infer current
-  Production deployment from the `main` ref alone.
+- Read-only `/api/health` probe on 15 November 2026 reports **v0.79.8 /
+  `49d58c52f11e6600d783206cd423c6a7861eb907`**, `deploymentReady=true` and
+  `database=connected`; Vercel deployment metadata identifies
+  `dpl_7JM2re7GuiGHrPwNQXZUBQpg4m3H`. This is deployment readiness evidence,
+  not a new acceptance result.
 - Production migrations remain operator-authorized and are never triggered
   automatically from local development, Preview or this draft candidate.
 
@@ -164,14 +167,18 @@ preparation.
 
 1. The integration candidate is a draft; PR #79 and PR #82 remain open and
    unmerged, and neither original branch may be treated as superseded.
-2. The additive PR #79 migration is not applied to shared Preview or
-   Production.
+2. The PR #79 additive migration marker is **present on the test database**
+   used by both fixed Previews (`migrationApplied=true`, 15 November health).
+   It is not verified or applied on the old Production database. Do not
+   reapply it to the test database; the old Production database remains
+   inactive recovery data.
 3. The R6 exact historical proposal remains unproven; the integrated repair is
    not live-accepted.
 4. The live uncertain-send recheck is NOT TESTED.
-5. Y83 delivery failed because the integrated Preview runtime lacks the
-   branch-scoped `CREDENTIAL_MASTER_KEY`; the environment fix and live retest
-   remain pending.
+5. Y83 delivery failed because the integrated Preview runtime lacks the test
+   key. The approved consolidation path reuses the test-compatible key in
+   Production scope; merely moving the old Preview scope is not the final fix.
+   The environment fix and live retest remain pending.
 6. PR #79's original credential/webhook/restoration jobs remain guarded to
    `refs/heads/fix/safe-telegram-staff-reply-delivery` plus an exact expected
    SHA. The new fixed-Preview transfer job is guarded only to this integration
@@ -193,15 +200,44 @@ preparation.
 
 ## 8. Next action
 
-- Ammar and the reviewer decide whether to accept, roll out or merge the
-  integration candidate. This snapshot does not merge, tag, release, migrate,
-  deploy, move the webhook, send Telegram messages or call a paid model.
-- The next maintenance step is a bounded, reviewer-approved read-only dry run
-  of `transfer-integration-preview-*` on the exact final HEAD. Apply and the
-  return path require separate reviewer approval; the current acceptance bot
-  remains on the old Preview until then.
-- The proposed acceptance sequence is bounded: first an AI/services question
-  with trace verification, then the affected staff-delivery smoke, then the
-  critical booking path only if the earlier steps pass.
-- Keep decision IDs #105 and #106 and their original meanings; the compact
-  decision index remains the Tier 0 router.
+- Ammar and the reviewer decide whether to approve the single-runtime
+  consolidation preparation in §9. This snapshot does not merge, tag, release,
+  migrate, deploy, move the webhook, send Telegram messages or call a paid
+  model.
+- The previously proposed Preview-transfer dry run is optional and is not a
+  mandatory acceptance gate. If used, it remains read-only until separately
+  approved; the current bot remains where it is until the consolidation
+  transition.
+- The proposed consolidated acceptance sequence is bounded: first an
+  AI/services question with trace verification, then the affected
+  staff-delivery smoke, then the critical booking path only if the earlier
+  steps pass.
+- Keep decision IDs #105, #106 and #107 and their original meanings; the
+  compact decision index remains the Tier 0 router.
+
+## 9. Single Production runtime consolidation — prepared, not executed
+
+- Approved operating decision: one primary Vercel runtime for development-stage
+  live acceptance, deployed from `main`, with one fixed bot and one explicitly
+  selected active database. Git branches and PRs remain the development
+  process; Preview is optional, not a mandatory per-task gate.
+- Selected dataset: the existing Neon test database
+  `ep-little-mouse-a5nh644n[-pooler].us-east-2.aws.neon.tech` / `neondb`. It
+  already carries the PR #79 additive migration marker, the fixed bot runtime
+  credential, and a known compatible key. The old Production database is
+  preserved intact as an inactive recovery source; it is not reset, overwritten
+  or deleted.
+- Proposed application pairing: Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` are switched to the existing test DB and
+  test-compatible key. The canonical Production URLs, auth secret and channel
+  settings stay unchanged. No key is generated, rotated or re-encrypted.
+- CI isolation: automatic PR migration validation now uses a disposable
+  PostgreSQL service, never the shared runtime database. Manual maintenance
+  remains exact-branch/SHA guarded. `production-db-migrate.yml` now requires an
+  `expected_db_host` preflight before status or apply.
+- Not executed: no Production environment write, migration, webhook move,
+  merge, branch deletion, credential rotation, paid model request or Telegram
+  send. The old Preview key scope is not the consolidation solution.
+- Exact ordered transition and prepared rollback are in
+  `docs/TROUBLESHOOTING.md`. Rollback has not been live-tested. R5 PASS, R6
+  FAIL and Y83 FAIL remain historical evidence and are not rewritten.

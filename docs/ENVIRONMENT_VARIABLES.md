@@ -313,3 +313,102 @@ readiness check requires the integrated Preview to report the reviewed
 version/SHA, `isProductionDb=false`, `migrationApplied=true` and the same
 authorized test DB host. Apply/return remain explicit reviewer-approved
 operations; do not copy or rotate credentials to make a check pass.
+
+Moving the old-PR79 Preview `CREDENTIAL_MASTER_KEY` scope to the integration
+branch would only repair the Y83 Preview diagnosis. It is **not** the single
+runtime consolidation and must not be reported as one.
+
+## Single Production runtime consolidation — prepared, not executed (15 November 2026)
+
+The approved operating decision is one primary Vercel runtime for
+development-stage live acceptance: Production deployed from `main`, one fixed
+bot, one explicitly selected active database. Git branches and PRs remain the
+development process; Preview is optional, never a mandatory per-task
+acceptance gate. This section records the prepared configuration only. No
+Production environment write, migration, webhook move, merge, branch deletion,
+credential rotation, paid model call or Telegram send was performed.
+
+### Configuration and scope inventory (values never read or printed)
+
+<!-- prettier-ignore -->
+| Variable | Current Production | Current integrated Preview | Proposed single Production runtime |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Production scope; sensitive; present. Documented target `ep-tiny-grass-a5e63jev.../neondb`; health reports `connected`. | Preview scope; sensitive; present. Verified target `ep-little-mouse-a5nh644n.../neondb`. | Reuse the verified test target through the existing `TEST_DATABASE_URL`; owner-assisted Production update. Preserve the old Production DB as inactive recovery data. |
+| `CREDENTIAL_MASTER_KEY` | Production scope; sensitive; present. Old Production key; not proven to decrypt the test DB. | Branch-scoped only to `fix/safe-telegram-staff-reply-delivery`; absent for the integration branch. Y83 proves runtime decryption fails there. | Reuse the existing test-compatible key (the key used by the old Preview and the GitHub Actions `CREDENTIAL_MASTER_KEY`). No generation or rotation. |
+| `OPENROUTER_API_KEY` | Production scope; sensitive; present. | Preview scope (all branches); sensitive; present. | Keep the Production value. Do not copy the Preview value. |
+| `BETTER_AUTH_URL` | Production scope; present; canonical origin `https://flowpilot-prod.vercel.app`. | Branch-scoped only to the old PR79 branch; the integration Preview derives its own Vercel host. | Keep the canonical Production origin. Do not copy Preview branch URLs. |
+| `NEXT_PUBLIC_APP_URL` | Production scope; encrypted; present; canonical origin above. | Branch-scoped only to the old PR79 branch. | Keep the canonical Production origin. |
+| `BETTER_AUTH_SECRET` | Production scope; sensitive; present. | Preview scope; sensitive; present. | Keep the Production value. Existing sessions from the old DB do not survive the DB change; accounts in the selected DB re-authenticate. |
+| Telegram / WhatsApp channel settings | Manager-bot and WhatsApp settings are Production-scoped. The fixed customer bot is a runtime credential in the selected DB. | No Production manager/WhatsApp settings; fixed bot credential is in the test DB; the integration key is missing (Y83). | Keep Production channel settings. Move the fixed bot once to the canonical Production webhook; the switch persists its secret hash in the selected test DB. |
+
+Supporting Actions secrets (names only): `TEST_DATABASE_URL` and
+`CREDENTIAL_MASTER_KEY` are the test-compatible pairing; `PRODUCTION_DATABASE_URL`
+currently names the old Production target and must be repointed during the
+transition; `YAKFI_TEST_CUSTOMER_BOT_TOKEN` is the owner-only maintenance token;
+`VERCEL_TOKEN` exists for an explicitly reviewed one-shot transfer if the owner
+cannot re-enter the key from the vault.
+
+### Metadata is not runtime usability
+
+- A Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` both exist and the
+  database reports `connected`; that does not prove the Production key
+  decrypts the test DB. The Y83 failure and the `CREDENTIALS_UNAVAILABLE`
+  reverse preflight are the counter-evidence.
+- The old Preview operates on the test DB with the branch-scoped key; R5
+  accepted delivery and the forward read-only dry run evidence that pairing.
+  The integration Preview has the same DB but no key, which is exactly why Y83
+  failed. A Production deployment has not been probed with this pairing.
+- Do not assume either key decrypts the other database's credentials. Do not
+  generate a replacement key or re-encrypt unrelated records.
+
+### Selected active database and reason
+
+The selected dataset is the existing Neon test database
+`ep-little-mouse-a5nh644n[-pooler].us-east-2.aws.neon.tech` / `neondb` because:
+
+- it already carries the additive PR #79 migration
+  `20261108200000_safe_telegram_staff_reply_delivery` (integration Preview health
+  reports `migrationApplied=true`); record this evidence and do not reapply it;
+- it contains the fixed bot runtime credential that the known test-compatible
+  key decrypts, avoiding key generation or re-encryption;
+- both fixed Previews already report the same test DB, 4 users and 4 accounts;
+- the old Production database remains intact as an inactive recovery source
+  and is never reset, overwritten or deleted.
+
+Changing the Production database also changes which data is live. Owner
+confirms all current users/data are experimental; old Production data will not
+be visible after the switch. Production URLs, auth settings and channel
+settings remain canonical.
+
+### CI isolation and runtime migrations
+
+- Automatic PR migration validation in `test-db-migrate.yml` now uses a
+  job-local `postgres:16` service. It never receives `TEST_DATABASE_URL`,
+  `PRODUCTION_DATABASE_URL` or `CREDENTIAL_MASTER_KEY`.
+- The manual fixed-target operations in that workflow remain exact-branch and
+  exact-SHA guarded and are now explicit runtime maintenance, not PR CI. Do not
+  dispatch them casually.
+- `production-db-migrate.yml` is the only runtime migration workflow. It now
+  requires `expected_db_host` and refuses to run when `PRODUCTION_DATABASE_URL`
+  resolves to a different host. The operator must repoint the Actions secret to
+  the selected active database during the transition.
+- `pr-validation.yml` already uses a disposable local PostgreSQL service.
+- Migration status on the selected target is read-only until an approved
+  migration is pending. The PR #79 marker is already present; do not reapply it.
+
+### Owner-assisted secure reuse
+
+Vercel does not expose sensitive environment values for reading back. The
+owner-authorized step is one of:
+
+1. re-enter the existing test-compatible `DATABASE_URL` and
+   `CREDENTIAL_MASTER_KEY` into the Production scope from the encrypted
+   password-manager vault, without printing or committing them; or
+2. authorize a separately reviewed one-shot transfer that copies the existing
+   GitHub Actions secrets `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY` to
+   the Production scope through the existing `VERCEL_TOKEN`, without outputting
+   the values.
+
+This patch does not implement that transfer. If neither source is available,
+stop; do not invent a key or rotate unrelated credentials. Exact transition
+order and rollback are in `TROUBLESHOOTING.md`.
