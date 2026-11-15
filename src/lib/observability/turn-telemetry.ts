@@ -211,6 +211,46 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.disclosure_allowed",
       value: { boolValue: record.disclosureAllowed ?? false },
     },
+    ...(record.disclosureDeclaredIntent !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_declared_intent",
+            value: { stringValue: record.disclosureDeclaredIntent },
+          },
+        ]
+      : []),
+    ...(record.disclosureProposedFamily !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_proposed_family",
+            value: { stringValue: record.disclosureProposedFamily },
+          },
+        ]
+      : []),
+    ...(record.disclosureProposalStatus !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_proposal_status",
+            value: { stringValue: record.disclosureProposalStatus },
+          },
+        ]
+      : []),
+    ...(record.disclosureLedgerIncluded !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_ledger_included",
+            value: { boolValue: record.disclosureLedgerIncluded },
+          },
+        ]
+      : []),
+    ...(record.disclosureLedgerDisclosable !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_ledger_disclosable",
+            value: { boolValue: record.disclosureLedgerDisclosable },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.final_outcome",
       value: { stringValue: record.finalOutcome },
@@ -219,6 +259,16 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.outbound_delivered",
       value: { boolValue: record.outboundSendDelivered ?? false },
     },
+    ...(record.outboundDeliveryErrorCode !== null
+      ? [
+          {
+            key: "flowpilot.outbound_delivery_error_code",
+            value: {
+              stringValue: record.outboundDeliveryErrorCode,
+            },
+          },
+        ]
+      : []),
     // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E), exported only
     // when a shadow evaluation ran this turn. Closed machine keys only; the
     // shadowModelCallCount attribute is the experimental counter that must

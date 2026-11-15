@@ -74,6 +74,7 @@ const ALLOWED_ERROR_CODES = new Set([
   "PERSISTENCE_FAILED",
   "DOMAIN_FAILURE",
   "DELIVERY_FAILURE",
+  "DELIVERY_FAILED",
   "CONNECTION_RESOLUTION_FAILED",
   "BOT_TOKEN_RESOLUTION_FAILED",
   "TELEGRAM_ACK_FAILED",
@@ -85,7 +86,11 @@ const ALLOWED_ERROR_CODES = new Set([
   "UNKNOWN_SECRET_HASH",
   "INVALID_SECRET_HASH",
   "TRANSIENT_TRANSPORT_FAILURE",
+  "PERMANENT_TRANSPORT_FAILURE",
   "UNAUTHORIZED_CREDENTIALS",
+  "INVALID_CONNECTION",
+  "MALFORMED_PROVIDER_PAYLOAD",
+  "UNSUPPORTED_MESSAGE_TYPE",
   "RATE_LIMITED",
   "UNKNOWN_ERROR",
 ]);
@@ -163,7 +168,13 @@ export type EngineInboundTurnResultLike =
       ok: true;
       duplicate: false;
       assistantAction: string;
-      delivery: { provider: string; delivered: boolean; error?: string } | null;
+      delivery: {
+        provider: string;
+        delivered: boolean;
+        error?: string;
+        errorCode?: string;
+        providerMessageId?: string;
+      } | null;
       [key: string]: unknown;
     };
 
@@ -178,6 +189,7 @@ export type TelegramInboundTurnResult =
       assistantAction: string;
       delivered: boolean;
       deliveryError?: string;
+      deliveryProviderMessageId?: string;
       duplicate: false;
       code?: undefined;
     }
@@ -194,6 +206,7 @@ export type TelegramInboundTurnResult =
       assistantAction: "DEFERRED_TO_STAFF";
       delivered: boolean;
       deliveryError?: string;
+      deliveryProviderMessageId?: string;
       duplicate: false;
       code?: undefined;
     }
@@ -202,7 +215,7 @@ export type TelegramInboundTurnResult =
       outcome: "DELIVERY_FAILURE";
       error: string;
       duplicate: false;
-      code?: undefined;
+      code: string;
     }
   | {
       ok: false;
@@ -218,6 +231,20 @@ export type TelegramInboundTurnResult =
       duplicate: false;
       code?: string;
     };
+
+function deliveryFailureCode(
+  delivery:
+    | {
+        errorCode?: string;
+        error?: string;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  if (!delivery) return undefined;
+  const candidate = delivery.errorCode ?? delivery.error;
+  return candidate ? sanitizeErrorCode(candidate) : undefined;
+}
 
 /**
  * Maps the engine result into a typed processing outcome without losing failure distinctions.
@@ -256,18 +283,19 @@ export function mapEngineResultToTelegramOutcome(
       outcome: "DEFERRED_TO_STAFF",
       assistantAction: "DEFERRED_TO_STAFF",
       delivered: isDelivered,
-      deliveryError: result.delivery?.error
-        ? sanitizeErrorCode(result.delivery.error)
-        : undefined,
+      deliveryError: deliveryFailureCode(result.delivery),
+      deliveryProviderMessageId: result.delivery?.providerMessageId,
       duplicate: false,
     };
   }
 
   if (result.delivery && !result.delivery.delivered) {
+    const failureCode = deliveryFailureCode(result.delivery);
     return {
       ok: false,
       outcome: "DELIVERY_FAILURE",
-      error: sanitizeErrorCode(result.delivery.error) ?? "DELIVERY_FAILED",
+      error: failureCode ?? "DELIVERY_FAILED",
+      code: failureCode ?? "DELIVERY_FAILED",
       duplicate: false,
     };
   }
@@ -277,9 +305,8 @@ export function mapEngineResultToTelegramOutcome(
     outcome: "SUCCESS",
     assistantAction: result.assistantAction,
     delivered: isDelivered,
-    deliveryError: result.delivery?.error
-      ? sanitizeErrorCode(result.delivery.error)
-      : undefined,
+    deliveryError: deliveryFailureCode(result.delivery),
+    deliveryProviderMessageId: result.delivery?.providerMessageId,
     duplicate: false,
   };
 }

@@ -135,6 +135,19 @@ and tests is allowed; executing package scripts is not.
   `BLOCKED` / `NOT RUN`; never claim an unexecuted check passed.
 - **Documentation-only changes:** same VPS boundary; run docs/format checks in
   existing CI or an authorized cloud runner.
+- **Runtime topology:** Git branches and PRs remain the development process.
+  Production is the single normal live-test runtime; Preview is optional and is
+  never a mandatory per-task acceptance gate. The fixed runtime bot and its
+  explicit database/key pairing change only through a reviewed,
+  owner-authorized transition. Do not create another persistent application
+  environment.
+- **CI data isolation:** automatic PR checks use disposable or local databases
+  and must never apply migrations to the selected live runtime database.
+  Runtime migrations remain explicit, target-verified operator operations.
+- **Sensitive value recovery:** Vercel does not expose sensitive values for
+  readback, and a deployment ID, health response or Git SHA is not a secret or
+  configuration backup. Never replace a Production secret until its recovery
+  source is confirmed; otherwise record the rollback blocker honestly.
 - **Database:** do not execute database commands on the VPS. Development
   database work belongs in an authorized non-VPS environment or CI. Production
   migrations are operator-authorized via

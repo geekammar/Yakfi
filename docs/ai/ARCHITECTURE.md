@@ -318,7 +318,8 @@ server/turn-evidence.ts`): bounded machine-safe fields only —
   `model`, `providerAttempts`, `providerStatus`, `providerLatencyMs`,
   `parseSuccess`, `disclosureChannel`, `disclosureAllowed`,
   `disclosureRefusalReason`, `knowledgeGapCategory`, `finalOutcome`,
-  `outboundSendAttempted`, `outboundSendDelivered`, `emittedAt`.
+  `outboundSendAttempted`, `outboundSendDelivered`,
+  `outboundDeliveryErrorCode`, `emittedAt`.
   **Never** customer message text, phone numbers, keys/tokens/secretRefs,
   prompts, chain-of-thought, raw provider payloads, or PII. A structural
   content-freeness guard is exported and asserted by the deterministic check.
@@ -652,6 +653,36 @@ never sent.
   reply backed by nothing would have to be invented — it is routed to a human
   instead.
 
+  **Canonical family vocabulary (repair).** The structured contract publishes
+  ONE machine vocabulary (`knowledgeFamilyValues` in `ai-contract.ts`) reused by
+  the proposal resolver and by the shared model instruction. A model-authored
+  reply may declare only `business.identity`, `business.address`,
+  `business.about`, `business.faqs`, `service.name`, `service.price` or
+  `service.description`. `domain.availability` and
+  `business.cancellationPolicy` remain recognized families but are
+  domain/handoff-owned; they are not model-authorable reply sources. The
+  parser deliberately keeps the field a bounded string so an unknown label
+  still reaches the gate and is classified (never converted into a generic
+  provider failure). Every canonical value resolves to itself, including
+  `business.cancellationPolicy`; its gate case returns the explicit no-channel
+  safe refusal. A legacy string `knowledgeRef` still accepts the established
+  family aliases; otherwise it is treated as a SOURCE REFERENCE, never guessed
+  to be a family identifier.
+
+  **Identity never erases a conflict.** An explicit identity goal is resolved
+  through the same structured proposal. It does not clear a contradictory
+  top-level family or an unknown declared family: conflicts stay
+  `AMBIGUOUS_MATCH`, unknown labels stay `UNKNOWN_KNOWLEDGE_FAMILY`, and the
+  identity source/provenance/ledger checks still decide whether the reply is
+  disclosed.
+
+  **Availability is domain-owned.** A model-authored `action=reply` that
+  declares `domain.availability` is explicitly refused: if the family was not
+  carried, the reason is `UNAVAILABLE_IN_REQUEST`; if it was carried, the
+  reason is `NOT_DISCLOSABLE` because the existing domain booking/availability
+  path — not the model — owns available times. No availability is computed by
+  the gate and no second booking path exists.
+
   **Service-catalog name channel (PROMPT-AI-OPS-20).** A service `name` is
   `PUBLIC` and B-02 **always** carries the catalog in `AiRequest.services`
   (the model needs it for booking/discovery), so a services-list question
@@ -686,11 +717,31 @@ ever surfaced):
 - `UNAVAILABLE_IN_REQUEST` — disclosable in principle but the request carries
   no data for it (an empty knowledge store, or a family with no request
   channel today).
+- `UNKNOWN_KNOWLEDGE_FAMILY` — the structured proposal named a family outside
+  the canonical vocabulary (or a conflicting/unrecognized label). Distinct
+  from `EXCLUDED_FROM_CONTEXT`; fails closed without emitting the raw label.
+- `AMBIGUOUS_MATCH` — conflicting declarations or multiple matching records.
 
-Guard: `pnpm check:ai-disclosure` (41/41, offline, in-memory, no
-DB/network/LLM/secrets — including end-to-end engine runs that prove an AI
-failure and a refused reply take the same `NEED_HUMAN` / `AI_HANDOFF` path,
-and that a refused reply is neither persisted nor sent).
+**Refusal evidence.** The gate returns bounded `diagnostics` on every refusal:
+the validated `declaredIntent`, the `proposalStatus` (`RESOLVED` · `MISSING` ·
+`UNKNOWN_FAMILY` · `CONFLICT`), the canonical `proposedFamily` (or the closed
+`UNKNOWN` sentinel / null), and the relevant ledger record's
+`ledgerIncluded`/`ledgerDisclosable` verdicts. The engine copies these to
+`TurnDisclosureObservation` and `flowpilot.turn.evidence@v1`
+(`disclosureDeclaredIntent`, `disclosureProposedFamily`,
+`disclosureProposalStatus`, `disclosureLedgerIncluded`,
+`disclosureLedgerDisclosable`). The legacy `disclosureChannel` semantics are
+unchanged: on a refusal it still reports the intent-derived primary family
+(for `FAQ`, `business.faqs`) and must not be read as the model's selected
+family. No raw model label, reply text, source content, customer text or
+secret enters evidence.
+
+Guard: `pnpm check:ai-disclosure`, `pnpm check:unknown-information-handoff`
+(including the new knowledge-family/availability/evidence cases) and
+`pnpm check:turn-evidence` — offline, in-memory, no DB/network/LLM/secrets.
+The end-to-end suites prove an AI failure and a refused reply take the same
+`NEED_HUMAN` / `AI_HANDOFF` path and that a refused reply is neither persisted
+nor sent.
 
 ### Operational facts and the deferred CONDITIONAL channels (product state)
 

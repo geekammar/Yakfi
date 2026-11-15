@@ -74,3 +74,363 @@ guidance is superseded by `AGENT_RULES.md` §4.
    every `→ fix:` line; it covers the common cases.
 2. `docs/BUILD_STATE.md` → Key Known Limitations (incl. device limitations).
 3. `docs/AGENT_RULES.md` — binding rules and lifecycle process.
+
+## Fixed test-bot credential recovery — PR #79
+
+Use the reviewed replacement files together. The old untracked Python script queried `is_active` although Prisma maps the real column as `"isActive"`; it also could report HEALTHY without matching bot identity. Do not run that old copy.
+
+From the repository root, run `python3 scripts/repair-test-bot-credential.py` for read-only diagnosis. It asks for the authorized test DATABASE_URL and the **exact current Preview** master key using masked terminal input. Both hex and base64 keys use the application's existing decoder. It never reads a potentially stale .env key, rewrites .env, changes webhooks, rotates the master key, or touches the Manager Bot.
+
+If diagnosis reports repair needed and the existing customer bot token is available, run `python3 scripts/repair-test-bot-credential.py --apply`. Only the fixed customer bot/tenant/connection can be repaired. The token must pass live getMe identity validation. The tool writes a fresh encrypted record and guarded connection reference in one transaction, reads the saved ciphertext back, verifies it before commit, and preserves the previous row for recovery. A concurrent connection edit aborts the transaction.
+
+If the exact Preview key is not available, stop at that prerequisite; do not invent or rotate it. The launcher also supports `--from-environment` for an authorized secret-bearing runner using `DATABASE_URL`, `CREDENTIAL_MASTER_KEY`, and (apply only) `TEST_BOT_TOKEN`. Supply it through that environment or masked terminal, never chat, logs, CLI arguments, or committed files. `HEALTHY_LOCAL_KEY` / `REPAIRED_LOCAL_KEY` does not establish Preview compatibility: the actual application credential resolver must pass there before switching Telegram.
+
+If the owner does not know the master key, use the reviewed `test-db-migrate.yml` manual operation `diagnose-credential` on `fix/safe-telegram-staff-reply-delivery` with `expected_commit_sha` set to that branch's full reviewed HEAD. It injects the existing GitHub `CREDENTIAL_MASTER_KEY` and `TEST_DATABASE_URL` only into the recovery step, and skips migration validation. This uses the source of the previously successful Preview key transfer; it does not transfer or print the key again.
+
+For repair, the owner may set the existing customer bot token with `gh secret set YAKFI_TEST_CUSTOMER_BOT_TOKEN --repo geekammar/Yakfi` (interactive hidden input; never put the token on the command line), then run the same workflow with operation `repair-credential` and the exact reviewed SHA. This step still requires bot getMe identity validation and the fixed test database target. Remove the temporary bot-token secret after successful Preview verification. A workflow run is not live customer acceptance.
+
+On timeout or connection loss, outcome may be unknown. Re-run read-only diagnosis and inspect the target reference before any apply retry. A failed GCM check means key/data authentication failed; it does not prove which key encrypted the original record.
+
+For return routing, use the destination environment's own database/key and reconcile its webhook secret. Do not reuse Preview credentials blindly for a Production destination. Do not alter historical QA row 249 or mark ISS-018 accepted before the customer's real staff reply arrives.
+
+## Provider 404 with an apparently healthy deployment
+
+On 13 November, direct policy inspection showed OpenRouter model `deepseek/deepseek-v4.1-flash` pinned to `decart/fp4`. The public model endpoint catalog listed 38 endpoints and no Decart endpoint. The adapter intentionally emits `provider.only` plus `allow_fallbacks: false`, so a stale pin can eliminate all eligible routes. The reviewer cleared only this pin in pilot and test policies; no model, key, budget, or fallback setting was changed. Policy is read from DB at runtime; a code rollback does not undo it.
+
+Retest a fresh or explicitly resumed AI-owned conversation. Existing NEED_HUMAN conversations correctly remain with staff; sending another greeting must not steal ownership. Require an actual successful model turn before declaring recovery. Provider failures with typed telemetry now select technical-failure copy; malformed semantic output remains a separate case. No keyword or greeting dictionary is introduced.
+
+The health endpoint is now read-only. It no longer aligns database schema or creates a default test account. `previewDiagnostics.migrationApplied` reads the completed PR #79 migration record; false is no longer an ambiguous "this request did not perform DDL" signal. Missing test accounts must be provisioned by an explicit reviewed operator action. Existing accounts previously provisioned with a public default password require password/access review before Pilot exposure; removing the provisioning code does not rotate those credentials.
+
+## Guarded customer-bot webhook switching & restoration runbook — PR #79
+
+Use the reviewed switch path to retarget customer bot `@Drafnanafnanbot` (numeric ID `8926541123`) from production (`https://flowpilot-prod.vercel.app/api/telegram/webhook`) to the stable Preview origin (`https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app/api/telegram/webhook`).
+
+### Target & Preflight Verification
+
+- Fixed Business ID: `f5314115-ae8c-46ea-9d7e-080ef5e7366d`
+- Fixed Connection ID: `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`
+- Authorized Test DB: `ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech` / `ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech`, database `neondb`
+- Branch-scoped Preview configuration: `NEXT_PUBLIC_APP_URL` and `BETTER_AUTH_URL` pinned to `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app` on branch `fix/safe-telegram-staff-reply-delivery`.
+
+### Guarded Workflow Execution (GitHub Actions)
+
+Trigger `.github/workflows/test-db-migrate.yml` manually via `workflow_dispatch` on branch `fix/safe-telegram-staff-reply-delivery` with `expected_commit_sha` set to the exact candidate commit SHA:
+
+1. **Dry-Run Inspection (Default / Read-Only)**:
+   - Operation: `switch-webhook-dry-run`
+   - Validates bot identity via `getMe`, verifies remote registration matches `https://flowpilot-prod.vercel.app/api/telegram/webhook`, checks allowed updates (`message`, `callback_query`), reads pending update count, and reports planned change with 0 mutations.
+
+2. **Guarded Apply (Mutation)**:
+   - Operation: `switch-webhook-apply`
+   - Executes Telegram `setWebhook` with the stable Preview URL, rotates webhook secret, persists and verifies SHA-256 secret hash in the test Neon database, and outputs verified metadata.
+
+### Restoration Runbook (Reverting to Production)
+
+Restoration must synchronize the destination environment's database (`PRODUCTION_DATABASE_URL`) and the new webhook secret hash. This fixed-bot maintenance job uses the existing owner-provided customer-bot token (`YAKFI_TEST_CUSTOMER_BOT_TOKEN` injected as `RESTORE_BOT_TOKEN`) explicitly, with no fallback to an encryption key. It verifies live `getMe`, the operator-pinned bot ID, the tenant/connection, non-manager status and the expected current URL before any mutation. This changes only operational credential sourcing: the application still resolves its encrypted credential normally. No ciphertext, credential reference or master key is replaced by a webhook switch.
+
+> [!IMPORTANT]
+> **Why ordinary repair cannot restore across origins**:
+> `production-telegram-repair.yml` (and ordinary repair) enforces `--expected-url` matching the current registration. When the customer bot is registered to Preview, ordinary repair aborts with `WEBHOOK_URL_MISMATCH` before mutation and refuses to retarget.
+>
+> Restoration requires the **explicit switch runner** targeting the Production database, with `expectedCurrentUrl` set to the verified Preview URL and `destinationUrl` set to the main customer webhook.
+
+#### Prepared Manual Restoration Path (Prepare-Only)
+
+A dedicated, guarded restoration operation is prepared in `.github/workflows/test-db-migrate.yml` on `refs/heads/fix/safe-telegram-staff-reply-delivery`:
+
+1. **Pre-Switch Credential Readiness (Read-Only)**:
+   - Operation: `restore-main-webhook-preflight`.
+   - Uses the main destination database and the owner's existing fixed-bot token, without any master key. Requires the bot still registered to main.
+   - Returns `RESTORE_PREFLIGHT_READY` after live identity/registration verification; zero database writes, zero `setWebhook` calls, no encrypted-store decryption. This is not evidence that the unknown Production encryption key has been recovered.
+
+2. **Post-Switch Dry-Run Inspection (Read-Only)**:
+   - Operation: `restore-main-webhook-dry-run`
+   - Workflow: `.github/workflows/test-db-migrate.yml`
+   - Branch: `fix/safe-telegram-staff-reply-delivery`
+   - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
+   - Action: Validates `PRODUCTION_DATABASE_URL` against the exact main Neon direct/pooler hosts (`ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech` or `ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech`), database `/neondb`, port and TLS/query policy, checks live bot identity, confirms current Telegram registration points to Preview URL, and plans return to main webhook with 0 mutations.
+
+3. **Guarded Apply (Mutation — Operator Authorized)**:
+   - Operation: `restore-main-webhook-apply`
+   - Workflow: `.github/workflows/test-db-migrate.yml`
+   - Branch: `fix/safe-telegram-staff-reply-delivery`
+   - Inputs: `expected_commit_sha` set to exact reviewed candidate commit SHA.
+   - Action: Coordinates Telegram `setWebhook` returning to `https://flowpilot-prod.vercel.app/api/telegram/webhook`, rotates webhook secret, and persists the confirmed secret hash into the Production database.
+   - Output: Sanitized result with verified registration and zero secret disclosures.
+
+4. **Post-Restoration Verification**:
+   - Inspect bot webhook via read-only check to ensure `url` equals `https://flowpilot-prod.vercel.app/api/telegram/webhook` and allowed updates include `message` and `callback_query`.
+   - Verify Production database secret hash is confirmed.
+
+Reviewer follow-up: restoration is restricted to the known main Neon endpoint and `/neondb`; arbitrary external hosts and connection-target query overrides are rejected. Both switch directions pass the fixed bot ID to the existing service and reject another identity before mutation. Forward/reverse offline tests verify each destination's stored hash equals the secret sent to fake Telegram, not merely that the hash changed.
+
+### Production credential preflight checkpoint — 13 November 2026
+
+Forward dry run 43504118788 on `6c0c60a` returned `SWITCH_DRY_RUN` for the correct bot and main-to-Preview URLs, with no mutations. Reverse preflight 43504704679 failed earlier with `CREDENTIALS_UNAVAILABLE`, not the expected current-URL mismatch. Main's credential row exists, belongs to the target business and matches the retained old test package; metadata alone cannot establish whether the execution key or ciphertext is wrong.
+
+Candidate-key run43508566171 also returned `CREDENTIALS_UNAVAILABLE`; the candidate did not establish Production credential resolution. Do not continue guessing keys. Vercel metadata confirms the current Production master key is sensitive and not readable back. The explicit maintenance-token path above supersedes the earlier instructions to set `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` for routing. That candidate secret is no longer used by the restoration job; retain or clean up temporary secrets only under the approved post-acceptance cleanup.
+
+### Test assets and secret recovery — 14 November 2026
+
+Owner confirms current messages/accounts are test assets. Read-only inventory found one runtime credential row owned by the fixed target, three Telegram connections and two WhatsApp connections. Do not infer that every setting can be rotated together. For acceptance routing, reuse the existing customer-bot token and preserve all runtime records. Before Pilot, separately rebaseline only the Production encryption key and its one credential with a reviewed re-encryption/configuration/redeployment/verification plan; the present change does not implement that rotation or prove the current Production app credential is healthy.
+
+Keep recoverable original secrets in an encrypted password-manager vault with separate Production/Preview entries, source, owner and date. GitHub Actions and Vercel are runtime distribution stores, not the only backup. Documentation/Drive stores names, scopes and recovery steps only, never values. Do not rotate database URLs/passwords, auth signing secrets, manager-bot token or other working integrations merely to repair this one credential. Re-inventory immediately before any future key rotation and preserve rollback references.
+
+### Explicit main/hash reconciliation after partial restoration
+
+If inspection confirms Telegram is already registered to main while the main database hash was not confirmed, `restore-main-webhook-reconcile` uses the same owner token, exact main DB, bot/tenant/connection guards and reviewed SHA. It requires current URL=main and destination=main, applies a fresh secret and verifies the main hash. It never decrypts/replaces stored credentials or modifies the test DB. This is an explicit mutation, not the read-only readiness preflight; do not run it automatically. If Telegram is still on Preview, use the reverse dry run and reviewed apply path instead. Operator logs point to these guarded workflows rather than generic CLI commands that would require the unavailable Production master key.
+
+### Missing delivery route after a fresh inbound (ISS-018 R4)
+
+Do not insert a route manually or delete dedupe history. The reported conversation f217cf5e-f417-4db1-b074-d5e531198285 has linked ingress evidence from two Telegram bots. The route binder and staff sender correctly fail closed. The repaired selector checks the authenticated connection/bot/recipient and historic claim compatibility before reusing a thread. New ingress may create a separate thread under the same customer; old mixed history and staff ownership remain intact and unroutable. Retest with one new uniquely marked Telegram inbound on the deployed reviewed SHA, then use the thread containing that new message. Preserve old rejected drafts and QA rows249/250; do not retry an old rejection or recreate a customer to conceal the failure.
+
+The R4 temporary AI reply is separately explained by CONFIG_ERROR before any provider HTTP dispatch. OPENROUTER_API_KEY exists only for Production in the reviewed Vercel metadata. An authorized operator may add the key to Preview ONLY for branch fix/safe-telegram-staff-reply-delivery and redeploy the exact reviewed candidate through Vercel. Never copy secret values into reports, change Production scope, or treat a missing provider key as user intent. This credential is independent of CREDENTIAL_MASTER_KEY and the Telegram webhook secret.
+
+## Guarded Preview-to-Preview transfer — PR #83
+
+This path moves the fixed customer bot between the two fixed Previews only. It
+never targets Production and never switches to main:
+
+- Old Preview: `https://flowpilot-prod-git-fix-safe-telegram-staff-reply-36d980-ammarj1.vercel.app`
+- Integrated Preview: `https://flowpilot-prod-git-integration-staff-delivery-kn-d54181-ammarj1.vercel.app`
+
+Both Previews use the SAME authorized Neon test database
+(`ep-little-mouse-a5nh644n[-pooler].us-east-2.aws.neon.tech`, database
+`neondb`). The existing switch service rotates the webhook secret and persists
+its hash in that database; the destination Preview reads the same hash, so
+incoming webhook authentication stays canonical. Do not copy credentials, reset
+the master key, regenerate the bot token or clear pending updates to bypass a
+mismatch.
+
+The workflow operation is fixed by name; there is no destination URL input.
+It requires the exact integration branch
+`refs/heads/integration/staff-delivery-knowledge-contract` and a full
+`expected_commit_sha` equal to the checked-out SHA. The runner also rejects
+Production/wrong databases, arbitrary destination input and mismatched bot,
+business or connection identities.
+
+### Forward (old Preview → integrated Preview)
+
+1. Read-only dry run on the exact reviewed integration SHA:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=transfer-integration-preview-dry-run -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+2. Confirm the dry run reports the expected current old-Preview URL, the fixed
+   integrated destination, destination version/SHA matching the reviewed
+   candidate, `isProductionDb=false`, `migrationApplied=true`, and the same
+   authorized test database host.
+3. Apply only after reviewer/Ammar approval:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=transfer-integration-preview-apply -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+
+### Return (integrated Preview → old Preview)
+
+Use the corresponding fixed operations on the same integration branch/SHA and
+the SAME test database. Do not change the database or copy a secret.
+
+1. Read-only dry run:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=return-old-preview-dry-run -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+2. Apply only after approval:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=return-old-preview-apply -f expected_commit_sha=<FULL_REVIEWED_SHA>`
+
+If the bot is already at the fixed destination, the run returns an explicit
+read-only `ALREADY_AT_DESTINATION` outcome with zero `setWebhook` calls and zero
+database writes. Otherwise a different current URL is refused; do not weaken
+the expected-current check. Dry runs perform no `setWebhook` and no database
+writes. The return path is prepared and offline-tested; a live rollback has NOT
+been tested. Production migration remains pending and operator-authorized.
+
+## Single Production runtime consolidation — prepared runbook (not executed)
+
+This runbook is approved preparation only. Reviewer and Ammar approve each
+mutation. Current baseline: Production
+`dpl_7JM2re7GuiGHrPwNQXZUBQpg4m3H` (SHA `49d58c5`, v0.79.8); integrated
+Preview `dpl_8SDviwrK2PEg7HTwXdkMojzUgWkL` (SHA `a566a10`, v0.79.10). The
+final PR #83 HEAD is the prepared source; the merge SHA is recorded only after
+the approved merge.
+
+### Recovery source and unsupported Vercel readback
+
+Distinguish three things before changing anything:
+
+- **Recoverable from an existing secure owner source:** the test database URL
+  (`TEST_DATABASE_URL`) and the test-compatible `CREDENTIAL_MASTER_KEY` are
+  expected to exist in the encrypted vault, because the owner used them for the
+  fixed Preview. The owner must confirm this; do not infer it from a matching
+  name.
+- **Not recoverable through Vercel today:** the current Production
+  `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` are sensitive values and cannot be
+  read back through the API or CLI. If they are not in the owner's vault, the
+  old Production runtime configuration cannot be restored by this handoff.
+- **Not a substitute for secret backup:** immutable deployment references such
+  as `dpl_7JM2...`, Git SHAs and health responses prove lineage/readiness, not
+  the values needed to restore a database connection or decrypt a credential.
+
+Do not replace Production secrets until the owner confirms the recovery path
+for the old values. Never print values, hashes, ciphertext, tokens or
+connection strings.
+
+### Migration ordering
+
+1. Run the read-only `verify-selected-runtime` operation in
+   `test-db-migrate.yml` on the exact PR #83 HEAD (integration branch) or the
+   exact merge SHA (main). It uses the existing `TEST_DATABASE_URL` and
+   `CREDENTIAL_MASTER_KEY` repository secrets, resolves the fixed bot
+   credential with a live `getMe`, and runs `prisma migrate status` without
+   applying anything.
+2. If the status is up to date, apply nothing. The PR #79 marker
+   `20261108200000_safe_telegram_staff_reply_delivery` is already present;
+   never reapply it.
+3. If migrations are pending, record the exact migration names from the
+   read-only output. Stop. Repoint and verify the **effective** Production
+   environment secret used by `production-db-migrate.yml` (the
+   environment-scoped secret overrides the repository-scoped secret), then run
+   that workflow with `expected_db_host=<selected test host>` and
+   `expected_commit_sha=<exact reviewed SHA>`. It refuses the legacy Production
+   host in apply mode.
+4. Do not run migration commands on the VPS and do not apply against the old
+   Production database.
+
+### Guard accuracy
+
+- `production-db-migrate.yml` requires both `expected_db_host` and
+  `expected_commit_sha`, and its apply step rejects the known legacy
+  Production Neon hosts.
+- `production-telegram-repair.yml` does **not** enforce `expected_db_host`.
+  It uses the `Production` environment's `PRODUCTION_DATABASE_URL`; do not
+  claim otherwise and do not use it as the cutover switch path.
+- The new cutover operation validates the selected test DB, fixed business,
+  connection, bot identity, expected current webhook, canonical destination,
+  deployed commit and health before any mutation.
+
+### Execution mechanisms
+
+- **Selected DB read-only preflight:** `test-db-migrate.yml` operation
+  `verify-selected-runtime`, guarded to the integration branch or `main` plus
+  the exact SHA. It runs the existing credential diagnosis
+  (`scripts/repair-test-bot-credential.py --from-environment`, read-only) and
+  `pnpm exec prisma migrate status`.
+- **Configuration cutover:** `test-db-migrate.yml` operation
+  `configure-production-runtime-env` with `environment_operation=preflight` or
+  `apply`, guarded to the integration branch or `main` plus the exact SHA. It
+  reuses repository `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY` with
+  `VERCEL_TOKEN` and updates only the Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` records. It does not use the `Production` GitHub
+  environment, so environment-scoped secrets cannot override its inputs.
+- **Merge and deployment:** approved PR #83 merge to `main`; normal Vercel
+  Production build of the exact merge SHA.
+- **Runtime credential/bot identity and switch:** `test-db-migrate.yml`
+  operations `cutover-main-runtime-dry-run` then
+  `cutover-main-runtime-apply`, guarded to `main` plus the exact merge SHA.
+  Both use repository `TEST_DATABASE_URL`/`CREDENTIAL_MASTER_KEY` and the
+  existing `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (HMAC signer only, never sent).
+  Before any switch, the deployed application must answer
+  `/api/operator/cutover-readiness` with a short-lived HMAC-signed proof that
+  it is running the expected commit/version on the selected DB, that the fixed
+  Business/connection exists there, and that its own credentials resolver
+  resolves the expected bot credential. The response is bounded metadata only
+  (no token, ciphertext, hash or connection string). The current webhook is
+  fixed by the `expected_current` choice; there is no arbitrary destination
+  input. Dry-run and apply are separate; no automatic retry occurs after
+  partial failure.
+- **Read-only postcheck:** rerun `verify-selected-runtime` on the merge SHA,
+  rerun `cutover-main-runtime-dry-run` with `expected_current=main` (returns
+  an explicit `ALREADY_AT_DESTINATION` no-op), inspect the signed runtime
+  readiness result and `/api/health`.
+  `production-telegram-repair.yml` remains an optional explicit check after its
+  environment secret is repointed; it is not the cutover gate.
+
+### Dispatchability
+
+`test-db-migrate.yml` already exists on `main`; dispatching it with
+`--ref integration/staff-delivery-knowledge-contract` runs the reviewed file
+from that exact ref without needing a bootstrap merge. After the merge, use
+`--ref main` and the merge SHA. All commands below require full 40-character
+SHAs; do not abbreviate.
+
+### Ordered cutover
+
+1. Owner confirms the recovery source for the old Production values and the
+   test DB URL/key; owner records the current deployment, bot webhook URL and
+   old Production DB host in a non-secret inventory. Do not delete, reset or
+   overwrite either database.
+2. Run `verify-selected-runtime` read-only on the exact PR #83 HEAD:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=verify-selected-runtime -f expected_commit_sha=4548c19f97a5591325090f1a97718755e45bf6f2`
+   Confirm `status: HEALTHY_LOCAL_KEY` and capture the migration status.
+3. If migrations are pending, stop and follow the migration ordering above.
+   Otherwise continue without applying migrations.
+4. Run the env preflight on the exact PR #83 HEAD:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=configure-production-runtime-env -f environment_operation=preflight -f expected_commit_sha=4548c19f97a5591325090f1a97718755e45bf6f2`
+   Confirm exactly one Production-scoped record exists for each of
+   `DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
+5. Run the same command with `environment_operation=apply` and the same exact
+   SHA. This is the only approved Production environment write in the
+   transition; it changes only the two fixed keys. If it reports
+   `PARTIAL_ENV_UPDATE`, stop before merge/deploy, inspect which key was
+   updated, and complete recovery only under separate approval; never retry
+   blindly.
+6. Merge the approved PR #83 to `main`; record the merge commit SHA. Let the
+   normal Vercel Production deployment build it. Verify `/api/health` reports
+   that exact `commitSha`, version `0.79.10`, `deploymentReady=true`,
+   `database=connected` and `missingEnvVars=[]`.
+7. Run the cutover dry-run on `main` with the exact merge SHA:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref main -f operation=cutover-main-runtime-dry-run -f expected_commit_sha=<MERGE_SHA> -f expected_current=integrated-preview`
+   Confirm the fixed bot identity, current URL, destination, deployed commit,
+   selected database and resolved application runtime credential. Zero
+   provider/DB/configuration writes.
+8. After separate approval, run `cutover-main-runtime-apply` with the same
+   SHA and `expected_current`:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref main -f operation=cutover-main-runtime-apply -f expected_commit_sha=<MERGE_SHA> -f expected_current=integrated-preview`
+   It switches the fixed bot once to
+   `https://flowpilot-prod.vercel.app/api/telegram/webhook`, rotates the
+   webhook secret, and persists the hash in the selected test DB.
+9. Run the read-only postcheck above. Then, and only after another separate
+   approval, perform one uniquely marked customer test. A paid model turn is a
+   separate approval.
+
+If the bot is already on canonical Production at step 7, the dry-run returns
+`ALREADY_AT_DESTINATION`; do not switch, and use
+`production-telegram-repair.yml` `check` then `apply-reconcile` after its
+environment secret is repointed to make the DB hash coherent.
+
+### Rollback (prepared, not live-tested)
+
+- **Before the bot move:** restore the Production application values from the
+  owner's vault, restore the effective `PRODUCTION_DATABASE_URL` environment
+  secret, and promote/restore the preserved deployment `dpl_7JM2...` (or the
+  previous verified main deployment). If the old values are not recoverable,
+  do not claim a full configuration rollback.
+- **After the bot move:** first move the bot back to the preserved old Preview
+  with the existing PR #79 guarded `switch-webhook-apply` on branch
+  `fix/safe-telegram-staff-reply-delivery` at its exact SHA `1a11f35...`. That
+  guard accepts current URL = canonical Production and destination = old
+  Preview, uses the same `TEST_DATABASE_URL`/`CREDENTIAL_MASTER_KEY`, and
+  writes the hash in the test DB read by that Preview. Then restore the
+  Production environment and promote the preserved deployment. Do not run
+  `restore-main-webhook-*` against the test DB.
+- If only the bot rollback is possible because old Production secrets are not
+  recoverable, keep Production on the selected test DB and the bot on the old
+  Preview; do not overwrite the old Production database. Record the unresolved
+  configuration recovery as a blocker.
+- Rollback has not been executed live. Keep both databases and additive tables
+  intact; never drop tables to simulate a rollback.
+
+## Y83 automated reply delivery failure — 15 November 2026
+
+The customer reply was persisted and AI/provider evidence was healthy, but
+Telegram delivery failed (`outboundSendDelivered=false`). The webhook logger
+showed `DELIVERY_FAILURE` / `UNKNOWN_ERROR`; the typed transport code was lost
+by the old delivery projection.
+
+Historical Y83 Preview remedy, not the consolidation: the integrated Preview
+branch would need the existing test-compatible `CREDENTIAL_MASTER_KEY` used by
+the fixed test bot. A key scoped only to the old PR79 feature branch is not
+visible to the integrated deployment, so runtime credential decryption fails
+before `sendMessage`. Per the approved single-runtime decision, do not treat
+moving that Preview scope as the final fix. The consolidation path in the
+section above reuses the key in Production scope. Do not rotate the key, copy a
+different key, or switch the bot to make delivery pass.
+
+The diagnostic repair in PR83 now carries a bounded `errorCode` (for example
+`UNAUTHORIZED_CREDENTIALS`, `PERMANENT_TRANSPORT_FAILURE`,
+`TRANSIENT_TRANSPORT_FAILURE`, `MALFORMED_PROVIDER_PAYLOAD`, or a bounded
+`UNKNOWN_ERROR` for thrown non-typed failures) through engine delivery,
+webhook logging and turn evidence. It does not resend Y83, retry blindly, or
+claim delivery without a fresh live retest.

@@ -6,6 +6,48 @@ on:
       - "prisma/**"
       - ".github/workflows/test-db-migrate.yml"
   workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        default: validate-migrations
+        options:
+          - validate-migrations
+          - verify-selected-runtime
+          - configure-production-runtime-env
+          - diagnose-credential
+          - repair-credential
+          - switch-webhook-dry-run
+          - switch-webhook-apply
+          - transfer-integration-preview-dry-run
+          - transfer-integration-preview-apply
+          - return-old-preview-dry-run
+          - return-old-preview-apply
+          - cutover-main-runtime-dry-run
+          - cutover-main-runtime-apply
+          - restore-main-webhook-reconcile
+          - restore-main-webhook-preflight
+          - restore-main-webhook-dry-run
+          - restore-main-webhook-apply
+      expected_commit_sha:
+        type: string
+        required: false
+        description: Full reviewed SHA, required for credential and webhook operations
+      expected_current:
+        type: choice
+        required: false
+        description: Verified current fixed-bot webhook for the cutover operation
+        options:
+          - integrated-preview
+          - old-preview
+          - main
+      environment_operation:
+        type: choice
+        required: false
+        default: preflight
+        description: Preflight or apply for configure-production-runtime-env
+        options:
+          - preflight
+          - apply
 
 permissions:
   contents: read
@@ -15,10 +57,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Automatic PR validation must never mutate the shared runtime database.
   validate-migrations:
-    name: Validate pending Prisma migrations (disposable test DB)
+    name: Validate pending Prisma migrations (ephemeral CI PostgreSQL)
+    if: github.event_name != 'workflow_dispatch' || inputs.operation == 'validate-migrations'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flowpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout pull request ref
         uses: actions/checkout@v4
@@ -40,26 +98,17 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      - name: Fail closed if TEST_DATABASE_URL is missing
-        shell: bash
-        run: |
-          if [ -z "${{ secrets.TEST_DATABASE_URL }}" ]; then
-            echo "::error::TEST_DATABASE_URL secret is not configured. Migration validation fails closed to prevent unverified schema changes from entering main."
-            exit 1
-          fi
-
       - name: Pre-migration status check
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
-          # Neon pooler endpoints use PgBouncer in transaction mode which does not support session advisory locks cleanly.
-          # Prisma Migrate documentation requires a direct connection: strip '-pooler.' to connect directly.
+          # Job-local disposable PostgreSQL: no shared pooler or runtime lock is involved.
           MIGRATE_URL="${DATABASE_URL/-pooler./.}"
           DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-pre.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-pre.raw.txt > status-pre.txt
-          echo "### Pre-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Pre-migration status (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-pre.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -67,12 +116,12 @@ jobs:
           if grep -qiE 'up to date|have not yet been applied' status-pre.txt; then
             exit 0
           fi
-          echo '::error::prisma migrate status could not read the test database — aborting'
+          echo '::error::prisma migrate status could not read the ephemeral CI database — aborting'
           exit 1
 
-      - name: Apply migrations to test database
+      - name: Apply migrations to ephemeral CI database
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
@@ -91,7 +140,7 @@ jobs:
             break
           done
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' deploy.raw.txt > deploy.txt
-          echo "### Migration deploy output (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Migration deploy output (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat deploy.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -100,21 +149,380 @@ jobs:
 
       - name: Post-migration status verification
         env:
-          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         shell: bash
         run: |
           set +e
           MIGRATE_URL="${DATABASE_URL/-pooler./.}"
           DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-post.raw.txt 2>&1
           sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-post.raw.txt > status-post.txt
-          echo "### Post-migration status (test DB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Post-migration status (ephemeral CI DB)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-post.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat status-post.txt
           if grep -qi 'Database schema is up to date' status-post.txt; then
-            echo '✅ Test migration validated: schema is up to date'
+            echo '✅ CI migration validated: schema is up to date'
             exit 0
           fi
-          echo '::error::Post-migration status on test DB does not report up to date'
+          echo '::error::Post-migration status on ephemeral CI DB does not report up to date'
           exit 1
+
+  verify-selected-runtime:
+    name: Verify selected runtime DB and bot credential (read-only)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract' ||
+      github.ref == 'refs/heads/main') &&
+      inputs.operation == 'verify-selected-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::Full reviewed SHA is missing or malformed; refusing selected-runtime verification.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA mismatched with checked-out SHA; refusing selected-runtime verification.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Verify fixed bot credential and live identity (read-only)
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        shell: bash
+        run: |
+          set +e
+          OUTPUT=$(python3 scripts/repair-test-bot-credential.py --from-environment 2>&1)
+          code=$?
+          printf '%s\n' "$OUTPUT"
+          if [ "$code" -ne 0 ] || ! printf '%s\n' "$OUTPUT" | grep -qx 'status: HEALTHY_LOCAL_KEY'; then
+            echo '::error::Selected runtime credential does not resolve to the fixed healthy bot identity.'
+            exit 1
+          fi
+      - name: Selected database migration status (read-only)
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        shell: bash
+        run: |
+          set +e
+          MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-selected.raw.txt 2>&1
+          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-selected.raw.txt > status-selected.txt
+          echo "### Selected runtime database migration status (read-only)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-selected.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat status-selected.txt
+          if grep -qi 'Database schema is up to date' status-selected.txt; then
+            echo 'SELECTED_DB_MIGRATIONS=UP_TO_DATE'
+            exit 0
+          fi
+          if grep -qi 'have not yet been applied' status-selected.txt; then
+            echo 'SELECTED_DB_MIGRATIONS=PENDING_REVIEW'
+            echo '::warning::Pending migrations were detected. Do not apply automatically; review the exact names above and use the approved runtime migration operation after repointing and verifying its secret.'
+            exit 0
+          fi
+          echo '::error::Unable to read the selected runtime database migration status.'
+          exit 1
+
+  configure-production-runtime-env:
+    name: Configure only the fixed Production runtime pair (exact SHA)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract' ||
+      github.ref == 'refs/heads/main') &&
+      inputs.operation == 'configure-production-runtime-env'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::Full reviewed SHA is missing or malformed; refusing Production environment update.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA mismatched with checked-out SHA; refusing Production environment update.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Preflight or apply the fixed Production runtime pair
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          OPERATION: ${{ inputs.environment_operation }}
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          node --import tsx scripts/update-production-runtime-env.ts
+
+  recover-test-credential:
+    name: Diagnose or repair fixed test bot credential
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'diagnose-credential' || inputs.operation == 'repair-credential')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing credential operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Diagnose or repair without exporting the master key
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          TEST_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$CREDENTIAL_MASTER_KEY" ]; then
+            echo '::error::Required test database or master key secret is unavailable.'
+            exit 1
+          fi
+          if [ "$OPERATION" = 'repair-credential' ]; then
+            if [ -z "$TEST_BOT_TOKEN" ]; then
+              echo '::error::Set YAKFI_TEST_CUSTOMER_BOT_TOKEN using masked GitHub secret input.'
+              exit 1
+            fi
+            python3 scripts/repair-test-bot-credential.py --from-environment --apply
+          else
+            python3 scripts/repair-test-bot-credential.py --from-environment
+          fi
+
+  switch-test-webhook:
+    name: Switch customer bot webhook to Preview (guarded)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'switch-webhook-dry-run' || inputs.operation == 'switch-webhook-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing webhook switch operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded customer webhook switch
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts
+
+  transfer-preview-webhook:
+    name: Transfer customer bot between fixed Previews (guarded)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract' &&
+      (inputs.operation == 'transfer-integration-preview-dry-run' || inputs.operation == 'transfer-integration-preview-apply' || inputs.operation == 'return-old-preview-dry-run' || inputs.operation == 'return-old-preview-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::Full reviewed SHA is missing or malformed; refusing Preview transfer.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA mismatched with checked-out SHA; refusing Preview transfer.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded fixed-Preview transfer
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts
+
+  cutover-main-runtime:
+    name: Cut over fixed bot to canonical Production runtime (guarded)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      (inputs.operation == 'cutover-main-runtime-dry-run' || inputs.operation == 'cutover-main-runtime-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact merged commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::Full merged SHA is missing or malformed; refusing runtime cutover.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Expected merged SHA does not match the checked-out SHA; refusing runtime cutover.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Read reviewed version
+        id: version
+        run: echo "value=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded Production runtime cutover
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          CUTOVER_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          EXPECTED_CURRENT_KIND: ${{ inputs.expected_current }}
+          EXPECTED_VERSION: ${{ steps.version.outputs.value }}
+          GITHUB_SHA: ${{ github.sha }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts
+
+  restore-main-webhook:
+    name: Restore customer bot webhook to Production (guarded prepare-only)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'restore-main-webhook-reconcile' || inputs.operation == 'restore-main-webhook-preflight' || inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing webhook restoration operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded customer webhook restoration (prepare-only)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts

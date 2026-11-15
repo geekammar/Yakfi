@@ -26,8 +26,11 @@
  *   knowledgeSourceClass[] · provider · model · providerAttempts ·
  *   providerStatus · providerLatencyMs · inputTokens · outputTokens ·
  *   parseSuccess · disclosureChannel · disclosureAllowed ·
- *   disclosureRefusalReason · knowledgeGapCategory · finalOutcome ·
- *   outboundSendAttempted · outboundSendDelivered · emittedAt
+ *   disclosureRefusalReason · disclosureDeclaredIntent ·
+ *   disclosureProposedFamily · disclosureProposalStatus ·
+ *   disclosureLedgerIncluded · disclosureLedgerDisclosable ·
+ *   knowledgeGapCategory · finalOutcome · outboundSendAttempted ·
+ *   outboundSendDelivered · outboundDeliveryErrorCode · emittedAt
  *
  * The token counters (`inputTokens` / `outputTokens`, PROMPT-AI-PERF-02) are
  * copied AS-IS from the existing attempt-level adapter telemetry the engine
@@ -96,10 +99,23 @@ export type TurnEvidence = {
   readonly disclosureChannel: string | null;
   readonly disclosureAllowed: boolean | null;
   readonly disclosureRefusalReason: string | null;
+  /**
+   * Additive bounded refusal evidence. `disclosureChannel` keeps its legacy
+   * intent-derived semantics; these fields expose the declared intent, the
+   * resolved canonical family (or closed `UNKNOWN`), the proposal status and
+   * the relevant ledger verdicts. No raw model labels/content are carried.
+   */
+  readonly disclosureDeclaredIntent: string | null;
+  readonly disclosureProposedFamily: string | null;
+  readonly disclosureProposalStatus: string | null;
+  readonly disclosureLedgerIncluded: boolean | null;
+  readonly disclosureLedgerDisclosable: boolean | null;
   readonly knowledgeGapCategory: string | null;
   readonly finalOutcome: string;
   readonly outboundSendAttempted: boolean;
   readonly outboundSendDelivered: boolean | null;
+  /** Bounded typed outbound transport failure code when delivery failed. */
+  readonly outboundDeliveryErrorCode: string | null;
   /** Bounded per-attempt execution and usage records across retries and fallback. */
   readonly executionAttempts: readonly TurnExecutionAttempt[] | null;
   /** Optional sanitized provider error classification for failed turn (CONFIG_ERROR, RETRYABLE, etc.). */
@@ -177,7 +193,10 @@ export type TurnEvidenceInput = {
   readonly assistantProvider?: string | null;
   readonly observability?: TurnObservability | null;
   readonly knowledgeGap?: { readonly category: string } | null;
-  readonly delivery?: { readonly delivered: boolean } | null;
+  readonly delivery?: {
+    readonly delivered: boolean;
+    readonly errorCode?: string;
+  } | null;
 };
 
 export type BuildTurnEvidenceMeta = {
@@ -284,6 +303,12 @@ export function buildTurnEvidence(
     disclosureChannel: observability?.disclosure?.channel ?? null,
     disclosureAllowed: observability?.disclosure?.allowed ?? null,
     disclosureRefusalReason: observability?.disclosure?.refusalReason ?? null,
+    disclosureDeclaredIntent: observability?.disclosure?.declaredIntent ?? null,
+    disclosureProposedFamily: observability?.disclosure?.proposedFamily ?? null,
+    disclosureProposalStatus: observability?.disclosure?.proposalStatus ?? null,
+    disclosureLedgerIncluded: observability?.disclosure?.ledgerIncluded ?? null,
+    disclosureLedgerDisclosable:
+      observability?.disclosure?.ledgerDisclosable ?? null,
     knowledgeGapCategory: input.knowledgeGap?.category ?? null,
     finalOutcome: input.duplicate
       ? "DUPLICATE"
@@ -291,6 +316,7 @@ export function buildTurnEvidence(
     outboundSendAttempted:
       input.delivery !== null && input.delivery !== undefined,
     outboundSendDelivered: input.delivery ? input.delivery.delivered : null,
+    outboundDeliveryErrorCode: input.delivery?.errorCode ?? null,
     executionAttempts: observability?.executionAttempts ?? null,
     errorCode:
       observability?.errorCode ??
@@ -368,8 +394,12 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "providerStatus",
   "disclosureChannel",
   "disclosureRefusalReason",
+  "disclosureDeclaredIntent",
+  "disclosureProposedFamily",
+  "disclosureProposalStatus",
   "knowledgeGapCategory",
   "finalOutcome",
+  "outboundDeliveryErrorCode",
   "emittedAt",
   // CORE-04A: Bounded execution attempt and cost completeness closed keys
   "status",

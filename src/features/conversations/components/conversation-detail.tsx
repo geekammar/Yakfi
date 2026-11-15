@@ -2,6 +2,7 @@
 
 import {
   assignConversation,
+  checkStaffReplyStatus,
   sendStaffReply,
   transitionConversation,
   updateAiSummary,
@@ -10,11 +11,22 @@ import { ConversationActions } from "@/features/conversations/components/convers
 import { ConversationStatusBadge } from "@/features/conversations/components/conversation-status";
 import {
   getStoredDraft,
+  getStoredDraftMeta,
+  getStoredReplyAttempts,
+  markStoredReplyAttemptDismissed,
   removeStoredDraft,
+  removeStoredReplyAttemptById,
   setStoredDraft,
+  setStoredReplyAttempt,
+  setStoredReplyAttempts,
+  type StoredReplyAttempt,
 } from "@/features/conversations/lib/storage";
 import { HANDOFF_CAUSE_PRESENTATIONS } from "@/features/conversations/server/handoff-cause";
-import type { ConversationDetailData } from "@/features/conversations/types";
+import type {
+  ConversationDetailData,
+  StaffReplyActionResult,
+  StaffReplyStatusActionResult,
+} from "@/features/conversations/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,6 +44,7 @@ import {
   ArrowRightIcon,
   BotIcon,
   CalendarDaysIcon,
+  CheckCircle2Icon,
   LoaderCircleIcon,
   MessageCircleIcon,
   SendIcon,
@@ -341,13 +354,27 @@ export function ConversationDetail({
   const savedScrollTopRef = useRef<number>(0);
 
   const draftRevisionRef = useRef(0);
+  const currentDraftIdRef = useRef<string>("");
   const activeSubmissionRef = useRef<{
     rawDraft: string;
     revision: number;
+    draftId?: string;
+    attemptId?: string;
+    content?: string;
   } | null>(null);
   const [failedSubmission, setFailedSubmission] = useState<string | null>(
     initialFailedSubmission,
   );
+  const [restoreBlockedNotice, setRestoreBlockedNotice] = useState<
+    string | null
+  >(null);
+  const [attempts, setAttempts] = useState<StoredReplyAttempt[]>([]);
+  const [acceptedNotice, setAcceptedNotice] = useState<string | null>(null);
+  const [confirmingNewSendAttemptId, setConfirmingNewSendAttemptId] = useState<
+    string | null
+  >(null);
+
+  const activeAttempt = attempts.find((a) => !a.dismissed) ?? null;
 
   const effectiveBusinessId = propBusinessId ?? initialData.businessId;
   const effectiveUserId = initialData.currentUserId;
@@ -366,7 +393,7 @@ export function ConversationDetail({
     window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
-  // Restore unsent draft across details toggle and Back navigation
+  // Restore unsent draft and active attempt across details toggle and Back navigation / reload
   useEffect(() => {
     if (!effectiveBusinessId || !effectiveUserId) return;
     const savedDraft = getStoredDraft(
@@ -374,18 +401,82 @@ export function ConversationDetail({
       effectiveUserId,
       data.id,
     );
-    if (savedDraft) {
-      queueMicrotask(() => {
-        setReply(savedDraft);
+    const savedMeta = getStoredDraftMeta(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+
+    const savedAttempts = getStoredReplyAttempts(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+
+    let updatedAttempts: StoredReplyAttempt[] = [];
+    if (savedAttempts.length > 0) {
+      let needsSave = false;
+      updatedAttempts = savedAttempts.map((attempt) => {
+        if (attempt.status === "pending") {
+          needsSave = true;
+          return {
+            ...attempt,
+            status: "unknown" as const,
+            message: "انقطعت الاستجابة قبل تأكيد حالة الرد",
+          };
+        }
+        return attempt;
       });
+      if (needsSave) {
+        setStoredReplyAttempts(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          updatedAttempts,
+        );
+      }
     }
+
+    queueMicrotask(() => {
+      if (savedMeta?.draftId) {
+        currentDraftIdRef.current = savedMeta.draftId;
+      } else if (savedDraft) {
+        const legacyDraftId = crypto.randomUUID();
+        currentDraftIdRef.current = legacyDraftId;
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            savedDraft,
+            {
+              draftId: legacyDraftId,
+              updatedAt: Date.now(),
+            },
+          );
+        }
+      }
+      if (savedDraft) {
+        setReply(savedDraft);
+      }
+      if (updatedAttempts.length > 0) {
+        setAttempts(updatedAttempts);
+      }
+    });
   }, [effectiveBusinessId, effectiveUserId, data.id]);
 
   const handleReplyTextChange = (text: string) => {
     draftRevisionRef.current += 1;
+    currentDraftIdRef.current = crypto.randomUUID();
     setReply(text);
+    if (!text.trim()) {
+      setRestoreBlockedNotice(null);
+    }
     if (effectiveBusinessId && effectiveUserId) {
-      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text);
+      setStoredDraft(effectiveBusinessId, effectiveUserId, data.id, text, {
+        draftId: currentDraftIdRef.current,
+        updatedAt: Date.now(),
+      });
     }
   };
   // Initial scroll to bottom on mount
@@ -497,34 +588,301 @@ export function ConversationDetail({
     });
   }
 
+  function handleRetryAttempt(attemptId?: string) {
+    const targetAttemptId = attemptId ?? activeAttempt?.attemptId;
+    const attempt = attempts.find((a) => a.attemptId === targetAttemptId);
+    if (!attempt || isPending) return;
+
+    setError(null);
+    setAcceptedNotice(null);
+
+    startTransition(async () => {
+      let result: StaffReplyStatusActionResult;
+      try {
+        result = await checkStaffReplyStatus({
+          id: data.id,
+          clientSubmissionId: attempt.attemptId,
+        });
+      } catch {
+        result = {
+          success: false,
+          status: "unknown",
+          message: "انقطع الاتصال بالخادم أثناء التحقق من حالة الرد",
+        };
+      }
+
+      if (result.status === "accepted") {
+        setAttempts((current) =>
+          current.filter((a) => a.attemptId !== attempt.attemptId),
+        );
+        if (effectiveBusinessId && effectiveUserId) {
+          removeStoredReplyAttemptById(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            attempt.attemptId,
+          );
+        }
+
+        // Repro C & Draft Ownership Check:
+        // Only clear stored draft if ownership can be PROVEN to belong to this attempt!
+        const currentStoredDraft = getStoredDraft(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+        );
+        const currentMeta = getStoredDraftMeta(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+        );
+
+        const draftOwnedByAttempt = Boolean(
+          currentStoredDraft &&
+          currentStoredDraft.trim() === attempt.content.trim() &&
+          currentMeta?.draftId &&
+          attempt.draftId &&
+          currentMeta.draftId === attempt.draftId,
+        );
+
+        if (draftOwnedByAttempt) {
+          if (effectiveBusinessId && effectiveUserId) {
+            removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
+          }
+          if (
+            attempt.draftId &&
+            currentDraftIdRef.current === attempt.draftId &&
+            reply.trim() === attempt.content.trim()
+          ) {
+            setReply("");
+            currentDraftIdRef.current = "";
+          }
+        }
+        // If ownership cannot be proven (e.g. newer draft B composed), PRESERVE THE DRAFT!
+
+        setAcceptedNotice("تم تأكيد قبول الإرسال من مزود الخدمة");
+        return;
+      }
+
+      if (result.status === "in-progress") {
+        const inProgressAttempt: StoredReplyAttempt = {
+          ...attempt,
+          status: "in-progress",
+          message: result.message || "الطلب قيد المعالجة حالياً",
+          code: result.code,
+        };
+        setAttempts((current) =>
+          current.map((a) =>
+            a.attemptId === attempt.attemptId ? inProgressAttempt : a,
+          ),
+        );
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            inProgressAttempt,
+          );
+        }
+        return;
+      }
+
+      if (result.status === "rejected") {
+        const rejectedAttempt: StoredReplyAttempt = {
+          ...attempt,
+          status: "rejected",
+          message: result.message || "تم رفض الإرسال من مزود الخدمة",
+          code: result.code,
+        };
+        setAttempts((current) =>
+          current.map((a) =>
+            a.attemptId === attempt.attemptId ? rejectedAttempt : a,
+          ),
+        );
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            rejectedAttempt,
+          );
+        }
+        return;
+      }
+
+      // unknown / not found
+      const unknownAttempt: StoredReplyAttempt = {
+        ...attempt,
+        status: "unknown",
+        message: result.message || "حالة الإرسال غير مؤكدة",
+        code: result.code,
+      };
+      setAttempts((current) =>
+        current.map((a) =>
+          a.attemptId === attempt.attemptId ? unknownAttempt : a,
+        ),
+      );
+      if (effectiveBusinessId && effectiveUserId) {
+        setStoredReplyAttempt(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          unknownAttempt,
+        );
+      }
+    });
+  }
+
+  function handleDismissAttempt(attemptId?: string) {
+    const id = attemptId ?? activeAttempt?.attemptId;
+    if (!id) return;
+    setAttempts((current) =>
+      current.map((a) => (a.attemptId === id ? { ...a, dismissed: true } : a)),
+    );
+    if (effectiveBusinessId && effectiveUserId) {
+      markStoredReplyAttemptDismissed(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        id,
+        true,
+      );
+    }
+  }
+
+  function handleUndismissAttempt(attemptId: string) {
+    setAttempts((current) =>
+      current.map((a) =>
+        a.attemptId === attemptId ? { ...a, dismissed: false } : a,
+      ),
+    );
+    if (effectiveBusinessId && effectiveUserId) {
+      markStoredReplyAttemptDismissed(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        attemptId,
+        false,
+      );
+    }
+  }
+
+  function handleDismissRejectedAttempt(attemptId?: string) {
+    const id = attemptId ?? activeAttempt?.attemptId;
+    if (!id) return;
+    setAttempts((current) => current.filter((a) => a.attemptId !== id));
+    if (effectiveBusinessId && effectiveUserId) {
+      removeStoredReplyAttemptById(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        id,
+      );
+    }
+  }
+
+  function handleRestoreFailedSubmission() {
+    if (!failedSubmission) return;
+    const latestStoredDraft = getStoredDraft(
+      effectiveBusinessId,
+      effectiveUserId,
+      data.id,
+    );
+    const hasComposerDraft = Boolean(reply.trim());
+    const hasStoredDraft = Boolean(
+      latestStoredDraft && latestStoredDraft.trim(),
+    );
+
+    if (hasComposerDraft || hasStoredDraft) {
+      setRestoreBlockedNotice("امسح المسودة الحالية أولاً لاستعادة الرد");
+      return;
+    }
+
+    setRestoreBlockedNotice(null);
+    const newRestoredDraftId = crypto.randomUUID();
+    draftRevisionRef.current += 1;
+    currentDraftIdRef.current = newRestoredDraftId;
+    setReply(failedSubmission);
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredDraft(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        failedSubmission,
+        {
+          draftId: newRestoredDraftId,
+          updatedAt: Date.now(),
+        },
+      );
+    }
+    setFailedSubmission(null);
+  }
+
   function handleReply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = reply.trim();
     if (!content || isPending) return;
 
-    ownSendPendingRef.current = true;
+    // Repro A check: If an unresolved attempt exists for this content,
+    // ordinary Send MUST NOT allocate a fresh ID or dispatch A again!
+    const unresolvedAttempt = attempts.find(
+      (a) =>
+        (a.status === "unknown" || a.status === "in-progress") &&
+        a.content.trim() === content,
+    );
 
-    // Optimistic append — rolled back if the server rejects the reply.
-    const pendingId = crypto.randomUUID();
-    setPendingMessageId(pendingId);
+    if (unresolvedAttempt) {
+      if (unresolvedAttempt.dismissed) {
+        handleUndismissAttempt(unresolvedAttempt.attemptId);
+      }
+      setError(
+        "هذا الرد معلق وغير مؤكد الإرسال مسبقاً. يُرجى التحقق من حالة الإرسال أولاً لتجنب التكرار.",
+      );
+      return;
+    }
 
-    // Keep recoverable raw draft snapshot and revision until confirmed success.
-    const rawDraftSnapshot = reply;
-    const submittedRevision = draftRevisionRef.current;
-    activeSubmissionRef.current = {
-      rawDraft: rawDraftSnapshot,
-      revision: submittedRevision,
+    executeSubmission(content, crypto.randomUUID());
+  }
+
+  function handleConfirmForceNewSubmission(sourceAttempt: StoredReplyAttempt) {
+    if (isPending) return;
+    setConfirmingNewSendAttemptId(null);
+
+    const freshAttemptId = crypto.randomUUID();
+    const explicitDraftId = crypto.randomUUID();
+    const submittedTimestamp = Date.now();
+    const content = sourceAttempt.content;
+
+    const inFlightAttempt: StoredReplyAttempt = {
+      attemptId: freshAttemptId,
+      content,
+      status: "pending",
+      timestamp: submittedTimestamp,
+      draftId: explicitDraftId,
+      dismissed: false,
     };
 
-    setReply("");
-    setFailedSubmission(null);
+    setAttempts((current) => [...current, inFlightAttempt]);
+
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredReplyAttempt(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        inFlightAttempt,
+      );
+    }
+
+    setPendingMessageId(freshAttemptId);
+    setError(null);
+    setAcceptedNotice(null);
 
     setData((current) => ({
       ...current,
       messages: [
         ...current.messages,
         {
-          id: pendingId,
+          id: freshAttemptId,
           senderType: "STAFF",
           content,
           createdAt: new Date().toISOString(),
@@ -533,30 +891,360 @@ export function ConversationDetail({
     }));
 
     startTransition(async () => {
-      const success = await runAction(() =>
-        sendStaffReply({ id: data.id, content }),
-      );
+      let result: StaffReplyActionResult;
+      try {
+        result = await sendStaffReply({
+          id: data.id,
+          content,
+          clientSubmissionId: freshAttemptId,
+        });
+      } catch {
+        result = {
+          success: false,
+          outcome: "unknown",
+          message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
+        };
+      }
+
       setPendingMessageId(null);
 
+      // Composer (reply) and stored draft are NEVER touched here!
+      if (result.success) {
+        setAttempts((current) =>
+          current.filter((a) => a.attemptId !== freshAttemptId),
+        );
+        if (effectiveBusinessId && effectiveUserId) {
+          removeStoredReplyAttemptById(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            freshAttemptId,
+          );
+        }
+        setAcceptedNotice("تم إرسال الرد بنجاح");
+
+        if (result.messageId) {
+          setData((current) => ({
+            ...current,
+            messages: current.messages.map((m) =>
+              m.id === freshAttemptId ? { ...m, id: result.messageId! } : m,
+            ),
+          }));
+        }
+
+        setData((current) => ({
+          ...current,
+          status: "NEED_HUMAN",
+          assignedUser:
+            result.assignedUser !== undefined
+              ? result.assignedUser
+              : current.assignedUser,
+        }));
+        return;
+      }
+
+      // Rollback optimistic message if not accepted
+      setData((current) => ({
+        ...current,
+        messages: current.messages.filter((m) => m.id !== freshAttemptId),
+      }));
+
+      if (result.outcome === "unknown") {
+        const unknownAttempt: StoredReplyAttempt = {
+          attemptId: freshAttemptId,
+          content,
+          status: "unknown",
+          message: result.message || "حالة الإرسال غير مؤكدة",
+          code: result.code,
+          timestamp: Date.now(),
+          draftId: explicitDraftId,
+          dismissed: false,
+        };
+        setAttempts((current) => {
+          const filtered = current.filter(
+            (a) => a.attemptId !== freshAttemptId,
+          );
+          return [...filtered, unknownAttempt];
+        });
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            unknownAttempt,
+          );
+        }
+        return;
+      }
+
+      if (result.outcome === "in-progress") {
+        const inProgressAttempt: StoredReplyAttempt = {
+          attemptId: freshAttemptId,
+          content,
+          status: "in-progress",
+          message: result.message || "الطلب قيد المعالجة حالياً",
+          code: result.code,
+          timestamp: Date.now(),
+          draftId: explicitDraftId,
+          dismissed: false,
+        };
+        setAttempts((current) => {
+          const filtered = current.filter(
+            (a) => a.attemptId !== freshAttemptId,
+          );
+          return [...filtered, inProgressAttempt];
+        });
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            inProgressAttempt,
+          );
+        }
+        return;
+      }
+
+      // DEFINITE REJECTION / UNROUTABLE
+      const rejectedAttempt: StoredReplyAttempt = {
+        attemptId: freshAttemptId,
+        content,
+        status: "rejected",
+        message: result.message || "تم رفض الإرسال من مزود الخدمة",
+        code: result.code,
+        timestamp: Date.now(),
+        draftId: explicitDraftId,
+        dismissed: false,
+      };
+      setAttempts((current) => {
+        const filtered = current.filter((a) => a.attemptId !== freshAttemptId);
+        return [...filtered, rejectedAttempt];
+      });
+      if (effectiveBusinessId && effectiveUserId) {
+        removeStoredReplyAttemptById(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          freshAttemptId,
+        );
+      }
+      setError(result.message || "تعذر إرسال الرد");
+    });
+  }
+
+  function executeSubmission(
+    content: string,
+    attemptId: string,
+    options?: { forceNew?: boolean },
+  ) {
+    void options;
+    ownSendPendingRef.current = true;
+    setPendingMessageId(attemptId);
+    setError(null);
+    setAcceptedNotice(null);
+
+    // Keep recoverable raw draft snapshot and revision until confirmed success.
+    const rawDraftSnapshot = reply;
+    const submittedRevision = draftRevisionRef.current;
+    const submittedDraftId = currentDraftIdRef.current || crypto.randomUUID();
+    currentDraftIdRef.current = submittedDraftId;
+    const submittedTimestamp = Date.now();
+
+    activeSubmissionRef.current = {
+      rawDraft: rawDraftSnapshot,
+      revision: submittedRevision,
+      draftId: submittedDraftId,
+      attemptId,
+      content,
+    };
+
+    // Durable attempt record in storage
+    const inFlightAttempt: StoredReplyAttempt = {
+      attemptId,
+      content,
+      status: "pending",
+      timestamp: submittedTimestamp,
+      draftId: submittedDraftId,
+      dismissed: false,
+    };
+
+    setAttempts((current) => {
+      const filtered = current.filter((a) => a.attemptId !== attemptId);
+      return [...filtered, inFlightAttempt];
+    });
+
+    if (effectiveBusinessId && effectiveUserId) {
+      setStoredReplyAttempt(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+        inFlightAttempt,
+      );
+    }
+
+    if (reply.trim() === content) {
+      setReply("");
+    }
+    setFailedSubmission(null);
+    setRestoreBlockedNotice(null);
+
+    // Optimistic message append if not already in message log
+    setData((current) => {
+      const exists = current.messages.some((m) => m.id === attemptId);
+      if (exists) return current;
+      return {
+        ...current,
+        messages: [
+          ...current.messages,
+          {
+            id: attemptId,
+            senderType: "STAFF",
+            content,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      };
+    });
+
+    startTransition(async () => {
+      let result: StaffReplyActionResult;
+      try {
+        result = await sendStaffReply({
+          id: data.id,
+          content,
+          clientSubmissionId: attemptId,
+        });
+      } catch {
+        result = {
+          success: false,
+          outcome: "unknown",
+          message: "انقطع الاتصال بالخادم أثناء معالجة الرد",
+        };
+      }
+
+      setPendingMessageId(null);
       const submission = activeSubmissionRef.current;
       activeSubmissionRef.current = null;
 
-      if (!success) {
-        // Rollback optimistic message
+      const hasNewerText =
+        draftRevisionRef.current > (submission?.revision ?? 0);
+
+      if (result.success) {
+        // ACCEPTED: draft cleared, stored attempt cleared, confirmed success visible
+        setAttempts((current) =>
+          current.filter((a) => a.attemptId !== attemptId),
+        );
+        if (effectiveBusinessId && effectiveUserId) {
+          removeStoredReplyAttemptById(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            attemptId,
+          );
+          const currentStoredDraft = getStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+          );
+          const currentMeta = getStoredDraftMeta(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+          );
+          const isTextMatching =
+            Boolean(currentStoredDraft) &&
+            currentStoredDraft!.trim() === content.trim();
+
+          const isStorageOwned = Boolean(
+            isTextMatching &&
+            currentMeta?.draftId &&
+            submittedDraftId &&
+            currentMeta.draftId === submittedDraftId,
+          );
+
+          if (isStorageOwned) {
+            removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
+          }
+        }
+
+        const isComposerOwned =
+          !hasNewerText &&
+          currentDraftIdRef.current === submittedDraftId &&
+          reply.trim() === content.trim();
+
+        if (isComposerOwned) {
+          setReply("");
+          currentDraftIdRef.current = "";
+        }
+        setAcceptedNotice("تم إرسال الرد بنجاح");
+
+        if (result.messageId) {
+          setData((current) => ({
+            ...current,
+            messages: current.messages.map((m) =>
+              m.id === attemptId ? { ...m, id: result.messageId! } : m,
+            ),
+          }));
+        }
+
         setData((current) => ({
           ...current,
-          messages: current.messages.filter(
-            (message) => message.id !== pendingId,
-          ),
+          status: "NEED_HUMAN",
+          assignedUser:
+            result.assignedUser !== undefined
+              ? result.assignedUser
+              : current.assignedUser,
         }));
+        return;
+      }
 
-        // Failure handling:
-        // Did operator type newer text while pending?
-        const hasNewerText =
-          draftRevisionRef.current > (submission?.revision ?? 0);
+      // Rollback optimistic message if not accepted
+      setData((current) => ({
+        ...current,
+        messages: current.messages.filter((m) => m.id !== attemptId),
+      }));
 
-        if (!hasNewerText && submission?.rawDraft) {
-          // If no newer text was typed, restore the failed submission directly
+      const currentStoredMeta = getStoredDraftMeta(
+        effectiveBusinessId,
+        effectiveUserId,
+        data.id,
+      );
+      const storedIsNewer =
+        Boolean(
+          currentStoredMeta?.updatedAt &&
+          currentStoredMeta.updatedAt > submittedTimestamp,
+        ) ||
+        Boolean(
+          currentStoredMeta?.draftId &&
+          currentStoredMeta.draftId !== submittedDraftId,
+        );
+
+      if (result.outcome === "unknown") {
+        const unknownAttempt: StoredReplyAttempt = {
+          attemptId,
+          content,
+          status: "unknown",
+          message: result.message || "حالة الإرسال غير مؤكدة",
+          code: result.code,
+          timestamp: Date.now(),
+          draftId: submittedDraftId,
+          dismissed: false,
+        };
+        setAttempts((current) => {
+          const filtered = current.filter((a) => a.attemptId !== attemptId);
+          return [...filtered, unknownAttempt];
+        });
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            unknownAttempt,
+          );
+        }
+
+        if (!hasNewerText && !storedIsNewer && submission?.rawDraft) {
+          currentDraftIdRef.current = submittedDraftId;
           setReply(submission.rawDraft);
           if (effectiveBusinessId && effectiveUserId) {
             setStoredDraft(
@@ -564,35 +1252,105 @@ export function ConversationDetail({
               effectiveUserId,
               data.id,
               submission.rawDraft,
+              {
+                draftId: submittedDraftId,
+                updatedAt: Date.now(),
+              },
             );
           }
         } else if (submission?.rawDraft) {
-          // Newer text typed while pending:
-          // Keep current newer draft UNCHANGED (no automatic concatenation!).
-          // Preserve failed submission separately with explicit recovery affordance.
           setFailedSubmission(submission.rawDraft);
         }
         return;
       }
 
-      // Success handling:
-      // Remove only if not superseded by newer operator text
-      const hasNewerText =
-        draftRevisionRef.current > (submission?.revision ?? 0);
+      if (result.outcome === "in-progress") {
+        const inProgressAttempt: StoredReplyAttempt = {
+          attemptId,
+          content,
+          status: "in-progress",
+          message: result.message || "الطلب قيد المعالجة حالياً",
+          code: result.code,
+          timestamp: Date.now(),
+          draftId: submittedDraftId,
+          dismissed: false,
+        };
+        setAttempts((current) => {
+          const filtered = current.filter((a) => a.attemptId !== attemptId);
+          return [...filtered, inProgressAttempt];
+        });
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredReplyAttempt(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            inProgressAttempt,
+          );
+        }
 
-      if (!hasNewerText && effectiveBusinessId && effectiveUserId) {
-        removeStoredDraft(effectiveBusinessId, effectiveUserId, data.id);
+        if (!hasNewerText && !storedIsNewer && submission?.rawDraft) {
+          currentDraftIdRef.current = submittedDraftId;
+          setReply(submission.rawDraft);
+          if (effectiveBusinessId && effectiveUserId) {
+            setStoredDraft(
+              effectiveBusinessId,
+              effectiveUserId,
+              data.id,
+              submission.rawDraft,
+              {
+                draftId: submittedDraftId,
+                updatedAt: Date.now(),
+              },
+            );
+          }
+        } else if (submission?.rawDraft) {
+          setFailedSubmission(submission.rawDraft);
+        }
+        return;
       }
 
-      setData((current) => ({
-        ...current,
-        status: "NEED_HUMAN",
-        assignedUser: current.assignedUser ?? {
-          id: current.currentUserId,
-          name: "أنت",
-          image: null,
-        },
-      }));
+      // DEFINITE REJECTION / UNROUTABLE
+      const rejectedAttempt: StoredReplyAttempt = {
+        attemptId,
+        content,
+        status: "rejected",
+        message: result.message || "تم رفض الإرسال من مزود الخدمة",
+        code: result.code,
+        timestamp: Date.now(),
+        draftId: submittedDraftId,
+        dismissed: false,
+      };
+      setAttempts((current) => {
+        const filtered = current.filter((a) => a.attemptId !== attemptId);
+        return [...filtered, rejectedAttempt];
+      });
+      if (effectiveBusinessId && effectiveUserId) {
+        removeStoredReplyAttemptById(
+          effectiveBusinessId,
+          effectiveUserId,
+          data.id,
+          attemptId,
+        );
+      }
+
+      if (!hasNewerText && !storedIsNewer && submission?.rawDraft) {
+        currentDraftIdRef.current = submittedDraftId;
+        setReply(submission.rawDraft);
+        if (effectiveBusinessId && effectiveUserId) {
+          setStoredDraft(
+            effectiveBusinessId,
+            effectiveUserId,
+            data.id,
+            submission.rawDraft,
+            {
+              draftId: submittedDraftId,
+              updatedAt: Date.now(),
+            },
+          );
+        }
+      } else if (submission?.rawDraft) {
+        setFailedSubmission(submission.rawDraft);
+      }
     });
   }
 
@@ -775,7 +1533,227 @@ export function ConversationDetail({
           </div>
 
           <form onSubmit={handleReply} className="border-t bg-card p-3 sm:p-4">
-            {failedSubmission ? (
+            {acceptedNotice ? (
+              <div
+                role="status"
+                aria-label="تأكيد إرسال الرد"
+                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary"
+              >
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2Icon className="size-4 shrink-0" />
+                  <span>{acceptedNotice}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setAcceptedNotice(null)}
+                  aria-label="إغلاق تأكيد الإرسال"
+                >
+                  <XIcon className="size-3.5" />
+                </Button>
+              </div>
+            ) : null}
+
+            {attempts.some(
+              (a) =>
+                a.dismissed &&
+                (a.status === "unknown" || a.status === "in-progress"),
+            ) && !activeAttempt ? (
+              <div
+                role="status"
+                aria-label="ردود معلقة سابقة"
+                className="mb-2.5 flex items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-1.5 text-xs text-warning-foreground"
+              >
+                <div className="flex items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0 text-warning" />
+                  <span>يوجد رد معلق غير مؤكد الإرسال</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs"
+                  onClick={() => {
+                    const firstDismissed = attempts.find(
+                      (a) =>
+                        a.dismissed &&
+                        (a.status === "unknown" || a.status === "in-progress"),
+                    );
+                    if (firstDismissed) {
+                      handleUndismissAttempt(firstDismissed.attemptId);
+                    }
+                  }}
+                >
+                  عرض وإعادة التحقق
+                </Button>
+              </div>
+            ) : null}
+
+            {activeAttempt && activeAttempt.status === "unknown" ? (
+              <div
+                role="alert"
+                aria-label="تنبيه حالة الإرسال غير مؤكدة"
+                className="mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning-foreground"
+              >
+                <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0 text-warning" />
+                  <span className="truncate">
+                    حالة الإرسال غير مؤكدة: &ldquo;
+                    {activeAttempt.content.trim()}&rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                  </span>
+                </div>
+                {confirmingNewSendAttemptId === activeAttempt.attemptId ? (
+                  <div
+                    role="alert"
+                    aria-label="تأكيد إرسال الرد كرسالة جديدة"
+                    className="w-full mt-2 rounded-lg border border-warning/50 bg-background/90 p-2.5 text-xs space-y-2"
+                  >
+                    <p className="font-medium text-warning-foreground">
+                      قد يكون الرد السابق قد وصل إلى العميل بالفعل. هل أنت متأكد
+                      من رغبتك في إرسال هذا الرد كرسالة جديدة؟
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="h-11 min-h-[44px] px-3 text-xs font-semibold"
+                        disabled={isPending}
+                        onClick={() =>
+                          handleConfirmForceNewSubmission(activeAttempt)
+                        }
+                      >
+                        تأكيد الإرسال
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 min-h-[44px] px-3 text-xs"
+                        disabled={isPending}
+                        onClick={() => setConfirmingNewSendAttemptId(null)}
+                      >
+                        إلغاء
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex shrink-0 items-center gap-1.5 ms-auto">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-11 min-h-[44px] px-3 text-xs"
+                      disabled={isPending}
+                      onClick={() =>
+                        handleRetryAttempt(activeAttempt.attemptId)
+                      }
+                    >
+                      إعادة التحقق من الإرسال
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-11 min-h-[44px] px-2 text-xs text-muted-foreground hover:text-foreground"
+                      disabled={isPending}
+                      onClick={() =>
+                        setConfirmingNewSendAttemptId(activeAttempt.attemptId)
+                      }
+                    >
+                      إرسال كرسالة جديدة
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
+                      aria-label="تجاهل الرد غير المؤكد"
+                      onClick={() =>
+                        handleDismissAttempt(activeAttempt.attemptId)
+                      }
+                    >
+                      <XIcon className="size-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {activeAttempt && activeAttempt.status === "in-progress" ? (
+              <div
+                role="status"
+                aria-label="حالة الطلب قيد المعالجة"
+                className="mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary"
+              >
+                <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
+                  <LoaderCircleIcon className="size-4 shrink-0 animate-spin" />
+                  <span className="truncate">
+                    الطلب قيد المعالجة: &ldquo;{activeAttempt.content.trim()}
+                    &rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 ms-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-11 min-h-[44px] px-3 text-xs"
+                    disabled={isPending}
+                    onClick={() => handleRetryAttempt(activeAttempt.attemptId)}
+                  >
+                    تحديث الحالة
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
+                    aria-label="تجاهل الرد قيد المعالجة"
+                    onClick={() =>
+                      handleDismissAttempt(activeAttempt.attemptId)
+                    }
+                  >
+                    <XIcon className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeAttempt && activeAttempt.status === "rejected" ? (
+              <div
+                role="alert"
+                aria-label="تنبيه رفض إرسال الرد"
+                className="mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <div className="flex min-w-0 w-full sm:w-auto sm:flex-1 items-center gap-1.5">
+                  <AlertCircleIcon className="size-4 shrink-0" />
+                  <span className="truncate">
+                    تم رفض الإرسال: &ldquo;{activeAttempt.content.trim()}&rdquo;
+                    {activeAttempt.message ? ` — ${activeAttempt.message}` : ""}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
+                  aria-label="تجاهل الرد المرفوض"
+                  onClick={() =>
+                    handleDismissRejectedAttempt(activeAttempt.attemptId)
+                  }
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              </div>
+            ) : null}
+
+            {failedSubmission &&
+            (!activeAttempt || activeAttempt.status !== "unknown") ? (
               <div
                 role="alert"
                 aria-label="تنبيه تعذر إرسال الرد"
@@ -787,24 +1765,19 @@ export function ConversationDetail({
                     تعذر إرسال: &ldquo;{failedSubmission.trim()}&rdquo;
                   </span>
                 </div>
+                {restoreBlockedNotice || reply.trim() ? (
+                  <p className="w-full text-xs font-medium text-destructive">
+                    {restoreBlockedNotice ||
+                      "امسح المسودة الحالية أولاً لاستعادة الرد"}
+                  </p>
+                ) : null}
                 <div className="flex shrink-0 items-center gap-1.5 ms-auto">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="h-11 min-h-[44px] min-w-[44px] px-3 text-xs"
-                    onClick={() => {
-                      setReply(failedSubmission);
-                      if (effectiveBusinessId && effectiveUserId) {
-                        setStoredDraft(
-                          effectiveBusinessId,
-                          effectiveUserId,
-                          data.id,
-                          failedSubmission,
-                        );
-                      }
-                      setFailedSubmission(null);
-                    }}
+                    onClick={handleRestoreFailedSubmission}
                   >
                     استعادة الرد
                   </Button>
@@ -814,7 +1787,10 @@ export function ConversationDetail({
                     size="sm"
                     className="h-11 w-11 min-h-[44px] min-w-[44px] p-0"
                     aria-label="تجاهل الرد المتعثر"
-                    onClick={() => setFailedSubmission(null)}
+                    onClick={() => {
+                      setFailedSubmission(null);
+                      setRestoreBlockedNotice(null);
+                    }}
                   >
                     <XIcon className="size-4" />
                   </Button>

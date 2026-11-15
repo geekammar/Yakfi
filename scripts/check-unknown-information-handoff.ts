@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
+import { buildAiContext } from "../src/features/conversations/server/ai-context-builder";
 import {
+  knowledgeFamilyValues,
+  modelAuthorableKnowledgeFamilyValues,
   parseAiResponse,
   type AiResponse,
 } from "../src/features/conversations/server/ai-contract";
@@ -10,12 +13,15 @@ import {
   buildBusinessAddressContent,
   buildBusinessIdentityContent,
   buildServiceDescriptionContent,
+  enforceDisclosure,
+  supportFamilyForProposedKnowledge,
 } from "../src/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
   resolveHandoffActionReply,
 } from "../src/features/conversations/server/conversation-ai";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+import { buildTurnEvidence } from "../src/features/conversations/server/turn-evidence";
 
 type Check = { label: string; pass: boolean; details?: unknown };
 const checks: Check[] = [];
@@ -107,6 +113,7 @@ function createEngineHarness(opts: {
   };
   const attention = new Map<string, AttentionRow>();
   let providerInvocations = 0;
+  let appointmentWrites = 0;
   let turnIndex = 0;
   const claimedKeys = new Set<string>();
 
@@ -255,7 +262,10 @@ function createEngineHarness(opts: {
     },
     appointmentRepository: {
       countOverlapping: async () => 0,
-      create: async () => ({}) as never,
+      create: async () => {
+        appointmentWrites += 1;
+        return {} as never;
+      },
       listUpcomingForCustomer: async () => [],
       listForBusinessDay: async () => [],
     },
@@ -368,6 +378,7 @@ function createEngineHarness(opts: {
     getMessages: () => messages,
     getAttention: () => attention,
     getProviderInvocations: () => providerInvocations,
+    getAppointmentWrites: () => appointmentWrites,
     getConversation: () => conversation,
   };
 }
@@ -2229,6 +2240,830 @@ async function runSuite(): Promise<void> {
             c.label.includes("9.A Conversation already assigned to staff") &&
             c.pass === true,
         ),
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 15. KNOWLEDGE-FAMILY CONTRACT, AVAILABILITY & REFUSAL EVIDENCE
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    const fourServices = [
+      {
+        id: "svc-cat-1",
+        businessId: TENANT_A,
+        name: "استشارة أسنان",
+        description: "استشارة وتشخيص",
+        durationMinutes: 30,
+        priceType: "FIXED",
+        priceAmount: 300,
+        priceCurrency: "EGP",
+        isActive: true,
+      },
+      {
+        id: "svc-cat-2",
+        businessId: TENANT_A,
+        name: "جلسة تجميلية",
+        description: null,
+        durationMinutes: 45,
+        priceType: null,
+        priceAmount: null,
+        priceCurrency: null,
+        isActive: true,
+      },
+      {
+        id: "svc-cat-3",
+        businessId: TENANT_A,
+        name: "حشو عصب",
+        description: null,
+        durationMinutes: 60,
+        priceType: null,
+        priceAmount: null,
+        priceCurrency: null,
+        isActive: true,
+      },
+      {
+        id: "svc-cat-4",
+        businessId: TENANT_A,
+        name: "كشف جراحة",
+        description: null,
+        durationMinutes: 30,
+        priceType: null,
+        priceAmount: null,
+        priceCurrency: null,
+        isActive: true,
+      },
+    ];
+
+    const r6ShapedReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content:
+        "الخدمات المتاحة: استشارة أسنان، جلسة تجميلية، حشو عصب، وكشف جراحة.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      safetyAssessment: "safe",
+      goals: [
+        { kind: "ANSWER", intent: "FAQ", requiredKnowledge: "service.name" },
+        {
+          kind: "DOMAIN_ACTION",
+          intent: "BOOKING",
+          continueAfter: true,
+        },
+      ],
+    };
+
+    // 15.A Four authorized services + empty FAQs + explicit service.name
+    // proposal: the catalog is disclosed and the booking goal stays pending.
+    const hCatalog = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [async () => r6ShapedReply],
+    });
+    const resCatalog = await hCatalog.runInbound(
+      "ممكن أعرف الخدمات المتاحة عندكم وإزاي أبدأ حجز؟",
+      "ext-15-catalog",
+    );
+    const sentCatalog = hCatalog.getSent();
+    check(
+      "15.A Four authorized services + empty FAQs + explicit service.name -> AI_REPLY with authoritative catalog",
+      resCatalog.ok === true &&
+        !resCatalog.duplicate &&
+        resCatalog.assistantAction === "AI_REPLY" &&
+        resCatalog.conversationStatus === "AI_ACTIVE" &&
+        resCatalog.handoffCause === null &&
+        resCatalog.observability?.disclosure?.allowed === true &&
+        resCatalog.observability?.disclosure?.channel === "service.name" &&
+        resCatalog.observability?.disclosure?.declaredIntent === "FAQ" &&
+        sentCatalog.length === 1 &&
+        fourServices.every((service) =>
+          sentCatalog[0]!.includes(service.name),
+        ) &&
+        hCatalog.getProviderInvocations() === 1 &&
+        hCatalog.getAppointmentWrites() === 0,
+      { resCatalog, sentCatalog },
+    );
+    const catalogObservability =
+      resCatalog.ok && !resCatalog.duplicate ? resCatalog.observability : null;
+    check(
+      "15.B Services answer + booking continuation preserves one send/model call and the pending booking goal",
+      catalogObservability?.answerAndContinue === true &&
+        catalogObservability?.pendingGoals?.some(
+          (goal) => goal.kind === "DOMAIN_ACTION" && goal.intent === "BOOKING",
+        ) === true &&
+        catalogObservability?.contextChannels?.servicesCount === 4,
+      catalogObservability,
+    );
+
+    // 15.C FAQ ledger EXCLUDED while the service catalog is authorized:
+    // catalog disclosure must not depend on the FAQ family.
+    const builtCatalog = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: {
+        business: {
+          businessId: TENANT_A,
+          name: "مركز رعاية الأسنان التخصصي",
+          about: null,
+          address: null,
+          faqs: [],
+        },
+        services: fourServices,
+        conversation: {
+          id: "conv-gate-catalog",
+          status: "AI_ACTIVE" as const,
+          recentMessages: [],
+        },
+        message: "ممكن أعرف الخدمات المتاحة عندكم وإزاي أبدأ حجز؟",
+        requiredSemanticCapability: "structured_turn",
+      },
+    });
+    const factsWithoutFaqs = builtCatalog.facts.map((fact) =>
+      fact.key === "business.faqs"
+        ? { ...fact, included: false, disclosable: false }
+        : fact,
+    );
+    const catalogWithoutFaqLedger = enforceDisclosure({
+      response: r6ShapedReply,
+      context: {
+        request: builtCatalog.request,
+        facts: factsWithoutFaqs,
+        scope: { businessId: TENANT_A },
+      },
+    });
+    check(
+      "15.C FAQ ledger excluded -> service.name catalog disclosure remains independent",
+      catalogWithoutFaqLedger.kind === "disclosed" &&
+        catalogWithoutFaqLedger.support.includes("service.name") &&
+        !catalogWithoutFaqLedger.support.includes("business.faqs"),
+      catalogWithoutFaqLedger,
+    );
+
+    // 15.D A FAQ proposal against an EMPTY FAQ store is UNAVAILABLE, never
+    // mislabeled as an excluded family and never sent.
+    const hEmptyFaq = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "مواعيد العمل من 9 إلى 5.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "business.faqs",
+          sourceId: "faq-0",
+        }),
+      ],
+    });
+    const resEmptyFaq = await hEmptyFaq.runInbound(
+      "مواعيد العمل ايه؟",
+      "ext-15-empty-faq",
+    );
+    check(
+      "15.D FAQ proposal with empty FAQ store -> safe POLICY_REFUSED with UNAVAILABLE_IN_REQUEST",
+      resEmptyFaq.ok === true &&
+        !resEmptyFaq.duplicate &&
+        resEmptyFaq.assistantAction === "AI_HANDOFF" &&
+        resEmptyFaq.conversationStatus === "NEED_HUMAN" &&
+        resEmptyFaq.handoffCause === "POLICY_REFUSED" &&
+        resEmptyFaq.observability?.disclosure?.refusalReason ===
+          "UNAVAILABLE_IN_REQUEST" &&
+        resEmptyFaq.observability?.disclosure?.proposalStatus === "RESOLVED" &&
+        resEmptyFaq.observability?.disclosure?.proposedFamily ===
+          "business.faqs" &&
+        resEmptyFaq.observability?.disclosure?.ledgerIncluded === true &&
+        !hEmptyFaq.getSent().some((message) => message.includes("9 إلى 5")),
+      { resEmptyFaq, sent: hEmptyFaq.getSent() },
+    );
+
+    // 15.E Known service price with a valid source: only the authoritative
+    // server-rendered price is emitted, never the model's invented number.
+    const hPrice = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الاستشارة 999 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-cat-1",
+        }),
+      ],
+    });
+    const resPrice = await hPrice.runInbound("بكام الاستشارة؟", "ext-15-price");
+    check(
+      "15.E Valid service price -> authoritative price rendered, invented number dropped",
+      resPrice.ok === true &&
+        !resPrice.duplicate &&
+        resPrice.assistantAction === "AI_REPLY" &&
+        resPrice.conversationStatus === "AI_ACTIVE" &&
+        hPrice.getSent().length === 1 &&
+        hPrice.getSent()[0]!.includes("300") &&
+        !hPrice.getSent()[0]!.includes("999"),
+      { resPrice, sent: hPrice.getSent() },
+    );
+
+    // 15.F Missing service price or a cross-tenant source: no fabricated
+    // price, no tenant leakage, safe refusal.
+    const hMissingPrice = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الجلسة 1500 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-cat-2",
+        }),
+      ],
+    });
+    const resMissingPrice = await hMissingPrice.runInbound(
+      "بكام الجلسة التجميلية؟",
+      "ext-15-missing-price",
+    );
+    check(
+      "15.F Missing price -> safe refusal with no fabricated number",
+      resMissingPrice.ok === true &&
+        !resMissingPrice.duplicate &&
+        resMissingPrice.assistantAction === "AI_HANDOFF" &&
+        resMissingPrice.conversationStatus === "NEED_HUMAN" &&
+        resMissingPrice.handoffCause === "POLICY_REFUSED" &&
+        !hMissingPrice.getSent().some((message) => message.includes("1500")),
+      { resMissingPrice, sent: hMissingPrice.getSent() },
+    );
+
+    const hCrossTenant = createEngineHarness({
+      faqs: [],
+      services: [
+        ...fourServices,
+        {
+          id: "svc-other-tenant",
+          businessId: "biz-other-tenant",
+          name: "خدمة منشأة أخرى",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 999,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الخدمة 999 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-other-tenant",
+        }),
+      ],
+    });
+    const resCrossTenant = await hCrossTenant.runInbound(
+      "بكام خدمة المنشأة الأخرى؟",
+      "ext-15-cross-tenant",
+    );
+    check(
+      "15.G Cross-tenant service source -> no price/name leakage, safe refusal",
+      resCrossTenant.ok === true &&
+        !resCrossTenant.duplicate &&
+        resCrossTenant.assistantAction === "AI_HANDOFF" &&
+        resCrossTenant.conversationStatus === "NEED_HUMAN" &&
+        resCrossTenant.handoffCause === "POLICY_REFUSED" &&
+        !hCrossTenant
+          .getSent()
+          .some(
+            (message) =>
+              message.includes("999") || message.includes("خدمة منشأة أخرى"),
+          ),
+      { resCrossTenant, sent: hCrossTenant.getSent() },
+    );
+
+    // 15.H Unknown family, conflicting declarations and missing metadata are
+    // distinguishable, fail closed, and never expose the raw model label.
+    const hUnknown = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "الخدمات المتاحة: استشارة أسنان.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.availability",
+        }),
+      ],
+    });
+    const resUnknown = await hUnknown.runInbound(
+      "الخدمات المتاحة ايه؟",
+      "ext-15-unknown-family",
+    );
+    check(
+      "15.H Unknown structured family -> UNKNOWN_KNOWLEDGE_FAMILY, not EXCLUDED_FROM_CONTEXT",
+      resUnknown.ok === true &&
+        !resUnknown.duplicate &&
+        resUnknown.assistantAction === "AI_HANDOFF" &&
+        resUnknown.conversationStatus === "NEED_HUMAN" &&
+        resUnknown.handoffCause === "POLICY_REFUSED" &&
+        resUnknown.observability?.disclosure?.refusalReason ===
+          "UNKNOWN_KNOWLEDGE_FAMILY" &&
+        resUnknown.observability?.disclosure?.proposalStatus ===
+          "UNKNOWN_FAMILY" &&
+        resUnknown.observability?.disclosure?.proposedFamily === "UNKNOWN",
+      resUnknown,
+    );
+
+    const hConflict = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الاستشارة 300 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          knowledgeRef: { family: "service.price", sourceId: "svc-cat-1" },
+          requiredKnowledge: "business.faqs",
+        }),
+      ],
+    });
+    const resConflict = await hConflict.runInbound(
+      "بكام الاستشارة؟",
+      "ext-15-conflict",
+    );
+    check(
+      "15.I Conflicting family declarations -> AMBIGUOUS_MATCH with CONFLICT evidence",
+      resConflict.ok === true &&
+        !resConflict.duplicate &&
+        resConflict.assistantAction === "AI_HANDOFF" &&
+        resConflict.conversationStatus === "NEED_HUMAN" &&
+        resConflict.observability?.disclosure?.refusalReason ===
+          "AMBIGUOUS_MATCH" &&
+        resConflict.observability?.disclosure?.proposalStatus === "CONFLICT" &&
+        resConflict.observability?.disclosure?.proposedFamily === null,
+      resConflict,
+    );
+
+    const hMissingFamily = createEngineHarness({
+      faqs: [],
+      services: fourServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "الخدمات المتاحة: استشارة أسنان.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+        }),
+      ],
+    });
+    const resMissingFamily = await hMissingFamily.runInbound(
+      "الخدمات المتاحة ايه؟",
+      "ext-15-missing-family",
+    );
+    check(
+      "15.J Missing family metadata -> UNAVAILABLE_IN_REQUEST with MISSING evidence",
+      resMissingFamily.ok === true &&
+        !resMissingFamily.duplicate &&
+        resMissingFamily.assistantAction === "AI_HANDOFF" &&
+        resMissingFamily.conversationStatus === "NEED_HUMAN" &&
+        resMissingFamily.observability?.disclosure?.refusalReason ===
+          "UNAVAILABLE_IN_REQUEST" &&
+        resMissingFamily.observability?.disclosure?.proposalStatus ===
+          "MISSING" &&
+        resMissingFamily.observability?.disclosure?.proposedFamily === null,
+      resMissingFamily,
+    );
+
+    // 15.K domain.availability in a model-authored reply: explicit safe
+    // refusal; no invented slots, even when availability was carried.
+    const builtAvailability = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: {
+        business: {
+          businessId: TENANT_A,
+          name: "مركز رعاية الأسنان التخصصي",
+          about: null,
+          address: null,
+          faqs: [],
+        },
+        services: fourServices,
+        conversation: {
+          id: "conv-gate-availability",
+          status: "AI_ACTIVE" as const,
+          recentMessages: [],
+        },
+        message: "عايز أحجز موعد بكرة",
+        availability: [{ date: "2026-11-15", slots: ["10:00", "11:00"] }],
+        requiredSemanticCapability: "structured_turn",
+      },
+    });
+    const modelAvailabilityReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "المواعيد المتاحة: 10:00 و11:00.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      safetyAssessment: "safe",
+      requiredKnowledge: "domain.availability",
+    };
+    const availabilityDecision = enforceDisclosure({
+      response: modelAvailabilityReply,
+      context: {
+        request: builtAvailability.request,
+        facts: builtAvailability.facts,
+        scope: { businessId: TENANT_A },
+      },
+    });
+    check(
+      "15.K Model-authored domain.availability -> explicit NOT_DISCLOSABLE, no invented slots",
+      availabilityDecision.kind === "requires-human" &&
+        availabilityDecision.reason === "NOT_DISCLOSABLE" &&
+        availabilityDecision.diagnostics.proposalStatus === "RESOLVED" &&
+        availabilityDecision.diagnostics.proposedFamily ===
+          "domain.availability" &&
+        availabilityDecision.diagnostics.ledgerIncluded === true &&
+        availabilityDecision.diagnostics.ledgerDisclosable === true,
+      availabilityDecision,
+    );
+
+    const builtNoAvailability = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: {
+        business: {
+          businessId: TENANT_A,
+          name: "مركز رعاية الأسنان التخصصي",
+          about: null,
+          address: null,
+          faqs: [],
+        },
+        services: fourServices,
+        conversation: {
+          id: "conv-gate-no-availability",
+          status: "AI_ACTIVE" as const,
+          recentMessages: [],
+        },
+        message: "عايز أحجز موعد بكرة",
+        requiredSemanticCapability: "structured_turn",
+      },
+    });
+    const missingAvailabilityDecision = enforceDisclosure({
+      response: modelAvailabilityReply,
+      context: {
+        request: builtNoAvailability.request,
+        facts: builtNoAvailability.facts,
+        scope: { businessId: TENANT_A },
+      },
+    });
+    check(
+      "15.L Missing/uncomputed domain.availability -> UNAVAILABLE_IN_REQUEST, no slot invention",
+      missingAvailabilityDecision.kind === "requires-human" &&
+        missingAvailabilityDecision.reason === "UNAVAILABLE_IN_REQUEST" &&
+        missingAvailabilityDecision.diagnostics.ledgerIncluded === null,
+      missingAvailabilityDecision,
+    );
+
+    // 15.M Refusal evidence distinguishes declared intent, proposed family
+    // and rejection cause while remaining content-free.
+    const emptyFaqEvidence = buildTurnEvidence(resEmptyFaq, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    const unknownEvidence = buildTurnEvidence(resUnknown, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    check(
+      "15.M Empty-FAQ evidence: legacy channel + proposed family + ledger verdict are distinct",
+      emptyFaqEvidence.disclosureChannel === "business.faqs" &&
+        emptyFaqEvidence.disclosureDeclaredIntent === "FAQ" &&
+        emptyFaqEvidence.disclosureProposedFamily === "business.faqs" &&
+        emptyFaqEvidence.disclosureProposalStatus === "RESOLVED" &&
+        emptyFaqEvidence.disclosureRefusalReason === "UNAVAILABLE_IN_REQUEST" &&
+        emptyFaqEvidence.disclosureLedgerIncluded === true,
+      emptyFaqEvidence,
+    );
+    check(
+      "15.N Unknown-family evidence exposes UNKNOWN, never the raw model label/content",
+      unknownEvidence.disclosureChannel === "business.faqs" &&
+        unknownEvidence.disclosureDeclaredIntent === "FAQ" &&
+        unknownEvidence.disclosureProposedFamily === "UNKNOWN" &&
+        unknownEvidence.disclosureProposalStatus === "UNKNOWN_FAMILY" &&
+        unknownEvidence.disclosureRefusalReason ===
+          "UNKNOWN_KNOWLEDGE_FAMILY" &&
+        !JSON.stringify(unknownEvidence).includes("service.availability") &&
+        !JSON.stringify(unknownEvidence).includes(
+          "الخدمات المتاحة: استشارة أسنان.",
+        ),
+      unknownEvidence,
+    );
+
+    // 15.O A proposed SERVICE family is distinguishable from the legacy
+    // intent-derived business.faqs channel (pure evidence projection fixture;
+    // this does NOT claim the historical R6 proposal).
+    const serviceFamilyEvidence = buildTurnEvidence(
+      {
+        ok: true,
+        assistantAction: "AI_HANDOFF",
+        intent: null,
+        conversationStatus: "NEED_HUMAN",
+        handoffCause: "POLICY_REFUSED",
+        assistantProvider: "fixture",
+        observability: {
+          disclosure: {
+            channel: "business.faqs",
+            allowed: false,
+            refusalReason: "EXCLUDED_FROM_CONTEXT",
+            declaredIntent: "FAQ",
+            proposedFamily: "service.name",
+            proposalStatus: "RESOLVED",
+            ledgerIncluded: false,
+            ledgerDisclosable: false,
+          },
+        },
+      },
+      { environment: "test", appVersion: "0.0.0", emittedAt: now },
+    );
+    check(
+      "15.O Proposed service family is retained while legacy disclosureChannel stays business.faqs",
+      serviceFamilyEvidence.disclosureChannel === "business.faqs" &&
+        serviceFamilyEvidence.disclosureProposedFamily === "service.name" &&
+        serviceFamilyEvidence.disclosureProposalStatus === "RESOLVED" &&
+        serviceFamilyEvidence.disclosureLedgerIncluded === false &&
+        serviceFamilyEvidence.disclosureLedgerDisclosable === false,
+      serviceFamilyEvidence,
+    );
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // 16. IDENTITY PROPOSAL AUTHORITY + CANONICAL VOCABULARY CONSISTENCY
+  // ────────────────────────────────────────────────────────────────────────────
+  {
+    const identityBuilt = buildAiContext({
+      scope: { businessId: TENANT_A },
+      sources: {
+        business: {
+          businessId: TENANT_A,
+          name: "مركز رعاية الأسنان التخصصي",
+          about: null,
+          address: null,
+          faqs: [],
+        },
+        services: [],
+        conversation: {
+          id: "conv-gate-identity",
+          status: "AI_ACTIVE" as const,
+          recentMessages: [],
+        },
+        message: "ما اسم العيادة؟",
+        requiredSemanticCapability: "structured_turn",
+      },
+    });
+
+    function identityReply(overrides: Partial<AiResponse> = {}): AiResponse {
+      return {
+        intent: "FAQ",
+        action: "reply",
+        content: "اسم العيادة هو مركز رعاية الأسنان التخصصي.",
+        extraction: emptyExtraction,
+        handoffReason: null,
+        summary: null,
+        safetyAssessment: "safe",
+        goals: [
+          {
+            kind: "ANSWER",
+            intent: "FAQ",
+            requiredKnowledge: "business.identity",
+          },
+        ],
+        ...overrides,
+      };
+    }
+    function identityDecision(overrides: Partial<AiResponse> = {}) {
+      return enforceDisclosure({
+        response: identityReply(overrides),
+        context: {
+          request: identityBuilt.request,
+          facts: identityBuilt.facts,
+          scope: { businessId: TENANT_A },
+        },
+      });
+    }
+
+    // A. Compatible top-level identity declaration + identity goal.
+    const validIdentity = identityDecision({
+      requiredKnowledge: "business.identity",
+    });
+    check(
+      "16.A Compatible identity goal + top-level declaration -> authoritative identity answer",
+      validIdentity.kind === "disclosed" &&
+        validIdentity.support.includes("business.identity") &&
+        validIdentity.renderedContent?.includes(
+          "مركز رعاية الأسنان التخصصي",
+        ) === true,
+      validIdentity,
+    );
+
+    // B. Identity goal + contradictory top-level family -> conflict, not identity.
+    const conflictingIdentity = identityDecision({
+      requiredKnowledge: "business.faqs",
+    });
+    check(
+      "16.B Identity goal + contradictory top-level family -> AMBIGUOUS_MATCH / CONFLICT",
+      conflictingIdentity.kind === "requires-human" &&
+        conflictingIdentity.reason === "AMBIGUOUS_MATCH" &&
+        conflictingIdentity.diagnostics.proposalStatus === "CONFLICT" &&
+        conflictingIdentity.diagnostics.proposedFamily === null &&
+        !("content" in conflictingIdentity),
+      conflictingIdentity,
+    );
+
+    // C. Identity goal + unknown top-level family -> unknown-family refusal.
+    const unknownIdentity = identityDecision({
+      requiredKnowledge: "service.availability",
+    });
+    check(
+      "16.C Identity goal + unknown top-level family -> UNKNOWN_KNOWLEDGE_FAMILY",
+      unknownIdentity.kind === "requires-human" &&
+        unknownIdentity.reason === "UNKNOWN_KNOWLEDGE_FAMILY" &&
+        unknownIdentity.diagnostics.proposalStatus === "UNKNOWN_FAMILY" &&
+        unknownIdentity.diagnostics.proposedFamily === "UNKNOWN" &&
+        !("content" in unknownIdentity),
+      unknownIdentity,
+    );
+
+    // D. Identity goal + conflicting structured source references -> conflict.
+    const sourceConflictIdentity = identityDecision({
+      sourceId: "foreign-source",
+      goals: [
+        {
+          kind: "ANSWER",
+          intent: "FAQ",
+          requiredKnowledge: "business.identity",
+          knowledgeRef: {
+            family: "business.identity",
+            sourceId: "business.identity",
+          },
+        },
+      ],
+    });
+    check(
+      "16.D Identity goal + conflicting structured source references -> AMBIGUOUS_MATCH / CONFLICT",
+      sourceConflictIdentity.kind === "requires-human" &&
+        sourceConflictIdentity.reason === "AMBIGUOUS_MATCH" &&
+        sourceConflictIdentity.diagnostics.proposalStatus === "CONFLICT" &&
+        !("content" in sourceConflictIdentity),
+      sourceConflictIdentity,
+    );
+
+    // E. Identity goal + foreign/invalid singleton source -> safe refusal.
+    const foreignSourceIdentity = identityDecision({
+      requiredKnowledge: "business.identity",
+      sourceId: "foreign-source",
+    });
+    check(
+      "16.E Identity goal + foreign/invalid source -> UNAVAILABLE_IN_REQUEST",
+      foreignSourceIdentity.kind === "requires-human" &&
+        foreignSourceIdentity.reason === "UNAVAILABLE_IN_REQUEST" &&
+        foreignSourceIdentity.diagnostics.proposalStatus === "RESOLVED" &&
+        foreignSourceIdentity.diagnostics.proposedFamily ===
+          "business.identity" &&
+        foreignSourceIdentity.diagnostics.ledgerIncluded === true,
+      foreignSourceIdentity,
+    );
+
+    // Engine-level coverage of the important refusal path: the conflicting
+    // identity proposal must produce one safe acknowledgment and never the
+    // model-authored identity text or an appointment write.
+    const hIdentityConflict = createEngineHarness({
+      faqs: [],
+      services: [],
+      responders: [
+        async () => identityReply({ requiredKnowledge: "business.faqs" }),
+      ],
+    });
+    const resIdentityConflict = await hIdentityConflict.runInbound(
+      "ما اسم العيادة؟",
+      "ext-16-identity-conflict",
+    );
+    const sentIdentityConflict = hIdentityConflict.getSent();
+    check(
+      "16.F Engine identity conflict -> POLICY_REFUSED, one safe ack, no model text, zero appointment writes",
+      resIdentityConflict.ok === true &&
+        !resIdentityConflict.duplicate &&
+        resIdentityConflict.assistantAction === "AI_HANDOFF" &&
+        resIdentityConflict.conversationStatus === "NEED_HUMAN" &&
+        resIdentityConflict.handoffCause === "POLICY_REFUSED" &&
+        sentIdentityConflict.length === 1 &&
+        sentIdentityConflict[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED &&
+        !sentIdentityConflict[0]!.includes("اسم العيادة هو") &&
+        hIdentityConflict.getAppointmentWrites() === 0,
+      { resIdentityConflict, sentIdentityConflict },
+    );
+
+    // Exhaustive canonical vocabulary/resolver consistency, using the
+    // canonical definitions directly (no duplicated unchecked list).
+    const unresolvedFamilies: string[] = [];
+    for (const family of knowledgeFamilyValues) {
+      const resolved = supportFamilyForProposedKnowledge(family);
+      if (
+        !resolved ||
+        resolved === "GENERIC_FAQ" ||
+        resolved.family !== family
+      ) {
+        unresolvedFamilies.push(family);
+      }
+    }
+    check(
+      "16.G Every canonical knowledgeFamilyValues entry resolves to itself",
+      unresolvedFamilies.length === 0,
+      unresolvedFamilies,
+    );
+    const authorableFamiliesAreCanonical =
+      modelAuthorableKnowledgeFamilyValues.every((family) =>
+        (knowledgeFamilyValues as readonly string[]).includes(family),
+      );
+    const authorableFamiliesExcludeDomain =
+      !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+        "domain.availability",
+      ) &&
+      !(modelAuthorableKnowledgeFamilyValues as readonly string[]).includes(
+        "business.cancellationPolicy",
+      );
+    check(
+      "16.H Model-authorable families are a supported subset and exclude domain-owned families",
+      authorableFamiliesAreCanonical && authorableFamiliesExcludeDomain,
+    );
+    const serviceCatalogAlias =
+      supportFamilyForProposedKnowledge("service.catalog");
+    const serviceCatalogAliasIsCanonical =
+      typeof serviceCatalogAlias === "object" &&
+      serviceCatalogAlias !== null &&
+      serviceCatalogAlias.family === "service.name";
+    check(
+      "16.I Existing service.catalog alias still resolves to service.name",
+      serviceCatalogAliasIsCanonical,
+    );
+    check(
+      "16.J Unsupported structured label still resolves as unknown",
+      supportFamilyForProposedKnowledge("service.availability") === null,
+    );
+
+    // Cancellation policy is a RECOGNIZED family (not UNKNOWN) but remains
+    // domain/handoff-owned: the gate must return its explicit safe refusal.
+    const cancellationReply: AiResponse = {
+      intent: "FAQ",
+      action: "reply",
+      content: "يمكنك إلغاء الموعد قبل 24 ساعة.",
+      extraction: emptyExtraction,
+      handoffReason: null,
+      summary: null,
+      safetyAssessment: "safe",
+      requiredKnowledge: "business.cancellationPolicy",
+    };
+    const cancellationDecision = enforceDisclosure({
+      response: cancellationReply,
+      context: {
+        request: identityBuilt.request,
+        facts: identityBuilt.facts,
+        scope: { businessId: TENANT_A },
+      },
+    });
+    check(
+      "16.K cancellationPolicy -> recognized safe refusal, not UNKNOWN_KNOWLEDGE_FAMILY",
+      cancellationDecision.kind === "requires-human" &&
+        cancellationDecision.reason === "UNAVAILABLE_IN_REQUEST" &&
+        cancellationDecision.diagnostics.proposalStatus === "RESOLVED" &&
+        cancellationDecision.diagnostics.proposedFamily ===
+          "business.cancellationPolicy" &&
+        cancellationDecision.diagnostics.ledgerIncluded === false,
+      cancellationDecision,
     );
   }
 

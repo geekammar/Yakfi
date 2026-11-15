@@ -4,8 +4,10 @@ import { spawnSync } from "node:child_process";
 import { offerCallbackData } from "@/features/conversations/server/channel-choice";
 import * as engine from "@/features/conversations/server/conversation-engine";
 import { emptyConversationState } from "@/features/conversations/server/conversation-state";
+import { buildTurnEvidence } from "@/features/conversations/server/turn-evidence";
 import { createPrismaProxy } from "@/server/db";
 import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
+import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
 import {
   hashTelegramWebhookSecret,
   parseTelegramUpdate,
@@ -16,6 +18,7 @@ import {
   mapEngineResultToTelegramOutcome,
   type TelegramWebhookLogEvent,
 } from "@/server/integrations/telegram/telegram-webhook-handler";
+import type { MessageTransport } from "@/server/transport/whatsapp-transport";
 
 import {
   createProductionTelegramWebhookDeps,
@@ -152,6 +155,7 @@ async function main(): Promise<void> {
   function createTestHarness(opts?: {
     conversationId?: string;
     stateStore?: any;
+    transport?: MessageTransport;
   }) {
     let modelCallCount = 0;
     let customAiResponder: ((prompt: unknown) => Promise<any> | any) | null =
@@ -353,7 +357,7 @@ async function main(): Promise<void> {
           };
         },
       },
-      transport: {
+      transport: opts?.transport ?? {
         providerName: "telegram",
         send: async (input: {
           to: string;
@@ -398,6 +402,7 @@ async function main(): Promise<void> {
       },
       getModelCalls: () => modelCallCount,
       getSentMessages: () => sentMessages,
+      getMessages: () => messagesList,
       getAppointments: () => createdAppointments,
       async sendInbound(
         text: string,
@@ -757,6 +762,316 @@ async function main(): Promise<void> {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // TEST 3b: Typed delivery diagnostics through the REAL Telegram transport
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    const DUMMY_TOKEN =
+      "8926541123:dummy_token_for_offline_delivery_diagnostics";
+    const connection = {
+      id: "conn-tg-1",
+      businessId: B_ID,
+      branchId: BRANCH_ID,
+      botExternalId: BOT_EXTERNAL_ID,
+      displayName: null,
+      botUsername: "Drafnanafnanbot",
+      provider: "telegram_managed",
+      status: "CONNECTED",
+      credentialsRef: "fp:delivery-diagnostics-ref",
+      credentialKind: "RUNTIME",
+      webhookSecretHash: null,
+      isActive: true,
+      createdAt: SIMULATED_NOW,
+      updatedAt: SIMULATED_NOW,
+      deletedAt: null,
+    } as any;
+
+    const makeResolver = (available: boolean) => ({
+      resolve: async (reference: string) =>
+        available
+          ? ({
+              ok: true as const,
+              kind: "RUNTIME" as const,
+              reference,
+              value: DUMMY_TOKEN,
+            } as any)
+          : ({
+              ok: false as const,
+              code: "UNRESOLVED_REFERENCE" as const,
+              message: "بيانات الاعتماد غير متاحة",
+            } as any),
+      store: async () => ({
+        ok: false as const,
+        code: "UNSUPPORTED_KIND" as const,
+        message: "غير مدعوم",
+      }),
+      delete: async () => ({
+        ok: false as const,
+        code: "UNSUPPORTED_KIND" as const,
+        message: "غير مدعوم",
+      }),
+    });
+
+    const makeRealTransport = (opts: {
+      available?: boolean;
+      handler: (url: string, init?: RequestInit) => Promise<Response>;
+    }) => {
+      const calls: Array<{
+        url: string;
+        body: Record<string, unknown> | null;
+      }> = [];
+      const lookups: Array<{ connectionId: string; businessId: string }> = [];
+      const resolver = makeResolver(opts.available !== false);
+      const transport = createTelegramMessageTransport({
+        api: {
+          fetchImpl: (async (url: string, init?: RequestInit) => {
+            let body: Record<string, unknown> | null = null;
+            try {
+              body = JSON.parse(String(init?.body ?? "{}"));
+            } catch {
+              body = null;
+            }
+            calls.push({ url, body });
+            return opts.handler(url, init);
+          }) as typeof fetch,
+          apiHost: "https://api.telegram.org",
+          credentialsResolver: resolver as any,
+        },
+        connectionRepository: {
+          findByIdWithinBusiness: async (
+            connectionId: string,
+            businessId: string,
+          ) => {
+            lookups.push({ connectionId, businessId });
+            return connectionId === connection.id &&
+              businessId === connection.businessId
+              ? connection
+              : null;
+          },
+        },
+        credentialsResolver: resolver as any,
+      });
+      return { transport, calls, lookups };
+    };
+
+    const successTransport = makeRealTransport({
+      handler: async () =>
+        new Response(
+          JSON.stringify({ ok: true, result: { message_id: 777 } }),
+          { status: 200 },
+        ),
+    });
+    const successHarness = createTestHarness({
+      conversationId: "conv-delivery-success",
+      transport: successTransport.transport,
+    });
+    const successTurn = await successHarness.sendInbound("مرحبا");
+    const successDelivery =
+      successTurn.ok && !successTurn.duplicate ? successTurn.delivery : null;
+    const successOutcome = mapEngineResultToTelegramOutcome(successTurn as any);
+    const successPersisted = successHarness
+      .getMessages()
+      .some((message) => message.senderType === "AI");
+    check(
+      "3b.1. Real Telegram transport sends once to the authenticated chat/connection, preserves providerMessageId, and maps SUCCESS",
+      successDelivery?.delivered === true &&
+        successDelivery.providerMessageId === "777" &&
+        successDelivery.errorCode === undefined &&
+        successTransport.calls.length === 1 &&
+        successTransport.calls[0]?.body?.chat_id === CHAT_ID &&
+        typeof successTransport.calls[0]?.body?.text === "string" &&
+        successTransport.lookups[0]?.connectionId === "conn-tg-1" &&
+        successTransport.lookups[0]?.businessId === B_ID &&
+        successPersisted &&
+        successOutcome.ok === true &&
+        successOutcome.outcome === "SUCCESS" &&
+        successOutcome.delivered === true &&
+        successOutcome.deliveryProviderMessageId === "777" &&
+        !JSON.stringify(successDelivery).includes(DUMMY_TOKEN),
+    );
+
+    const credentialFailTransport = makeRealTransport({
+      available: false,
+      handler: async () => {
+        throw new Error("provider must not be called without credentials");
+      },
+    });
+    const credentialFailHarness = createTestHarness({
+      conversationId: "conv-delivery-credential-fail",
+      transport: credentialFailTransport.transport,
+    });
+    const credentialFailTurn = await credentialFailHarness.sendInbound("مرحبا");
+    const credentialFailDelivery =
+      credentialFailTurn.ok && !credentialFailTurn.duplicate
+        ? credentialFailTurn.delivery
+        : null;
+    const credentialFailOutcome = mapEngineResultToTelegramOutcome(
+      credentialFailTurn as any,
+    );
+    const credentialFailPersisted = credentialFailHarness
+      .getMessages()
+      .some((message) => message.senderType === "AI");
+    const loggedCredentialFailure: TelegramWebhookLogEvent[] = [];
+    createSafeTelegramWebhookLogger((event) =>
+      loggedCredentialFailure.push(event),
+    ).log({
+      stage: "outbound",
+      outcome: "DELIVERY_FAILURE",
+      error:
+        credentialFailOutcome.ok === false
+          ? credentialFailOutcome.error
+          : "UNKNOWN_ERROR",
+    });
+    check(
+      "3b.2. Credential failure survives as UNAUTHORIZED_CREDENTIALS, makes zero provider calls, and is not reported delivered",
+      credentialFailDelivery?.delivered === false &&
+        credentialFailDelivery.errorCode === "UNAUTHORIZED_CREDENTIALS" &&
+        credentialFailTransport.calls.length === 0 &&
+        credentialFailPersisted &&
+        credentialFailOutcome.ok === false &&
+        credentialFailOutcome.outcome === "DELIVERY_FAILURE" &&
+        credentialFailOutcome.error === "UNAUTHORIZED_CREDENTIALS" &&
+        credentialFailOutcome.code === "UNAUTHORIZED_CREDENTIALS" &&
+        loggedCredentialFailure[0]?.error === "UNAUTHORIZED_CREDENTIALS" &&
+        !JSON.stringify(credentialFailOutcome).includes("UNRESOLVED_REFERENCE"),
+    );
+
+    const permanentTransport = makeRealTransport({
+      handler: async () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: chat not found",
+          }),
+          { status: 400 },
+        ),
+    });
+    const transientTransport = makeRealTransport({
+      handler: async () =>
+        new Response(JSON.stringify({ ok: false }), { status: 500 }),
+    });
+    const malformedTransport = makeRealTransport({
+      handler: async () =>
+        new Response(JSON.stringify({ ok: true, result: null }), {
+          status: 200,
+        }),
+    });
+    const permanentHarness = createTestHarness({
+      conversationId: "conv-delivery-permanent",
+      transport: permanentTransport.transport,
+    });
+    const transientHarness = createTestHarness({
+      conversationId: "conv-delivery-transient",
+      transport: transientTransport.transport,
+    });
+    const malformedHarness = createTestHarness({
+      conversationId: "conv-delivery-malformed",
+      transport: malformedTransport.transport,
+    });
+    const permanentTurn = await permanentHarness.sendInbound("مرحبا");
+    const transientTurn = await transientHarness.sendInbound("مرحبا");
+    const malformedTurn = await malformedHarness.sendInbound("مرحبا");
+    const permanentDelivery =
+      permanentTurn.ok && !permanentTurn.duplicate
+        ? permanentTurn.delivery
+        : null;
+    const transientDelivery =
+      transientTurn.ok && !transientTurn.duplicate
+        ? transientTurn.delivery
+        : null;
+    const malformedDelivery =
+      malformedTurn.ok && !malformedTurn.duplicate
+        ? malformedTurn.delivery
+        : null;
+    const permanentOutcome = mapEngineResultToTelegramOutcome(
+      permanentTurn as any,
+    );
+    const transientOutcome = mapEngineResultToTelegramOutcome(
+      transientTurn as any,
+    );
+    const malformedOutcome = mapEngineResultToTelegramOutcome(
+      malformedTurn as any,
+    );
+    check(
+      "3b.3. Permanent, transient and malformed provider failures retain their bounded typed codes to safe evidence",
+      permanentDelivery?.errorCode === "PERMANENT_TRANSPORT_FAILURE" &&
+        transientDelivery?.errorCode === "TRANSIENT_TRANSPORT_FAILURE" &&
+        malformedDelivery?.errorCode === "MALFORMED_PROVIDER_PAYLOAD" &&
+        permanentOutcome.ok === false &&
+        permanentOutcome.error === "PERMANENT_TRANSPORT_FAILURE" &&
+        transientOutcome.ok === false &&
+        transientOutcome.error === "TRANSIENT_TRANSPORT_FAILURE" &&
+        malformedOutcome.ok === false &&
+        malformedOutcome.error === "MALFORMED_PROVIDER_PAYLOAD" &&
+        permanentTransport.calls.length === 1 &&
+        transientTransport.calls.length === 1 &&
+        malformedTransport.calls.length === 1,
+    );
+
+    const RAW_THROWN_ERROR = "RAW_PROVIDER_BODY_SHOULD_NOT_LEAK";
+    const throwingTransport: MessageTransport = {
+      providerName: "telegram",
+      send: async () => {
+        throw new Error(RAW_THROWN_ERROR);
+      },
+    };
+    const throwingHarness = createTestHarness({
+      conversationId: "conv-delivery-throw",
+      transport: throwingTransport,
+    });
+    const throwingTurn = await throwingHarness.sendInbound("مرحبا");
+    const throwingDelivery =
+      throwingTurn.ok && !throwingTurn.duplicate ? throwingTurn.delivery : null;
+    const throwingOutcome = mapEngineResultToTelegramOutcome(
+      throwingTurn as any,
+    );
+    check(
+      "3b.4. A thrown transport exception becomes UNKNOWN_ERROR without raw error-message leakage",
+      throwingDelivery?.delivered === false &&
+        throwingDelivery.errorCode === "UNKNOWN_ERROR" &&
+        throwingDelivery.error === undefined &&
+        throwingOutcome.ok === false &&
+        throwingOutcome.outcome === "DELIVERY_FAILURE" &&
+        throwingOutcome.error === "UNKNOWN_ERROR" &&
+        !JSON.stringify(throwingDelivery).includes(RAW_THROWN_ERROR) &&
+        !JSON.stringify(throwingOutcome).includes(RAW_THROWN_ERROR),
+    );
+
+    const failedDeliveryEvidence = buildTurnEvidence(
+      {
+        ok: true,
+        duplicate: false,
+        businessId: B_ID,
+        conversationId: "conv-delivery-evidence",
+        customerMessageId: "msg-delivery-evidence",
+        assistantAction: "AI_REPLY",
+        intent: "FAQ",
+        conversationStatus: "AI_ACTIVE",
+        handoffCause: null,
+        assistantProvider: "fake-ai",
+        observability: null,
+        knowledgeGap: null,
+        delivery: {
+          delivered: false,
+          errorCode: "UNAUTHORIZED_CREDENTIALS",
+        },
+      },
+      {
+        environment: "test",
+        appVersion: "0.0.0",
+        emittedAt: SIMULATED_NOW,
+      },
+    );
+    check(
+      "3b.5. Turn evidence records the bounded outbound delivery error code",
+      failedDeliveryEvidence.outboundSendAttempted === true &&
+        failedDeliveryEvidence.outboundSendDelivered === false &&
+        failedDeliveryEvidence.outboundDeliveryErrorCode ===
+          "UNAUTHORIZED_CREDENTIALS",
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // TEST 4: Production logger wiring, safe event filtering & ACK failure mapping
   // ──────────────────────────────────────────────────────────────────────────
   {
@@ -892,6 +1207,13 @@ async function main(): Promise<void> {
           "ANSWER_CALLBACK_FAILED",
           "UNHANDLED_EXCEPTION",
           "RATE_LIMITED",
+          "UNAUTHORIZED_CREDENTIALS",
+          "INVALID_CONNECTION",
+          "MALFORMED_PROVIDER_PAYLOAD",
+          "PERMANENT_TRANSPORT_FAILURE",
+          "TRANSIENT_TRANSPORT_FAILURE",
+          "UNSUPPORTED_MESSAGE_TYPE",
+          "DELIVERY_FAILED",
           "UNKNOWN_ERROR",
         ].includes(e.error)
       );

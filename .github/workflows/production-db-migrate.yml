@@ -7,6 +7,14 @@ on:
         description: "Branch, tag, or commit SHA whose migrations are applied"
         required: false
         default: "main"
+      expected_db_host:
+        description: "Exact host that must match PRODUCTION_DATABASE_URL"
+        required: true
+        type: string
+      expected_commit_sha:
+        description: "Exact reviewed commit SHA whose migrations are applied"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,6 +35,21 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+        shell: bash
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::Full reviewed commit SHA is missing or malformed; refusing runtime migration.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Expected reviewed SHA does not match the checked-out commit; refusing runtime migration.'
+            exit 1
+          fi
+
       - name: Record source commit
         shell: bash
         run: |
@@ -34,6 +57,7 @@ jobs:
             echo "## Production database migration"
             echo ""
             echo "- selected ref: \`${{ inputs.ref }}\`"
+            echo "- expected database host: \`${{ inputs.expected_db_host }}\`"
             echo "- resolved commit: \`$(git rev-parse HEAD)\`"
             echo "- started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -55,6 +79,40 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      - name: Verify selected runtime database target
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          EXPECTED_DB_HOST: ${{ inputs.expected_db_host }}
+        shell: bash
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo '::error::PRODUCTION_DATABASE_URL secret is unavailable; aborting before any change.'
+            exit 1
+          fi
+          if [ -z "$EXPECTED_DB_HOST" ]; then
+            echo '::error::expected_db_host is required; aborting before any change.'
+            exit 1
+          fi
+          ACTUAL_DB_HOST=$(node -e 'try { const u = new URL(process.env.DATABASE_URL || ""); process.stdout.write(u.hostname); } catch { process.exit(1); }') || {
+            echo '::error::PRODUCTION_DATABASE_URL is not a valid database URL; aborting before any change.'
+            exit 1
+          }
+          if [ "$ACTUAL_DB_HOST" != "$EXPECTED_DB_HOST" ]; then
+            echo "::error::Database target mismatch. expected_db_host does not match PRODUCTION_DATABASE_URL; aborting before any change."
+            exit 1
+          fi
+          # The old Production database is preserved as inactive recovery data.
+          # Runtime migrations never target it after the single-runtime cutover.
+          for legacy_host in \
+            "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech" \
+            "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech"; do
+            if [ "$ACTUAL_DB_HOST" = "$legacy_host" ]; then
+              echo '::error::Legacy Production database host is inactive; refusing runtime migration.'
+              exit 1
+            fi
+          done
+          echo "Verified runtime database host: $ACTUAL_DB_HOST"
 
       - name: Pre-migration status
         env:

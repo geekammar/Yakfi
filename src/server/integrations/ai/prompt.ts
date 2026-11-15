@@ -9,7 +9,10 @@
  * JSON-only output matching `aiResponseSchema`. Editing prompt text belongs
  * in the `.prompt` file, not here.
  */
-import type { AiRequest } from "@/features/conversations/server/ai-contract";
+import {
+  knowledgeFamilyPromptDirective,
+  type AiRequest,
+} from "@/features/conversations/server/ai-contract";
 import { ASSISTANT_STYLE_DIRECTIVE } from "@/features/conversations/server/assistant-style";
 
 import { getPromptBody } from "./prompt-registry";
@@ -98,9 +101,14 @@ export function buildPromptMessages(
     `CURRENT message: ${request.message}`,
   ].join("\n\n");
 
-  const systemContent = extraSystemInstructions
-    ? `${AI_SYSTEM_INSTRUCTIONS} ${extraSystemInstructions}`
-    : AI_SYSTEM_INSTRUCTIONS;
+  // The knowledge-family directive is derived from the ONE canonical contract
+  // vocabulary (ai-contract.ts), so every provider sees the same exact machine
+  // keys without a provider-specific prompt copy or a handwritten synonym list.
+  const systemContent = [
+    AI_SYSTEM_INSTRUCTIONS,
+    knowledgeFamilyPromptDirective,
+    ...(extraSystemInstructions ? [extraSystemInstructions] : []),
+  ].join(" ");
 
   return [
     { role: "system", content: systemContent },

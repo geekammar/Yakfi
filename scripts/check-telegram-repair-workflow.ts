@@ -10,8 +10,19 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
-import type { TelegramBotTargetMatch } from "../src/server/integrations/telegram/telegram-repair";
+import type {
+  CredentialsResolver,
+  ResolvedCredential,
+} from "../src/server/credentials/credentials-resolver";
+import type { TelegramApiDeps } from "../src/server/integrations/telegram/telegram-client";
+import type {
+  SwitchTelegramWebhookParams,
+  TelegramBotTargetMatch,
+} from "../src/server/integrations/telegram/telegram-repair";
+import type { TelegramConnection } from "../src/types/domain";
 
 // Seed offline dummy env vars before importing repo layers
 process.env.DATABASE_URL ??=
@@ -69,6 +80,32 @@ function runBashScript(
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...env },
     });
+    return { status: 0, stdout, stderr: "" };
+  } catch (err: unknown) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return {
+      status: e.status ?? 1,
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+    };
+  }
+}
+
+function runSwitchRunner(env: Record<string, string>): {
+  status: number;
+  stdout: string;
+  stderr: string;
+} {
+  try {
+    const stdout = execFileSync(
+      "node",
+      ["--import", "tsx", "scripts/switch-test-bot-webhook.ts"],
+      {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...env },
+      },
+    );
     return { status: 0, stdout, stderr: "" };
   } catch (err: unknown) {
     const e = err as { status?: number; stdout?: string; stderr?: string };
@@ -458,6 +495,2081 @@ fi
       lookupWithoutMasterKeyRun.stdout.includes(
         "RECORDED_USERNAME: Drafnanafnanbot",
       ),
+  );
+
+  // ─── 4. Switch CLI Boundary Enforcement ───────────────────────────────────
+  // T17. CLI --switch requires --expected-current-url and --destination-url
+  const switchMissingUrls = runCli([
+    "--switch",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+  ]);
+  check(
+    "T17. CLI --switch fails closed when expected-current-url or destination-url is omitted",
+    switchMissingUrls.status === 1 &&
+      switchMissingUrls.stderr.includes(
+        "Both --expected-current-url and --destination-url are required",
+      ),
+  );
+
+  // T18. CLI --switch rejects non-UUID IDs
+  const switchBadUuid = runCli([
+    "--switch",
+    "--business-id",
+    "invalid-uuid",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T18. CLI --switch strictly rejects non-UUID business-id or connection-id",
+    switchBadUuid.status === 1 &&
+      switchBadUuid.stderr.includes("must be valid UUIDs"),
+  );
+
+  // T19. CLI --switch rejects combination with --lookup or --reconcile-secret
+  const switchWithLookup = runCli([
+    "--switch",
+    "--lookup",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  const switchWithReconcile = runCli([
+    "--switch",
+    "--reconcile-secret",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T19. CLI --switch rejects conflicting modes (--lookup, --reconcile-secret)",
+    switchWithLookup.status === 1 &&
+      switchWithLookup.stderr.includes("cannot be combined with --lookup") &&
+      switchWithReconcile.status === 1 &&
+      switchWithReconcile.stderr.includes(
+        "cannot be combined with --reconcile-secret",
+      ),
+  );
+
+  // T20. Passing switch flags without --switch fails
+  const flagsWithoutSwitch = runCli([
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T20. Passing --expected-current-url or --destination-url without --switch is rejected",
+    flagsWithoutSwitch.status === 1 &&
+      flagsWithoutSwitch.stderr.includes("only valid with --switch"),
+  );
+
+  // ─── 5. Guarded Switch Runner & Restoration Workflow Execution Tests ───────
+  const {
+    executeGuardedSwitch,
+    validateProductionDatabaseUrl,
+    verifyPreviewDestinationReadiness,
+    verifyProductionDestinationReadiness,
+    FIXED_TARGETS,
+    createOwnerRestoreResolver,
+  } = await import("./switch-test-bot-webhook");
+  const { validateDatabaseUrl, RecoveryError } =
+    await import("../src/server/credentials/test-bot-recovery");
+  const { switchTelegramBotWebhook } =
+    await import("../src/server/integrations/telegram/telegram-repair");
+  const { signCutoverReadiness } =
+    await import("../src/server/operator/cutover-readiness");
+
+  // T21. Runner CLI fails closed on unknown operation
+  const runnerUnknownOp = runSwitchRunner({
+    OPERATION: "unauthorized-op",
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T21. Runner CLI fails closed on unknown operation",
+    runnerUnknownOp.status === 1 &&
+      runnerUnknownOp.stderr.includes("Preflight Refused: [UNKNOWN_OPERATION]"),
+  );
+
+  // T22. Runner CLI fails closed on missing database URL
+  const runnerMissingDb = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL: "",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T22. Runner CLI fails closed on missing database URL",
+    runnerMissingDb.status === 1 &&
+      runnerMissingDb.stderr.includes(
+        "Preflight Refused: [MISSING_DATABASE_URL]",
+      ),
+  );
+
+  // T23. Runner CLI fails closed on missing master key secret
+  const runnerMissingKey = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY: "",
+  });
+  check(
+    "T23. Runner CLI fails closed on missing master key secret",
+    runnerMissingKey.status === 1 &&
+      runnerMissingKey.stderr.includes(
+        "Preflight Refused: [MISSING_CREDENTIAL_MASTER_KEY]",
+      ),
+  );
+
+  // T24. Runner CLI strictly refuses unauthorized database target host
+  const runnerBadHost = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL:
+      "postgresql://postgres:pass@localhost:5432/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T24. Runner CLI strictly refuses unauthorized database target host",
+    runnerBadHost.status === 1 &&
+      runnerBadHost.stderr.includes(
+        "Preflight Refused: [DATABASE_TARGET_NOT_AUTHORIZED]",
+      ),
+  );
+
+  // T25. Structured validation accepts both authorized test database hosts
+  let validTestHostsPass = true;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    );
+    validateDatabaseUrl(
+      "postgres://user:pass@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech:5432/neondb?sslmode=require",
+    );
+  } catch {
+    validTestHostsPass = false;
+  }
+  check(
+    "T25. Structured validation accepts both authorized test database hosts (direct and pooler)",
+    validTestHostsPass,
+  );
+
+  // T26. Structured validation rejects authorized host with database name suffix (/neondb_backup)
+  let rejectedBackupDb = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb_backup?sslmode=require",
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof RecoveryError &&
+      err.code === "DATABASE_TARGET_NOT_AUTHORIZED"
+    ) {
+      rejectedBackupDb = true;
+    }
+  }
+  check(
+    "T26. Structured validation rejects authorized host with database name suffix (/neondb_backup)",
+    rejectedBackupDb,
+  );
+
+  // T27. Structured validation rejects query param injection / connection-string manipulation
+  let rejectedQueryInjection = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@localhost:5432/neondb?fake=@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb&sslmode=require",
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof RecoveryError &&
+      (err.code === "DATABASE_TARGET_NOT_AUTHORIZED" ||
+        err.code === "DATABASE_OPTIONS_NOT_AUTHORIZED")
+    ) {
+      rejectedQueryInjection = true;
+    }
+  }
+  check(
+    "T27. Structured validation rejects query param injection / connection-string manipulation",
+    rejectedQueryInjection,
+  );
+
+  // T28. Structured validation rejects plain postgresql:// without sslmode or with unauthorized options
+  let rejectedPlainAndOptions = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb",
+    );
+  } catch (err1: unknown) {
+    if (
+      err1 instanceof RecoveryError &&
+      err1.code === "DATABASE_TLS_REQUIRED"
+    ) {
+      try {
+        validateDatabaseUrl(
+          "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require&target_session_attrs=read-write",
+        );
+      } catch (err2: unknown) {
+        if (
+          err2 instanceof RecoveryError &&
+          err2.code === "DATABASE_OPTIONS_NOT_AUTHORIZED"
+        ) {
+          rejectedPlainAndOptions = true;
+        }
+      }
+    }
+  }
+  check(
+    "T28. Structured validation rejects plain postgresql:// without sslmode and rejects unauthorized query options",
+    rejectedPlainAndOptions,
+  );
+
+  // T29. Structured validation rejects malformed database URLs
+  let rejectedMalformedUrl = false;
+  try {
+    validateDatabaseUrl("not-a-valid-database-url");
+  } catch (err: unknown) {
+    if (err instanceof RecoveryError && err.code === "INVALID_DATABASE_URL") {
+      rejectedMalformedUrl = true;
+    }
+  }
+  check(
+    "T29. Structured validation rejects malformed database URLs with INVALID_DATABASE_URL",
+    rejectedMalformedUrl,
+  );
+
+  // T30. Production destination validator rejects test database and loopback hosts
+  let prodValidatorGuardsPass = false;
+  try {
+    validateProductionDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    );
+  } catch (err1: unknown) {
+    if (
+      err1 instanceof RecoveryError &&
+      err1.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
+    ) {
+      try {
+        validateProductionDatabaseUrl(
+          "postgresql://user:pass@127.0.0.1:5432/neondb?sslmode=require",
+        );
+      } catch (err2: unknown) {
+        if (
+          err2 instanceof RecoveryError &&
+          err2.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
+        ) {
+          prodValidatorGuardsPass = true;
+        }
+      }
+    }
+  }
+  check(
+    "T30. Production restoration validator strictly rejects test database and loopback hosts",
+    prodValidatorGuardsPass,
+  );
+
+  // T31. Guarded runner dry run executes without mutation and with apply=false
+  const dryRunCapture = { current: null as SwitchTelegramWebhookParams | null };
+  const loggedLines: string[] = [];
+  const testOut = {
+    log: (...args: unknown[]) => loggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) => loggedLines.push(args.map(String).join(" ")),
+  };
+
+  const dryRunOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-dry-run",
+    },
+    {
+      switchFn: async (params) => {
+        dryRunCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCH_DRY_RUN",
+          dryRun: true,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          currentWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          destinationWebhookUrl: FIXED_TARGETS.previewWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          restorationProcedure: "test restoration procedure",
+          message: "Dry run successful",
+        };
+      },
+      out: testOut,
+    },
+  );
+  check(
+    "T31. Guarded runner dry run passes apply=false, pins fixed targets, and logs planned procedure",
+    dryRunOutcome.ok === true &&
+      dryRunOutcome.status === "SWITCH_DRY_RUN" &&
+      dryRunCapture.current !== null &&
+      dryRunCapture.current.apply === false &&
+      dryRunCapture.current.businessId === FIXED_TARGETS.businessId &&
+      dryRunCapture.current.connectionId === FIXED_TARGETS.connectionId &&
+      dryRunCapture.current.expectedBotExternalId ===
+        FIXED_TARGETS.botExternalId &&
+      dryRunCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      dryRunCapture.current.destinationUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      loggedLines.some((l) => l.includes("mode=DRY RUN")),
+  );
+
+  // T32. Guarded runner apply executes with apply=true
+  const applyCapture = { current: null as SwitchTelegramWebhookParams | null };
+  const applyLoggedLines: string[] = [];
+  const applyOut = {
+    log: (...args: unknown[]) =>
+      applyLoggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) =>
+      applyLoggedLines.push(args.map(String).join(" ")),
+  };
+
+  const applyOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-apply",
+    },
+    {
+      switchFn: async (params) => {
+        applyCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCHED",
+          dryRun: false,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          previousWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          webhookUrl: FIXED_TARGETS.previewWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          previousAllowedUpdates: ["message"],
+          pendingUpdateCount: 0,
+          webhookSecretHashPersisted: true,
+          restorationProcedure: "test revert procedure",
+          verifiedAt: new Date().toISOString(),
+        };
+      },
+      out: applyOut,
+    },
+  );
+  check(
+    "T32. Guarded runner apply passes apply=true, pins fixed targets, and logs switched confirmation",
+    applyOutcome.ok === true &&
+      applyOutcome.status === "SWITCHED" &&
+      applyCapture.current !== null &&
+      applyCapture.current.apply === true &&
+      applyCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      applyCapture.current.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
+      applyLoggedLines.some((l) => l.includes("mode=APPLY (explicit switch)")),
+  );
+
+  // T33. Strict output hygiene boundary: synthetic secrets, tokens, and database URLs are never leaked
+  const hygieneLoggedLines: string[] = [];
+  const hygieneOut = {
+    log: (...args: unknown[]) =>
+      hygieneLoggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) =>
+      hygieneLoggedLines.push(args.map(String).join(" ")),
+  };
+  const SYNTHETIC_SECRET = "TOP_SECRET_TELEGRAM_BOT_TOKEN_XYZ_999";
+  const SYNTHETIC_DB_PASS = "SUPER_SECRET_POSTGRES_PASSWORD_ABC_123";
+
+  const hygieneOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL: `postgresql://app_user:${SYNTHETIC_DB_PASS}@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require`,
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-apply",
+    },
+    {
+      switchFn: async () => {
+        throw new Error(
+          `Connection failed to postgres://app_user:${SYNTHETIC_DB_PASS}@ep-little-mouse... with token ${SYNTHETIC_SECRET}`,
+        );
+      },
+      out: hygieneOut,
+    },
+  );
+  const combinedHygieneOutput = hygieneLoggedLines.join("\n");
+  check(
+    "T33. Strict output hygiene boundary: catches unexpected errors, emits UNEXPECTED_SWITCH_FAILURE, and discloses zero secrets",
+    hygieneOutcome.ok === false &&
+      hygieneOutcome.code === "UNEXPECTED_SWITCH_FAILURE" &&
+      !combinedHygieneOutput.includes(SYNTHETIC_SECRET) &&
+      !combinedHygieneOutput.includes(SYNTHETIC_DB_PASS) &&
+      combinedHygieneOutput.includes("[UNEXPECTED_SWITCH_FAILURE]"),
+  );
+
+  // T34. Workflow definition delegates to switch runner with exact branch and SHA protection
+  const workflowYaml = readFileSync(
+    ".github/workflows/test-db-migrate.yml",
+    "utf-8",
+  );
+  const hasBranchGate = workflowYaml.includes(
+    "github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery'",
+  );
+  const hasShaCheck =
+    workflowYaml.includes("EXPECTED_SHA: ${{ inputs.expected_commit_sha }}") &&
+    workflowYaml.includes('[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]');
+  const delegatesToSwitchRunner = workflowYaml.includes(
+    "node --import tsx scripts/switch-test-bot-webhook.ts",
+  );
+  const hasTestDbBinding = workflowYaml.includes(
+    "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
+  );
+  const hasProdDbBinding = workflowYaml.includes(
+    "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+  );
+  const hasWorkflowOptions =
+    workflowYaml.includes("switch-webhook-dry-run") &&
+    workflowYaml.includes("switch-webhook-apply") &&
+    workflowYaml.includes("restore-main-webhook-dry-run") &&
+    workflowYaml.includes("restore-main-webhook-apply") &&
+    workflowYaml.includes("transfer-integration-preview-dry-run") &&
+    workflowYaml.includes("transfer-integration-preview-apply") &&
+    workflowYaml.includes("return-old-preview-dry-run") &&
+    workflowYaml.includes("return-old-preview-apply");
+
+  check(
+    "T34. Workflow file strictly delegates to switch runner with branch gate, SHA check, and isolated secret scopes",
+    hasBranchGate &&
+      hasShaCheck &&
+      delegatesToSwitchRunner &&
+      hasTestDbBinding &&
+      hasProdDbBinding &&
+      hasWorkflowOptions,
+  );
+
+  // T35. Offline multi-database switch and restoration regression (test DB switch -> main DB restoration cycle)
+  let telegramRemoteUrl: string = FIXED_TARGETS.mainWebhookUrl;
+  let telegramRemoteSecret: string | null = "initial-secret";
+  let telegramRemoteUpdates = ["message"];
+
+  const mockCredentialsResolver = {
+    async resolve(): Promise<ResolvedCredential> {
+      return {
+        ok: true,
+        kind: "RUNTIME",
+        reference: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+        value: "8926541123:dummy-token-for-offline-testing-regression-only",
+      };
+    },
+  };
+
+  const mockTelegramApi: TelegramApiDeps = {
+    apiHost: "https://api.telegram.org",
+    credentialsResolver: mockCredentialsResolver,
+    async fetchImpl(input: RequestInfo | URL, init?: RequestInit) {
+      const urlStr = typeof input === "string" ? input : input.toString();
+      if (urlStr.includes("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              first_name: "Drafnan Bot",
+              username: "Drafnanafnanbot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/getWebhookInfo")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: telegramRemoteUrl,
+              has_custom_certificate: false,
+              pending_update_count: 0,
+              allowed_updates: telegramRemoteUpdates,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/setWebhook")) {
+        const body = JSON.parse(init?.body as string);
+        telegramRemoteUrl = body.url;
+        telegramRemoteSecret = body.secret_token;
+        telegramRemoteUpdates = body.allowed_updates;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: true,
+            description: "Webhook was set",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 404 });
+    },
+  };
+
+  const testDbConnection = {
+    id: FIXED_TARGETS.connectionId,
+    businessId: FIXED_TARGETS.businessId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: "Drafnanafnanbot",
+    provider: "telegram_managed",
+    credentialsRef: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+    status: "CONNECTED",
+    isActive: true,
+    webhookSecretHash: "initial-test-db-secret-hash",
+  };
+
+  const mainDbConnection = {
+    id: FIXED_TARGETS.connectionId,
+    businessId: FIXED_TARGETS.businessId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: "Drafnanafnanbot",
+    provider: "telegram_managed",
+    credentialsRef: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+    status: "CONNECTED",
+    isActive: true,
+    webhookSecretHash: "initial-main-db-secret-hash",
+  };
+
+  const createRepoFor = (connRef: typeof testDbConnection) => ({
+    async findByIdWithinBusiness(
+      id: string,
+      businessId: string,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+    async updateWebhookSecretHash(
+      id: string,
+      businessId: string,
+      webhookSecretHash: string,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        connRef.webhookSecretHash = webhookSecretHash;
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+    async update(
+      id: string,
+      businessId: string,
+      data: Partial<TelegramConnection>,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        Object.assign(connRef, data);
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+  });
+
+  // Step 1: Forward switch targeting Test DB
+  const forwardStepResult = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(testDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.mainWebhookUrl,
+      destinationUrl: FIXED_TARGETS.previewWebhookUrl,
+      apply: true,
+    },
+  );
+
+  const forwardSuccess =
+    forwardStepResult.ok === true &&
+    forwardStepResult.status === "SWITCHED" &&
+    telegramRemoteUrl === (FIXED_TARGETS.previewWebhookUrl as string) &&
+    telegramRemoteSecret !== null &&
+    testDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+    mainDbConnection.webhookSecretHash === "initial-main-db-secret-hash";
+
+  const testDbHashAfterForward = testDbConnection.webhookSecretHash;
+
+  // Step 2: Reverse switch (restoration) targeting Main DB
+  const reverseStepResult = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(mainDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.mainWebhookUrl,
+      apply: true,
+    },
+  );
+
+  const reverseSuccess =
+    reverseStepResult.ok === true &&
+    reverseStepResult.status === "SWITCHED" &&
+    telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+    mainDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret!).digest("hex") &&
+    testDbConnection.webhookSecretHash === testDbHashAfterForward;
+
+  check(
+    "T35. Offline multi-database switch and restoration regression: forward switch synchronizes Test DB, restoration synchronizes Main DB without cross-database interference",
+    forwardSuccess && reverseSuccess,
+  );
+
+  let validMainTargets = true;
+  for (const host of [
+    "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+    "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(
+        `postgresql://${host}/neondb?sslmode=require`,
+      );
+    } catch {
+      validMainTargets = false;
+    }
+  }
+  check(
+    "T36. Restoration accepts only the known main endpoint direct/pooler targets",
+    validMainTargets,
+  );
+  let rejectedMainTargets = true;
+  for (const uri of [
+    "postgresql://unrelated.example/neondb?sslmode=require",
+    "postgresql://[::1]/neondb?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/other?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require&host=localhost",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=disable",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(uri);
+      rejectedMainTargets = false;
+    } catch {
+      /* Expected refusal. */
+    }
+  }
+  check(
+    "T37. Restoration rejects wrong host/database, IPv6 loopback and query transport overrides",
+    rejectedMainTargets,
+  );
+  const deniedIdentityHash = mainDbConnection.webhookSecretHash;
+  const deniedIdentitySecret = telegramRemoteSecret;
+  const deniedIdentity = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(mainDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: "999999999",
+      expectedCurrentUrl: FIXED_TARGETS.mainWebhookUrl,
+      destinationUrl: FIXED_TARGETS.previewWebhookUrl,
+      apply: true,
+    },
+  );
+  check(
+    "T38. Wrong operator-pinned bot ID is rejected before webhook or database mutation",
+    !deniedIdentity.ok &&
+      deniedIdentity.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === deniedIdentitySecret &&
+      mainDbConnection.webhookSecretHash === deniedIdentityHash,
+  );
+  const unknownOpLog: string[] = [];
+  await executeGuardedSwitch(
+    { OPERATION: SYNTHETIC_SECRET },
+    {
+      out: {
+        log: (...args) => unknownOpLog.push(args.join(" ")),
+        error: (...args) => unknownOpLog.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T39. Unknown-operation error does not echo arbitrary input",
+    !unknownOpLog.join(" ").includes(SYNTHETIC_SECRET),
+  );
+
+  // T40. Production restoration must never inherit the Preview encryption key.
+  const restorationJob =
+    workflowYaml.split("\n  restore-main-webhook:")[1] ?? "";
+  const forwardJob =
+    (workflowYaml.split("\n  switch-test-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T40. Workflow binds explicit owner token for restoration and keeps the Preview key isolated",
+    restorationJob.includes(
+      "RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}",
+    ) &&
+      restorationJob.includes(
+        "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+      ) &&
+      !restorationJob.includes("CREDENTIAL_MASTER_KEY:") &&
+      !restorationJob.includes("secrets.TEST_DATABASE_URL") &&
+      forwardJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      forwardJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      !forwardJob.includes("RESTORE_BOT_TOKEN:"),
+  );
+
+  // Exercise the real runner and switch service with an explicit owner token.
+  const ownerToken = `${FIXED_TARGETS.botExternalId}:owner_token_regression_only_123456789`;
+  const ownerEnv = {
+    DATABASE_URL:
+      "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    OPERATION: "restore-main-webhook-dry-run",
+    RESTORE_BOT_TOKEN: ownerToken,
+  };
+  const ownerLines: string[] = [];
+  const ownerOut = {
+    log: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+    error: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+  };
+  let ownerApiMode: "valid" | "wrong-bot" | "manager" | "unauthorized" =
+    "valid";
+  let ownerRequests = 0;
+  const ownerApi: TelegramApiDeps = {
+    ...mockTelegramApi,
+    async fetchImpl(input, init) {
+      const url = String(input);
+      if (!url.startsWith(`https://api.telegram.org/bot${ownerToken}/`)) {
+        throw new Error("Unexpected credential source");
+      }
+      ownerRequests++;
+      if (url.endsWith("/getMe") && ownerApiMode !== "valid") {
+        if (ownerApiMode === "unauthorized") {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error_code: 401,
+              description: "Unauthorized",
+            }),
+            { status: 401 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id:
+                ownerApiMode === "wrong-bot"
+                  ? 999999999
+                  : Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              can_manage_bots: ownerApiMode === "manager",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return mockTelegramApi.fetchImpl(input, init);
+    },
+  };
+  const ownerSwitch = async (
+    params: SwitchTelegramWebhookParams,
+    resolver?: Pick<CredentialsResolver, "resolve">,
+  ) => {
+    if (!resolver) throw new Error("Explicit owner resolver missing");
+    return switchTelegramBotWebhook(
+      {
+        api: ownerApi,
+        credentialsResolver: resolver,
+        connectionRepository: createRepoFor(mainDbConnection),
+      },
+      params,
+    );
+  };
+  const missingOwner = await executeGuardedSwitch(
+    { ...ownerEnv, RESTORE_BOT_TOKEN: "", CREDENTIAL_MASTER_KEY: "unused" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T41. Missing restoration token fails before execution and never falls back to a master key",
+    !missingOwner.ok &&
+      missingOwner.code === "MISSING_RESTORE_BOT_TOKEN" &&
+      ownerRequests === 0,
+  );
+
+  const beforeOwnerRef = mainDbConnection.credentialsRef;
+  const beforeOwnerHash = mainDbConnection.webhookSecretHash;
+  const beforeOwnerSecret = telegramRemoteSecret;
+  const readonlyOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T42. Owner-token preflight reaches current-URL refusal without master key, ciphertext access or mutations",
+    !readonlyOwner.ok &&
+      readonlyOwner.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      ownerRequests >= 2 &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl,
+  );
+
+  // Fake remote is now at Preview, as it would be after an authorized forward switch.
+  telegramRemoteUrl = FIXED_TARGETS.previewWebhookUrl;
+  ownerApiMode = "wrong-bot";
+  const wrongOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T43. Wrong owner-token identity is rejected before writes or webhook retargeting",
+    !wrongOwner.ok &&
+      wrongOwner.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.previewWebhookUrl &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "manager";
+  const managerOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T44. Owner-token path preserves the Manager Bot exclusion",
+    !managerOwner.ok && managerOwner.code === "MANAGER_BOT_TARGET_REJECTED",
+  );
+
+  ownerApiMode = "unauthorized";
+  const rejectedOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T45. Telegram-rejected owner token fails closed before mutation",
+    !rejectedOwner.ok &&
+      rejectedOwner.code === "BOT_IDENTITY_VERIFICATION_FAILED" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "valid";
+  const ownerDry = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T46. Owner-token dry run with Preview current URL has zero writes",
+    ownerDry.ok &&
+      ownerDry.status === "SWITCH_DRY_RUN" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret,
+  );
+
+  const beforeOwnerTestHash = testDbConnection.webhookSecretHash;
+  const ownerApplied = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T47. Owner-token restoration synchronizes main hash, retains credential reference and leaves test DB untouched",
+    ownerApplied.ok &&
+      ownerApplied.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      testDbConnection.webhookSecretHash === beforeOwnerTestHash,
+  );
+
+  const readonlyResolver = createOwnerRestoreResolver(ownerToken);
+  const invalidReference = await readonlyResolver.resolve(
+    "UNRELATED_ENV_TOKEN",
+  );
+  const beforeOwnerLeaks = ownerLines.join("\n");
+  await executeGuardedSwitch(ownerEnv, {
+    switchFn: async () => {
+      throw new Error(`Sensitive source ${ownerToken}`);
+    },
+    out: ownerOut,
+  });
+  check(
+    "T48. Owner resolver cannot store/delete credentials and secret-bearing failures are sanitized",
+    !("store" in readonlyResolver) &&
+      !("delete" in readonlyResolver) &&
+      !invalidReference.ok &&
+      !beforeOwnerLeaks.includes(ownerToken) &&
+      !ownerLines.join("\n").includes(ownerToken) &&
+      ownerLines.join("\n").includes("UNEXPECTED_SWITCH_FAILURE"),
+  );
+
+  const beforePreflightRequests = ownerRequests;
+  const beforePreflightHash = mainDbConnection.webhookSecretHash;
+  const beforePreflightSecret = telegramRemoteSecret;
+  const readyPreflight = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-preflight" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T49. Pre-switch restoration preflight returns READY on main with exactly two read requests and no mutations",
+    readyPreflight.ok &&
+      readyPreflight.status === "RESTORE_PREFLIGHT_READY" &&
+      ownerRequests - beforePreflightRequests === 2 &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === beforePreflightSecret &&
+      mainDbConnection.webhookSecretHash === beforePreflightHash &&
+      mainDbConnection.credentialsRef === beforeOwnerRef,
+  );
+  check(
+    "T50. Read-only restoration preflight is explicitly routed to the guarded restoration job",
+    restorationJob.includes(
+      "inputs.operation == 'restore-main-webhook-preflight'",
+    ) && workflowYaml.includes("- restore-main-webhook-preflight"),
+  );
+
+  // Model a remote-main/local-hash mismatch left by a partial restoration.
+  mainDbConnection.webhookSecretHash = "unconfirmed-old-main-hash";
+  const beforeReconcileRef = mainDbConnection.credentialsRef;
+  const beforeReconcileTestHash = testDbConnection.webhookSecretHash;
+  const reconciledOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-reconcile" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T51. Explicit owner-token reconciliation repairs a main/hash mismatch without moving the URL or touching ciphertext/test DB",
+    reconciledOwner.ok &&
+      reconciledOwner.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeReconcileRef &&
+      testDbConnection.webhookSecretHash === beforeReconcileTestHash &&
+      restorationJob.includes(
+        "inputs.operation == 'restore-main-webhook-reconcile'",
+      ),
+  );
+
+  // ─── 6. Fixed Preview-to-Preview Transfer Guards ────────────────────────────
+  const transferJob =
+    (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  const integrationBranchGuard =
+    "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'";
+  check(
+    "T52. Preview transfer workflow is pinned to the exact integration branch/SHA and test-only secrets",
+    transferJob.includes(integrationBranchGuard) &&
+      !transferJob.includes(
+        "github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery'",
+      ) &&
+      transferJob.includes("EXPECTED_SHA: ${{ inputs.expected_commit_sha }}") &&
+      transferJob.includes(
+        "if ! printf '%s' \"$EXPECTED_SHA\" | grep -Eq '^[0-9a-f]{40}$'",
+      ) &&
+      transferJob.includes('[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]') &&
+      transferJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      transferJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      transferJob.includes(
+        "EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}",
+      ) &&
+      !transferJob.includes("PRODUCTION_DATABASE_URL") &&
+      !transferJob.includes("RESTORE_BOT_TOKEN") &&
+      transferJob.includes("transfer-integration-preview-dry-run") &&
+      transferJob.includes("return-old-preview-apply"),
+  );
+
+  const previewTestDbUrl =
+    "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const previewIntegrationSha = "a".repeat(40);
+  const previewOtherSha = "b".repeat(40);
+  const makeHealthResponse = (
+    args: {
+      version?: string;
+      commitSha?: string;
+      dbHost?: string;
+      isProductionDb?: boolean;
+      migrationApplied?: boolean;
+      deploymentReady?: boolean;
+      database?: string;
+    } = {},
+  ): Response =>
+    new Response(
+      JSON.stringify({
+        status: "ok",
+        version: args.version ?? FIXED_TARGETS.integratedPreviewVersion,
+        commitSha: args.commitSha ?? previewIntegrationSha,
+        deploymentReady: args.deploymentReady ?? true,
+        database: args.database ?? "connected",
+        previewDiagnostics: {
+          dbHost:
+            args.dbHost ?? "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+          isProductionDb: args.isProductionDb ?? false,
+          migrationApplied: args.migrationApplied ?? true,
+        },
+      }),
+      { status: 200 },
+    );
+
+  const integratedReadiness = await verifyPreviewDestinationReadiness(
+    {
+      kind: "integrated-preview",
+      expectedCommitSha: previewIntegrationSha,
+      databaseUrl: previewTestDbUrl,
+    },
+    { fetchImpl: async () => makeHealthResponse() },
+  );
+  const oldReadiness = await verifyPreviewDestinationReadiness(
+    {
+      kind: "old-preview",
+      expectedCommitSha: previewIntegrationSha,
+      databaseUrl: previewTestDbUrl,
+    },
+    {
+      fetchImpl: async () =>
+        makeHealthResponse({
+          version: FIXED_TARGETS.oldPreviewVersion,
+          commitSha: FIXED_TARGETS.oldPreviewCommitSha,
+        }),
+    },
+  );
+  check(
+    "T53. Readiness pins integrated and old Preview candidate identities",
+    integratedReadiness.ok &&
+      integratedReadiness.kind === "integrated-preview" &&
+      integratedReadiness.commitSha === previewIntegrationSha &&
+      integratedReadiness.version === FIXED_TARGETS.integratedPreviewVersion &&
+      oldReadiness.ok &&
+      oldReadiness.kind === "old-preview" &&
+      oldReadiness.commitSha === FIXED_TARGETS.oldPreviewCommitSha &&
+      oldReadiness.version === FIXED_TARGETS.oldPreviewVersion,
+  );
+
+  const readinessFailures = await Promise.all([
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      {
+        fetchImpl: async () =>
+          makeHealthResponse({ commitSha: previewOtherSha }),
+      },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      {
+        fetchImpl: async () =>
+          makeHealthResponse({
+            dbHost: "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+            isProductionDb: true,
+          }),
+      },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      {
+        fetchImpl: async () => makeHealthResponse({ migrationApplied: false }),
+      },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: previewIntegrationSha,
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse({ deploymentReady: false }) },
+    ),
+    verifyPreviewDestinationReadiness(
+      {
+        kind: "integrated-preview",
+        expectedCommitSha: "",
+        databaseUrl: previewTestDbUrl,
+      },
+      { fetchImpl: async () => makeHealthResponse() },
+    ),
+  ]);
+  check(
+    "T54. Readiness fails closed on candidate mismatch, Production DB, pending migration, unready deployment and missing SHA",
+    readinessFailures[0]?.ok === false &&
+      readinessFailures[0]?.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      readinessFailures[1]?.ok === false &&
+      readinessFailures[1]?.code === "DESTINATION_DATABASE_MISMATCH" &&
+      readinessFailures[2]?.ok === false &&
+      readinessFailures[2]?.code === "DESTINATION_MIGRATION_NOT_APPLIED" &&
+      readinessFailures[3]?.ok === false &&
+      readinessFailures[3]?.code === "DESTINATION_NOT_READY" &&
+      readinessFailures[4]?.ok === false &&
+      readinessFailures[4]?.code === "MISSING_EXPECTED_COMMIT_SHA",
+  );
+
+  const transferRemote = {
+    url: FIXED_TARGETS.previewWebhookUrl as string,
+    secret: "dummy-existing-preview-secret",
+    updates: ["message"],
+    setCalls: 0,
+  };
+  const transferConnection = {
+    ...testDbConnection,
+    webhookSecretHash: "transfer-start-hash",
+  };
+  const transferWrites = { count: 0 };
+  const transferRepo = {
+    async findByIdWithinBusiness(
+      id: string,
+      businessId: string,
+    ): Promise<TelegramConnection | null> {
+      return id === transferConnection.id &&
+        businessId === transferConnection.businessId
+        ? ({ ...transferConnection } as unknown as TelegramConnection)
+        : null;
+    },
+    async updateWebhookSecretHash(
+      id: string,
+      businessId: string,
+      webhookSecretHash: string,
+    ): Promise<TelegramConnection | null> {
+      if (
+        id !== transferConnection.id ||
+        businessId !== transferConnection.businessId
+      ) {
+        return null;
+      }
+      transferWrites.count += 1;
+      transferConnection.webhookSecretHash = webhookSecretHash;
+      return { ...transferConnection } as unknown as TelegramConnection;
+    },
+    async update(
+      id: string,
+      businessId: string,
+      data: Partial<TelegramConnection>,
+    ): Promise<TelegramConnection | null> {
+      if (
+        id !== transferConnection.id ||
+        businessId !== transferConnection.businessId
+      ) {
+        return null;
+      }
+      transferWrites.count += 1;
+      Object.assign(transferConnection, data);
+      return { ...transferConnection } as unknown as TelegramConnection;
+    },
+  };
+  const transferApi: TelegramApiDeps = {
+    ...mockTelegramApi,
+    async fetchImpl(input, init) {
+      const urlStr = String(input);
+      if (urlStr.includes("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              username: "Drafnanafnanbot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/getWebhookInfo")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: transferRemote.url,
+              has_custom_certificate: false,
+              pending_update_count: 0,
+              allowed_updates: transferRemote.updates,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/setWebhook")) {
+        const body = JSON.parse(init?.body as string);
+        transferRemote.setCalls += 1;
+        transferRemote.url = body.url;
+        transferRemote.secret = body.secret_token;
+        transferRemote.updates = body.allowed_updates;
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 404 });
+    },
+  };
+
+  const transferState: {
+    healthCalls: Array<{
+      kind: string;
+      expectedCommitSha: string;
+      databaseUrl: string;
+    }>;
+    switchCalls: number;
+    lastParams: SwitchTelegramWebhookParams | undefined;
+    out: string[];
+  } = {
+    healthCalls: [],
+    switchCalls: 0,
+    lastParams: undefined,
+    out: [],
+  };
+  const transferOut = {
+    log: (...args: unknown[]) => transferState.out.push(args.join(" ")),
+    error: (...args: unknown[]) => transferState.out.push(args.join(" ")),
+  };
+  const lastTransferParams = (): SwitchTelegramWebhookParams | undefined =>
+    transferState.lastParams as SwitchTelegramWebhookParams | undefined;
+  const transferDeps = (ready = true) => ({
+    verifyDestination: async (params: {
+      kind: string;
+      expectedCommitSha: string;
+      databaseUrl: string;
+    }) => {
+      transferState.healthCalls.push(params);
+      return ready
+        ? {
+            ok: true as const,
+            kind: params.kind as "old-preview" | "integrated-preview",
+            origin:
+              params.kind === "integrated-preview"
+                ? FIXED_TARGETS.integratedPreviewOrigin
+                : FIXED_TARGETS.oldPreviewOrigin,
+            version:
+              params.kind === "integrated-preview"
+                ? FIXED_TARGETS.integratedPreviewVersion
+                : FIXED_TARGETS.oldPreviewVersion,
+            commitSha:
+              params.kind === "integrated-preview"
+                ? previewIntegrationSha
+                : FIXED_TARGETS.oldPreviewCommitSha,
+            dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+          }
+        : { ok: false as const, code: "DESTINATION_NOT_READY" as const };
+    },
+    switchFn: async (
+      params: SwitchTelegramWebhookParams,
+      resolver?: Pick<CredentialsResolver, "resolve">,
+    ) => {
+      transferState.switchCalls += 1;
+      transferState.lastParams = params;
+      return switchTelegramBotWebhook(
+        {
+          api: transferApi,
+          credentialsResolver: resolver ?? mockCredentialsResolver,
+          connectionRepository: transferRepo,
+        },
+        params,
+      );
+    },
+    out: transferOut,
+  });
+  const transferEnv = (
+    operation: string,
+    overrides: Record<string, string> = {},
+  ) => ({
+    DATABASE_URL: previewTestDbUrl,
+    CREDENTIAL_MASTER_KEY: "test-only-master-key",
+    EXPECTED_COMMIT_SHA: previewIntegrationSha,
+    GITHUB_SHA: previewIntegrationSha,
+    OPERATION: operation,
+    ...overrides,
+  });
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  const transferStartHash = transferConnection.webhookSecretHash;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferState.lastParams = undefined;
+  const forwardDry = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      DESTINATION_URL: "https://arbitrary.example/api/telegram/webhook",
+    }),
+    transferDeps(),
+  );
+  check(
+    "T55. Forward dry run pins old->integrated URLs, ignores arbitrary destination input, applies nothing and writes nothing",
+    forwardDry.ok &&
+      forwardDry.status === "SWITCH_DRY_RUN" &&
+      transferState.healthCalls.length === 1 &&
+      transferState.healthCalls[0]?.kind === "integrated-preview" &&
+      transferState.healthCalls[0]?.expectedCommitSha ===
+        previewIntegrationSha &&
+      lastTransferParams()?.expectedCurrentUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      lastTransferParams()?.destinationUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      lastTransferParams()?.apply === false &&
+      lastTransferParams()?.allowAlreadyAtDestination === true &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0 &&
+      transferConnection.webhookSecretHash === transferStartHash,
+  );
+
+  transferRemote.url = FIXED_TARGETS.integratedPreviewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferState.lastParams = undefined;
+  const returnDry = await executeGuardedSwitch(
+    transferEnv("return-old-preview-dry-run"),
+    transferDeps(),
+  );
+  check(
+    "T56. Return dry run pins integrated->old URLs and reads old Preview readiness with zero writes",
+    returnDry.ok &&
+      returnDry.status === "SWITCH_DRY_RUN" &&
+      transferState.healthCalls[0]?.kind === "old-preview" &&
+      transferState.healthCalls[0]?.expectedCommitSha ===
+        previewIntegrationSha &&
+      lastTransferParams()?.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      lastTransferParams()?.destinationUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      lastTransferParams()?.apply === false &&
+      transferRemote.url === FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.integratedPreviewWebhookUrl;
+  transferRemote.setCalls = 0;
+  transferWrites.count = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const alreadyAtDestination = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-apply"),
+    transferDeps(),
+  );
+  check(
+    "T57. An already-complete transfer returns an explicit read-only no-op with zero setWebhook and zero DB writes",
+    alreadyAtDestination.ok &&
+      alreadyAtDestination.status === "ALREADY_AT_DESTINATION" &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0 &&
+      transferState.switchCalls === 1,
+  );
+
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const missingExpectedSha = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      EXPECTED_COMMIT_SHA: "",
+      GITHUB_SHA: "",
+    }),
+    transferDeps(),
+  );
+  const mismatchedExpectedSha = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      GITHUB_SHA: previewOtherSha,
+    }),
+    transferDeps(),
+  );
+  check(
+    "T58. Preview transfer rejects missing or mismatched expected/checked-out SHA before readiness or provider calls",
+    !missingExpectedSha.ok &&
+      missingExpectedSha.code === "MISSING_EXPECTED_COMMIT_SHA" &&
+      !mismatchedExpectedSha.ok &&
+      mismatchedExpectedSha.code === "COMMIT_SHA_MISMATCH" &&
+      transferState.healthCalls.length === 0 &&
+      transferState.switchCalls === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const productionDbAttempt = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run", {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    }),
+    transferDeps(),
+  );
+  const unreadyDestination = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run"),
+    transferDeps(false),
+  );
+  check(
+    "T59. Preview transfer rejects Production/wrong DB and a failed destination-secret consistency check before provider calls",
+    !productionDbAttempt.ok &&
+      productionDbAttempt.code === "DATABASE_TARGET_NOT_AUTHORIZED" &&
+      !unreadyDestination.ok &&
+      unreadyDestination.code === "DESTINATION_NOT_READY" &&
+      transferState.switchCalls === 0 &&
+      transferRemote.setCalls === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  const wrongBot = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: "999999999",
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  const wrongBusiness = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: "11111111-1111-4111-8111-111111111111",
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  const wrongConnection = await switchTelegramBotWebhook(
+    {
+      api: transferApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: transferRepo,
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: "22222222-2222-4222-8222-222222222222",
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+      apply: true,
+      allowAlreadyAtDestination: true,
+    },
+  );
+  check(
+    "T60. Wrong bot, business or connection is rejected before webhook or database mutation",
+    !wrongBot.ok &&
+      wrongBot.code === "BOT_IDENTITY_MISMATCH" &&
+      !wrongBusiness.ok &&
+      wrongBusiness.code === "CONNECTION_NOT_FOUND" &&
+      !wrongConnection.ok &&
+      wrongConnection.code === "CONNECTION_NOT_FOUND" &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.mainWebhookUrl;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  const unexpectedCurrent = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-dry-run"),
+    transferDeps(),
+  );
+  check(
+    "T61. Unexpected current webhook URL is refused without setWebhook or DB writes",
+    !unexpectedCurrent.ok &&
+      unexpectedCurrent.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      transferRemote.url === FIXED_TARGETS.mainWebhookUrl &&
+      transferRemote.setCalls === 0 &&
+      transferWrites.count === 0,
+  );
+
+  transferRemote.url = FIXED_TARGETS.previewWebhookUrl;
+  transferConnection.webhookSecretHash = "same-test-db-start-hash";
+  const sameTestDbCredentialRef = transferConnection.credentialsRef;
+  transferWrites.count = 0;
+  transferRemote.setCalls = 0;
+  transferState.healthCalls.length = 0;
+  transferState.switchCalls = 0;
+  const forwardApply = await executeGuardedSwitch(
+    transferEnv("transfer-integration-preview-apply"),
+    transferDeps(),
+  );
+  const afterForwardHash = transferConnection.webhookSecretHash;
+  const forwardSecret = transferRemote.secret;
+  const returnApply = await executeGuardedSwitch(
+    transferEnv("return-old-preview-apply", {
+      GITHUB_SHA: previewIntegrationSha,
+    }),
+    transferDeps(),
+  );
+  check(
+    "T62. Forward and return apply operations share the SAME test DB, rotate the canonical secret hash, and preserve credentials",
+    forwardApply.ok &&
+      forwardApply.status === "SWITCHED" &&
+      afterForwardHash ===
+        createHash("sha256").update(forwardSecret).digest("hex") &&
+      returnApply.ok &&
+      returnApply.status === "SWITCHED" &&
+      transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
+      transferConnection.webhookSecretHash ===
+        createHash("sha256").update(transferRemote.secret).digest("hex") &&
+      transferConnection.credentialsRef === sameTestDbCredentialRef &&
+      transferRemote.setCalls === 2 &&
+      transferWrites.count === 2,
+  );
+
+  // T63. Automatic PR migration validation is isolated from the shared runtime DB.
+  const validateMigrationsJob =
+    (workflowYaml.split("\n  validate-migrations:")[1] ?? "").split(
+      "\n  verify-selected-runtime:",
+    )[0] ?? "";
+  const manualTestJob =
+    (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
+      "\n  cutover-main-runtime:",
+    )[0] ?? "";
+  check(
+    "T63. Automatic PR migration validation uses a disposable PostgreSQL service and never binds runtime database secrets",
+    validateMigrationsJob.includes("image: postgres:16") &&
+      validateMigrationsJob.includes(
+        "DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test",
+      ) &&
+      !validateMigrationsJob.includes("secrets.TEST_DATABASE_URL") &&
+      !validateMigrationsJob.includes("secrets.PRODUCTION_DATABASE_URL") &&
+      manualTestJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}"),
+  );
+
+  // T64. Production runtime cutover dry-run maps the fixed current URL to Production.
+  const cutoverIntegrationSha = "c".repeat(40);
+  const cutoverBotToken = ["8926541123", "cutover", "signing", "sentinel"].join(
+    ":",
+  );
+  const cutoverDryCapture = {
+    current: null as SwitchTelegramWebhookParams | null,
+  };
+  const cutoverDryLines: string[] = [];
+  const cutoverDryOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+      EXPECTED_VERSION: "0.79.10",
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+      }),
+      switchFn: async (params) => {
+        cutoverDryCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCH_DRY_RUN",
+          dryRun: true,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          currentWebhookUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+          destinationWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          restorationProcedure: "test cutover restoration",
+          message: "Cutover dry run successful",
+        };
+      },
+      out: {
+        log: (...args) => cutoverDryLines.push(args.join(" ")),
+        error: (...args) => cutoverDryLines.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T64. Cutover dry-run maps integrated Preview to canonical Production with apply=false",
+    cutoverDryOutcome.ok === true &&
+      cutoverDryOutcome.status === "SWITCH_DRY_RUN" &&
+      cutoverDryCapture.current !== null &&
+      cutoverDryCapture.current.apply === false &&
+      cutoverDryCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      cutoverDryCapture.current.destinationUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      cutoverDryCapture.current.allowAlreadyAtDestination === true &&
+      cutoverDryLines.some((line) =>
+        line.includes("Production Runtime Cutover"),
+      ),
+  );
+
+  // T65. Cutover rejects arbitrary current kinds, missing SHAs and unhealthy destinations.
+  let cutoverRefusalCalls = 0;
+  const cutoverRefusalDeps = {
+    verifyProductionDestination: async () => ({
+      ok: true as const,
+      origin: "https://flowpilot-prod.vercel.app",
+      version: "0.79.10",
+      commitSha: cutoverIntegrationSha,
+      dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+    }),
+    switchFn: async () => {
+      cutoverRefusalCalls += 1;
+      throw new Error("must not execute");
+    },
+  };
+  const invalidCurrent = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "arbitrary-url",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    cutoverRefusalDeps,
+  );
+  const missingSha = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+    },
+    cutoverRefusalDeps,
+  );
+  const unhealthyDestination = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    {
+      verifyProductionDestination: async () => ({
+        ok: false as const,
+        code: "DESTINATION_IDENTITY_MISMATCH" as const,
+      }),
+      switchFn: async () => {
+        cutoverRefusalCalls += 1;
+        throw new Error("must not execute");
+      },
+    },
+  );
+  check(
+    "T65. Cutover refuses arbitrary current kinds, missing SHA and unhealthy Production destination before mutation",
+    invalidCurrent.code === "INVALID_EXPECTED_CURRENT_KIND" &&
+      missingSha.code === "MISSING_EXPECTED_COMMIT_SHA" &&
+      unhealthyDestination.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      cutoverRefusalCalls === 0,
+  );
+
+  // T66. Cutover apply uses the application credential and the fixed Production destination.
+  const cutoverApplyCapture = {
+    current: null as SwitchTelegramWebhookParams | null,
+  };
+  const cutoverApplyLines: string[] = [];
+  const cutoverApplyOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-apply",
+      EXPECTED_CURRENT_KIND: "integrated-preview",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+      EXPECTED_VERSION: "0.79.10",
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+      }),
+      switchFn: async (params) => {
+        cutoverApplyCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCHED",
+          dryRun: false,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          previousWebhookUrl: FIXED_TARGETS.integratedPreviewWebhookUrl,
+          webhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          previousAllowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          webhookSecretHashPersisted: true,
+          restorationProcedure: "test rollback procedure",
+          verifiedAt: new Date().toISOString(),
+        };
+      },
+      out: {
+        log: (...args) => cutoverApplyLines.push(args.join(" ")),
+        error: (...args) => cutoverApplyLines.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T66. Cutover apply uses the selected DB application credential and writes only the fixed Production destination",
+    cutoverApplyOutcome.ok === true &&
+      cutoverApplyOutcome.status === "SWITCHED" &&
+      cutoverApplyCapture.current !== null &&
+      cutoverApplyCapture.current.apply === true &&
+      cutoverApplyCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.integratedPreviewWebhookUrl &&
+      cutoverApplyCapture.current.destinationUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      cutoverApplyLines.some((line) => line.includes("mode=APPLY")),
+  );
+
+  // T67. Cutover is a read-only no-op when the bot is already on canonical Production.
+  const cutoverAlreadyAtDestination = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
+      OPERATION: "cutover-main-runtime-dry-run",
+      EXPECTED_CURRENT_KIND: "main",
+      EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
+      GITHUB_SHA: cutoverIntegrationSha,
+    },
+    {
+      verifyProductionDestination: async (params) => ({
+        ok: true,
+        origin: "https://flowpilot-prod.vercel.app",
+        version: "0.79.10",
+        commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+      }),
+      switchFn: async () => ({
+        ok: true,
+        status: "ALREADY_AT_DESTINATION",
+        dryRun: true,
+        botExternalId: FIXED_TARGETS.botExternalId,
+        botUsername: FIXED_TARGETS.botUsername,
+        currentWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+        destinationWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+        allowedUpdates: ["message", "callback_query"],
+        pendingUpdateCount: 0,
+        message: "Already at destination",
+      }),
+    },
+  );
+  check(
+    "T67. Cutover dry-run on an already-correct Production URL is an explicit read-only no-op",
+    cutoverAlreadyAtDestination.ok === true &&
+      cutoverAlreadyAtDestination.status === "ALREADY_AT_DESTINATION",
+  );
+
+  // T71. The deployed-runtime readiness client fails closed on every missing/wrong proof.
+  const readinessNow = 1_700_000_000_000;
+  const readinessTimestamp = String(readinessNow);
+  const readinessUrl =
+    "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const readinessBody = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    checkedAt: new Date(readinessNow).toISOString(),
+    commitSha: cutoverIntegrationSha,
+    version: "0.79.10",
+    databaseHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+    databaseName: "neondb",
+    businessId: FIXED_TARGETS.businessId,
+    connectionId: FIXED_TARGETS.connectionId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: FIXED_TARGETS.botUsername,
+    connectionStatus: "CONNECTED",
+    credentialResolved: true,
+    ...overrides,
+  });
+  let readinessHeaders: Headers | null = null;
+  const readinessValid = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      expectedVersion: "0.79.10",
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async (_input, init) => {
+        readinessHeaders = new Headers(init?.headers ?? {});
+        return new Response(JSON.stringify(readinessBody()), { status: 200 });
+      },
+    },
+  );
+  const sentSignature = readinessHeaders
+    ? new Headers(readinessHeaders).get("x-flowpilot-cutover-signature")
+    : null;
+  const expectedSignature = signCutoverReadiness(
+    cutoverBotToken,
+    readinessTimestamp,
+    FIXED_TARGETS.botExternalId,
+  );
+  const missingReadinessToken = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: "",
+    },
+    { now: () => readinessNow },
+  );
+  const unauthorizedReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () => new Response("{}", { status: 401 }),
+    },
+  );
+  const wrongCommitReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(readinessBody({ commitSha: "d".repeat(40) })),
+          { status: 200 },
+        ),
+    },
+  );
+  const wrongDatabaseReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(
+            readinessBody({
+              databaseHost: "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+            }),
+          ),
+          { status: 200 },
+        ),
+    },
+  );
+  const unresolvedReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(readinessBody({ credentialResolved: false })),
+          { status: 200 },
+        ),
+    },
+  );
+  check(
+    "T71. Runtime readiness requires a signed live-app proof of commit, selected DB, fixed target and resolved credential",
+    readinessValid.ok === true &&
+      readinessValid.dbHost ===
+        "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
+      sentSignature === expectedSignature &&
+      missingReadinessToken.ok === false &&
+      missingReadinessToken.code === "MISSING_CUTOVER_BOT_TOKEN" &&
+      unauthorizedReadiness.ok === false &&
+      unauthorizedReadiness.code === "DESTINATION_READINESS_UNAUTHORIZED" &&
+      wrongCommitReadiness.ok === false &&
+      wrongCommitReadiness.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      wrongDatabaseReadiness.ok === false &&
+      wrongDatabaseReadiness.code === "DESTINATION_DATABASE_MISMATCH" &&
+      unresolvedReadiness.ok === false &&
+      unresolvedReadiness.code === "DESTINATION_RUNTIME_UNRESOLVED",
+  );
+
+  // T68. Workflow definitions pin selected-database and cutover operations.
+  const selectedRuntimeJob =
+    (workflowYaml.split("\n  verify-selected-runtime:")[1] ?? "").split(
+      "\n  configure-production-runtime-env:",
+    )[0] ?? "";
+  const cutoverJob =
+    (workflowYaml.split("\n  cutover-main-runtime:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T68. Selected-runtime verification is read-only and cutover is main/SHA guarded with test-only secrets",
+    selectedRuntimeJob.includes(
+      "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'",
+    ) &&
+      selectedRuntimeJob.includes("github.ref == 'refs/heads/main'") &&
+      selectedRuntimeJob.includes(
+        "python3 scripts/repair-test-bot-credential.py --from-environment",
+      ) &&
+      selectedRuntimeJob.includes("pnpm exec prisma migrate status") &&
+      !selectedRuntimeJob.includes("db:deploy") &&
+      !selectedRuntimeJob.includes("--apply") &&
+      cutoverJob.includes("github.ref == 'refs/heads/main'") &&
+      cutoverJob.includes("EXPECTED_CURRENT_KIND") &&
+      cutoverJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      cutoverJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      cutoverJob.includes(
+        "CUTOVER_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}",
+      ) &&
+      !cutoverJob.includes("PRODUCTION_DATABASE_URL") &&
+      !cutoverJob.includes("RESTORE_BOT_TOKEN") &&
+      !cutoverJob.includes("environment: Production"),
+  );
+
+  // T69. Runtime migration and environment cutover are narrowly target-guarded.
+  const productionMigrateYaml = readFileSync(
+    ".github/workflows/production-db-migrate.yml",
+    "utf-8",
+  );
+  const configureEnvJob =
+    (
+      workflowYaml.split("\n  configure-production-runtime-env:")[1] ?? ""
+    ).split("\n  recover-test-credential:")[0] ?? "";
+  const runtimeEnvScript = readFileSync(
+    "scripts/update-production-runtime-env.ts",
+    "utf-8",
+  );
+  check(
+    "T69. Runtime migration and environment cutover are exact-SHA/target guarded without unrelated keys",
+    productionMigrateYaml.includes("expected_db_host:") &&
+      productionMigrateYaml.includes("expected_commit_sha:") &&
+      productionMigrateYaml.includes(
+        "Legacy Production database host is inactive",
+      ) &&
+      productionMigrateYaml.includes(
+        "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+      ) &&
+      configureEnvJob.includes(
+        "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'",
+      ) &&
+      configureEnvJob.includes("github.ref == 'refs/heads/main'") &&
+      configureEnvJob.includes("environment_operation") &&
+      configureEnvJob.includes("VERCEL_TOKEN") &&
+      configureEnvJob.includes(
+        "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
+      ) &&
+      configureEnvJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      configureEnvJob.includes(
+        "node --import tsx scripts/update-production-runtime-env.ts",
+      ) &&
+      !configureEnvJob.includes("environment: Production") &&
+      !configureEnvJob.includes("NEXT_PUBLIC_APP_URL") &&
+      !configureEnvJob.includes("BETTER_AUTH_SECRET") &&
+      runtimeEnvScript.includes(
+        'TARGET_KEYS = ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"] as const',
+      ) &&
+      runtimeEnvScript.includes("decrypt=false") &&
+      runtimeEnvScript.includes('type: "sensitive"') &&
+      !runtimeEnvScript.includes("NEXT_PUBLIC_APP_URL") &&
+      !runtimeEnvScript.includes("BETTER_AUTH_SECRET"),
+  );
+
+  // T70. The application-runtime readiness probe is authenticated, fixed and read-only.
+  const publicPaths = readFileSync("src/lib/public-paths.ts", "utf-8");
+  const readinessRoute = readFileSync(
+    "src/app/api/operator/cutover-readiness/route.ts",
+    "utf-8",
+  );
+  const readinessModule = readFileSync(
+    "src/server/operator/cutover-readiness.ts",
+    "utf-8",
+  );
+  check(
+    "T70. Deployed runtime readiness is signature-gated, fixed-target and exposes bounded evidence only",
+    publicPaths.includes("/api/operator/cutover-readiness") &&
+      readinessRoute.includes("checkCutoverReadiness") &&
+      readinessRoute.includes('dynamic = "force-dynamic"') &&
+      readinessModule.includes("createHmac") &&
+      readinessModule.includes("timingSafeEqual") &&
+      readinessModule.includes("CUTOVER_READINESS_BUSINESS_ID") &&
+      readinessModule.includes("CUTOVER_READINESS_CONNECTION_ID") &&
+      readinessModule.includes("CUTOVER_READINESS_BOT_ID") &&
+      readinessModule.includes("credentialResolved: true") &&
+      readinessModule.includes("databaseHost") &&
+      !readinessModule.includes("return resolved.value") &&
+      !readinessModule.includes("cipherBlob") &&
+      !readinessModule.includes("webhookSecretHash"),
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

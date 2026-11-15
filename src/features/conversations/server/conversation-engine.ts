@@ -271,6 +271,11 @@ import {
   usageRepository,
 } from "@/server/repositories";
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
+import {
+  TransportError,
+  type TransportSendResult,
+  type WhatsAppTransportErrorCode,
+} from "@/server/transport/whatsapp-transport";
 import type { Conversation, ConversationStatus } from "@/types/domain";
 
 import pkg from "../../../../package.json";
@@ -526,6 +531,23 @@ export type AssistantAction =
   /** The thread is not AI-eligible; the message went to staff attention. */
   | "DEFERRED_TO_STAFF";
 
+export type InboundDeliveryFailureCode =
+  WhatsAppTransportErrorCode | "UNKNOWN_ERROR";
+
+/**
+ * Bounded outbound delivery projection carried by a successful inbound turn.
+ * `error` stays for legacy human-readable consumers; `errorCode` is the
+ * authoritative typed classification for evidence/logging. Raw transport
+ * exception messages are never copied here.
+ */
+export type InboundDelivery = {
+  provider: string;
+  delivered: boolean;
+  error?: string;
+  errorCode?: InboundDeliveryFailureCode;
+  providerMessageId?: string;
+};
+
 export type InboundSuccess = {
   ok: true;
   /** False — this delivery was processed (not a duplicate). */
@@ -568,7 +590,7 @@ export type InboundSuccess = {
    */
   knowledgeGap?: { id: string; category: KnowledgeGapCategory } | null;
   /** Best-effort outbound delivery report (null when nothing was sent). */
-  delivery: { provider: string; delivered: boolean; error?: string } | null;
+  delivery: InboundDelivery | null;
 };
 
 /**
@@ -1384,6 +1406,31 @@ function resumeBookingExtraction(
   };
 }
 
+function projectTransportDelivery(sent: TransportSendResult): InboundDelivery {
+  return {
+    provider: sent.provider,
+    delivered: sent.delivered,
+    ...(sent.error ? { error: sent.error } : {}),
+    ...(sent.errorCode ? { errorCode: sent.errorCode } : {}),
+    ...(sent.providerMessageId
+      ? { providerMessageId: sent.providerMessageId }
+      : {}),
+  };
+}
+
+function projectTransportException(
+  provider: string,
+  error: unknown,
+): InboundDelivery {
+  return {
+    provider,
+    delivered: false,
+    ...(error instanceof TransportError
+      ? { errorCode: error.code }
+      : { errorCode: "UNKNOWN_ERROR" }),
+  };
+}
+
 async function persistAssistantReply(
   deps: ConversationEngineDeps,
   conversationId: string,
@@ -1419,17 +1466,9 @@ async function deliverAssistantReply(
       ...(choices ? { choices } : {}),
       ...(replyMarkup ? { replyMarkup } : {}),
     });
-    delivery = {
-      provider: sent.provider,
-      delivered: sent.delivered,
-      ...(sent.error ? { error: sent.error } : {}),
-    };
+    delivery = projectTransportDelivery(sent);
   } catch (error) {
-    delivery = {
-      provider: deps.transport.providerName,
-      delivered: false,
-      error: error instanceof Error ? error.message : "transport error",
-    };
+    delivery = projectTransportException(deps.transport.providerName, error);
   }
   await recordUsage(deps, {
     businessId,
@@ -3722,6 +3761,19 @@ async function runInboundTurn(
   // resolved one) — carried into every outbound delivery for tenancy.
   const outboundConnectionId = resolvedIdentity?.connectionId ?? null;
 
+  // This identity comes from the authenticated adapter, never message text.
+  // Resolve thread compatibility BEFORE selecting a customer's latest thread.
+  const deliveryRoute =
+    inbound.externalId?.startsWith(`tg:${inbound.to}:`) &&
+    resolvedIdentity?.connectionId
+      ? {
+          channel: "telegram" as const,
+          connectionId: resolvedIdentity.connectionId,
+          botExternalId: inbound.to,
+          recipientExternalId: inbound.from,
+        }
+      : undefined;
+
   // 2. Claim the external message key (DURABLE, tenant-scoped) BEFORE
   //    any irreversible processing. A redelivery of an already-processed
   //    message stops here with zero side effects; a redelivery of a
@@ -3746,14 +3798,21 @@ async function runInboundTurn(
       phone: canonicalPhone(inbound.from),
     });
 
-    // 4. Find or create the conversation (latest thread per customer —
-    //    no second conversation system, no duplicate active threads).
+    // 4. Find or create a compatible thread for this authenticated connection.
+    //    Mixed legacy history remains intact and unroutable; fresh ingress
+    //    starts a separate thread rather than guessing its old destination.
     //    New threads are Branch-aware: the Business's Default Branch,
     //    resolved server-side (DECISIONS #30 — never client input).
-    const latest = await deps.conversationRepository.findLatestByCustomer(
-      business.id,
-      customer.id,
-    );
+    const latest = deliveryRoute
+      ? await deps.conversationRepository.findLatestByCustomer(
+          business.id,
+          customer.id,
+          deliveryRoute,
+        )
+      : await deps.conversationRepository.findLatestByCustomer(
+          business.id,
+          customer.id,
+        );
     let conversation: Conversation | null = latest
       ? await deps.conversationRepository.findById(latest.id)
       : null;
@@ -3830,6 +3889,7 @@ async function runInboundTurn(
             : {}
           : { status: "NEED_HUMAN" },
         { claimId: claim.claimId },
+        deliveryRoute,
       );
     } catch (error) {
       if (error instanceof InboundDuplicateError) {
@@ -6403,6 +6463,7 @@ async function runInboundTurn(
         controlHandoffReason:
           turnTelemetry?.conversationControl?.handoffReason ?? null,
         failureCause,
+        providerErrorCode: turnErrorCode,
       });
       const assistantMessage = await persistAssistantReply(
         deps,
@@ -9080,8 +9141,15 @@ async function runInboundTurn(
             : (TASK_SUPPORT_FAMILIES[validated.intent].family ??
               "declared-intent"),
         allowed: disclosure.kind === "disclosed",
+        declaredIntent: validated.intent,
         ...(disclosure.kind === "requires-human"
-          ? { refusalReason: disclosure.reason }
+          ? {
+              refusalReason: disclosure.reason,
+              proposedFamily: disclosure.diagnostics.proposedFamily,
+              proposalStatus: disclosure.diagnostics.proposalStatus,
+              ledgerIncluded: disclosure.diagnostics.ledgerIncluded,
+              ledgerDisclosable: disclosure.diagnostics.ledgerDisclosable,
+            }
           : {}),
       },
     };
@@ -9360,17 +9428,9 @@ async function runInboundTurn(
         connectionId: outboundConnectionId ?? undefined,
         ...(choices ? { choices } : {}),
       });
-      delivery = {
-        provider: sent.provider,
-        delivered: sent.delivered,
-        ...(sent.error ? { error: sent.error } : {}),
-      };
+      delivery = projectTransportDelivery(sent);
     } catch (error) {
-      delivery = {
-        provider: deps.transport.providerName,
-        delivered: false,
-        error: error instanceof Error ? error.message : "transport error",
-      };
+      delivery = projectTransportException(deps.transport.providerName, error);
     }
     await recordUsage(deps, {
       businessId: business.id,

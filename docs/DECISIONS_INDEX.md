@@ -119,6 +119,9 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 102 | Temporal correction authority + structured calendar clarification | dates/offers/leap years | [#102](DECISIONS.md) |
 | 103 | Stale-session sign-in redirect loop repair (ISS-017) | auth screens/proxy/session | [#103](DECISIONS.md) |
 | 104 | Truthful unknown-information replies + disclosure/handoff boundary | unknown info/disclosure/handoff | [#104](DECISIONS.md) |
+| 105 | Safe Telegram staff reply delivery, route authority, reconciliation and attempt identity | staff reply delivery/routes/idempotency | [#105](DECISIONS.md) |
+| 106 | Knowledge-family contract, domain-availability handling, bounded refusal evidence | AI disclosure/contract/availability/evidence | [#106](DECISIONS.md) |
+| 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -133,5 +136,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   narrative existed only in the former index row, not in `DECISIONS.md`. Its
   VPS-local check behavior is historical and does not authorize VPS execution;
   see `AGENT_RULES.md` §4.
-- Decision #105 exists only on the open PR #79 branch and is intentionally not
-  listed here as a `main` decision. See `docs/CURRENT_STATE.md` §3 and §7.
+- Decisions #105 and #106 are carried by the draft integration candidate from
+  PR #79 and PR #82 respectively; neither is a merged `main` decision. R6
+  historical attribution remains unproven. Decision #107 is prepared in draft
+  PR #83 and is not executed; see `docs/CURRENT_STATE.md` §9.

@@ -84,3 +84,34 @@ export type ConversationDetailData = {
 
 export type ConversationActionResult =
   { success: true } | { success: false; message: string };
+
+export type StaffReplyOutcome =
+  "unroutable" | "in-progress" | "accepted" | "definite_rejection" | "unknown";
+
+export type StaffReplyActionResult =
+  | {
+      success: true;
+      outcome: "accepted";
+      messageId?: string;
+      assignedUser?: InboxUser | null;
+    }
+  | {
+      success: false;
+      outcome: "unroutable" | "in-progress" | "definite_rejection" | "unknown";
+      message: string;
+      code?: string;
+    };
+
+export type StaffReplyStatusActionResult =
+  | {
+      success: true;
+      status: "accepted";
+      messageId?: string;
+      message: string;
+    }
+  | {
+      success: false;
+      status: "in-progress" | "rejected" | "unknown";
+      code?: string;
+      message: string;
+    };
