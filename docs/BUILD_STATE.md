@@ -1,5 +1,26 @@
 # FlowPilot — Build State
 
+## Draft integration candidate — 15 November 2026
+
+- Branch `integration/staff-delivery-knowledge-contract`, based on `main`
+  `49d58c5`, package version `v0.79.10`; draft, not merged, deployed or
+  live-accepted.
+- Integrates the exact reviewed commits PR #79 `1a11f35` and PR #82 `2075968`
+  via merge commits. Original branches are untouched.
+- Overlaps resolved semantically: `docs/CURRENT_STATE.md`,
+  `docs/DECISIONS_INDEX.md` (compact index retains #105 and #106),
+  `docs/DECISIONS.md` (both original entries), `pr-validation.yml` (both
+  branches' checks retained) and `check-scarce-availability-regressions.ts`
+  (main's fixed reference clock retained).
+- PR #79's additive migration `20261108200000_safe_telegram_staff_reply_delivery`
+  remains unapplied on shared Preview/Production. PR #79 maintenance jobs
+  remain guarded to the original branch/SHA and are not widened here.
+- R5 acceptance and the original R6 failure remain tied to their original
+  candidates; this integration candidate requires its own CI and live
+  acceptance. R6 historical attribution remains unproven.
+- Next: reviewer-approved bounded acceptance (AI/services trace first, then
+  staff-delivery smoke, then booking path only if earlier steps pass).
+
 ## Muse R4 ingress/thread selection repair — 14 November 2026
 
 Muse R4-UI-29-A1 (QA row250) FAILED on reviewed43a16ad: authenticated inbound, draft navigation/reload and takeover passed; composer refused before dispatch because the mixed legacy conversation had no authoritative route. Independent DB inspection found one historic linked claim from bot8644293921 and current claims from8926541123 on the same thread. addMessage correctly refused binding mixed history; the engine had selected the latest customer thread without connection compatibility. New authenticated Telegram ingress now selects a compatible bound or safe legacy thread, otherwise creates a separate thread through the existing path. Mixed history, routes, old assignment and claims remain unchanged; sending from the old mixed thread remains refused. No secret reset, schema change, manual route insertion or webhook switch is required. Real-PostgreSQL regression covers the observed two-bot history, preserved old owner, new bound route, dedupe/reuse, correct single-send target and safe legacy reuse. Live acceptance is still pending a fresh probe on the new candidate; do not resend the rejected old draft or change QA249/250.
