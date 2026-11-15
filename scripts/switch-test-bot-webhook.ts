@@ -364,7 +364,9 @@ export async function executeGuardedSwitch(
   const isPreviewToPreview = isIntegratedPreviewTransfer || isOldPreviewReturn;
 
   let expectedCurrentUrl: string = FIXED_TARGETS.mainWebhookUrl;
-  let destinationUrl: string = FIXED_TARGETS.previewWebhookUrl;
+  let destinationUrl: string = isRestore
+    ? FIXED_TARGETS.mainWebhookUrl
+    : FIXED_TARGETS.previewWebhookUrl;
 
   if (isRestore && !isRestorePreflight && !isReconcile) {
     expectedCurrentUrl = FIXED_TARGETS.previewWebhookUrl;
