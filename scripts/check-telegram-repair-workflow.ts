@@ -2066,11 +2066,11 @@ fi
   // T63. Automatic PR migration validation is isolated from the shared runtime DB.
   const validateMigrationsJob =
     (workflowYaml.split("\n  validate-migrations:")[1] ?? "").split(
-      "\n  recover-test-credential:",
+      "\n  verify-selected-runtime:",
     )[0] ?? "";
   const manualTestJob =
     (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
-      "\n  restore-main-webhook:",
+      "\n  cutover-main-runtime:",
     )[0] ?? "";
   check(
     "T63. Automatic PR migration validation uses a disposable PostgreSQL service and never binds runtime database secrets",
