@@ -2114,6 +2114,7 @@ fi
         origin: "https://flowpilot-prod.vercel.app",
         version: "0.79.10",
         commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
       }),
       switchFn: async (params) => {
         cutoverDryCapture.current = params;
@@ -2161,6 +2162,7 @@ fi
       origin: "https://flowpilot-prod.vercel.app",
       version: "0.79.10",
       commitSha: cutoverIntegrationSha,
+      dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
     }),
     switchFn: async () => {
       cutoverRefusalCalls += 1;
@@ -2248,6 +2250,7 @@ fi
         origin: "https://flowpilot-prod.vercel.app",
         version: "0.79.10",
         commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
       }),
       switchFn: async (params) => {
         cutoverApplyCapture.current = params;
@@ -2305,6 +2308,7 @@ fi
         origin: "https://flowpilot-prod.vercel.app",
         version: "0.79.10",
         commitSha: params.expectedCommitSha,
+        dbHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
       }),
       switchFn: async () => ({
         ok: true,
@@ -2444,10 +2448,15 @@ fi
       readinessValid.dbHost ===
         "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
       sentSignature === expectedSignature &&
+      missingReadinessToken.ok === false &&
       missingReadinessToken.code === "MISSING_CUTOVER_BOT_TOKEN" &&
+      unauthorizedReadiness.ok === false &&
       unauthorizedReadiness.code === "DESTINATION_READINESS_UNAUTHORIZED" &&
+      wrongCommitReadiness.ok === false &&
       wrongCommitReadiness.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      wrongDatabaseReadiness.ok === false &&
       wrongDatabaseReadiness.code === "DESTINATION_DATABASE_MISMATCH" &&
+      unresolvedReadiness.ok === false &&
       unresolvedReadiness.code === "DESTINATION_RUNTIME_UNRESOLVED",
   );
 

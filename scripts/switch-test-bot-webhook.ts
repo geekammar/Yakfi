@@ -411,6 +411,8 @@ export type SwitchRunnerDeps = {
   verifyProductionDestination?: (params: {
     expectedCommitSha: string;
     expectedVersion?: string;
+    databaseUrl: string;
+    cutoverBotToken: string;
   }) => Promise<ProductionDestinationReadiness>;
   switchFn?: (
     params: SwitchTelegramWebhookParams,
