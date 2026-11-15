@@ -2080,9 +2080,7 @@ fi
       ) &&
       !validateMigrationsJob.includes("secrets.TEST_DATABASE_URL") &&
       !validateMigrationsJob.includes("secrets.PRODUCTION_DATABASE_URL") &&
-      manualTestJob.includes(
-        "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
-      ),
+      manualTestJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}"),
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────
