@@ -827,13 +827,15 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
       priceCurrency: service.priceCurrency ?? null,
       priceNote: service.priceNote ?? null,
     });
+    // Keyed by the authorized service id (never the name): the disclosure
+    // gate must resolve the exact selected row, not a name-based fallback.
     const priceVerdict = evaluateCandidate({
       ledger,
       scope,
       source: "SERVICE_CATALOG",
       businessId: service.businessId,
       visibility: classifyServiceField("price"),
-      key: `service.price:${service.name}`,
+      key: `service.price:${service.id}`,
       inBudget: true,
       taskRequired: relevance.priceOrFee,
     });

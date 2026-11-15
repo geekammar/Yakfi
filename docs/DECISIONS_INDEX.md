@@ -123,6 +123,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 106 | Knowledge-family contract, domain-availability handling, bounded refusal evidence | AI disclosure/contract/availability/evidence | [#106](DECISIONS.md) |
 | 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
 | 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
+| 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -139,5 +140,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   see `AGENT_RULES.md` §4.
 - Decisions #105–#107 were merged to `main` through PR #83
   (`f15deded`, `v0.79.10`); #107's runtime consolidation itself remains prepared,
-  not executed. R6 historical attribution remains unproven. Decision #108 is a
-  draft live-refresh repair candidate and is not merged or deployed.
+  not executed. R6 historical attribution remains unproven. Decision #108 was
+  merged through PR #84 (`b485bda`, `v0.79.11`) but its later live acceptance is
+  not claimed here. Decision #109 is a draft pricing/attention repair candidate
+  and is not merged or deployed.

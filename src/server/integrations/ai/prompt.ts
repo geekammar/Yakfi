@@ -39,17 +39,21 @@ export function buildPromptMessages(
         // when the context builder found the turn price-relevant AND an
         // authoritative price is stored; description is PUBLIC but carried
         // only on a service-info turn (PROMPT-AI-ARCH-15). Render each only
-        // when provided.
+        // when provided. The service id is an opaque source reference the
+        // structured disclosure contract requires; it is rendered next to the
+        // name but is never a customer-visible knowledge fact.
         .map((s) => {
-          const parts = [s.name];
+          const label =
+            s.id !== undefined ? `[id: ${s.id}] ${s.name}` : s.name;
+          const details: string[] = [];
           if (s.durationMinutes !== undefined)
-            parts.push(`${s.durationMinutes}m`);
-          if (s.price !== undefined) parts.push(`السعر: ${s.price}`);
+            details.push(`${s.durationMinutes}m`);
+          if (s.price !== undefined) details.push(`السعر: ${s.price}`);
           if (s.description !== undefined)
-            parts.push(`الوصف: ${s.description}`);
-          return parts.length > 1
-            ? `${parts[0]} (${parts.slice(1).join(", ")})`
-            : parts[0];
+            details.push(`الوصف: ${s.description}`);
+          return details.length > 0
+            ? `${label} (${details.join(", ")})`
+            : label;
         })
         .join("; ")
     : "(none)";

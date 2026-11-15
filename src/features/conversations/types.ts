@@ -37,8 +37,9 @@ export type InboxConversation = {
  *
  * Deliberately smaller than `ConversationDetailData`: it carries only the
  * values that can change while the operator is reading (messages, bookings,
- * status, ownership and the team list needed by the assignment control).
- * Opening/attention acknowledgment is NOT part of this snapshot.
+ * status, ownership, the current open attention reason and the team list
+ * needed by the assignment control). Reading attention is display-only:
+ * opening/acknowledgment writes stay outside this snapshot.
  */
 export type ConversationRefreshData = Pick<
   ConversationDetailData,
@@ -46,6 +47,8 @@ export type ConversationRefreshData = Pick<
   | "status"
   | "aiSummary"
   | "assignedUser"
+  | "attentionReason"
+  | "attentionCause"
   | "messages"
   | "appointments"
   | "team"

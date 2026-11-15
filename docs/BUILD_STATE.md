@@ -1,5 +1,33 @@
 # FlowPilot — Build State
 
+## Authoritative pricing and current-attention repair — 15 November 2026
+
+- Production evidence `v0.79.11` / `b485bda` / conversation
+  `b56c9e2c-cb33-4872-bfdd-82c9a11dea58`: YPRICE A–D provider and delivery
+  succeeded, but fixed/range/case-dependent price questions were refused at the
+  disclosure gate (`UNAVAILABLE_IN_REQUEST`) while the unpriced consultation
+  took the safe knowledge-gap path.
+- Proven application-side cause: authorized service ids were carried in the
+  request but not rendered to the model, and the shared knowledge-family
+  directive named FAQ source references without requiring the exact
+  `service.price` source id.
+- Candidate `v0.79.12` (`fix/yakfi-authoritative-pricing-attention`, draft PR):
+  render opaque service ids in the provider prompt; require `service.price` +
+  the exact selected service id in the canonical directive and prompt source;
+  accept only an exact id from the current request in the gate; render the
+  stored fixed/range/`CONDITIONAL` value without inventing numbers; keep
+  unpriced services on the safe handoff path.
+- Attention display: the read-only refresh reads current open attention without
+  acknowledging it; a successful Return to assistant clears the obsolete reason
+  locally, and a later genuine handoff shows its current reason. Draft,
+  summary, scroll, ownership and polling protections are unchanged.
+- Duration remains `INTERNAL` (DECISIONS #53/#51/#52); no visibility change.
+  Flagged inconsistency: `buildPromptMessages` can render a duration supplied
+  by an out-of-band producer, but the production context builder never supplies
+  it. No migration, live AI/Telegram call, service-record edit, environment or
+  webhook change. Historical YPRICE results and 0.79.10 acceptance are
+  preserved; live YPRICE acceptance remains pending.
+
 ## Conversation live-refresh repair — 15 November 2026
 
 - Current `main` / Production acceptance baseline: `v0.79.10` /

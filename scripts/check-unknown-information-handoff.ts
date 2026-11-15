@@ -74,7 +74,9 @@ function createEngineHarness(opts: {
     durationMinutes: number;
     priceType?: string | null;
     priceAmount?: number | null;
+    priceMaxAmount?: number | null;
     priceCurrency?: string | null;
+    priceNote?: string | null;
     isActive?: boolean;
   }>;
   about?: string | null;
@@ -979,6 +981,242 @@ async function runSuite(): Promise<void> {
         resPrice.conversationStatus === "AI_ACTIVE" &&
         (hPrice.getSent()[0]?.includes("400") ?? false),
       resPrice,
+    );
+
+    // 10.C2 Fixed price is rendered from the EXACT selected service, never
+    // the first priced service in the catalog.
+    const hSelectedPrice = createEngineHarness({
+      faqs: [],
+      services: [
+        {
+          id: "svc-first",
+          businessId: TENANT_A,
+          name: "تنظيف أسنان",
+          description: null,
+          durationMinutes: 30,
+          priceType: "FIXED",
+          priceAmount: 400,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+        {
+          id: "svc-selected",
+          businessId: TENANT_A,
+          name: "حشو أسنان",
+          description: null,
+          durationMinutes: 45,
+          priceType: "FIXED",
+          priceAmount: 900,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر حشو الأسنان 900 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-selected",
+        }),
+      ],
+    });
+    const resSelectedPrice = await hSelectedPrice.runInbound(
+      "بكام حشو الأسنان؟",
+      "ext-sc10-price-selected",
+    );
+    check(
+      "10.C2 Fixed price is rendered from the exact selected service (not the first priced service)",
+      resSelectedPrice.ok === true &&
+        !resSelectedPrice.duplicate &&
+        resSelectedPrice.assistantAction === "AI_REPLY" &&
+        resSelectedPrice.conversationStatus === "AI_ACTIVE" &&
+        hSelectedPrice.getSent()[0] === "سعر حشو أسنان: 900 جنيه." &&
+        !hSelectedPrice.getSent()[0]?.includes("400"),
+      resSelectedPrice,
+    );
+
+    // 10.C3 RANGE stays a range — never converted into a fixed guarantee.
+    const hRangePrice = createEngineHarness({
+      faqs: [],
+      services: [
+        {
+          id: "svc-range",
+          businessId: TENANT_A,
+          name: "علاج عصب",
+          description: null,
+          durationMinutes: 60,
+          priceType: "RANGE",
+          priceAmount: 800,
+          priceMaxAmount: 1200,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر علاج العصب 1000 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-range",
+        }),
+      ],
+    });
+    const resRangePrice = await hRangePrice.runInbound(
+      "بكام علاج العصب؟",
+      "ext-sc10-price-range",
+    );
+    check(
+      "10.C3 RANGE is rendered authoritatively without becoming a fixed price",
+      resRangePrice.ok === true &&
+        !resRangePrice.duplicate &&
+        resRangePrice.assistantAction === "AI_REPLY" &&
+        resRangePrice.conversationStatus === "AI_ACTIVE" &&
+        hRangePrice.getSent()[0] === "سعر علاج عصب: من 800 إلى 1200 جنيه." &&
+        !hRangePrice.getSent()[0]?.includes("1000"),
+      resRangePrice,
+    );
+
+    // 10.C4 CONDITIONAL ("حسب الحالة") is preserved with no invented number.
+    const hConditionalPrice = createEngineHarness({
+      faqs: [],
+      services: [
+        {
+          id: "svc-conditional",
+          businessId: TENANT_A,
+          name: "جلسة تجميل",
+          description: null,
+          durationMinutes: 45,
+          priceType: "CONDITIONAL",
+          priceNote: "حسب الحالة",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر جلسة التجميل 1000 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-conditional",
+        }),
+      ],
+    });
+    const resConditionalPrice = await hConditionalPrice.runInbound(
+      "بكام جلسة التجميل؟",
+      "ext-sc10-price-conditional",
+    );
+    check(
+      "10.C4 Case-dependent price is rendered as stored without an invented number",
+      resConditionalPrice.ok === true &&
+        !resConditionalPrice.duplicate &&
+        resConditionalPrice.assistantAction === "AI_REPLY" &&
+        resConditionalPrice.conversationStatus === "AI_ACTIVE" &&
+        hConditionalPrice.getSent()[0] === "سعر جلسة تجميل: حسب الحالة." &&
+        !/\d/.test(hConditionalPrice.getSent()[0] ?? ""),
+      resConditionalPrice,
+    );
+
+    // 10.C5 A service with NO stored price stays on the safe handoff path.
+    const hMissingPrice = createEngineHarness({
+      faqs: [],
+      services: [
+        {
+          id: "svc-no-price",
+          businessId: TENANT_A,
+          name: "استشارة",
+          description: null,
+          durationMinutes: 20,
+          priceType: null,
+          priceAmount: null,
+          priceCurrency: null,
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الاستشارة 500 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          sourceId: "svc-no-price",
+        }),
+      ],
+    });
+    const resMissingPrice = await hMissingPrice.runInbound(
+      "بكام الاستشارة؟",
+      "ext-sc10-price-missing",
+    );
+    check(
+      "10.C5 Missing price is refused to the safe handoff path (no invented number)",
+      resMissingPrice.ok === true &&
+        !resMissingPrice.duplicate &&
+        resMissingPrice.assistantAction === "AI_HANDOFF" &&
+        resMissingPrice.conversationStatus === "NEED_HUMAN" &&
+        resMissingPrice.handoffCause === "POLICY_REFUSED" &&
+        !hMissingPrice.getSent().some((msg) => msg.includes("500")),
+      resMissingPrice,
+    );
+
+    // 10.C6 A service-price reply without an exact source id is refused.
+    const hMissingPriceSource = createEngineHarness({
+      faqs: [],
+      services: [
+        {
+          id: "svc-source-required",
+          businessId: TENANT_A,
+          name: "كشف",
+          description: null,
+          durationMinutes: 20,
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+          isActive: true,
+        },
+      ],
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "سعر الكشف 300 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+        }),
+      ],
+    });
+    const resMissingPriceSource = await hMissingPriceSource.runInbound(
+      "بكام الكشف؟",
+      "ext-sc10-price-missing-source",
+    );
+    check(
+      "10.C6 service.price without the exact source id is refused to the safe handoff path",
+      resMissingPriceSource.ok === true &&
+        !resMissingPriceSource.duplicate &&
+        resMissingPriceSource.assistantAction === "AI_HANDOFF" &&
+        resMissingPriceSource.conversationStatus === "NEED_HUMAN" &&
+        resMissingPriceSource.handoffCause === "POLICY_REFUSED" &&
+        !hMissingPriceSource.getSent().some((msg) => msg.includes("300")),
+      resMissingPriceSource,
     );
 
     // 10.D Valid Service Catalog Listing
@@ -1922,7 +2160,7 @@ async function runSuite(): Promise<void> {
       resAdv8c,
     );
 
-    // 14.8d Duplicate/ambiguous matching source references -> refused by cardinality check
+    // 14.8d A service NAME is never accepted as a service-price source id
     const hAdv8d = createEngineHarness({
       services: [
         {
@@ -1966,12 +2204,15 @@ async function runSuite(): Promise<void> {
     });
     const resAdv8d = await hAdv8d.runInbound("بكام تنظيف الأسنان؟", "adv-8d");
     check(
-      "14.8d Duplicate/ambiguous matching source references -> refused by cardinality check",
+      "14.8d A service name is not accepted as the exact service-price source id",
       resAdv8d.ok === true &&
         !resAdv8d.duplicate &&
         resAdv8d.assistantAction === "AI_HANDOFF" &&
         resAdv8d.conversationStatus === "NEED_HUMAN" &&
-        resAdv8d.handoffCause === "POLICY_REFUSED",
+        resAdv8d.handoffCause === "POLICY_REFUSED" &&
+        resAdv8d.observability?.disclosure?.refusalReason ===
+          "UNAVAILABLE_IN_REQUEST" &&
+        !hAdv8d.getSent().some((msg) => msg.includes("400")),
       resAdv8d,
     );
 
