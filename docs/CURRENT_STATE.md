@@ -33,6 +33,13 @@
   and draft identity, pending/unknown submissions, unsaved summary edits,
   mobile tab and reading position; stale or post-navigation responses are
   ignored.
+- **Identity-safe review repair:** message identity is the authoritative `id`
+  only. No sender/content/timestamp inference is used to match an optimistic
+  row to a server row; snapshots are deferred while a local send/mutation is
+  unresolved and optimistic rows reconcile only through the returned
+  `messageId`. Summary saves capture the submitted value and edit revision; a
+  newer in-flight edit survives success, and failures release the refresh gate
+  without discarding editor text.
 - Opening/attention acknowledgment remains unchanged. Polling performs no
   attention, ownership, message, appointment or delivery writes.
 - No migration, AI prompt/intent, booking/availability rule, Telegram

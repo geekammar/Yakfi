@@ -17,8 +17,12 @@
   hidden pause, focus/online revalidation, cleanup, bounded backoff and
   last-good retention; merge preserves draft/draft identity, pending/unknown
   attempts, unsaved summaries, mobile selection and scroll; stale/navigation
-  responses are ignored. No migration and no delivery/booking/AI/pricing
-  behavior change.
+  responses are ignored. Review follow-up removes content-based message
+  matching (authoritative id only), defers snapshots during unresolved local
+  mutations, reconciles optimistic rows only through the returned `messageId`,
+  and protects newer summary edits across in-flight saves with exception-safe
+  lifecycle release. No migration and no delivery/booking/AI/pricing behavior
+  change.
 - Automated verification: GitHub Actions run `43751606013` passed PR Quality
   Gates and the Playwright UX QA suite on the implementation HEAD; the final
   documentation-only commit is revalidated by the PR CI run. Later Muse
