@@ -22,7 +22,6 @@ import {
 } from "@/features/conversations/lib/storage";
 import type {
   ConversationDetailData,
-  ConversationRefreshData,
   StaffReplyActionResult,
   StaffReplyStatusActionResult,
 } from "@/features/conversations/types";
