@@ -211,6 +211,46 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
       key: "flowpilot.disclosure_allowed",
       value: { boolValue: record.disclosureAllowed ?? false },
     },
+    ...(record.disclosureDeclaredIntent !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_declared_intent",
+            value: { stringValue: record.disclosureDeclaredIntent },
+          },
+        ]
+      : []),
+    ...(record.disclosureProposedFamily !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_proposed_family",
+            value: { stringValue: record.disclosureProposedFamily },
+          },
+        ]
+      : []),
+    ...(record.disclosureProposalStatus !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_proposal_status",
+            value: { stringValue: record.disclosureProposalStatus },
+          },
+        ]
+      : []),
+    ...(record.disclosureLedgerIncluded !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_ledger_included",
+            value: { boolValue: record.disclosureLedgerIncluded },
+          },
+        ]
+      : []),
+    ...(record.disclosureLedgerDisclosable !== null
+      ? [
+          {
+            key: "flowpilot.disclosure_ledger_disclosable",
+            value: { boolValue: record.disclosureLedgerDisclosable },
+          },
+        ]
+      : []),
     {
       key: "flowpilot.final_outcome",
       value: { stringValue: record.finalOutcome },

@@ -26,8 +26,11 @@
  *   knowledgeSourceClass[] · provider · model · providerAttempts ·
  *   providerStatus · providerLatencyMs · inputTokens · outputTokens ·
  *   parseSuccess · disclosureChannel · disclosureAllowed ·
- *   disclosureRefusalReason · knowledgeGapCategory · finalOutcome ·
- *   outboundSendAttempted · outboundSendDelivered · emittedAt
+ *   disclosureRefusalReason · disclosureDeclaredIntent ·
+ *   disclosureProposedFamily · disclosureProposalStatus ·
+ *   disclosureLedgerIncluded · disclosureLedgerDisclosable ·
+ *   knowledgeGapCategory · finalOutcome · outboundSendAttempted ·
+ *   outboundSendDelivered · emittedAt
  *
  * The token counters (`inputTokens` / `outputTokens`, PROMPT-AI-PERF-02) are
  * copied AS-IS from the existing attempt-level adapter telemetry the engine
@@ -96,6 +99,17 @@ export type TurnEvidence = {
   readonly disclosureChannel: string | null;
   readonly disclosureAllowed: boolean | null;
   readonly disclosureRefusalReason: string | null;
+  /**
+   * Additive bounded refusal evidence. `disclosureChannel` keeps its legacy
+   * intent-derived semantics; these fields expose the declared intent, the
+   * resolved canonical family (or closed `UNKNOWN`), the proposal status and
+   * the relevant ledger verdicts. No raw model labels/content are carried.
+   */
+  readonly disclosureDeclaredIntent: string | null;
+  readonly disclosureProposedFamily: string | null;
+  readonly disclosureProposalStatus: string | null;
+  readonly disclosureLedgerIncluded: boolean | null;
+  readonly disclosureLedgerDisclosable: boolean | null;
   readonly knowledgeGapCategory: string | null;
   readonly finalOutcome: string;
   readonly outboundSendAttempted: boolean;
@@ -284,6 +298,12 @@ export function buildTurnEvidence(
     disclosureChannel: observability?.disclosure?.channel ?? null,
     disclosureAllowed: observability?.disclosure?.allowed ?? null,
     disclosureRefusalReason: observability?.disclosure?.refusalReason ?? null,
+    disclosureDeclaredIntent: observability?.disclosure?.declaredIntent ?? null,
+    disclosureProposedFamily: observability?.disclosure?.proposedFamily ?? null,
+    disclosureProposalStatus: observability?.disclosure?.proposalStatus ?? null,
+    disclosureLedgerIncluded: observability?.disclosure?.ledgerIncluded ?? null,
+    disclosureLedgerDisclosable:
+      observability?.disclosure?.ledgerDisclosable ?? null,
     knowledgeGapCategory: input.knowledgeGap?.category ?? null,
     finalOutcome: input.duplicate
       ? "DUPLICATE"
@@ -368,6 +388,9 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "providerStatus",
   "disclosureChannel",
   "disclosureRefusalReason",
+  "disclosureDeclaredIntent",
+  "disclosureProposedFamily",
+  "disclosureProposalStatus",
   "knowledgeGapCategory",
   "finalOutcome",
   "emittedAt",

@@ -30,8 +30,11 @@ import type {
   AiFactUpdate,
   AiGoal,
   AiHandoffCause,
+  AiIntent,
   AiResponse,
   AiTurnPlan,
+  DisclosureProposalStatus,
+  ProposedKnowledgeFamilyObservation,
 } from "@/features/conversations/server/ai-contract";
 import {
   synthesizeDecisionGoals,
@@ -88,9 +91,34 @@ export type TurnContextChannels = {
  * only — never reply text, never policy internals surfaced to a customer.
  */
 export type TurnDisclosureObservation = {
+  /**
+   * LEGACY field — its historical semantics are preserved exactly:
+   * a disclosed reply reports the ledger family that backed it; a refusal
+   * reports the intent-derived primary family (or `declared-intent`), which
+   * is NOT necessarily the model's proposed family.
+   */
   readonly channel: string;
   readonly allowed: boolean;
   readonly refusalReason?: string;
+  /**
+   * Additive refusal evidence: the validated intent that declared the reply.
+   * Populated on gate consultation; closed AiIntent value only.
+   */
+  readonly declaredIntent?: AiIntent;
+  /**
+   * Additive refusal evidence: the resolved canonical family, the closed
+   * `UNKNOWN` sentinel for an unrecognized structured label, or null when the
+   * proposal was missing/conflicting. Never the raw model label.
+   */
+  readonly proposedFamily?: ProposedKnowledgeFamilyObservation;
+  /** Additive refusal evidence: how the family proposal resolved. */
+  readonly proposalStatus?: DisclosureProposalStatus;
+  /**
+   * Additive refusal evidence: the relevant ledger record's verdicts when the
+   * refusal concerned a concrete family; null when not applicable.
+   */
+  readonly ledgerIncluded?: boolean | null;
+  readonly ledgerDisclosable?: boolean | null;
 };
 
 /**

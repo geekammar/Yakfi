@@ -140,6 +140,7 @@ jobs:
           pnpm check:temporal-correction-authority
           pnpm check:unknown-information-handoff
           pnpm check:safe-telegram-reply
+          pnpm check:ai-disclosure
           pnpm check:ai-provider
           pnpm check:conversation-control
           pnpm check:provider-failure-diagnostics

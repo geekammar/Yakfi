@@ -55,6 +55,7 @@ import {
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
 } from "../src/features/conversations/server/ai-disclosure";
+import { SAFE_HANDOFF_REPLIES } from "../src/features/conversations/server/conversation-ai";
 import {
   AI_MUST_NOT_RESOLVE_CONFLICTS,
   mostRestrictive,
@@ -149,7 +150,16 @@ function emptyExtraction() {
 }
 
 /** A self-authored reply (the only reply shape the assistant emits today). */
-function replyOf(intent: AiResponse["intent"], content: string): AiResponse {
+function replyOf(
+  intent: AiResponse["intent"],
+  content: string,
+  proposal?: {
+    requiredKnowledge?: string;
+    knowledgeRef?: AiResponse["knowledgeRef"];
+    sourceId?: string | null;
+    goals?: AiResponse["goals"];
+  },
+): AiResponse {
   return {
     intent,
     action: "reply",
@@ -157,6 +167,16 @@ function replyOf(intent: AiResponse["intent"], content: string): AiResponse {
     extraction: emptyExtraction(),
     handoffReason: null,
     summary: null,
+    ...(proposal?.requiredKnowledge
+      ? { requiredKnowledge: proposal.requiredKnowledge }
+      : {}),
+    ...(proposal?.knowledgeRef !== undefined
+      ? { knowledgeRef: proposal.knowledgeRef }
+      : {}),
+    ...(proposal?.sourceId !== undefined
+      ? { sourceId: proposal.sourceId }
+      : {}),
+    ...(proposal?.goals !== undefined ? { goals: proposal.goals } : {}),
   };
 }
 
@@ -228,6 +248,7 @@ async function main(): Promise<void> {
         "FORBIDDEN_FACT_IN_CONTEXT",
         "NOT_DISCLOSABLE",
         "UNAVAILABLE_IN_REQUEST",
+        "UNKNOWN_KNOWLEDGE_FAMILY",
       ].sort(),
     ),
   );
@@ -258,9 +279,13 @@ async function main(): Promise<void> {
   );
 
   // ── 1 / 14 / 20. PUBLIC disclosure, unchanged answer, message preserved ───
+  const faqProposal = {
+    requiredKnowledge: "business.faqs",
+    sourceId: "faq-0",
+  } as const;
   const faqTurn = gateReply({
     message: "كم سعر تنظيف الأسنان؟",
-    reply: replyOf("FAQ", SAFE_ANSWER),
+    reply: replyOf("FAQ", SAFE_ANSWER, faqProposal),
   });
   check(
     "1. حقيقة عامة (مخزن الأسئلة) تُفصح عنها — الرد مُصرَّح",
@@ -274,7 +299,10 @@ async function main(): Promise<void> {
     "14. رد آمن يُمرَّر كما هو تماماً (الحدّ لا يحرّف النص)",
     faqTurn.decision.kind === "disclosed" &&
       eq(faqTurn.decision.response.content, SAFE_ANSWER) &&
-      deepEq(faqTurn.decision.response, replyOf("FAQ", SAFE_ANSWER)),
+      deepEq(
+        faqTurn.decision.response,
+        replyOf("FAQ", SAFE_ANSWER, faqProposal),
+      ),
   );
   check(
     "20. رسالة العميل تُحفظ كما هي في الطلب (حقيقة عامة)",
@@ -290,7 +318,9 @@ async function main(): Promise<void> {
   const aboutTurn = gateReply({
     message: "احكيلي عن العيادة",
     sources: { business: businessSources({ faqs: [] }) },
-    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان"),
+    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان", {
+      requiredKnowledge: "business.about",
+    }),
   });
   check(
     "1b. رد FAQ مدعوم بقناة «عن المنشأة» (مخزن فارغ) — يُفصح",
@@ -306,7 +336,9 @@ async function main(): Promise<void> {
   const aboutOffTaskTurn = gateReply({
     message: "عايز أحجز موعد",
     sources: { business: businessSources({ faqs: [] }) },
-    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان"),
+    reply: replyOf("FAQ", "عيادة متخصصة في طب وتجميل الأسنان", {
+      requiredKnowledge: "business.about",
+    }),
   });
   check(
     "1c. قناة «عن المنشأة» غير محمولة في دور غير ذي صلة — رفض (لا اختراع)",
@@ -324,7 +356,10 @@ async function main(): Promise<void> {
         serviceFact("تنظيف الأسنان", { description: "تنظيف وتلميع الأسنان" }),
       ],
     },
-    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان"),
+    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان", {
+      requiredKnowledge: "service.description",
+      sourceId: "تنظيف الأسنان",
+    }),
   });
   check(
     "1d. رد FAQ مدعوم بقناة «وصف الخدمة» (مخزن فارغ) — يُفصح",
@@ -348,7 +383,10 @@ async function main(): Promise<void> {
         serviceFact("تنظيف الأسنان", { description: "تنظيف وتلميع الأسنان" }),
       ],
     },
-    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان"),
+    reply: replyOf("FAQ", "تنظيف وتلميع الأسنان", {
+      requiredKnowledge: "service.description",
+      sourceId: "تنظيف الأسنان",
+    }),
   });
   check(
     "1e. قناة «وصف الخدمة» غير محمولة في دور غير ذي صلة — رفض",
@@ -363,7 +401,10 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [] }),
       services: [serviceFact("حشو الأسنان")], // description null
     },
-    reply: replyOf("FAQ", "حشو تجميلي"),
+    reply: replyOf("FAQ", "حشو تجميلي", {
+      requiredKnowledge: "service.description",
+      sourceId: "حشو الأسنان",
+    }),
   });
   check(
     "1f. وصف مفقود على دور تفاصيل = تحويل لبشري (لا اختراع وصف)",
@@ -387,7 +428,9 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [], about: "" }),
       services: [serviceFact("تنظيف الأسنان"), serviceFact("حشو الأسنان")],
     },
-    reply: replyOf("FAQ", "نقدم تنظيف الأسنان وحشو الأسنان."),
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان وحشو الأسنان.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "1g. رد «قائمة الخدمات» مدعوم بأسماء الكتالوج المحمّلة (مخزن فارغ) — يُفصح ويبقى AI_ACTIVE",
@@ -412,7 +455,9 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [], about: "" }),
       services: [serviceFact("تنظيف الأسنان")],
     },
-    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "1g-bis. صيغة «الخدمات» بالتعريف تُفعّل عائلة أسماء الكتالوج أيضاً",
@@ -434,7 +479,9 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [], about: "" }),
       services: [serviceFact("تنظيف الأسنان")],
     },
-    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "1h. عائلة أسماء الكتالوج غير مسلّحة في دور غير الكتالوج — رفض (تبقى الأسماء في الكتالوج)",
@@ -452,7 +499,9 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [], about: "" }),
       services: [serviceFact("تنظيف الأسنان")],
     },
-    reply: replyOf("FAQ", "المركز في القاهرة ونعمل من 10 لـ 6."),
+    reply: replyOf("FAQ", "المركز في القاهرة ونعمل من 10 لـ 6.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "1i. رد موقع/مواعيد على دور غير الكتالوج يُرفض رغم حمل الأسماء (لا تسرّب معلومات مخترعة)",
@@ -467,7 +516,9 @@ async function main(): Promise<void> {
       business: businessSources({ faqs: [], about: "" }),
       services: [],
     },
-    reply: replyOf("FAQ", "نقدم تنظيف الأسنان."),
+    reply: replyOf("FAQ", "نقدم تنظيف الأسنان.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "1j. كتالوج فارغ على دور قائمة خدمات = تحويل لبشري (لا اختراع خدمة)",
@@ -486,7 +537,9 @@ async function main(): Promise<void> {
   const identityTurn = gateReply({
     message: "ما اسم العيادة؟",
     sources: { business: businessSources({ faqs: [], about: "" }) },
-    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور لطب الأسنان."),
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور لطب الأسنان.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   check(
     "1k. سؤال هوية يُجاب من اسم المنشأة المعتمد (مخزن فارغ) — يُفصح",
@@ -506,12 +559,16 @@ async function main(): Promise<void> {
   const colloquialIdentityTurn = gateReply({
     message: "إيه اسمك؟",
     sources: { business: businessSources({ faqs: [], about: "" }) },
-    reply: replyOf("FAQ", "اسمي عيادة النور لطب الأسنان."),
+    reply: replyOf("FAQ", "اسمي عيادة النور لطب الأسنان.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   const whoIdentityTurn = gateReply({
     message: "انتو مين؟",
     sources: { business: businessSources({ faqs: [], about: "" }) },
-    reply: replyOf("FAQ", "إحنا عيادة النور لطب الأسنان."),
+    reply: replyOf("FAQ", "إحنا عيادة النور لطب الأسنان.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   check(
     "1l. صيغتا «إيه اسمك؟» و«انتو مين؟» تُسلّحان قناة الاسم أيضاً",
@@ -542,7 +599,9 @@ async function main(): Promise<void> {
   const missingNameTurn = gateReply({
     message: "ما اسم العيادة؟",
     sources: { business: businessSources({ faqs: [], about: "", name: "" }) },
-    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور."),
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   check(
     "1n. اسم المنشأة غائب ⇒ لا قناة محمولة ⇒ تحويل بشري (لا اختراع اسم)",
@@ -586,7 +645,9 @@ async function main(): Promise<void> {
         businessId: TENANT_B,
       }),
     },
-    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور."),
+    reply: replyOf("FAQ", "اسم العيادة هو عيادة النور.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   check(
     "1p. سجل منشأة أخرى لا يسند رد هوية (لا اسم محمول، عزل المستأجرين)",
@@ -609,7 +670,9 @@ async function main(): Promise<void> {
         address: "القاهرة — شارع الجمهورية",
       }),
     },
-    reply: replyOf("FAQ", "عيادة النور لطب الأسنان."),
+    reply: replyOf("FAQ", "عيادة النور لطب الأسنان.", {
+      requiredKnowledge: "business.identity",
+    }),
   });
   const addressTurn = gateReply({
     message: "العنوان فين؟",
@@ -620,7 +683,9 @@ async function main(): Promise<void> {
         address: "القاهرة — شارع الجمهورية",
       }),
     },
-    reply: replyOf("FAQ", "القاهرة — شارع الجمهورية."),
+    reply: replyOf("FAQ", "القاهرة — شارع الجمهورية.", {
+      requiredKnowledge: "business.address",
+    }),
   });
   check(
     "1q. سؤال الهوية لا يُفعّل قنوات «عن المنشأة/العنوان» (كل قناة على بوّابتها)",
@@ -653,33 +718,53 @@ async function main(): Promise<void> {
     sources: {
       availability: [{ date: "2026-09-28", slots: ["10:00", "11:00"] }],
     },
-    reply: replyOf("AVAILABILITY", "المواعيد المتاحة: 10:00 أو 11:00."),
+    reply: replyOf("FAQ", "المواعيد المتاحة: 10:00 أو 11:00.", {
+      requiredKnowledge: "domain.availability",
+    }),
   });
   check(
-    "3a. حقيقة شرطية (التوفر) تُفصح عند صلة المهمة بها",
-    eq(bookingTurn.decision.kind, "disclosed") &&
+    "3a. التوفر مملوك للنطاق: رد نموذج يصرّح domain.availability يُرفض حتى مع توفره",
+    eq(bookingTurn.decision.kind, "requires-human") &&
+      eq(
+        bookingTurn.decision.kind === "requires-human"
+          ? bookingTurn.decision.reason
+          : null,
+        "NOT_DISCLOSABLE",
+      ) &&
       eq(record(bookingTurn, "domain.availability")?.included, true) &&
       eq(record(bookingTurn, "domain.availability")?.disclosable, true) &&
-      eq(bookingTurn.request.availability?.[0]?.date, "2026-09-28"),
+      eq(bookingTurn.request.availability?.[0]?.date, "2026-09-28") &&
+      eq(
+        bookingTurn.decision.kind === "requires-human"
+          ? bookingTurn.decision.diagnostics.proposedFamily
+          : null,
+        "domain.availability",
+      ),
   );
-  // Same availability supplied, but the turn is NOT a booking ask and the
-  // knowledge store carries nothing → the fact is excluded, so a reply
-  // declaring it cannot be emitted.
+  // The builder treats supplied domain availability as an active booking
+  // signal (hasActiveBooking in the legacy relevance path), so the fact is
+  // carried. The gate MUST still refuse a model-authored availability reply:
+  // being carried never transfers domain authority to the model.
   const offTaskTurn = gateReply({
     message: "بماذا تفعلون؟",
     sources: {
       business: businessSources({ faqs: [] }),
       availability: [{ date: "2026-09-28", slots: ["10:00"] }],
     },
-    reply: replyOf("AVAILABILITY", "المواعيد المتاحة: 10:00."),
+    reply: replyOf("FAQ", "المواعيد المتاحة: 10:00.", {
+      requiredKnowledge: "domain.availability",
+    }),
   });
   check(
-    "3b. حقيقة شرطية بلا صلة بالمهمة لا تُفصح (استبعاد، لا تحميل استباقي)",
+    "3b. التوفر المحمّل يبقى مملوكاً للنطاق: رد النموذج يُرفض رغم تضمينه",
     eq(offTaskTurn.decision.kind, "requires-human") &&
-      eq(record(offTaskTurn, "domain.availability")?.included, false) &&
+      eq(record(offTaskTurn, "domain.availability")?.included, true) &&
+      eq(record(offTaskTurn, "domain.availability")?.disclosable, true) &&
       eq(
-        record(offTaskTurn, "domain.availability")?.omissionReason,
-        "NOT_TASK_RELEVANT",
+        offTaskTurn.decision.kind === "requires-human"
+          ? offTaskTurn.decision.reason
+          : null,
+        "NOT_DISCLOSABLE",
       ),
   );
 
@@ -698,7 +783,10 @@ async function main(): Promise<void> {
     faqs: [{ question: "سؤال", answer: "جواب" }],
   };
   const internalDecision = enforceDisclosure({
-    response: replyOf("FAQ", "نعمل من 10 إلى 6."),
+    response: replyOf("FAQ", "نعمل من 10 إلى 6.", {
+      requiredKnowledge: "business.faqs",
+      sourceId: "سؤال",
+    }),
     context: { request: requestWithStore, facts: internalLedger },
   });
   check(
@@ -761,7 +849,10 @@ async function main(): Promise<void> {
   const poisonedTurn = gateReply({
     message: "كم السعر؟",
     sources: { business: poisonedBusiness },
-    reply: replyOf("FAQ", SAFE_ANSWER),
+    reply: replyOf("FAQ", SAFE_ANSWER, {
+      requiredKnowledge: "business.faqs",
+      sourceId: "faq-0",
+    }),
   });
   const poisonedRequestJson = JSON.stringify(poisonedTurn.request);
   const poisonedResponseJson = JSON.stringify(
@@ -797,6 +888,8 @@ async function main(): Promise<void> {
           "handoffReason",
           "intent",
           "summary",
+          "requiredKnowledge",
+          "sourceId",
         ].sort(),
       ) &&
       !poisonedRequestJson.includes("visibility") &&
@@ -830,7 +923,9 @@ async function main(): Promise<void> {
       ],
       conversation: { status: "AI_ACTIVE", recentMessages: [] },
     },
-    reply: replyOf("FAQ", "نقدم خدمة المنشأة الأخرى."),
+    reply: replyOf("FAQ", "نقدم خدمة المنشأة الأخرى.", {
+      requiredKnowledge: "service.name",
+    }),
   });
   check(
     "2/10. حقائق المنشأة الأخرى العامة لا تسند رداً (استبعاد، لا تسريب)",
@@ -872,7 +967,10 @@ async function main(): Promise<void> {
       eq(emptyScopeTurn.decision.kind, "requires-human"),
   );
   const emptyLedgerDecision = enforceDisclosure({
-    response: replyOf("FAQ", SAFE_ANSWER),
+    response: replyOf("FAQ", SAFE_ANSWER, {
+      requiredKnowledge: "business.faqs",
+      sourceId: "سؤال",
+    }),
     context: { request: requestWithStore, facts: [] },
   });
   check(
@@ -894,7 +992,10 @@ async function main(): Promise<void> {
       eq(mostRestrictive(["PUBLIC", "CONDITIONAL", "FORBIDDEN"]), "FORBIDDEN"),
   );
   const conflictDecision = enforceDisclosure({
-    response: replyOf("FAQ", "الجواب حسب المصدر الأكثر تقييداً."),
+    response: replyOf("FAQ", "الجواب حسب المصدر الأكثر تقييداً.", {
+      requiredKnowledge: "business.faqs",
+      sourceId: "سؤال",
+    }),
     // The merged outcome of a conflict is the MOST restrictive level (B-01),
     // which is never disclosable — the gate obeys the recorded verdict.
     context: {
@@ -1025,7 +1126,16 @@ async function main(): Promise<void> {
     faqs: Array<{ question: string; answer: string }>;
     ai:
       | { kind: "throw" }
-      | { kind: "reply"; content: string; intent: AiResponse["intent"] };
+      | {
+          kind: "reply";
+          content: string;
+          intent: AiResponse["intent"];
+          proposal?: {
+            requiredKnowledge?: string;
+            knowledgeRef?: AiResponse["knowledgeRef"];
+            sourceId?: string | null;
+          };
+        };
   }): Promise<RunResult> {
     const messages: Array<{
       senderType: string;
@@ -1124,7 +1234,10 @@ async function main(): Promise<void> {
           if (opts.ai.kind === "throw") {
             throw new Error("provider down");
           }
-          return replyOf(opts.ai.intent, opts.ai.content);
+          return {
+            ...replyOf(opts.ai.intent, opts.ai.content, opts.ai.proposal),
+            safetyAssessment: "safe",
+          };
         },
       },
       transport: {
@@ -1198,7 +1311,7 @@ async function main(): Promise<void> {
       !refused.aiMessages.includes(LEAKY_REPLY) &&
       // …but exactly one safe deterministic acknowledgment is persisted…
       eq(refused.aiMessages.length, 1) &&
-      refused.aiMessages[0]!.includes("سيرد عليك أحد أعضاء الفريق") &&
+      refused.aiMessages[0] === SAFE_HANDOFF_REPLIES.DISCLOSURE_REFUSED &&
       // …and delivered (never silence).
       eq(refused.sent.length, 1) &&
       refused.sent[0] === refused.aiMessages[0],
@@ -1208,7 +1321,15 @@ async function main(): Promise<void> {
   const safe = await runTurn({
     text: "كم سعر تنظيف الأسنان؟",
     faqs: [{ question: "كم سعر تنظيف الأسنان؟", answer: SAFE_ANSWER }],
-    ai: { kind: "reply", content: SAFE_ANSWER, intent: "FAQ" },
+    ai: {
+      kind: "reply",
+      content: SAFE_ANSWER,
+      intent: "FAQ",
+      proposal: {
+        requiredKnowledge: "business.faqs",
+        sourceId: "faq-0",
+      },
+    },
   });
   check(
     "13c/14. الرد الآمن المُسنَد يُرسل كما هو (AI_REPLY + AI_ACTIVE)",
@@ -1236,20 +1357,24 @@ async function main(): Promise<void> {
   // (e) GREETING (DECISIONS #61) — a knowledge-free social protocol. The
   //     gate passes it by DECLARED INTENT, never by inspecting text: even
   //     on an EMPTY knowledge store the turn stays AI_ACTIVE and answers
-  //     with the fixed acknowledgment (no invention, no handoff). The
-  //     engine's deterministic bypass produced it, so ZERO LLM calls were
-  //     spent and no AI_TURN usage fact exists.
+  //     (no invention, no handoff). The production default is the structured
+  //     generative path, so this fixture spends at most the one allowed call;
+  //     the disclosure decision is still intent-based, not lexical.
   const greeting = await runTurn({
     text: "السلام عليكم",
     faqs: [], // no knowledge store at all — still safe to greet
-    ai: { kind: "reply", content: "رد ترحيبي", intent: "GREETING" },
+    ai: {
+      kind: "reply",
+      content: "وعليكم السلام ورحمة الله وبركاته",
+      intent: "GREETING",
+    },
   });
   check(
     "13e. GREETING تُفصح بلا معرفة مساندة — AI_REPLY + AI_ACTIVE ولا تحويل",
     eq(greeting.assistantAction, "AI_REPLY") &&
       eq(greeting.conversationStatus, "AI_ACTIVE") &&
       greeting.aiMessages.length === 1 &&
-      greeting.aiCalls === 0, // deterministic bypass: no provider call
+      greeting.aiCalls <= 1, // zero-or-one model-call invariant
   );
   check(
     "13f. ترحيب GREETING لا يدّعي البشرية ولا يخترع معلومات",
@@ -1288,7 +1413,7 @@ async function main(): Promise<void> {
     ),
   );
   const again = enforceDisclosure({
-    response: replyOf("FAQ", SAFE_ANSWER),
+    response: replyOf("FAQ", SAFE_ANSWER, faqProposal),
     context: { request: faqTurn.request, facts: faqTurn.facts },
   });
   check(

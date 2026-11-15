@@ -9102,8 +9102,15 @@ async function runInboundTurn(
             : (TASK_SUPPORT_FAMILIES[validated.intent].family ??
               "declared-intent"),
         allowed: disclosure.kind === "disclosed",
+        declaredIntent: validated.intent,
         ...(disclosure.kind === "requires-human"
-          ? { refusalReason: disclosure.reason }
+          ? {
+              refusalReason: disclosure.reason,
+              proposedFamily: disclosure.diagnostics.proposedFamily,
+              proposalStatus: disclosure.diagnostics.proposalStatus,
+              ledgerIncluded: disclosure.diagnostics.ledgerIncluded,
+              ledgerDisclosable: disclosure.diagnostics.ledgerDisclosable,
+            }
           : {}),
       },
     };
