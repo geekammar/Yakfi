@@ -39,12 +39,12 @@ no free-text keyword/regex/substring intent matching.
 
 - Branch: `integration/staff-delivery-knowledge-contract`, based on `main`
   `49d58c5`, package version `v0.79.10` (draft PR, not merged or deployed).
-- The branch integrates the exact reviewed commits:
-  - PR #79 `1a11f35bf53b11f1ebb5da364b4205524353cf1c`
-    (`fix/safe-telegram-staff-reply-delivery`);
-  - PR #82 `207596839e9af51944c876397c7cf7d14775bd9d`
-    (`fix/knowledge-family-disclosure-contract`).
-  The original branches were neither edited, rebased nor force-pushed.
+- Integrated reviewed commits: PR #79
+  `1a11f35bf53b11f1ebb5da364b4205524353cf1c`
+  (`fix/safe-telegram-staff-reply-delivery`) and PR #82
+  `207596839e9af51944c876397c7cf7d14775bd9d`
+  (`fix/knowledge-family-disclosure-contract`). The original branches were
+  neither edited, rebased nor force-pushed.
 - Retained PR #79 behavior (decision #105, original meaning): authenticated
   Telegram ingress and compatible-thread selection, immutable
   `ConversationDeliveryRoute` delivery routes, durable
