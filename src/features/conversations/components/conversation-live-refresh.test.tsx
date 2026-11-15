@@ -515,7 +515,6 @@ describe("ConversationDetail live refresh (open thread)", () => {
     expect(refreshConversationDetail).toHaveBeenCalledTimes(2);
   });
 
-
   it("never conflates independent STAFF messages that share identical text", () => {
     const optimistic = {
       id: "optimistic-staff-1",
@@ -599,7 +598,9 @@ describe("ConversationDetail live refresh (open thread)", () => {
     // replace the optimistic row.
     await advance(5_000);
     expect(
-      container.querySelector('[aria-label="حالة المحادثة: المساعد الذكي نشط"]'),
+      container.querySelector(
+        '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+      ),
     ).not.toBeNull();
     expect(logMessageTexts().filter((text) => text === content)).toHaveLength(
       1,
@@ -642,7 +643,9 @@ describe("ConversationDetail live refresh (open thread)", () => {
       2,
     );
     expect(
-      container.querySelector('[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]'),
+      container.querySelector(
+        '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
+      ),
     ).not.toBeNull();
     expect(attemptId).not.toBe("authoritative-staff-row");
 
@@ -830,7 +833,9 @@ describe("ConversationDetail live refresh (open thread)", () => {
     });
     await advance(5_000);
     expect(
-      container.querySelector('[aria-label="حالة المحادثة: المساعد الذكي نشط"]'),
+      container.querySelector(
+        '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+      ),
     ).not.toBeNull();
 
     await act(async () => {

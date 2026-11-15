@@ -80,10 +80,7 @@ export function mergeConversationRefresh(
     messages:
       optimisticIds.size > 0
         ? current.messages
-        : mergeConversationRefreshMessages(
-            current.messages,
-            refresh.messages,
-          ),
+        : mergeConversationRefreshMessages(current.messages, refresh.messages),
     appointments: refresh.appointments,
     team: refresh.team,
   };
