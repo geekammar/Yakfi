@@ -258,6 +258,7 @@ Docs:
 - scripts/check-appointment-calendar-dates.ts
 - scripts/check-safe-telegram-reply.ts
 - src/features/conversations/components/conversation-detail.test.tsx
+- src/features/conversations/components/conversation-live-refresh.test.tsx
 - src/features/conversations/server/conversation-refresh.test.tsx
 - tests/e2e/conversation-live-refresh.spec.ts
 

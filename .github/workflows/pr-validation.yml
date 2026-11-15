@@ -157,6 +157,7 @@ jobs:
           pnpm check:appointment-calendar-dates
           pnpm check:ui-accessibility
           pnpm test:conversation-detail
+          pnpm test:conversation-live-refresh
           pnpm test:conversation-refresh
           pnpm test:staff-workspace
           pnpm test:provider-dialog
