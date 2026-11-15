@@ -185,8 +185,7 @@ async function main(): Promise<void> {
       ) &&
       preflightLines.every(
         (line) =>
-          !line.includes("db-secret-sentinel") &&
-          !line.includes(MASTER_VALUE),
+          !line.includes("db-secret-sentinel") && !line.includes(MASTER_VALUE),
       ),
   );
 
@@ -240,8 +239,7 @@ async function main(): Promise<void> {
       ) &&
       applyLines.every(
         (line) =>
-          !line.includes("db-secret-sentinel") &&
-          !line.includes(MASTER_VALUE),
+          !line.includes("db-secret-sentinel") && !line.includes(MASTER_VALUE),
       ),
   );
 
@@ -294,7 +292,12 @@ async function main(): Promise<void> {
     {
       operation: "apply",
       values: {
-        DATABASE_URL: ["postgresql", "://user:pass@", "evil.example", "/neondb?sslmode=require"].join(""),
+        DATABASE_URL: [
+          "postgresql",
+          "://user:pass@",
+          "evil.example",
+          "/neondb?sslmode=require",
+        ].join(""),
         CREDENTIAL_MASTER_KEY: MASTER_VALUE,
       },
     },
@@ -304,7 +307,10 @@ async function main(): Promise<void> {
     "P10. Invalid master-key format fails before PATCH without claiming decryption",
     {
       operation: "apply",
-      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: "not-a-valid-key" },
+      values: {
+        DATABASE_URL: DATABASE_VALUE,
+        CREDENTIAL_MASTER_KEY: "not-a-valid-key",
+      },
     },
     "MASTER_KEY_UNAVAILABLE_OR_INVALID",
   );
@@ -312,7 +318,10 @@ async function main(): Promise<void> {
     "P11. Mixed Production/Preview scope is rejected before any PATCH",
     {
       operation: "apply",
-      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: MASTER_VALUE },
+      values: {
+        DATABASE_URL: DATABASE_VALUE,
+        CREDENTIAL_MASTER_KEY: MASTER_VALUE,
+      },
       envs: [
         ...baseEnvs().filter((e) => e.id !== "env-db-production"),
         {

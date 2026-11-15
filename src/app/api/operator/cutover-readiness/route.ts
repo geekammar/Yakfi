@@ -1,5 +1,6 @@
-import pkg from "../../../../../package.json";
 import { checkCutoverReadiness } from "@/server/operator/cutover-readiness";
+
+import pkg from "../../../../../package.json";
 
 export const dynamic = "force-dynamic";
 

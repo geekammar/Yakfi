@@ -33,9 +33,7 @@ type ReadinessDeps = {
     "findByIdWithinBusiness"
   >;
   credentialsResolver?: Pick<CredentialsResolver, "resolve">;
-  getMe?: (
-    token: string,
-  ) => Promise<TelegramApiResult<TelegramBotUser>>;
+  getMe?: (token: string) => Promise<TelegramApiResult<TelegramBotUser>>;
   getEnvVar?: (name: string) => string | undefined;
   now?: () => number;
 };
@@ -83,15 +81,15 @@ function validConnection(
 ): conn is TelegramConnection & { credentialsRef: string } {
   return Boolean(
     conn &&
-      conn.id === CUTOVER_READINESS_CONNECTION_ID &&
-      conn.businessId === CUTOVER_READINESS_BUSINESS_ID &&
-      conn.botExternalId === CUTOVER_READINESS_BOT_ID &&
-      conn.botUsername?.toLowerCase() ===
-        CUTOVER_READINESS_BOT_USERNAME.toLowerCase() &&
-      conn.status === "CONNECTED" &&
-      conn.isActive &&
-      conn.deletedAt === null &&
-      conn.credentialsRef,
+    conn.id === CUTOVER_READINESS_CONNECTION_ID &&
+    conn.businessId === CUTOVER_READINESS_BUSINESS_ID &&
+    conn.botExternalId === CUTOVER_READINESS_BOT_ID &&
+    conn.botUsername?.toLowerCase() ===
+      CUTOVER_READINESS_BOT_USERNAME.toLowerCase() &&
+    conn.status === "CONNECTED" &&
+    conn.isActive &&
+    conn.deletedAt === null &&
+    conn.credentialsRef,
   );
 }
 
@@ -104,8 +102,7 @@ export async function checkCutoverReadiness(
   deps: ReadinessDeps = {},
 ): Promise<CutoverReadinessOutcome> {
   const now = deps.now ?? Date.now;
-  const getEnvVar =
-    deps.getEnvVar ?? ((name: string) => process.env[name]);
+  const getEnvVar = deps.getEnvVar ?? ((name: string) => process.env[name]);
   const providedBotId =
     request.headers.get("x-flowpilot-cutover-bot-id")?.trim() ?? "";
   const timestamp =

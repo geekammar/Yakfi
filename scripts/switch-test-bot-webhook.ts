@@ -13,10 +13,6 @@ import { fileURLToPath } from "node:url";
 import { isRuntimeCredentialReference } from "../src/lib/validation";
 import type { CredentialsResolver } from "../src/server/credentials/credentials-resolver";
 import {
-  CUTOVER_READINESS_PATH,
-  signCutoverReadiness,
-} from "../src/server/operator/cutover-readiness";
-import {
   RecoveryError,
   validateDatabaseUrl,
 } from "../src/server/credentials/test-bot-recovery";
@@ -24,6 +20,10 @@ import type {
   SwitchTelegramWebhookOutcome,
   SwitchTelegramWebhookParams,
 } from "../src/server/integrations/telegram/telegram-repair";
+import {
+  CUTOVER_READINESS_PATH,
+  signCutoverReadiness,
+} from "../src/server/operator/cutover-readiness";
 
 export const FIXED_TARGETS = {
   businessId: "f5314115-ae8c-46ea-9d7e-080ef5e7366d",
@@ -298,7 +298,11 @@ export async function verifyProductionDestinationReadiness(
     databaseUrl: string;
     cutoverBotToken: string;
   },
-  deps: { fetchImpl?: typeof fetch; timeoutMs?: number; now?: () => number } = {},
+  deps: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    now?: () => number;
+  } = {},
 ): Promise<ProductionDestinationReadiness> {
   const expected = params.expectedCommitSha.trim();
   if (!/^[0-9a-f]{40}$/.test(expected)) {

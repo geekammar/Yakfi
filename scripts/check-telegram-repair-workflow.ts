@@ -597,9 +597,8 @@ fi
     await import("../src/server/credentials/test-bot-recovery");
   const { switchTelegramBotWebhook } =
     await import("../src/server/integrations/telegram/telegram-repair");
-  const { signCutoverReadiness } = await import(
-    "../src/server/operator/cutover-readiness"
-  );
+  const { signCutoverReadiness } =
+    await import("../src/server/operator/cutover-readiness");
 
   // T21. Runner CLI fails closed on unknown operation
   const runnerUnknownOp = runSwitchRunner({
@@ -2089,7 +2088,9 @@ fi
 
   // T64. Production runtime cutover dry-run maps the fixed current URL to Production.
   const cutoverIntegrationSha = "c".repeat(40);
-  const cutoverBotToken = ["8926541123", "cutover", "signing", "sentinel"].join(":");
+  const cutoverBotToken = ["8926541123", "cutover", "signing", "sentinel"].join(
+    ":",
+  );
   const cutoverDryCapture = {
     current: null as SwitchTelegramWebhookParams | null,
   };
@@ -2491,9 +2492,9 @@ fi
     "utf-8",
   );
   const configureEnvJob =
-    (workflowYaml.split("\n  configure-production-runtime-env:")[1] ?? "").split(
-      "\n  recover-test-credential:",
-    )[0] ?? "";
+    (
+      workflowYaml.split("\n  configure-production-runtime-env:")[1] ?? ""
+    ).split("\n  recover-test-credential:")[0] ?? "";
   const runtimeEnvScript = readFileSync(
     "scripts/update-production-runtime-env.ts",
     "utf-8",

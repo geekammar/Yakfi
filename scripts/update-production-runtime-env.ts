@@ -77,7 +77,10 @@ function validateSourcePair(
   DATABASE_URL: string;
   CREDENTIAL_MASTER_KEY: string;
 } {
-  const databaseUrl = requireString(values.DATABASE_URL, "MISSING_DATABASE_URL");
+  const databaseUrl = requireString(
+    values.DATABASE_URL,
+    "MISSING_DATABASE_URL",
+  );
   const masterKey = requireString(
     values.CREDENTIAL_MASTER_KEY,
     "MISSING_CREDENTIAL_MASTER_KEY",

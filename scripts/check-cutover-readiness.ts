@@ -119,7 +119,10 @@ async function main(): Promise<void> {
   );
 
   const stale = await checkCutoverReadiness(
-    request({ ...validHeaders(), "x-flowpilot-cutover-timestamp": String(NOW - 300_000) }),
+    request({
+      ...validHeaders(),
+      "x-flowpilot-cutover-timestamp": String(NOW - 300_000),
+    }),
     { commitSha: "a".repeat(40), version: "0.79.10" },
     deps,
   );
@@ -186,7 +189,10 @@ async function main(): Promise<void> {
   );
 
   const badSignature = await checkCutoverReadiness(
-    request({ ...validHeaders(), "x-flowpilot-cutover-signature": "0".repeat(64) }),
+    request({
+      ...validHeaders(),
+      "x-flowpilot-cutover-signature": "0".repeat(64),
+    }),
     { commitSha: "a".repeat(40), version: "0.79.10" },
     deps,
   );
@@ -249,7 +255,9 @@ async function main(): Promise<void> {
     console.error(`\nFailed ${failed} of ${checks.length} checks.`);
     process.exit(1);
   }
-  console.log(`\nAll ${checks.length}/${checks.length} cutover readiness checks PASSED.`);
+  console.log(
+    `\nAll ${checks.length}/${checks.length} cutover readiness checks PASSED.`,
+  );
 }
 
 main().catch((err) => {
