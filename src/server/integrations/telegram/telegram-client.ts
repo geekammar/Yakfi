@@ -238,7 +238,7 @@ export async function telegramSendMessage(
     replyMarkup?: Record<string, unknown>;
   },
 ): Promise<TelegramApiResult<TelegramSendMessageResult>> {
-  return callTelegramApi<TelegramSendMessageResult>(deps, {
+  const result = await callTelegramApi<TelegramSendMessageResult>(deps, {
     token,
     method: "sendMessage",
     body: {
@@ -247,6 +247,21 @@ export async function telegramSendMessage(
       ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
     },
   });
+  if (!result.ok) return result;
+  if (
+    !result.result ||
+    typeof result.result !== "object" ||
+    typeof result.result.message_id !== "number"
+  ) {
+    return {
+      ok: false,
+      error: new TransportError(
+        "MALFORMED_PROVIDER_PAYLOAD",
+        "استجابة تيليجرام غير صالحة",
+      ),
+    };
+  }
+  return result;
 }
 
 export const TELEGRAM_CUSTOMER_ALLOWED_UPDATES = [

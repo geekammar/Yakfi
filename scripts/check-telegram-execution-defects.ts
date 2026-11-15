@@ -1229,6 +1229,16 @@ async function main(): Promise<void> {
     );
     await Promise.all(scheduledThrowLogger);
 
+    console.log("TEST4 DEBUG", {
+      prodSuppliesLogger,
+      ackWrapperOk: ackWrapperResult?.ok,
+      status: res.status,
+      hasAckFailedLog,
+      hasOutboundSuccessLog,
+      noRawErrorMessageLeak,
+      resThrowLoggerStatus: resThrowLogger.status,
+      loggedEvents,
+    });
     check(
       "4. Production composition supplies logger, safe allowlisted events prevent leakage, non-throwing ACK failure maps to ACK_FAILED, and logger exceptions never abort processing",
       Boolean(
