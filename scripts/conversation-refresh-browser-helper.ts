@@ -1,7 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
-import { auth } from "../src/lib/auth";
+import { randomUUID } from "node:crypto";
+
+import { createLocalAccountIssuer } from "better-auth/db";
+import { hashPassword } from "better-auth/crypto";
+
 import { db } from "../src/server/db";
 
 function isDisposableDatabase(url: string | undefined): boolean {
@@ -20,20 +23,8 @@ function isDisposableDatabase(url: string | undefined): boolean {
   }
 }
 
-async function createSyntheticUser(
-  email: string,
-  password: string,
-  name: string,
-) {
-  await (auth.api.signUpEmail as any)({
-    body: { email, password, name },
-  });
-  const user = await db.user.findUniqueOrThrow({ where: { email } });
-  return user;
-}
-
 async function createFixture(email: string, password: string, name: string) {
-  const user = await createSyntheticUser(email, password, name);
+  const userId = randomUUID();
   const suffix = Date.now().toString(36);
   const phoneSuffix = Date.now().toString().slice(-7);
 
@@ -53,13 +44,27 @@ async function createFixture(email: string, password: string, name: string) {
     where: { id: business.id },
     data: { defaultBranchId: branch.id },
   });
-  await db.user.update({
-    where: { id: user.id },
+  await db.user.create({
     data: {
+      id: userId,
+      name,
+      email,
+      emailVerified: true,
+      image: null,
       businessId: business.id,
       role: "ADMIN",
       isActive: true,
       accountType: "BUSINESS",
+    },
+  });
+  await db.account.create({
+    data: {
+      id: randomUUID(),
+      userId,
+      accountId: userId,
+      providerId: "credential",
+      issuer: createLocalAccountIssuer("credential"),
+      password: await hashPassword(password),
     },
   });
 
@@ -119,7 +124,7 @@ async function createFixture(email: string, password: string, name: string) {
   });
 
   return {
-    userId: user.id,
+    userId,
     businessId: business.id,
     conversationId: conversation.id,
     customerId: customer.id,

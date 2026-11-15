@@ -55,12 +55,9 @@ vi.mock("@/features/conversations/actions/conversation-actions", () => ({
   updateAiSummary,
 }));
 
-vi.mock(
-  "@/features/conversations/actions/conversation-refresh-actions",
-  () => ({
-    refreshConversationDetail,
-  }),
-);
+vi.mock("@/features/conversations/actions/conversation-refresh-actions", () => {
+  return { refreshConversationDetail };
+});
 
 const mockData: ConversationDetailData = {
   id: "conv-test-1",
@@ -2949,6 +2946,11 @@ describe("ConversationDetail live refresh (open thread)", () => {
     if (container.parentNode) document.body.removeChild(container);
   });
 
+  type SuccessfulRefresh = {
+    success: true;
+    data: ConversationRefreshData;
+  };
+
   function refreshSnapshot(
     overrides: Partial<ConversationRefreshData> = {},
   ): ConversationRefreshData {
@@ -3178,14 +3180,8 @@ describe("ConversationDetail live refresh (open thread)", () => {
   });
 
   it("ignores an older refresh response after a newer local action result", async () => {
-    let resolveRefresh: (value: {
-      success: true;
-      data: ConversationRefreshData;
-    }) => void = () => {};
-    const refreshPromise = new Promise<{
-      success: true;
-      data: ConversationRefreshData;
-    }>((res) => {
+    let resolveRefresh: (value: SuccessfulRefresh) => void = () => {};
+    const refreshPromise = new Promise<SuccessfulRefresh>((res) => {
       resolveRefresh = res;
     });
     refreshConversationDetail.mockReturnValueOnce(refreshPromise);
@@ -3247,14 +3243,8 @@ describe("ConversationDetail live refresh (open thread)", () => {
   });
 
   it("ignores a refresh that completes after navigation/unmount", async () => {
-    let resolveRefresh: (value: {
-      success: true;
-      data: ConversationRefreshData;
-    }) => void = () => {};
-    const refreshPromise = new Promise<{
-      success: true;
-      data: ConversationRefreshData;
-    }>((res) => {
+    let resolveRefresh: (value: SuccessfulRefresh) => void = () => {};
+    const refreshPromise = new Promise<SuccessfulRefresh>((res) => {
       resolveRefresh = res;
     });
     refreshConversationDetail.mockReturnValueOnce(refreshPromise);
@@ -3311,14 +3301,8 @@ describe("ConversationDetail live refresh (open thread)", () => {
   });
 
   it("pauses while hidden, refreshes on visibility/focus, never overlaps and cleans up on unmount", async () => {
-    let resolveFirst: (value: {
-      success: true;
-      data: ConversationRefreshData;
-    }) => void = () => {};
-    const firstPromise = new Promise<{
-      success: true;
-      data: ConversationRefreshData;
-    }>((res) => {
+    let resolveFirst: (value: SuccessfulRefresh) => void = () => {};
+    const firstPromise = new Promise<SuccessfulRefresh>((res) => {
       resolveFirst = res;
     });
     refreshConversationDetail.mockReturnValueOnce(firstPromise);

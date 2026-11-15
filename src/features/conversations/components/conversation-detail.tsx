@@ -568,8 +568,7 @@ export function ConversationDetail({
         if (result.data.id !== requestConversationId) return;
 
         const previousServerSummary = serverSummaryRef.current;
-        const hasUnsavedSummary =
-          summaryRef.current !== previousServerSummary;
+        const hasUnsavedSummary = summaryRef.current !== previousServerSummary;
 
         setData((current) =>
           mergeConversationRefresh(
