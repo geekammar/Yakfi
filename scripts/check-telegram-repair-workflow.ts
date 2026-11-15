@@ -1763,6 +1763,8 @@ fi
     log: (...args: unknown[]) => transferState.out.push(args.join(" ")),
     error: (...args: unknown[]) => transferState.out.push(args.join(" ")),
   };
+  const lastTransferParams = (): SwitchTelegramWebhookParams | undefined =>
+    transferState.lastParams as SwitchTelegramWebhookParams | undefined;
   const transferDeps = (ready = true) => ({
     verifyDestination: async (params: {
       kind: string;
@@ -1840,12 +1842,12 @@ fi
       transferState.healthCalls[0]?.kind === "integrated-preview" &&
       transferState.healthCalls[0]?.expectedCommitSha ===
         previewIntegrationSha &&
-      transferState.lastParams?.expectedCurrentUrl ===
+      lastTransferParams()?.expectedCurrentUrl ===
         FIXED_TARGETS.previewWebhookUrl &&
-      transferState.lastParams?.destinationUrl ===
+      lastTransferParams()?.destinationUrl ===
         FIXED_TARGETS.integratedPreviewWebhookUrl &&
-      transferState.lastParams?.apply === false &&
-      transferState.lastParams?.allowAlreadyAtDestination === true &&
+      lastTransferParams()?.apply === false &&
+      lastTransferParams()?.allowAlreadyAtDestination === true &&
       transferRemote.url === FIXED_TARGETS.previewWebhookUrl &&
       transferRemote.setCalls === 0 &&
       transferWrites.count === 0 &&
@@ -1869,11 +1871,11 @@ fi
       transferState.healthCalls[0]?.kind === "old-preview" &&
       transferState.healthCalls[0]?.expectedCommitSha ===
         previewIntegrationSha &&
-      transferState.lastParams?.expectedCurrentUrl ===
+      lastTransferParams()?.expectedCurrentUrl ===
         FIXED_TARGETS.integratedPreviewWebhookUrl &&
-      transferState.lastParams?.destinationUrl ===
+      lastTransferParams()?.destinationUrl ===
         FIXED_TARGETS.previewWebhookUrl &&
-      transferState.lastParams?.apply === false &&
+      lastTransferParams()?.apply === false &&
       transferRemote.url === FIXED_TARGETS.integratedPreviewWebhookUrl &&
       transferRemote.setCalls === 0 &&
       transferWrites.count === 0,
