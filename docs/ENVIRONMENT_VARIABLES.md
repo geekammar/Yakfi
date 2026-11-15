@@ -412,7 +412,9 @@ If the owner cannot re-enter them, use the reviewed one-shot
 `CREDENTIAL_MASTER_KEY` with `VERCEL_TOKEN`, requires the exact reviewed SHA,
 and updates only the existing Production `DATABASE_URL` and
 `CREDENTIAL_MASTER_KEY` records. It does not create secrets, copy Preview
-variables, or touch auth/AI/channel settings.
+variables, or touch auth/AI/channel settings. A `PARTIAL_ENV_UPDATE` result is
+a stop condition: inspect which key changed, do not merge or deploy, and
+recover only under separate approval.
 
 The current Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` are sensitive
 and cannot be read back through Vercel. A deployment ID or health response is

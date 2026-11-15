@@ -345,7 +345,10 @@ connection strings.
    `DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
 5. Run `production-runtime-env.yml` with `operation=apply` and the same exact
    SHA. This is the only approved Production environment write in the
-   transition; it changes only the two fixed keys.
+   transition; it changes only the two fixed keys. If it reports
+   `PARTIAL_ENV_UPDATE`, stop before merge/deploy, inspect which key was
+   updated, and complete recovery only under separate approval; never retry
+   blindly.
 6. Merge the approved PR #83 to `main`; record the merge commit SHA. Let the
    normal Vercel Production deployment build it. Verify `/api/health` reports
    that exact `commitSha`, version `0.79.10`, `deploymentReady=true`,
