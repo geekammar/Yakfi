@@ -124,19 +124,19 @@ test.describe("Conversation live refresh — authorized browser journey", () => 
       page.locator('[aria-label="المسؤول الحالي: أنت"]'),
     ).toBeVisible();
 
+    const visibleService = page
+      .getByText(update.serviceName, { exact: true })
+      .filter({ visible: true });
+
     if (testInfo.project.name === "mobile-390") {
       await page
         .locator('button[aria-label="عرض تفاصيل العميل والمواعيد"]')
         .click();
-      await expect(
-        page.getByText(update.serviceName, { exact: true }),
-      ).toBeVisible();
+      await expect(visibleService).toBeVisible();
       await page.locator('button[aria-label="العودة إلى المحادثة"]').click();
       await expect(replyBox).toHaveValue(draft);
     } else {
-      await expect(
-        page.getByText(update.serviceName, { exact: true }),
-      ).toBeVisible();
+      await expect(visibleService).toBeVisible();
     }
 
     const attention = runHelper<{
