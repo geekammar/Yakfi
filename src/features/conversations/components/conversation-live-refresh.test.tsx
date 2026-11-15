@@ -130,6 +130,8 @@ describe("ConversationDetail live refresh (open thread)", () => {
       status: mockData.status,
       aiSummary: mockData.aiSummary,
       assignedUser: mockData.assignedUser,
+      attentionReason: mockData.attentionReason,
+      attentionCause: mockData.attentionCause,
       messages: mockData.messages,
       appointments: mockData.appointments,
       team: mockData.team,
@@ -214,6 +216,94 @@ describe("ConversationDetail live refresh (open thread)", () => {
     expect(transitionConversation).not.toHaveBeenCalled();
     expect(updateAiSummary).not.toHaveBeenCalled();
     expect(checkStaffReplyStatus).not.toHaveBeenCalled();
+
+    await act(async () => root.unmount());
+  });
+
+  it("clears the previous handoff reason after a successful Return to assistant", async () => {
+    const handoffData: ConversationDetailData = {
+      ...mockData,
+      status: "NEED_HUMAN",
+      assignedUser: { id: "user-me", name: "أحمد المشرف", image: null },
+      attentionReason: "AI_HANDOFF",
+      attentionCause: "KNOWLEDGE_GAP_UNRESOLVED",
+    };
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({
+        status: "AI_ACTIVE",
+        assignedUser: null,
+        attentionReason: null,
+        attentionCause: null,
+      }),
+    });
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={handoffData} />);
+    });
+    expect(container.textContent).toContain("المعلومات غير متوفرة");
+
+    const returnButton = container.querySelector(
+      'button[aria-label="إعادة للمساعد"]',
+    );
+    await act(async () => {
+      returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(transitionConversation).toHaveBeenCalledWith({
+      id: mockData.id,
+      transition: "RETURN_TO_AI",
+    });
+    expect(
+      container.querySelector(
+        '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+      ),
+    ).not.toBeNull();
+    expect(container.textContent).not.toContain("المعلومات غير متوفرة");
+
+    await act(async () => root.unmount());
+  });
+
+  it("shows the current reason when a genuine new handoff arrives after Return to assistant", async () => {
+    const handoffData: ConversationDetailData = {
+      ...mockData,
+      status: "NEED_HUMAN",
+      assignedUser: { id: "user-me", name: "أحمد المشرف", image: null },
+      attentionReason: "AI_HANDOFF",
+      attentionCause: "KNOWLEDGE_GAP_UNRESOLVED",
+    };
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ConversationDetail data={handoffData} />);
+    });
+    const returnButton = container.querySelector(
+      'button[aria-label="إعادة للمساعد"]',
+    );
+    await act(async () => {
+      returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain("المعلومات غير متوفرة");
+
+    refreshConversationDetail.mockResolvedValue({
+      success: true,
+      data: refreshSnapshot({
+        status: "NEED_HUMAN",
+        assignedUser: null,
+        attentionReason: "AI_HANDOFF",
+        attentionCause: "CUSTOMER_REQUESTED_HUMAN",
+      }),
+    });
+    await advance();
+
+    expect(
+      container.querySelector(
+        '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
+      ),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("العميل طلب مسؤولاً");
+    expect(container.textContent).not.toContain("المعلومات غير متوفرة");
 
     await act(async () => root.unmount());
   });

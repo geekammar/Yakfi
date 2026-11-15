@@ -107,7 +107,9 @@ describe("getConversationRefresh", () => {
       CONVERSATION_ID,
       BUSINESS_ID,
     );
-    expect(operatorAttentionRepository.findOpen).not.toHaveBeenCalled();
+    expect(operatorAttentionRepository.findOpen).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+    );
     expect(operatorAttentionRepository.resolve).not.toHaveBeenCalled();
     expect(operatorAttentionRepository.open).not.toHaveBeenCalled();
     expect(
@@ -120,11 +122,36 @@ describe("getConversationRefresh", () => {
       status: "AI_ACTIVE",
       aiSummary: "ملخص الخادم",
       assignedUser: { id: USER_ID },
+      attentionReason: null,
+      attentionCause: null,
     });
     expect(result).not.toHaveProperty("customer");
     expect(result).not.toHaveProperty("currentUserId");
-    expect(result).not.toHaveProperty("attentionReason");
-    expect(result).not.toHaveProperty("attentionCause");
+  });
+
+  it("reads the current open attention without acknowledging it", async () => {
+    operatorAttentionRepository.findOpen.mockResolvedValueOnce({
+      id: "attention-1",
+      conversationId: CONVERSATION_ID,
+      reason: "AI_HANDOFF",
+      cause: "KNOWLEDGE_GAP_UNRESOLVED",
+      createdAt: "2026-11-01T10:05:00.000Z",
+    });
+
+    const result = await getConversationRefresh(BUSINESS_ID, CONVERSATION_ID);
+
+    expect(result).toMatchObject({
+      attentionReason: "AI_HANDOFF",
+      attentionCause: "KNOWLEDGE_GAP_UNRESOLVED",
+    });
+    expect(operatorAttentionRepository.findOpen).toHaveBeenCalledWith(
+      CONVERSATION_ID,
+    );
+    expect(operatorAttentionRepository.resolve).not.toHaveBeenCalled();
+    expect(operatorAttentionRepository.open).not.toHaveBeenCalled();
+    expect(
+      operatorAttentionRepository.resolveByConversation,
+    ).not.toHaveBeenCalled();
   });
 
   it("rejects a cross-tenant conversation without any write or attention read", async () => {

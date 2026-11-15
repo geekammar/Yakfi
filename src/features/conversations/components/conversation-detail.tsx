@@ -738,6 +738,12 @@ export function ConversationDetail({
       setData((current) => ({
         ...current,
         status: nextStatus,
+        // Returning to the assistant resolves the previous handoff: its
+        // reason must not stay presented as the CURRENT reason. A genuinely
+        // new handoff is repopulated only by the read-only refresh snapshot.
+        ...(transition === "RETURN_TO_AI"
+          ? { attentionReason: null, attentionCause: null }
+          : {}),
         assignedUser:
           transition === "TAKE_OVER"
             ? {

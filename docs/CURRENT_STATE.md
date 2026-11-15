@@ -1,13 +1,42 @@
 # FlowPilot — Current State
 
 > **Tier 0 orientation snapshot — as of 15 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 is the current
-> accepted baseline and the live-refresh repair candidate. Preserved evidence
-> follows: historical `main` context, the integration/R5 record, the original
-> R6 failure, and the Y83 delivery failure. This file is not a substitute for
-> code, the canonical topic docs or `docs/BUILD_STATE.md`. No live deployment,
-> provider probe, migration, webhook move or paid call was performed for this
-> snapshot.
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0A is the current
+> pricing/attention repair candidate; Section 0 retains the live-refresh
+> candidate and accepted baseline. Preserved evidence follows: historical
+> `main` context, the integration/R5 record, the original R6 failure, and the
+> Y83 delivery failure. This file is not a substitute for code, the canonical
+> topic docs or `docs/BUILD_STATE.md`. No live deployment, provider probe,
+> migration, webhook move or paid call was performed for this snapshot.
+
+## 0A. Authoritative pricing and current-attention repair candidate — 15 November 2026
+
+- **Production evidence:** runtime `0.79.11` / commit
+  `b485bda15fbd1a2244a55d96f7b0b91374b71142`, conversation
+  `b56c9e2c-cb33-4872-bfdd-82c9a11dea58`. YPRICE A–D: fixed-price
+  consultation → `KNOWLEDGE_GAP_UNRESOLVED`; range root canal and
+  case-dependent cosmetic session → `POLICY_REFUSED` /
+  `UNAVAILABLE_IN_REQUEST`; unpriced surgery consultation → safe knowledge-gap
+  handoff. All four provider executions and outbound deliveries succeeded; this
+  is not a Telegram credential failure. Traces: A
+  `340552b30d50498e821de2212fe75ac1`, B `6b8723746ca140049a9c1d1bacae8958`,
+  C `1f3c3b430cd84ca0916c41bc49f513b2`, D `0df9a4543d4b4dbe9dcf6a1118260d66`.
+- **Proven root cause:** the context builder already carried authorized service
+  ids and resolved/disclosable `service.price` families, but
+  `buildPromptMessages` rendered only names/prices and the shared directive
+  explained FAQ source references without the exact service id required by the
+  price channel. The model therefore could not supply a valid source id.
+- **Candidate `v0.79.12` on `fix/yakfi-authoritative-pricing-attention` (draft
+  PR):** prompt services now expose opaque authorized ids; the canonical
+  directive and `.prompt` source require `service.price` with the exact selected
+  service id; the gate accepts only an exact id from the current request and
+  renders the stored fixed/range/case-dependent value. The read-only refresh
+  reads current open attention without acknowledging it, and a successful
+  Return to assistant clears the obsolete reason locally.
+- **Unchanged:** duration stays `INTERNAL` (DECISIONS #53/#51/#52); no pricing
+  schema, service records, booking/delivery rules, ownership rules or live
+  environment were changed. Historical R5/R6/Y83 and 0.79.10 acceptance remain
+  preserved. Live YPRICE re-acceptance is still required.
 
 ## 0. Current release and live-refresh defect — 15 November 2026
 

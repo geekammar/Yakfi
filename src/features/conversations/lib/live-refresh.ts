@@ -77,6 +77,8 @@ export function mergeConversationRefresh(
     status: refresh.status,
     aiSummary: refresh.aiSummary,
     assignedUser: refresh.assignedUser,
+    attentionReason: refresh.attentionReason,
+    attentionCause: refresh.attentionCause,
     messages:
       optimisticIds.size > 0
         ? current.messages

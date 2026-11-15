@@ -414,6 +414,125 @@ async function main(): Promise<void> {
       ),
   );
 
+  // ── 1f2/1f3/1f4. service.price requires the EXACT exposed service id ──────
+  const pricedServiceName = "تنظيف الأسنان";
+  const pricedServiceId = `svc-${pricedServiceName}`;
+  const priceTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact(pricedServiceName, {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+    },
+    reply: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      sourceId: pricedServiceId,
+    }),
+  });
+  check(
+    "1f2. سعر خدمة بمعرف الخدمة الدقيق = يُفصح من البيانات المخزنة (مخزن أسئلة فارغ)",
+    eq(priceTurn.decision.kind, "disclosed") &&
+      deepEq(
+        priceTurn.decision.kind === "disclosed"
+          ? priceTurn.decision.support
+          : [],
+        ["service.price"],
+      ) &&
+      eq(
+        priceTurn.decision.kind === "disclosed"
+          ? priceTurn.decision.renderedContent
+          : null,
+        "سعر تنظيف الأسنان: 300 جنيه.",
+      ),
+  );
+  const priceNameSourceTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact(pricedServiceName, {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+    },
+    reply: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      sourceId: pricedServiceName,
+    }),
+  });
+  check(
+    "1f3. اسم الخدمة ليس معرفاً صالحاً لمصدر السعر — رفض آمن",
+    eq(priceNameSourceTurn.decision.kind, "requires-human") &&
+      eq(
+        priceNameSourceTurn.decision.kind === "requires-human"
+          ? priceNameSourceTurn.decision.reason
+          : null,
+        "UNAVAILABLE_IN_REQUEST",
+      ),
+  );
+  const priceMissingSourceTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact(pricedServiceName, {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+    },
+    reply: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+    }),
+  });
+  check(
+    "1f4. سعر خدمة بلا معرف مصدر = رفض آمن (لا تخمين)",
+    eq(priceMissingSourceTurn.decision.kind, "requires-human") &&
+      eq(
+        priceMissingSourceTurn.decision.kind === "requires-human"
+          ? priceMissingSourceTurn.decision.reason
+          : null,
+        "UNAVAILABLE_IN_REQUEST",
+      ),
+  );
+  const ambiguousPriceDecision = enforceDisclosure({
+    response: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      sourceId: pricedServiceId,
+    }),
+    context: {
+      request: {
+        ...priceTurn.request,
+        services: [
+          priceTurn.request.services[0]!,
+          {
+            ...priceTurn.request.services[0]!,
+            name: "خدمة أخرى بنفس المعرف",
+          },
+        ],
+      },
+      facts: priceTurn.facts,
+    },
+  });
+  check(
+    "1f5. مرجع سعر مكرر/غامض = رفض آمن (AMBIGUOUS_MATCH)",
+    eq(ambiguousPriceDecision.kind, "requires-human") &&
+      eq(
+        ambiguousPriceDecision.kind === "requires-human"
+          ? ambiguousPriceDecision.reason
+          : null,
+        "AMBIGUOUS_MATCH",
+      ),
+  );
+
   // ── 1g/1h/1i/1j. PROMPT-AI-OPS-20: service-catalog NAME channel ────────────
   // A services-list FAQ reply is backable by the carried PUBLIC catalog NAMES
   // — with an EMPTY FAQ store and NO descriptions/prices, so no other channel

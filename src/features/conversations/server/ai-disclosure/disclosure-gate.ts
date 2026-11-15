@@ -742,9 +742,9 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }
       const sId = proposal.sourceId.trim();
-      const matches = context.request.services.filter(
-        (s) => s.id === sId || s.name.trim() === sId,
-      );
+      // The model must reference the EXACT opaque service id exposed in the
+      // request. A service name is never accepted as an id fallback.
+      const matches = context.request.services.filter((s) => s.id === sId);
       if (matches.length === 0) {
         return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
       }

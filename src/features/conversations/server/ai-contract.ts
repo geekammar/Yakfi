@@ -399,7 +399,12 @@ const recentMessageSchema = z.object({
 });
 
 const serviceFactSchema = z.object({
-  /** Bounded unique identifier for structured source references. */
+  /**
+   * Bounded unique identifier for structured source references. The prompt
+   * renders it as an opaque `[id: …]` token so a service-price reply can cite
+   * the EXACT selected service. It is a source reference, never a
+   * customer-visible knowledge fact and never a disclosure channel.
+   */
   id: z.string().trim().min(1).max(120).optional(),
   name: z.string().trim().min(1).max(120),
   /**
@@ -732,7 +737,7 @@ const modelAuthorableKnowledgeFamilyKeys =
  * vocabulary above. `buildPromptMessages` appends it to the existing system
  * instructions for every adapter; no provider-specific prompt copy exists.
  */
-export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyKeys}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
+export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyKeys}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. A service price answer uses service.price with knowledgeRef.sourceId or sourceId set to the EXACT service id shown for the selected service in services[]; never use a service name as the source id. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
 
 /**
  * Structured source reference proposed by the model (ISS-012).

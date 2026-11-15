@@ -160,7 +160,9 @@ build`) inherits this automatically.
 
 - **Request — `AiRequest` (`ai-contract.ts: aiRequestSchema`):**
   `message` (1–4096) + `conversationStatus` + `recentMessages` (≤20) +
-  `businessName` + `services[]` (≤100) + `faqs[]` (≤50) +
+  `businessName` + `services[]` (≤100; each row may carry the opaque
+  authorized service `id`, used only as a structured source reference) +
+  `faqs[]` (≤50) +
   optional `providerPreference` + optional `availability[]` (≤14 × ≤50 slots) +
   optional `assistantStyle` (a bounded Arabic phrasing directive — DECISIONS #62) +
   optional `businessAbout` and per-service optional `price`/`description`
@@ -658,7 +660,9 @@ never sent.
   the proposal resolver and by the shared model instruction. A model-authored
   reply may declare only `business.identity`, `business.address`,
   `business.about`, `business.faqs`, `service.name`, `service.price` or
-  `service.description`. `domain.availability` and
+  `service.description`. A service-price answer must cite the exact
+  `service.price` source id rendered for the selected service in `services[]`;
+  a service name is never accepted as that id. `domain.availability` and
   `business.cancellationPolicy` remain recognized families but are
   domain/handoff-owned; they are not model-authorable reply sources. The
   parser deliberately keeps the field a bounded string so an unknown label

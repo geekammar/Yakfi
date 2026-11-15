@@ -247,6 +247,40 @@ async function main(): Promise<void> {
     })(),
   );
   check(
+    "buildPromptMessages يعرض معرف الخدمة الدقيق بجانب الاسم والسعر",
+    (() => {
+      const msgs = prompt.buildPromptMessages({
+        ...baseRequest,
+        services: [
+          {
+            id: "svc-prompt-1",
+            name: "تنظيف الأسنان",
+            price: "300 جنيه",
+          },
+        ],
+        faqs: [],
+      });
+      const userContent = msgs[1]!.content;
+      return (
+        userContent.includes("[id: svc-prompt-1] تنظيف الأسنان") &&
+        userContent.includes("السعر: 300 جنيه")
+      );
+    })(),
+  );
+  check(
+    "تعليمات عائلة المعرفة تصل إلى الموجه وتشترط معرف الخدمة الدقيق للسعر",
+    (() => {
+      const msgs = prompt.buildPromptMessages(baseRequest);
+      const systemContent = msgs[0]!.content;
+      return (
+        systemContent.includes(aiContract.knowledgeFamilyPromptDirective) &&
+        systemContent.includes("service.price") &&
+        systemContent.includes("EXACT service id") &&
+        systemContent.includes("never use a service name as the source id")
+      );
+    })(),
+  );
+  check(
     "buildRequestBody يطلب response_format json_object و temperature 0.2",
     (() => {
       const b = prompt.buildRequestBody("test-model", [

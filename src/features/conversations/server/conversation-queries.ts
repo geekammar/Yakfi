@@ -161,10 +161,11 @@ export async function getConversationDetail(
  * Authorized READ-ONLY snapshot for a conversation that is already open.
  *
  * Unlike `getConversationDetail`, this deliberately performs NO operator-
- * attention read or acknowledgment: periodic refreshes must never clear a
- * handoff alert, mutate ownership, mark anything sent, write appointments or
- * trigger delivery. `businessId` is always derived from the authenticated
- * server session by the caller — never from the browser.
+ * attention acknowledgment: it may READ the CURRENT open marker so a new
+ * handoff can be shown without a reload, but periodic refreshes must never
+ * resolve/clear a handoff alert, mutate ownership, mark anything sent, write
+ * appointments or trigger delivery. `businessId` is always derived from the
+ * authenticated server session by the caller — never from the browser.
  */
 export async function getConversationRefresh(
   businessId: string,
@@ -176,7 +177,8 @@ export async function getConversationRefresh(
   );
   if (!conversation) return null;
 
-  const [appointments, users] = await Promise.all([
+  const [openAttention, appointments, users] = await Promise.all([
+    operatorAttentionRepository.findOpen(conversationId),
     appointmentRepository.listRecentByCustomer(
       businessId,
       conversation.customerId,
@@ -189,6 +191,8 @@ export async function getConversationRefresh(
     status: conversation.status,
     aiSummary: conversation.aiSummary ?? "",
     assignedUser: conversation.assignedTo,
+    attentionReason: openAttention?.reason ?? null,
+    attentionCause: openAttention?.cause ?? null,
     messages: projectMessages(conversation),
     appointments: projectAppointments(appointments),
     team: users
