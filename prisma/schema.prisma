@@ -64,17 +64,17 @@ enum ReminderChannel {
 // ─── Core domain ─────────────────────────────────────────────
 
 model Business {
-  id                    String    @id @default(uuid())
-  name                  String
+  id                     String    @id @default(uuid())
+  name                   String
   // Discovery metadata (operator PROMPT-07): the business's vertical as a
   // stable machine key validated by Zod (`VERTICALS` in lib/validation).
   // Metadata for Local Vertical Discovery ONLY — never permission for
   // vertical-specific UI (PRODUCT_VISION / DECISIONS #22 context).
-  vertical              String?
-  city                  String?
-  whatsappNumber        String
-  timezone              String    @default("Asia/Riyadh")
-  about                 String?
+  vertical               String?
+  city                   String?
+  whatsappNumber         String
+  timezone               String    @default("Asia/Riyadh")
+  about                  String?
   // Customer-facing location/address (PROMPT-AI-OPS-21). A single free-text
   // line — the smallest provider-neutral representation actually needed for
   // the assistant to answer "أين موقعكم؟". NOT geocoding, maps, routing, or
@@ -83,32 +83,32 @@ model Business {
   // assistant ONLY on a contact/identity/location turn, and a missing
   // address is never invented. `city` stays a separate discovery-metadata
   // column (INTERNAL) — this is the customer-facing location fact.
-  address               String?
+  address                String?
   /// JSON working-hours structure, e.g. { "sun": { "open": "09:00", "close": "21:00", "closed": false }, ... }
-  workingHours          Json?
-  slotDurationMinutes   Int       @default(30) @map("slot_duration_minutes")
+  workingHours           Json?
+  slotDurationMinutes    Int       @default(30) @map("slot_duration_minutes")
   // Booking confirmation mode (operator PROMPT-09): how new appointments
   // enter the agenda — "manual" (PENDING until the team confirms) or
   // "automatic" (CONFIRMED on creation). Stable machine key validated by
   // Zod (`CONFIRMATION_MODE_VALUES` in lib/validation) — no Prisma enum,
   // extending the list needs no migration. Default preserves the
   // pre-existing behavior (PENDING).
-  confirmationMode      String    @default("manual") @map("confirmation_mode")
+  confirmationMode       String    @default("manual") @map("confirmation_mode")
   // Customer-facing appointment time display preference:
   // "START_ONLY" (البداية فقط — default) or "FULL_RANGE" (الفترة كاملة).
   // Presentation only: does not alter start/end, duration, availability, slot identity,
   // provider eligibility, booking conflicts, or confirmation state.
-  appointmentTimeDisplay String   @default("START_ONLY") @map("appointment_time_display")
+  appointmentTimeDisplay String    @default("START_ONLY") @map("appointment_time_display")
   /// JSON FAQ entries: [{ "question": "...", "answer": "..." }]
-  faqs                  Json?
-  cancellationPolicy    String?
+  faqs                   Json?
+  cancellationPolicy     String?
   // ── Assistant configuration (PROMPT-AI-UX-01) ──────────────────────────
   // Optional customer-facing name for the assistant ("مساعد عيادة أفنان").
   // When absent the UI shows the fixed fallback «المساعد الذكي». It is
   // DISPLAY copy only — it never reaches the AI request and never names a
   // provider/model (the resident phrasing directive stays the only style the
   // assistant receives).
-  assistantName         String?   @map("assistant_name")
+  assistantName          String?   @map("assistant_name")
   // JSON persisted assistant style: the CLOSED, bounded subset of
   // `assistantStyleSchema` the Business ADMIN owns (language / tone / detail
   // / emoji). Provider-neutral, channel-agnostic, validated by Zod on every
@@ -117,12 +117,12 @@ model Business {
   // does NOT own (arabicStyle, role) are never stored here — they stay
   // resident, evidence-tuned constants. See
   // `src/features/conversations/server/assistant-style.ts`.
-  assistantStyle        Json?     @map("assistant_style")
-  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
-  isActive              Boolean   @default(true)
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt             DateTime? @map("deleted_at")
+  assistantStyle         Json?     @map("assistant_style")
+  onboardingCompletedAt  DateTime? @map("onboarding_completed_at")
+  isActive               Boolean   @default(true)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt              DateTime? @map("deleted_at")
 
   // The Business's Default Branch (DECISIONS #30, PROMPT-ARCH-02): an
   // operational unit pointer — NOT the tenant boundary (businessId is).
@@ -175,6 +175,8 @@ model Business {
   conversationStates               ConversationStateRecord[]
   followUpRequests                 FollowUpRequest[]
   appointmentReminders             AppointmentReminder[]
+  deliveryRoutes                   ConversationDeliveryRoute[]
+  staffReplySubmissions            StaffReplySubmission[]
 
   @@index([isActive])
   @@index([defaultBookingServiceId])
@@ -300,14 +302,16 @@ model Conversation {
   updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
   deletedAt      DateTime?          @map("deleted_at")
 
-  business      Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer      Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  branch        Branch                   @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  assignedTo    User?                    @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  messages      Message[]
-  attention     OperatorAttention?
-  knowledgeGaps KnowledgeGap[]
-  stateRecord   ConversationStateRecord?
+  business         Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer         Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch           Branch                     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  assignedTo       User?                      @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages         Message[]
+  attention        OperatorAttention?
+  knowledgeGaps    KnowledgeGap[]
+  stateRecord      ConversationStateRecord?
+  deliveryRoute    ConversationDeliveryRoute?
+  replySubmissions StaffReplySubmission[]
 
   @@index([businessId])
   @@index([businessId, status])
@@ -1298,4 +1302,52 @@ model Verification {
 
   @@index([identifier])
   @@map("verifications")
+}
+
+// ─── Safe Staff Reply Delivery (ISS-018) ──────────────────────────
+// Binds verified channel route to a thread and provides durable submission
+// claiming before provider dispatch.
+
+model ConversationDeliveryRoute {
+  id                  String   @id @default(uuid())
+  businessId          String   @map("business_id")
+  conversationId      String   @unique @map("conversation_id")
+  channel             String   @default("telegram")
+  connectionId        String   @map("connection_id")
+  botExternalId       String   @map("bot_external_id")
+  recipientExternalId String   @map("recipient_external_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("conversation_delivery_routes")
+}
+
+model StaffReplySubmission {
+  id                String    @id @default(uuid())
+  businessId        String    @map("business_id")
+  conversationId    String    @map("conversation_id")
+  submissionKey     String    @map("submission_key")
+  payloadHash       String    @map("payload_hash")
+  content           String
+  status            String // "CLAIMED", "ACCEPTED", "REJECTED", "UNCONFIRMED"
+  provider          String? // "telegram"
+  providerMessageId String?   @map("provider_message_id")
+  errorCode         String?   @map("error_code")
+  errorMessage      String?   @map("error_message")
+  staffMessageId    String?   @map("staff_message_id")
+  claimedAt         DateTime  @default(now()) @map("claimed_at")
+  completedAt       DateTime? @map("completed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, conversationId, submissionKey])
+  @@index([businessId, conversationId])
+  @@map("staff_reply_submissions")
 }

@@ -119,6 +119,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 102 | Temporal correction authority + structured calendar clarification | dates/offers/leap years | [#102](DECISIONS.md) |
 | 103 | Stale-session sign-in redirect loop repair (ISS-017) | auth screens/proxy/session | [#103](DECISIONS.md) |
 | 104 | Truthful unknown-information replies + disclosure/handoff boundary | unknown info/disclosure/handoff | [#104](DECISIONS.md) |
+| 105 | Safe Telegram staff reply delivery, route authority, reconciliation and attempt identity | staff reply delivery/routes/idempotency | [#105](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -133,5 +134,5 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   narrative existed only in the former index row, not in `DECISIONS.md`. Its
   VPS-local check behavior is historical and does not authorize VPS execution;
   see `AGENT_RULES.md` §4.
-- Decision #105 exists only on the open PR #79 branch and is intentionally not
-  listed here as a `main` decision. See `docs/CURRENT_STATE.md` §3 and §7.
+- Decision #105 is carried by the draft integration candidate from PR #79 and
+  is not a merged `main` decision. See `docs/CURRENT_STATE.md`.

@@ -11,11 +11,15 @@ Usage:
   # Inspection and Repair (requires explicit UUIDs):
   pnpm telegram:repair-webhook --business-id <UUID> --connection-id <UUID> [options]
 
+  # Explicit Webhook Switch (defaults to dry run unless --apply):
+  pnpm telegram:repair-webhook --switch --business-id <UUID> --connection-id <UUID> --expected-current-url <URL> --destination-url <URL> [--apply]
+
 Modes:
   --lookup                     Read-only candidate lookup (queries database by bot username or external ID)
   (default)                    Read-only check mode (inspects allowed_updates and URL)
   --apply                      Apply subscription repair (adds callback_query and rotates secret)
   --apply --reconcile-secret   Force secret rotation and DB reconciliation even if subscription is OK
+  --switch                     Explicitly switch bot webhook URL from expected current to destination URL
 
 Lookup Options:
   --bot-username, -u <str>     Bot @username to look up (e.g. @Drafnanafnanbot)
@@ -27,6 +31,10 @@ Repair Options:
   --expected-url <URL>         Verify registered webhook URL matches this expected URL exactly
   --help, -h                   Show this help message
 
+Switch Options:
+  --expected-current-url <URL> The expected current webhook URL registered with Telegram
+  --destination-url <URL>      The intended new customer webhook URL destination
+
 Examples:
   # 1. Candidate lookup:
   pnpm telegram:repair-webhook --lookup --bot-username @Drafnanafnanbot
@@ -37,8 +45,11 @@ Examples:
   # 3. Targeted apply:
   pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-url https://flowpilot-prod.vercel.app/api/telegram/webhook --apply
 
-  # 4. Targeted reconciliation after partial failure:
-  pnpm telegram:repair-webhook --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-url https://flowpilot-prod.vercel.app/api/telegram/webhook --apply --reconcile-secret
+  # 4. Explicit webhook switch dry run:
+  pnpm telegram:repair-webhook --switch --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-current-url https://flowpilot-prod.vercel.app/api/telegram/webhook --destination-url https://preview.flowpilot.app/api/telegram/webhook
+
+  # 5. Explicit webhook switch apply:
+  pnpm telegram:repair-webhook --switch --business-id 11111111-1111-1111-1111-111111111111 --connection-id 22222222-2222-2222-2222-222222222222 --expected-current-url https://flowpilot-prod.vercel.app/api/telegram/webhook --destination-url https://preview.flowpilot.app/api/telegram/webhook --apply
 `);
   process.exit(code);
 }
@@ -55,6 +66,9 @@ function parseArgs(args: string[]): {
   lookup: boolean;
   botUsername?: string;
   botExternalId?: string;
+  isSwitch: boolean;
+  expectedCurrentUrl?: string;
+  destinationUrl?: string;
 } {
   let businessId: string | undefined;
   let connectionId: string | undefined;
@@ -64,6 +78,9 @@ function parseArgs(args: string[]): {
   let lookup = false;
   let botUsername: string | undefined;
   let botExternalId: string | undefined;
+  let isSwitch = false;
+  let expectedCurrentUrl: string | undefined;
+  let destinationUrl: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -73,6 +90,34 @@ function parseArgs(args: string[]): {
       printHelpAndExit(0);
     } else if (arg === "--lookup") {
       lookup = true;
+    } else if (arg === "--switch") {
+      isSwitch = true;
+    } else if (arg === "--expected-current-url") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --expected-current-url");
+        process.exit(1);
+      }
+      expectedCurrentUrl = next;
+    } else if (arg.startsWith("--expected-current-url=")) {
+      expectedCurrentUrl = arg.slice("--expected-current-url=".length);
+      if (!expectedCurrentUrl) {
+        console.error("❌ Error: Empty value for --expected-current-url");
+        process.exit(1);
+      }
+    } else if (arg === "--destination-url") {
+      const next = args[++i];
+      if (!next || next.startsWith("-")) {
+        console.error("❌ Error: Missing value for --destination-url");
+        process.exit(1);
+      }
+      destinationUrl = next;
+    } else if (arg.startsWith("--destination-url=")) {
+      destinationUrl = arg.slice("--destination-url=".length);
+      if (!destinationUrl) {
+        console.error("❌ Error: Empty value for --destination-url");
+        process.exit(1);
+      }
     } else if (arg === "--bot-username" || arg === "-u") {
       const next = args[++i];
       if (!next || next.startsWith("-")) {
@@ -159,6 +204,9 @@ function parseArgs(args: string[]): {
     lookup,
     botUsername,
     botExternalId,
+    isSwitch,
+    expectedCurrentUrl,
+    destinationUrl,
   };
 }
 
@@ -169,63 +217,171 @@ async function handleLookup(params: {
   const { lookupTelegramBotTargetDefault } =
     await import("../src/server/integrations/telegram/telegram-repair");
 
-  const outcome = await lookupTelegramBotTargetDefault(params);
+  try {
+    const outcome = await lookupTelegramBotTargetDefault(params);
 
-  if (!outcome.ok) {
-    console.error(`\n❌ Lookup Refused: [${outcome.code}] ${outcome.message}`);
+    if (!outcome.ok) {
+      console.error(
+        `\n❌ Lookup Refused: [${outcome.code}] ${outcome.message}`,
+      );
+      process.exit(1);
+    }
+
+    console.log("\n================ Target Lookup Result ================");
+    console.log(`Status:              ${outcome.status}`);
+    console.log(`Query:               ${JSON.stringify(outcome.query)}`);
+
+    if (outcome.status === "NO_MATCH") {
+      console.log(`Message:             ${outcome.message}`);
+      console.log(
+        "Verdict:             No matching Telegram bot connection was found in the database.",
+      );
+      console.log("====================================================\n");
+      process.exit(0);
+    }
+
+    if (outcome.status === "AMBIGUOUS_MATCH") {
+      console.log(`Message:             ${outcome.message}`);
+      console.log(`Found Matches:       ${outcome.matches.length}`);
+      console.log("Candidates:");
+      for (let i = 0; i < outcome.matches.length; i++) {
+        const m = outcome.matches[i]!;
+        console.log(
+          `  [${i + 1}] businessId: ${m.businessId} | connectionId: ${m.connectionId} | botExternalId: ${m.botExternalId} | botUsername: @${m.botUsername ?? "unknown"} | status: ${m.status} | isActive: ${m.isActive}`,
+        );
+      }
+      console.log(
+        "Verdict:             Multiple candidate connections matched. Choose explicit IDs before running check or apply.",
+      );
+      console.log("====================================================\n");
+      process.exit(1);
+    }
+
+    // EXACT_MATCH
+    console.log(`Business ID:         ${outcome.target.businessId}`);
+    console.log(`Connection ID:       ${outcome.target.connectionId}`);
+    console.log(`Bot External ID:     ${outcome.target.botExternalId}`);
+    console.log(
+      `Bot Username:        @${outcome.target.botUsername ?? "unknown"}`,
+    );
+    console.log(`Status:              ${outcome.target.status}`);
+    console.log(`Is Active:           ${outcome.target.isActive}`);
+    console.log("====================================================\n");
+
+    console.log("Next Step (Read-Only Check):");
+    console.log(
+      `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL>\n`,
+    );
+    console.log("Targeted Repair (when callback_query missing):");
+    console.log(
+      `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
+    );
+    process.exit(0);
+  } catch {
+    console.error(
+      "\n❌ Lookup Refused: [UNEXPECTED_LOOKUP_FAILURE] Operation failed without disclosing raw error or secrets.",
+    );
     process.exit(1);
   }
+}
 
-  console.log("\n================ Target Lookup Result ================");
-  console.log(`Status:              ${outcome.status}`);
-  console.log(`Query:               ${JSON.stringify(outcome.query)}`);
+async function handleSwitch(params: {
+  businessId: string;
+  connectionId: string;
+  expectedCurrentUrl: string;
+  destinationUrl: string;
+  apply: boolean;
+}) {
+  const modeLabel = params.apply
+    ? "APPLY (explicit switch)"
+    : "DRY RUN (read-only)";
 
-  if (outcome.status === "NO_MATCH") {
-    console.log(`Message:             ${outcome.message}`);
+  console.log(`[FlowPilot] Telegram Webhook Switch: mode=${modeLabel}`);
+  console.log(
+    `Target: businessId=${params.businessId}, connectionId=${params.connectionId}`,
+  );
+  console.log(`Expected Current URL: ${params.expectedCurrentUrl}`);
+  console.log(`Destination URL:      ${params.destinationUrl}`);
+
+  try {
+    const { switchTelegramBotWebhookDefault } =
+      await import("../src/server/integrations/telegram/telegram-repair");
+    const outcome = await switchTelegramBotWebhookDefault(params);
+
+    if (!outcome.ok) {
+      if (outcome.status === "PARTIAL_FAILURE") {
+        console.error("\n⚠️  PARTIAL FAILURE / RECOVERY REQUIRED");
+        console.error(`[${outcome.code}] ${outcome.message}`);
+        if (outcome.remoteStateMayHaveChanged) {
+          console.error(
+            "Note: Telegram remote state may have changed while local database confirmation was not obtained.",
+          );
+        }
+        if (outcome.reconciliationCommand) {
+          console.error("\nReconciliation Command:");
+          console.error(`  ${outcome.reconciliationCommand}`);
+        }
+        if (outcome.restorationProcedure) {
+          console.error("\nRestoration Procedure (revert switch):");
+          console.error(`  ${outcome.restorationProcedure}\n`);
+        }
+        process.exit(1);
+      }
+
+      console.error(
+        `\n❌ Switch Refused / Failed: [${outcome.code}] ${outcome.message}`,
+      );
+      if (outcome.restorationProcedure) {
+        console.error("\nRestoration Procedure:");
+        console.error(`  ${outcome.restorationProcedure}\n`);
+      }
+      process.exit(1);
+    }
+
+    console.log("\n================ Webhook Switch Result ================");
+    console.log(`Status:              ${outcome.status}`);
     console.log(
-      "Verdict:             No matching Telegram bot connection was found in the database.",
+      `Mode:                ${outcome.dryRun ? "DRY RUN (no changes made)" : "APPLIED (switched)"}`,
     );
-    console.log("====================================================\n");
-    process.exit(0);
-  }
+    console.log(`Bot External ID:     ${outcome.botExternalId}`);
+    console.log(`Bot Username:        @${outcome.botUsername ?? "unknown"}`);
 
-  if (outcome.status === "AMBIGUOUS_MATCH") {
-    console.log(`Message:             ${outcome.message}`);
-    console.log(`Found Matches:       ${outcome.matches.length}`);
-    console.log("Candidates:");
-    for (let i = 0; i < outcome.matches.length; i++) {
-      const m = outcome.matches[i]!;
+    if (outcome.status === "SWITCH_DRY_RUN") {
+      console.log(`Current URL:         ${outcome.currentWebhookUrl}`);
+      console.log(`Destination URL:     ${outcome.destinationWebhookUrl}`);
       console.log(
-        `  [${i + 1}] businessId: ${m.businessId} | connectionId: ${m.connectionId} | botExternalId: ${m.botExternalId} | botUsername: @${m.botUsername ?? "unknown"} | status: ${m.status} | isActive: ${m.isActive}`,
+        `Target Updates:      ${JSON.stringify(outcome.allowedUpdates)}`,
+      );
+      console.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
+      console.log(`Message:             ${outcome.message}`);
+      console.log("\nNext Step to Apply Switch:");
+      console.log(
+        `  pnpm telegram:repair-webhook --switch --business-id ${params.businessId} --connection-id ${params.connectionId} --expected-current-url ${outcome.currentWebhookUrl} --destination-url ${outcome.destinationWebhookUrl} --apply\n`,
+      );
+      console.log("Planned Restoration Procedure (after apply):");
+      console.log(`  ${outcome.restorationProcedure}`);
+    } else if (outcome.status === "SWITCHED") {
+      console.log(`Previous URL:        ${outcome.previousWebhookUrl}`);
+      console.log(`New Webhook URL:     ${outcome.webhookUrl}`);
+      console.log(
+        `Allowed Updates:     ${JSON.stringify(outcome.allowedUpdates)}`,
+      );
+      console.log(`Pending Updates:     ${outcome.pendingUpdateCount}`);
+      console.log(`Secret Persisted:    CONFIRMED`);
+      console.log(`Verified At:         ${outcome.verifiedAt}`);
+      console.log("\nRestoration Procedure (to revert back):");
+      console.log(`  ${outcome.restorationProcedure}\n`);
+      console.log(
+        "Verdict:             Successfully switched Telegram customer bot webhook to destination URL and synchronized database secret!",
       );
     }
-    console.log(
-      "Verdict:             Multiple candidate connections matched. Choose explicit IDs before running check or apply.",
+    console.log("=======================================================\n");
+  } catch {
+    console.error(
+      "\n❌ Switch Refused / Failed: [UNEXPECTED_SWITCH_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
-    console.log("====================================================\n");
     process.exit(1);
   }
-
-  // EXACT_MATCH
-  console.log(`Business ID:         ${outcome.target.businessId}`);
-  console.log(`Connection ID:       ${outcome.target.connectionId}`);
-  console.log(`Bot External ID:     ${outcome.target.botExternalId}`);
-  console.log(
-    `Bot Username:        @${outcome.target.botUsername ?? "unknown"}`,
-  );
-  console.log(`Status:              ${outcome.target.status}`);
-  console.log(`Is Active:           ${outcome.target.isActive}`);
-  console.log("====================================================\n");
-
-  console.log("Next Step (Read-Only Check):");
-  console.log(
-    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL>\n`,
-  );
-  console.log("Targeted Repair (when callback_query missing):");
-  console.log(
-    `  pnpm telegram:repair-webhook --business-id ${outcome.target.businessId} --connection-id ${outcome.target.connectionId} --expected-url <EXPECTED_URL> --apply\n`,
-  );
-  process.exit(0);
 }
 
 async function main() {
@@ -238,7 +394,63 @@ async function main() {
     lookup,
     botUsername,
     botExternalId,
+    isSwitch,
+    expectedCurrentUrl,
+    destinationUrl,
   } = parseArgs(process.argv.slice(2));
+
+  if (isSwitch) {
+    if (lookup) {
+      console.error("❌ Error: --switch cannot be combined with --lookup.");
+      process.exit(1);
+    }
+    if (reconcileSecret) {
+      console.error(
+        "❌ Error: --switch cannot be combined with --reconcile-secret. Use --apply to rotate secrets during a switch.",
+      );
+      process.exit(1);
+    }
+    if (expectedWebhookUrl) {
+      console.error(
+        "❌ Error: --switch requires --expected-current-url and --destination-url instead of --expected-url.",
+      );
+      process.exit(1);
+    }
+    if (!businessId || !connectionId) {
+      console.error(
+        "❌ Error: Both --business-id and --connection-id are required for --switch.",
+      );
+      process.exit(1);
+    }
+    if (!UUID_REGEX.test(businessId) || !UUID_REGEX.test(connectionId)) {
+      console.error(
+        "❌ Error: Both --business-id and --connection-id must be valid UUIDs.",
+      );
+      process.exit(1);
+    }
+    if (!expectedCurrentUrl || !destinationUrl) {
+      console.error(
+        "❌ Error: Both --expected-current-url and --destination-url are required for --switch.",
+      );
+      process.exit(1);
+    }
+
+    await handleSwitch({
+      businessId,
+      connectionId,
+      expectedCurrentUrl,
+      destinationUrl,
+      apply,
+    });
+    return;
+  }
+
+  if (expectedCurrentUrl || destinationUrl) {
+    console.error(
+      "❌ Error: --expected-current-url and --destination-url are only valid with --switch.",
+    );
+    process.exit(1);
+  }
 
   if (lookup) {
     if (apply || reconcileSecret) {
@@ -401,10 +613,9 @@ async function main() {
       );
     }
     console.log("====================================================\n");
-  } catch (err) {
+  } catch {
     console.error(
-      "\n❌ Unexpected Maintenance Error:",
-      err instanceof Error ? err.message : String(err),
+      "\n❌ Maintenance Refused / Failed: [UNEXPECTED_MAINTENANCE_FAILURE] Operation failed without disclosing raw error or secrets.",
     );
     process.exit(1);
   }

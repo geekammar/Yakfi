@@ -6,6 +6,24 @@ on:
       - "prisma/**"
       - ".github/workflows/test-db-migrate.yml"
   workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        default: validate-migrations
+        options:
+          - validate-migrations
+          - diagnose-credential
+          - repair-credential
+          - switch-webhook-dry-run
+          - switch-webhook-apply
+          - restore-main-webhook-reconcile
+          - restore-main-webhook-preflight
+          - restore-main-webhook-dry-run
+          - restore-main-webhook-apply
+      expected_commit_sha:
+        type: string
+        required: false
+        description: Full reviewed SHA, required for credential and webhook operations
 
 permissions:
   contents: read
@@ -17,6 +35,7 @@ concurrency:
 jobs:
   validate-migrations:
     name: Validate pending Prisma migrations (disposable test DB)
+    if: github.event_name != 'workflow_dispatch' || inputs.operation == 'validate-migrations'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -118,3 +137,137 @@ jobs:
           fi
           echo '::error::Post-migration status on test DB does not report up to date'
           exit 1
+
+  recover-test-credential:
+    name: Diagnose or repair fixed test bot credential
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'diagnose-credential' || inputs.operation == 'repair-credential')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing credential operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Diagnose or repair without exporting the master key
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          TEST_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$CREDENTIAL_MASTER_KEY" ]; then
+            echo '::error::Required test database or master key secret is unavailable.'
+            exit 1
+          fi
+          if [ "$OPERATION" = 'repair-credential' ]; then
+            if [ -z "$TEST_BOT_TOKEN" ]; then
+              echo '::error::Set YAKFI_TEST_CUSTOMER_BOT_TOKEN using masked GitHub secret input.'
+              exit 1
+            fi
+            python3 scripts/repair-test-bot-credential.py --from-environment --apply
+          else
+            python3 scripts/repair-test-bot-credential.py --from-environment
+          fi
+
+  switch-test-webhook:
+    name: Switch customer bot webhook to Preview (guarded)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'switch-webhook-dry-run' || inputs.operation == 'switch-webhook-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing webhook switch operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded customer webhook switch
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts
+
+  restore-main-webhook:
+    name: Restore customer bot webhook to Production (guarded prepare-only)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery' &&
+      (inputs.operation == 'restore-main-webhook-reconcile' || inputs.operation == 'restore-main-webhook-preflight' || inputs.operation == 'restore-main-webhook-dry-run' || inputs.operation == 'restore-main-webhook-apply')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require exact reviewed commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::Reviewed SHA missing or mismatched; refusing webhook restoration operation.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install reviewed locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Execute guarded customer webhook restoration (prepare-only)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          node --import tsx scripts/switch-test-bot-webhook.ts

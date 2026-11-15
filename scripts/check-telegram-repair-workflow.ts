@@ -10,8 +10,19 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
-import type { TelegramBotTargetMatch } from "../src/server/integrations/telegram/telegram-repair";
+import type {
+  CredentialsResolver,
+  ResolvedCredential,
+} from "../src/server/credentials/credentials-resolver";
+import type { TelegramApiDeps } from "../src/server/integrations/telegram/telegram-client";
+import type {
+  SwitchTelegramWebhookParams,
+  TelegramBotTargetMatch,
+} from "../src/server/integrations/telegram/telegram-repair";
+import type { TelegramConnection } from "../src/types/domain";
 
 // Seed offline dummy env vars before importing repo layers
 process.env.DATABASE_URL ??=
@@ -69,6 +80,32 @@ function runBashScript(
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...env },
     });
+    return { status: 0, stdout, stderr: "" };
+  } catch (err: unknown) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return {
+      status: e.status ?? 1,
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? "",
+    };
+  }
+}
+
+function runSwitchRunner(env: Record<string, string>): {
+  status: number;
+  stdout: string;
+  stderr: string;
+} {
+  try {
+    const stdout = execFileSync(
+      "node",
+      ["--import", "tsx", "scripts/switch-test-bot-webhook.ts"],
+      {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...env },
+      },
+    );
     return { status: 0, stdout, stderr: "" };
   } catch (err: unknown) {
     const e = err as { status?: number; stdout?: string; stderr?: string };
@@ -457,6 +494,986 @@ fi
     lookupWithoutMasterKeyRun.status === 0 &&
       lookupWithoutMasterKeyRun.stdout.includes(
         "RECORDED_USERNAME: Drafnanafnanbot",
+      ),
+  );
+
+  // ─── 4. Switch CLI Boundary Enforcement ───────────────────────────────────
+  // T17. CLI --switch requires --expected-current-url and --destination-url
+  const switchMissingUrls = runCli([
+    "--switch",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+  ]);
+  check(
+    "T17. CLI --switch fails closed when expected-current-url or destination-url is omitted",
+    switchMissingUrls.status === 1 &&
+      switchMissingUrls.stderr.includes(
+        "Both --expected-current-url and --destination-url are required",
+      ),
+  );
+
+  // T18. CLI --switch rejects non-UUID IDs
+  const switchBadUuid = runCli([
+    "--switch",
+    "--business-id",
+    "invalid-uuid",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T18. CLI --switch strictly rejects non-UUID business-id or connection-id",
+    switchBadUuid.status === 1 &&
+      switchBadUuid.stderr.includes("must be valid UUIDs"),
+  );
+
+  // T19. CLI --switch rejects combination with --lookup or --reconcile-secret
+  const switchWithLookup = runCli([
+    "--switch",
+    "--lookup",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  const switchWithReconcile = runCli([
+    "--switch",
+    "--reconcile-secret",
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T19. CLI --switch rejects conflicting modes (--lookup, --reconcile-secret)",
+    switchWithLookup.status === 1 &&
+      switchWithLookup.stderr.includes("cannot be combined with --lookup") &&
+      switchWithReconcile.status === 1 &&
+      switchWithReconcile.stderr.includes(
+        "cannot be combined with --reconcile-secret",
+      ),
+  );
+
+  // T20. Passing switch flags without --switch fails
+  const flagsWithoutSwitch = runCli([
+    "--business-id",
+    "11111111-1111-1111-1111-111111111111",
+    "--connection-id",
+    "22222222-2222-2222-2222-222222222222",
+    "--expected-current-url",
+    "https://flowpilot-prod.vercel.app/api/telegram/webhook",
+    "--destination-url",
+    "https://preview.flowpilot.app/api/telegram/webhook",
+  ]);
+  check(
+    "T20. Passing --expected-current-url or --destination-url without --switch is rejected",
+    flagsWithoutSwitch.status === 1 &&
+      flagsWithoutSwitch.stderr.includes("only valid with --switch"),
+  );
+
+  // ─── 5. Guarded Switch Runner & Restoration Workflow Execution Tests ───────
+  const {
+    executeGuardedSwitch,
+    validateProductionDatabaseUrl,
+    FIXED_TARGETS,
+    createOwnerRestoreResolver,
+  } = await import("./switch-test-bot-webhook");
+  const { validateDatabaseUrl, RecoveryError } =
+    await import("../src/server/credentials/test-bot-recovery");
+  const { switchTelegramBotWebhook } =
+    await import("../src/server/integrations/telegram/telegram-repair");
+
+  // T21. Runner CLI fails closed on unknown operation
+  const runnerUnknownOp = runSwitchRunner({
+    OPERATION: "unauthorized-op",
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T21. Runner CLI fails closed on unknown operation",
+    runnerUnknownOp.status === 1 &&
+      runnerUnknownOp.stderr.includes("Preflight Refused: [UNKNOWN_OPERATION]"),
+  );
+
+  // T22. Runner CLI fails closed on missing database URL
+  const runnerMissingDb = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL: "",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T22. Runner CLI fails closed on missing database URL",
+    runnerMissingDb.status === 1 &&
+      runnerMissingDb.stderr.includes(
+        "Preflight Refused: [MISSING_DATABASE_URL]",
+      ),
+  );
+
+  // T23. Runner CLI fails closed on missing master key secret
+  const runnerMissingKey = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL:
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY: "",
+  });
+  check(
+    "T23. Runner CLI fails closed on missing master key secret",
+    runnerMissingKey.status === 1 &&
+      runnerMissingKey.stderr.includes(
+        "Preflight Refused: [MISSING_CREDENTIAL_MASTER_KEY]",
+      ),
+  );
+
+  // T24. Runner CLI strictly refuses unauthorized database target host
+  const runnerBadHost = runSwitchRunner({
+    OPERATION: "switch-webhook-dry-run",
+    DATABASE_URL:
+      "postgresql://postgres:pass@localhost:5432/neondb?sslmode=require",
+    CREDENTIAL_MASTER_KEY:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  check(
+    "T24. Runner CLI strictly refuses unauthorized database target host",
+    runnerBadHost.status === 1 &&
+      runnerBadHost.stderr.includes(
+        "Preflight Refused: [DATABASE_TARGET_NOT_AUTHORIZED]",
+      ),
+  );
+
+  // T25. Structured validation accepts both authorized test database hosts
+  let validTestHostsPass = true;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    );
+    validateDatabaseUrl(
+      "postgres://user:pass@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech:5432/neondb?sslmode=require",
+    );
+  } catch {
+    validTestHostsPass = false;
+  }
+  check(
+    "T25. Structured validation accepts both authorized test database hosts (direct and pooler)",
+    validTestHostsPass,
+  );
+
+  // T26. Structured validation rejects authorized host with database name suffix (/neondb_backup)
+  let rejectedBackupDb = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb_backup?sslmode=require",
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof RecoveryError &&
+      err.code === "DATABASE_TARGET_NOT_AUTHORIZED"
+    ) {
+      rejectedBackupDb = true;
+    }
+  }
+  check(
+    "T26. Structured validation rejects authorized host with database name suffix (/neondb_backup)",
+    rejectedBackupDb,
+  );
+
+  // T27. Structured validation rejects query param injection / connection-string manipulation
+  let rejectedQueryInjection = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@localhost:5432/neondb?fake=@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb&sslmode=require",
+    );
+  } catch (err: unknown) {
+    if (
+      err instanceof RecoveryError &&
+      (err.code === "DATABASE_TARGET_NOT_AUTHORIZED" ||
+        err.code === "DATABASE_OPTIONS_NOT_AUTHORIZED")
+    ) {
+      rejectedQueryInjection = true;
+    }
+  }
+  check(
+    "T27. Structured validation rejects query param injection / connection-string manipulation",
+    rejectedQueryInjection,
+  );
+
+  // T28. Structured validation rejects plain postgresql:// without sslmode or with unauthorized options
+  let rejectedPlainAndOptions = false;
+  try {
+    validateDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb",
+    );
+  } catch (err1: unknown) {
+    if (
+      err1 instanceof RecoveryError &&
+      err1.code === "DATABASE_TLS_REQUIRED"
+    ) {
+      try {
+        validateDatabaseUrl(
+          "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require&target_session_attrs=read-write",
+        );
+      } catch (err2: unknown) {
+        if (
+          err2 instanceof RecoveryError &&
+          err2.code === "DATABASE_OPTIONS_NOT_AUTHORIZED"
+        ) {
+          rejectedPlainAndOptions = true;
+        }
+      }
+    }
+  }
+  check(
+    "T28. Structured validation rejects plain postgresql:// without sslmode and rejects unauthorized query options",
+    rejectedPlainAndOptions,
+  );
+
+  // T29. Structured validation rejects malformed database URLs
+  let rejectedMalformedUrl = false;
+  try {
+    validateDatabaseUrl("not-a-valid-database-url");
+  } catch (err: unknown) {
+    if (err instanceof RecoveryError && err.code === "INVALID_DATABASE_URL") {
+      rejectedMalformedUrl = true;
+    }
+  }
+  check(
+    "T29. Structured validation rejects malformed database URLs with INVALID_DATABASE_URL",
+    rejectedMalformedUrl,
+  );
+
+  // T30. Production destination validator rejects test database and loopback hosts
+  let prodValidatorGuardsPass = false;
+  try {
+    validateProductionDatabaseUrl(
+      "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    );
+  } catch (err1: unknown) {
+    if (
+      err1 instanceof RecoveryError &&
+      err1.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
+    ) {
+      try {
+        validateProductionDatabaseUrl(
+          "postgresql://user:pass@127.0.0.1:5432/neondb?sslmode=require",
+        );
+      } catch (err2: unknown) {
+        if (
+          err2 instanceof RecoveryError &&
+          err2.code === "PRODUCTION_DATABASE_TARGET_NOT_AUTHORIZED"
+        ) {
+          prodValidatorGuardsPass = true;
+        }
+      }
+    }
+  }
+  check(
+    "T30. Production restoration validator strictly rejects test database and loopback hosts",
+    prodValidatorGuardsPass,
+  );
+
+  // T31. Guarded runner dry run executes without mutation and with apply=false
+  const dryRunCapture = { current: null as SwitchTelegramWebhookParams | null };
+  const loggedLines: string[] = [];
+  const testOut = {
+    log: (...args: unknown[]) => loggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) => loggedLines.push(args.map(String).join(" ")),
+  };
+
+  const dryRunOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-dry-run",
+    },
+    {
+      switchFn: async (params) => {
+        dryRunCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCH_DRY_RUN",
+          dryRun: true,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          currentWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          destinationWebhookUrl: FIXED_TARGETS.previewWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          pendingUpdateCount: 0,
+          restorationProcedure: "test restoration procedure",
+          message: "Dry run successful",
+        };
+      },
+      out: testOut,
+    },
+  );
+  check(
+    "T31. Guarded runner dry run passes apply=false, pins fixed targets, and logs planned procedure",
+    dryRunOutcome.ok === true &&
+      dryRunOutcome.status === "SWITCH_DRY_RUN" &&
+      dryRunCapture.current !== null &&
+      dryRunCapture.current.apply === false &&
+      dryRunCapture.current.businessId === FIXED_TARGETS.businessId &&
+      dryRunCapture.current.connectionId === FIXED_TARGETS.connectionId &&
+      dryRunCapture.current.expectedBotExternalId ===
+        FIXED_TARGETS.botExternalId &&
+      dryRunCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      dryRunCapture.current.destinationUrl ===
+        FIXED_TARGETS.previewWebhookUrl &&
+      loggedLines.some((l) => l.includes("mode=DRY RUN")),
+  );
+
+  // T32. Guarded runner apply executes with apply=true
+  const applyCapture = { current: null as SwitchTelegramWebhookParams | null };
+  const applyLoggedLines: string[] = [];
+  const applyOut = {
+    log: (...args: unknown[]) =>
+      applyLoggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) =>
+      applyLoggedLines.push(args.map(String).join(" ")),
+  };
+
+  const applyOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL:
+        "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-apply",
+    },
+    {
+      switchFn: async (params) => {
+        applyCapture.current = params;
+        return {
+          ok: true,
+          status: "SWITCHED",
+          dryRun: false,
+          botExternalId: FIXED_TARGETS.botExternalId,
+          botUsername: FIXED_TARGETS.botUsername,
+          previousWebhookUrl: FIXED_TARGETS.mainWebhookUrl,
+          webhookUrl: FIXED_TARGETS.previewWebhookUrl,
+          allowedUpdates: ["message", "callback_query"],
+          previousAllowedUpdates: ["message"],
+          pendingUpdateCount: 0,
+          webhookSecretHashPersisted: true,
+          restorationProcedure: "test revert procedure",
+          verifiedAt: new Date().toISOString(),
+        };
+      },
+      out: applyOut,
+    },
+  );
+  check(
+    "T32. Guarded runner apply passes apply=true, pins fixed targets, and logs switched confirmation",
+    applyOutcome.ok === true &&
+      applyOutcome.status === "SWITCHED" &&
+      applyCapture.current !== null &&
+      applyCapture.current.apply === true &&
+      applyCapture.current.expectedCurrentUrl ===
+        FIXED_TARGETS.mainWebhookUrl &&
+      applyCapture.current.destinationUrl === FIXED_TARGETS.previewWebhookUrl &&
+      applyLoggedLines.some((l) => l.includes("mode=APPLY (explicit switch)")),
+  );
+
+  // T33. Strict output hygiene boundary: synthetic secrets, tokens, and database URLs are never leaked
+  const hygieneLoggedLines: string[] = [];
+  const hygieneOut = {
+    log: (...args: unknown[]) =>
+      hygieneLoggedLines.push(args.map(String).join(" ")),
+    error: (...args: unknown[]) =>
+      hygieneLoggedLines.push(args.map(String).join(" ")),
+  };
+  const SYNTHETIC_SECRET = "TOP_SECRET_TELEGRAM_BOT_TOKEN_XYZ_999";
+  const SYNTHETIC_DB_PASS = "SUPER_SECRET_POSTGRES_PASSWORD_ABC_123";
+
+  const hygieneOutcome = await executeGuardedSwitch(
+    {
+      DATABASE_URL: `postgresql://app_user:${SYNTHETIC_DB_PASS}@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require`,
+      CREDENTIAL_MASTER_KEY:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      OPERATION: "switch-webhook-apply",
+    },
+    {
+      switchFn: async () => {
+        throw new Error(
+          `Connection failed to postgres://app_user:${SYNTHETIC_DB_PASS}@ep-little-mouse... with token ${SYNTHETIC_SECRET}`,
+        );
+      },
+      out: hygieneOut,
+    },
+  );
+  const combinedHygieneOutput = hygieneLoggedLines.join("\n");
+  check(
+    "T33. Strict output hygiene boundary: catches unexpected errors, emits UNEXPECTED_SWITCH_FAILURE, and discloses zero secrets",
+    hygieneOutcome.ok === false &&
+      hygieneOutcome.code === "UNEXPECTED_SWITCH_FAILURE" &&
+      !combinedHygieneOutput.includes(SYNTHETIC_SECRET) &&
+      !combinedHygieneOutput.includes(SYNTHETIC_DB_PASS) &&
+      combinedHygieneOutput.includes("[UNEXPECTED_SWITCH_FAILURE]"),
+  );
+
+  // T34. Workflow definition delegates to switch runner with exact branch and SHA protection
+  const workflowYaml = readFileSync(
+    ".github/workflows/test-db-migrate.yml",
+    "utf-8",
+  );
+  const hasBranchGate = workflowYaml.includes(
+    "github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery'",
+  );
+  const hasShaCheck =
+    workflowYaml.includes("EXPECTED_SHA: ${{ inputs.expected_commit_sha }}") &&
+    workflowYaml.includes('[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]');
+  const delegatesToSwitchRunner = workflowYaml.includes(
+    "node --import tsx scripts/switch-test-bot-webhook.ts",
+  );
+  const hasTestDbBinding = workflowYaml.includes(
+    "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
+  );
+  const hasProdDbBinding = workflowYaml.includes(
+    "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+  );
+  const hasWorkflowOptions =
+    workflowYaml.includes("switch-webhook-dry-run") &&
+    workflowYaml.includes("switch-webhook-apply") &&
+    workflowYaml.includes("restore-main-webhook-dry-run") &&
+    workflowYaml.includes("restore-main-webhook-apply");
+
+  check(
+    "T34. Workflow file strictly delegates to switch runner with branch gate, SHA check, and isolated secret scopes",
+    hasBranchGate &&
+      hasShaCheck &&
+      delegatesToSwitchRunner &&
+      hasTestDbBinding &&
+      hasProdDbBinding &&
+      hasWorkflowOptions,
+  );
+
+  // T35. Offline multi-database switch and restoration regression (test DB switch -> main DB restoration cycle)
+  let telegramRemoteUrl: string = FIXED_TARGETS.mainWebhookUrl;
+  let telegramRemoteSecret: string | null = "initial-secret";
+  let telegramRemoteUpdates = ["message"];
+
+  const mockCredentialsResolver = {
+    async resolve(): Promise<ResolvedCredential> {
+      return {
+        ok: true,
+        kind: "RUNTIME",
+        reference: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+        value: "8926541123:dummy-token-for-offline-testing-regression-only",
+      };
+    },
+  };
+
+  const mockTelegramApi: TelegramApiDeps = {
+    apiHost: "https://api.telegram.org",
+    credentialsResolver: mockCredentialsResolver,
+    async fetchImpl(input: RequestInfo | URL, init?: RequestInit) {
+      const urlStr = typeof input === "string" ? input : input.toString();
+      if (urlStr.includes("/getMe")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id: Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              first_name: "Drafnan Bot",
+              username: "Drafnanafnanbot",
+              can_manage_bots: false,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/getWebhookInfo")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              url: telegramRemoteUrl,
+              has_custom_certificate: false,
+              pending_update_count: 0,
+              allowed_updates: telegramRemoteUpdates,
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (urlStr.includes("/setWebhook")) {
+        const body = JSON.parse(init?.body as string);
+        telegramRemoteUrl = body.url;
+        telegramRemoteSecret = body.secret_token;
+        telegramRemoteUpdates = body.allowed_updates;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: true,
+            description: "Webhook was set",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 404 });
+    },
+  };
+
+  const testDbConnection = {
+    id: FIXED_TARGETS.connectionId,
+    businessId: FIXED_TARGETS.businessId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: "Drafnanafnanbot",
+    provider: "telegram_managed",
+    credentialsRef: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+    status: "CONNECTED",
+    isActive: true,
+    webhookSecretHash: "initial-test-db-secret-hash",
+  };
+
+  const mainDbConnection = {
+    id: FIXED_TARGETS.connectionId,
+    businessId: FIXED_TARGETS.businessId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: "Drafnanafnanbot",
+    provider: "telegram_managed",
+    credentialsRef: "fp:725da53e-e346-4a3c-a083-fc8a3bae7f37",
+    status: "CONNECTED",
+    isActive: true,
+    webhookSecretHash: "initial-main-db-secret-hash",
+  };
+
+  const createRepoFor = (connRef: typeof testDbConnection) => ({
+    async findByIdWithinBusiness(
+      id: string,
+      businessId: string,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+    async updateWebhookSecretHash(
+      id: string,
+      businessId: string,
+      webhookSecretHash: string,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        connRef.webhookSecretHash = webhookSecretHash;
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+    async update(
+      id: string,
+      businessId: string,
+      data: Partial<TelegramConnection>,
+    ): Promise<TelegramConnection | null> {
+      if (id === connRef.id && businessId === connRef.businessId) {
+        Object.assign(connRef, data);
+        return { ...connRef } as unknown as TelegramConnection;
+      }
+      return null;
+    },
+  });
+
+  // Step 1: Forward switch targeting Test DB
+  const forwardStepResult = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(testDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.mainWebhookUrl,
+      destinationUrl: FIXED_TARGETS.previewWebhookUrl,
+      apply: true,
+    },
+  );
+
+  const forwardSuccess =
+    forwardStepResult.ok === true &&
+    forwardStepResult.status === "SWITCHED" &&
+    telegramRemoteUrl === (FIXED_TARGETS.previewWebhookUrl as string) &&
+    telegramRemoteSecret !== null &&
+    testDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+    mainDbConnection.webhookSecretHash === "initial-main-db-secret-hash";
+
+  const testDbHashAfterForward = testDbConnection.webhookSecretHash;
+
+  // Step 2: Reverse switch (restoration) targeting Main DB
+  const reverseStepResult = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(mainDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedCurrentUrl: FIXED_TARGETS.previewWebhookUrl,
+      destinationUrl: FIXED_TARGETS.mainWebhookUrl,
+      apply: true,
+    },
+  );
+
+  const reverseSuccess =
+    reverseStepResult.ok === true &&
+    reverseStepResult.status === "SWITCHED" &&
+    telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+    mainDbConnection.webhookSecretHash ===
+      createHash("sha256").update(telegramRemoteSecret!).digest("hex") &&
+    testDbConnection.webhookSecretHash === testDbHashAfterForward;
+
+  check(
+    "T35. Offline multi-database switch and restoration regression: forward switch synchronizes Test DB, restoration synchronizes Main DB without cross-database interference",
+    forwardSuccess && reverseSuccess,
+  );
+
+  let validMainTargets = true;
+  for (const host of [
+    "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+    "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(
+        `postgresql://${host}/neondb?sslmode=require`,
+      );
+    } catch {
+      validMainTargets = false;
+    }
+  }
+  check(
+    "T36. Restoration accepts only the known main endpoint direct/pooler targets",
+    validMainTargets,
+  );
+  let rejectedMainTargets = true;
+  for (const uri of [
+    "postgresql://unrelated.example/neondb?sslmode=require",
+    "postgresql://[::1]/neondb?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/other?sslmode=require",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require&host=localhost",
+    "postgresql://ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=disable",
+  ]) {
+    try {
+      validateProductionDatabaseUrl(uri);
+      rejectedMainTargets = false;
+    } catch {
+      /* Expected refusal. */
+    }
+  }
+  check(
+    "T37. Restoration rejects wrong host/database, IPv6 loopback and query transport overrides",
+    rejectedMainTargets,
+  );
+  const deniedIdentityHash = mainDbConnection.webhookSecretHash;
+  const deniedIdentitySecret = telegramRemoteSecret;
+  const deniedIdentity = await switchTelegramBotWebhook(
+    {
+      api: mockTelegramApi,
+      credentialsResolver: mockCredentialsResolver,
+      connectionRepository: createRepoFor(mainDbConnection),
+    },
+    {
+      businessId: FIXED_TARGETS.businessId,
+      connectionId: FIXED_TARGETS.connectionId,
+      expectedBotExternalId: "999999999",
+      expectedCurrentUrl: FIXED_TARGETS.mainWebhookUrl,
+      destinationUrl: FIXED_TARGETS.previewWebhookUrl,
+      apply: true,
+    },
+  );
+  check(
+    "T38. Wrong operator-pinned bot ID is rejected before webhook or database mutation",
+    !deniedIdentity.ok &&
+      deniedIdentity.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === deniedIdentitySecret &&
+      mainDbConnection.webhookSecretHash === deniedIdentityHash,
+  );
+  const unknownOpLog: string[] = [];
+  await executeGuardedSwitch(
+    { OPERATION: SYNTHETIC_SECRET },
+    {
+      out: {
+        log: (...args) => unknownOpLog.push(args.join(" ")),
+        error: (...args) => unknownOpLog.push(args.join(" ")),
+      },
+    },
+  );
+  check(
+    "T39. Unknown-operation error does not echo arbitrary input",
+    !unknownOpLog.join(" ").includes(SYNTHETIC_SECRET),
+  );
+
+  // T40. Production restoration must never inherit the Preview encryption key.
+  const restorationJob =
+    workflowYaml.split("\n  restore-main-webhook:")[1] ?? "";
+  const forwardJob =
+    (workflowYaml.split("\n  switch-test-webhook:")[1] ?? "").split(
+      "\n  restore-main-webhook:",
+    )[0] ?? "";
+  check(
+    "T40. Workflow binds explicit owner token for restoration and keeps the Preview key isolated",
+    restorationJob.includes(
+      "RESTORE_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}",
+    ) &&
+      restorationJob.includes(
+        "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
+      ) &&
+      !restorationJob.includes("CREDENTIAL_MASTER_KEY:") &&
+      !restorationJob.includes("secrets.TEST_DATABASE_URL") &&
+      forwardJob.includes(
+        "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
+      ) &&
+      forwardJob.includes("DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}") &&
+      !forwardJob.includes("RESTORE_BOT_TOKEN:"),
+  );
+
+  // Exercise the real runner and switch service with an explicit owner token.
+  const ownerToken = `${FIXED_TARGETS.botExternalId}:owner_token_regression_only_123456789`;
+  const ownerEnv = {
+    DATABASE_URL:
+      "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+    OPERATION: "restore-main-webhook-dry-run",
+    RESTORE_BOT_TOKEN: ownerToken,
+  };
+  const ownerLines: string[] = [];
+  const ownerOut = {
+    log: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+    error: (...args: unknown[]) => ownerLines.push(args.join(" ")),
+  };
+  let ownerApiMode: "valid" | "wrong-bot" | "manager" | "unauthorized" =
+    "valid";
+  let ownerRequests = 0;
+  const ownerApi: TelegramApiDeps = {
+    ...mockTelegramApi,
+    async fetchImpl(input, init) {
+      const url = String(input);
+      if (!url.startsWith(`https://api.telegram.org/bot${ownerToken}/`)) {
+        throw new Error("Unexpected credential source");
+      }
+      ownerRequests++;
+      if (url.endsWith("/getMe") && ownerApiMode !== "valid") {
+        if (ownerApiMode === "unauthorized") {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error_code: 401,
+              description: "Unauthorized",
+            }),
+            { status: 401 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              id:
+                ownerApiMode === "wrong-bot"
+                  ? 999999999
+                  : Number(FIXED_TARGETS.botExternalId),
+              is_bot: true,
+              can_manage_bots: ownerApiMode === "manager",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return mockTelegramApi.fetchImpl(input, init);
+    },
+  };
+  const ownerSwitch = async (
+    params: SwitchTelegramWebhookParams,
+    resolver?: Pick<CredentialsResolver, "resolve">,
+  ) => {
+    if (!resolver) throw new Error("Explicit owner resolver missing");
+    return switchTelegramBotWebhook(
+      {
+        api: ownerApi,
+        credentialsResolver: resolver,
+        connectionRepository: createRepoFor(mainDbConnection),
+      },
+      params,
+    );
+  };
+  const missingOwner = await executeGuardedSwitch(
+    { ...ownerEnv, RESTORE_BOT_TOKEN: "", CREDENTIAL_MASTER_KEY: "unused" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T41. Missing restoration token fails before execution and never falls back to a master key",
+    !missingOwner.ok &&
+      missingOwner.code === "MISSING_RESTORE_BOT_TOKEN" &&
+      ownerRequests === 0,
+  );
+
+  const beforeOwnerRef = mainDbConnection.credentialsRef;
+  const beforeOwnerHash = mainDbConnection.webhookSecretHash;
+  const beforeOwnerSecret = telegramRemoteSecret;
+  const readonlyOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T42. Owner-token preflight reaches current-URL refusal without master key, ciphertext access or mutations",
+    !readonlyOwner.ok &&
+      readonlyOwner.code === "CURRENT_WEBHOOK_URL_MISMATCH" &&
+      ownerRequests >= 2 &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl,
+  );
+
+  // Fake remote is now at Preview, as it would be after an authorized forward switch.
+  telegramRemoteUrl = FIXED_TARGETS.previewWebhookUrl;
+  ownerApiMode = "wrong-bot";
+  const wrongOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T43. Wrong owner-token identity is rejected before writes or webhook retargeting",
+    !wrongOwner.ok &&
+      wrongOwner.code === "BOT_IDENTITY_MISMATCH" &&
+      telegramRemoteUrl === FIXED_TARGETS.previewWebhookUrl &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "manager";
+  const managerOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T44. Owner-token path preserves the Manager Bot exclusion",
+    !managerOwner.ok && managerOwner.code === "MANAGER_BOT_TARGET_REJECTED",
+  );
+
+  ownerApiMode = "unauthorized";
+  const rejectedOwner = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T45. Telegram-rejected owner token fails closed before mutation",
+    !rejectedOwner.ok &&
+      rejectedOwner.code === "BOT_IDENTITY_VERIFICATION_FAILED" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash,
+  );
+
+  ownerApiMode = "valid";
+  const ownerDry = await executeGuardedSwitch(ownerEnv, {
+    switchFn: ownerSwitch,
+    out: ownerOut,
+  });
+  check(
+    "T46. Owner-token dry run with Preview current URL has zero writes",
+    ownerDry.ok &&
+      ownerDry.status === "SWITCH_DRY_RUN" &&
+      mainDbConnection.webhookSecretHash === beforeOwnerHash &&
+      telegramRemoteSecret === beforeOwnerSecret,
+  );
+
+  const beforeOwnerTestHash = testDbConnection.webhookSecretHash;
+  const ownerApplied = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-apply" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T47. Owner-token restoration synchronizes main hash, retains credential reference and leaves test DB untouched",
+    ownerApplied.ok &&
+      ownerApplied.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeOwnerRef &&
+      testDbConnection.webhookSecretHash === beforeOwnerTestHash,
+  );
+
+  const readonlyResolver = createOwnerRestoreResolver(ownerToken);
+  const invalidReference = await readonlyResolver.resolve(
+    "UNRELATED_ENV_TOKEN",
+  );
+  const beforeOwnerLeaks = ownerLines.join("\n");
+  await executeGuardedSwitch(ownerEnv, {
+    switchFn: async () => {
+      throw new Error(`Sensitive source ${ownerToken}`);
+    },
+    out: ownerOut,
+  });
+  check(
+    "T48. Owner resolver cannot store/delete credentials and secret-bearing failures are sanitized",
+    !("store" in readonlyResolver) &&
+      !("delete" in readonlyResolver) &&
+      !invalidReference.ok &&
+      !beforeOwnerLeaks.includes(ownerToken) &&
+      !ownerLines.join("\n").includes(ownerToken) &&
+      ownerLines.join("\n").includes("UNEXPECTED_SWITCH_FAILURE"),
+  );
+
+  const beforePreflightRequests = ownerRequests;
+  const beforePreflightHash = mainDbConnection.webhookSecretHash;
+  const beforePreflightSecret = telegramRemoteSecret;
+  const readyPreflight = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-preflight" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T49. Pre-switch restoration preflight returns READY on main with exactly two read requests and no mutations",
+    readyPreflight.ok &&
+      readyPreflight.status === "RESTORE_PREFLIGHT_READY" &&
+      ownerRequests - beforePreflightRequests === 2 &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret === beforePreflightSecret &&
+      mainDbConnection.webhookSecretHash === beforePreflightHash &&
+      mainDbConnection.credentialsRef === beforeOwnerRef,
+  );
+  check(
+    "T50. Read-only restoration preflight is explicitly routed to the guarded restoration job",
+    restorationJob.includes(
+      "inputs.operation == 'restore-main-webhook-preflight'",
+    ) && workflowYaml.includes("- restore-main-webhook-preflight"),
+  );
+
+  // Model a remote-main/local-hash mismatch left by a partial restoration.
+  mainDbConnection.webhookSecretHash = "unconfirmed-old-main-hash";
+  const beforeReconcileRef = mainDbConnection.credentialsRef;
+  const beforeReconcileTestHash = testDbConnection.webhookSecretHash;
+  const reconciledOwner = await executeGuardedSwitch(
+    { ...ownerEnv, OPERATION: "restore-main-webhook-reconcile" },
+    { switchFn: ownerSwitch, out: ownerOut },
+  );
+  check(
+    "T51. Explicit owner-token reconciliation repairs a main/hash mismatch without moving the URL or touching ciphertext/test DB",
+    reconciledOwner.ok &&
+      reconciledOwner.status === "SWITCHED" &&
+      telegramRemoteUrl === FIXED_TARGETS.mainWebhookUrl &&
+      telegramRemoteSecret !== null &&
+      mainDbConnection.webhookSecretHash ===
+        createHash("sha256").update(telegramRemoteSecret).digest("hex") &&
+      mainDbConnection.credentialsRef === beforeReconcileRef &&
+      testDbConnection.webhookSecretHash === beforeReconcileTestHash &&
+      restorationJob.includes(
+        "inputs.operation == 'restore-main-webhook-reconcile'",
       ),
   );
 
