@@ -243,6 +243,8 @@ Docs:
   Code:
 - src/features/conversations/components/inbox-list.tsx
 - src/features/conversations/components/conversation-detail.tsx
+- src/features/conversations/actions/conversation-refresh-actions.ts
+- src/features/conversations/lib/live-refresh.ts
 - src/features/conversations/server/conversation-queries.ts
 - src/features/customers/components/customers-directory.tsx
 - src/features/customers/server/customer-service.ts
@@ -255,6 +257,9 @@ Docs:
 - scripts/check-operator-attention.ts
 - scripts/check-appointment-calendar-dates.ts
 - scripts/check-safe-telegram-reply.ts
+- src/features/conversations/components/conversation-detail.test.tsx
+- src/features/conversations/server/conversation-refresh.test.tsx
+- tests/e2e/conversation-live-refresh.spec.ts
 
 ## Boundaries needing later refinement
 

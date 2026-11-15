@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.10",
+  "version": "0.79.11",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -200,6 +200,7 @@
     "test:assistant-settings": "vitest run --config vitest.config.ts src/features/assistant/components/assistant-settings-screen.test.tsx",
     "test:settings": "vitest run --config vitest.config.ts src/features/settings/components/settings-screen.test.tsx",
     "test:conversation-detail": "vitest run --config vitest.config.ts src/features/conversations/components/conversation-detail.test.tsx",
+    "test:conversation-refresh": "vitest run --config vitest.config.ts src/features/conversations/server/conversation-refresh.test.tsx",
     "test:staff-workspace": "vitest run --config vitest.config.ts src/features/staff/components/staff-workspace.test.tsx",
     "test:provider-dialog": "vitest run --config vitest.config.ts src/features/staff/components/provider-dialog.test.tsx",
     "test:install-prompt": "vitest run --config vitest.config.ts src/components/shared/pwa/install-prompt.test.tsx",

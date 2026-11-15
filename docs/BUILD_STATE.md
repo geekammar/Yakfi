@@ -1,5 +1,27 @@
 # FlowPilot — Build State
 
+## Conversation live-refresh repair — 15 November 2026
+
+- Current `main` / Production acceptance baseline: `v0.79.10` /
+  `f15deded0b2295b9c5fc016aa77486d71e40dab3`. Production acceptance passed for
+  AI customer-visible delivery, one staff reply and one complete conversational
+  booking.
+- Separate live-refresh defect: an open conversation stayed stale (no incoming
+  customer/AI messages, status/ownership update or new appointment) until a
+  manual reload. `ConversationDetail` used one-time `useState(initialData)` and
+  `getConversationDetail` is a write-on-open attention acknowledgment, not a
+  pure read.
+- Candidate `v0.79.11` (`fix/conversation-live-refresh`, draft PR): new
+  authenticated read-only `refreshConversationDetail` action +
+  `getConversationRefresh` snapshot; visible-tab 5s polling with no overlap,
+  hidden pause, focus/online revalidation, cleanup, bounded backoff and
+  last-good retention; merge preserves draft/draft identity, pending/unknown
+  attempts, unsaved summaries, mobile selection and scroll; stale/navigation
+  responses are ignored. No migration and no delivery/booking/AI/pricing
+  behavior change.
+- Automated verification runs in CI; later Muse Production acceptance remains
+  pending. No merge/deploy/migration/live customer test performed.
+
 ## Single Production runtime consolidation preparation — 15 November 2026
 
 - Approved operating decision: one primary Vercel runtime for development-stage

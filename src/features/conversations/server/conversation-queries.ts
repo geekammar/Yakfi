@@ -1,5 +1,6 @@
 import type {
   ConversationDetailData,
+  ConversationRefreshData,
   InboxConversation,
   InboxUser,
 } from "@/features/conversations/types";
@@ -11,6 +12,40 @@ import {
 } from "@/server/repositories";
 
 import { resolveDisplayForMessage } from "./interaction-display";
+
+type DetailConversation = NonNullable<
+  Awaited<ReturnType<typeof conversationRepository.findDetailByBusiness>>
+>;
+type DetailAppointments = Awaited<
+  ReturnType<typeof appointmentRepository.listRecentByCustomer>
+>;
+
+function projectMessages(conversation: DetailConversation) {
+  return conversation.messages.map((message) => ({
+    id: message.id,
+    senderType: message.senderType,
+    content: message.content,
+    displayText: resolveDisplayForMessage({
+      senderType: message.senderType,
+      content: message.content,
+      displayText: message.displayText,
+      metadata: message.metadata,
+    }),
+    metadata: message.metadata ?? null,
+    createdAt: message.createdAt.toISOString(),
+  }));
+}
+
+function projectAppointments(appointments: DetailAppointments) {
+  return appointments.map((appointment) => ({
+    id: appointment.id,
+    date: appointment.date.toISOString().slice(0, 10),
+    startTime: appointment.startTime.toISOString(),
+    status: appointment.status,
+    notes: appointment.notes,
+    service: appointment.service,
+  }));
+}
 
 export async function getConversationInbox(businessId: string) {
   const [conversations, users] = await Promise.all([
@@ -114,27 +149,48 @@ export async function getConversationDetail(
     },
     assignedUser: conversation.assignedTo,
     currentUserId,
-    messages: conversation.messages.map((message) => ({
-      id: message.id,
-      senderType: message.senderType,
-      content: message.content,
-      displayText: resolveDisplayForMessage({
-        senderType: message.senderType,
-        content: message.content,
-        displayText: message.displayText,
-        metadata: message.metadata,
-      }),
-      metadata: message.metadata ?? null,
-      createdAt: message.createdAt.toISOString(),
-    })),
-    appointments: appointments.map((appointment) => ({
-      id: appointment.id,
-      date: appointment.date.toISOString().slice(0, 10),
-      startTime: appointment.startTime.toISOString(),
-      status: appointment.status,
-      notes: appointment.notes,
-      service: appointment.service,
-    })),
+    messages: projectMessages(conversation),
+    appointments: projectAppointments(appointments),
+    team: users
+      .filter((user) => user.isActive)
+      .map((user) => ({ id: user.id, name: user.name, image: user.image })),
+  };
+}
+
+/**
+ * Authorized READ-ONLY snapshot for a conversation that is already open.
+ *
+ * Unlike `getConversationDetail`, this deliberately performs NO operator-
+ * attention read or acknowledgment: periodic refreshes must never clear a
+ * handoff alert, mutate ownership, mark anything sent, write appointments or
+ * trigger delivery. `businessId` is always derived from the authenticated
+ * server session by the caller — never from the browser.
+ */
+export async function getConversationRefresh(
+  businessId: string,
+  conversationId: string,
+): Promise<ConversationRefreshData | null> {
+  const conversation = await conversationRepository.findDetailByBusiness(
+    conversationId,
+    businessId,
+  );
+  if (!conversation) return null;
+
+  const [appointments, users] = await Promise.all([
+    appointmentRepository.listRecentByCustomer(
+      businessId,
+      conversation.customerId,
+    ),
+    userRepository.listByBusiness({ businessId }, { pageSize: 100 }),
+  ]);
+
+  return {
+    id: conversation.id,
+    status: conversation.status,
+    aiSummary: conversation.aiSummary ?? "",
+    assignedUser: conversation.assignedTo,
+    messages: projectMessages(conversation),
+    appointments: projectAppointments(appointments),
     team: users
       .filter((user) => user.isActive)
       .map((user) => ({ id: user.id, name: user.name, image: user.image })),
