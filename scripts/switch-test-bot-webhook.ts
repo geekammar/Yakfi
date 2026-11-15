@@ -363,8 +363,8 @@ export async function executeGuardedSwitch(
     operation === "return-old-preview-apply";
   const isPreviewToPreview = isIntegratedPreviewTransfer || isOldPreviewReturn;
 
-  let expectedCurrentUrl = FIXED_TARGETS.mainWebhookUrl;
-  let destinationUrl = FIXED_TARGETS.previewWebhookUrl;
+  let expectedCurrentUrl: string = FIXED_TARGETS.mainWebhookUrl;
+  let destinationUrl: string = FIXED_TARGETS.previewWebhookUrl;
 
   if (isRestore && !isRestorePreflight && !isReconcile) {
     expectedCurrentUrl = FIXED_TARGETS.previewWebhookUrl;
@@ -395,15 +395,13 @@ export async function executeGuardedSwitch(
   }
 
   const destinationReadiness = isPreviewToPreview
-    ? await (deps.verifyDestination ?? verifyPreviewDestinationReadiness)(
-        {
-          kind: isIntegratedPreviewTransfer
-            ? "integrated-preview"
-            : "old-preview",
-          expectedCommitSha,
-          databaseUrl,
-        },
-      )
+    ? await (deps.verifyDestination ?? verifyPreviewDestinationReadiness)({
+        kind: isIntegratedPreviewTransfer
+          ? "integrated-preview"
+          : "old-preview",
+        expectedCommitSha,
+        databaseUrl,
+      })
     : null;
   if (destinationReadiness && !destinationReadiness.ok) {
     out.error(

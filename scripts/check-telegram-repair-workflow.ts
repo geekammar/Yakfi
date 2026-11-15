@@ -1482,7 +1482,6 @@ fi
       ),
   );
 
-
   // ─── 6. Fixed Preview-to-Preview Transfer Guards ────────────────────────────
   const transferJob =
     (workflowYaml.split("\n  transfer-preview-webhook:")[1] ?? "").split(
@@ -1496,9 +1495,7 @@ fi
       !transferJob.includes(
         "github.ref == 'refs/heads/fix/safe-telegram-staff-reply-delivery'",
       ) &&
-      transferJob.includes(
-        "EXPECTED_SHA: ${{ inputs.expected_commit_sha }}",
-      ) &&
+      transferJob.includes("EXPECTED_SHA: ${{ inputs.expected_commit_sha }}") &&
       transferJob.includes(
         "if ! printf '%s' \"$EXPECTED_SHA\" | grep -Eq '^[0-9a-f]{40}$'",
       ) &&
@@ -1507,7 +1504,9 @@ fi
       transferJob.includes(
         "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
       ) &&
-      transferJob.includes("EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}") &&
+      transferJob.includes(
+        "EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}",
+      ) &&
       !transferJob.includes("PRODUCTION_DATABASE_URL") &&
       !transferJob.includes("RESTORE_BOT_TOKEN") &&
       transferJob.includes("transfer-integration-preview-dry-run") &&
@@ -1518,15 +1517,17 @@ fi
     "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require";
   const previewIntegrationSha = "a".repeat(40);
   const previewOtherSha = "b".repeat(40);
-  const makeHealthResponse = (args: {
-    version?: string;
-    commitSha?: string;
-    dbHost?: string;
-    isProductionDb?: boolean;
-    migrationApplied?: boolean;
-    deploymentReady?: boolean;
-    database?: string;
-  } = {}): Response =>
+  const makeHealthResponse = (
+    args: {
+      version?: string;
+      commitSha?: string;
+      dbHost?: string;
+      isProductionDb?: boolean;
+      migrationApplied?: boolean;
+      deploymentReady?: boolean;
+      database?: string;
+    } = {},
+  ): Response =>
     new Response(
       JSON.stringify({
         status: "ok",
@@ -1536,8 +1537,7 @@ fi
         database: args.database ?? "connected",
         previewDiagnostics: {
           dbHost:
-            args.dbHost ??
-            "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+            args.dbHost ?? "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
           isProductionDb: args.isProductionDb ?? false,
           migrationApplied: args.migrationApplied ?? true,
         },
@@ -1572,8 +1572,7 @@ fi
     integratedReadiness.ok &&
       integratedReadiness.kind === "integrated-preview" &&
       integratedReadiness.commitSha === previewIntegrationSha &&
-      integratedReadiness.version ===
-        FIXED_TARGETS.integratedPreviewVersion &&
+      integratedReadiness.version === FIXED_TARGETS.integratedPreviewVersion &&
       oldReadiness.ok &&
       oldReadiness.kind === "old-preview" &&
       oldReadiness.commitSha === FIXED_TARGETS.oldPreviewCommitSha &&
@@ -1587,7 +1586,10 @@ fi
         expectedCommitSha: previewIntegrationSha,
         databaseUrl: previewTestDbUrl,
       },
-      { fetchImpl: async () => makeHealthResponse({ commitSha: previewOtherSha }) },
+      {
+        fetchImpl: async () =>
+          makeHealthResponse({ commitSha: previewOtherSha }),
+      },
     ),
     verifyPreviewDestinationReadiness(
       {
@@ -1609,7 +1611,9 @@ fi
         expectedCommitSha: previewIntegrationSha,
         databaseUrl: previewTestDbUrl,
       },
-      { fetchImpl: async () => makeHealthResponse({ migrationApplied: false }) },
+      {
+        fetchImpl: async () => makeHealthResponse({ migrationApplied: false }),
+      },
     ),
     verifyPreviewDestinationReadiness(
       {
@@ -1732,24 +1736,28 @@ fi
         transferRemote.url = body.url;
         transferRemote.secret = body.secret_token;
         transferRemote.updates = body.allowed_updates;
-        return new Response(
-          JSON.stringify({ ok: true, result: true }),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          status: 200,
+        });
       }
       return new Response(JSON.stringify({ ok: false }), { status: 404 });
     },
   };
 
-  const transferState = {
-    healthCalls: [] as Array<{
+  const transferState: {
+    healthCalls: Array<{
       kind: string;
       expectedCommitSha: string;
       databaseUrl: string;
-    }>,
+    }>;
+    switchCalls: number;
+    lastParams: SwitchTelegramWebhookParams | undefined;
+    out: string[];
+  } = {
+    healthCalls: [],
     switchCalls: 0,
-    lastParams: undefined as SwitchTelegramWebhookParams | undefined,
-    out: [] as string[],
+    lastParams: undefined,
+    out: [],
   };
   const transferOut = {
     log: (...args: unknown[]) => transferState.out.push(args.join(" ")),
@@ -1830,7 +1838,8 @@ fi
       forwardDry.status === "SWITCH_DRY_RUN" &&
       transferState.healthCalls.length === 1 &&
       transferState.healthCalls[0]?.kind === "integrated-preview" &&
-      transferState.healthCalls[0]?.expectedCommitSha === previewIntegrationSha &&
+      transferState.healthCalls[0]?.expectedCommitSha ===
+        previewIntegrationSha &&
       transferState.lastParams?.expectedCurrentUrl ===
         FIXED_TARGETS.previewWebhookUrl &&
       transferState.lastParams?.destinationUrl ===
@@ -1858,7 +1867,8 @@ fi
     returnDry.ok &&
       returnDry.status === "SWITCH_DRY_RUN" &&
       transferState.healthCalls[0]?.kind === "old-preview" &&
-      transferState.healthCalls[0]?.expectedCommitSha === previewIntegrationSha &&
+      transferState.healthCalls[0]?.expectedCommitSha ===
+        previewIntegrationSha &&
       transferState.lastParams?.expectedCurrentUrl ===
         FIXED_TARGETS.integratedPreviewWebhookUrl &&
       transferState.lastParams?.destinationUrl ===
