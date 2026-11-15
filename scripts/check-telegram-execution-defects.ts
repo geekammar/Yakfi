@@ -6,7 +6,6 @@ import * as engine from "@/features/conversations/server/conversation-engine";
 import { emptyConversationState } from "@/features/conversations/server/conversation-state";
 import { createPrismaProxy } from "@/server/db";
 import { createTelegramMessageTransport } from "@/server/integrations/telegram/telegram-transport";
-import type { TelegramApiDeps } from "@/server/integrations/telegram/telegram-client";
 import type { MessageTransport } from "@/server/transport/whatsapp-transport";
 import { renderTelegramInlineKeyboard } from "@/server/integrations/telegram/telegram-presentation";
 import {
