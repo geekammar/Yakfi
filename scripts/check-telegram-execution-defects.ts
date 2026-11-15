@@ -1173,6 +1173,13 @@ async function main(): Promise<void> {
           "ANSWER_CALLBACK_FAILED",
           "UNHANDLED_EXCEPTION",
           "RATE_LIMITED",
+          "UNAUTHORIZED_CREDENTIALS",
+          "INVALID_CONNECTION",
+          "MALFORMED_PROVIDER_PAYLOAD",
+          "PERMANENT_TRANSPORT_FAILURE",
+          "TRANSIENT_TRANSPORT_FAILURE",
+          "UNSUPPORTED_MESSAGE_TYPE",
+          "DELIVERY_FAILED",
           "UNKNOWN_ERROR",
         ].includes(e.error)
       );
@@ -1229,16 +1236,6 @@ async function main(): Promise<void> {
     );
     await Promise.all(scheduledThrowLogger);
 
-    console.log("TEST4 DEBUG", {
-      prodSuppliesLogger,
-      ackWrapperOk: ackWrapperResult?.ok,
-      status: res.status,
-      hasAckFailedLog,
-      hasOutboundSuccessLog,
-      noRawErrorMessageLeak,
-      resThrowLoggerStatus: resThrowLogger.status,
-      loggedEvents,
-    });
     check(
       "4. Production composition supplies logger, safe allowlisted events prevent leakage, non-throwing ACK failure maps to ACK_FAILED, and logger exceptions never abort processing",
       Boolean(
