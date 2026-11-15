@@ -595,6 +595,8 @@ export async function executeGuardedSwitch(
         deps.verifyProductionDestination ?? verifyProductionDestinationReadiness
       )({
         expectedCommitSha,
+        databaseUrl,
+        cutoverBotToken,
         ...(expectedVersion ? { expectedVersion } : {}),
       })
     : null;
