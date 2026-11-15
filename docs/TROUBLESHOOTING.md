@@ -307,28 +307,43 @@ connection strings.
   the exact SHA. It runs the existing credential diagnosis
   (`scripts/repair-test-bot-credential.py --from-environment`, read-only) and
   `pnpm exec prisma migrate status`.
-- **Configuration cutover:** `production-runtime-env.yml` operation
-  `preflight` or `apply`, guarded to the integration branch or `main` plus the
-  exact SHA. It reuses repository `TEST_DATABASE_URL` and
-  `CREDENTIAL_MASTER_KEY` with `VERCEL_TOKEN` and updates only the Production
-  `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` records. It does not use the
-  `Production` GitHub environment, so environment-scoped secrets cannot
-  override its inputs.
+- **Configuration cutover:** `test-db-migrate.yml` operation
+  `configure-production-runtime-env` with `environment_operation=preflight` or
+  `apply`, guarded to the integration branch or `main` plus the exact SHA. It
+  reuses repository `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY` with
+  `VERCEL_TOKEN` and updates only the Production `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` records. It does not use the `Production` GitHub
+  environment, so environment-scoped secrets cannot override its inputs.
 - **Merge and deployment:** approved PR #83 merge to `main`; normal Vercel
   Production build of the exact merge SHA.
 - **Runtime credential/bot identity and switch:** `test-db-migrate.yml`
   operations `cutover-main-runtime-dry-run` then
   `cutover-main-runtime-apply`, guarded to `main` plus the exact merge SHA.
-  Both use the selected test DB/key and the application credential, verify the
-  deployed Production health commit/version, and expose only sanitized
-  metadata. The current webhook is fixed by the `expected_current` choice;
-  there is no arbitrary destination input. Dry-run and apply are separate; no
-  automatic retry occurs after partial failure.
+  Both use repository `TEST_DATABASE_URL`/`CREDENTIAL_MASTER_KEY` and the
+  existing `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (HMAC signer only, never sent).
+  Before any switch, the deployed application must answer
+  `/api/operator/cutover-readiness` with a short-lived HMAC-signed proof that
+  it is running the expected commit/version on the selected DB, that the fixed
+  Business/connection exists there, and that its own credentials resolver
+  resolves the expected bot credential. The response is bounded metadata only
+  (no token, ciphertext, hash or connection string). The current webhook is
+  fixed by the `expected_current` choice; there is no arbitrary destination
+  input. Dry-run and apply are separate; no automatic retry occurs after
+  partial failure.
 - **Read-only postcheck:** rerun `verify-selected-runtime` on the merge SHA,
   rerun `cutover-main-runtime-dry-run` with `expected_current=main` (returns
-  an explicit `ALREADY_AT_DESTINATION` no-op), and inspect `/api/health`.
+  an explicit `ALREADY_AT_DESTINATION` no-op), inspect the signed runtime
+  readiness result and `/api/health`.
   `production-telegram-repair.yml` remains an optional explicit check after its
   environment secret is repointed; it is not the cutover gate.
+
+### Dispatchability
+
+`test-db-migrate.yml` already exists on `main`; dispatching it with
+`--ref integration/staff-delivery-knowledge-contract` runs the reviewed file
+from that exact ref without needing a bootstrap merge. After the merge, use
+`--ref main` and the merge SHA. All commands below require full 40-character
+SHAs; do not abbreviate.
 
 ### Ordered cutover
 
@@ -336,14 +351,16 @@ connection strings.
    test DB URL/key; owner records the current deployment, bot webhook URL and
    old Production DB host in a non-secret inventory. Do not delete, reset or
    overwrite either database.
-2. Run `verify-selected-runtime` read-only on the exact PR #83 HEAD. Confirm
-   `status: HEALTHY_LOCAL_KEY` and capture the migration status.
+2. Run `verify-selected-runtime` read-only on the exact PR #83 HEAD:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=verify-selected-runtime -f expected_commit_sha=4548c19f97a5591325090f1a97718755e45bf6f2`
+   Confirm `status: HEALTHY_LOCAL_KEY` and capture the migration status.
 3. If migrations are pending, stop and follow the migration ordering above.
    Otherwise continue without applying migrations.
-4. Run `production-runtime-env.yml` with `operation=preflight` on the exact
-   PR #83 HEAD. Confirm exactly one Production-scoped record exists for each of
+4. Run the env preflight on the exact PR #83 HEAD:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref integration/staff-delivery-knowledge-contract -f operation=configure-production-runtime-env -f environment_operation=preflight -f expected_commit_sha=4548c19f97a5591325090f1a97718755e45bf6f2`
+   Confirm exactly one Production-scoped record exists for each of
    `DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
-5. Run `production-runtime-env.yml` with `operation=apply` and the same exact
+5. Run the same command with `environment_operation=apply` and the same exact
    SHA. This is the only approved Production environment write in the
    transition; it changes only the two fixed keys. If it reports
    `PARTIAL_ENV_UPDATE`, stop before merge/deploy, inspect which key was
@@ -353,12 +370,15 @@ connection strings.
    normal Vercel Production deployment build it. Verify `/api/health` reports
    that exact `commitSha`, version `0.79.10`, `deploymentReady=true`,
    `database=connected` and `missingEnvVars=[]`.
-7. Run `cutover-main-runtime-dry-run` on `main` with the exact merge SHA and
-   `expected_current=integrated-preview` (the last recorded fixed-bot
-   registration). Confirm the fixed bot identity, current URL, destination and
-   deployed commit. Zero provider/DB/configuration writes.
+7. Run the cutover dry-run on `main` with the exact merge SHA:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref main -f operation=cutover-main-runtime-dry-run -f expected_commit_sha=<MERGE_SHA> -f expected_current=integrated-preview`
+   Confirm the fixed bot identity, current URL, destination, deployed commit,
+   selected database and resolved application runtime credential. Zero
+   provider/DB/configuration writes.
 8. After separate approval, run `cutover-main-runtime-apply` with the same
-   SHA and `expected_current`. It switches the fixed bot once to
+   SHA and `expected_current`:
+   `gh workflow run test-db-migrate.yml --repo geekammar/Yakfi --ref main -f operation=cutover-main-runtime-apply -f expected_commit_sha=<MERGE_SHA> -f expected_current=integrated-preview`
+   It switches the fixed bot once to
    `https://flowpilot-prod.vercel.app/api/telegram/webhook`, rotates the
    webhook secret, and persists the hash in the selected test DB.
 9. Run the read-only postcheck above. Then, and only after another separate

@@ -129,6 +129,7 @@ jobs:
           pnpm check:telegram-onboarding
           pnpm check:telegram-repair-workflow
           pnpm check:update-production-runtime-env
+          pnpm check:cutover-readiness
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects
           pnpm check:telegram-acceptance

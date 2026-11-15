@@ -28,9 +28,13 @@
   status plus fixed-bot credential/getMe), exact-main-SHA
   `cutover-main-runtime-dry-run` / `cutover-main-runtime-apply` (fixed bot to
   canonical Production using the selected test DB/key), and the one-shot
-  `production-runtime-env.yml` (only Production `DATABASE_URL` and
-  `CREDENTIAL_MASTER_KEY`). `production-telegram-repair.yml` does not enforce
-  `expected_db_host` and is not the cutover gate.
+  `test-db-migrate.yml` / `configure-production-runtime-env` operation (only
+  Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY`). Cutover readiness now
+  requires a signed proof from the deployed application
+  (`/api/operator/cutover-readiness`) of commit/version, selected DB binding,
+  fixed Business/connection and resolved bot credential before any switch.
+  `production-telegram-repair.yml` does not enforce `expected_db_host` and is
+  not the cutover gate.
 - Recovery limit: the current Production `DATABASE_URL` and
   `CREDENTIAL_MASTER_KEY` are sensitive and cannot be read back through Vercel.
   A deployment ID is not a secret backup; if the old values are not in the

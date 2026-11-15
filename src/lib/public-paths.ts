@@ -44,6 +44,10 @@ const PUBLIC_PATH_PREFIXES = [
   // Scheduled cron endpoints (BOOK-REM-01). Authenticated via CRON_SECRET
   // bearer token / header; answering 401 if missing or unauthorized.
   "/api/cron",
+  // Fixed cutover readiness probe. Authenticated by a short-lived HMAC
+  // signed with the fixed bot credential the deployed application resolves
+  // from the selected runtime DB; returns only bounded readiness metadata.
+  "/api/operator/cutover-readiness",
 ] as const;
 
 export const QA_CONVERSATION_HEADER_PATH = "/qa/conversation-header";

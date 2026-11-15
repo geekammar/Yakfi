@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 
+import { resolveMasterKey } from "../src/server/credentials/credential-crypto";
+import { validateDatabaseUrl } from "../src/server/credentials/test-bot-recovery";
+
 export const PROJECT_ID = "prj_CjKh6Qt6IAKEc9EB4StaJJxnP0Fp";
 export const TARGET_ENVIRONMENT = "production";
 export const TARGET_KEYS = ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"] as const;
@@ -34,19 +37,28 @@ function assertExactSha(expected: string, actual: string): void {
   }
 }
 
-function hasTarget(env: VercelEnv, target: string): boolean {
-  if (Array.isArray(env.target)) return env.target.includes(target);
-  return env.target === target;
+function targetList(env: VercelEnv): unknown[] {
+  if (Array.isArray(env.target)) return env.target;
+  return env.target === undefined ? [] : [env.target];
 }
 
 export function findProductionRecord(
   envs: VercelEnv[],
   key: TargetKey,
 ): VercelEnv {
-  const matches = envs.filter(
+  const keyRecords = envs.filter((env) => env.key === key);
+  const mixedScope = keyRecords.filter(
     (env) =>
-      env.key === key &&
-      hasTarget(env, TARGET_ENVIRONMENT) &&
+      targetList(env).includes(TARGET_ENVIRONMENT) &&
+      targetList(env).length > 1,
+  );
+  if (mixedScope.length > 0) {
+    throw new Error(`MIXED_SCOPE_${key}_RECORD`);
+  }
+  const matches = keyRecords.filter(
+    (env) =>
+      targetList(env).length === 1 &&
+      targetList(env)[0] === TARGET_ENVIRONMENT &&
       !env.gitBranch &&
       !env.customEnvironmentId,
   );
@@ -57,6 +69,36 @@ export function findProductionRecord(
     throw new Error(`AMBIGUOUS_${key}_PRODUCTION_RECORD`);
   }
   return matches[0]!;
+}
+
+function validateSourcePair(
+  values: Partial<Record<TargetKey, string | undefined>>,
+): {
+  DATABASE_URL: string;
+  CREDENTIAL_MASTER_KEY: string;
+} {
+  const databaseUrl = requireString(values.DATABASE_URL, "MISSING_DATABASE_URL");
+  const masterKey = requireString(
+    values.CREDENTIAL_MASTER_KEY,
+    "MISSING_CREDENTIAL_MASTER_KEY",
+  );
+  try {
+    validateDatabaseUrl(databaseUrl);
+  } catch (error: unknown) {
+    if (error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)) {
+      throw new Error(error.message);
+    }
+    throw new Error("DATABASE_TARGET_NOT_AUTHORIZED");
+  }
+  const resolved = resolveMasterKey(masterKey);
+  if (!resolved.ok) {
+    throw new Error("MASTER_KEY_UNAVAILABLE_OR_INVALID");
+  }
+  resolved.key.fill(0);
+  return {
+    DATABASE_URL: databaseUrl,
+    CREDENTIAL_MASTER_KEY: masterKey,
+  };
 }
 
 async function listProjectEnvs(
@@ -119,7 +161,7 @@ export async function runUpdateProductionRuntimeEnv(
     expectedSha: string;
     githubSha: string;
     token?: string;
-    values: Record<TargetKey, string | undefined>;
+    values: Partial<Record<TargetKey, string | undefined>>;
   },
   deps: Deps = {},
 ): Promise<void> {
@@ -132,6 +174,7 @@ export async function runUpdateProductionRuntimeEnv(
   const githubSha = requireString(params.githubSha, "GITHUB_SHA_REQUIRED");
   assertExactSha(expectedSha, githubSha);
   const token = requireString(params.token, "VERCEL_TOKEN_UNAVAILABLE");
+  const values = validateSourcePair(params.values);
 
   const envs = await listProjectEnvs(token, fetchImpl);
   const records = TARGET_KEYS.map((key) => ({
@@ -150,7 +193,7 @@ export async function runUpdateProductionRuntimeEnv(
   }
 
   for (const { key, record } of records) {
-    const value = requireString(params.values[key], `MISSING_${key}`);
+    const value = values[key];
     try {
       await updateEnvRecord(token, record, value, fetchImpl);
     } catch {
@@ -166,7 +209,7 @@ export async function runUpdateProductionRuntimeEnv(
     if (record.type !== "sensitive") {
       throw new Error(`VERIFIED_${key}_NOT_SENSITIVE`);
     }
-    log(`VERIFIED key=${key} scope=${TARGET_ENVIRONMENT}`);
+    log(`METADATA_VERIFIED key=${key} scope=${TARGET_ENVIRONMENT}`);
   }
   log(`APPLY_OK keys=${TARGET_KEYS.join(",")} scope=${TARGET_ENVIRONMENT}`);
 }

@@ -13,6 +13,10 @@ import { fileURLToPath } from "node:url";
 import { isRuntimeCredentialReference } from "../src/lib/validation";
 import type { CredentialsResolver } from "../src/server/credentials/credentials-resolver";
 import {
+  CUTOVER_READINESS_PATH,
+  signCutoverReadiness,
+} from "../src/server/operator/cutover-readiness";
+import {
   RecoveryError,
   validateDatabaseUrl,
 } from "../src/server/credentials/test-bot-recovery";
@@ -264,57 +268,93 @@ export type ProductionDestinationReadiness =
       origin: string;
       version: string | null;
       commitSha: string;
+      dbHost: string;
     }
   | {
       ok: false;
       code:
         | "MISSING_EXPECTED_COMMIT_SHA"
+        | "MISSING_CUTOVER_BOT_TOKEN"
+        | "DESTINATION_READINESS_UNAUTHORIZED"
         | "DESTINATION_HEALTH_UNAVAILABLE"
         | "DESTINATION_NOT_READY"
-        | "DESTINATION_IDENTITY_MISMATCH";
+        | "DESTINATION_IDENTITY_MISMATCH"
+        | "DESTINATION_DATABASE_MISMATCH"
+        | "DESTINATION_RUNTIME_UNRESOLVED";
     };
 
 /**
  * Bounded read-only readiness check for the canonical Production runtime.
- * It verifies the deployed commit SHA and ready/connected health before any
- * cutover mutation. It never reads or returns secrets, raw bodies or tokens.
+ * The deployed application must prove, with a short-lived HMAC signed by the
+ * fixed bot credential it resolves itself, that it is running the expected
+ * commit/version on the selected database with the fixed Business/connection
+ * and a resolvable bot credential. It never reads or returns secrets, raw
+ * bodies or tokens.
  */
 export async function verifyProductionDestinationReadiness(
   params: {
     expectedCommitSha: string;
     expectedVersion?: string;
+    databaseUrl: string;
+    cutoverBotToken: string;
   },
-  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number; now?: () => number } = {},
 ): Promise<ProductionDestinationReadiness> {
   const expected = params.expectedCommitSha.trim();
   if (!/^[0-9a-f]{40}$/.test(expected)) {
     return { ok: false, code: "MISSING_EXPECTED_COMMIT_SHA" };
   }
+  const botToken = params.cutoverBotToken.trim();
+  if (!botToken) {
+    return { ok: false, code: "MISSING_CUTOVER_BOT_TOKEN" };
+  }
+  const sourceHost = parseDbHost(params.databaseUrl);
+  if (!sourceHost || !isAuthorizedTestDbHost(sourceHost)) {
+    return { ok: false, code: "DESTINATION_DATABASE_MISMATCH" };
+  }
 
+  const timestamp = String((deps.now ?? Date.now)());
   const origin = new URL(FIXED_TARGETS.mainWebhookUrl).origin;
   let response: Response;
   try {
     response = await (deps.fetchImpl ?? globalThis.fetch)(
-      `${origin}/api/health`,
+      `${origin}${CUTOVER_READINESS_PATH}`,
       {
         method: "GET",
         redirect: "error",
+        headers: {
+          "x-flowpilot-cutover-bot-id": FIXED_TARGETS.botExternalId,
+          "x-flowpilot-cutover-timestamp": timestamp,
+          "x-flowpilot-cutover-signature": signCutoverReadiness(
+            botToken,
+            timestamp,
+            FIXED_TARGETS.botExternalId,
+          ),
+        },
         signal: AbortSignal.timeout(deps.timeoutMs ?? 5000),
       },
     );
   } catch {
     return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
   }
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, code: "DESTINATION_READINESS_UNAUTHORIZED" };
+  }
   if (!response.ok) {
-    return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
+    return { ok: false, code: "DESTINATION_NOT_READY" };
   }
 
   let body: {
-    status?: unknown;
+    ok?: unknown;
     version?: unknown;
     commitSha?: unknown;
-    deploymentReady?: unknown;
-    database?: unknown;
+    databaseHost?: unknown;
+    databaseName?: unknown;
+    businessId?: unknown;
+    connectionId?: unknown;
+    botExternalId?: unknown;
+    botUsername?: unknown;
+    credentialResolved?: unknown;
   };
   try {
     body = (await response.json()) as typeof body;
@@ -322,19 +362,29 @@ export async function verifyProductionDestinationReadiness(
     return { ok: false, code: "DESTINATION_HEALTH_UNAVAILABLE" };
   }
 
-  if (
-    body.status !== "ok" ||
-    body.deploymentReady !== true ||
-    body.database !== "connected"
-  ) {
-    return { ok: false, code: "DESTINATION_NOT_READY" };
+  if (body.ok !== true || body.credentialResolved !== true) {
+    return { ok: false, code: "DESTINATION_RUNTIME_UNRESOLVED" };
   }
-  if (body.commitSha !== expected) {
+  if (
+    body.commitSha !== expected ||
+    body.businessId !== FIXED_TARGETS.businessId ||
+    body.connectionId !== FIXED_TARGETS.connectionId ||
+    body.botExternalId !== FIXED_TARGETS.botExternalId ||
+    body.botUsername !== FIXED_TARGETS.botUsername
+  ) {
     return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
   }
   const expectedVersion = params.expectedVersion?.trim();
   if (expectedVersion && body.version !== expectedVersion) {
     return { ok: false, code: "DESTINATION_IDENTITY_MISMATCH" };
+  }
+  if (
+    typeof body.databaseHost !== "string" ||
+    !isAuthorizedTestDbHost(body.databaseHost) ||
+    canonicalDbHost(body.databaseHost) !== canonicalDbHost(sourceHost) ||
+    body.databaseName !== "neondb"
+  ) {
+    return { ok: false, code: "DESTINATION_DATABASE_MISMATCH" };
   }
 
   return {
@@ -342,6 +392,7 @@ export async function verifyProductionDestinationReadiness(
     origin,
     version: typeof body.version === "string" ? body.version : null,
     commitSha: expected,
+    dbHost: body.databaseHost,
   };
 }
 
@@ -426,8 +477,12 @@ export async function executeGuardedSwitch(
   const isReconcile = operation === "restore-main-webhook-reconcile";
   const isApply = operation.endsWith("-apply") || isReconcile;
   const isRestorePreflight = operation === "restore-main-webhook-preflight";
+  const isCutover =
+    operation === "cutover-main-runtime-dry-run" ||
+    operation === "cutover-main-runtime-apply";
   const masterKey = (env.CREDENTIAL_MASTER_KEY ?? "").trim();
   const restoreToken = (env.RESTORE_BOT_TOKEN ?? "").trim();
+  const cutoverBotToken = (env.CUTOVER_BOT_TOKEN ?? "").trim();
   if (isRestore ? !restoreToken : !masterKey) {
     const code = isRestore
       ? "MISSING_RESTORE_BOT_TOKEN"
@@ -436,6 +491,12 @@ export async function executeGuardedSwitch(
       `❌ Preflight Refused: [${code}] Required maintenance credential is unavailable.`,
     );
     return { ok: false, code };
+  }
+  if (isCutover && !cutoverBotToken) {
+    out.error(
+      "❌ Preflight Refused: [MISSING_CUTOVER_BOT_TOKEN] The existing fixed-bot owner token is required for application-runtime readiness.",
+    );
+    return { ok: false, code: "MISSING_CUTOVER_BOT_TOKEN" };
   }
 
   try {
@@ -463,9 +524,6 @@ export async function executeGuardedSwitch(
     operation === "return-old-preview-dry-run" ||
     operation === "return-old-preview-apply";
   const isPreviewToPreview = isIntegratedPreviewTransfer || isOldPreviewReturn;
-  const isCutover =
-    operation === "cutover-main-runtime-dry-run" ||
-    operation === "cutover-main-runtime-apply";
 
   let expectedCurrentUrl: string = FIXED_TARGETS.mainWebhookUrl;
   let destinationUrl: string = isRestore

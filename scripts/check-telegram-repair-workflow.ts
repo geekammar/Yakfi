@@ -589,6 +589,7 @@ fi
     executeGuardedSwitch,
     validateProductionDatabaseUrl,
     verifyPreviewDestinationReadiness,
+    verifyProductionDestinationReadiness,
     FIXED_TARGETS,
     createOwnerRestoreResolver,
   } = await import("./switch-test-bot-webhook");
@@ -596,6 +597,9 @@ fi
     await import("../src/server/credentials/test-bot-recovery");
   const { switchTelegramBotWebhook } =
     await import("../src/server/integrations/telegram/telegram-repair");
+  const { signCutoverReadiness } = await import(
+    "../src/server/operator/cutover-readiness"
+  );
 
   // T21. Runner CLI fails closed on unknown operation
   const runnerUnknownOp = runSwitchRunner({
@@ -2085,6 +2089,7 @@ fi
 
   // T64. Production runtime cutover dry-run maps the fixed current URL to Production.
   const cutoverIntegrationSha = "c".repeat(40);
+  const cutoverBotToken = ["8926541123", "cutover", "signing", "sentinel"].join(":");
   const cutoverDryCapture = {
     current: null as SwitchTelegramWebhookParams | null,
   };
@@ -2095,6 +2100,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-dry-run",
       EXPECTED_CURRENT_KIND: "integrated-preview",
       EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
@@ -2166,6 +2172,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-dry-run",
       EXPECTED_CURRENT_KIND: "arbitrary-url",
       EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
@@ -2179,6 +2186,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-dry-run",
       EXPECTED_CURRENT_KIND: "integrated-preview",
     },
@@ -2190,6 +2198,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-dry-run",
       EXPECTED_CURRENT_KIND: "integrated-preview",
       EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
@@ -2225,6 +2234,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-apply",
       EXPECTED_CURRENT_KIND: "integrated-preview",
       EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
@@ -2282,6 +2292,7 @@ fi
         "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require",
       CREDENTIAL_MASTER_KEY:
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      CUTOVER_BOT_TOKEN: cutoverBotToken,
       OPERATION: "cutover-main-runtime-dry-run",
       EXPECTED_CURRENT_KIND: "main",
       EXPECTED_COMMIT_SHA: cutoverIntegrationSha,
@@ -2314,10 +2325,135 @@ fi
       cutoverAlreadyAtDestination.status === "ALREADY_AT_DESTINATION",
   );
 
+  // T71. The deployed-runtime readiness client fails closed on every missing/wrong proof.
+  const readinessNow = 1_700_000_000_000;
+  const readinessTimestamp = String(readinessNow);
+  const readinessUrl =
+    "postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const readinessBody = (overrides: Record<string, unknown> = {}) => ({
+    ok: true,
+    checkedAt: new Date(readinessNow).toISOString(),
+    commitSha: cutoverIntegrationSha,
+    version: "0.79.10",
+    databaseHost: "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
+    databaseName: "neondb",
+    businessId: FIXED_TARGETS.businessId,
+    connectionId: FIXED_TARGETS.connectionId,
+    botExternalId: FIXED_TARGETS.botExternalId,
+    botUsername: FIXED_TARGETS.botUsername,
+    connectionStatus: "CONNECTED",
+    credentialResolved: true,
+    ...overrides,
+  });
+  let readinessHeaders: Headers | null = null;
+  const readinessValid = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      expectedVersion: "0.79.10",
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async (_input, init) => {
+        readinessHeaders = new Headers(init?.headers ?? {});
+        return new Response(JSON.stringify(readinessBody()), { status: 200 });
+      },
+    },
+  );
+  const sentSignature = readinessHeaders
+    ? new Headers(readinessHeaders).get("x-flowpilot-cutover-signature")
+    : null;
+  const expectedSignature = signCutoverReadiness(
+    cutoverBotToken,
+    readinessTimestamp,
+    FIXED_TARGETS.botExternalId,
+  );
+  const missingReadinessToken = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: "",
+    },
+    { now: () => readinessNow },
+  );
+  const unauthorizedReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () => new Response("{}", { status: 401 }),
+    },
+  );
+  const wrongCommitReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(readinessBody({ commitSha: "d".repeat(40) })),
+          { status: 200 },
+        ),
+    },
+  );
+  const wrongDatabaseReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(
+            readinessBody({
+              databaseHost: "ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech",
+            }),
+          ),
+          { status: 200 },
+        ),
+    },
+  );
+  const unresolvedReadiness = await verifyProductionDestinationReadiness(
+    {
+      expectedCommitSha: cutoverIntegrationSha,
+      databaseUrl: readinessUrl,
+      cutoverBotToken: cutoverBotToken,
+    },
+    {
+      now: () => readinessNow,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify(readinessBody({ credentialResolved: false })),
+          { status: 200 },
+        ),
+    },
+  );
+  check(
+    "T71. Runtime readiness requires a signed live-app proof of commit, selected DB, fixed target and resolved credential",
+    readinessValid.ok === true &&
+      readinessValid.dbHost ===
+        "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
+      sentSignature === expectedSignature &&
+      missingReadinessToken.code === "MISSING_CUTOVER_BOT_TOKEN" &&
+      unauthorizedReadiness.code === "DESTINATION_READINESS_UNAUTHORIZED" &&
+      wrongCommitReadiness.code === "DESTINATION_IDENTITY_MISMATCH" &&
+      wrongDatabaseReadiness.code === "DESTINATION_DATABASE_MISMATCH" &&
+      unresolvedReadiness.code === "DESTINATION_RUNTIME_UNRESOLVED",
+  );
+
   // T68. Workflow definitions pin selected-database and cutover operations.
   const selectedRuntimeJob =
     (workflowYaml.split("\n  verify-selected-runtime:")[1] ?? "").split(
-      "\n  recover-test-credential:",
+      "\n  configure-production-runtime-env:",
     )[0] ?? "";
   const cutoverJob =
     (workflowYaml.split("\n  cutover-main-runtime:")[1] ?? "").split(
@@ -2341,26 +2477,29 @@ fi
       cutoverJob.includes(
         "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
       ) &&
+      cutoverJob.includes(
+        "CUTOVER_BOT_TOKEN: ${{ secrets.YAKFI_TEST_CUSTOMER_BOT_TOKEN }}",
+      ) &&
       !cutoverJob.includes("PRODUCTION_DATABASE_URL") &&
       !cutoverJob.includes("RESTORE_BOT_TOKEN") &&
       !cutoverJob.includes("environment: Production"),
   );
 
-  // T69. Runtime migration and environment workflows are narrowly target-guarded.
+  // T69. Runtime migration and environment cutover are narrowly target-guarded.
   const productionMigrateYaml = readFileSync(
     ".github/workflows/production-db-migrate.yml",
     "utf-8",
   );
-  const runtimeEnvYaml = readFileSync(
-    ".github/workflows/production-runtime-env.yml",
-    "utf-8",
-  );
+  const configureEnvJob =
+    (workflowYaml.split("\n  configure-production-runtime-env:")[1] ?? "").split(
+      "\n  recover-test-credential:",
+    )[0] ?? "";
   const runtimeEnvScript = readFileSync(
     "scripts/update-production-runtime-env.ts",
     "utf-8",
   );
   check(
-    "T69. Runtime migration requires exact SHA/host and rejects the legacy Production database; env cutover updates only the fixed Production pair",
+    "T69. Runtime migration and environment cutover are exact-SHA/target guarded without unrelated keys",
     productionMigrateYaml.includes("expected_db_host:") &&
       productionMigrateYaml.includes("expected_commit_sha:") &&
       productionMigrateYaml.includes(
@@ -2369,25 +2508,24 @@ fi
       productionMigrateYaml.includes(
         "DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}",
       ) &&
-      runtimeEnvYaml.includes(
+      configureEnvJob.includes(
         "github.ref == 'refs/heads/integration/staff-delivery-knowledge-contract'",
       ) &&
-      runtimeEnvYaml.includes("github.ref == 'refs/heads/main'") &&
-      runtimeEnvYaml.includes("preflight") &&
-      runtimeEnvYaml.includes("apply") &&
-      runtimeEnvYaml.includes("VERCEL_TOKEN") &&
-      runtimeEnvYaml.includes(
+      configureEnvJob.includes("github.ref == 'refs/heads/main'") &&
+      configureEnvJob.includes("environment_operation") &&
+      configureEnvJob.includes("VERCEL_TOKEN") &&
+      configureEnvJob.includes(
         "DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}",
       ) &&
-      runtimeEnvYaml.includes(
+      configureEnvJob.includes(
         "CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}",
       ) &&
-      runtimeEnvYaml.includes(
+      configureEnvJob.includes(
         "node --import tsx scripts/update-production-runtime-env.ts",
       ) &&
-      !runtimeEnvYaml.includes("environment: Production") &&
-      !runtimeEnvYaml.includes("NEXT_PUBLIC_APP_URL") &&
-      !runtimeEnvYaml.includes("BETTER_AUTH_SECRET") &&
+      !configureEnvJob.includes("environment: Production") &&
+      !configureEnvJob.includes("NEXT_PUBLIC_APP_URL") &&
+      !configureEnvJob.includes("BETTER_AUTH_SECRET") &&
       runtimeEnvScript.includes(
         'TARGET_KEYS = ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"] as const',
       ) &&
@@ -2395,6 +2533,33 @@ fi
       runtimeEnvScript.includes('type: "sensitive"') &&
       !runtimeEnvScript.includes("NEXT_PUBLIC_APP_URL") &&
       !runtimeEnvScript.includes("BETTER_AUTH_SECRET"),
+  );
+
+  // T70. The application-runtime readiness probe is authenticated, fixed and read-only.
+  const publicPaths = readFileSync("src/lib/public-paths.ts", "utf-8");
+  const readinessRoute = readFileSync(
+    "src/app/api/operator/cutover-readiness/route.ts",
+    "utf-8",
+  );
+  const readinessModule = readFileSync(
+    "src/server/operator/cutover-readiness.ts",
+    "utf-8",
+  );
+  check(
+    "T70. Deployed runtime readiness is signature-gated, fixed-target and exposes bounded evidence only",
+    publicPaths.includes("/api/operator/cutover-readiness") &&
+      readinessRoute.includes("checkCutoverReadiness") &&
+      readinessRoute.includes('dynamic = "force-dynamic"') &&
+      readinessModule.includes("createHmac") &&
+      readinessModule.includes("timingSafeEqual") &&
+      readinessModule.includes("CUTOVER_READINESS_BUSINESS_ID") &&
+      readinessModule.includes("CUTOVER_READINESS_CONNECTION_ID") &&
+      readinessModule.includes("CUTOVER_READINESS_BOT_ID") &&
+      readinessModule.includes("credentialResolved: true") &&
+      readinessModule.includes("databaseHost") &&
+      !readinessModule.includes("return resolved.value") &&
+      !readinessModule.includes("cipherBlob") &&
+      !readinessModule.includes("webhookSecretHash"),
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

@@ -19,12 +19,7 @@ const DATABASE_VALUE = [
   "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
   "/neondb?sslmode=require",
 ].join("");
-const MASTER_VALUE = [
-  "master-key",
-  "secret",
-  "sentinel",
-  "0123456789abcdef",
-].join("-");
+const MASTER_VALUE = ["a1b2", "c3d4", "e5f6", "0718"].join("").repeat(4);
 
 type RecordShape = VercelEnv & {
   id: string;
@@ -191,7 +186,7 @@ async function main(): Promise<void> {
       preflightLines.every(
         (line) =>
           !line.includes("db-secret-sentinel") &&
-          !line.includes("master-key-secret-sentinel"),
+          !line.includes(MASTER_VALUE),
       ),
   );
 
@@ -246,8 +241,99 @@ async function main(): Promise<void> {
       applyLines.every(
         (line) =>
           !line.includes("db-secret-sentinel") &&
-          !line.includes("master-key-secret-sentinel"),
+          !line.includes(MASTER_VALUE),
       ),
+  );
+
+  async function expectZeroMutation(
+    label: string,
+    params: {
+      operation: "preflight" | "apply";
+      values: { DATABASE_URL?: string; CREDENTIAL_MASTER_KEY?: string };
+      envs?: RecordShape[];
+    },
+    expectedCode: string,
+  ): Promise<void> {
+    let calls = 0;
+    let patches = 0;
+    let code = "";
+    try {
+      await runUpdateProductionRuntimeEnv(
+        {
+          operation: params.operation,
+          expectedSha: SHA,
+          githubSha: SHA,
+          token: AUTH_SENTINEL,
+          values: params.values,
+        },
+        {
+          log: () => undefined,
+          fetchImpl: async (_input, init) => {
+            calls += 1;
+            if (init?.method === "PATCH") patches += 1;
+            return jsonResponse({ envs: params.envs ?? baseEnvs() });
+          },
+        },
+      );
+    } catch (error: unknown) {
+      code = error instanceof Error ? error.message : "";
+    }
+    check(label, code === expectedCode && patches === 0 && calls <= 1);
+  }
+
+  await expectZeroMutation(
+    "P8. Missing second source value fails before list/PATCH",
+    {
+      operation: "apply",
+      values: { DATABASE_URL: DATABASE_VALUE },
+    },
+    "MISSING_CREDENTIAL_MASTER_KEY",
+  );
+  await expectZeroMutation(
+    "P9. Invalid selected database target fails before PATCH",
+    {
+      operation: "apply",
+      values: {
+        DATABASE_URL: ["postgresql", "://user:pass@", "evil.example", "/neondb?sslmode=require"].join(""),
+        CREDENTIAL_MASTER_KEY: MASTER_VALUE,
+      },
+    },
+    "DATABASE_TARGET_NOT_AUTHORIZED",
+  );
+  await expectZeroMutation(
+    "P10. Invalid master-key format fails before PATCH without claiming decryption",
+    {
+      operation: "apply",
+      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: "not-a-valid-key" },
+    },
+    "MASTER_KEY_UNAVAILABLE_OR_INVALID",
+  );
+  await expectZeroMutation(
+    "P11. Mixed Production/Preview scope is rejected before any PATCH",
+    {
+      operation: "apply",
+      values: { DATABASE_URL: DATABASE_VALUE, CREDENTIAL_MASTER_KEY: MASTER_VALUE },
+      envs: [
+        ...baseEnvs().filter((e) => e.id !== "env-db-production"),
+        {
+          id: "env-db-mixed",
+          key: "DATABASE_URL",
+          target: ["production", "preview"],
+          gitBranch: null,
+          customEnvironmentId: null,
+          type: "sensitive",
+        },
+      ],
+    },
+    "MIXED_SCOPE_DATABASE_URL_RECORD",
+  );
+  await expectZeroMutation(
+    "P12. Preflight applies the same source-value validation as apply",
+    {
+      operation: "preflight",
+      values: { DATABASE_URL: DATABASE_VALUE },
+    },
+    "MISSING_CREDENTIAL_MASTER_KEY",
   );
 
   const partialCalls: Array<{ url: string; init?: RequestInit }> = [];

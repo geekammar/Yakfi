@@ -407,14 +407,14 @@ re-enter only those two values into the Production scope without printing or
 committing them.
 
 If the owner cannot re-enter them, use the reviewed one-shot
-`production-runtime-env.yml` workflow with `operation=preflight` then
-`operation=apply`. It reuses the repository secrets `TEST_DATABASE_URL` and
-`CREDENTIAL_MASTER_KEY` with `VERCEL_TOKEN`, requires the exact reviewed SHA,
-and updates only the existing Production `DATABASE_URL` and
-`CREDENTIAL_MASTER_KEY` records. It does not create secrets, copy Preview
-variables, or touch auth/AI/channel settings. A `PARTIAL_ENV_UPDATE` result is
-a stop condition: inspect which key changed, do not merge or deploy, and
-recover only under separate approval.
+`test-db-migrate.yml` operation `configure-production-runtime-env` with
+`environment_operation=preflight` then `environment_operation=apply`. It
+reuses the repository secrets `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`
+with `VERCEL_TOKEN`, requires the exact reviewed SHA, and updates only the
+existing Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` records. It
+does not create secrets, copy Preview variables, or touch auth/AI/channel
+settings. A `PARTIAL_ENV_UPDATE` result is a stop condition: inspect which key
+changed, do not merge or deploy, and recover only under separate approval.
 
 The current Production `DATABASE_URL` and `CREDENTIAL_MASTER_KEY` are sensitive
 and cannot be read back through Vercel. A deployment ID or health response is
@@ -429,9 +429,9 @@ guaranteed.
   `Production` GitHub environment, so the environment-scoped
   `PRODUCTION_DATABASE_URL` overrides the repository-scoped secret of the same
   name. Repoint and verify the effective scope before relying on either.
-- `test-db-migrate.yml` manual operations and `production-runtime-env.yml` do
-  not set a GitHub environment; they use the repository-scoped
-  `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
+- `test-db-migrate.yml` manual operations (including
+  `configure-production-runtime-env`) do not set a GitHub environment; they
+  use the repository-scoped `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
 - `production-telegram-repair.yml` does not enforce `expected_db_host`; it is
   not the cutover gate. Use the guarded cutover operations instead.
 - Matching secret names do not prove equal values. Verify the target scope and
@@ -442,12 +442,17 @@ guaranteed.
 - `test-db-migrate.yml` / `verify-selected-runtime`: read-only selected DB
   migration status plus fixed-bot credential/getMe verification using
   `TEST_DATABASE_URL` and `CREDENTIAL_MASTER_KEY`.
-- `production-runtime-env.yml` / `preflight` or `apply`: updates only the two
-  fixed Production environment records, exact-SHA guarded.
+- `test-db-migrate.yml` / `configure-production-runtime-env` with
+  `environment_operation=preflight` or `apply`: updates only the two fixed
+  Production environment records, exact-SHA guarded.
 - `test-db-migrate.yml` / `cutover-main-runtime-dry-run` then
   `cutover-main-runtime-apply`: fixed-bot switch to canonical Production using
-  the selected test DB/key, deployed commit/health checks, explicit current
-  webhook kind, separate dry-run/apply, and no automatic retry.
+  the selected test DB/key. Before switchFn, the deployed app must answer
+  `/api/operator/cutover-readiness` with a short-lived HMAC proof of its
+  commit/version, selected DB binding, fixed Business/connection and resolved
+  bot credential; the existing `YAKFI_TEST_CUSTOMER_BOT_TOKEN` signs the
+  request and is never sent. Dry-run/apply are separate with no automatic
+  retry.
 - Read-only postcheck: repeat `verify-selected-runtime`, repeat the cutover
   dry-run with `expected_current=main`, and inspect `/api/health`.
 

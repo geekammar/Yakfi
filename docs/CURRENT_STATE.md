@@ -237,10 +237,11 @@ preparation.
   `expected_db_host` and `expected_commit_sha` and rejects the legacy Production
   hosts in apply mode.
 - Prepared runners: `test-db-migrate.yml` adds read-only
-  `verify-selected-runtime` and guarded `cutover-main-runtime-dry-run` /
-  `cutover-main-runtime-apply`; `production-runtime-env.yml` is a one-shot
-  exact-SHA update of only the Production `DATABASE_URL` and
-  `CREDENTIAL_MASTER_KEY` from existing Actions secrets.
+  `verify-selected-runtime`, one-shot `configure-production-runtime-env`, and
+  guarded `cutover-main-runtime-dry-run` / `cutover-main-runtime-apply`.
+  The cutover verifies a signed proof from the deployed application
+  (`/api/operator/cutover-readiness`) of commit/version, selected DB binding,
+  fixed Business/connection and resolved bot credential before any switch.
   `production-telegram-repair.yml` does not enforce `expected_db_host` and is
   not the cutover gate.
 - Recovery limit: the current Production `DATABASE_URL` and
