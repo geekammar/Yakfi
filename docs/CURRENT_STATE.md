@@ -37,8 +37,12 @@
   attention, ownership, message, appointment or delivery writes.
 - No migration, AI prompt/intent, booking/availability rule, Telegram
   transport, credential, price presentation or existing-appointment change.
-- **Automated verification only** (CI evidence belongs to the draft PR). The
-  later Muse Production acceptance is not performed or claimed here.
+- **Automated verification:** GitHub Actions run `43751606013` on the
+  implementation HEAD passed both gates — PR Quality Gates & Regression Suite
+  and Automated Browser UX QA (200 Playwright tests: 185 passed, 15 skipped,
+  0 failed). The documentation-only evidence update is revalidated by the final
+  PR CI run. The later Muse Production acceptance is not performed or claimed
+  here.
 
 ## 1. Main code baseline
 
