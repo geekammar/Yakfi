@@ -299,8 +299,7 @@ export class TurnEvidenceRepository {
           finalOutcome: record.finalOutcome,
           outboundSendAttempted: record.outboundSendAttempted,
           outboundSendDelivered: record.outboundSendDelivered ?? null,
-          outboundDeliveryErrorCode:
-            record.outboundDeliveryErrorCode ?? null,
+          outboundDeliveryErrorCode: record.outboundDeliveryErrorCode ?? null,
           totalCostUsd: record.totalCostUsd ?? null,
           knownCostSubtotalUsd: record.knownCostSubtotalUsd ?? null,
           costCompleteness: record.costCompleteness ?? null,

@@ -56,8 +56,7 @@ export const durableTurnEvidenceProviderStatusValues = [
   "NOT_CALLED",
 ] as const;
 
-const boundedMachineKey = (max: number) =>
-  z.string().trim().min(1).max(max);
+const boundedMachineKey = (max: number) => z.string().trim().min(1).max(max);
 
 const usdSchema = z
   .number()

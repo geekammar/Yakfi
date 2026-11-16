@@ -41,9 +41,7 @@ import {
 type AttemptCompleteness = "KNOWN" | "UNKNOWN";
 
 function isFiniteNonNegative(value: unknown): value is number {
-  return (
-    typeof value === "number" && Number.isFinite(value) && value >= 0
-  );
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function normalizeAttemptCost(attempt: {
@@ -76,8 +74,7 @@ function projectAttempt(
     outputTokens: attempt.outputTokens ?? null,
     costUsd: cost.costUsd,
     costCurrency: cost.costUsd === null ? null : "USD",
-    costProvenance:
-      cost.costUsd === null ? "UNKNOWN" : "PROVIDER_REPORTED",
+    costProvenance: cost.costUsd === null ? "UNKNOWN" : "PROVIDER_REPORTED",
     costCompleteness: cost.completeness,
     errorCode: attempt.errorCode ?? null,
     httpStatus: attempt.httpStatus ?? null,
