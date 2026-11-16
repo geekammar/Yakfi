@@ -38,7 +38,6 @@ import {
   durableTurnEvidenceValidation,
 } from "@/lib/validation";
 
-type AttemptCompleteness = "KNOWN" | "UNKNOWN";
 type DispatchState = DurableTurnEvidenceAttemptDto["dispatchState"];
 
 function isFiniteNonNegative(value: unknown): value is number {

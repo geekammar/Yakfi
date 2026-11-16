@@ -106,7 +106,6 @@ function evidence(
   const finalRecord = options.finalOutcome
     ? { ...record, finalOutcome: options.finalOutcome }
     : record;
-  const record = buildTurnEvidence(result, META);
   // Simulate a hostile extra field on the source record. The projection must
   // never copy unknown keys.
   return {

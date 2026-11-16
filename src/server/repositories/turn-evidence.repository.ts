@@ -224,6 +224,112 @@ function toCost(value: number | string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+
+function toAttemptRows(record: DurableTurnEvidenceDto): AttemptRow[] {
+  return record.attempts
+    .slice()
+    .sort((a, b) => a.attemptIndex - b.attemptIndex)
+    .map((attempt) => ({
+      attemptIndex: attempt.attemptIndex,
+      attemptIdentity: attempt.attemptIdentity,
+      provider: attempt.provider,
+      model: attempt.model ?? null,
+      status: attempt.status,
+      dispatchState: attempt.dispatchState,
+      httpAttempts: attempt.httpAttempts ?? null,
+      inputTokens: attempt.inputTokens ?? null,
+      outputTokens: attempt.outputTokens ?? null,
+      costUsd: attempt.costUsd ?? null,
+      costCurrency: attempt.costCurrency ?? null,
+      costProvenance: attempt.costProvenance,
+      costCompleteness: attempt.costCompleteness,
+      errorCode: attempt.errorCode ?? null,
+      httpStatus: attempt.httpStatus ?? null,
+    }));
+}
+
+/**
+ * Stable fingerprint of the ACCOUNTING-RELEVANT facts. `occurredAt` is the
+ * distinct act of emission, not a turn fact, so a legitimate replay at a later
+ * instant is idempotent rather than a conflict. Attempt order is normalized by
+ * index so array ordering cannot create a false conflict.
+ */
+function computeFactFingerprint(record: DurableTurnEvidenceDto): string {
+  const canonical = {
+    schema: record.schema,
+    businessId: record.businessId,
+    conversationId: record.conversationId,
+    customerMessageId: record.customerMessageId,
+    traceId: record.traceId ?? null,
+    trafficPool: record.trafficPool,
+    executionEvidence: record.executionEvidence,
+    appVersion: record.appVersion,
+    environment: record.environment,
+    intent: record.intent ?? null,
+    assistantAction: record.assistantAction,
+    conversationStatus: record.conversationStatus,
+    handoffCause: record.handoffCause ?? null,
+    routingDecision: record.routingDecision ?? null,
+    provider: record.provider ?? null,
+    model: record.model ?? null,
+    providerStatus: record.providerStatus ?? null,
+    stopReason: record.stopReason ?? null,
+    finalOutcome: record.finalOutcome,
+    outboundSendAttempted: record.outboundSendAttempted,
+    outboundSendDelivered: record.outboundSendDelivered ?? null,
+    outboundDeliveryErrorCode: record.outboundDeliveryErrorCode ?? null,
+    totalCostUsd: record.totalCostUsd ?? null,
+    knownCostSubtotalUsd: record.knownCostSubtotalUsd ?? null,
+    costCompleteness: record.costCompleteness ?? null,
+    costCurrency: record.costCurrency ?? null,
+    logicalAttemptCount: record.logicalAttemptCount,
+    confirmedHttpDispatches: record.confirmedHttpDispatches,
+    unknownDispatchAttemptCount: record.unknownDispatchAttemptCount,
+    preventedAttemptCount: record.preventedAttemptCount,
+    attempts: toAttemptRows(record),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/**
+ * Verify the authoritative identity chain before ANY write. A caller can never
+ * attach evidence to another tenant's conversation/message by passing
+ * mismatched ids.
+ */
+async function assertAuthoritativeIdentity(
+  record: DurableTurnEvidenceDto,
+): Promise<void> {
+  const message = await db.message.findUnique({
+    where: { id: record.customerMessageId },
+    select: {
+      conversationId: true,
+      conversation: { select: { businessId: true } },
+    },
+  });
+  if (
+    !message ||
+    message.conversationId !== record.conversationId ||
+    message.conversation.businessId !== record.businessId
+  ) {
+    throw new Error("TURN_EVIDENCE_IDENTITY_MISMATCH");
+  }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
+function toEvidenceRecord(row: EvidenceRow): TurnEvidenceRecord {
+  const { factFingerprint: _fingerprint, attempts, ...rest } = row;
+  void _fingerprint;
+  return { ...rest, attempts };
+}
+
 export class TurnEvidenceRepository {
   /**
    * Persist ONE finished turn's bounded evidence. Validation and identity
