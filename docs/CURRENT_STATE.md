@@ -11,36 +11,48 @@
 
 ## 0. Current release and acceptance evidence — 16 November 2026
 
-- **Current `main` / Production baseline:** `0.79.13`, merge commit
-  `472e9aa9571c15b3f091741012b06cbe0d66e576` (PR #86). Refs were verified
-  before branching; no difference was found.
-- **PR #86 is merged.** Its final CI run `43863159151` passed both required
-  jobs (`PR Quality Gates & Regression Suite`, `Automated Browser UX QA`) on
-  HEAD `c45492b`; the merge produced `472e9aa` / tag `v0.79.13`.
-- **Current candidate:** branch `test/acceptance-evidence-ci`, package
-  `0.79.14`, draft PR from the exact main merge commit. Scope is evidence
-  completion only: real-action appointment tenant isolation, NO_SHOW policy
-  coverage, and required-CI wiring for the existing Copy Lab/turn-evidence
-  checks. No booking policy, schema, migration or runtime change is included.
-- **Real-DB versus controlled boundary:** the new appointment-action test uses
-  REAL exported actions, repositories and PostgreSQL writes for two
-  businesses. Only the Next.js `requireUser()` module seam is controlled; the
-  session→persisted-user→tenant resolution still uses the REAL database user
-  lookup. This is not claimed as full browser/cookie Better Auth coverage.
-- **CI wiring and concurrency:** `check:copy-lab-db` and
-  `test:appointment-actions-db` run only after disposable PostgreSQL
-  preparation; `test:copy-lab` and `check:turn-evidence` run in the offline
-  validate job. `pr-validation.yml` cancels superseded runs per PR/ref;
-  `production-release.yml` and `test-db-migrate.yml` are serialized with
-  cancellation disabled. Limits: different PRs/branches may run concurrently,
-  there is no cross-workflow lock, and cancellation is not a transactional
-  rollback. Automatic PR tests use only the job-local database, never
-  Production/Neon runtime credentials.
-- **Still open:** real-device/operator mobile acceptance, and persisted
-  usage/cost reconciliation. `check:turn-evidence` is offline/in-memory; it
-  does not prove reconciliation against stored `usage_records`, complete cost
-  accounting, or a global spend cap. Playwright mobile viewports are automated
-  evidence, not operator mobile acceptance.
+- **Current `main` / Production baseline:** `0.79.14`, merge commit
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87). Refs were verified
+  before branching; no movement was found.
+- **PR #87 is merged.** It completed the prior evidence branch: real-action
+  appointment tenant isolation, NO_SHOW policy coverage, and required-CI
+  wiring for the existing Copy Lab/turn-evidence checks. Its final CI result
+  is recorded on that PR; this snapshot does not rewrite it.
+- **Current candidate:** branch `feat/durable-turn-usage-cost-evidence`,
+  package `0.79.15`, draft PR from the exact `main` merge commit. Scope is the
+  bounded durable usage/cost evidence addition: additive
+  `turn_evidence_records`/`turn_evidence_attempts` migration, a validated
+  content-free DTO, awaited post-outcome persistence, new `AI_TURN` message
+  linkage, and a read-only tenant/conversation/time-window reconciliation
+  reader. The existing cost engine and attempt projection are reused.
+- **Cost/evidence boundary:** persisted costs are the existing
+  provider-reported USD values (`DOUBLE PRECISION`, no integer-micro
+  rounding). Null/unknown, real zero, and not-applicable remain distinct; a
+  mixed turn is `PARTIAL` with `totalCostUsd = null`; a no-call turn creates no
+  paid attempt. Provider-reported cost is NOT invoice reconciliation.
+  Historical `AI_TURN` rows without a `messageId` remain explicitly
+  unresolved; no historical rate, invoice or cost is backfilled.
+- **Pool and lifecycle:** `trafficPool` is explicit (`SERVING` from production
+  entry points, `TEST` from the dedicated test ingress); shadow evaluation is
+  never counted as a serving paid turn. Durable persistence is awaited inside
+  the existing request lifecycle AFTER the reply was persisted + delivered. A
+  storage failure emits only a sanitized `durable.failed` signal and cannot
+  resend, rerun AI, recreate a booking or change the customer outcome; the
+  existing fail-open log/OTLP emission is preserved.
+- **CI wiring:** `check:durable-turn-evidence` runs in the offline validate
+  job; `test:turn-evidence-durable-db` runs only after disposable PostgreSQL
+  preparation and `db:deploy`. The new DB suite covers successful/fallback/
+  partial/zero/unknown/no-call, replay, concurrency, tenant/conflicting
+  identity, persistence failure, precision/nullability, redaction and payload
+  bounds. Automatic PR tests never receive Production/Neon runtime
+  credentials.
+- **Still open:** real-device/operator mobile acceptance, a global enforceable
+  spend cap, provider-invoice reconciliation (explicitly `NOT_PERFORMED`),
+  crash-before-turn-completion attempts, and production application of the new
+  migration (operator-authorized, never automatic). Playwright mobile viewports
+  remain automated evidence, not operator mobile acceptance. Historical QA
+  outcomes (including QA249/QA250 failures and later passes), R5 PASS, R6 FAIL
+  and Y83 FAIL remain preserved.
 
 ## 0A. Historical pricing/attention repair candidate — 15 November 2026
 

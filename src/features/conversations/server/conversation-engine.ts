@@ -181,6 +181,7 @@ import type {
 import { openTurnStateSession } from "@/features/conversations/server/conversation-state-store";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { offlineMessageTransport } from "@/features/conversations/server/conversation-transport";
+import { buildDurableTurnEvidence } from "@/features/conversations/server/durable-turn-evidence";
 import {
   contractHandoffReasonToCause,
   controlHandoffReasonToCause,
@@ -230,6 +231,7 @@ import { turnTelemetrySink } from "@/lib/observability/turn-telemetry";
 import { nowTimeInTimeZone } from "@/lib/scheduling/slot-grid";
 import type {
   AttentionReason,
+  DurableTurnEvidenceDto,
   KnowledgeGapCategory,
   RecordUsageDto,
 } from "@/lib/validation";
@@ -252,6 +254,7 @@ import type {
   OperatorAttentionRepository,
   ProviderRepository,
   ServiceRepository,
+  TurnEvidenceRepository,
   UsageRepository,
 } from "@/server/repositories";
 import {
@@ -268,6 +271,7 @@ import {
   operatorAttentionRepository,
   providerRepository,
   serviceRepository,
+  turnEvidenceRepository,
   usageRepository,
 } from "@/server/repositories";
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
@@ -421,6 +425,22 @@ export type ConversationEngineDeps = {
    */
   turnTelemetry?: TurnTelemetrySink;
   /**
+   * OPTIONAL: durable, content-free per-turn usage/cost evidence. When
+   * present, ONE bounded record is persisted for every finished non-duplicate
+   * turn AFTER the customer outcome is complete. Storage failure is isolated:
+   * it can never resend a reply, rerun AI, recreate a booking or change the
+   * completed outcome. Offline harnesses may omit it (same convention as the
+   * telemetry sink).
+   */
+  turnEvidenceRepository?: Pick<TurnEvidenceRepository, "record">;
+  /**
+   * EXPLICIT operational pool for the durable evidence. Never inferred from
+   * the environment: production entry points leave it at `SERVING`; the
+   * dedicated test-ingress entry point sets `TEST`. SHADOW evaluations are a
+   * side-channel and are never counted as serving attempts.
+   */
+  trafficPool?: DurableTurnEvidenceDto["trafficPool"];
+  /**
    * OPTIONAL (CONV-CORE-01): the durable ConversationState store (typed
    * offers + customer facts). When absent — offline harnesses, or a database
    * the migration has not reached yet — the engine keeps the legacy,
@@ -468,6 +488,8 @@ export const defaultConversationEngineDeps: ConversationEngineDeps = {
   attentionRepository: operatorAttentionRepository,
   knowledgeGapRepository,
   turnTelemetry: turnTelemetrySink,
+  turnEvidenceRepository,
+  trafficPool: "SERVING",
   conversationStateRepository,
   providerRepository,
   appointmentRepository,
@@ -3552,17 +3574,58 @@ export async function receiveInboundMessage(
       }
     }
 
-    // PROMPT-AI-OPS-22 — emit ONE bounded, content-free turn-evidence record.
-    // This sits at the SAME single choke point as operator attention and the
-    // knowledge-gap recorder, strictly AFTER the reply was persisted + sent,
-    // so it is off the customer critical path and best-effort/total: a missing
-    // sink, a disabled sink, or a throwing sink can never block, retry, or
-    // alter the turn (the evidence is explanatory, never authoritative).
-    if (deps.turnTelemetry) {
+    // PROMPT-AI-OPS-22 — build ONE bounded, content-free turn-evidence
+    // record. It is used by the existing log sink AND by the additive durable
+    // projection below; building it once keeps both views identical.
+    let evidence: ReturnType<typeof buildTurnEvidence> | null = null;
+    if (deps.turnTelemetry || deps.turnEvidenceRepository) {
       try {
-        deps.turnTelemetry.emit(buildTurnEvidence(result, TURN_EVIDENCE_META));
+        evidence = buildTurnEvidence(result, TURN_EVIDENCE_META);
+      } catch {
+        evidence = null;
+      }
+    }
+
+    // Existing log emission is preserved and remains fail-open.
+    if (deps.turnTelemetry && evidence) {
+      try {
+        deps.turnTelemetry.emit(evidence);
       } catch {
         // Observability failure must never change a customer outcome.
+      }
+    }
+
+    // Durable evidence is awaited inside the existing request lifecycle
+    // (`after()` on Telegram, the route handler elsewhere) — never an
+    // untracked fire-and-forget promise. It runs AFTER the reply was persisted
+    // + delivered, so a storage failure cannot resend, rerun AI, recreate a
+    // booking, or alter the completed customer outcome.
+    if (deps.turnEvidenceRepository && evidence) {
+      try {
+        const recorded = await deps.turnEvidenceRepository.record(
+          buildDurableTurnEvidence(evidence, deps.trafficPool ?? "SERVING"),
+        );
+        if (recorded.status === "CONFLICT") {
+          // eslint-disable-next-line no-console
+          console.warn(
+            JSON.stringify({
+              level: "warn",
+              msg: "flowpilot.turn.evidence.durable.conflict",
+              customerMessageId: result.customerMessageId,
+            }),
+          );
+        }
+      } catch {
+        // Sanitized signal only: never the raw error, customer text, prompt,
+        // provider payload or secret. The customer outcome is already final.
+        // eslint-disable-next-line no-console
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            msg: "flowpilot.turn.evidence.durable.failed",
+            customerMessageId: result.customerMessageId,
+          }),
+        );
       }
     }
 
@@ -6180,6 +6243,9 @@ async function runInboundTurn(
           businessId: business.id,
           kind: "AI_TURN",
           conversationId: conversation.id,
+          // Authoritative inbound message identity: new AI_TURN rows are
+          // linkable to durable turn evidence. Historical rows stay unchanged.
+          messageId: customerMessage.id,
           provider: telemetry?.finalProvider ?? deps.ai.providerName,
           model: (successAttempt?.model ??
             telemetry?.finalModel ??

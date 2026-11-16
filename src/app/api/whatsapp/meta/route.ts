@@ -33,6 +33,7 @@ export const dynamic = "force-dynamic";
 const metaEngineDeps = {
   ...defaultConversationEngineDeps,
   transport: createDefaultMetaWhatsAppTransport(),
+  trafficPool: "SERVING" as const,
 };
 
 export async function GET(request: Request) {

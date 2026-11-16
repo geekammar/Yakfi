@@ -353,6 +353,53 @@ Guard: `pnpm check:turn-evidence` (offline, in-memory, no DB/network/LLM/
 secrets — including a non-destructive replay of the two observed live questions
 against the real pilot data shape with a healthy provider, both → DISCLOSED).
 
+#### Durable evidence extension (`flowpilot.turn.evidence.durable@v1`)
+
+Runtime logs have finite retention, so the finished-turn record alone cannot
+answer "what did this turn cost, and what remains unknown?" after the window
+expires. The additive extension persists a **small, content-free projection**
+of the SAME record into the existing PostgreSQL architecture:
+
+```
+buildTurnEvidence (unchanged, content-free)
+        ↓
+buildDurableTurnEvidence (pure allowlist projection; no cost engine)
+        ↓
+TurnEvidenceRepository.record (awaited after the customer outcome is final)
+        ↓
+turn_evidence_records + turn_evidence_attempts
+```
+
+- **Identity/replay:** `(businessId, customerMessageId)` is the stable key.
+  Identical replay increments `replayCount` without duplicating accounting;
+  different substantive facts increment `conflictCount` and never replace the
+  historical row. New `AI_TURN` usage rows carry the same `messageId`;
+  historical rows without it remain explicitly unresolved.
+- **Cost semantics:** totals/subtotals/completeness and per-attempt
+  cost/provenance are copied from the existing projection. Null, real zero and
+  not-applicable stay distinct; a mixed known/unknown turn is `PARTIAL` with
+  `totalCostUsd = null`; no-call turns have zero attempts and no forged cost.
+  USD doubles are stored without integer-micro rounding.
+- **Pool separation:** `trafficPool` is explicit (`SERVING` from production
+  entry points, `TEST` from the dedicated test ingress). Shadow evaluation is
+  not a serving attempt and is never counted as a paid turn.
+- **Failure limits:** storage is awaited inside the existing request lifecycle
+  (`after()` on Telegram, the route handler elsewhere), strictly AFTER the
+  reply was persisted + delivered. A failure is swallowed, emits only the
+  sanitized `flowpilot.turn.evidence.durable.failed` signal, preserves the
+  existing log/OTLP emission, and cannot resend, rerun AI, recreate a booking
+  or change the customer outcome. Storage failure means the durable row is
+  absent — no delivery guarantee is claimed.
+- **Reconciliation:** `TurnEvidenceRepository.reconcile(...)` is bounded by
+  tenant, optional conversation and a ≤31-day window. It reports usage/logical
+  turn/attempt counts, duplicates, conflicts, known subtotal, complete total,
+  completeness, unknown-cost counts and missing links. It is provider-reported
+  evidence only; invoice reconciliation is `NOT_PERFORMED`.
+
+Checks: `pnpm check:durable-turn-evidence` (offline projection/allowlist) and
+`pnpm test:turn-evidence-durable-db` (disposable PostgreSQL: replay,
+concurrency, tenant isolation, precision, persistence failure).
+
 ## Context budget (minimal prompt context)
 
 The engine's `AiRequest` is the **prompt context** — nothing larger is sent.
@@ -793,7 +840,7 @@ construction (`UNAVAILABLE_IN_REQUEST`). No catalog redesign, no new UX.
 | Prompt bodies (`system.booking-assistant`, `providers.atria.json-output`) | `/prompts/**/*.prompt` → generated artifact (`src/generated/ai-prompts.generated.ts`)                          | Code reviewer only (PR)                | Edit the `.prompt` + `pnpm generate:ai-prompts` + `pnpm check:ai-prompts` green |
 | Deterministic classifier behavior (`booking-intent@v1`, …)                | `src/features/conversations/server/conversation-ai.ts` (code is the truth; catalogued in `docs/ai/PROMPTS.md`) | Code reviewer only (PR)                | Code change + `EVALUATIONS.md` fixtures stay green                              |
 | Runtime provider selection (primary/secondary/fallback/secretRefs)        | `platform_ai_policies` singleton (`src/server/repositories/ai-policy.repository.ts`)                           | Platform Operator (Superadmin DB path) | `updateAiPolicy` (validated; secretRefs only, no key material)                  |
-| Telemetry/policy observability                                            | `usage_records` (kind `AI_TURN` — provider/model/tokens/latency/handoff)                                       | Append-only; no write blocks the turn  | Engine best-effort `recordUsage` — see Economics boundary                       |
+| Telemetry/policy observability                                            | `usage_records` (kind `AI_TURN` — provider/model/tokens/handoff) + `turn_evidence_records`/`turn_evidence_attempts` (bounded cost evidence) | Append-only; no write blocks the turn  | Engine best-effort `recordUsage`; awaited durable evidence after the outcome — see Economics boundary |
 
 Prompts are **not** DB rows, not Superadmin-editable, not A/B-testable in this
 phase. A/B testing and a prompt marketplace are explicitly **deferred** — do

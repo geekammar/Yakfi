@@ -133,6 +133,7 @@ jobs:
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects
           pnpm check:turn-evidence
+          pnpm check:durable-turn-evidence
           pnpm check:telegram-acceptance
           pnpm check:channel-neutral-choices
           pnpm check:readable-interaction-history
@@ -192,6 +193,7 @@ jobs:
           pnpm check:booking-acceptance-db
           pnpm check:booking-concurrency-db
           pnpm test:appointment-actions-db
+          pnpm test:turn-evidence-durable-db
           pnpm check:iss-006-db
           pnpm check:customer-time-display-db
           pnpm check:stale-session-db

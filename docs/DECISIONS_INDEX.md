@@ -124,6 +124,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
 | 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
 | 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
+| 110 | Durable turn usage/cost evidence: bounded content-free projection, stable message identity, replay/conflict semantics, explicit pools, read-only reconciliation | turn cost evidence/persistence/reconciliation | [#110](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -144,5 +145,6 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   merged through PR #84 (`b485bda`, `v0.79.11`) but its later live acceptance is
   not claimed here. Decision #109 merged through PR #85 (`e5ff129`, `v0.79.12`).
   PR #86 merged booking concurrency/tenant-isolation evidence as `472e9aa` /
-  `v0.79.13`; the current evidence-completion branch is test/documentation work
-  and does not change a product decision.
+  `v0.79.13`; PR #87 merged the evidence-completion branch as `ef3a5d8` /
+  `v0.79.14`. Decision #110 is the current candidate (`v0.79.15`): an additive
+  durable-evidence table pair plus focused offline/disposable-DB checks.

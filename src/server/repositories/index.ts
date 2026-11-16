@@ -32,6 +32,7 @@ import {
   type TelegramConnectionLookupRow,
 } from "./telegram-connection.repository";
 import { TelegramProvisioningLedgerRepository } from "./telegram-provisioning-ledger.repository";
+import { TurnEvidenceRepository } from "./turn-evidence.repository";
 import { UsageRepository } from "./usage.repository";
 import { UserRepository } from "./user.repository";
 import { WhatsAppConnectionRepository } from "./whatsapp-connection.repository";
@@ -57,6 +58,7 @@ export const telegramProvisioningLedgerRepository =
 export const providerRepository = new ProviderRepository();
 export const inboundDedupeRepository = new InboundDedupeRepository();
 export const usageRepository = new UsageRepository();
+export const turnEvidenceRepository = new TurnEvidenceRepository();
 export const operatorAttentionRepository = new OperatorAttentionRepository();
 export const knowledgeGapRepository = new KnowledgeGapRepository();
 export const platformInvitationRepository = new PlatformInvitationRepository();
@@ -87,6 +89,7 @@ export {
   TelegramConnectionRepository,
   type TelegramConnectionLookupRow,
   TelegramProvisioningLedgerRepository,
+  TurnEvidenceRepository,
   UsageRepository,
   UserRepository,
   WhatsAppConnectionRepository,

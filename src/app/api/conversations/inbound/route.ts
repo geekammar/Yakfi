@@ -65,7 +65,9 @@ export type InboundRouteDeps = {
 };
 
 export const defaultInboundRouteDeps: InboundRouteDeps = {
-  engineDeps: defaultConversationEngineDeps,
+  // This route is the dedicated isolated TEST ingress (hard phone boundary
+  // above). The pool is explicit — never inferred from NODE_ENV.
+  engineDeps: { ...defaultConversationEngineDeps, trafficPool: "TEST" },
   ensureTestBusiness,
   getExpectedTokens: () =>
     [env.FLOWPILOT_TEST_INGRESS_TOKEN, env.INBOUND_WEBHOOK_TOKEN].filter(

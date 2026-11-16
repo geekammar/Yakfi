@@ -396,7 +396,12 @@ reference: `ECONOMICS.md` (DECISIONS #36). IMPLEMENTED as raw usage facts
 the conversation engine (INBOUND_MESSAGE / OUTBOUND_MESSAGE / AI_TURN)
 carrying ids, counters, provider/model machine keys, and status — never
 message content, secrets, or chain-of-thought, and never pricing logic
-(cost is only an optional point-in-time snapshot).
+(cost is only an optional point-in-time snapshot). The additive durable
+projection (`turn_evidence_records` + `turn_evidence_attempts`,
+`flowpilot.turn.evidence.durable@v1`) reuses the existing cost result to
+retain bounded per-turn/per-attempt cost completeness after log retention
+expires; it is not a billing, invoice or second cost engine. See
+`ECONOMICS.md` §3 and `DATABASE.md`.
 
 ## State Management Philosophy
 

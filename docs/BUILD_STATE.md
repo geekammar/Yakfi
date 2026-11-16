@@ -1,5 +1,41 @@
 # FlowPilot — Build State
 
+## Durable turn usage/cost evidence (draft PR, v0.79.15) — 16 November 2026
+
+- Verified baseline: `main` / `v0.79.14` at
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87 merged). The new branch
+  `feat/durable-turn-usage-cost-evidence` starts from that exact commit;
+  package version is `0.79.15` (required by the version gate).
+- Added additive migration `20261116120000_durable_turn_evidence`:
+  `turn_evidence_records` (one row per authoritative inbound
+  `customerMessageId`, tenant-scoped unique replay key) and
+  `turn_evidence_attempts` (max 16 bounded per-attempt facts). No ALTERs on
+  existing tables and no historical backfill.
+- Added a validated, content-free DTO/allowlist
+  (`src/lib/validation/turn-evidence.ts`) and a pure projection
+  (`src/features/conversations/server/durable-turn-evidence.ts`). Totals,
+  subtotals, completeness and per-attempt costs are copied from the existing
+  cost result/attempt projection; this is not a second cost engine.
+- Added `TurnEvidenceRepository` (`record`, `reconcile`,
+  `listByConversationWindow`). Identical replay is idempotent; conflicting
+  facts increment conflict counters without replacing history. The
+  reconciliation reader is tenant/conversation/time-window bounded and
+  content-free; provider-reported cost is separate from invoice reconciliation
+  (`NOT_PERFORMED`).
+- Engine wiring: the existing `flowpilot.turn.evidence@v1` log emission is
+  preserved; durable persistence is awaited after the customer outcome is
+  complete and is isolated from it. New `AI_TURN` usage rows now carry the
+  authoritative `messageId`. `trafficPool` is explicit (`SERVING` production,
+  `TEST` dedicated test ingress); shadow is never counted as a paid turn.
+- Required CI: offline `check:durable-turn-evidence` plus disposable-PostgreSQL
+  `test:turn-evidence-durable-db` (successful/fallback/partial/zero/unknown/
+  no-call, replay, concurrency, tenant/conflicting identity, persistence
+  failure, precision/nullability, redaction, payload bounds).
+- Explicit limits: the migration is not applied to Production in this PR; no
+  invoice reconciliation, global spend cap, crash-recovery of in-flight
+  attempts, historical backfill or live acceptance is claimed. Final-HEAD CI
+  results are recorded on the draft PR.
+
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 
 - Verified baseline: current `main` / Production release `0.79.13`, merge

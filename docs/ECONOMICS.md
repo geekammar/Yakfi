@@ -132,9 +132,49 @@ Pure per-attempt physical execution accounting:
 - **Coverage Denominator:** Coverage ratio reflects known dispatched attempts divided by total dispatched wire attempts. Zero denominator yields null (`N/A`).
 - **Content-Free Output Projection:** All attempt results and pool summaries are projected through allowlists to strip caller properties.
 
-### 3. Persistence Caveats & Architectural Gaps (Under Review)
+### 3. Durable per-turn evidence (implemented, bounded)
 
-The proposed persistence schema is a discovery design proposal and is **NOT approved or implemented**:
+`flowpilot.turn.evidence.durable@v1` persists a **small, content-free
+projection** of the existing finished-turn evidence. It reuses the existing
+cost result and attempt projections — it is NOT a second cost engine, a
+billing ledger or an invoice system.
+
+- **Tables:** `turn_evidence_records` (one row per finished turn) and
+  `turn_evidence_attempts` (bounded, max 16 per turn). Migration
+  `20261116120000_durable_turn_evidence` is additive and leaves historical
+  `usage_records` untouched.
+- **Identity:** `(businessId, customerMessageId)` is the stable replay key.
+  New `AI_TURN` usage rows carry the same `messageId`. A turn never uses
+  message text, a timestamp alone, or provider/model names as identity.
+- **Replay/conflict:** an identical replay is idempotent (`replayCount`); a
+  replay with different substantive facts increments `conflictCount` and
+  leaves the historical row/attempts unchanged. It is never silently replaced.
+- **Cost fields:** `totalCostUsd`, `knownCostSubtotalUsd`,
+  `costCompleteness` and per-attempt `costUsd`/`costCurrency`/provenance are
+  copied from the existing projection. USD values are IEEE-754 doubles in
+  `DOUBLE PRECISION` columns, so sub-micro costs are not rounded to integer
+  micro-units. Null (unknown/not applicable) is distinct from a real `0`.
+- **Completeness rule:** a mixed known/unknown attempt set is `PARTIAL` and
+  MUST have `totalCostUsd = null`; the known subtotal remains separate. A
+  no-call turn has zero attempts, a null completeness and no fabricated cost.
+- **Pool separation:** `trafficPool` is explicit (`SERVING` / `TEST`);
+  dedicated test ingress writes `TEST`, production entry points write
+  `SERVING`. Shadow evaluations are a side-channel and never become serving
+  attempts or paid turn rows.
+- **Failure isolation:** persistence is awaited in the existing request
+  lifecycle AFTER the customer outcome is complete. A storage failure is
+  caught, emits a sanitized `flowpilot.turn.evidence.durable.failed` signal,
+  and cannot resend a reply, rerun AI, recreate a booking or alter the turn.
+  The existing fail-open log/OTLP emission is preserved.
+- **Read-only reconciliation:** `TurnEvidenceRepository.reconcile(...)` is
+  bounded by tenant, optional conversation and a ≤31-day window. It reports
+  usage counts, logical turns, physical attempts, duplicate/conflict counts,
+  known subtotal, complete total, completeness buckets, unknown-cost counts
+  and missing/unlinked identities. Provider-reported cost is explicitly
+  separated from invoice reconciliation, which is `NOT_PERFORMED`.
+  Historical `AI_TURN` rows without a `messageId` remain unresolved.
+
+### 4. Persistence Caveats & Architectural Gaps (Under Review)
 
 - **Independent Handoff Evidence Integrity:** Handoff regression suites (`scripts/check-handoff-cause.ts`) independently verify conversation-engine handoff causes: E10 validates inactive-service / `TENANT_CONFIGURATION` behavior, and E12b validates deterministic sensitive-handoff precedence over model `HUMAN_REQUEST` claims (`SENSITIVE_OR_RESTRICTED`). These are conversation control and safety rules, not economics cost or retry-lineage tests, and their expected outcomes remain untouched.
 - **Finished-Only Crash Gaps:** In-flight network attempts that crash the process before turn completion are missing from finished-turn logs.
