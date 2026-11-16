@@ -187,6 +187,7 @@ jobs:
         run: |
           pnpm check:welcome-intro-db
           pnpm check:booking-acceptance-db
+          pnpm check:booking-concurrency-db
           pnpm check:iss-006-db
           pnpm check:customer-time-display-db
           pnpm check:stale-session-db

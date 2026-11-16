@@ -1,5 +1,31 @@
 # FlowPilot — Build State
 
+## Booking concurrency and tenant-isolation evidence — 16 November 2026
+
+- Branch `test/booking-concurrency-tenant-isolation` (draft, unmerged) from
+  `main` `e5ff129` / `v0.79.12`; package version `v0.79.13`.
+- Added `scripts/check-booking-concurrency-db.ts`
+  (`pnpm check:booking-concurrency-db`) against the existing disposable
+  PostgreSQL CI service. It exercises coordinated parallel
+  `createAppointmentRecord` calls through the real SERIALIZABLE repository path
+  for identical and overlapping intervals, durable confirmation replay through
+  the real Conversation Engine/inbound-dedupe path, post-offer slot occupation,
+  the actual `PENDING`/`CONFIRMED` blocking policy versus
+  `CANCELLED`/`COMPLETED`, cross-tenant identifiers/appointment detail/mutation,
+  and independent-provider/business capacity.
+- The suite exposed a bounded retry-classification defect: Prisma's driver
+  adapter surfaces serialization failures as `DriverAdapterError`
+  (`cause.kind = "TransactionWriteConflict"`), which
+  `AppointmentRepository`'s P2034-only classifier did not recognize. The final
+  DB outcome was still one active booking, but the losing writer received
+  `CREATE_FAILED` instead of the documented typed `SLOT_CONFLICT`. Bounded
+  repair: treat P2034 / PostgreSQL 40001 / 40P01 and
+  `TransactionWriteConflict` as retryable in the existing SERIALIZABLE retry
+  loop. No booking policy, schema, migration, tenant guard or production
+  runtime was changed. The suite is wired into
+  `.github/workflows/pr-validation.yml`; live CI evidence is recorded on the
+  draft PR and is not claimed here.
+
 ## Authoritative pricing and current-attention repair — 15 November 2026
 
 - Production evidence `v0.79.11` / `b485bda` / conversation

@@ -34,14 +34,20 @@ const notDeleted = { deletedAt: null } as const;
  */
 const SERIALIZABLE_ATTEMPTS = 3;
 
-/** Prisma P2034 — serialization failure / deadlock in a transaction. */
+/** Prisma P2034 / PrismaPg write conflict and the raw PostgreSQL retry codes. */
 function isTransactionConflict(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "P2034"
-  );
+  if (typeof error !== "object" || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (code === "P2034" || code === "40001" || code === "40P01") return true;
+  const cause = (error as { cause?: unknown }).cause;
+  if (typeof cause !== "object" || cause === null) return false;
+  const kind = (cause as { kind?: unknown }).kind;
+  if (kind === "TransactionWriteConflict") return true;
+  if (kind === "postgres") {
+    const postgresCode = (cause as { code?: unknown }).code;
+    return postgresCode === "40001" || postgresCode === "40P01";
+  }
+  return false;
 }
 
 /**
