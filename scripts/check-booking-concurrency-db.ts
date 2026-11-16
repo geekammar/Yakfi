@@ -3,11 +3,11 @@ import "./setup-test-env";
 
 import { randomUUID } from "node:crypto";
 
-import { getAppointmentDetail } from "@/features/appointments/server/appointment-queries";
 import {
   createAppointmentRecord,
   defaultAppointmentCreateServiceDeps,
 } from "@/features/appointments/server/appointment-create-service";
+import { getAppointmentDetail } from "@/features/appointments/server/appointment-queries";
 import {
   defaultAvailabilityServiceDeps,
   getAvailability,
@@ -17,12 +17,12 @@ import {
   resolveBookingContext,
 } from "@/features/appointments/server/booking-flow-service";
 import { buildSlotOffer } from "@/features/conversations/server/booking-offer";
+import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import {
   dehydrateConversationState,
   emptyConversationState,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
-import { receiveInboundMessage } from "@/features/conversations/server/conversation-engine";
 import type { MessageTransport } from "@/features/conversations/server/conversation-transport";
 import { db } from "@/server/db";
 import {
