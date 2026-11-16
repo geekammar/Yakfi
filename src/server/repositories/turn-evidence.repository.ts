@@ -496,12 +496,8 @@ export class TurnEvidenceRepository {
       evidence: {
         logicalTurns,
         physicalAttemptRecords: toCount(evidenceAgg.physical_attempt_records),
-        confirmedHttpDispatches: toCount(
-          evidenceAgg.confirmed_http_dispatches,
-        ),
-        unknownDispatchAttempts: toCount(
-          evidenceAgg.unknown_dispatch_attempts,
-        ),
+        confirmedHttpDispatches: toCount(evidenceAgg.confirmed_http_dispatches),
+        unknownDispatchAttempts: toCount(evidenceAgg.unknown_dispatch_attempts),
         preventedDispatches: toCount(evidenceAgg.prevented_dispatches),
         duplicateEmissions: toCount(evidenceAgg.duplicate_emissions),
         identityConflicts: toCount(evidenceAgg.identity_conflicts),
@@ -544,9 +540,7 @@ export class TurnEvidenceRepository {
           expectedNoCall,
           unresolved: unresolvedMissingUsage,
         },
-        unresolvedHistoricalIdentity: toCount(
-          usageAgg.ai_missing_message_id,
-        ),
+        unresolvedHistoricalIdentity: toCount(usageAgg.ai_missing_message_id),
         unresolvedMissingEvidence: toCount(usageAgg.ai_without_evidence),
         unclassifiedOtherPool: toCount(usageAgg.ai_linked_other_pool),
       },

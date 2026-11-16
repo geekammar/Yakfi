@@ -187,7 +187,8 @@ const durableAttemptSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["costProvenance"],
-          message: "ZERO_DISPATCH_PREVENTED cannot describe a dispatched attempt",
+          message:
+            "ZERO_DISPATCH_PREVENTED cannot describe a dispatched attempt",
         });
       }
     } else {
@@ -251,7 +252,9 @@ const durableTurnEvidenceSchema = z
       .number()
       .int()
       .min(0)
-      .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS * DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
+      .max(
+        DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS * DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS,
+      ),
     unknownDispatchAttemptCount: z
       .number()
       .int()

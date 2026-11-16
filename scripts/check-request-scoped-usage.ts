@@ -126,9 +126,7 @@ async function main(): Promise<void> {
       success: true,
       data: {
         policy: null,
-        effective: policies[
-          Math.min(policyCall++, policies.length - 1)
-        ]!,
+        effective: policies[Math.min(policyCall++, policies.length - 1)]!,
       },
     })) as never,
   });

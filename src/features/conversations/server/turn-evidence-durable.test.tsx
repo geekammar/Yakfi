@@ -966,9 +966,7 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
       "UNAVAILABLE",
     );
     expect(reconciliation.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
-    expect(
-      reconciliation.evidence.executionEvidence.provenNoCall,
-    ).toBe(0);
+    expect(reconciliation.evidence.executionEvidence.provenNoCall).toBe(0);
   });
 
   it("keeps unknown HTTP dispatch separate from confirmed and prevented dispatch", async () => {
@@ -1112,8 +1110,10 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
       ).then((row) => row?.trafficPool),
     ).toBe("SERVING");
     expect(
-      await findEvidence(fixture.businessId, testRun.result.customerMessageId)
-        .then((row) => row?.trafficPool),
+      await findEvidence(
+        fixture.businessId,
+        testRun.result.customerMessageId,
+      ).then((row) => row?.trafficPool),
     ).toBe("TEST");
   });
 

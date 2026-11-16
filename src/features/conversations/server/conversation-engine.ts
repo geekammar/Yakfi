@@ -6354,9 +6354,7 @@ async function runInboundTurn(
         ? turnTelemetry.retryTrace.attempts.map((a, idx) => ({
             attempt: a.attempt ?? idx + 1,
             provider:
-              a.provider ??
-              turnTelemetry?.finalProvider ??
-              requestProviderName,
+              a.provider ?? turnTelemetry?.finalProvider ?? requestProviderName,
             model: a.model ?? undefined,
             status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
             ...(a.httpAttempts !== undefined

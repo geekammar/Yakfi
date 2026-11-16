@@ -187,7 +187,10 @@ billing ledger or an invoice system.
   The existing fail-open log/OTLP emission is preserved.
 - **Read-only reconciliation:** `TurnEvidenceRepository.reconcile(...)` is
   EXACT over the FULL requested tenant/conversation/≤31-day window and
-  requires an explicit pool. It separates:
+  requires an explicit pool. `scopedWindowTotalCostUsd` is non-null only when
+  every scoped turn is COMPLETE or proven no-call. Historical rows are never
+  guessed into a pool. Provider-reported cost is explicitly separated from
+  invoice reconciliation, which is `NOT_PERFORMED`. It separates:
   - scoped evidence aggregates (cost, completeness, execution proof, counts);
   - window usage counts, which are NOT pool totals because `usage_records`
     has no pool column;
@@ -195,10 +198,6 @@ billing ledger or an invoice system.
     `linkedOtherPool`, `withoutEvidence`, `missingMessageId`);
   - evidence without AI_TURN split into expected proven no-call vs unresolved;
   - unresolved historical identity (no `messageId`) vs new missing evidence.
-  `scopedWindowTotalCostUsd` is non-null only when every scoped turn is
-  COMPLETE or proven no-call. Historical rows are never guessed into a pool.
-  Provider-reported cost is explicitly separated from invoice reconciliation,
-  which is `NOT_PERFORMED`.
 
 ### 4. Persistence Caveats & Architectural Gaps (Under Review)
 

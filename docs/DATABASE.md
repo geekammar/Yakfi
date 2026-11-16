@@ -3,16 +3,16 @@
 PostgreSQL (Neon) · Prisma 7 · UUID primary keys everywhere.
 Last updated: durable turn usage/cost evidence — migration chain now includes
 `20261116120000_durable_turn_evidence` and
-`20261116210000_durable_turn_evidence_execution_scope` (`turn_evidence_records`
-+ `turn_evidence_attempts`; ADDITIVE, not applied to Production in this pass).
-Earlier additive migrations since the DOC-NORMALIZE baseline include
-operator-attention + typed `cause`, runtime-credentials,
-WhatsApp-onboarding-lifecycle, platform-control-plane, account-issuer,
-service-price, the Telegram connection/provisioning tables, conversation
-state, readable interaction history, appointment-time display and safe
-Telegram staff-reply delivery. Prior chain record:
-PROMPT-ARCH-03 (migration-chain repair: root baseline `0_init` +
-`migration_lock.toml` + chain/schema alignment; DECISIONS #40).
+`20261116210000_durable_turn_evidence_execution_scope` (the
+`turn_evidence_records`/`turn_evidence_attempts` tables; ADDITIVE, not applied
+to Production in this pass). Earlier additive migrations since the
+DOC-NORMALIZE baseline include operator-attention + typed `cause`,
+runtime-credentials, WhatsApp-onboarding-lifecycle, platform-control-plane,
+account-issuer, service-price, the Telegram connection/provisioning tables,
+conversation state, readable interaction history, appointment-time display and
+safe Telegram staff-reply delivery. Prior chain record: PROMPT-ARCH-03
+(migration-chain repair: root baseline `0_init` + `migration_lock.toml` +
+chain/schema alignment; DECISIONS #40).
 
 ## Migration Chain (PROMPT-ARCH-03)
 

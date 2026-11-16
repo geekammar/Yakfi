@@ -296,14 +296,21 @@ function main(): void {
 
   // ── 5. No-call vs unavailable execution ─────────────────────────────────
   const noCall = buildDurableTurnEvidence(
-    evidence(null, {}, {
-      providerStatus: "NOT_CALLED",
-      routingDecision: "DETERMINISTIC_BYPASS",
-    }),
+    evidence(
+      null,
+      {},
+      {
+        providerStatus: "NOT_CALLED",
+        routingDecision: "DETERMINISTIC_BYPASS",
+      },
+    ),
     "TEST",
   );
   check("no-call: zero attempts", noCall.attempts.length === 0);
-  check("no-call: proven no-call", noCall.executionEvidence === "PROVEN_NO_CALL");
+  check(
+    "no-call: proven no-call",
+    noCall.executionEvidence === "PROVEN_NO_CALL",
+  );
   check("no-call: no total", noCall.totalCostUsd === null);
   check("no-call: no subtotal", noCall.knownCostSubtotalUsd === null);
   check("no-call: no completeness", noCall.costCompleteness === null);
@@ -311,11 +318,15 @@ function main(): void {
   check("no-call: DTO valid", parseOk(noCall));
 
   const deferred = buildDurableTurnEvidence(
-    evidence(null, {}, {
-      noObservability: true,
-      assistantAction: "DEFERRED_TO_STAFF",
-      finalOutcome: "DEFERRED_TO_STAFF",
-    }),
+    evidence(
+      null,
+      {},
+      {
+        noObservability: true,
+        assistantAction: "DEFERRED_TO_STAFF",
+        finalOutcome: "DEFERRED_TO_STAFF",
+      },
+    ),
     "TEST",
   );
   check(
@@ -363,7 +374,10 @@ function main(): void {
     unknownHttp.confirmedHttpDispatches === 0 &&
       unknownHttp.unknownDispatchAttemptCount === 1,
   );
-  check("unknown HTTP: cost still known", unknownHttp.attempts[0]?.costUsd === 0.0005);
+  check(
+    "unknown HTTP: cost still known",
+    unknownHttp.attempts[0]?.costUsd === 0.0005,
+  );
   check("unknown HTTP: DTO valid", parseOk(unknownHttp));
 
   const prevented = buildDurableTurnEvidence(
@@ -384,7 +398,10 @@ function main(): void {
     ),
     "SERVING",
   );
-  check("prevented: dispatch PREVENTED", prevented.attempts[0]?.dispatchState === "PREVENTED");
+  check(
+    "prevented: dispatch PREVENTED",
+    prevented.attempts[0]?.dispatchState === "PREVENTED",
+  );
   check(
     "prevented: provenance is proven zero",
     prevented.attempts[0]?.costProvenance === "ZERO_DISPATCH_PREVENTED" &&
