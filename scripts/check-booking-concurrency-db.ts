@@ -53,9 +53,7 @@ function check(label: string, pass: boolean, details?: string): void {
   console.log(`${mark} : ${label}${details ? ` (${details})` : ""}`);
 }
 
-function classifyTarget(
-  url: string,
-): { host: string; local: boolean } | null {
+function classifyTarget(url: string): { host: string; local: boolean } | null {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname;
@@ -126,10 +124,7 @@ function createControlledDb(rendezvous: {
   return new Proxy(db, {
     get(target, prop, receiver) {
       if (prop === "$transaction") {
-        return async function (
-          fn: (tx: any) => Promise<any>,
-          options?: any,
-        ) {
+        return async function (fn: (tx: any) => Promise<any>, options?: any) {
           return target.$transaction(async (tx: any) => {
             const wrapped = new Proxy(tx, {
               get(txTarget, txProp, txReceiver) {
@@ -144,11 +139,7 @@ function createControlledDb(rendezvous: {
                           return result;
                         };
                       }
-                      return Reflect.get(
-                        modelTarget,
-                        modelProp,
-                        modelReceiver,
-                      );
+                      return Reflect.get(modelTarget, modelProp, modelReceiver);
                     },
                   });
                 }
@@ -379,9 +370,9 @@ async function main(): Promise<void> {
       "0. Fixtures created for two isolated businesses with real providers/services/customers",
       Boolean(
         businessA.businessId &&
-          businessB.businessId &&
-          providerA.id &&
-          providerB.id,
+        businessB.businessId &&
+        providerA.id &&
+        providerB.id,
       ),
     );
 
@@ -473,14 +464,13 @@ async function main(): Promise<void> {
       });
       const overlapCount =
         rows.length === 2
-          ? rows.filter(
-              (row, index) =>
-                rows.some(
-                  (other, otherIndex) =>
-                    otherIndex > index &&
-                    row.startTime < other.endTime &&
-                    row.endTime > other.startTime,
-                ),
+          ? rows.filter((row, index) =>
+              rows.some(
+                (other, otherIndex) =>
+                  otherIndex > index &&
+                  row.startTime < other.endTime &&
+                  row.endTime > other.startTime,
+              ),
             ).length
           : 0;
       check(
@@ -558,11 +548,11 @@ async function main(): Promise<void> {
         "C. Concurrent duplicate confirmation and replay yield exactly one appointment",
         Boolean(
           seeded.offer &&
-            processed.length === 1 &&
-            duplicates.length === 1 &&
-            afterConfirm === 1 &&
-            repeatedTap.ok &&
-            afterRepeatedTap === 1,
+          processed.length === 1 &&
+          duplicates.length === 1 &&
+          afterConfirm === 1 &&
+          repeatedTap.ok &&
+          afterRepeatedTap === 1,
         ),
         `processed=${processed.length}, duplicates=${duplicates.length}, afterConfirm=${afterConfirm}, afterRepeat=${afterRepeatedTap}`,
       );
@@ -624,10 +614,10 @@ async function main(): Promise<void> {
         "D. A slot occupied after offer issuance is revalidated with no second booking",
         Boolean(
           seeded.offer &&
-            rival &&
-            selection.ok &&
-            customerBookings === 0 &&
-            slotBookings === 1,
+          rival &&
+          selection.ok &&
+          customerBookings === 0 &&
+          slotBookings === 1,
         ),
         `rival=${Boolean(rival)}, selectionOk=${selection.ok}, customerBookings=${customerBookings}, slotBookings=${slotBookings}`,
       );
@@ -811,21 +801,21 @@ async function main(): Promise<void> {
         "F. Cross-tenant customer/service/provider/appointment use is rejected without mutation",
         Boolean(
           !foreignCustomer.success &&
-            foreignCustomer.code === "CUSTOMER_NOT_FOUND" &&
-            !foreignService.success &&
-            foreignService.code === "SERVICE_UNAVAILABLE" &&
-            !foreignProvider.success &&
-            foreignProvider.code === "PROVIDER_NOT_ELIGIBLE" &&
-            !foreignAvailability.success &&
-            foreignAvailability.error.code === "SERVICE_NOT_FOUND" &&
-            !foreignExclude.success &&
-            foreignExclude.error.code === "FORBIDDEN" &&
-            foreignDetail === null &&
-            foreignContext.customer === null &&
-            foreignContext.serviceId === null &&
-            foreignContext.providerId === null &&
-            foreignMutation === null &&
-            unchangedB?.performedServiceId === null,
+          foreignCustomer.code === "CUSTOMER_NOT_FOUND" &&
+          !foreignService.success &&
+          foreignService.code === "SERVICE_UNAVAILABLE" &&
+          !foreignProvider.success &&
+          foreignProvider.code === "PROVIDER_NOT_ELIGIBLE" &&
+          !foreignAvailability.success &&
+          foreignAvailability.error.code === "SERVICE_NOT_FOUND" &&
+          !foreignExclude.success &&
+          foreignExclude.error.code === "FORBIDDEN" &&
+          foreignDetail === null &&
+          foreignContext.customer === null &&
+          foreignContext.serviceId === null &&
+          foreignContext.providerId === null &&
+          foreignMutation === null &&
+          unchangedB?.performedServiceId === null,
         ),
         `customer=${!foreignCustomer.success ? foreignCustomer.code : "SUCCESS"}, service=${!foreignService.success ? foreignService.code : "SUCCESS"}, provider=${!foreignProvider.success ? foreignProvider.code : "SUCCESS"}, exclude=${!foreignExclude.success ? foreignExclude.error.code : "SUCCESS"}`,
       );
