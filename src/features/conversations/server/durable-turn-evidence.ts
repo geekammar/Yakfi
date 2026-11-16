@@ -44,9 +44,10 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function normalizeAttemptCost(attempt: {
-  readonly costUsd?: number;
-}): { costUsd: number | null; completeness: AttemptCompleteness } {
+function normalizeAttemptCost(attempt: { readonly costUsd?: number }): {
+  costUsd: number | null;
+  completeness: AttemptCompleteness;
+} {
   if (isFiniteNonNegative(attempt.costUsd)) {
     return { costUsd: attempt.costUsd, completeness: "KNOWN" };
   }

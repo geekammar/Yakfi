@@ -474,10 +474,7 @@ export class TurnEvidenceRepository {
       unknownCostAttempts += row.attempts.filter(
         (attempt) => attempt.costCompleteness !== "KNOWN",
       ).length;
-      knownSubtotalUsd = addFinite(
-        knownSubtotalUsd,
-        row.knownCostSubtotalUsd,
-      );
+      knownSubtotalUsd = addFinite(knownSubtotalUsd, row.knownCostSubtotalUsd);
 
       if (row.costCompleteness === "COMPLETE") {
         completeness.complete += 1;

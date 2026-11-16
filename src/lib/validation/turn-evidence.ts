@@ -66,12 +66,7 @@ const usdSchema = z
   .refine((value) => value >= 0, { error: "cost must be non-negative" });
 
 const optionalText = (max: number) => boundedMachineKey(max).nullish();
-const optionalTokens = z
-  .number()
-  .int()
-  .min(0)
-  .max(2_147_483_647)
-  .nullish();
+const optionalTokens = z.number().int().min(0).max(2_147_483_647).nullish();
 
 const durableAttemptSchema = z
   .object({
@@ -217,9 +212,7 @@ const durableTurnEvidenceSchema = z
     outboundDeliveryErrorCode: optionalText(64),
     totalCostUsd: usdSchema.nullish(),
     knownCostSubtotalUsd: usdSchema.nullish(),
-    costCompleteness: z
-      .enum(durableTurnEvidenceCompletenessValues)
-      .nullish(),
+    costCompleteness: z.enum(durableTurnEvidenceCompletenessValues).nullish(),
     costCurrency: z.enum(durableTurnEvidenceCurrencyValues).nullish(),
     attempts: z
       .array(durableAttemptSchema)
@@ -253,10 +246,7 @@ const durableTurnEvidenceSchema = z
     const unknownAttempts = record.attempts.length - knownAttempts;
 
     if (record.attempts.length === 0) {
-      if (
-        record.totalCostUsd !== null &&
-        record.totalCostUsd !== undefined
-      ) {
+      if (record.totalCostUsd !== null && record.totalCostUsd !== undefined) {
         ctx.addIssue({
           code: "custom",
           path: ["totalCostUsd"],
@@ -352,10 +342,7 @@ const durableTurnEvidenceSchema = z
           message: "PARTIAL requires both known and unknown attempts",
         });
       }
-      if (
-        record.totalCostUsd !== null &&
-        record.totalCostUsd !== undefined
-      ) {
+      if (record.totalCostUsd !== null && record.totalCostUsd !== undefined) {
         ctx.addIssue({
           code: "custom",
           path: ["totalCostUsd"],
@@ -386,10 +373,7 @@ const durableTurnEvidenceSchema = z
           message: "UNAVAILABLE cannot hide a known attempt cost",
         });
       }
-      if (
-        record.totalCostUsd !== null &&
-        record.totalCostUsd !== undefined
-      ) {
+      if (record.totalCostUsd !== null && record.totalCostUsd !== undefined) {
         ctx.addIssue({
           code: "custom",
           path: ["totalCostUsd"],
@@ -407,10 +391,7 @@ const durableTurnEvidenceSchema = z
           message: "UNAVAILABLE cannot carry a positive known subtotal",
         });
       }
-      if (
-        record.costCurrency !== null &&
-        record.costCurrency !== undefined
-      ) {
+      if (record.costCurrency !== null && record.costCurrency !== undefined) {
         ctx.addIssue({
           code: "custom",
           path: ["costCurrency"],
@@ -455,9 +436,7 @@ const reconcileTurnEvidenceSchema = z
 export type DurableTurnEvidenceAttemptDto = z.infer<
   typeof durableAttemptSchema
 >;
-export type DurableTurnEvidenceDto = z.infer<
-  typeof durableTurnEvidenceSchema
->;
+export type DurableTurnEvidenceDto = z.infer<typeof durableTurnEvidenceSchema>;
 export type ReconcileTurnEvidenceDto = z.infer<
   typeof reconcileTurnEvidenceSchema
 >;

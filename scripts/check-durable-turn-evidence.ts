@@ -352,10 +352,13 @@ function main(): void {
   );
   check(
     "redaction: validation strips unknown fields",
-    !("messageText" in durableTurnEvidenceValidation.record.parse({
-      ...one,
-      messageText: EXTRA_SECRET,
-    })),
+    !(
+      "messageText" in
+      durableTurnEvidenceValidation.record.parse({
+        ...one,
+        messageText: EXTRA_SECRET,
+      })
+    ),
   );
 
   // ── 7. Payload bounds ────────────────────────────────────────────────────
