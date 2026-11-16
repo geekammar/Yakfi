@@ -410,7 +410,11 @@ async function main(): Promise<void> {
     });
   }
 
-  const aiReply = (content: string, intent = "FAQ") => ({
+  const aiReply = (
+    content: string,
+    intent = "FAQ",
+    requiredKnowledge?: string,
+  ) => ({
     intent,
     action: "reply",
     content,
@@ -419,6 +423,9 @@ async function main(): Promise<void> {
     summary: null,
     // CORE-03D2: a structured generative turn must carry a valid assessment.
     safetyAssessment: "safe" as const,
+    // B-03/ISS-012: a positive knowledge reply declares the exact family the
+    // server must resolve before the answer can be disclosed.
+    ...(requiredKnowledge ? { requiredKnowledge } : {}),
   });
   const aiNoKnowledge = (content: string, intent = "FAQ") => ({
     intent,
@@ -435,6 +442,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
     // CORE-04A: physical attempts are only truthful when the adapter reports
     // them. This healthy one-call adapter reports exactly one wire attempt.
@@ -509,7 +518,11 @@ async function main(): Promise<void> {
     address: PILOT_ADDRESS,
     about: PILOT_ABOUT,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
   });
   const loc = await run(locHarness, {
     text: "أين موقعكم؟",
@@ -644,7 +657,11 @@ async function main(): Promise<void> {
   const throwHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
     sink: "throw",
   });
   const throwResult = await run(throwHarness, {
@@ -654,7 +671,11 @@ async function main(): Promise<void> {
   const okHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
   });
   const okResult = await run(okHarness, {
     text: "أين موقعكم؟",
@@ -748,7 +769,11 @@ async function main(): Promise<void> {
   // ── 10. Fail-open sink + kill switch ─────────────────────────────────────
   const disabledHarness = buildHarness({
     address: PILOT_ADDRESS,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
     sink: "disabled",
   });
   const disabled = await run(disabledHarness, {
@@ -849,7 +874,11 @@ async function main(): Promise<void> {
     address: PILOT_ADDRESS,
     about: PILOT_ABOUT,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
   });
   const liveLocResult = await run(liveLoc, {
     text: "أين موقعكم؟",
@@ -861,6 +890,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
   });
   const liveCatResult = await run(liveCat, {
@@ -957,6 +988,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
     aiTelemetry: TELEMETRY_WITH_TOKENS,
   });
@@ -971,6 +1004,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
   });
   const plainResult = await run(plainHarness, {
@@ -1069,7 +1104,11 @@ async function main(): Promise<void> {
   const fallbackHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(
+      `نحن في ${PILOT_ADDRESS}.`,
+      "FAQ",
+      "business.address",
+    ),
     aiTelemetry: FALLBACK_TELEMETRY,
   });
   await run(fallbackHarness, {
