@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.12",
+  "version": "0.79.13",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -91,6 +91,7 @@
     "check:welcome-intro-runtime": "tsx scripts/check-welcome-intro-runtime.ts",
     "check:welcome-intro-db": "tsx scripts/check-welcome-intro-db.ts",
     "check:booking-acceptance-db": "tsx scripts/check-booking-acceptance-db.ts",
+    "check:booking-concurrency-db": "tsx scripts/check-booking-concurrency-db.ts",
     "check:customer-time-display-db": "tsx scripts/check-customer-time-display-db.ts",
     "check:unknown-information-handoff-db": "tsx scripts/check-unknown-information-handoff-db.ts",
     "check:safe-telegram-reply-db": "tsx scripts/check-safe-telegram-reply-db.ts",
