@@ -21,6 +21,13 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { db } from "@/server/db";
+import type { AppointmentStatus } from "@/types/domain";
+
+import {
+  rescheduleAppointment,
+  updateAppointmentStatus,
+} from "./appointment-actions";
 import {
   afterAll,
   beforeAll,
@@ -30,14 +37,6 @@ import {
   it,
   vi,
 } from "vitest";
-
-import { db } from "@/server/db";
-import type { AppointmentStatus } from "@/types/domain";
-
-import {
-  rescheduleAppointment,
-  updateAppointmentStatus,
-} from "./appointment-actions";
 
 const { requireUserMock, revalidatePathMock } = vi.hoisted(() => ({
   requireUserMock: vi.fn(),
