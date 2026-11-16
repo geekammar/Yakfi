@@ -1044,6 +1044,7 @@ model TurnEvidenceRecord {
   customerMessageId         String    @map("customer_message_id")
   traceId                   String?   @map("trace_id")
   trafficPool               String    @map("traffic_pool")
+  executionEvidence         String    @map("execution_evidence")
   occurredAt                DateTime  @map("occurred_at")
   appVersion                String    @map("app_version")
   environment               String
@@ -1064,6 +1065,10 @@ model TurnEvidenceRecord {
   knownCostSubtotalUsd      Float?    @map("known_cost_subtotal_usd")
   costCompleteness          String?   @map("cost_completeness")
   costCurrency              String?   @map("cost_currency")
+  logicalAttemptCount       Int       @default(0) @map("logical_attempt_count")
+  confirmedHttpDispatches   Int       @default(0) @map("confirmed_http_dispatches")
+  unknownDispatchAttemptCount Int     @default(0) @map("unknown_dispatch_attempt_count")
+  preventedAttemptCount     Int       @default(0) @map("prevented_attempt_count")
   factFingerprint           String    @map("fact_fingerprint")
   replayCount               Int       @default(0) @map("replay_count")
   conflictCount             Int       @default(0) @map("conflict_count")
@@ -1078,6 +1083,7 @@ model TurnEvidenceRecord {
   @@index([businessId, occurredAt])
   @@index([conversationId, occurredAt])
   @@index([businessId, conversationId, occurredAt])
+  @@index([businessId, trafficPool, occurredAt])
   @@map("turn_evidence_records")
 }
 

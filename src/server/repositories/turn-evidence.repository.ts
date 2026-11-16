@@ -65,6 +65,7 @@ type EvidenceRow = {
   customerMessageId: string;
   traceId: string | null;
   trafficPool: string;
+  executionEvidence: string;
   occurredAt: Date;
   appVersion: string;
   environment: string;
@@ -85,6 +86,10 @@ type EvidenceRow = {
   knownCostSubtotalUsd: number | null;
   costCompleteness: string | null;
   costCurrency: string | null;
+  logicalAttemptCount: number;
+  confirmedHttpDispatches: number;
+  unknownDispatchAttemptCount: number;
+  preventedAttemptCount: number;
   factFingerprint: string;
   replayCount: number;
   conflictCount: number;
@@ -104,162 +109,119 @@ export type TurnEvidenceRecord = Omit<
 
 export type TurnEvidenceReconciliation = {
   schema: typeof TURN_EVIDENCE_RECONCILIATION_SCHEMA;
-  businessId: string;
-  conversationId: string | null;
-  from: string;
-  to: string;
-  usageCounts: {
-    inbound: number;
-    outbound: number;
-    aiTurn: number;
+  scope: {
+    businessId: string;
+    conversationId: string | null;
+    trafficPool: string;
+    from: string;
+    to: string;
+    /** Every aggregate below describes the FULL requested window. */
+    aggregateScope: "FULL_WINDOW";
   };
-  logicalTurns: number;
-  /** True when the bounded evidence query hit `limit`. */
-  logicalTurnsTruncated: boolean;
-  physicalAttempts: number;
-  duplicateEmissions: number;
-  identityConflicts: number;
-  cost: {
-    currency: "USD" | null;
-    /** Sum of authoritative known subtotals (may include PARTIAL turns). */
-    knownCostSubtotalUsd: number | null;
-    /** Sum of totals from COMPLETE turns only; never a subtotal. */
-    completeTotalUsd: number | null;
-    completeness: {
-      complete: number;
-      partial: number;
+  evidence: {
+    logicalTurns: number;
+    /** Bounded logical attempt records (not necessarily dispatched). */
+    physicalAttemptRecords: number;
+    /** Sum of known HTTP calls across DISPATCHED attempt records. */
+    confirmedHttpDispatches: number;
+    /** Attempt records whose physical HTTP count is genuinely unknown. */
+    unknownDispatchAttempts: number;
+    /** Proven locally prevented dispatches (zero external cost). */
+    preventedDispatches: number;
+    duplicateEmissions: number;
+    identityConflicts: number;
+    executionEvidence: {
+      recorded: number;
+      provenNoCall: number;
       unavailable: number;
-      notApplicable: number;
     };
-    unknownCostTurns: number;
-    unknownCostAttempts: number;
-    /** Provider-reported evidence only; invoices are a separate process. */
-    providerReportedOnly: true;
-    invoiceReconciliation: "NOT_PERFORMED";
+    cost: {
+      currency: "USD" | null;
+      /** Sum of authoritative known subtotals (may include PARTIAL turns). */
+      knownCostSubtotalUsd: number | null;
+      /** Sum of COMPLETE turn totals only; never a partial subtotal. */
+      completeTurnTotalUsd: number | null;
+      /** Complete total ONLY when every scoped turn is complete or proven no-call. */
+      scopedWindowTotalCostUsd: number | null;
+      scopedWindowCostStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+      completeness: {
+        complete: number;
+        partial: number;
+        unavailable: number;
+        notApplicable: number;
+      };
+      unknownCostTurns: number;
+      unknownCostAttempts: number;
+      providerReportedOnly: true;
+      invoiceReconciliation: "NOT_PERFORMED";
+    };
   };
-  links: {
-    aiTurnsWithMessageId: number;
-    aiTurnsLinkedToEvidence: number;
-    aiTurnsMissingMessageId: number;
-    aiTurnsWithoutEvidence: number;
-    evidenceWithoutAiTurn: number;
-    /** AI_TURN rows actually inspected (bounded; see `analysisTruncated`). */
-    aiTurnsAnalyzed: number;
-    analysisTruncated: boolean;
+  usage: {
+    /** Window counts. usage_records carry no pool; these are NOT pool totals. */
+    window: {
+      inbound: number;
+      outbound: number;
+      aiTurn: number;
+    };
+    aiTurnLinks: {
+      linkedScoped: number;
+      linkedOtherPool: number;
+      withoutEvidence: number;
+      missingMessageId: number;
+    };
+    evidenceWithoutAiTurn: {
+      /** Proven deterministic/deferred no-call turns (expected). */
+      expectedNoCall: number;
+      /** Execution recorded/unavailable but no AI_TURN link exists. */
+      unresolved: number;
+    };
+    /** AI_TURN rows with no authoritative message identity (historical). */
+    unresolvedHistoricalIdentity: number;
+    /** AI_TURN rows with a message id but no evidence row (new/missing). */
+    unresolvedMissingEvidence: number;
+    /** AI_TURN rows linked to evidence outside the requested pool. */
+    unclassifiedOtherPool: number;
   };
-  /** Historical usage rows that cannot be linked by a stable identity. */
-  unresolvedHistoricalRows: number;
 };
 
-function toAttemptRows(record: DurableTurnEvidenceDto): AttemptRow[] {
-  return record.attempts
-    .slice()
-    .sort((a, b) => a.attemptIndex - b.attemptIndex)
-    .map((attempt) => ({
-      attemptIndex: attempt.attemptIndex,
-      attemptIdentity: attempt.attemptIdentity,
-      provider: attempt.provider,
-      model: attempt.model ?? null,
-      status: attempt.status,
-      dispatchState: attempt.dispatchState,
-      httpAttempts: attempt.httpAttempts ?? null,
-      inputTokens: attempt.inputTokens ?? null,
-      outputTokens: attempt.outputTokens ?? null,
-      costUsd: attempt.costUsd ?? null,
-      costCurrency: attempt.costCurrency ?? null,
-      costProvenance: attempt.costProvenance,
-      costCompleteness: attempt.costCompleteness,
-      errorCode: attempt.errorCode ?? null,
-      httpStatus: attempt.httpStatus ?? null,
-    }));
+type RawEvidenceAggregate = {
+  logical_turns: number | bigint;
+  physical_attempt_records: number | bigint;
+  confirmed_http_dispatches: number | bigint;
+  unknown_dispatch_attempts: number | bigint;
+  prevented_dispatches: number | bigint;
+  duplicate_emissions: number | bigint;
+  identity_conflicts: number | bigint;
+  execution_recorded: number | bigint;
+  execution_proven_no_call: number | bigint;
+  execution_unavailable: number | bigint;
+  cost_complete: number | bigint;
+  cost_partial: number | bigint;
+  cost_unavailable: number | bigint;
+  cost_not_applicable: number | bigint;
+  usd_turns: number | bigint;
+  known_cost_subtotal: number | string | null;
+  complete_turn_total: number | string | null;
+};
+
+type RawUsageAggregate = {
+  inbound: number | bigint;
+  outbound: number | bigint;
+  ai_turn: number | bigint;
+  ai_linked_scoped: number | bigint;
+  ai_linked_other_pool: number | bigint;
+  ai_without_evidence: number | bigint;
+  ai_missing_message_id: number | bigint;
+};
+
+function toCount(value: number | bigint): number {
+  return typeof value === "bigint" ? Number(value) : value;
 }
 
-/**
- * Stable fingerprint of the ACCOUNTING-RELEVANT facts. `occurredAt` is the
- * distinct act of emission, not a turn fact, so a legitimate replay at a later
- * instant is idempotent rather than a conflict. Attempt order is normalized by
- * index so array ordering cannot create a false conflict.
- */
-function computeFactFingerprint(record: DurableTurnEvidenceDto): string {
-  const canonical = {
-    schema: record.schema,
-    businessId: record.businessId,
-    conversationId: record.conversationId,
-    customerMessageId: record.customerMessageId,
-    traceId: record.traceId ?? null,
-    trafficPool: record.trafficPool,
-    appVersion: record.appVersion,
-    environment: record.environment,
-    intent: record.intent ?? null,
-    assistantAction: record.assistantAction,
-    conversationStatus: record.conversationStatus,
-    handoffCause: record.handoffCause ?? null,
-    routingDecision: record.routingDecision ?? null,
-    provider: record.provider ?? null,
-    model: record.model ?? null,
-    providerStatus: record.providerStatus ?? null,
-    stopReason: record.stopReason ?? null,
-    finalOutcome: record.finalOutcome,
-    outboundSendAttempted: record.outboundSendAttempted,
-    outboundSendDelivered: record.outboundSendDelivered ?? null,
-    outboundDeliveryErrorCode: record.outboundDeliveryErrorCode ?? null,
-    totalCostUsd: record.totalCostUsd ?? null,
-    knownCostSubtotalUsd: record.knownCostSubtotalUsd ?? null,
-    costCompleteness: record.costCompleteness ?? null,
-    costCurrency: record.costCurrency ?? null,
-    attempts: toAttemptRows(record),
-  };
-  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
-}
-
-/**
- * Verify the authoritative identity chain before ANY write. A caller can never
- * attach evidence to another tenant's conversation/message by passing
- * mismatched ids.
- */
-async function assertAuthoritativeIdentity(
-  record: DurableTurnEvidenceDto,
-): Promise<void> {
-  const message = await db.message.findUnique({
-    where: { id: record.customerMessageId },
-    select: {
-      conversationId: true,
-      conversation: { select: { businessId: true } },
-    },
-  });
-  if (
-    !message ||
-    message.conversationId !== record.conversationId ||
-    message.conversation.businessId !== record.businessId
-  ) {
-    throw new Error("TURN_EVIDENCE_IDENTITY_MISMATCH");
-  }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "P2002"
-  );
-}
-
-function toEvidenceRecord(row: EvidenceRow): TurnEvidenceRecord {
-  const { factFingerprint: _fingerprint, attempts, ...rest } = row;
-  void _fingerprint;
-  return { ...rest, attempts };
-}
-
-function addFinite(
-  current: number | null,
-  value: number | null,
-): number | null {
-  if (value === null) return current;
-  if (!Number.isFinite(value)) {
-    throw new Error("TURN_EVIDENCE_NON_FINITE_COST");
-  }
-  return current === null ? value : current + value;
+function toCost(value: number | string | null): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export class TurnEvidenceRepository {
@@ -284,6 +246,7 @@ export class TurnEvidenceRepository {
           customerMessageId: record.customerMessageId,
           traceId: record.traceId ?? null,
           trafficPool: record.trafficPool,
+          executionEvidence: record.executionEvidence,
           occurredAt: record.occurredAt,
           appVersion: record.appVersion,
           environment: record.environment,
@@ -304,6 +267,10 @@ export class TurnEvidenceRepository {
           knownCostSubtotalUsd: record.knownCostSubtotalUsd ?? null,
           costCompleteness: record.costCompleteness ?? null,
           costCurrency: record.costCurrency ?? null,
+          logicalAttemptCount: record.logicalAttemptCount,
+          confirmedHttpDispatches: record.confirmedHttpDispatches,
+          unknownDispatchAttemptCount: record.unknownDispatchAttemptCount,
+          preventedAttemptCount: record.preventedAttemptCount,
           factFingerprint,
           attempts: { create: attempts },
         },
@@ -360,185 +327,247 @@ export class TurnEvidenceRepository {
   }
 
   /**
-   * Bounded, tenant-scoped reconciliation over the durable evidence and the
-   * existing usage rows. Read-only and content-free. Joins by stable ids only;
-   * it never inspects message text.
+   * EXACT, tenant-scoped, single-pool reconciliation over the FULL requested
+   * window. No page/membership heuristics classify missing links. Link
+   * existence is checked by authoritative ids without constraining the other
+   * side's timestamp, so a usage/evidence boundary crossing is never called
+   * missing.
    */
   async reconcile(input: unknown): Promise<TurnEvidenceReconciliation> {
     const parsed: ReconcileTurnEvidenceDto =
       durableTurnEvidenceValidation.reconcile.parse(input);
-    const conversationFilter = parsed.conversationId
-      ? { conversationId: parsed.conversationId }
-      : {};
+    const conversationId = parsed.conversationId ?? null;
 
-    const usageWhere = {
-      businessId: parsed.businessId,
-      occurredAt: { gte: parsed.from, lt: parsed.to },
-      ...conversationFilter,
-    };
-    const [usageGroups, aiTurnRows] = await Promise.all([
-      db.usageRecord.groupBy({
-        by: ["kind"],
-        where: usageWhere,
-        _count: { _all: true },
-      }),
-      db.usageRecord.findMany({
-        where: { ...usageWhere, kind: "AI_TURN" },
-        select: { messageId: true },
-        orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-        take: 5000,
-      }),
-    ]);
+    const evidenceRows = await db.$queryRaw<RawEvidenceAggregate[]>`
+      SELECT
+        COUNT(*)::int AS logical_turns,
+        COALESCE(SUM(e.logical_attempt_count), 0)::int AS physical_attempt_records,
+        COALESCE(SUM(e.confirmed_http_dispatches), 0)::int AS confirmed_http_dispatches,
+        COALESCE(SUM(e.unknown_dispatch_attempt_count), 0)::int AS unknown_dispatch_attempts,
+        COALESCE(SUM(e.prevented_attempt_count), 0)::int AS prevented_dispatches,
+        COALESCE(SUM(e.replay_count), 0)::int AS duplicate_emissions,
+        COALESCE(SUM(e.conflict_count), 0)::int AS identity_conflicts,
+        COUNT(*) FILTER (WHERE e.execution_evidence = 'RECORDED')::int AS execution_recorded,
+        COUNT(*) FILTER (WHERE e.execution_evidence = 'PROVEN_NO_CALL')::int AS execution_proven_no_call,
+        COUNT(*) FILTER (WHERE e.execution_evidence = 'UNAVAILABLE')::int AS execution_unavailable,
+        COUNT(*) FILTER (WHERE e.cost_completeness = 'COMPLETE')::int AS cost_complete,
+        COUNT(*) FILTER (WHERE e.cost_completeness = 'PARTIAL')::int AS cost_partial,
+        COUNT(*) FILTER (WHERE e.cost_completeness = 'UNAVAILABLE')::int AS cost_unavailable,
+        COUNT(*) FILTER (WHERE e.cost_completeness IS NULL)::int AS cost_not_applicable,
+        COUNT(*) FILTER (WHERE e.cost_currency = 'USD')::int AS usd_turns,
+        SUM(e.known_cost_subtotal_usd) AS known_cost_subtotal,
+        SUM(e.total_cost_usd) FILTER (WHERE e.cost_completeness = 'COMPLETE') AS complete_turn_total
+      FROM turn_evidence_records e
+      WHERE e.business_id = ${parsed.businessId}
+        AND e.traffic_pool = ${parsed.trafficPool}
+        AND e.occurred_at >= ${parsed.from}
+        AND e.occurred_at < ${parsed.to}
+        AND (${conversationId}::text IS NULL OR e.conversation_id = ${conversationId}::text)
+    `;
+    const evidenceAgg = evidenceRows[0];
 
-    const evidence = (await db.turnEvidenceRecord.findMany({
-      where: {
-        businessId: parsed.businessId,
-        occurredAt: { gte: parsed.from, lt: parsed.to },
-        ...conversationFilter,
-      },
-      select: {
-        customerMessageId: true,
-        totalCostUsd: true,
-        knownCostSubtotalUsd: true,
-        costCompleteness: true,
-        costCurrency: true,
-        replayCount: true,
-        conflictCount: true,
-        attempts: { select: { costCompleteness: true } },
-      },
-      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-      take: parsed.limit,
-    })) as Array<{
-      customerMessageId: string;
-      totalCostUsd: number | null;
-      knownCostSubtotalUsd: number | null;
-      costCompleteness: string | null;
-      costCurrency: string | null;
-      replayCount: number;
-      conflictCount: number;
-      attempts: Array<{ costCompleteness: string }>;
-    }>;
+    const usageRows = await db.$queryRaw<RawUsageAggregate[]>`
+      SELECT
+        COUNT(*) FILTER (WHERE u.kind = 'INBOUND_MESSAGE')::int AS inbound,
+        COUNT(*) FILTER (WHERE u.kind = 'OUTBOUND_MESSAGE')::int AS outbound,
+        COUNT(*) FILTER (WHERE u.kind = 'AI_TURN')::int AS ai_turn,
+        COUNT(*) FILTER (
+          WHERE u.kind = 'AI_TURN' AND u.message_id IS NULL
+        )::int AS ai_missing_message_id,
+        COUNT(*) FILTER (
+          WHERE u.kind = 'AI_TURN' AND u.message_id IS NOT NULL
+            AND e.id IS NOT NULL AND e.traffic_pool = ${parsed.trafficPool}
+        )::int AS ai_linked_scoped,
+        COUNT(*) FILTER (
+          WHERE u.kind = 'AI_TURN' AND u.message_id IS NOT NULL
+            AND e.id IS NOT NULL AND e.traffic_pool <> ${parsed.trafficPool}
+        )::int AS ai_linked_other_pool,
+        COUNT(*) FILTER (
+          WHERE u.kind = 'AI_TURN' AND u.message_id IS NOT NULL AND e.id IS NULL
+        )::int AS ai_without_evidence
+      FROM usage_records u
+      LEFT JOIN turn_evidence_records e
+        ON e.business_id = u.business_id
+       AND e.customer_message_id = u.message_id
+      WHERE u.business_id = ${parsed.businessId}
+        AND u.occurred_at >= ${parsed.from}
+        AND u.occurred_at < ${parsed.to}
+        AND (${conversationId}::text IS NULL OR u.conversation_id = ${conversationId}::text)
+    `;
+    const usageAgg = usageRows[0];
 
-    const usageCounts = { inbound: 0, outbound: 0, aiTurn: 0 };
-    for (const group of usageGroups) {
-      const count = group._count._all;
-      if (group.kind === "INBOUND_MESSAGE") usageCounts.inbound = count;
-      else if (group.kind === "OUTBOUND_MESSAGE") usageCounts.outbound = count;
-      else if (group.kind === "AI_TURN") usageCounts.aiTurn = count;
+    const evidenceUsageRows = await db.$queryRaw<
+      Array<{
+        expected_no_call: number | bigint;
+        unresolved_missing_usage: number | bigint;
+      }>
+    >`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE e.execution_evidence = 'PROVEN_NO_CALL'
+            AND NOT EXISTS (
+              SELECT 1 FROM usage_records u
+              WHERE u.business_id = e.business_id
+                AND u.kind = 'AI_TURN'
+                AND u.message_id = e.customer_message_id
+            )
+        )::int AS expected_no_call,
+        COUNT(*) FILTER (
+          WHERE e.execution_evidence <> 'PROVEN_NO_CALL'
+            AND NOT EXISTS (
+              SELECT 1 FROM usage_records u
+              WHERE u.business_id = e.business_id
+                AND u.kind = 'AI_TURN'
+                AND u.message_id = e.customer_message_id
+            )
+        )::int AS unresolved_missing_usage
+      FROM turn_evidence_records e
+      WHERE e.business_id = ${parsed.businessId}
+        AND e.traffic_pool = ${parsed.trafficPool}
+        AND e.occurred_at >= ${parsed.from}
+        AND e.occurred_at < ${parsed.to}
+        AND (${conversationId}::text IS NULL OR e.conversation_id = ${conversationId}::text)
+    `;
+    const evidenceUsageAgg = evidenceUsageRows[0];
+
+    const unknownCostRows = await db.$queryRaw<
+      Array<{ unknown_cost_attempts: number | bigint }>
+    >`
+      SELECT COALESCE(COUNT(*), 0)::int AS unknown_cost_attempts
+      FROM turn_evidence_attempts a
+      JOIN turn_evidence_records e ON e.id = a.turn_evidence_id
+      WHERE e.business_id = ${parsed.businessId}
+        AND e.traffic_pool = ${parsed.trafficPool}
+        AND e.occurred_at >= ${parsed.from}
+        AND e.occurred_at < ${parsed.to}
+        AND (${conversationId}::text IS NULL OR e.conversation_id = ${conversationId}::text)
+        AND a.cost_completeness <> 'KNOWN'
+    `;
+
+    const unknownCostAgg = unknownCostRows[0];
+    if (!evidenceAgg || !usageAgg || !evidenceUsageAgg || !unknownCostAgg) {
+      throw new Error("TURN_EVIDENCE_RECONCILIATION_QUERY_FAILED");
     }
 
-    const evidenceMessageIds = new Set(
-      evidence.map((row) => row.customerMessageId),
+    const logicalTurns = toCount(evidenceAgg.logical_turns);
+    const complete = toCount(evidenceAgg.cost_complete);
+    const partial = toCount(evidenceAgg.cost_partial);
+    const unavailable = toCount(evidenceAgg.cost_unavailable);
+    const notApplicable = toCount(evidenceAgg.cost_not_applicable);
+    const executionUnavailable = toCount(evidenceAgg.execution_unavailable);
+    const unresolvedMissingUsage = toCount(
+      evidenceUsageAgg.unresolved_missing_usage,
     );
-    const aiTurnMessageIds = new Set<string>();
-    let aiTurnsWithMessageId = 0;
-    let aiTurnsLinkedToEvidence = 0;
-    let aiTurnsMissingMessageId = 0;
-    let aiTurnsWithoutEvidence = 0;
+    const expectedNoCall = toCount(evidenceUsageAgg.expected_no_call);
+    const aiTurn = toCount(usageAgg.ai_turn);
 
-    for (const row of aiTurnRows) {
-      if (!row.messageId) {
-        aiTurnsMissingMessageId += 1;
-        continue;
-      }
-      aiTurnsWithMessageId += 1;
-      aiTurnMessageIds.add(row.messageId);
-      if (evidenceMessageIds.has(row.messageId)) {
-        aiTurnsLinkedToEvidence += 1;
-      } else {
-        aiTurnsWithoutEvidence += 1;
-      }
+    let scopedWindowCostStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+    if (logicalTurns === 0) {
+      scopedWindowCostStatus = aiTurn > 0 ? "UNAVAILABLE" : "COMPLETE";
+    } else if (
+      unavailable > 0 ||
+      executionUnavailable > 0 ||
+      unresolvedMissingUsage > 0
+    ) {
+      scopedWindowCostStatus =
+        complete > 0 || partial > 0 ? "PARTIAL" : "UNAVAILABLE";
+    } else if (partial > 0) {
+      scopedWindowCostStatus = "PARTIAL";
+    } else {
+      scopedWindowCostStatus = "COMPLETE";
     }
 
-    let logicalTurns = 0;
-    let physicalAttempts = 0;
-    let duplicateEmissions = 0;
-    let identityConflicts = 0;
-    let knownSubtotalUsd: number | null = null;
-    let completeTotalUsd: number | null = null;
-    let unknownCostTurns = 0;
-    let unknownCostAttempts = 0;
-    let anyKnownCurrency = false;
-    const completeness = {
-      complete: 0,
-      partial: 0,
-      unavailable: 0,
-      notApplicable: 0,
-    };
-
-    for (const row of evidence) {
-      logicalTurns += 1;
-      physicalAttempts += row.attempts.length;
-      duplicateEmissions += row.replayCount;
-      identityConflicts += row.conflictCount;
-      unknownCostAttempts += row.attempts.filter(
-        (attempt) => attempt.costCompleteness !== "KNOWN",
-      ).length;
-      knownSubtotalUsd = addFinite(knownSubtotalUsd, row.knownCostSubtotalUsd);
-
-      if (row.costCompleteness === "COMPLETE") {
-        completeness.complete += 1;
-        completeTotalUsd = addFinite(completeTotalUsd, row.totalCostUsd);
-      } else if (row.costCompleteness === "PARTIAL") {
-        completeness.partial += 1;
-        unknownCostTurns += 1;
-      } else if (row.costCompleteness === "UNAVAILABLE") {
-        completeness.unavailable += 1;
-        unknownCostTurns += 1;
-      } else {
-        completeness.notApplicable += 1;
-      }
-      if (row.costCurrency === "USD") anyKnownCurrency = true;
-    }
-
-    const evidenceWithoutAiTurn = evidence.filter(
-      (row) => !aiTurnMessageIds.has(row.customerMessageId),
-    ).length;
+    const completeTurnTotalUsd = toCost(evidenceAgg.complete_turn_total);
+    const scopedWindowTotalCostUsd =
+      scopedWindowCostStatus === "COMPLETE"
+        ? (completeTurnTotalUsd ?? 0)
+        : null;
 
     return {
       schema: TURN_EVIDENCE_RECONCILIATION_SCHEMA,
-      businessId: parsed.businessId,
-      conversationId: parsed.conversationId ?? null,
-      from: parsed.from.toISOString(),
-      to: parsed.to.toISOString(),
-      usageCounts,
-      logicalTurns,
-      logicalTurnsTruncated: evidence.length === parsed.limit,
-      physicalAttempts,
-      duplicateEmissions,
-      identityConflicts,
-      cost: {
-        currency: anyKnownCurrency ? "USD" : null,
-        knownCostSubtotalUsd: knownSubtotalUsd,
-        completeTotalUsd,
-        completeness,
-        unknownCostTurns,
-        unknownCostAttempts,
-        providerReportedOnly: true,
-        invoiceReconciliation: "NOT_PERFORMED",
+      scope: {
+        businessId: parsed.businessId,
+        conversationId,
+        trafficPool: parsed.trafficPool,
+        from: parsed.from.toISOString(),
+        to: parsed.to.toISOString(),
+        aggregateScope: "FULL_WINDOW",
       },
-      links: {
-        aiTurnsWithMessageId,
-        aiTurnsLinkedToEvidence,
-        aiTurnsMissingMessageId,
-        aiTurnsWithoutEvidence,
-        evidenceWithoutAiTurn,
-        aiTurnsAnalyzed: aiTurnRows.length,
-        analysisTruncated: aiTurnRows.length < usageCounts.aiTurn,
+      evidence: {
+        logicalTurns,
+        physicalAttemptRecords: toCount(evidenceAgg.physical_attempt_records),
+        confirmedHttpDispatches: toCount(
+          evidenceAgg.confirmed_http_dispatches,
+        ),
+        unknownDispatchAttempts: toCount(
+          evidenceAgg.unknown_dispatch_attempts,
+        ),
+        preventedDispatches: toCount(evidenceAgg.prevented_dispatches),
+        duplicateEmissions: toCount(evidenceAgg.duplicate_emissions),
+        identityConflicts: toCount(evidenceAgg.identity_conflicts),
+        executionEvidence: {
+          recorded: toCount(evidenceAgg.execution_recorded),
+          provenNoCall: toCount(evidenceAgg.execution_proven_no_call),
+          unavailable: executionUnavailable,
+        },
+        cost: {
+          currency: toCount(evidenceAgg.usd_turns) > 0 ? "USD" : null,
+          knownCostSubtotalUsd: toCost(evidenceAgg.known_cost_subtotal),
+          completeTurnTotalUsd,
+          scopedWindowTotalCostUsd,
+          scopedWindowCostStatus,
+          completeness: {
+            complete,
+            partial,
+            unavailable,
+            notApplicable,
+          },
+          unknownCostTurns: partial + unavailable,
+          unknownCostAttempts: toCount(unknownCostAgg.unknown_cost_attempts),
+          providerReportedOnly: true,
+          invoiceReconciliation: "NOT_PERFORMED",
+        },
       },
-      unresolvedHistoricalRows:
-        aiTurnsMissingMessageId + aiTurnsWithoutEvidence,
+      usage: {
+        window: {
+          inbound: toCount(usageAgg.inbound),
+          outbound: toCount(usageAgg.outbound),
+          aiTurn,
+        },
+        aiTurnLinks: {
+          linkedScoped: toCount(usageAgg.ai_linked_scoped),
+          linkedOtherPool: toCount(usageAgg.ai_linked_other_pool),
+          withoutEvidence: toCount(usageAgg.ai_without_evidence),
+          missingMessageId: toCount(usageAgg.ai_missing_message_id),
+        },
+        evidenceWithoutAiTurn: {
+          expectedNoCall,
+          unresolved: unresolvedMissingUsage,
+        },
+        unresolvedHistoricalIdentity: toCount(
+          usageAgg.ai_missing_message_id,
+        ),
+        unresolvedMissingEvidence: toCount(usageAgg.ai_without_evidence),
+        unclassifiedOtherPool: toCount(usageAgg.ai_linked_other_pool),
+      },
     };
   }
 
-  /** Bounded, tenant-scoped read of persisted evidence (diagnostics). */
-  async listByConversationWindow(
-    input: unknown,
-  ): Promise<TurnEvidenceRecord[]> {
-    const parsed = durableTurnEvidenceValidation.reconcile.parse(input);
+  /**
+   * Bounded, tenant-scoped, single-pool diagnostic page (limit + 1 probe for
+   * truthful truncation). This is a SAMPLE, never a full-window total.
+   */
+  async listByConversationWindow(input: unknown): Promise<{
+    items: TurnEvidenceRecord[];
+    hasMore: boolean;
+    limit: number;
+    trafficPool: string;
+  }> {
+    const parsed = durableTurnEvidenceValidation.list.parse(input);
     const rows = (await db.turnEvidenceRecord.findMany({
       where: {
         businessId: parsed.businessId,
+        trafficPool: parsed.trafficPool,
         ...(parsed.conversationId
           ? { conversationId: parsed.conversationId }
           : {}),
@@ -546,8 +575,14 @@ export class TurnEvidenceRepository {
       },
       include: { attempts: { orderBy: { attemptIndex: "asc" } } },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
-      take: parsed.limit,
+      take: parsed.limit + 1,
     })) as EvidenceRow[];
-    return rows.map(toEvidenceRecord);
+    const hasMore = rows.length > parsed.limit;
+    return {
+      items: rows.slice(0, parsed.limit).map(toEvidenceRecord),
+      hasMore,
+      limit: parsed.limit,
+      trafficPool: parsed.trafficPool,
+    };
   }
 }

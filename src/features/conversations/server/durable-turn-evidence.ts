@@ -39,19 +39,16 @@ import {
 } from "@/lib/validation";
 
 type AttemptCompleteness = "KNOWN" | "UNKNOWN";
+type DispatchState = DurableTurnEvidenceAttemptDto["dispatchState"];
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function normalizeAttemptCost(attempt: { readonly costUsd?: number }): {
-  costUsd: number | null;
-  completeness: AttemptCompleteness;
-} {
-  if (isFiniteNonNegative(attempt.costUsd)) {
-    return { costUsd: attempt.costUsd, completeness: "KNOWN" };
-  }
-  return { costUsd: null, completeness: "UNKNOWN" };
+function readDispatchState(httpAttempts: number | null): DispatchState {
+  if (httpAttempts === 0) return "PREVENTED";
+  if (typeof httpAttempts === "number" && httpAttempts > 0) return "DISPATCHED";
+  return "UNKNOWN";
 }
 
 function projectAttempt(
@@ -60,9 +57,40 @@ function projectAttempt(
 ): DurableTurnEvidenceAttemptDto {
   const httpAttempts =
     typeof attempt.httpAttempts === "number" ? attempt.httpAttempts : null;
-  const dispatchState =
-    httpAttempts === 0 ? ("PREVENTED" as const) : ("DISPATCHED" as const);
-  const cost = normalizeAttemptCost(attempt);
+  const dispatchState = readDispatchState(httpAttempts);
+
+  // A proven local prevention has zero external cost by the EXISTING cost
+  // semantics. Anything else is known only when the attempt projection says
+  // the provider reported it; costUsd without that explicit provenance is
+  // treated as unknown rather than silently re-labelled.
+  if (dispatchState === "PREVENTED") {
+    if (isFiniteNonNegative(attempt.costUsd) && attempt.costUsd > 0) {
+      throw new Error(
+        "contradictory evidence: PREVENTED dispatch cannot carry a positive cost",
+      );
+    }
+    return {
+      attemptIndex: attempt.attempt,
+      attemptIdentity: `${record.traceId ?? record.customerMessageId}:attempt:${attempt.attempt}`,
+      provider: attempt.provider,
+      model: attempt.model ?? null,
+      status: attempt.status,
+      dispatchState,
+      httpAttempts: 0,
+      inputTokens: attempt.inputTokens ?? null,
+      outputTokens: attempt.outputTokens ?? null,
+      costUsd: 0,
+      costCurrency: "USD",
+      costProvenance: "ZERO_DISPATCH_PREVENTED",
+      costCompleteness: "KNOWN",
+      errorCode: attempt.errorCode ?? null,
+      httpStatus: attempt.httpStatus ?? null,
+    };
+  }
+
+  const costKnown =
+    isFiniteNonNegative(attempt.costUsd) &&
+    attempt.costSource === "PROVIDER_REPORTED";
   return {
     attemptIndex: attempt.attempt,
     attemptIdentity: `${record.traceId ?? record.customerMessageId}:attempt:${attempt.attempt}`,
@@ -73,13 +101,31 @@ function projectAttempt(
     httpAttempts,
     inputTokens: attempt.inputTokens ?? null,
     outputTokens: attempt.outputTokens ?? null,
-    costUsd: cost.costUsd,
-    costCurrency: cost.costUsd === null ? null : "USD",
-    costProvenance: cost.costUsd === null ? "UNKNOWN" : "PROVIDER_REPORTED",
-    costCompleteness: cost.completeness,
+    costUsd: costKnown ? attempt.costUsd! : null,
+    costCurrency: costKnown ? "USD" : null,
+    costProvenance: costKnown ? "PROVIDER_REPORTED" : "UNKNOWN",
+    costCompleteness: costKnown ? "KNOWN" : "UNKNOWN",
     errorCode: attempt.errorCode ?? null,
     httpStatus: attempt.httpStatus ?? null,
   };
+}
+
+/**
+ * Proven no-call is reserved for authoritative engine decisions:
+ * - a deferred-to-staff turn never attempted AI;
+ * - a deterministic/JEV routing with providerStatus NOT_CALLED proves no
+ *   provider dispatch.
+ * An empty attempt list WITHOUT one of these proofs is UNAVAILABLE execution
+ * evidence, never a fabricated no-call.
+ */
+function hasProvenNoCall(record: TurnEvidence): boolean {
+  if (record.finalOutcome === "DEFERRED_TO_STAFF") return true;
+  if (record.providerStatus !== "NOT_CALLED") return false;
+  return (
+    record.routingDecision === "DETERMINISTIC_BYPASS" ||
+    record.routingDecision === "DETERMINISTIC" ||
+    record.routingDecision === "JEV"
+  );
 }
 
 /**
@@ -99,6 +145,21 @@ export function buildDurableTurnEvidence(
   const attempts = sourceAttempts.map((attempt) =>
     projectAttempt(record, attempt),
   );
+  const executionEvidence =
+    attempts.length > 0
+      ? ("RECORDED" as const)
+      : hasProvenNoCall(record)
+        ? ("PROVEN_NO_CALL" as const)
+        : ("UNAVAILABLE" as const);
+  const dispatchCounts = attempts.reduce(
+    (acc, attempt) => {
+      if (attempt.dispatchState === "PREVENTED") acc.prevented += 1;
+      else if (attempt.dispatchState === "UNKNOWN") acc.unknown += 1;
+      else acc.confirmed += attempt.httpAttempts ?? 0;
+      return acc;
+    },
+    { confirmed: 0, unknown: 0, prevented: 0 },
+  );
   const costCompleteness =
     record.costCompleteness === "COMPLETE" ||
     record.costCompleteness === "PARTIAL" ||
@@ -115,7 +176,11 @@ export function buildDurableTurnEvidence(
       : null;
   const hasCostValue =
     record.totalCostUsd !== null ||
-    attempts.some((attempt) => attempt.costCompleteness === "KNOWN") ||
+    attempts.some(
+      (attempt) =>
+        attempt.dispatchState !== "PREVENTED" &&
+        attempt.costCompleteness === "KNOWN",
+    ) ||
     costCompleteness === "COMPLETE" ||
     costCompleteness === "PARTIAL";
 
@@ -126,6 +191,7 @@ export function buildDurableTurnEvidence(
     customerMessageId: record.customerMessageId,
     traceId: record.traceId,
     trafficPool,
+    executionEvidence,
     occurredAt: new Date(record.emittedAt),
     appVersion: record.appVersion,
     environment: record.environment,
@@ -146,6 +212,10 @@ export function buildDurableTurnEvidence(
     knownCostSubtotalUsd: record.knownCostSubtotalUsd,
     costCompleteness,
     costCurrency: hasCostValue ? "USD" : null,
+    logicalAttemptCount: attempts.length,
+    confirmedHttpDispatches: dispatchCounts.confirmed,
+    unknownDispatchAttemptCount: dispatchCounts.unknown,
+    preventedAttemptCount: dispatchCounts.prevented,
     attempts,
   };
 }

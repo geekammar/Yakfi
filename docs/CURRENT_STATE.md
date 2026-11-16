@@ -19,40 +19,53 @@
   wiring for the existing Copy Lab/turn-evidence checks. Its final CI result
   is recorded on that PR; this snapshot does not rewrite it.
 - **Current candidate:** branch `feat/durable-turn-usage-cost-evidence`,
-  package `0.79.15`, draft PR from the exact `main` merge commit. Scope is the
-  bounded durable usage/cost evidence addition: additive
-  `turn_evidence_records`/`turn_evidence_attempts` migration, a validated
-  content-free DTO, awaited post-outcome persistence, new `AI_TURN` message
-  linkage, and a read-only tenant/conversation/time-window reconciliation
-  reader. The existing cost engine and attempt projection are reused.
+  package `0.79.15`, draft PR #88 from the exact `main` merge commit. Scope is
+  the bounded durable usage/cost evidence addition plus the reviewed PR88
+  repair: request-scoped provider telemetry (no module-level last-request
+  state), explicit pool-scoped reports, exact full-window reconciliation with
+  truthful link/truncation semantics, and explicit unknown-execution vs
+  proven-no-call/dispatch evidence. The existing cost engine and attempt
+  projection are reused.
 - **Cost/evidence boundary:** persisted costs are the existing
   provider-reported USD values (`DOUBLE PRECISION`, no integer-micro
-  rounding). Null/unknown, real zero, and not-applicable remain distinct; a
-  mixed turn is `PARTIAL` with `totalCostUsd = null`; a no-call turn creates no
-  paid attempt. Provider-reported cost is NOT invoice reconciliation.
-  Historical `AI_TURN` rows without a `messageId` remain explicitly
-  unresolved; no historical rate, invoice or cost is backfilled.
+  rounding). Null/unknown, real zero, proven prevention and not-applicable
+  remain distinct; a mixed turn is `PARTIAL` with `totalCostUsd = null`.
+  Missing telemetry is `UNAVAILABLE` execution, never a proven no-call; missing
+  HTTP counts are `UNKNOWN`, never `DISPATCHED`. Provider-reported cost is NOT
+  invoice reconciliation. Historical `AI_TURN` rows without a `messageId`
+  remain explicitly unresolved; no historical rate, invoice or cost is
+  backfilled.
 - **Pool and lifecycle:** `trafficPool` is explicit (`SERVING` from production
-  entry points, `TEST` from the dedicated test ingress); shadow evaluation is
-  never counted as a serving paid turn. Durable persistence is awaited inside
-  the existing request lifecycle AFTER the reply was persisted + delivered. A
-  storage failure emits only a sanitized `durable.failed` signal and cannot
-  resend, rerun AI, recreate a booking or change the customer outcome; the
-  existing fail-open log/OTLP emission is preserved.
-- **CI wiring:** `check:durable-turn-evidence` runs in the offline validate
-  job; `test:turn-evidence-durable-db` runs only after disposable PostgreSQL
-  preparation and `db:deploy`. The new DB suite covers successful/fallback/
-  partial/zero/unknown/no-call, replay, concurrency, tenant/conflicting
-  identity, persistence failure, precision/nullability, redaction and payload
-  bounds. Automatic PR tests never receive Production/Neon runtime
-  credentials.
+  entry points, `TEST` from the dedicated test ingress); reports require one
+  pool and test/shadow traffic never inflates serving metrics. Window usage
+  counts are labelled NOT pool totals because `usage_records` has no pool
+  column. Durable persistence is awaited inside the existing request lifecycle
+  AFTER the reply was persisted + delivered. A storage failure emits only a
+  sanitized `durable.failed` signal and cannot resend, rerun AI, recreate a
+  booking or change the customer outcome; the existing fail-open log/OTLP
+  emission is preserved.
+- **CI wiring:** `check:request-scoped-usage` and
+  `check:durable-turn-evidence` run in the offline validate job;
+  `test:turn-evidence-durable-db` runs only after disposable PostgreSQL
+  preparation and `db:deploy`. Tests cover production-wrapper interleaving,
+  successful/fallback/partial/zero/unknown/proven-no-call/unavailable-
+  execution, unknown/prevented dispatch, replay, concurrency, same-tenant
+  mixed pool, exact full-window vs bounded page, window edges, real missing
+  links, tenant/conflicting identity, persistence failure, precision/
+  nullability, redaction and payload bounds. Automatic PR tests never receive
+  Production/Neon runtime credentials.
+- **Production observation (separate):** at 2026-11-16T21:12Z both the
+  Production alias and the direct Production deployment returned HTTP 402 /
+  `DEPLOYMENT_DISABLED`. PR #88 was not merged and is not attributed as the
+  cause. Do not change deployment/account/billing settings from this task;
+  live acceptance is **BLOCKED** while the condition persists.
 - **Still open:** real-device/operator mobile acceptance, a global enforceable
   spend cap, provider-invoice reconciliation (explicitly `NOT_PERFORMED`),
   crash-before-turn-completion attempts, and production application of the new
-  migration (operator-authorized, never automatic). Playwright mobile viewports
-  remain automated evidence, not operator mobile acceptance. Historical QA
-  outcomes (including QA249/QA250 failures and later passes), R5 PASS, R6 FAIL
-  and Y83 FAIL remain preserved.
+  migrations (operator-authorized, never automatic). Playwright mobile
+  viewports remain automated evidence, not operator mobile acceptance.
+  Historical QA outcomes (including QA249/QA250 failures and later passes),
+  R5 PASS, R6 FAIL and Y83 FAIL remain preserved.
 
 ## 0A. Historical pricing/attention repair candidate — 15 November 2026
 

@@ -53,7 +53,21 @@ export interface ConversationAi {
   /** Honest reporting of WHICH assistant implementation answered. */
   readonly providerName: string;
   respond(request: AiRequest): Promise<AiResponse>;
+  /**
+   * OPTIONAL request-scoped result seam. An implementation that owns
+   * per-request provider/telemetry state returns response, provider identity
+   * and telemetry together so a concurrent turn can never read another
+   * turn's "last" telemetry. The engine prefers this over the legacy
+   * `respond` + `getLastTelemetry` pair when present.
+   */
+  respondTurn?(request: AiRequest): Promise<ConversationAiTurnResult>;
 }
+
+export type ConversationAiTurnResult = {
+  readonly response: AiResponse | null;
+  readonly providerName: string;
+  readonly telemetry: AiTelemetry | null;
+};
 
 // ─── Arabic text normalization ───────────────────────────────────────────────
 

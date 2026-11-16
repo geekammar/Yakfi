@@ -107,7 +107,7 @@ type AttemptInput = {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
-  httpAttempts?: number;
+  httpAttempts?: number | null;
   errorCode?: "TIMEOUT" | "PERMANENT";
   httpStatus?: number;
 };
@@ -120,17 +120,24 @@ function buildTelemetry(
     costCompleteness: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
   },
 ): AiTelemetry {
-  const totalHttpAttempts = attempts.reduce(
-    (sum, attempt) => sum + (attempt.httpAttempts ?? 1),
-    0,
+  const resolvedHttpAttempts = attempts.map((attempt) =>
+    attempt.httpAttempts === null ? undefined : (attempt.httpAttempts ?? 1),
   );
+  const allHttpKnown = resolvedHttpAttempts.every(
+    (value) => typeof value === "number",
+  );
+  const totalHttpAttempts = allHttpKnown
+    ? resolvedHttpAttempts.reduce((sum, value) => sum + (value ?? 0), 0)
+    : undefined;
   const retryAttempts = attempts.map((attempt, index) => ({
     attempt: index + 1,
     outcome: attempt.status,
     provider: attempt.provider,
     model: attempt.model,
     latencyMs: 10,
-    httpAttempts: attempt.httpAttempts ?? 1,
+    ...(typeof resolvedHttpAttempts[index] === "number"
+      ? { httpAttempts: resolvedHttpAttempts[index] }
+      : {}),
     inputTokens: attempt.inputTokens,
     outputTokens: attempt.outputTokens,
     costUsd: attempt.costUsd,
@@ -138,11 +145,13 @@ function buildTelemetry(
     httpStatus: attempt.httpStatus,
   }));
   return {
-    attempts: attempts.map((attempt) => ({
+    attempts: attempts.map((attempt, index) => ({
       provider: attempt.provider,
       model: attempt.model,
       latencyMs: 10,
-      httpAttempts: attempt.httpAttempts ?? 1,
+      ...(typeof resolvedHttpAttempts[index] === "number"
+        ? { httpAttempts: resolvedHttpAttempts[index] }
+        : {}),
       inputTokens: attempt.inputTokens,
       outputTokens: attempt.outputTokens,
       costUsd: attempt.costUsd,
@@ -196,6 +205,7 @@ async function runTurn(
     phone?: string;
     aiResponse?: AiResponse | null;
     telemetry?: AiTelemetry | null;
+    telemetryPresent?: boolean;
     repo?: EvidenceRepo;
     requiredSemanticCapability?: "structured_turn" | null;
     trafficPool?: ConversationEngineDeps["trafficPool"];
@@ -211,7 +221,9 @@ async function runTurn(
       if (!options.aiResponse) throw new Error("simulated provider failure");
       return options.aiResponse;
     },
-    getLastTelemetry: () => options.telemetry ?? null,
+    ...(options.telemetryPresent === false
+      ? {}
+      : { getLastTelemetry: () => options.telemetry ?? null }),
   } as unknown as ConversationEngineDeps["ai"];
   const transport = {
     providerName: "fake-transport",
@@ -356,17 +368,27 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     const window = windowForNow();
     const reconciliation = await turnEvidenceRepository.reconcile({
       businessId: fixture.businessId,
+      trafficPool: "TEST",
       ...window,
-      limit: 100,
     });
-    expect(reconciliation.logicalTurns).toBe(1);
-    expect(reconciliation.physicalAttempts).toBe(1);
-    expect(reconciliation.usageCounts.aiTurn).toBe(1);
-    expect(reconciliation.links.aiTurnsLinkedToEvidence).toBe(1);
-    expect(reconciliation.links.aiTurnsMissingMessageId).toBe(0);
-    expect(reconciliation.cost.knownCostSubtotalUsd).toBe(cost);
-    expect(reconciliation.cost.completeTotalUsd).toBe(cost);
-    expect(reconciliation.cost.invoiceReconciliation).toBe("NOT_PERFORMED");
+    expect(reconciliation.scope.trafficPool).toBe("TEST");
+    expect(reconciliation.evidence.logicalTurns).toBe(1);
+    expect(reconciliation.evidence.physicalAttemptRecords).toBe(1);
+    expect(reconciliation.evidence.confirmedHttpDispatches).toBe(1);
+    expect(reconciliation.evidence.unknownDispatchAttempts).toBe(0);
+    expect(reconciliation.evidence.executionEvidence.recorded).toBe(1);
+    expect(reconciliation.usage.window.aiTurn).toBe(1);
+    expect(reconciliation.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(reconciliation.usage.aiTurnLinks.missingMessageId).toBe(0);
+    expect(reconciliation.evidence.cost.knownCostSubtotalUsd).toBe(cost);
+    expect(reconciliation.evidence.cost.completeTurnTotalUsd).toBe(cost);
+    expect(reconciliation.evidence.cost.scopedWindowTotalCostUsd).toBe(cost);
+    expect(reconciliation.evidence.cost.scopedWindowCostStatus).toBe(
+      "COMPLETE",
+    );
+    expect(reconciliation.evidence.cost.invoiceReconciliation).toBe(
+      "NOT_PERFORMED",
+    );
   });
 
   it("persists multiple fallback attempts with stable identities and the full total", async () => {
@@ -533,6 +555,7 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
       deterministic.result.customerMessageId,
     );
     expect(deterministicRow?.attempts).toHaveLength(0);
+    expect(deterministicRow?.executionEvidence).toBe("PROVEN_NO_CALL");
     expect(deterministicRow?.totalCostUsd).toBeNull();
     expect(deterministicRow?.knownCostSubtotalUsd).toBeNull();
     expect(deterministicRow?.costCompleteness).toBeNull();
@@ -590,6 +613,7 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
       deferred.result.customerMessageId,
     );
     expect(deferredRow?.attempts).toHaveLength(0);
+    expect(deferredRow?.executionEvidence).toBe("PROVEN_NO_CALL");
     expect(deferredRow?.totalCostUsd).toBeNull();
     expect(deferredRow?.costCompleteness).toBeNull();
   });
@@ -771,19 +795,19 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     const window = windowForNow();
     const reconciliationA = await turnEvidenceRepository.reconcile({
       businessId: fixtureA.businessId,
+      trafficPool: "TEST",
       ...window,
-      limit: 100,
     });
-    expect(reconciliationA.logicalTurns).toBe(0);
-    expect(reconciliationA.cost.knownCostSubtotalUsd).toBeNull();
+    expect(reconciliationA.evidence.logicalTurns).toBe(0);
+    expect(reconciliationA.evidence.cost.knownCostSubtotalUsd).toBeNull();
 
     const reconciliationB = await turnEvidenceRepository.reconcile({
       businessId: fixtureB.businessId,
+      trafficPool: "TEST",
       ...window,
-      limit: 100,
     });
-    expect(reconciliationB.logicalTurns).toBe(1);
-    expect(reconciliationB.cost.knownCostSubtotalUsd).toBe(0.0007);
+    expect(reconciliationB.evidence.logicalTurns).toBe(1);
+    expect(reconciliationB.evidence.cost.knownCostSubtotalUsd).toBe(0.0007);
   });
 
   it("preserves the customer outcome when durable storage fails", async () => {
@@ -913,5 +937,317 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
         })),
       }),
     ).rejects.toThrow();
+  });
+
+  it("represents missing execution telemetry as UNAVAILABLE, never as no-call", async () => {
+    const fixture = await createFixture("منشأة بلا تليمتري");
+    const run = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetryPresent: false,
+    });
+    const row = await findEvidence(
+      fixture.businessId,
+      run.result.customerMessageId,
+    );
+    expect(row?.executionEvidence).toBe("UNAVAILABLE");
+    expect(row?.attempts).toHaveLength(0);
+    expect(row?.logicalAttemptCount).toBe(0);
+    expect(row?.confirmedHttpDispatches).toBe(0);
+    expect(row?.unknownDispatchAttemptCount).toBe(0);
+
+    const window = windowForNow();
+    const reconciliation = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+    });
+    expect(reconciliation.evidence.executionEvidence.unavailable).toBe(1);
+    expect(reconciliation.evidence.cost.scopedWindowCostStatus).toBe(
+      "UNAVAILABLE",
+    );
+    expect(reconciliation.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+    expect(
+      reconciliation.evidence.executionEvidence.provenNoCall,
+    ).toBe(0);
+  });
+
+  it("keeps unknown HTTP dispatch separate from confirmed and prevented dispatch", async () => {
+    const fixture = await createFixture("منشأة الإرسال");
+    const unknownRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "openrouter",
+            model: "model-unknown-http",
+            status: "SUCCESS",
+            httpAttempts: null,
+            costUsd: 0.0005,
+          },
+        ],
+        {
+          totalCostUsd: 0.0005,
+          knownCostSubtotalUsd: 0.0005,
+          costCompleteness: "COMPLETE",
+        },
+      ),
+    });
+    const unknownRow = await findEvidence(
+      fixture.businessId,
+      unknownRun.result.customerMessageId,
+    );
+    expect(unknownRow?.executionEvidence).toBe("RECORDED");
+    expect(unknownRow?.logicalAttemptCount).toBe(1);
+    expect(unknownRow?.confirmedHttpDispatches).toBe(0);
+    expect(unknownRow?.unknownDispatchAttemptCount).toBe(1);
+    expect(unknownRow?.preventedAttemptCount).toBe(0);
+    expect(unknownRow?.attempts[0]?.dispatchState).toBe("UNKNOWN");
+    expect(unknownRow?.attempts[0]?.httpAttempts).toBeNull();
+    expect(unknownRow?.attempts[0]?.costCompleteness).toBe("KNOWN");
+
+    const preventedRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      phone: randomPhone("+2017"),
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "openrouter",
+            model: "model-prevented",
+            status: "FAILURE",
+            httpAttempts: 0,
+          },
+        ],
+        {
+          totalCostUsd: null,
+          knownCostSubtotalUsd: null,
+          costCompleteness: "UNAVAILABLE",
+        },
+      ),
+    });
+    const preventedRow = await findEvidence(
+      fixture.businessId,
+      preventedRun.result.customerMessageId,
+    );
+    expect(preventedRow?.executionEvidence).toBe("RECORDED");
+    expect(preventedRow?.logicalAttemptCount).toBe(1);
+    expect(preventedRow?.confirmedHttpDispatches).toBe(0);
+    expect(preventedRow?.unknownDispatchAttemptCount).toBe(0);
+    expect(preventedRow?.preventedAttemptCount).toBe(1);
+    expect(preventedRow?.attempts[0]?.dispatchState).toBe("PREVENTED");
+    expect(preventedRow?.attempts[0]?.httpAttempts).toBe(0);
+    expect(preventedRow?.attempts[0]?.costUsd).toBe(0);
+    expect(preventedRow?.attempts[0]?.costProvenance).toBe(
+      "ZERO_DISPATCH_PREVENTED",
+    );
+  });
+
+  it("keeps same-tenant TEST and SERVING evidence/cost metrics separate", async () => {
+    const fixture = await createFixture("منشأة المزج");
+    const testRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      trafficPool: "TEST",
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "openrouter",
+            model: "model-test",
+            status: "SUCCESS",
+            costUsd: 0.0001,
+          },
+        ],
+        {
+          totalCostUsd: 0.0001,
+          knownCostSubtotalUsd: 0.0001,
+          costCompleteness: "COMPLETE",
+        },
+      ),
+    });
+    const servingRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      phone: randomPhone("+2018"),
+      trafficPool: "SERVING",
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "agentrouter",
+            model: "model-serving",
+            status: "SUCCESS",
+            costUsd: 0.0002,
+          },
+        ],
+        {
+          totalCostUsd: 0.0002,
+          knownCostSubtotalUsd: 0.0002,
+          costCompleteness: "COMPLETE",
+        },
+      ),
+    });
+    const window = windowForNow();
+    const testReport = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+    });
+    const servingReport = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "SERVING",
+      ...window,
+    });
+    expect(testReport.evidence.logicalTurns).toBe(1);
+    expect(testReport.evidence.cost.knownCostSubtotalUsd).toBe(0.0001);
+    expect(testReport.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(testReport.usage.aiTurnLinks.linkedOtherPool).toBe(1);
+    expect(servingReport.evidence.logicalTurns).toBe(1);
+    expect(servingReport.evidence.cost.knownCostSubtotalUsd).toBe(0.0002);
+    expect(servingReport.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(servingReport.usage.aiTurnLinks.linkedOtherPool).toBe(1);
+    expect(
+      await findEvidence(
+        fixture.businessId,
+        servingRun.result.customerMessageId,
+      ).then((row) => row?.trafficPool),
+    ).toBe("SERVING");
+    expect(
+      await findEvidence(fixture.businessId, testRun.result.customerMessageId)
+        .then((row) => row?.trafficPool),
+    ).toBe("TEST");
+  });
+
+  it("reports exact full-window aggregates and truthful bounded page/links", async () => {
+    const fixture = await createFixture("منشأة النافذة");
+    const normalRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "openrouter",
+            model: "model-normal",
+            status: "SUCCESS",
+            costUsd: 0.0003,
+          },
+        ],
+        {
+          totalCostUsd: 0.0003,
+          knownCostSubtotalUsd: 0.0003,
+          costCompleteness: "COMPLETE",
+        },
+      ),
+    });
+    const noCallRun = await runTurn(fixture, {
+      text: "السلام عليكم",
+      aiResponse: null,
+      requiredSemanticCapability: null,
+      externalId: randomUUID(),
+      phone: randomPhone("+2019"),
+    });
+    const missingUsageRun = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      externalId: randomUUID(),
+      phone: randomPhone("+2020"),
+      telemetry: buildTelemetry(
+        [
+          {
+            provider: "agentrouter",
+            model: "model-missing-usage",
+            status: "SUCCESS",
+            costUsd: 0.0004,
+          },
+        ],
+        {
+          totalCostUsd: 0.0004,
+          knownCostSubtotalUsd: 0.0004,
+          costCompleteness: "COMPLETE",
+        },
+      ),
+    });
+
+    // Move the normal turn's usage outside the evidence window. The link is
+    // still present in the database and must NOT be called missing.
+    await db.usageRecord.updateMany({
+      where: {
+        businessId: fixture.businessId,
+        kind: "AI_TURN",
+        messageId: normalRun.result.customerMessageId,
+      },
+      data: { occurredAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) },
+    });
+    // A genuinely missing usage row for an execution-recorded turn.
+    await db.usageRecord.deleteMany({
+      where: {
+        businessId: fixture.businessId,
+        kind: "AI_TURN",
+        messageId: missingUsageRun.result.customerMessageId,
+      },
+    });
+    // A usage row with no evidence at all.
+    await db.usageRecord.create({
+      data: {
+        businessId: fixture.businessId,
+        kind: "AI_TURN",
+        conversationId: normalRun.result.conversationId,
+        messageId: randomUUID(),
+        provider: "openrouter",
+        status: "SUCCESS",
+        occurredAt: new Date(),
+      },
+    });
+    // A historical usage row with no authoritative message id.
+    await db.usageRecord.create({
+      data: {
+        businessId: fixture.businessId,
+        kind: "AI_TURN",
+        messageId: null,
+        provider: "openrouter",
+        status: "FAILURE",
+        occurredAt: new Date(),
+      },
+    });
+
+    // Keep all three evidence rows inside the window.
+    const now = Date.now();
+    const window = {
+      from: new Date(now - 60 * 60 * 1000),
+      to: new Date(now + 60 * 60 * 1000),
+    };
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+    });
+    expect(report.evidence.logicalTurns).toBe(3);
+    expect(report.evidence.executionEvidence.recorded).toBe(2);
+    expect(report.evidence.executionEvidence.provenNoCall).toBe(1);
+    expect(report.usage.window.aiTurn).toBe(2);
+    expect(report.usage.aiTurnLinks.linkedScoped).toBe(0);
+    expect(report.usage.aiTurnLinks.withoutEvidence).toBe(1);
+    expect(report.usage.aiTurnLinks.missingMessageId).toBe(1);
+    expect(report.usage.evidenceWithoutAiTurn.expectedNoCall).toBe(1);
+    expect(report.usage.evidenceWithoutAiTurn.unresolved).toBe(1);
+    expect(report.usage.unresolvedHistoricalIdentity).toBe(1);
+    expect(report.usage.unresolvedMissingEvidence).toBe(1);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+
+    const page = await turnEvidenceRepository.listByConversationWindow({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+      limit: 2,
+    });
+    expect(page.items).toHaveLength(2);
+    expect(page.hasMore).toBe(true);
+    const fullPage = await turnEvidenceRepository.listByConversationWindow({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+      limit: 10,
+    });
+    expect(fullPage.items).toHaveLength(3);
+    expect(fullPage.hasMore).toBe(false);
   });
 });

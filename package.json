@@ -72,6 +72,7 @@
     "check:knowledge-gap": "tsx scripts/check-knowledge-gap.ts",
     "check:turn-evidence": "tsx scripts/check-turn-evidence.ts",
     "check:durable-turn-evidence": "tsx scripts/check-durable-turn-evidence.ts",
+    "check:request-scoped-usage": "tsx scripts/check-request-scoped-usage.ts",
     "check:economics-contract": "tsx scripts/check-economics-contract.ts",
     "check:jev": "tsx scripts/check-jev-strategy.ts",
     "check:jev-semantic": "tsx scripts/check-jev-semantic.ts",

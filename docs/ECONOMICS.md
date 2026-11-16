@@ -140,39 +140,65 @@ cost result and attempt projections — it is NOT a second cost engine, a
 billing ledger or an invoice system.
 
 - **Tables:** `turn_evidence_records` (one row per finished turn) and
-  `turn_evidence_attempts` (bounded, max 16 per turn). Migration
-  `20261116120000_durable_turn_evidence` is additive and leaves historical
-  `usage_records` untouched.
+  `turn_evidence_attempts` (bounded, max 16 per turn). Migrations
+  `20261116120000_durable_turn_evidence` and
+  `20261116210000_durable_turn_evidence_execution_scope` are additive and
+  leave historical `usage_records` untouched.
 - **Identity:** `(businessId, customerMessageId)` is the stable replay key.
   New `AI_TURN` usage rows carry the same `messageId`. A turn never uses
   message text, a timestamp alone, or provider/model names as identity.
 - **Replay/conflict:** an identical replay is idempotent (`replayCount`); a
   replay with different substantive facts increments `conflictCount` and
   leaves the historical row/attempts unchanged. It is never silently replaced.
+- **Execution evidence:** `executionEvidence` is `RECORDED` when attempt
+  records exist, `PROVEN_NO_CALL` only for an authoritative deterministic/
+  deferred no-call, and `UNAVAILABLE` whenever absence of telemetry cannot
+  prove that no model call occurred. Counts keep logical attempt records,
+  confirmed HTTP dispatches, unknown dispatch quantities and proven local
+  prevention separate.
+- **Dispatch honesty:** an attempt with missing `httpAttempts` is `UNKNOWN`,
+  never `DISPATCHED`. A proven local prevention is `PREVENTED` with a real
+  zero USD cost and `ZERO_DISPATCH_PREVENTED` provenance. Cost is propagated
+  only from the existing explicit provider-reported projection; a cost value
+  without that provenance is not re-labelled.
 - **Cost fields:** `totalCostUsd`, `knownCostSubtotalUsd`,
   `costCompleteness` and per-attempt `costUsd`/`costCurrency`/provenance are
   copied from the existing projection. USD values are IEEE-754 doubles in
   `DOUBLE PRECISION` columns, so sub-micro costs are not rounded to integer
   micro-units. Null (unknown/not applicable) is distinct from a real `0`.
-- **Completeness rule:** a mixed known/unknown attempt set is `PARTIAL` and
-  MUST have `totalCostUsd = null`; the known subtotal remains separate. A
-  no-call turn has zero attempts, a null completeness and no fabricated cost.
+- **Completeness rule:** a mixed known/unknown dispatched attempt set is
+  `PARTIAL` and MUST have `totalCostUsd = null`; the known subtotal remains
+  separate. Prevented attempts are excluded from the dispatched completeness
+  denominator. A proven no-call turn has zero attempts, a null completeness
+  and no fabricated cost.
 - **Pool separation:** `trafficPool` is explicit (`SERVING` / `TEST`);
   dedicated test ingress writes `TEST`, production entry points write
   `SERVING`. Shadow evaluations are a side-channel and never become serving
-  attempts or paid turn rows.
+  attempts or paid turn rows. Reconciliation REQUIRES one explicit pool;
+  TEST/SHADOW never inflate SERVING evidence/cost metrics.
+- **Request-scoped telemetry:** the production policy-backed assistant returns
+  response, provider identity and telemetry from the same request-scoped
+  adapter instance. No module-level "last telemetry" value is used for
+  accounting, including failure paths.
 - **Failure isolation:** persistence is awaited in the existing request
   lifecycle AFTER the customer outcome is complete. A storage failure is
   caught, emits a sanitized `flowpilot.turn.evidence.durable.failed` signal,
   and cannot resend a reply, rerun AI, recreate a booking or alter the turn.
   The existing fail-open log/OTLP emission is preserved.
 - **Read-only reconciliation:** `TurnEvidenceRepository.reconcile(...)` is
-  bounded by tenant, optional conversation and a ≤31-day window. It reports
-  usage counts, logical turns, physical attempts, duplicate/conflict counts,
-  known subtotal, complete total, completeness buckets, unknown-cost counts
-  and missing/unlinked identities. Provider-reported cost is explicitly
-  separated from invoice reconciliation, which is `NOT_PERFORMED`.
-  Historical `AI_TURN` rows without a `messageId` remain unresolved.
+  EXACT over the FULL requested tenant/conversation/≤31-day window and
+  requires an explicit pool. It separates:
+  - scoped evidence aggregates (cost, completeness, execution proof, counts);
+  - window usage counts, which are NOT pool totals because `usage_records`
+    has no pool column;
+  - AI_TURN links classified by authoritative IDs (`linkedScoped`,
+    `linkedOtherPool`, `withoutEvidence`, `missingMessageId`);
+  - evidence without AI_TURN split into expected proven no-call vs unresolved;
+  - unresolved historical identity (no `messageId`) vs new missing evidence.
+  `scopedWindowTotalCostUsd` is non-null only when every scoped turn is
+  COMPLETE or proven no-call. Historical rows are never guessed into a pool.
+  Provider-reported cost is explicitly separated from invoice reconciliation,
+  which is `NOT_PERFORMED`.
 
 ### 4. Persistence Caveats & Architectural Gaps (Under Review)
 

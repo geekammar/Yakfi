@@ -1,5 +1,40 @@
 # FlowPilot — Build State
 
+## PR88 focused repair — truthful reconciliation and request-scoped usage (draft, v0.79.15) — 16 November 2026
+
+- Request-scoped provider telemetry: the production policy-backed wrapper now
+  returns response/provider/telemetry from one request-local adapter through
+  `respondTurn`; module-level last-telemetry state was removed. Failure paths
+  cannot inherit a previous call's tokens/cost/model/provider.
+- Pool-scoped reporting: `reconcile` requires an explicit `trafficPool`.
+  Evidence/cost/attempt/identity metrics are scoped; `usage_records` window
+  counts are labelled NOT pool totals because that table has no pool column.
+  AI_TURN links are classified by authoritative IDs. TEST/SHADOW never inflate
+  SERVING.
+- Exact, bounded reconciliation: full requested tenant/conversation/≤31-day
+  window aggregates are exact (parameterized read-only SQL); link existence
+  does not depend on the other side's timestamp; the diagnostic list uses
+  limit+1/`hasMore`. Expected proven no-call is separated from unresolved
+  evidence-without-usage; historical identity-less usage is separated from new
+  missing evidence. A complete window total is emitted only when every scoped
+  turn is COMPLETE or proven no-call.
+- Execution-proof honesty: `executionEvidence` distinguishes RECORDED /
+  PROVEN_NO_CALL / UNAVAILABLE; missing HTTP counts are UNKNOWN, never
+  DISPATCHED; proven prevention carries zero external cost; confirmed HTTP
+  dispatches, logical attempts, unknown dispatch quantities and prevention are
+  separate counters. Migration
+  `20261116210000_durable_turn_evidence_execution_scope` is additive to the two
+  new evidence tables.
+- Required CI adds `check:request-scoped-usage` and expands the disposable-DB
+  suite with mixed-pool, exact-vs-page, window-edge, real missing link,
+  no-call, missing telemetry, unknown HTTP and prevention cases.
+- Separate operational observation: Production returned HTTP 402 /
+  `DEPLOYMENT_DISABLED` at 2026-11-16T21:12Z. PR #88 is not merged and is not
+  attributed as the cause; live acceptance is BLOCKED. No deployment/account/
+  billing change was attempted.
+- Explicit limits: no merge/deploy/Production migration; finished-turn crash
+  gaps, invoice reconciliation and a global enforceable spend cap remain open.
+
 ## Durable turn usage/cost evidence (draft PR, v0.79.15) — 16 November 2026
 
 - Verified baseline: `main` / `v0.79.14` at

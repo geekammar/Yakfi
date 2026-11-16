@@ -375,14 +375,26 @@ turn_evidence_records + turn_evidence_attempts
   different substantive facts increment `conflictCount` and never replace the
   historical row. New `AI_TURN` usage rows carry the same `messageId`;
   historical rows without it remain explicitly unresolved.
+- **Request-scoped provider telemetry:** the production policy-backed wrapper
+  creates a request-local adapter and returns response, provider identity and
+  telemetry together through `respondTurn`. There is no module-level "last
+  telemetry" value; a failed call cannot inherit a previous call's tokens,
+  cost, model or provider.
+- **Execution proof:** `executionEvidence` is `RECORDED`, `PROVEN_NO_CALL`, or
+  `UNAVAILABLE`. An empty attempt list is no-call ONLY for authoritative
+  deterministic/deferred outcomes; missing telemetry is `UNAVAILABLE`.
+  Missing HTTP counts stay `UNKNOWN`; confirmed HTTP dispatches, logical
+  attempts, unknown dispatch quantities and proven prevention are separate.
 - **Cost semantics:** totals/subtotals/completeness and per-attempt
   cost/provenance are copied from the existing projection. Null, real zero and
   not-applicable stay distinct; a mixed known/unknown turn is `PARTIAL` with
-  `totalCostUsd = null`; no-call turns have zero attempts and no forged cost.
-  USD doubles are stored without integer-micro rounding.
+  `totalCostUsd = null`; proven no-call turns have zero attempts and no forged
+  cost; prevented attempts carry proven zero external cost. USD doubles are
+  stored without integer-micro rounding.
 - **Pool separation:** `trafficPool` is explicit (`SERVING` from production
   entry points, `TEST` from the dedicated test ingress). Shadow evaluation is
-  not a serving attempt and is never counted as a paid turn.
+  not a serving attempt and is never counted as a paid turn. Reports REQUIRE
+  one pool; TEST/SHADOW never inflate SERVING metrics.
 - **Failure limits:** storage is awaited inside the existing request lifecycle
   (`after()` on Telegram, the route handler elsewhere), strictly AFTER the
   reply was persisted + delivered. A failure is swallowed, emits only the
@@ -390,15 +402,22 @@ turn_evidence_records + turn_evidence_attempts
   existing log/OTLP emission, and cannot resend, rerun AI, recreate a booking
   or change the customer outcome. Storage failure means the durable row is
   absent — no delivery guarantee is claimed.
-- **Reconciliation:** `TurnEvidenceRepository.reconcile(...)` is bounded by
-  tenant, optional conversation and a ≤31-day window. It reports usage/logical
-  turn/attempt counts, duplicates, conflicts, known subtotal, complete total,
-  completeness, unknown-cost counts and missing links. It is provider-reported
-  evidence only; invoice reconciliation is `NOT_PERFORMED`.
+- **Reconciliation:** `TurnEvidenceRepository.reconcile(...)` is EXACT over the
+  full requested tenant/conversation/≤31-day window and requires an explicit
+  pool. Usage-window counts are labelled as NOT pool totals (`usage_records`
+  has no pool column). Links are checked by authoritative IDs without a
+  timestamp join, so window-edge crossings are not called missing. Evidence
+  without AI_TURN is split into expected proven no-call vs unresolved;
+  historical identity-less usage is separate from new missing evidence. A
+  complete window total is emitted only when every scoped turn is complete or
+  proven no-call. Provider-reported evidence is separate from invoice
+  reconciliation (`NOT_PERFORMED`).
 
-Checks: `pnpm check:durable-turn-evidence` (offline projection/allowlist) and
-`pnpm test:turn-evidence-durable-db` (disposable PostgreSQL: replay,
-concurrency, tenant isolation, precision, persistence failure).
+Checks: `pnpm check:request-scoped-usage` (production wrapper interleaving with
+fake provider HTTP), `pnpm check:durable-turn-evidence` (offline
+projection/allowlist), and `pnpm test:turn-evidence-durable-db` (disposable
+PostgreSQL: replay, pool isolation, exact aggregation, window edges, missing
+links, unknown execution/prevention, precision, persistence failure).
 
 ## Context budget (minimal prompt context)
 

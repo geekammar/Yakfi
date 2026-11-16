@@ -235,7 +235,10 @@ import type {
   KnowledgeGapCategory,
   RecordUsageDto,
 } from "@/lib/validation";
-import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
+import {
+  createPolicyBackedAi,
+  type AiFactoryDeps,
+} from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
 import type {
   AiTelemetry,
@@ -294,84 +297,64 @@ function getEnvVar(name: string): string | undefined {
   return process.env[name];
 }
 
-// Last telemetry from the most recent LLM turn — surfaced to the
-// engine's readAiTelemetry (AI_TURN rich record). Null when the last
-// turn used the deterministic fallback or had no telemetry.
-let lastTelemetryValue: AiTelemetry | null = null;
-let lastProviderNameInner = "policy-backed";
+/**
+ * Production policy-backed assistant, built per request. The wrapper NEVER
+ * keeps a module-level "last telemetry" value: each call creates its own
+ * `liveAi` instance and returns that instance's response, provider identity
+ * and telemetry together through `respondTurn`. A concurrent turn can
+ * therefore never read another turn's tokens, cost, model or failure state.
+ */
+export type PolicyBackedConversationAiOverrides = Partial<
+  Pick<AiFactoryDeps, "getEnvVar" | "fetchImpl" | "getAiPolicyImpl">
+>;
 
-const policyBackedAi: ConversationAi = {
-  get providerName() {
-    return lastProviderNameInner;
-  },
-  async respond(request: AiRequest) {
-    const liveAi = await createPolicyBackedAi({
-      getEnvVar,
-      fetchImpl: globalThis.fetch as unknown as typeof fetch,
+export function createPolicyBackedConversationAi(
+  overrides: PolicyBackedConversationAiOverrides = {},
+): ConversationAi {
+  const getEnv = overrides.getEnvVar ?? getEnvVar;
+  const fetchImpl =
+    overrides.fetchImpl ?? (globalThis.fetch as unknown as typeof fetch);
+
+  async function createLiveAi(): Promise<ConversationAi> {
+    return createPolicyBackedAi({
+      getEnvVar: getEnv,
+      fetchImpl,
+      ...(overrides.getAiPolicyImpl
+        ? { getAiPolicyImpl: overrides.getAiPolicyImpl }
+        : {}),
     });
-    // Keep providerName honest for deferred / handoff reporting
-    lastProviderNameInner = liveAi.providerName;
-    const maybe = liveAi as unknown as { getLastTelemetry?: () => unknown };
-    let result: AiResponse;
-    try {
-      result = await liveAi.respond(request);
-    } catch (error) {
-      // Preserve telemetry even on controlled failure (engine maps
-      // null → NEED_HUMAN). Capture before re-throwing.
-      if (typeof maybe.getLastTelemetry === "function") {
-        try {
-          const t = maybe.getLastTelemetry();
-          if (
-            t &&
-            typeof t === "object" &&
-            "finalProvider" in (t as Record<string, unknown>)
-          ) {
-            lastTelemetryValue = t as AiTelemetry;
-            if (lastTelemetryValue.finalProvider)
-              lastProviderNameInner = lastTelemetryValue.finalProvider;
-          }
-        } catch {
-          // telemetry is best-effort
-        }
-      }
-      throw error;
-    }
-    if (typeof maybe.getLastTelemetry === "function") {
+  }
+
+  return {
+    providerName: "policy-backed",
+    async respond(request: AiRequest) {
+      const liveAi = await createLiveAi();
+      return liveAi.respond(request);
+    },
+    async respondTurn(request: AiRequest) {
+      const liveAi = await createLiveAi();
+      const providerName = liveAi.providerName;
       try {
-        const t = maybe.getLastTelemetry();
-        if (
-          t &&
-          typeof t === "object" &&
-          "finalProvider" in (t as Record<string, unknown>)
-        ) {
-          lastTelemetryValue = t as AiTelemetry;
-          if (
-            lastTelemetryValue.finalProvider &&
-            lastTelemetryValue.finalProvider !== "deterministic-bypass"
-          ) {
-            lastProviderNameInner = lastTelemetryValue.finalProvider;
-          } else if (
-            lastTelemetryValue.finalProvider === "deterministic-bypass"
-          ) {
-            lastProviderNameInner = "deterministic-bypass";
-          }
-        } else {
-          lastTelemetryValue = null;
-        }
+        const response = await liveAi.respond(request);
+        return {
+          response,
+          providerName,
+          telemetry: readAiTelemetry(liveAi),
+        };
       } catch {
-        lastTelemetryValue = null;
+        // Failure is part of the SAME request result: telemetry belongs to
+        // this liveAi instance, never to a previous turn.
+        return {
+          response: null,
+          providerName,
+          telemetry: readAiTelemetry(liveAi),
+        };
       }
-    } else {
-      lastTelemetryValue = null;
-    }
-    return result;
-  },
-  // Exposed for the engine's readAiTelemetry (LLM path); deterministic
-  // fallback has no telemetry.
-  getLastTelemetry(): AiTelemetry | null {
-    return lastTelemetryValue;
-  },
-} as unknown as ConversationAi & { getLastTelemetry(): AiTelemetry | null };
+    },
+  };
+}
+
+const policyBackedAi = createPolicyBackedConversationAi();
 
 export type ConversationEngineDeps = {
   businessRepository: Pick<BusinessRepository, "findByWhatsappNumber"> &
@@ -6208,6 +6191,10 @@ async function runInboundTurn(
     // WHICH routing produced the turn. It changes no branch.
     const deterministicBypass = turn !== null;
     let turnTelemetry: AiTelemetry | null = null;
+    // Request-scoped provider identity. It is updated ONLY from the same
+    // authoritative call result that produced the response/telemetry, so a
+    // concurrent turn can never borrow another turn's provider.
+    let requestProviderName = deps.ai.providerName;
     // PROMPT-AI-PERF-02 — the ONE attempt selection for the whole turn: the
     // SUCCESSFUL attempt wins, else the last attempt. It sources BOTH the
     // AI_TURN usage record's token counters AND the turn-evidence token
@@ -6216,16 +6203,30 @@ async function runInboundTurn(
     let successAttempt: AiTelemetryAttempt | undefined;
     let lastAttempt: AiTelemetryAttempt | undefined;
     if (!turn) {
-      try {
-        turn = await deps.ai.respond(aiRequest);
-      } catch {
-        turn = null;
+      if (typeof deps.ai.respondTurn === "function") {
+        try {
+          const requestResult = await deps.ai.respondTurn(aiRequest);
+          turn = requestResult.response;
+          turnTelemetry = requestResult.telemetry;
+          requestProviderName = requestResult.providerName;
+        } catch {
+          turn = null;
+          turnTelemetry = null;
+        }
+      } else {
+        try {
+          turn = await deps.ai.respond(aiRequest);
+        } catch {
+          turn = null;
+        }
+        turnTelemetry = readAiTelemetry(deps.ai);
+        requestProviderName =
+          turnTelemetry?.finalProvider ?? requestProviderName;
       }
-      turnTelemetry = readAiTelemetry(deps.ai);
       const telemetry = turnTelemetry;
       const jevCallSpent = !!telemetry?.jevDecision?.semantic?.jevCallSpent;
       const isBypassTelemetry =
-        deps.ai.providerName === "deterministic" ||
+        requestProviderName === "deterministic" ||
         telemetry?.finalProvider === "deterministic-bypass" ||
         (telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER &&
           !jevCallSpent);
@@ -6246,7 +6247,7 @@ async function runInboundTurn(
           // Authoritative inbound message identity: new AI_TURN rows are
           // linkable to durable turn evidence. Historical rows stay unchanged.
           messageId: customerMessage.id,
-          provider: telemetry?.finalProvider ?? deps.ai.providerName,
+          provider: telemetry?.finalProvider ?? requestProviderName,
           model: (successAttempt?.model ??
             telemetry?.finalModel ??
             undefined) as string | undefined,
@@ -6288,7 +6289,7 @@ async function runInboundTurn(
       ? "DETERMINISTIC_BYPASS"
       : turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER
         ? "JEV"
-        : deps.ai.providerName === "deterministic"
+        : requestProviderName === "deterministic"
           ? "DETERMINISTIC"
           : "LLM";
 
@@ -6298,7 +6299,7 @@ async function runInboundTurn(
       !deterministicBypass &&
       turnRouting === "LLM" &&
       turnTelemetry?.finalProvider !== "deterministic" &&
-      deps.ai.providerName !== "deterministic";
+      requestProviderName !== "deterministic";
 
     // CORE-03D2: On structured generative turns, a valid explicit safetyAssessment
     // is strictly required before ordinary structured execution can proceed.
@@ -6343,7 +6344,7 @@ async function runInboundTurn(
     // Disentangles physical HTTP attempts across wire calls from logical serving activity.
     const { providerAttempts, modelCallCount } = resolveTurnCounters({
       deterministicBypass,
-      providerName: deps.ai.providerName,
+      providerName: requestProviderName,
       turnTelemetry,
     });
 
@@ -6355,7 +6356,7 @@ async function runInboundTurn(
             provider:
               a.provider ??
               turnTelemetry?.finalProvider ??
-              deps.ai.providerName,
+              requestProviderName,
             model: a.model ?? undefined,
             status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
             ...(a.httpAttempts !== undefined
@@ -6437,7 +6438,7 @@ async function runInboundTurn(
       response: validated,
       provider: deterministicBypass
         ? "deterministic-bypass"
-        : (turnTelemetry?.finalProvider ?? deps.ai.providerName),
+        : (turnTelemetry?.finalProvider ?? requestProviderName),
       model: turnTelemetry?.finalModel ?? null,
       fallbackUsed: turnTelemetry?.fallbackUsed ?? false,
       retryCount: turnTelemetry?.retryTrace
@@ -6558,7 +6559,7 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         handoffCause: failureCause,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: requestProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6620,7 +6621,7 @@ async function runInboundTurn(
           resolvedTurn.precedenceRule === "SAFETY_RESTRICTED"
             ? "SENSITIVE_OR_RESTRICTED"
             : "CUSTOMER_REQUESTED_HUMAN",
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: requestProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6674,7 +6675,7 @@ async function runInboundTurn(
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: requestProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6811,7 +6812,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -6882,7 +6883,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -6950,7 +6951,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -7413,7 +7414,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -7484,7 +7485,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -7552,7 +7553,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               delivery,
             };
           }
@@ -7952,7 +7953,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: requestProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -8006,7 +8007,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: requestProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -8068,7 +8069,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               observability: {
                 ...turnObservability,
                 turnPlan: {
@@ -8125,7 +8126,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: requestProviderName,
               observability: {
                 ...turnObservability,
                 turnPlan: {
@@ -8467,7 +8468,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: clarifyObservability,
           delivery,
         };
@@ -8526,7 +8527,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
           handoffCause: eligibilityCause,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8600,7 +8601,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8753,7 +8754,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8902,7 +8903,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8955,7 +8956,7 @@ async function runInboundTurn(
           conversationStatus: "NEED_HUMAN",
           // CORE-02 blocked the booking — an authoritative domain constraint.
           handoffCause: "DOMAIN_REQUIRES_HUMAN",
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -9022,7 +9023,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: requestProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -9062,7 +9063,7 @@ async function runInboundTurn(
           // CORE-02 found no bookable options — a domain constraint the
           // assistant cannot resolve autonomously.
           handoffCause: "DOMAIN_REQUIRES_HUMAN",
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -9167,7 +9168,7 @@ async function runInboundTurn(
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: requestProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -9279,7 +9280,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: requestProviderName,
           observability: preserveObservability,
           delivery,
         };
@@ -9332,7 +9333,7 @@ async function runInboundTurn(
         // the assistant could not justify the answer from authoritative
         // sources, which is a policy refusal, never a knowledge gap.
         handoffCause: "POLICY_REFUSED",
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: requestProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -9545,7 +9546,7 @@ async function runInboundTurn(
         validated.action === "booking_handoff"
           ? "DOMAIN_REQUIRES_HUMAN"
           : contractHandoffReasonToCause(validated.handoffReason),
-      assistantProvider: deps.ai.providerName,
+      assistantProvider: requestProviderName,
       observability: turnObservability,
       delivery,
     };

@@ -2,8 +2,9 @@
 
 PostgreSQL (Neon) · Prisma 7 · UUID primary keys everywhere.
 Last updated: durable turn usage/cost evidence — migration chain now includes
-`20261116120000_durable_turn_evidence` (`turn_evidence_records` +
-`turn_evidence_attempts`; ADDITIVE, not applied to Production in this pass).
+`20261116120000_durable_turn_evidence` and
+`20261116210000_durable_turn_evidence_execution_scope` (`turn_evidence_records`
++ `turn_evidence_attempts`; ADDITIVE, not applied to Production in this pass).
 Earlier additive migrations since the DOC-NORMALIZE baseline include
 operator-attention + typed `cause`, runtime-credentials,
 WhatsApp-onboarding-lifecycle, platform-control-plane, account-issuer,
@@ -41,6 +42,8 @@ PROMPT-ARCH-03 (migration-chain repair: root baseline `0_init` +
                                                       one new table + indexes + FKs, zero ALTERs on existing tables)
 20261116120000_durable_turn_evidence                ← durable turn usage/cost evidence (ADDITIVE; two new
                                                       tables + indexes + FKs, zero ALTERs, no backfill)
+20261116210000_durable_turn_evidence_execution_scope ← execution proof + dispatch counters + pool index
+                                                      (ADDITIVE; ALTERs only the two new evidence tables)
 ```
 
 Invariant (verified PROMPT-ARCH-03 on a pristine empty PostgreSQL, re-verified
@@ -169,7 +172,8 @@ Practical indexes on every foreign key plus:
 - `turn_evidence_records(businessId, customerMessageId)` (unique replay key),
   `turn_evidence_records(businessId, occurredAt)`,
   `turn_evidence_records(conversationId, occurredAt)`,
-  `turn_evidence_records(businessId, conversationId, occurredAt)`
+  `turn_evidence_records(businessId, conversationId, occurredAt)`,
+  `turn_evidence_records(businessId, trafficPool, occurredAt)`
 - `turn_evidence_attempts(turnEvidenceId, attemptIndex)` (unique),
   `turn_evidence_attempts(turnEvidenceId)`
 - `users(accountType)`

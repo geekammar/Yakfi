@@ -35,6 +35,12 @@ export const durableTurnEvidenceStatusValues = ["SUCCESS", "FAILURE"] as const;
 export const durableTurnEvidenceDispatchStates = [
   "DISPATCHED",
   "PREVENTED",
+  "UNKNOWN",
+] as const;
+export const durableTurnEvidenceExecutionEvidenceValues = [
+  "RECORDED",
+  "PROVEN_NO_CALL",
+  "UNAVAILABLE",
 ] as const;
 export const durableTurnEvidenceCostProvenanceValues = [
   "PROVIDER_REPORTED",
@@ -153,31 +159,52 @@ const durableAttemptSchema = z
         });
       }
       if (
-        attempt.costProvenance === "ZERO_DISPATCH_PREVENTED" &&
-        attempt.costUsd !== 0
+        attempt.costCompleteness !== "KNOWN" ||
+        attempt.costUsd !== 0 ||
+        attempt.costCurrency !== "USD" ||
+        attempt.costProvenance !== "ZERO_DISPATCH_PREVENTED"
       ) {
         ctx.addIssue({
           code: "custom",
-          path: ["costUsd"],
-          message: "ZERO_DISPATCH_PREVENTED requires a real zero cost",
+          path: ["costProvenance"],
+          message:
+            "PREVENTED dispatch requires a proven zero USD cost with ZERO_DISPATCH_PREVENTED provenance",
         });
       }
-    } else if (attempt.httpAttempts === 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["dispatchState"],
-        message: "httpAttempts = 0 must be recorded as PREVENTED",
-      });
-    }
-    if (
-      attempt.costProvenance === "ZERO_DISPATCH_PREVENTED" &&
-      attempt.dispatchState !== "PREVENTED"
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["costProvenance"],
-        message: "ZERO_DISPATCH_PREVENTED requires PREVENTED dispatch",
-      });
+    } else if (attempt.dispatchState === "DISPATCHED") {
+      if (
+        typeof attempt.httpAttempts !== "number" ||
+        !Number.isInteger(attempt.httpAttempts) ||
+        attempt.httpAttempts < 1
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpAttempts"],
+          message: "DISPATCHED requires a positive known httpAttempts count",
+        });
+      }
+      if (attempt.costProvenance === "ZERO_DISPATCH_PREVENTED") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costProvenance"],
+          message: "ZERO_DISPATCH_PREVENTED cannot describe a dispatched attempt",
+        });
+      }
+    } else {
+      if (attempt.httpAttempts !== null && attempt.httpAttempts !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["httpAttempts"],
+          message: "UNKNOWN dispatch must not carry an HTTP count",
+        });
+      }
+      if (attempt.costProvenance === "ZERO_DISPATCH_PREVENTED") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["costProvenance"],
+          message: "ZERO_DISPATCH_PREVENTED requires PREVENTED dispatch",
+        });
+      }
     }
   });
 
@@ -194,6 +221,7 @@ const durableTurnEvidenceSchema = z
       .regex(/^[A-Za-z0-9._:-]{1,128}$/, "traceId is not a bounded machine id")
       .nullish(),
     trafficPool: z.enum(durableTurnEvidenceTrafficPoolValues),
+    executionEvidence: z.enum(durableTurnEvidenceExecutionEvidenceValues),
     occurredAt: z.date(),
     appVersion: boundedMachineKey(64),
     environment: boundedMachineKey(64),
@@ -214,6 +242,26 @@ const durableTurnEvidenceSchema = z
     knownCostSubtotalUsd: usdSchema.nullish(),
     costCompleteness: z.enum(durableTurnEvidenceCompletenessValues).nullish(),
     costCurrency: z.enum(durableTurnEvidenceCurrencyValues).nullish(),
+    logicalAttemptCount: z
+      .number()
+      .int()
+      .min(0)
+      .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
+    confirmedHttpDispatches: z
+      .number()
+      .int()
+      .min(0)
+      .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS * DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
+    unknownDispatchAttemptCount: z
+      .number()
+      .int()
+      .min(0)
+      .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
+    preventedAttemptCount: z
+      .number()
+      .int()
+      .min(0)
+      .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
     attempts: z
       .array(durableAttemptSchema)
       .max(DURABLE_TURN_EVIDENCE_MAX_ATTEMPTS),
@@ -240,10 +288,71 @@ const durableTurnEvidenceSchema = z
       identities.add(attempt.attemptIdentity);
     }
 
-    const knownAttempts = record.attempts.filter(
+    const dispatchedAttempts = record.attempts.filter(
+      (attempt) => attempt.dispatchState !== "PREVENTED",
+    );
+    const knownAttempts = dispatchedAttempts.filter(
       (attempt) => attempt.costCompleteness === "KNOWN",
     ).length;
-    const unknownAttempts = record.attempts.length - knownAttempts;
+    const unknownAttempts = dispatchedAttempts.length - knownAttempts;
+    const preventedAttempts = record.attempts.filter(
+      (attempt) => attempt.dispatchState === "PREVENTED",
+    ).length;
+    const unknownDispatchAttempts = record.attempts.filter(
+      (attempt) => attempt.dispatchState === "UNKNOWN",
+    ).length;
+    const confirmedHttpDispatches = record.attempts.reduce(
+      (sum, attempt) =>
+        attempt.dispatchState === "DISPATCHED"
+          ? sum + (attempt.httpAttempts ?? 0)
+          : sum,
+      0,
+    );
+
+    if (record.logicalAttemptCount !== record.attempts.length) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["logicalAttemptCount"],
+        message: "logicalAttemptCount must equal the bounded attempt records",
+      });
+    }
+    if (record.preventedAttemptCount !== preventedAttempts) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["preventedAttemptCount"],
+        message: "preventedAttemptCount must equal PREVENTED attempts",
+      });
+    }
+    if (record.unknownDispatchAttemptCount !== unknownDispatchAttempts) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["unknownDispatchAttemptCount"],
+        message: "unknownDispatchAttemptCount must equal UNKNOWN attempts",
+      });
+    }
+    if (record.confirmedHttpDispatches !== confirmedHttpDispatches) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["confirmedHttpDispatches"],
+        message:
+          "confirmedHttpDispatches must equal the known HTTP calls of DISPATCHED attempts",
+      });
+    }
+    if (record.attempts.length === 0) {
+      if (record.executionEvidence === "RECORDED") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["executionEvidence"],
+          message: "RECORDED execution requires at least one attempt record",
+        });
+      }
+    } else if (record.executionEvidence !== "RECORDED") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["executionEvidence"],
+        message: "attempt records require executionEvidence = RECORDED",
+      });
+    }
 
     if (record.attempts.length === 0) {
       if (record.totalCostUsd !== null && record.totalCostUsd !== undefined) {
@@ -409,9 +518,38 @@ const reconcileTurnEvidenceSchema = z
   .object({
     businessId: uuidSchema,
     conversationId: uuidSchema.nullish(),
+    trafficPool: z.enum(durableTurnEvidenceTrafficPoolValues),
     from: z.date(),
     to: z.date(),
-    limit: z.number().int().min(1).max(500).default(200),
+  })
+  .superRefine((value, ctx) => {
+    if (value.from.getTime() >= value.to.getTime()) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "time window must be non-empty",
+      });
+    }
+    if (
+      value.to.getTime() - value.from.getTime() >
+      MAX_TURN_EVIDENCE_RECONCILIATION_WINDOW_MS
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "time window exceeds the 31-day reconciliation bound",
+      });
+    }
+  });
+
+const listTurnEvidenceSchema = z
+  .object({
+    businessId: uuidSchema,
+    conversationId: uuidSchema.nullish(),
+    trafficPool: z.enum(durableTurnEvidenceTrafficPoolValues),
+    from: z.date(),
+    to: z.date(),
+    limit: z.number().int().min(1).max(500).default(100),
   })
   .superRefine((value, ctx) => {
     if (value.from.getTime() >= value.to.getTime()) {
@@ -440,8 +578,10 @@ export type DurableTurnEvidenceDto = z.infer<typeof durableTurnEvidenceSchema>;
 export type ReconcileTurnEvidenceDto = z.infer<
   typeof reconcileTurnEvidenceSchema
 >;
+export type ListTurnEvidenceDto = z.infer<typeof listTurnEvidenceSchema>;
 
 export const durableTurnEvidenceValidation = {
   record: durableTurnEvidenceSchema,
   reconcile: reconcileTurnEvidenceSchema,
+  list: listTurnEvidenceSchema,
 } as const;

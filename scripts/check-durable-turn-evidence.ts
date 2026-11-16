@@ -65,6 +65,13 @@ function evidence(
     knownCostSubtotalUsd?: number | null;
     costCompleteness?: "COMPLETE" | "PARTIAL" | "UNAVAILABLE" | null;
   } = {},
+  options: {
+    providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED";
+    routingDecision?: string;
+    finalOutcome?: string;
+    assistantAction?: string;
+    noObservability?: boolean;
+  } = {},
 ): TurnEvidence {
   const result: InboundSuccess = {
     ok: true,
@@ -73,29 +80,37 @@ function evidence(
     conversationId: CONVERSATION,
     customerId: "44444444-4444-4444-8444-444444444444",
     customerMessageId: MESSAGE,
-    assistantAction: "AI_REPLY",
+    assistantAction: (options.assistantAction ?? "AI_REPLY") as never,
     intent: "FAQ",
     conversationStatus: "AI_ACTIVE",
     handoffCause: null,
     assistantProvider: "openrouter",
     delivery: { provider: "telegram", delivered: true },
-    observability: {
-      routingDecision: "LLM",
-      traceId: TRACE,
-      provider: "openrouter",
-      model: "model-1",
-      providerStatus: "SUCCESS",
-      executionAttempts: attempts ?? undefined,
-      totalCostUsd: costs.totalCostUsd,
-      knownCostSubtotalUsd: costs.knownCostSubtotalUsd,
-      costCompleteness: costs.costCompleteness ?? undefined,
-    },
+    ...(options.noObservability
+      ? {}
+      : {
+          observability: {
+            routingDecision: (options.routingDecision ?? "LLM") as never,
+            traceId: TRACE,
+            provider: "openrouter",
+            model: "model-1",
+            providerStatus: options.providerStatus ?? "SUCCESS",
+            executionAttempts: attempts ?? undefined,
+            totalCostUsd: costs.totalCostUsd,
+            knownCostSubtotalUsd: costs.knownCostSubtotalUsd,
+            costCompleteness: costs.costCompleteness ?? undefined,
+          },
+        }),
   };
+  const record = buildTurnEvidence(result, META);
+  const finalRecord = options.finalOutcome
+    ? { ...record, finalOutcome: options.finalOutcome }
+    : record;
   const record = buildTurnEvidence(result, META);
   // Simulate a hostile extra field on the source record. The projection must
   // never copy unknown keys.
   return {
-    ...record,
+    ...finalRecord,
     messageText: EXTRA_SECRET,
     prompt: EXTRA_SECRET,
     rawProviderPayload: EXTRA_SECRET,
@@ -279,14 +294,104 @@ function main(): void {
   check("unknown: no currency", unknown.costCurrency === null);
   check("zero/unknown distinct", zero.totalCostUsd !== unknown.totalCostUsd);
 
-  // ── 5. No-call turn: no fictitious paid attempt ─────────────────────────
-  const noCall = buildDurableTurnEvidence(evidence(null), "TEST");
+  // ── 5. No-call vs unavailable execution ─────────────────────────────────
+  const noCall = buildDurableTurnEvidence(
+    evidence(null, {}, {
+      providerStatus: "NOT_CALLED",
+      routingDecision: "DETERMINISTIC_BYPASS",
+    }),
+    "TEST",
+  );
   check("no-call: zero attempts", noCall.attempts.length === 0);
+  check("no-call: proven no-call", noCall.executionEvidence === "PROVEN_NO_CALL");
   check("no-call: no total", noCall.totalCostUsd === null);
   check("no-call: no subtotal", noCall.knownCostSubtotalUsd === null);
   check("no-call: no completeness", noCall.costCompleteness === null);
   check("no-call: explicit TEST pool", noCall.trafficPool === "TEST");
   check("no-call: DTO valid", parseOk(noCall));
+
+  const deferred = buildDurableTurnEvidence(
+    evidence(null, {}, {
+      noObservability: true,
+      assistantAction: "DEFERRED_TO_STAFF",
+      finalOutcome: "DEFERRED_TO_STAFF",
+    }),
+    "TEST",
+  );
+  check(
+    "deferred: proven no-call",
+    deferred.executionEvidence === "PROVEN_NO_CALL",
+  );
+  check("deferred: DTO valid", parseOk(deferred));
+
+  const absentTelemetry = buildDurableTurnEvidence(
+    evidence(null, {}, { providerStatus: "SUCCESS", routingDecision: "LLM" }),
+    "TEST",
+  );
+  check(
+    "absent telemetry: execution UNAVAILABLE",
+    absentTelemetry.executionEvidence === "UNAVAILABLE",
+  );
+  check("absent telemetry: DTO valid", parseOk(absentTelemetry));
+
+  const unknownHttp = buildDurableTurnEvidence(
+    evidence(
+      [
+        attempt({
+          attempt: 1,
+          provider: "openrouter",
+          status: "SUCCESS",
+          httpAttempts: undefined,
+          costUsd: 0.0005,
+          costSource: "PROVIDER_REPORTED",
+        }),
+      ],
+      {
+        totalCostUsd: 0.0005,
+        knownCostSubtotalUsd: 0.0005,
+        costCompleteness: "COMPLETE",
+      },
+    ),
+    "SERVING",
+  );
+  check(
+    "unknown HTTP: dispatch UNKNOWN",
+    unknownHttp.attempts[0]?.dispatchState === "UNKNOWN",
+  );
+  check(
+    "unknown HTTP: confirmed dispatches separate",
+    unknownHttp.confirmedHttpDispatches === 0 &&
+      unknownHttp.unknownDispatchAttemptCount === 1,
+  );
+  check("unknown HTTP: cost still known", unknownHttp.attempts[0]?.costUsd === 0.0005);
+  check("unknown HTTP: DTO valid", parseOk(unknownHttp));
+
+  const prevented = buildDurableTurnEvidence(
+    evidence(
+      [
+        attempt({
+          attempt: 1,
+          provider: "openrouter",
+          status: "FAILURE",
+          httpAttempts: 0,
+        }),
+      ],
+      {
+        totalCostUsd: null,
+        knownCostSubtotalUsd: null,
+        costCompleteness: "UNAVAILABLE",
+      },
+    ),
+    "SERVING",
+  );
+  check("prevented: dispatch PREVENTED", prevented.attempts[0]?.dispatchState === "PREVENTED");
+  check(
+    "prevented: provenance is proven zero",
+    prevented.attempts[0]?.costProvenance === "ZERO_DISPATCH_PREVENTED" &&
+      prevented.attempts[0]?.costUsd === 0,
+  );
+  check("prevented: count", prevented.preventedAttemptCount === 1);
+  check("prevented: DTO valid", parseOk(prevented));
 
   // ── 6. Content-free allowlist ────────────────────────────────────────────
   const serialized = JSON.stringify(one);
@@ -303,6 +408,7 @@ function main(): void {
     "customerMessageId",
     "traceId",
     "trafficPool",
+    "executionEvidence",
     "occurredAt",
     "appVersion",
     "environment",
@@ -323,6 +429,10 @@ function main(): void {
     "knownCostSubtotalUsd",
     "costCompleteness",
     "costCurrency",
+    "logicalAttemptCount",
+    "confirmedHttpDispatches",
+    "unknownDispatchAttemptCount",
+    "preventedAttemptCount",
     "attempts",
   ]);
   check(
