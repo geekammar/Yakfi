@@ -13,9 +13,18 @@
   the actual `PENDING`/`CONFIRMED` blocking policy versus
   `CANCELLED`/`COMPLETED`, cross-tenant identifiers/appointment detail/mutation,
   and independent-provider/business capacity.
-- No booking policy, schema, migration, tenant guard or production runtime was
-  changed. The suite is wired into `.github/workflows/pr-validation.yml`; live
-  CI evidence is recorded on the draft PR and is not claimed here.
+- The suite exposed a bounded retry-classification defect: Prisma's driver
+  adapter surfaces serialization failures as `DriverAdapterError`
+  (`cause.kind = "TransactionWriteConflict"`), which
+  `AppointmentRepository`'s P2034-only classifier did not recognize. The final
+  DB outcome was still one active booking, but the losing writer received
+  `CREATE_FAILED` instead of the documented typed `SLOT_CONFLICT`. Bounded
+  repair: treat P2034 / PostgreSQL 40001 / 40P01 and
+  `TransactionWriteConflict` as retryable in the existing SERIALIZABLE retry
+  loop. No booking policy, schema, migration, tenant guard or production
+  runtime was changed. The suite is wired into
+  `.github/workflows/pr-validation.yml`; live CI evidence is recorded on the
+  draft PR and is not claimed here.
 
 ## Authoritative pricing and current-attention repair — 15 November 2026
 

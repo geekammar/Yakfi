@@ -381,19 +381,6 @@ async function main(): Promise<void> {
       const repository = new AppointmentRepository(
         createControlledDb(rendezvous),
       );
-      const observedCodes: string[] = [];
-      const originalCreate =
-        repository.createWithConflictCheck.bind(repository);
-      repository.createWithConflictCheck = async (dto) => {
-        try {
-          return await originalCreate(dto);
-        } catch (error) {
-          observedCodes.push(
-            `${(error as { code?: unknown }).code ?? "UNKNOWN"}:${(error as { name?: unknown }).name ?? "UNKNOWN"}`,
-          );
-          throw error;
-        }
-      };
       const deps = {
         ...defaultAppointmentCreateServiceDeps,
         appointmentRepository: repository,
@@ -431,7 +418,7 @@ async function main(): Promise<void> {
       check(
         "A. Concurrent identical-slot claims by two customers leave exactly one active booking",
         successes.length === 1 && conflicts.length === 1 && persisted === 1,
-        `successes=${successes.length}, conflicts=${conflicts.length}, persisted=${persisted}, results=${[first, second].map((result) => (result.success ? "SUCCESS" : result.code)).join(",")}, raw=${observedCodes.join(",")}`,
+        `successes=${successes.length}, conflicts=${conflicts.length}, persisted=${persisted}, results=${[first, second].map((result) => (result.success ? "SUCCESS" : result.code)).join(",")}`,
       );
     }
 
