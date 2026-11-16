@@ -38,6 +38,25 @@
   disposable PostgreSQL service and must never mutate the selected runtime database. Runtime migrations
   remain explicit, target-verified operator actions.
 
+### CI concurrency guarantees and limits
+
+- `pr-validation.yml` uses `pr-validate-<PR number or ref>` with
+  `cancel-in-progress: true`: a newer run supersedes an older run for the SAME
+  PR/ref. Different PRs and branches may run concurrently.
+- `production-release.yml` (`production-release`) and `test-db-migrate.yml`
+  (`test-db-migration-shared-singleton`) are serialized with
+  `cancel-in-progress: false`.
+- These are queue/cancellation guarantees, not a global lock: there is no
+  cross-workflow mutual exclusion, and cancelling a run does not roll back
+  commands it already executed. Every PR run uses its own disposable
+  PostgreSQL service; automatic PR checks never receive Production/Neon
+  runtime credentials.
+- Required evidence wiring: `check:copy-lab-db` and
+  `test:appointment-actions-db` run only after disposable DB preparation;
+  `test:copy-lab` and `check:turn-evidence` run in the offline validate job.
+  `check:turn-evidence` is offline and does not reconcile persisted
+  `usage_records`.
+
 ## Branch & PR Model (Mobile-First Developer Experience)
 
 FlowPilot uses a GitHub PR-based workflow. The VPS is for source/text

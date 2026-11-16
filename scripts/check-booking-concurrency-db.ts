@@ -323,6 +323,21 @@ async function main(): Promise<void> {
   }
   console.log(`🔒 Target database verified local: ${target.host}`);
 
+  const neonGuard = classifyTarget(
+    "postgresql://user:password@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb",
+  );
+  const loopbackGuard = classifyTarget(
+    "postgresql://postgres:password@localhost:5432/flowpilot_test",
+  );
+  check(
+    "0a. Database-test safety guard rejects runtime/Neon targets and accepts loopback",
+    neonGuard !== null &&
+      neonGuard.local === false &&
+      loopbackGuard !== null &&
+      loopbackGuard.local === true,
+    `neonLocal=${neonGuard?.local}, loopbackLocal=${loopbackGuard?.local}`,
+  );
+
   const businessA = await createBusinessFixture("منشأة التدقيق أ");
   const businessB = await createBusinessFixture("منشأة التدقيق ب");
   const serviceA = await createService(businessA.businessId, "استشارة أ");
@@ -706,6 +721,70 @@ async function main(): Promise<void> {
           activeSlot.code === "SLOT_CONFLICT" &&
           completedSlot.success === true,
         `canceled=${canceledSlot.success}, active=${!activeSlot.success ? activeSlot.code : "SUCCESS"}, completed=${completedSlot.success}`,
+      );
+
+      await db.appointment.create({
+        data: {
+          businessId: businessA.businessId,
+          branchId: businessA.branchId,
+          customerId: customerA1.id,
+          serviceId: serviceA.id,
+          providerId: providerA.id,
+          date: toDate(dateE),
+          startTime: toTime("12:00"),
+          endTime: toTime("12:30"),
+          status: "NO_SHOW",
+        },
+      });
+      const noShowAvailability = await getAvailability(
+        defaultAvailabilityServiceDeps,
+        actorA,
+        {
+          serviceId: serviceA.id,
+          providerId: providerA.id,
+          date: dateE,
+        },
+      );
+      const noShowSlotOffered =
+        noShowAvailability.success &&
+        noShowAvailability.data.slots.some(
+          (slot) => slot.startTime === "12:00",
+        );
+      const conflictBeforeNoShowBooking =
+        await appointmentRepository.hasConflict({
+          businessId: businessA.businessId,
+          date: dateE,
+          startTime: "12:00",
+          endTime: "12:30",
+          providerId: providerA.id,
+        });
+      const noShowSlot = await createAppointmentRecord(
+        defaultAppointmentCreateServiceDeps,
+        actorA,
+        {
+          customerId: customerA2.id,
+          serviceId: serviceA.id,
+          providerId: providerA.id,
+          date: dateE,
+          startTime: "12:00",
+          notes: "",
+        },
+      );
+      const conflictAfterNoShowBooking =
+        await appointmentRepository.hasConflict({
+          businessId: businessA.businessId,
+          date: dateE,
+          startTime: "12:00",
+          endTime: "12:30",
+          providerId: providerA.id,
+        });
+      check(
+        "E2. NO_SHOW is non-blocking for availability and conflict checks; a subsequent active booking blocks",
+        noShowSlotOffered === true &&
+          conflictBeforeNoShowBooking === false &&
+          noShowSlot.success === true &&
+          conflictAfterNoShowBooking === true,
+        `slotOffered=${noShowSlotOffered}, conflictBefore=${conflictBeforeNoShowBooking}, booked=${noShowSlot.success}, conflictAfter=${conflictAfterNoShowBooking}`,
       );
     }
 
