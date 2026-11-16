@@ -224,7 +224,6 @@ function toCost(value: number | string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-
 function toAttemptRows(record: DurableTurnEvidenceDto): AttemptRow[] {
   return record.attempts
     .slice()

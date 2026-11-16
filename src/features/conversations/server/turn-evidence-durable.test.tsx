@@ -1146,8 +1146,10 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
       phone: randomPhone("+2019"),
     });
     expect(
-      await findEvidence(fixture.businessId, noCallRun.result.customerMessageId)
-        .then((row) => row?.executionEvidence),
+      await findEvidence(
+        fixture.businessId,
+        noCallRun.result.customerMessageId,
+      ).then((row) => row?.executionEvidence),
     ).toBe("PROVEN_NO_CALL");
     const missingUsageRun = await runTurn(fixture, {
       aiResponse: SAFE_HANDOFF,
