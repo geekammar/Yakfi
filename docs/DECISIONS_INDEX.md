@@ -142,5 +142,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   (`f15deded`, `v0.79.10`); #107's runtime consolidation itself remains prepared,
   not executed. R6 historical attribution remains unproven. Decision #108 was
   merged through PR #84 (`b485bda`, `v0.79.11`) but its later live acceptance is
-  not claimed here. Decision #109 is a draft pricing/attention repair candidate
-  and is not merged or deployed.
+  not claimed here. Decision #109 merged through PR #85 (`e5ff129`, `v0.79.12`).
+  PR #86 merged booking concurrency/tenant-isolation evidence as `472e9aa` /
+  `v0.79.13`; the current evidence-completion branch is test/documentation work
+  and does not change a product decision.

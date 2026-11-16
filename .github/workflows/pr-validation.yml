@@ -132,6 +132,7 @@ jobs:
           pnpm check:cutover-readiness
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects
+          pnpm check:turn-evidence
           pnpm check:telegram-acceptance
           pnpm check:channel-neutral-choices
           pnpm check:readable-interaction-history
@@ -174,6 +175,7 @@ jobs:
           pnpm test:follow-up-scheduling
           pnpm check:qa-harness
           pnpm check:copy-lab
+          pnpm test:copy-lab
           pnpm check:welcome-intro-runtime
 
       - name: Deploy Prisma schema to test PostgreSQL
@@ -181,13 +183,15 @@ jobs:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         run: pnpm db:deploy
 
-      - name: Conversation Lab, Booking & Follow-up integration checks (real disposable DB)
+      - name: Conversation Lab, Appointment Actions, Booking & Follow-up integration checks (real disposable DB)
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/flowpilot_test
         run: |
+          pnpm check:copy-lab-db
           pnpm check:welcome-intro-db
           pnpm check:booking-acceptance-db
           pnpm check:booking-concurrency-db
+          pnpm test:appointment-actions-db
           pnpm check:iss-006-db
           pnpm check:customer-time-display-db
           pnpm check:stale-session-db

@@ -1,8 +1,64 @@
 # FlowPilot — Build State
 
-## Booking concurrency and tenant-isolation evidence — 16 November 2026
+## Acceptance evidence completion and CI wiring — 16 November 2026
 
-- Branch `test/booking-concurrency-tenant-isolation` (draft, unmerged) from
+- Verified baseline: current `main` / Production release `0.79.13`, merge
+  commit `472e9aa9571c15b3f091741012b06cbe0d66e576` (PR #86). No ref
+  difference was found before branching.
+- Candidate branch `test/acceptance-evidence-ci` was created from that exact
+  merge commit; package version is `0.79.14` (required by the version gate).
+  Draft PR, unmerged.
+- Added `test:appointment-actions-db`
+  (`src/features/appointments/actions/appointment-actions-isolation.test.tsx`).
+  It invokes the REAL exported `updateAppointmentStatus` (including
+  cancellation) and `rescheduleAppointment` against disposable PostgreSQL,
+  with two Business fixtures. Actor A cannot cancel or reschedule B's
+  appointment; the foreign row and its pending reminder remain byte-identical.
+  Same-business controls prove the actions still mutate successfully, so a
+  blanket-rejection regression cannot pass. The tests also exercise the
+  session-to-persisted-user/tenant boundary using REAL
+  `userRepository.findById` + database reads: a spoofed session tenant and a
+  client-supplied `businessId` are ignored, and a session without a persisted
+  user or a persisted user without a tenant is rejected.
+- Explicit boundary: the Next.js `requireUser()` module seam is controlled in
+  this harness. This is NOT a full browser/cookie Better Auth test; the
+  existing browser recovery journey remains the cookie-backed verification.
+  Repository mutations and PostgreSQL writes are real, not canned failures.
+- Extended `check:booking-concurrency-db` with NO_SHOW policy evidence derived
+  from the current code contract: only `PENDING`/`CONFIRMED` block availability
+  and conflict checks. The suite verifies NO_SHOW releases the slot for
+  availability, `hasConflict` is false before a new active booking and true
+  afterwards. No booking policy was changed; no policy self-contradiction was
+  found in this scope.
+- Required-CI wiring: `check:copy-lab-db` and
+  `test:appointment-actions-db` run only in the disposable-PostgreSQL step
+  after `db:deploy`; `test:copy-lab` and `check:turn-evidence` run in the
+  offline validate job. The existing `check:copy-lab` remains wired.
+- Database safety: the DB-backed checks refuse remote targets (including Neon
+  runtime hosts) and accept only loopback. CI supplies the job-local
+  `postgres:16` service only; no Production/test-runtime credentials are
+  supplied to automatic PR tests.
+- CI concurrency guarantees and limits: `pr-validation.yml` groups runs by PR
+  number (or ref) with `cancel-in-progress: true`, so a newer run supersedes an
+  older run for the same PR/ref. `production-release.yml` is serialized
+  (`cancel-in-progress: false`), and `test-db-migrate.yml` uses a shared
+  singleton group with cancellation disabled. Limits: different PRs/branches
+  may run concurrently; there is no cross-workflow lock; cancellation is not a
+  transactional rollback of already-observed commands; each PR run gets its own
+  disposable database, and Preview remains optional.
+- Explicit non-claims: `check:turn-evidence` is offline/in-memory and does not
+  read or reconcile persisted `usage_records`, and it does not prove complete
+  cost accounting or a global spend cap. Persisted usage/cost reconciliation
+  and real-device mobile acceptance remain open. Playwright mobile viewports
+  are automated evidence, not operator mobile acceptance.
+- Verification: final-HEAD CI results are recorded on the draft PR; this ledger
+  does not claim a pass before that run completes.
+
+## Booking concurrency and tenant-isolation evidence (PR #86, merged) — 16 November 2026
+
+- Merged to `main` via PR #86 at
+  `472e9aa9571c15b3f091741012b06cbe0d66e576`; package/tag `0.79.13`.
+- Original branch `test/booking-concurrency-tenant-isolation` was based on
   `main` `e5ff129` / `v0.79.12`; package version `v0.79.13`.
 - Added `scripts/check-booking-concurrency-db.ts`
   (`pnpm check:booking-concurrency-db`) against the existing disposable
@@ -23,8 +79,8 @@
   `TransactionWriteConflict` as retryable in the existing SERIALIZABLE retry
   loop. No booking policy, schema, migration, tenant guard or production
   runtime was changed. The suite is wired into
-  `.github/workflows/pr-validation.yml`; live CI evidence is recorded on the
-  draft PR and is not claimed here.
+  `.github/workflows/pr-validation.yml`. CI run `43863159151` passed both
+  required jobs on HEAD `c45492b`; PR #86 then merged as `472e9aa` / `0.79.13`.
 
 ## Authoritative pricing and current-attention repair — 15 November 2026
 

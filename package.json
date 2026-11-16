@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.13",
+  "version": "0.79.14",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -211,6 +211,7 @@
     "test:reschedule-panel": "vitest run --config vitest.config.ts src/features/appointments/components/reschedule-panel.test.tsx",
     "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:appointment-duration": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-duration.test.tsx",
+    "test:appointment-actions-db": "vitest run --config vitest.config.ts src/features/appointments/actions/appointment-actions-isolation.test.tsx",
     "test:login-form": "vitest run --config vitest.config.ts src/features/auth/components/login-form.test.tsx",
     "test:sign-in-page": "vitest run --config vitest.config.ts 'src/app/(auth)/sign-in/page.test.tsx'",
     "test:follow-up-scheduling": "vitest run --config vitest.config.ts src/features/appointments/components/follow-up-scheduling.test.tsx",

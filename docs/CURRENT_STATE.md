@@ -1,15 +1,48 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 15 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0A is the current
-> pricing/attention repair candidate; Section 0 retains the live-refresh
-> candidate and accepted baseline. Preserved evidence follows: historical
+> **Tier 0 orientation snapshot — as of 16 November 2026.** Read with
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 is the current
+> release/evidence baseline; 0A/0B retain the prior pricing/attention and
+> live-refresh candidate history. Preserved evidence follows: historical
 > `main` context, the integration/R5 record, the original R6 failure, and the
 > Y83 delivery failure. This file is not a substitute for code, the canonical
 > topic docs or `docs/BUILD_STATE.md`. No live deployment, provider probe,
 > migration, webhook move or paid call was performed for this snapshot.
 
-## 0A. Authoritative pricing and current-attention repair candidate — 15 November 2026
+## 0. Current release and acceptance evidence — 16 November 2026
+
+- **Current `main` / Production baseline:** `0.79.13`, merge commit
+  `472e9aa9571c15b3f091741012b06cbe0d66e576` (PR #86). Refs were verified
+  before branching; no difference was found.
+- **PR #86 is merged.** Its final CI run `43863159151` passed both required
+  jobs (`PR Quality Gates & Regression Suite`, `Automated Browser UX QA`) on
+  HEAD `c45492b`; the merge produced `472e9aa` / tag `v0.79.13`.
+- **Current candidate:** branch `test/acceptance-evidence-ci`, package
+  `0.79.14`, draft PR from the exact main merge commit. Scope is evidence
+  completion only: real-action appointment tenant isolation, NO_SHOW policy
+  coverage, and required-CI wiring for the existing Copy Lab/turn-evidence
+  checks. No booking policy, schema, migration or runtime change is included.
+- **Real-DB versus controlled boundary:** the new appointment-action test uses
+  REAL exported actions, repositories and PostgreSQL writes for two
+  businesses. Only the Next.js `requireUser()` module seam is controlled; the
+  session→persisted-user→tenant resolution still uses the REAL database user
+  lookup. This is not claimed as full browser/cookie Better Auth coverage.
+- **CI wiring and concurrency:** `check:copy-lab-db` and
+  `test:appointment-actions-db` run only after disposable PostgreSQL
+  preparation; `test:copy-lab` and `check:turn-evidence` run in the offline
+  validate job. `pr-validation.yml` cancels superseded runs per PR/ref;
+  `production-release.yml` and `test-db-migrate.yml` are serialized with
+  cancellation disabled. Limits: different PRs/branches may run concurrently,
+  there is no cross-workflow lock, and cancellation is not a transactional
+  rollback. Automatic PR tests use only the job-local database, never
+  Production/Neon runtime credentials.
+- **Still open:** real-device/operator mobile acceptance, and persisted
+  usage/cost reconciliation. `check:turn-evidence` is offline/in-memory; it
+  does not prove reconciliation against stored `usage_records`, complete cost
+  accounting, or a global spend cap. Playwright mobile viewports are automated
+  evidence, not operator mobile acceptance.
+
+## 0A. Historical pricing/attention repair candidate — 15 November 2026
 
 - **Production evidence:** runtime `0.79.11` / commit
   `b485bda15fbd1a2244a55d96f7b0b91374b71142`, conversation
@@ -38,7 +71,7 @@
   environment were changed. Historical R5/R6/Y83 and 0.79.10 acceptance remain
   preserved. Live YPRICE re-acceptance is still required.
 
-## 0. Current release and live-refresh defect — 15 November 2026
+## 0B. Prior live-refresh candidate and accepted baseline — 15 November 2026
 
 - **Current `main` / Production acceptance baseline:** `f15deded0b2295b9c5fc016aa77486d71e40dab3`
   (merge of PR #83), package version `v0.79.10`.
@@ -84,7 +117,8 @@
 
 - Historical baseline at this snapshot: `49d58c52f11e6600d783206cd423c6a7861eb907`
   — merge of PR #81, package version `v0.79.8` (14 November 2026). Superseded
-  by the accepted `f15deded` / `v0.79.10` baseline in §0; retained as history.
+  by the accepted `f15deded` / `v0.79.10` baseline in §0B; retained as
+  history.
 - Main includes the truthful unknown-information reply and handoff-consistency
   repair (ISS-012 / TG-22), PR #81's compact Tier 0 rules and test-reliability
   repairs, the Telegram customer/manager-bot foundation, the single

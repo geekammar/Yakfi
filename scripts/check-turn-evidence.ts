@@ -150,7 +150,17 @@ async function main(): Promise<void> {
      * (PROMPT-AI-PERF-02 — token-observability coverage.)
      */
     aiTelemetry?: AiTelemetry | null;
+    /**
+     * CORE-03B2A: production defaults free-form turns to `structured_turn`.
+     * An explicit `null` exercises the still-supported legacy deterministic
+     * bypass path (used below only for the zero-call evidence cases).
+     */
+    requiredSemanticCapability?: "structured_turn" | null;
   }) {
+    const requiredSemanticCapability =
+      opts.requiredSemanticCapability === undefined
+        ? "structured_turn"
+        : opts.requiredSemanticCapability;
     const business = businessRow({
       address: opts.address ?? null,
       about: opts.about ?? null,
@@ -374,6 +384,7 @@ async function main(): Promise<void> {
           return { provider: "fake-transport", delivered: true };
         },
       },
+      requiredSemanticCapability,
     };
 
     return {
@@ -399,13 +410,22 @@ async function main(): Promise<void> {
     });
   }
 
-  const aiReply = (content: string, intent = "FAQ") => ({
+  const aiReply = (
+    content: string,
+    intent = "FAQ",
+    requiredKnowledge?: string,
+  ) => ({
     intent,
     action: "reply",
     content,
     extraction: emptyExtraction,
     handoffReason: null,
     summary: null,
+    // CORE-03D2: a structured generative turn must carry a valid assessment.
+    safetyAssessment: "safe" as const,
+    // B-03/ISS-012: a positive knowledge reply declares the exact family the
+    // server must resolve before the answer can be disclosed.
+    ...(requiredKnowledge ? { requiredKnowledge } : {}),
   });
   const aiNoKnowledge = (content: string, intent = "FAQ") => ({
     intent,
@@ -414,6 +434,7 @@ async function main(): Promise<void> {
     extraction: emptyExtraction,
     handoffReason: "NO_KNOWLEDGE",
     summary: null,
+    safetyAssessment: "safe" as const,
   });
 
   // ── 1. Service catalog PRESENT → disclosure ALLOWS the answer path ───────
@@ -421,7 +442,27 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
+    // CORE-04A: physical attempts are only truthful when the adapter reports
+    // them. This healthy one-call adapter reports exactly one wire attempt.
+    aiTelemetry: {
+      attempts: [
+        {
+          provider: "fake-ai",
+          model: "fake-1",
+          latencyMs: 10,
+          httpAttempts: 1,
+          status: "SUCCESS",
+        },
+      ],
+      fallbackUsed: false,
+      finalProvider: "fake-ai",
+      finalModel: "fake-1",
+      finalStatus: "SUCCESS",
+      totalHttpAttempts: 1,
+    },
   });
   const cat = await run(catHarness, {
     text: "ما الخدمات المتاحة؟",
@@ -477,7 +518,7 @@ async function main(): Promise<void> {
     address: PILOT_ADDRESS,
     about: PILOT_ABOUT,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
   });
   const loc = await run(locHarness, {
     text: "أين موقعكم؟",
@@ -564,6 +605,23 @@ async function main(): Promise<void> {
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
     aiFails: true,
+    aiTelemetry: {
+      attempts: [
+        {
+          provider: "fake-ai",
+          model: "fake-1",
+          latencyMs: 120,
+          httpAttempts: 1,
+          status: "FAILURE",
+          errorCode: "PERMANENT",
+        },
+      ],
+      fallbackUsed: false,
+      finalProvider: "fake-ai",
+      finalModel: "fake-1",
+      finalStatus: "FAILURE",
+      totalHttpAttempts: 1,
+    },
   });
   const fail = await run(failHarness, {
     text: "أين موقعكم؟",
@@ -595,7 +653,7 @@ async function main(): Promise<void> {
   const throwHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
     sink: "throw",
   });
   const throwResult = await run(throwHarness, {
@@ -605,7 +663,7 @@ async function main(): Promise<void> {
   const okHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
   });
   const okResult = await run(okHarness, {
     text: "أين موقعكم؟",
@@ -650,7 +708,14 @@ async function main(): Promise<void> {
   );
 
   // ── 8b. A zero-call deterministic turn is observable as such ─────────────
-  const greetHarness = buildHarness({ services: PILOT_SERVICES });
+  // Production free-form turns default to structured (generative) handling;
+  // natural greetings are therefore model-handled on that path. The explicit
+  // `capability = null` below exercises the still-supported LEGACY
+  // deterministic bypass so the zero-call evidence projection stays covered.
+  const greetHarness = buildHarness({
+    services: PILOT_SERVICES,
+    requiredSemanticCapability: null,
+  });
   const greet = await run(greetHarness, {
     text: "السلام عليكم",
     externalId: "greet-1",
@@ -692,7 +757,7 @@ async function main(): Promise<void> {
   // ── 10. Fail-open sink + kill switch ─────────────────────────────────────
   const disabledHarness = buildHarness({
     address: PILOT_ADDRESS,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
     sink: "disabled",
   });
   const disabled = await run(disabledHarness, {
@@ -793,7 +858,7 @@ async function main(): Promise<void> {
     address: PILOT_ADDRESS,
     about: PILOT_ABOUT,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
   });
   const liveLocResult = await run(liveLoc, {
     text: "أين موقعكم؟",
@@ -805,6 +870,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
   });
   const liveCatResult = await run(liveCat, {
@@ -901,6 +968,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
     aiTelemetry: TELEMETRY_WITH_TOKENS,
   });
@@ -915,6 +984,8 @@ async function main(): Promise<void> {
     services: PILOT_SERVICES,
     aiResponse: aiReply(
       "نقدم: استشارة أسنان، كشف جراحة، حشو عصب، وجلسة تجميلية.",
+      "FAQ",
+      "service.name",
     ),
   });
   const plainResult = await run(plainHarness, {
@@ -990,6 +1061,7 @@ async function main(): Promise<void> {
         provider: "fake-primary",
         model: "fake-1",
         latencyMs: 90,
+        httpAttempts: 1,
         status: "FAILURE",
         errorCode: "RETRYABLE",
       },
@@ -997,6 +1069,7 @@ async function main(): Promise<void> {
         provider: "fake-secondary",
         model: "fake-2",
         latencyMs: 350,
+        httpAttempts: 1,
         inputTokens: TOKEN_IN,
         outputTokens: TOKEN_OUT,
         status: "SUCCESS",
@@ -1006,11 +1079,12 @@ async function main(): Promise<void> {
     finalProvider: "fake-secondary",
     finalModel: "fake-2",
     finalStatus: "SUCCESS",
+    totalHttpAttempts: 2,
   };
   const fallbackHarness = buildHarness({
     address: PILOT_ADDRESS,
     services: PILOT_SERVICES,
-    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`),
+    aiResponse: aiReply(`نحن في ${PILOT_ADDRESS}.`, "FAQ", "business.address"),
     aiTelemetry: FALLBACK_TELEMETRY,
   });
   await run(fallbackHarness, {
@@ -1024,10 +1098,13 @@ async function main(): Promise<void> {
       fallbackHarness.emitted()[0]?.outputTokens === TOKEN_OUT,
   );
 
-  // 13B. DETERMINISTIC ZERO-CALL PATH — no provider call, no fabricated tokens.
+  // 13B. LEGACY DETERMINISTIC ZERO-CALL PATH — no provider call, no
+  // fabricated tokens. `capability = null` explicitly selects the supported
+  // legacy bypass; structured production greetings are generative.
   const greetTokenHarness = buildHarness({
     services: PILOT_SERVICES,
     aiTelemetry: TELEMETRY_WITH_TOKENS,
+    requiredSemanticCapability: null,
   });
   const greetToken = await run(greetTokenHarness, {
     text: "السلام عليكم",
