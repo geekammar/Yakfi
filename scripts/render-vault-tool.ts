@@ -68,6 +68,18 @@ const LEGACY_INACTIVE_DB_HOSTS = new Set([
   "ep-tiny-grass-a5e63jev-pooler.us-east-2.aws.neon.tech",
 ]);
 
+export type OwnerRecoveryKeypair = {
+  recipient: string;
+  privateKey: string;
+};
+
+export type EncryptedBundleMetadata = {
+  workspaceId: string;
+  serviceId: string;
+  commitSha: string;
+  keyNames: AllowlistedKey[];
+};
+
 export type EncryptedSecretBundle = {
   schema: typeof BUNDLE_SCHEMA;
   createdAt: string;
@@ -77,12 +89,7 @@ export type EncryptedSecretBundle = {
   salt: string;
   authTag: string;
   ciphertext: string;
-  metadata: {
-    workspaceId: string;
-    serviceId: string;
-    commitSha: string;
-    keyNames: AllowlistedKey[];
-  };
+  metadata: EncryptedBundleMetadata;
 };
 
 export type SafeTransferSummary = {
@@ -98,10 +105,145 @@ export type SafeTransferSummary = {
   encryptedBundleWritten?: boolean;
 };
 
-export function generateOwnerRecoveryKeypair(): {
-  recipient: string;
-  privateKey: string;
-} {
+export type BundleVerificationSuccess = {
+  ok: true;
+  workspaceId: string;
+  serviceId: string;
+  commitSha: string;
+  verifiedKeys: AllowlistedKey[];
+};
+
+export type BundleVerificationFailure = {
+  ok: false;
+  code: string;
+};
+
+export type BundleVerificationResult =
+  | BundleVerificationSuccess
+  | BundleVerificationFailure;
+
+export type VerifiedRenderService = {
+  ok: true;
+  serviceId: string;
+  serviceName: string;
+  workspaceId: string;
+  region: string;
+};
+
+export type TransferRenderResult = {
+  summary: SafeTransferSummary;
+  encryptedBundle: EncryptedSecretBundle;
+};
+
+export type DbHostClassification =
+  | "ACTIVE_NEON_TEST_DB"
+  | "LEGACY_INACTIVE_PROD_DB"
+  | "OTHER_HOST"
+  | "MISSING_OR_INVALID";
+
+export type VercelEnvKeyMeta = {
+  key: string;
+  type: string;
+};
+
+export type VercelProductionMetaSummary = {
+  totalProductionCount: number;
+  sensitiveCount: number;
+  nonSensitiveCount: number;
+  keys: VercelEnvKeyMeta[];
+};
+
+export type RenderServiceSummary = {
+  serviceId: string;
+  workspaceId: string;
+  region: string;
+};
+
+export type SourceInspectionReport = {
+  testDbClassification: DbHostClassification;
+  prodDbClassification: DbHostClassification;
+  masterKeyFormatValid: boolean;
+  vercelProductionMetadata?: VercelProductionMetaSummary;
+  renderServiceVerified?: RenderServiceSummary;
+};
+
+export type BacklogPolicy = "require_zero" | "allow_inspected_replay";
+export type BacklogDispositionPolicy = BacklogPolicy;
+
+export type RenderCutoverReady = {
+  ok: true;
+  origin: string;
+  commitSha: string;
+  version: string;
+  pendingUpdateCount: number;
+  dropPendingUpdates: false;
+};
+
+export type RenderCutoverBlocked = {
+  ok: false;
+  code: string;
+  pendingUpdateCount?: number;
+};
+
+export type RenderCutoverOutcome = RenderCutoverReady | RenderCutoverBlocked;
+
+type DecryptedEnvelopeShape = {
+  values?: Record<string, unknown>;
+};
+
+type RenderServiceDetailsPayload = {
+  region?: unknown;
+};
+
+type RenderServicePayload = {
+  id?: unknown;
+  name?: unknown;
+  ownerId?: unknown;
+  type?: unknown;
+  serviceDetails?: RenderServiceDetailsPayload;
+};
+
+type RenderServiceEnvelope = RenderServicePayload & {
+  service?: RenderServicePayload;
+};
+
+type VercelEnvRecordPayload = {
+  key?: unknown;
+  type?: unknown;
+  target?: unknown;
+};
+
+type VercelEnvListPayload = {
+  envs?: VercelEnvRecordPayload[];
+};
+
+type CutoverReadinessPayload = {
+  ok?: unknown;
+  commitSha?: unknown;
+  version?: unknown;
+  databaseHost?: unknown;
+  databaseName?: unknown;
+  businessId?: unknown;
+  connectionId?: unknown;
+  botExternalId?: unknown;
+  botUsername?: unknown;
+  credentialResolved?: unknown;
+};
+
+type OwnerKeyfilePayload = {
+  privateKey?: string;
+};
+
+type FetchDeps = {
+  fetchImpl?: typeof fetch;
+};
+
+type CutoverDeps = {
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+};
+
+export function generateOwnerRecoveryKeypair(): OwnerRecoveryKeypair {
   const { publicKey, privateKey } = generateKeyPairSync("x25519");
   const spki = publicKey.export({ format: "der", type: "spki" });
   const pkcs8 = privateKey.export({ format: "der", type: "pkcs8" });
@@ -204,17 +346,15 @@ function buildBundleAad(params: {
   commitSha: string;
   keyNames: AllowlistedKey[];
 }): Buffer {
-  return Buffer.from(
-    JSON.stringify({
-      schema: BUNDLE_SCHEMA,
-      recipient: params.recipient,
-      workspaceId: params.workspaceId,
-      serviceId: params.serviceId,
-      commitSha: params.commitSha,
-      keyNames: params.keyNames,
-    }),
-    "utf8",
-  );
+  const aadJson = JSON.stringify({
+    schema: BUNDLE_SCHEMA,
+    recipient: params.recipient,
+    workspaceId: params.workspaceId,
+    serviceId: params.serviceId,
+    commitSha: params.commitSha,
+    keyNames: params.keyNames,
+  });
+  return Buffer.from(aadJson, "utf8");
 }
 
 export function encryptAllowlistedSecretsForOwner(params: {
@@ -268,13 +408,10 @@ export function encryptAllowlistedSecretsForOwner(params: {
   });
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const derivedKey = Buffer.from(
-    hkdfSync("sha256", shared, salt, HKDF_INFO, 32),
-  );
-  const plaintextBuf = Buffer.from(
-    JSON.stringify({ values: payloadMap }),
-    "utf8",
-  );
+  const hkdfOut = hkdfSync("sha256", shared, salt, HKDF_INFO, 32);
+  const derivedKey = Buffer.from(hkdfOut);
+  const payloadJson = JSON.stringify({ values: payloadMap });
+  const plaintextBuf = Buffer.from(payloadJson, "utf8");
 
   const aad = buildBundleAad({
     recipient: normalizedRecipient,
@@ -314,16 +451,6 @@ export function encryptAllowlistedSecretsForOwner(params: {
     plaintextBuf.fill(0);
   }
 }
-
-export type BundleVerificationResult =
-  | {
-      ok: true;
-      workspaceId: string;
-      serviceId: string;
-      commitSha: string;
-      verifiedKeys: AllowlistedKey[];
-    }
-  | { ok: false; code: string };
 
 function decryptBundleToMap(
   bundle: EncryptedSecretBundle,
@@ -373,9 +500,8 @@ function decryptBundleToMap(
   const iv = Buffer.from(bundle.iv, "base64url");
   const authTag = Buffer.from(bundle.authTag, "base64url");
   const ciphertext = Buffer.from(bundle.ciphertext, "base64url");
-  const derivedKey = Buffer.from(
-    hkdfSync("sha256", shared, salt, HKDF_INFO, 32),
-  );
+  const hkdfOut = hkdfSync("sha256", shared, salt, HKDF_INFO, 32);
+  const derivedKey = Buffer.from(hkdfOut);
 
   const aad = buildBundleAad({
     recipient: bundle.recipient,
@@ -391,9 +517,8 @@ function decryptBundleToMap(
     decipher.setAAD(aad);
     decipher.setAuthTag(authTag);
     decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const parsed = JSON.parse(decrypted.toString("utf8")) as {
-      values?: Record<string, unknown>;
-    };
+    const utf8 = decrypted.toString("utf8");
+    const parsed = JSON.parse(utf8) as DecryptedEnvelopeShape;
     if (!parsed.values || typeof parsed.values !== "object") {
       throw new Error("MALFORMED_DECRYPTED_PAYLOAD");
     }
@@ -453,14 +578,8 @@ export async function verifyRenderServiceOwnership(
     expectedWorkspaceId?: string;
     expectedRegion?: string;
   },
-  deps: { fetchImpl?: typeof fetch } = {},
-): Promise<{
-  ok: true;
-  serviceId: string;
-  serviceName: string;
-  workspaceId: string;
-  region: string;
-}> {
+  deps: FetchDeps = {},
+): Promise<VerifiedRenderService> {
   const serviceId = params.serviceId.trim();
   if (!RENDER_SERVICE_ID_RE.test(serviceId)) {
     throw new Error("INVALID_RENDER_SERVICE_ID");
@@ -494,20 +613,7 @@ export async function verifyRenderServiceOwnership(
     throw new Error(`RENDER_SERVICE_LOOKUP_FAILED_${response.status}`);
   }
 
-  const raw = (await response.json()) as {
-    service?: {
-      id?: unknown;
-      name?: unknown;
-      ownerId?: unknown;
-      type?: unknown;
-      serviceDetails?: { region?: unknown };
-    };
-    id?: unknown;
-    name?: unknown;
-    ownerId?: unknown;
-    type?: unknown;
-    serviceDetails?: { region?: unknown };
-  };
+  const raw = (await response.json()) as RenderServiceEnvelope;
   const svc = raw.service ?? raw;
   if (svc.id !== serviceId) {
     throw new Error("RENDER_SERVICE_ID_MISMATCH");
@@ -546,11 +652,8 @@ export async function transferAllowlistedSecretsToRender(
     sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
     dryRun: boolean;
   },
-  deps: { fetchImpl?: typeof fetch } = {},
-): Promise<{
-  summary: SafeTransferSummary;
-  encryptedBundle: EncryptedSecretBundle;
-}> {
+  deps: FetchDeps = {},
+): Promise<TransferRenderResult> {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
   const actualSha = params.actualCommitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(expectedSha) || expectedSha !== actualSha) {
@@ -600,7 +703,8 @@ export async function transferAllowlistedSecretsToRender(
   for (const key of sortedKeys) {
     const val = validateAllowlistedValue(key, params.sourceValues[key]);
     const encodedKey = encodeURIComponent(key);
-    const putUrl = `https://api.render.com/v1/services/${encodedSvc}/env-vars/${encodedKey}`;
+    const svcBase = `https://api.render.com/v1/services/${encodedSvc}`;
+    const putUrl = `${svcBase}/env-vars/${encodedKey}`;
     const res = await fetchImpl(putUrl, {
       method: "PUT",
       headers: {
@@ -646,34 +750,7 @@ export async function transferAllowlistedSecretsToRender(
   };
 }
 
-export type SourceInspectionReport = {
-  testDbClassification:
-    | "ACTIVE_NEON_TEST_DB"
-    | "LEGACY_INACTIVE_PROD_DB"
-    | "OTHER_HOST"
-    | "MISSING_OR_INVALID";
-  prodDbClassification:
-    | "ACTIVE_NEON_TEST_DB"
-    | "LEGACY_INACTIVE_PROD_DB"
-    | "OTHER_HOST"
-    | "MISSING_OR_INVALID";
-  masterKeyFormatValid: boolean;
-  vercelProductionMetadata?: {
-    totalProductionCount: number;
-    sensitiveCount: number;
-    nonSensitiveCount: number;
-    keys: Array<{ key: string; type: string }>;
-  };
-  renderServiceVerified?: {
-    serviceId: string;
-    workspaceId: string;
-    region: string;
-  };
-};
-
-function classifyDbHostSafe(
-  rawUrl: string | undefined,
-): SourceInspectionReport["testDbClassification"] {
+function classifyDbHostSafe(rawUrl: string | undefined): DbHostClassification {
   if (!rawUrl || !rawUrl.trim()) return "MISSING_OR_INVALID";
   try {
     const parsed = new URL(rawUrl.trim());
@@ -698,7 +775,7 @@ export async function inspectRecoverySources(
     renderApiKey?: string;
     renderServiceId?: string;
   },
-  deps: { fetchImpl?: typeof fetch } = {},
+  deps: FetchDeps = {},
 ): Promise<SourceInspectionReport> {
   const resolvedKey = resolveMasterKey(params.credentialMasterKey?.trim());
   const masterKeyFormatValid = resolvedKey.ok;
@@ -715,7 +792,9 @@ export async function inspectRecoverySources(
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
 
   if (params.vercelAccessCred?.trim()) {
-    const vercelUrl = `https://api.vercel.com/v10/projects/${CONFIRMED_VERCEL_PROJECT_ID}/env?decrypt=false`;
+    const vBase = "https://api.vercel.com/v10/projects";
+    const vProj = CONFIRMED_VERCEL_PROJECT_ID;
+    const vercelUrl = `${vBase}/${vProj}/env?decrypt=false`;
     const res = await fetchImpl(vercelUrl, {
       method: "GET",
       headers: { Authorization: `Bearer ${params.vercelAccessCred.trim()}` },
@@ -723,9 +802,7 @@ export async function inspectRecoverySources(
       signal: AbortSignal.timeout(15_000),
     });
     if (res.ok) {
-      const data = (await res.json()) as {
-        envs?: Array<{ key?: unknown; type?: unknown; target?: unknown }>;
-      };
+      const data = (await res.json()) as VercelEnvListPayload;
       if (Array.isArray(data.envs)) {
         const prodEnvs = data.envs.filter((item) => {
           const targets: unknown[] = [];
@@ -774,10 +851,6 @@ export async function inspectRecoverySources(
   return report;
 }
 
-export type BacklogDispositionPolicy =
-  | "require_zero"
-  | "allow_inspected_replay";
-
 export async function verifyRenderCutoverReadinessAndBacklog(
   params: {
     renderOrigin: string;
@@ -788,18 +861,8 @@ export async function verifyRenderCutoverReadinessAndBacklog(
     pendingUpdateCount: number;
     backlogPolicy?: BacklogDispositionPolicy;
   },
-  deps: { fetchImpl?: typeof fetch; now?: () => number } = {},
-): Promise<
-  | {
-      ok: true;
-      origin: string;
-      commitSha: string;
-      version: string;
-      pendingUpdateCount: number;
-      dropPendingUpdates: false;
-    }
-  | { ok: false; code: string; pendingUpdateCount?: number }
-> {
+  deps: CutoverDeps = {},
+): Promise<RenderCutoverOutcome> {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(expectedSha)) {
     return { ok: false, code: "INVALID_EXPECTED_COMMIT_SHA" };
@@ -872,18 +935,7 @@ export async function verifyRenderCutoverReadinessAndBacklog(
     return { ok: false, code: "RENDER_CUTOVER_READINESS_UNAVAILABLE" };
   }
 
-  const body = (await res.json()) as {
-    ok?: unknown;
-    commitSha?: unknown;
-    version?: unknown;
-    databaseHost?: unknown;
-    databaseName?: unknown;
-    businessId?: unknown;
-    connectionId?: unknown;
-    botExternalId?: unknown;
-    botUsername?: unknown;
-    credentialResolved?: unknown;
-  };
+  const body = (await res.json()) as CutoverReadinessPayload;
 
   if (body.ok !== true || body.credentialResolved !== true) {
     return { ok: false, code: "RENDER_RUNTIME_CREDENTIAL_UNRESOLVED" };
@@ -971,7 +1023,7 @@ async function runCli(): Promise<void> {
     const rawBundle = readFileSync(bundlePath, "utf8");
     const bundle = JSON.parse(rawBundle) as EncryptedSecretBundle;
     const rawKeyFile = readFileSync(keyFilePath, "utf8");
-    const keyData = JSON.parse(rawKeyFile) as { privateKey?: string };
+    const keyData = JSON.parse(rawKeyFile) as OwnerKeyfilePayload;
     const result = verifyOwnerEncryptedBundle({
       bundle,
       privateKey: keyData.privateKey ?? "",
@@ -997,15 +1049,14 @@ async function runCli(): Promise<void> {
       renderApiKey: process.env.RENDER_API_KEY_SOURCE,
       renderServiceId: process.env.RENDER_SERVICE_ID,
     });
-    const keyFormatLabel = report.masterKeyFormatValid
-      ? "VALID"
-      : "MISSING_OR_INVALID";
+    const isKeyValid = report.masterKeyFormatValid;
+    const keyFormatLabel = isKeyValid ? "VALID" : "MISSING_OR_INVALID";
+    const testDbClass = report.testDbClassification;
+    const prodDbClass = report.prodDbClassification;
     writeSummaryLine("### Safe Recovery Source Inspection (Values-Free)");
+    writeSummaryLine(`- **TEST_DATABASE_URL target**: \`${testDbClass}\``);
     writeSummaryLine(
-      `- **TEST_DATABASE_URL target**: \`${report.testDbClassification}\``,
-    );
-    writeSummaryLine(
-      `- **PRODUCTION_DATABASE_URL target**: \`${report.prodDbClassification}\``,
+      `- **PRODUCTION_DATABASE_URL target**: \`${prodDbClass}\``,
     );
     writeSummaryLine(
       `- **CREDENTIAL_MASTER_KEY 32-byte format**: \`${keyFormatLabel}\``,
@@ -1013,7 +1064,11 @@ async function runCli(): Promise<void> {
     if (report.vercelProductionMetadata) {
       const v = report.vercelProductionMetadata;
       writeSummaryLine(
-        `- **Vercel Production Env Metadata**: total=\`${v.totalProductionCount}\`, sensitive=\`${v.sensitiveCount}\`, nonSensitive=\`${v.nonSensitiveCount}\``,
+        `- **Vercel Production Total**: \`${v.totalProductionCount}\``,
+      );
+      writeSummaryLine(`- **Vercel Sensitive**: \`${v.sensitiveCount}\``);
+      writeSummaryLine(
+        `- **Vercel Non-Sensitive**: \`${v.nonSensitiveCount}\``,
       );
       for (const item of v.keys) {
         writeSummaryLine(`  - \`${item.key}\` (\`${item.type}\`)`);
@@ -1021,9 +1076,9 @@ async function runCli(): Promise<void> {
     }
     if (report.renderServiceVerified) {
       const r = report.renderServiceVerified;
-      writeSummaryLine(
-        `- **Render Target Verified**: service=\`${r.serviceId}\`, workspace=\`${r.workspaceId}\`, region=\`${r.region}\``,
-      );
+      writeSummaryLine(`- **Render Service**: \`${r.serviceId}\``);
+      writeSummaryLine(`- **Render Workspace**: \`${r.workspaceId}\``);
+      writeSummaryLine(`- **Render Region**: \`${r.region}\``);
     }
     return;
   }
@@ -1055,9 +1110,8 @@ async function runCli(): Promise<void> {
     writeFileSync(bundleOut, outJson, { mode: 0o600 });
     const joinedAllowlist = bundle.metadata.keyNames.join(", ");
     writeSummaryLine("### Encrypted Owner Bundle Created (Zero Plaintext)");
-    writeSummaryLine(
-      `- **Workspace**: \`${bundle.metadata.workspaceId}\` | **Service**: \`${bundle.metadata.serviceId}\``,
-    );
+    writeSummaryLine(`- **Workspace**: \`${bundle.metadata.workspaceId}\``);
+    writeSummaryLine(`- **Service**: \`${bundle.metadata.serviceId}\``);
     writeSummaryLine(`- **Allowlisted Keys**: \`${joinedAllowlist}\``);
     writeSummaryLine(`- **Commit SHA**: \`${bundle.metadata.commitSha}\``);
     return;
