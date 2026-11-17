@@ -795,10 +795,7 @@ export async function verifyRenderCutoverReadinessAndBacklog(
     pendingUpdateCount: number;
     backlogPolicy?: BacklogDispositionPolicy;
   },
-  deps: {
-    fetchImpl?: typeof fetch;
-    now?: () => number;
-  } = {},
+  deps: { fetchImpl?: typeof fetch; now?: () => number } = {},
 ): Promise<
   | {
       ok: true;
@@ -985,9 +982,7 @@ async function runCli(): Promise<void> {
     const rawBundle = readFileSync(bundlePath, "utf8");
     const bundle = JSON.parse(rawBundle) as EncryptedSecretBundle;
     const rawKeyFile = readFileSync(keyFilePath, "utf8");
-    const keyData = JSON.parse(rawKeyFile) as {
-      privateKey?: string;
-    };
+    const keyData = JSON.parse(rawKeyFile) as { privateKey?: string };
     const result = verifyOwnerEncryptedBundle({
       bundle,
       privateKey: keyData.privateKey ?? "",
