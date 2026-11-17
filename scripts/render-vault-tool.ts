@@ -323,10 +323,7 @@ export type BundleVerificationResult =
       commitSha: string;
       verifiedKeys: AllowlistedKey[];
     }
-  | {
-      ok: false;
-      code: string;
-    };
+  | { ok: false; code: string };
 
 function decryptBundleToMap(
   bundle: EncryptedSecretBundle,
@@ -727,11 +724,7 @@ export async function inspectRecoverySources(
     });
     if (res.ok) {
       const data = (await res.json()) as {
-        envs?: Array<{
-          key?: unknown;
-          type?: unknown;
-          target?: unknown;
-        }>;
+        envs?: Array<{ key?: unknown; type?: unknown; target?: unknown }>;
       };
       if (Array.isArray(data.envs)) {
         const prodEnvs = data.envs.filter((item) => {
@@ -805,11 +798,7 @@ export async function verifyRenderCutoverReadinessAndBacklog(
       pendingUpdateCount: number;
       dropPendingUpdates: false;
     }
-  | {
-      ok: false;
-      code: string;
-      pendingUpdateCount?: number;
-    }
+  | { ok: false; code: string; pendingUpdateCount?: number }
 > {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(expectedSha)) {
