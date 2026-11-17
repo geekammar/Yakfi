@@ -118,9 +118,9 @@ export type BundleVerificationFailure = {
   code: string;
 };
 
-export type BundleVerificationResult =
-  | BundleVerificationSuccess
-  | BundleVerificationFailure;
+type VerifyOk = BundleVerificationSuccess;
+type VerifyErr = BundleVerificationFailure;
+export type BundleVerificationResult = VerifyOk | VerifyErr;
 
 export type VerifiedRenderService = {
   ok: true;
