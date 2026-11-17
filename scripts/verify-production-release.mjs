@@ -102,10 +102,8 @@ export function evaluateLiveHealthResponse(params) {
     return { ok: false, code: "DEPLOYMENT_NOT_READY" };
   }
 
-  if (
-    !Array.isArray(body.missingEnvVars) ||
-    body.missingEnvVars.length !== 0
-  ) {
+  const missingVars = body.missingEnvVars;
+  if (!Array.isArray(missingVars) || missingVars.length !== 0) {
     return { ok: false, code: "MISSING_REQUIRED_ENV_VARS" };
   }
 
@@ -202,10 +200,7 @@ export async function pollProductionReleaseReadiness(input, deps = {}) {
     }
   }
 
-  return {
-    ok: false,
-    code: lastFailureCode,
-  };
+  return { ok: false, code: lastFailureCode };
 }
 
 async function main() {
@@ -239,10 +234,9 @@ async function main() {
   }
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+const argvEntry = process.argv[1];
+const cliEntryHref = argvEntry ? pathToFileURL(argvEntry).href : "";
+if (cliEntryHref && import.meta.url === cliEntryHref) {
   main().catch(() => {
     console.error("::error::UNEXPECTED_RELEASE_VERIFICATION_ERROR");
     process.exit(1);

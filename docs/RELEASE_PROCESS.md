@@ -291,16 +291,17 @@ gh release create v0.1.0 --verify-tag --title "FlowPilot v0.1.0" \
 
 ## Rollback / Recovery
 
-| Situation                        | Recovery / Limitations                                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Tag pushed but release wrong     | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo                                                  |
-| Defective commit pushed to main  | Revert with `git revert <commit>` and push forward to `main`; never force-push                                           |
-| Render deployment broken         | Roll back in Render Dashboard → Deploys to previous verified Render commit SHA; re-verify `/api/health` HTTP 200 + SHA   |
-| Vercel deployment broken / 402   | Vercel returned HTTP 402 `DEPLOYMENT_DISABLED` on 16 Nov 2026 and is **not** an active or valid rollback target          |
-| Production DB migration rollback | Prisma has no automated down-migrations; apply forward-fix migrations or restore backup in Neon console                  |
-| Repo created but push rejected   | Fix locally, `git push -u origin main` again (script is re-runnable)                                                     |
-| Secret leaked in a commit        | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval                          |
-| Catastrophic failure             | Re-clone from remote or restore from backup; repo is private and re-creatable                                            |
+<!-- prettier-ignore -->
+| Situation | Recovery / Limitations |
+| --- | --- |
+| Tag pushed but release wrong | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo |
+| Defective commit pushed to main | Revert with `git revert <commit>` and push forward to `main`; never force-push |
+| Render deployment broken | Roll back in Render Dashboard → Deploys to previous verified Render commit SHA; re-verify `/api/health` HTTP 200 + SHA |
+| Vercel deployment broken / 402 | Vercel returned HTTP 402 `DEPLOYMENT_DISABLED` on 16 Nov 2026 and is **not** an active or valid rollback target |
+| Production DB migration rollback | Prisma has no automated down-migrations; apply forward-fix migrations or restore backup in Neon console |
+| Repo created but push rejected | Fix locally, `git push -u origin main` again (script is re-runnable) |
+| Secret leaked in a commit | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval |
+| Catastrophic failure | Re-clone from remote or restore from backup; repo is private and re-creatable |
 
 ## Post-Deploy Release Verification Gate (`production-release.yml`)
 

@@ -111,7 +111,10 @@ async function main(): Promise<void> {
   const root = process.cwd();
 
   // ─── 1. Render Blueprint & Version Pinning ────────────────────────────────
-  const nodeVersion = readFileSync(resolve(root, ".node-version"), "utf8").trim();
+  const nodeVersion = readFileSync(
+    resolve(root, ".node-version"),
+    "utf8",
+  ).trim();
   const pkg = JSON.parse(
     readFileSync(resolve(root, "package.json"), "utf8"),
   ) as {
@@ -220,11 +223,10 @@ async function main(): Promise<void> {
     isPublicPath("/api/health", { RENDER: "true" }) === true &&
       isPublicPath("/api/health/live", { RENDER: "true" }) === true,
   );
+  const renderOnlyEnv = (k: string) => (k === "RENDER" ? "true" : undefined);
   check(
     "R3.4 Production JEV budget safety blocks unbudgeted JEV on Render production",
-    isTypeSafeJevPreferred((k) =>
-      k === "RENDER" ? "true" : undefined,
-    ) === false &&
+    isTypeSafeJevPreferred(renderOnlyEnv) === false &&
       isTypeSafeJevPreferred((k) => {
         if (k === "RENDER") return "true";
         if (k === "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET") return "25";
@@ -448,17 +450,15 @@ async function main(): Promise<void> {
     varByName.get("APPOINTMENT_REMINDERS_ENABLED")?.recoveryState ===
     "CONFIRMED_DISABLED";
 
+  const vercelObs = inventory.vercelObservationSummary;
   check(
     "R6.1 Values-free inventory covers all required/optional vars, 11 metadata fields, 25 Vercel Prod count, disabled reminders & unknown JEV/SHADOW",
     inventory.schema === "yakfi.env-inventory@v1" &&
       inventory.targetPlatform?.workspaceId === CONFIRMED_RENDER_WORKSPACE_ID &&
-      inventory.vercelObservationSummary?.observedProductionVarCount === 25 &&
-      inventory.vercelObservationSummary?.observedSensitiveOrSecretCount ===
-        24 &&
-      inventory.vercelObservationSummary?.observedConfigPlainOrEncryptedCount ===
-        1 &&
-      inventory.vercelObservationSummary?.sensitiveReadbackSupported ===
-        false &&
+      vercelObs?.observedProductionVarCount === 25 &&
+      vercelObs?.observedSensitiveOrSecretCount === 24 &&
+      vercelObs?.observedConfigPlainOrEncryptedCount === 1 &&
+      vercelObs?.sensitiveReadbackSupported === false &&
       allRequiredNamesPresent &&
       allFieldsNonEmpty &&
       jevRecordedUnknown &&
@@ -644,6 +644,7 @@ async function main(): Promise<void> {
       err instanceof Error && err.message === "RENDER_WORKSPACE_MISMATCH";
   }
 
+  const expectedEnvPath = `/services/${testServiceId}/env-vars/`;
   check(
     "R7.3 Render transfer pins workspace tea-db9st3gm7kps73ek9op0 + ohio, performs zero PUTs in dryRun, and uses per-key PUTs only",
     dryRunTransfer.summary.ok &&
@@ -651,7 +652,7 @@ async function main(): Promise<void> {
       applyTransfer.summary.ok &&
       applyTransfer.summary.code === "TRANSFER_APPLIED" &&
       putUrls.length === 2 &&
-      putUrls.every((u) => u.includes(`/services/${testServiceId}/env-vars/`)) &&
+      putUrls.every((u) => u.includes(expectedEnvPath)) &&
       wrongWorkspaceRejected,
   );
 

@@ -288,17 +288,23 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 `engines.node: "22.x"`) and `pnpm@11.24.0` (`packageManager` + Corepack).
 
 - **Build Command** (zero live DB migrations, zero seed):
+
   ```bash
   corepack enable && corepack prepare pnpm@11.24.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm build
   ```
+
   (`--prod=false` ensures `tsx`, `typescript`, and `@tailwindcss/postcss` are
   installed even when `NODE_ENV=production` is present; `pnpm build` runs
   `pnpm generate:ai-prompts && next build`.)
+
 - **Start Command** (binds `0.0.0.0:$PORT`):
+
   ```bash
   pnpm run start:render
   ```
+
   (Executes `next start --hostname 0.0.0.0 --port "${PORT:-10000}"`.)
+
 - **Health Check Path (continuous Render liveness):** `/api/health/live`
 - **Auto-Deploy Trigger:** `off` during cutover preparation (`render.yaml`
   `autoDeployTrigger: off`) so unconfigured or unmigrated commits never deploy
@@ -340,9 +346,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.4 Platform-Neutral Headers & Telegram `after()` Semantics
 
-- **`/sw.js` and `/offline.html` headers:** `Cache-Control: public, max-age=0,
-  must-revalidate` now lives in `next.config.ts` (`headers()`), enforced
-  identically on Render, local Node, and Vercel.
+- **`/sw.js` and `/offline.html` headers:**
+  `Cache-Control: public, max-age=0, must-revalidate` now lives in
+  `next.config.ts` (`headers()`), enforced identically on Render, local Node,
+  and Vercel.
 - **Telegram `next/server` `after()`:** retained in
   `src/app/api/telegram/webhook/route.ts`. On Render's persistent Node process,
   `POST /api/telegram/webhook` authenticates the secret token and flushes HTTP
@@ -393,8 +400,8 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `deployment_target=render`, `production_base_url=https://<render-origin>`,
      `expected_commit_sha=<40-char SHA>`, `publish_release=false` (verify-only).
    - Verify Better Auth in browser at `https://<render-origin>/sign-in`: confirm
-     sign-in succeeds, `Set-Cookie` carries `__Secure-` + `Secure; HttpOnly;
-     SameSite=Lax`, and no redirect loop occurs.
+     sign-in succeeds, `Set-Cookie` carries `__Secure-` with
+     `Secure; HttpOnly; SameSite=Lax`, and no redirect loop occurs.
    - Verify `/api/operator/cutover-readiness` signed HMAC proof confirms the
      live Render instance resolves the fixed Business
      `f5314115-ae8c-46ea-9d7e-080ef5e7366d`, Connection
@@ -417,9 +424,9 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
    - **Backlog policy (mandatory — no blind replay and no blind
      `drop_pending_updates`):**
      - If `pending_update_count === 0`: proceed with guarded `setWebhook` to
-       `https://<render-origin>/api/telegram/webhook` (`allowed_updates:
-       ["message", "callback_query"]`, fresh secret hash persisted in Neon,
-       `drop_pending_updates` omitted/`false`).
+       `https://<render-origin>/api/telegram/webhook` with
+       `allowed_updates: ["message", "callback_query"]`, fresh secret hash
+       persisted in Neon, and `drop_pending_updates` omitted (`false`).
      - If `pending_update_count > 0`: **STOP**. Updates queued during Vercel's
        HTTP 402 outage must neither be replayed blindly into live AI/booking
        execution nor dropped silently with `drop_pending_updates=true`. Present

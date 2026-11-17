@@ -28,8 +28,8 @@ import {
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-import { resolveMasterKey } from "../src/server/credentials/credential-crypto";
-import { validateDatabaseUrl } from "../src/server/credentials/test-bot-recovery";
+import { resolveMasterKey } from "@/server/credentials/credential-crypto";
+import { validateDatabaseUrl } from "@/server/credentials/test-bot-recovery";
 import {
   CUTOVER_READINESS_BOT_ID,
   CUTOVER_READINESS_BOT_USERNAME,
@@ -37,7 +37,7 @@ import {
   CUTOVER_READINESS_CONNECTION_ID,
   CUTOVER_READINESS_PATH,
   signCutoverReadiness,
-} from "../src/server/operator/cutover-readiness";
+} from "@/server/operator/cutover-readiness";
 
 export const CONFIRMED_RENDER_WORKSPACE_ID = "tea-db9st3gm7kps73ek9op0";
 export const CONFIRMED_RENDER_REGION = "ohio";
@@ -1023,6 +1023,9 @@ async function runCli(): Promise<void> {
       renderApiKey: process.env.RENDER_API_KEY_SOURCE,
       renderServiceId: process.env.RENDER_SERVICE_ID,
     });
+    const keyFormatLabel = report.masterKeyFormatValid
+      ? "VALID"
+      : "MISSING_OR_INVALID";
     writeSummaryLine("### Safe Recovery Source Inspection (Values-Free)");
     writeSummaryLine(
       `- **TEST_DATABASE_URL target**: \`${report.testDbClassification}\``,
@@ -1031,7 +1034,7 @@ async function runCli(): Promise<void> {
       `- **PRODUCTION_DATABASE_URL target**: \`${report.prodDbClassification}\``,
     );
     writeSummaryLine(
-      `- **CREDENTIAL_MASTER_KEY 32-byte format**: \`${report.masterKeyFormatValid ? "VALID" : "MISSING_OR_INVALID"}\``,
+      `- **CREDENTIAL_MASTER_KEY 32-byte format**: \`${keyFormatLabel}\``,
     );
     if (report.vercelProductionMetadata) {
       const v = report.vercelProductionMetadata;
@@ -1106,11 +1109,8 @@ async function runCli(): Promise<void> {
         dryRun,
       });
     if (bundleOut) {
-      writeFileSync(
-        bundleOut,
-        JSON.stringify(encryptedBundle, null, 2) + "\n",
-        { mode: 0o600 },
-      );
+      const jsonOut = JSON.stringify(encryptedBundle, null, 2) + "\n";
+      writeFileSync(bundleOut, jsonOut, { mode: 0o600 });
     }
     writeSummaryLine("### Render Allowlisted Secret Transfer Summary");
     writeSummaryLine(`- **Outcome**: \`${summary.code}\``);
@@ -1130,10 +1130,9 @@ async function runCli(): Promise<void> {
   process.exit(1);
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+const argvEntry = process.argv[1];
+const cliEntryHref = argvEntry ? pathToFileURL(argvEntry).href : "";
+if (cliEntryHref && import.meta.url === cliEntryHref) {
   runCli().catch((err: unknown) => {
     const safeCode =
       err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)

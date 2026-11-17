@@ -25,9 +25,9 @@
   explicit target + exact 40-char `commitSha` with no automatic unverified tags.
 - Recoverable secrets & cutover runbook: added values-free inventory
   `config/render-env-inventory.json`, owner-encrypted X25519/AES-256-GCM bundle
-  + restoration check + allowlisted `tea-db9st3gm7kps73ek9op0` transfer tool
-  (`scripts/render-vault-tool.ts`) and manual-only workflow
-  (`.github/workflows/render-migration-ops.yml`, not executed), plus ordered
+  with local restoration check and allowlisted `tea-db9st3gm7kps73ek9op0`
+  transfer tool (`scripts/render-vault-tool.ts`), manual-only workflow
+  (`.github/workflows/render-migration-ops.yml`, not executed), and ordered
   cutover/backlog/anti-split-brain/rollback runbook in canonical docs.
 - Required CI: wired offline `check:render-migration` and real-Node
   (`next start`) + disposable-PostgreSQL `check:render-runtime-db` (verifying
