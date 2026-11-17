@@ -5,31 +5,32 @@
  * Verifies:
  * 1. Reproducible Render Blueprint (`render.yaml`) & Node/pnpm pinning
  * 2. Platform-neutral `/sw.js` & `/offline.html` headers in `next.config.ts`
- * 3. `RENDER_GIT_COMMIT` identity, QA harness production block & JEV budget guard
+ * 3. `RENDER_GIT_COMMIT` identity, QA harness block & JEV budget guard
  * 4. Better Auth `trustedOrigins` & URL resolution without fake `VERCEL_ENV`
- * 5. Explicit release target & exact 40-char SHA gate (`production-release.yml`)
+ * 5. Explicit release target & exact 40-char SHA gate
  * 6. Values-free environment inventory completeness & zero-secret hygiene
- * 7. Recoverable owner-encrypted secret bundle, restoration check, workspace
- *    pinning (`tea-db9st3gm7kps73ek9op0`), allowlist & webhook backlog policy
+ * 7. Owner-encrypted secret bundle, restoration check, workspace pinning
+ *    (`tea-db9st3gm7kps73ek9op0`), allowlist & webhook backlog policy
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import nextConfig, { PLATFORM_NEUTRAL_PWA_HEADERS } from "../next.config";
-import { isPublicPath } from "../src/lib/public-paths";
-import { isQaHarnessAllowed } from "../src/lib/qa-harness";
+import { isPublicPath } from "@/lib/public-paths";
+import { isQaHarnessAllowed } from "@/lib/qa-harness";
 import {
   isRenderProductionRuntime,
   resolveRuntimeCommitSha,
   resolveRuntimeEnvironmentLabel,
-} from "../src/lib/runtime-identity";
+} from "@/lib/runtime-identity";
 import {
   getTrustedOrigins,
   isVercelPreview,
   resolveAppUrl,
-} from "../src/lib/url-resolver";
-import { isTypeSafeJevPreferred } from "../src/server/integrations/ai/factory";
-import { signCutoverReadiness } from "../src/server/operator/cutover-readiness";
+} from "@/lib/url-resolver";
+import { isTypeSafeJevPreferred } from "@/server/integrations/ai/factory";
+import { signCutoverReadiness } from "@/server/operator/cutover-readiness";
+
+import nextConfig, { PLATFORM_NEUTRAL_PWA_HEADERS } from "../next.config";
 import {
   CONFIRMED_RENDER_REGION,
   CONFIRMED_RENDER_WORKSPACE_ID,
@@ -111,18 +112,16 @@ async function main(): Promise<void> {
   const root = process.cwd();
 
   // ─── 1. Render Blueprint & Version Pinning ────────────────────────────────
-  const nodeVersion = readFileSync(
-    resolve(root, ".node-version"),
-    "utf8",
-  ).trim();
-  const pkg = JSON.parse(
-    readFileSync(resolve(root, "package.json"), "utf8"),
-  ) as {
+  const nodeVerPath = resolve(root, ".node-version");
+  const nodeVersion = readFileSync(nodeVerPath, "utf8").trim();
+  const pkgRaw = readFileSync(resolve(root, "package.json"), "utf8");
+  const pkg = JSON.parse(pkgRaw) as {
     engines?: { node?: string };
     packageManager?: string;
     scripts?: Record<string, string>;
   };
   const renderYaml = readFileSync(resolve(root, "render.yaml"), "utf8");
+  const renderStartScript = pkg.scripts?.["start:render"] ?? "";
 
   check(
     "R1.1 .node-version pins Node 22 matching package.json engines.node (22.x)",
@@ -144,8 +143,8 @@ async function main(): Promise<void> {
       renderYaml.includes("autoDeployTrigger: off") &&
       renderYaml.includes("healthCheckPath: /api/health/live") &&
       renderYaml.includes("startCommand: pnpm run start:render") &&
-      (pkg.scripts?.["start:render"] ?? "").includes("--hostname 0.0.0.0") &&
-      (pkg.scripts?.["start:render"] ?? "").includes("PORT"),
+      renderStartScript.includes("--hostname 0.0.0.0") &&
+      renderStartScript.includes("PORT"),
   );
   check(
     "R1.4 render.yaml excludes DB migrations, seed, cron, worker, redis, and disk",
@@ -162,23 +161,22 @@ async function main(): Promise<void> {
   );
 
   // ─── 2. Platform-Neutral PWA Cache-Control Headers ────────────────────────
-  const vercelJson = JSON.parse(
-    readFileSync(resolve(root, "vercel.json"), "utf8"),
-  ) as Record<string, unknown>;
+  const vercelRaw = readFileSync(resolve(root, "vercel.json"), "utf8");
+  const vercelJson = JSON.parse(vercelRaw) as Record<string, unknown>;
   const resolvedHeaders = nextConfig.headers ? await nextConfig.headers() : [];
   const swHeader = resolvedHeaders.find((h) => h.source === "/sw.js");
   const offlineHeader = resolvedHeaders.find(
     (h) => h.source === "/offline.html",
   );
+  const expectedCache = "public, max-age=0, must-revalidate";
 
   check(
     "R2.1 next.config.ts defines Cache-Control: public, max-age=0, must-revalidate for /sw.js and /offline.html",
     PLATFORM_NEUTRAL_PWA_HEADERS.length === 2 &&
       swHeader?.headers[0]?.key === "Cache-Control" &&
-      swHeader?.headers[0]?.value === "public, max-age=0, must-revalidate" &&
+      swHeader?.headers[0]?.value === expectedCache &&
       offlineHeader?.headers[0]?.key === "Cache-Control" &&
-      offlineHeader?.headers[0]?.value ===
-        "public, max-age=0, must-revalidate",
+      offlineHeader?.headers[0]?.value === expectedCache,
   );
   check(
     "R2.2 vercel.json retains buildCommand & ignoreCommand without platform-only headers or crons",
@@ -190,48 +188,52 @@ async function main(): Promise<void> {
   // ─── 3. Runtime Identity, Public Probe Paths, QA Guard & JEV Budget ───────
   const renderSha = "1".repeat(40);
   const vercelSha = "2".repeat(40);
+  const fromRender = resolveRuntimeCommitSha({ RENDER_GIT_COMMIT: renderSha });
+  const fromVercel = resolveRuntimeCommitSha({
+    VERCEL_GIT_COMMIT_SHA: vercelSha,
+  });
+  const fromBoth = resolveRuntimeCommitSha({
+    RENDER_GIT_COMMIT: renderSha,
+    VERCEL_GIT_COMMIT_SHA: vercelSha,
+  });
+
   check(
     "R3.1 resolveRuntimeCommitSha supports RENDER_GIT_COMMIT and VERCEL_GIT_COMMIT_SHA",
-    resolveRuntimeCommitSha({ RENDER_GIT_COMMIT: renderSha }) === renderSha &&
-      resolveRuntimeCommitSha({ VERCEL_GIT_COMMIT_SHA: vercelSha }) ===
-        vercelSha &&
-      resolveRuntimeCommitSha({
-        RENDER_GIT_COMMIT: renderSha,
-        VERCEL_GIT_COMMIT_SHA: vercelSha,
-      }) === renderSha &&
+    fromRender === renderSha &&
+      fromVercel === vercelSha &&
+      fromBoth === renderSha &&
       resolveRuntimeCommitSha({}) === null,
   );
+
+  const renderPrEnv = { RENDER: "true", RENDER_IS_PULL_REQUEST: "true" };
+  const renderHarnessEnv = {
+    RENDER: "true",
+    FLOWPILOT_ENABLE_QA_HARNESS: "true",
+  };
   check(
     "R3.2 Render production runtime blocks QA fixture routes even if FLOWPILOT_ENABLE_QA_HARNESS=true",
     isRenderProductionRuntime({ RENDER: "true" }) === true &&
-      isRenderProductionRuntime({
-        RENDER: "true",
-        RENDER_IS_PULL_REQUEST: "true",
-      }) === false &&
+      isRenderProductionRuntime(renderPrEnv) === false &&
       resolveRuntimeEnvironmentLabel({ RENDER: "true" }) === "production" &&
-      isQaHarnessAllowed({
-        RENDER: "true",
-        FLOWPILOT_ENABLE_QA_HARNESS: "true",
-      }) === false &&
-      isPublicPath("/qa/conversation-header", {
-        RENDER: "true",
-        FLOWPILOT_ENABLE_QA_HARNESS: "true",
-      }) === false,
+      isQaHarnessAllowed(renderHarnessEnv) === false &&
+      isPublicPath("/qa/conversation-header", renderHarnessEnv) === false,
   );
   check(
     "R3.3 Both /api/health and /api/health/live are public probe paths",
     isPublicPath("/api/health", { RENDER: "true" }) === true &&
       isPublicPath("/api/health/live", { RENDER: "true" }) === true,
   );
+
   const renderOnlyEnv = (k: string) => (k === "RENDER" ? "true" : undefined);
+  const renderBudgetedEnv = (k: string) => {
+    if (k === "RENDER") return "true";
+    if (k === "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET") return "25";
+    return undefined;
+  };
   check(
     "R3.4 Production JEV budget safety blocks unbudgeted JEV on Render production",
     isTypeSafeJevPreferred(renderOnlyEnv) === false &&
-      isTypeSafeJevPreferred((k) => {
-        if (k === "RENDER") return "true";
-        if (k === "FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET") return "25";
-        return undefined;
-      }) === true,
+      isTypeSafeJevPreferred(renderBudgetedEnv) === true,
   );
 
   // ─── 4. Better Auth Trusted Origins Without Fake VERCEL_ENV ───────────────
@@ -263,10 +265,11 @@ async function main(): Promise<void> {
   }
 
   // ─── 5. Explicit Release Target & Exact-SHA Verification ──────────────────
-  const prodReleaseYaml = readFileSync(
-    resolve(root, ".github/workflows/production-release.yml"),
-    "utf8",
+  const prodReleasePath = resolve(
+    root,
+    ".github/workflows/production-release.yml",
   );
+  const prodReleaseYaml = readFileSync(prodReleasePath, "utf8");
   check(
     "R5.1 production-release.yml has no automatic push tagging and no hardcoded Vercel URL",
     !prodReleaseYaml.includes("flowpilot-prod.vercel.app") &&
@@ -413,10 +416,8 @@ async function main(): Promise<void> {
   );
 
   // ─── 6. Values-Free Inventory Completeness & Hygiene ──────────────────────
-  const inventoryRaw = readFileSync(
-    resolve(root, "config/render-env-inventory.json"),
-    "utf8",
-  );
+  const invPath = resolve(root, "config/render-env-inventory.json");
+  const inventoryRaw = readFileSync(invPath, "utf8");
   const inventory = JSON.parse(inventoryRaw) as {
     schema?: string;
     targetPlatform?: { workspaceId?: string };
@@ -435,20 +436,23 @@ async function main(): Promise<void> {
     varByName.has(n),
   );
   const allFieldsNonEmpty = varList.every((entry) =>
-    REQUIRED_INVENTORY_FIELDS.every(
-      (field) =>
-        typeof entry[field] === "string" &&
-        String(entry[field]).trim().length > 0,
-    ),
+    REQUIRED_INVENTORY_FIELDS.every((field) => {
+      const val = entry[field];
+      return typeof val === "string" && val.trim().length > 0;
+    }),
   );
+  const semState = varByName.get(
+    "FLOWPILOT_JEV_SEMANTIC_ENABLED",
+  )?.recoveryState;
+  const shadowState = varByName.get(
+    "FLOWPILOT_JEV_SHADOW_ENABLED",
+  )?.recoveryState;
   const jevRecordedUnknown =
-    varByName.get("FLOWPILOT_JEV_SEMANTIC_ENABLED")?.recoveryState ===
-      "UNKNOWN_UNVERIFIED" &&
-    varByName.get("FLOWPILOT_JEV_SHADOW_ENABLED")?.recoveryState ===
-      "UNKNOWN_UNVERIFIED";
-  const remindersDisabled =
-    varByName.get("APPOINTMENT_REMINDERS_ENABLED")?.recoveryState ===
-    "CONFIRMED_DISABLED";
+    semState === "UNKNOWN_UNVERIFIED" && shadowState === "UNKNOWN_UNVERIFIED";
+  const remState = varByName.get(
+    "APPOINTMENT_REMINDERS_ENABLED",
+  )?.recoveryState;
+  const remindersDisabled = remState === "CONFIRMED_DISABLED";
 
   const vercelObs = inventory.vercelObservationSummary;
   check(
@@ -466,10 +470,11 @@ async function main(): Promise<void> {
   );
 
   // ─── 7. Owner-Encrypted Recovery Bundle, Restoration Check & Guards ───────
-  const recoveryWorkflowYaml = readFileSync(
-    resolve(root, ".github/workflows/render-migration-ops.yml"),
-    "utf8",
+  const opsWorkflowPath = resolve(
+    root,
+    ".github/workflows/render-migration-ops.yml",
   );
+  const recoveryWorkflowYaml = readFileSync(opsWorkflowPath, "utf8");
   check(
     "R7.1 render-migration-ops.yml is manual workflow_dispatch only (never runs in PR CI) and enforces exact 40-char SHA",
     recoveryWorkflowYaml.includes("workflow_dispatch:") &&
@@ -523,13 +528,15 @@ async function main(): Promise<void> {
       err instanceof Error && err.message === "DISALLOWED_SECRET_KEY";
   }
 
+  const verifiedJoined = validRestore.ok
+    ? validRestore.verifiedKeys.join(",")
+    : "";
   check(
     "R7.2 Encrypted owner bundle omits plaintext, passes owner restoration check, and fails closed on wrong key, AAD tamper, or disallowed key",
     !serializedBundle.includes("ep-little-mouse-a5nh644n") &&
       !serializedBundle.includes(syntheticKeyHex) &&
       validRestore.ok === true &&
-      validRestore.verifiedKeys.join(",") ===
-        "CREDENTIAL_MASTER_KEY,DATABASE_URL" &&
+      verifiedJoined === "CREDENTIAL_MASTER_KEY,DATABASE_URL" &&
       wrongKeyRestore.ok === false &&
       wrongKeyRestore.code === "RECIPIENT_KEY_MISMATCH" &&
       tamperedMetadataRestore.ok === false &&
@@ -537,7 +544,6 @@ async function main(): Promise<void> {
       disallowedKeyRejected,
   );
 
-  // Test Render workspace/region/single-key PUT enforcement
   const putUrls: string[] = [];
   const dryRunTransfer = await transferAllowlistedSecretsToRender(
     {
@@ -656,7 +662,6 @@ async function main(): Promise<void> {
       wrongWorkspaceRejected,
   );
 
-  // Test Vercel metadata inspection strips values
   const inspection = await inspectRecoverySources(
     {
       testDatabaseUrl: syntheticDbConn,
@@ -700,7 +705,6 @@ async function main(): Promise<void> {
       !serializedInspection.includes("flowpilot-prod.vercel.app"),
   );
 
-  // Test Render cutover readiness + explicit pending-update backlog policy
   const fixedNow = 1_763_400_000_000;
   const signer = "123456:placeholder_example_bot_signer";
   const blockedBacklog = await verifyRenderCutoverReadinessAndBacklog({
@@ -712,6 +716,8 @@ async function main(): Promise<void> {
     pendingUpdateCount: 4,
   });
 
+  const activePoolerHost =
+    "ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech";
   const cleanCutover = await verifyRenderCutoverReadinessAndBacklog(
     {
       renderOrigin: "https://yakfi-web.onrender.com",
@@ -738,8 +744,7 @@ async function main(): Promise<void> {
             ok: true,
             commitSha: exactSha,
             version: "0.79.15",
-            databaseHost:
-              "ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech",
+            databaseHost: activePoolerHost,
             databaseName: "neondb",
             businessId: "f5314115-ae8c-46ea-9d7e-080ef5e7366d",
             connectionId: "1d2cdf87-2bee-4f26-aad5-5ab9efd1c716",
