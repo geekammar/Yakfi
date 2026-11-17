@@ -328,7 +328,9 @@ export function isTypeSafeJevPreferred(
   // It is not by itself enforcement of a global monthly spend cap.
   const isProd =
     getEnvVar("NODE_ENV") === "production" ||
-    getEnvVar("VERCEL_ENV") === "production";
+    getEnvVar("VERCEL_ENV") === "production" ||
+    (getEnvVar("RENDER") === "true" &&
+      getEnvVar("RENDER_IS_PULL_REQUEST") !== "true");
   if (isProd) {
     const approvedBudget = parseApprovedMonthlyBudget(
       getEnvVar(JEV_BUDGET_APPROVAL_FLAG),

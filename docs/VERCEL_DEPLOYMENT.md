@@ -249,3 +249,203 @@ pnpm deploy             # full gate → production deployment URL (deploy:produc
 
 Still stuck? `docs/TROUBLESHOOTING.md` (local issues) and the Vercel
 deployment log (Builds → failed deployment → inspect) cover the rest.
+
+---
+
+## SECTION 7 — Render Single-Service Migration & Concrete Cutover Plan (Prepared — 17 November 2026)
+
+> **Status:** Source preparation and CI verification complete; **live deployment
+> and webhook cutover NOT executed** pending reviewer/Ammar authorization.
+> Sections 0–6 above remain preserved as historical Vercel reference; at
+> `2026-11-16T21:12Z` Vercel Production returned HTTP `402` /
+> `DEPLOYMENT_DISABLED` and is **not** an active or working rollback target.
+
+### 7.1 Target Architecture & Owner Dashboard Pre-Checks
+
+- **Workspace:** `My Workspace` (`tea-db9st3gm7kps73ek9op0`), owner account
+  `sarazainx@gmail.com` (Hobby workspace; **no** paid workspace upgrade).
+- **Service:** one native Node web service (`yakfi-web` in `render.yaml`),
+  `plan: starter` (`0.5 CPU`, `512 MB RAM`, ~$7/month), `region: ohio` (AWS
+  `us-east-2`, co-located with existing Neon PostgreSQL `us-east-2`).
+- **Scope boundary:** keep the existing Neon PostgreSQL database and existing
+  Telegram bots. Add **no** Render Postgres, Redis/Key-Value, worker, queue,
+  persistent disk, Docker container, or Cron Job.
+- **Unverified capacity note:** `512 MB` RAM runtime headroom under concurrent
+  SSR + Prisma + AI/Telegram turns remains **unverified** until measured live on
+  Render Metrics.
+- **Owner billing verification (before first deploy):** Ammar verifies in Render
+  Dashboard → Billing:
+  1. Exact remaining balance of the $50 promotional credit and its exact expiry
+     date.
+  2. Confirmation that `starter` ($7/mo) web-service compute charges draw from
+     that credit on the Hobby workspace without requiring a paid team seat.
+  3. Credit-exhaustion / spend-limit behavior (whether a payment method is
+     charged or services suspend at $0 credit).
+
+### 7.2 Exact Render Commands & Required Environment Variables
+
+Pinned runtime versions: Node `22` (`.node-version` + `package.json`
+`engines.node: "22.x"`) and `pnpm@11.24.0` (`packageManager` + Corepack).
+
+- **Build Command** (zero live DB migrations, zero seed):
+  ```bash
+  corepack enable && corepack prepare pnpm@11.24.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm build
+  ```
+  (`--prod=false` ensures `tsx`, `typescript`, and `@tailwindcss/postcss` are
+  installed even when `NODE_ENV=production` is present; `pnpm build` runs
+  `pnpm generate:ai-prompts && next build`.)
+- **Start Command** (binds `0.0.0.0:$PORT`):
+  ```bash
+  pnpm run start:render
+  ```
+  (Executes `next start --hostname 0.0.0.0 --port "${PORT:-10000}"`.)
+- **Health Check Path (continuous Render liveness):** `/api/health/live`
+- **Auto-Deploy Trigger:** `off` during cutover preparation (`render.yaml`
+  `autoDeployTrigger: off`) so unconfigured or unmigrated commits never deploy
+  automatically.
+
+**Required application variables on Render** (names only; see
+`config/render-env-inventory.json` and `docs/ENVIRONMENT_VARIABLES.md`):
+
+- Required at build + boot: `NEXT_PUBLIC_APP_URL` (must match exact HTTPS Render
+  origin **before** running the final `next build`), `BETTER_AUTH_URL` (same
+  exact HTTPS origin), `BETTER_AUTH_SECRET` (≥ 32 chars), `DATABASE_URL`
+  (selected active Neon dataset `ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require`).
+- Required for `fp:<id>` runtime credentials & live AI: `CREDENTIAL_MASTER_KEY`
+  (exact 32-byte key matching `runtime_credentials` in the selected Neon DB),
+  `OPENROUTER_API_KEY`.
+- Optional channel provisioning: `TELEGRAM_MANAGER_BOT_TOKEN`,
+  `TELEGRAM_MANAGER_BOT_USERNAME` (not required for the already-provisioned
+  customer bot `@Drafnanafnanbot`, only for minting new managed bots).
+- Keep `APPOINTMENT_REMINDERS_ENABLED` unset (`false`), never set fake
+  `VERCEL_ENV=preview`, and leave unknown `FLOWPILOT_JEV_*` / `SHADOW_*`
+  variables unset until verified.
+
+### 7.3 Liveness vs Readiness & Neon Suspension Impact
+
+- **`GET /api/health/live` (Lightweight Liveness — HTTP 200, zero DB queries):**
+  wired to Render's `healthCheckPath`. Render probes `healthCheckPath` roughly
+  every 5 seconds; pointing that continuous probe at a DB-backed route would
+  issue ~17,280 `SELECT 1` queries/day, **preventing Neon scale-to-zero idle
+  suspension** and burning ~730 compute-hours/month continuously.
+- **`GET /api/health` (Explicit Deployment & DB Readiness — HTTP 200 vs 503):**
+  checks `REQUIRED_ENV_VARS` and executes a bounded 3s Prisma `SELECT 1`.
+  Returns **HTTP 200** (`status: "ok"`, `deploymentReady: true`) only when all
+  required variables are present and `database === "connected"`; returns **HTTP
+  503** (`status: "degraded"`, `deploymentReady: false`) otherwise. Used by
+  operator cutover checks and `.github/workflows/production-release.yml`.
+- **Runtime commit identity:** both health routes and
+  `/api/operator/cutover-readiness` read `RENDER_GIT_COMMIT` (falling back to
+  `VERCEL_GIT_COMMIT_SHA`), reporting the exact 40-character deployed commit.
+
+### 7.4 Platform-Neutral Headers & Telegram `after()` Semantics
+
+- **`/sw.js` and `/offline.html` headers:** `Cache-Control: public, max-age=0,
+  must-revalidate` now lives in `next.config.ts` (`headers()`), enforced
+  identically on Render, local Node, and Vercel.
+- **Telegram `next/server` `after()`:** retained in
+  `src/app/api/telegram/webhook/route.ts`. On Render's persistent Node process,
+  `POST /api/telegram/webhook` authenticates the secret token and flushes HTTP
+  `200` promptly while `after()` runs the Conversation Engine + outbound
+  `sendMessage` on the Node event loop.
+- **Crash / OOM / redeploy limitation:** once HTTP `200` is flushed, Telegram
+  marks the update delivered and will **not** retry if the Node process crashes
+  (e.g., 512 MB OOM) or receives `SIGKILL` mid-turn during a redeploy. Avoid
+  triggering redeploys while active customer turns are mid-flight, and inspect
+  conversation/turn logs after any restart.
+
+### 7.5 Concrete Ordered Cutover Runbook
+
+1. **Owner Vault & Recovery Proof (before touching Render secrets):**
+   - On Ammar's private workstation (never on the VPS or chat), generate the
+     owner X25519 recovery keypair and save the private key in the encrypted
+     password manager vault:
+     `pnpm exec tsx scripts/render-vault-tool.ts keygen --out ~/yakfi-owner-recovery-key.json`
+   - Run read-only `verify-selected-runtime` (`test-db-migrate.yml`) on the
+     merged `main` SHA to confirm `status: HEALTHY_LOCAL_KEY` and read-only
+     `prisma migrate status` on `ep-little-mouse-a5nh644n.../neondb`.
+   - Dispatch `.github/workflows/render-migration-ops.yml` (`inspect-sources`,
+     then `export-encrypted-bundle` with `owner_recipient=yakfi-rcpt-v1:...`),
+     download `yakfi-owner-encrypted-bundle`, and run the local restoration
+     check:
+     `pnpm exec tsx scripts/render-vault-tool.ts verify-bundle --bundle yakfi-secrets.enc.json --key-file ~/yakfi-owner-recovery-key.json`
+   - Store any newly created values (`BETTER_AUTH_SECRET`, dedicated
+     `OPENROUTER_API_KEY`) in the owner vault **before** entering them into
+     Render. Render alone is never treated as the backup.
+2. **Create Service & Pin Exact URLs Before Final Build:**
+   - Create the single `yakfi-web` Starter service in `My Workspace`
+     (`tea-db9st3gm7kps73ek9op0`), region `ohio`, `autoDeployTrigger: off`.
+   - Confirm the exact assigned HTTPS origin (e.g.
+     `https://yakfi-web.onrender.com`). Set both `NEXT_PUBLIC_APP_URL` and
+     `BETTER_AUTH_URL` to that exact HTTPS origin (no trailing slash), populate
+     `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` from the vault, and transfer
+     allowlisted `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` (via owner vault or
+     reviewed `render-migration-ops.yml` `transfer-to-render` with
+     `dry_run=true` then `dry_run=false`).
+   - Trigger a clean Render build + deploy of the exact merged `main` SHA
+     **after** `NEXT_PUBLIC_APP_URL` is set so client bundles inline the true
+     origin.
+3. **Verify Live Readiness, Exact SHA, Better Auth & DB/Key Pairing:**
+   - Check `GET https://<render-origin>/api/health`: require HTTP `200`,
+     `status: "ok"`, `deploymentReady: true`, `database: "connected"`,
+     `missingEnvVars: []`, exact `version`, and exact 40-char `commitSha`.
+   - Run `.github/workflows/production-release.yml` with
+     `deployment_target=render`, `production_base_url=https://<render-origin>`,
+     `expected_commit_sha=<40-char SHA>`, `publish_release=false` (verify-only).
+   - Verify Better Auth in browser at `https://<render-origin>/sign-in`: confirm
+     sign-in succeeds, `Set-Cookie` carries `__Secure-` + `Secure; HttpOnly;
+     SameSite=Lax`, and no redirect loop occurs.
+   - Verify `/api/operator/cutover-readiness` signed HMAC proof confirms the
+     live Render instance resolves the fixed Business
+     `f5314115-ae8c-46ea-9d7e-080ef5e7366d`, Connection
+     `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716`, and `@Drafnanafnanbot`
+     (`8926541123`) `fp:<id>` credential.
+4. **Prevent Dual-Runtime Split-Brain (Before Moving Telegram Webhook):**
+   - Ensure **only one active runtime** can process webhooks or scheduled work:
+     1. In Vercel (`flowpilot-prod` and legacy `flowpilot_v3`), disconnect Git
+        auto-deployment / pause project deployments so clearing Vercel's HTTP
+        402 billing hold later **cannot** silently revive Vercel as a competing
+        sender or deploy runner.
+     2. Confirm zero external cron/uptime schedulers hit Vercel `/api/cron/*`,
+        and keep `APPOINTMENT_REMINDERS_ENABLED` unset everywhere.
+     3. Switching the Telegram webhook to Render rotates the per-connection
+        `X-Telegram-Bot-Api-Secret-Token` and updates `webhook_secret_hash` in
+        Neon, so any stale request to an old runtime fails authentication (`401`).
+5. **Inspect Webhook State & Enforce Explicit Pending-Update Backlog Policy:**
+   - Run read-only `getWebhookInfo` inspection first and record current `url`,
+     `pending_update_count`, `last_error_date`, and `last_error_message`.
+   - **Backlog policy (mandatory — no blind replay and no blind
+     `drop_pending_updates`):**
+     - If `pending_update_count === 0`: proceed with guarded `setWebhook` to
+       `https://<render-origin>/api/telegram/webhook` (`allowed_updates:
+       ["message", "callback_query"]`, fresh secret hash persisted in Neon,
+       `drop_pending_updates` omitted/`false`).
+     - If `pending_update_count > 0`: **STOP**. Updates queued during Vercel's
+       HTTP 402 outage must neither be replayed blindly into live AI/booking
+       execution nor dropped silently with `drop_pending_updates=true`. Present
+       the count and `last_error_date` to Ammar/reviewer and choose an explicit
+       disposition (e.g., temporary drain on Render with
+       `FLOWPILOT_AI_GLOBAL_STOP=true` so queued messages persist safely as
+       staff handoffs with zero paid AI calls and zero automated bookings, or
+       explicit owner-signed drop).
+6. **Post-Cutover Verification & Release Tagging:**
+   - Re-verify `getWebhookInfo` (`url === https://<render-origin>/api/telegram/webhook`,
+     `allowed_updates` includes `message` and `callback_query`).
+   - Run `.github/workflows/production-release.yml` with `publish_release=true`
+     only after the exact SHA is verified live on Render.
+
+### 7.6 Rollback Plan & PR #88 Separation
+
+- **Application rollback target:** roll back in Render Dashboard → Deploys (or
+  Render API) to the **previous known-good Render deployment / commit SHA**, and
+  re-verify `GET /api/health` HTTP `200` + exact rolled-back `commitSha`.
+- **Vercel is NOT a rollback target:** while Vercel returns HTTP `402`
+  `DEPLOYMENT_DISABLED` (and its Production Sensitive secrets cannot be read
+  back), never treat Vercel as an available fallback runtime.
+- **Database rollback boundary:** keep additive tables and both Neon databases
+  intact (`ep-little-mouse-a5nh644n...` active; `ep-tiny-grass-a5e63jev...`
+  preserved inactive archive). Never drop tables or reset schemas.
+- **PR #88 separation:** draft PR #88 (`feat/durable-turn-usage-cost-evidence`)
+  and its additive Prisma migrations remain an independent reviewed decision.
+  Coordinate `package.json` SemVer (`0.79.15` → `0.79.16`) at final merge time
+  so `pnpm check:version` passes monotonically without weakening the gate.

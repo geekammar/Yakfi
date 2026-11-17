@@ -1,3 +1,4 @@
+import { resolveRuntimeCommitSha } from "@/lib/runtime-identity";
 import { populatePreviewEnvIfNeeded } from "@/lib/url-resolver";
 
 import pkg from "../../../../package.json";
@@ -107,15 +108,21 @@ export async function GET() {
     }
   }
 
-  return Response.json({
-    status: "ok",
-    version: pkg.version,
-    commitSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
-    environment: process.env.NODE_ENV ?? "development",
-    timestamp: new Date().toISOString(),
-    deploymentReady,
-    database,
-    missingEnvVars,
-    ...(previewDiagnostics ? { previewDiagnostics } : {}),
-  });
+  return Response.json(
+    {
+      status: deploymentReady ? "ok" : "degraded",
+      version: pkg.version,
+      commitSha: resolveRuntimeCommitSha(),
+      environment: process.env.NODE_ENV ?? "development",
+      timestamp: new Date().toISOString(),
+      deploymentReady,
+      database,
+      missingEnvVars,
+      ...(previewDiagnostics ? { previewDiagnostics } : {}),
+    },
+    {
+      status: deploymentReady ? 200 : 503,
+      headers: { "Cache-Control": "no-store" },
+    },
+  );
 }

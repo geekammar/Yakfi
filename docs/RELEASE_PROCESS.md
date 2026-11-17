@@ -291,15 +291,41 @@ gh release create v0.1.0 --verify-tag --title "FlowPilot v0.1.0" \
 
 ## Rollback / Recovery
 
-| Situation                        | Recovery / Limitations                                                                                  |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Tag pushed but release wrong     | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo                                 |
-| Defective commit pushed to main  | Revert with `git revert <commit>` and push forward to `main`; never force-push                          |
-| Vercel deployment broken         | Instant rollback in Vercel project dashboard to previous stable deployment                              |
-| Production DB migration rollback | Prisma has no automated down-migrations; apply forward-fix migrations or restore backup in Neon console |
-| Repo created but push rejected   | Fix locally, `git push -u origin main` again (script is re-runnable)                                    |
-| Secret leaked in a commit        | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval         |
-| Catastrophic failure             | Re-clone from remote or restore from backup; repo is private and re-creatable                           |
+| Situation                        | Recovery / Limitations                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Tag pushed but release wrong     | `gh release delete <tag> && git push origin :refs/tags/<tag>` then redo                                                  |
+| Defective commit pushed to main  | Revert with `git revert <commit>` and push forward to `main`; never force-push                                           |
+| Render deployment broken         | Roll back in Render Dashboard → Deploys to previous verified Render commit SHA; re-verify `/api/health` HTTP 200 + SHA   |
+| Vercel deployment broken / 402   | Vercel returned HTTP 402 `DEPLOYMENT_DISABLED` on 16 Nov 2026 and is **not** an active or valid rollback target          |
+| Production DB migration rollback | Prisma has no automated down-migrations; apply forward-fix migrations or restore backup in Neon console                  |
+| Repo created but push rejected   | Fix locally, `git push -u origin main` again (script is re-runnable)                                                     |
+| Secret leaked in a commit        | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval                          |
+| Catastrophic failure             | Re-clone from remote or restore from backup; repo is private and re-creatable                                            |
+
+## Post-Deploy Release Verification Gate (`production-release.yml`)
+
+`.github/workflows/production-release.yml` (`scripts/verify-production-release.mjs`)
+enforces explicit target and commit identity before any tag or GitHub Release:
+
+- **Manual `workflow_dispatch` on `main` only** — automatic unverified tag/release
+  creation on `push` is disabled, and the former hardcoded Vercel URL and
+  missing-`commitSha` fallback were removed.
+- **Required inputs:** `deployment_target` (`render` | `vercel`),
+  `production_base_url` (exact HTTPS origin matching the target platform),
+  `expected_commit_sha` (exact 40-char hex SHA matching `main` `HEAD`), and
+  `publish_release` (`false` default for verify-only; `true` to tag/release).
+- **Readiness + exact SHA proof:** polls `<production_base_url>/api/health` and
+  requires HTTP `200`, `status: "ok"`, `deploymentReady: true`,
+  `database: "connected"`, `missingEnvVars: []`, exact `package.json` `version`,
+  and an **exact 40-character `commitSha`** (`RENDER_GIT_COMMIT` on Render or
+  `VERCEL_GIT_COMMIT_SHA` on Vercel). Missing, abbreviated, or mismatched SHAs
+  and HTTP `503` readiness failures abort before any tag or release is created.
+- **SemVer merge-order coordination (`pnpm check:version`):** every PR to `main`
+  must carry a strictly greater SemVer than `origin/main` with a free `vX.Y.Z`
+  tag. When two independent candidate branches are open against `main` (`0.79.14`
+  → Render migration prep vs draft PR #88), whichever PR merges second rebases
+  onto updated `main` and bumps `package.json` to the next patch (`0.79.16`) so
+  the mandatory version gate remains intact without weakening.
 
 ## See Also
 

@@ -1,25 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm db:generate && pnpm build",
-  "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
-  "headers": [
-    {
-      "source": "/sw.js",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    },
-    {
-      "source": "/offline.html",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    }
-  ]
+  "ignoreCommand": "bash scripts/vercel-ignore-build.sh"
 }

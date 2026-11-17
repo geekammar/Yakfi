@@ -1,5 +1,41 @@
 # FlowPilot — Build State
 
+## Render migration preparation and recoverable secrets (draft PR, v0.79.15) — 17 November 2026
+
+- Verified baseline: `main` / `v0.79.14` at
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87 merged). Separate branch
+  `feat/yakfi-render-migration-prep` starts directly from `ef3a5d80`; draft PR
+  #88 (`74f6594a6982a2c1381c3e86aecd07d9ba026fce`) remains completely untouched.
+- Reproducible Render Node hosting: added `.node-version` (`22`), `render.yaml`
+  (single `starter` `0.5c-512mb` native Node web service in `ohio` near Neon
+  `us-east-2`, `autoDeployTrigger: off`, `healthCheckPath: /api/health/live`,
+  frozen-lockfile `pnpm@11.24.0 --prod=false` + `pnpm db:generate` + `pnpm build`,
+  `start:render` on `0.0.0.0:$PORT`, zero live migrations/seed/cron/worker/Redis/
+  disk).
+- Platform-neutral hosting & readiness repairs: moved `/sw.js` and
+  `/offline.html` `Cache-Control: public, max-age=0, must-revalidate` from
+  `vercel.json` into `next.config.ts` `headers()`; added `RENDER_GIT_COMMIT`
+  support (`src/lib/runtime-identity.ts`) across `/api/health`,
+  `/api/health/live`, and `/api/operator/cutover-readiness`; fixed `/api/health`
+  to return HTTP `503` (`status: "degraded"`) whenever `deploymentReady` is
+  `false` while introducing zero-DB `/api/health/live` so continuous platform
+  probes do not block Neon idle suspension; hardened `isQaHarnessAllowed` and
+  JEV production budget checks for `RENDER=true`; updated
+  `production-release.yml` + `scripts/verify-production-release.mjs` to require
+  explicit target + exact 40-char `commitSha` with no automatic unverified tags.
+- Recoverable secrets & cutover runbook: added values-free inventory
+  `config/render-env-inventory.json`, owner-encrypted X25519/AES-256-GCM bundle
+  + restoration check + allowlisted `tea-db9st3gm7kps73ek9op0` transfer tool
+  (`scripts/render-vault-tool.ts`) and manual-only workflow
+  (`.github/workflows/render-migration-ops.yml`, not executed), plus ordered
+  cutover/backlog/anti-split-brain/rollback runbook in canonical docs.
+- Required CI: wired offline `check:render-migration` and real-Node
+  (`next start`) + disposable-PostgreSQL `check:render-runtime-db` (verifying
+  headers, HTTP 503 readiness failure, exact SHA, Better Auth origins/cookies,
+  and real `next/server` `after()` execution with controlled mocks). `512 MB`
+  live capacity, Render credit details, and live deployment remain unexecuted
+  owner actions.
+
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 
 - Verified baseline: current `main` / Production release `0.79.13`, merge

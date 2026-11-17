@@ -1,15 +1,36 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 16 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 is the current
-> release/evidence baseline; 0A/0B retain the prior pricing/attention and
-> live-refresh candidate history. Preserved evidence follows: historical
-> `main` context, the integration/R5 record, the original R6 failure, and the
-> Y83 delivery failure. This file is not a substitute for code, the canonical
-> topic docs or `docs/BUILD_STATE.md`. No live deployment, provider probe,
-> migration, webhook move or paid call was performed for this snapshot.
+> **Tier 0 orientation snapshot — as of 17 November 2026.** Read with
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records the
+> current Render migration preparation candidate; 00/0A/0B and Sections 1–9
+> retain all prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged. No
+> live deployment, DB migration, secret rotation, webhook move, Telegram send or
+> paid AI call was performed.
 
-## 0. Current release and acceptance evidence — 16 November 2026
+## 0. Render migration preparation & recoverable secrets — 17 November 2026
+
+- **Current `main` baseline:** `0.79.14`, merge commit
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87). At `2026-11-16T21:12Z`
+  Vercel Production returned HTTP `402` / `DEPLOYMENT_DISABLED`; Vercel is not a
+  working runtime or rollback target. Draft PR #88 (`74f6594a...`) remains
+  separate and untouched.
+- **Candidate (`feat/yakfi-render-migration-prep`, `0.79.15`):** prepares one
+  native Node 22 / `pnpm@11.24.0` Render Starter (`0.5c-512mb`, `ohio`) web
+  service in `My Workspace` (`tea-db9st3gm7kps73ek9op0`); moves `/sw.js` and
+  `/offline.html` headers to `next.config.ts`; supports `RENDER_GIT_COMMIT`;
+  separates zero-DB `/api/health/live` from HTTP `200`/`503` `/api/health` DB
+  readiness; requires explicit target + exact 40-char SHA in
+  `production-release.yml`; adds values-free `config/render-env-inventory.json`,
+  manual owner-encrypted X25519/GCM secret recovery + restoration check
+  (`render-migration-ops.yml` / `scripts/render-vault-tool.ts`), and the ordered
+  cutover runbook (`docs/VERCEL_DEPLOYMENT.md` §7).
+- **Still open / owner-gated:** Render $50 credit balance/expiry/exhaustion
+  dashboard check, `512 MB` live RAM measurement, owner recovery keypair +
+  vault backup, live Render deploy, and guarded webhook cutover (explicit
+  backlog policy: no blind replay or `drop_pending_updates`). Reminders stay
+  disabled; unknown JEV/SHADOW values remain `UNKNOWN_UNVERIFIED`.
+
+## 00. Prior acceptance evidence completion — 16 November 2026
 
 - **Current `main` / Production baseline:** `0.79.13`, merge commit
   `472e9aa9571c15b3f091741012b06cbe0d66e576` (PR #86). Refs were verified
