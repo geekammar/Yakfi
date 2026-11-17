@@ -234,13 +234,73 @@ type OwnerKeyfilePayload = {
   privateKey?: string;
 };
 
-type FetchDeps = {
+export type FetchDeps = {
   fetchImpl?: typeof fetch;
 };
 
-type CutoverDeps = {
+export type CutoverDeps = {
   fetchImpl?: typeof fetch;
   now?: () => number;
+};
+
+export type BuildBundleAadParams = {
+  recipient: string;
+  workspaceId: string;
+  serviceId: string;
+  commitSha: string;
+  keyNames: AllowlistedKey[];
+};
+
+export type EncryptAllowlistedParams = {
+  recipient: string;
+  allowlist: AllowlistedKey[];
+  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
+  commitSha: string;
+  serviceId: string;
+  workspaceId?: string;
+  now?: () => Date;
+};
+
+export type VerifyBundleParams = {
+  bundle: EncryptedSecretBundle;
+  privateKey: string;
+};
+
+export type VerifyRenderServiceParams = {
+  serviceId: string;
+  renderApiKey: string;
+  expectedWorkspaceId?: string;
+  expectedRegion?: string;
+};
+
+export type TransferRenderParams = {
+  expectedCommitSha: string;
+  actualCommitSha: string;
+  serviceId: string;
+  renderApiKey: string;
+  ownerRecipient: string;
+  allowlist: AllowlistedKey[];
+  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
+  dryRun: boolean;
+};
+
+export type InspectSourcesParams = {
+  testDatabaseUrl?: string;
+  prodDatabaseUrl?: string;
+  credentialMasterKey?: string;
+  vercelAccessCred?: string;
+  renderApiKey?: string;
+  renderServiceId?: string;
+};
+
+export type VerifyCutoverParams = {
+  renderOrigin: string;
+  expectedCommitSha: string;
+  expectedVersion: string;
+  databaseUrl: string;
+  cutoverSignerCred: string;
+  pendingUpdateCount: number;
+  backlogPolicy?: BacklogDispositionPolicy;
 };
 
 export function generateOwnerRecoveryKeypair(): OwnerRecoveryKeypair {
@@ -298,10 +358,14 @@ function parseOwnerPrivateKey(rawPrivate: string) {
 }
 
 export function parseAllowlist(raw: string): AllowlistedKey[] {
-  const items = raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+  const rawParts = raw.split(",");
+  const items: string[] = [];
+  for (const part of rawParts) {
+    const trimmed = part.trim();
+    if (trimmed.length > 0) {
+      items.push(trimmed);
+    }
+  }
   if (items.length === 0) {
     throw new Error("EMPTY_ALLOWLIST");
   }
@@ -339,13 +403,7 @@ export function validateAllowlistedValue(
   return trimmed;
 }
 
-function buildBundleAad(params: {
-  recipient: string;
-  workspaceId: string;
-  serviceId: string;
-  commitSha: string;
-  keyNames: AllowlistedKey[];
-}): Buffer {
+function buildBundleAad(params: BuildBundleAadParams): Buffer {
   const aadJson = JSON.stringify({
     schema: BUNDLE_SCHEMA,
     recipient: params.recipient,
@@ -357,15 +415,9 @@ function buildBundleAad(params: {
   return Buffer.from(aadJson, "utf8");
 }
 
-export function encryptAllowlistedSecretsForOwner(params: {
-  recipient: string;
-  allowlist: AllowlistedKey[];
-  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
-  commitSha: string;
-  serviceId: string;
-  workspaceId?: string;
-  now?: () => Date;
-}): EncryptedSecretBundle {
+export function encryptAllowlistedSecretsForOwner(
+  params: EncryptAllowlistedParams,
+): EncryptedSecretBundle {
   const commitSha = params.commitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(commitSha)) {
     throw new Error("INVALID_COMMIT_SHA");
@@ -421,7 +473,7 @@ export function encryptAllowlistedSecretsForOwner(params: {
     keyNames: sortedKeys,
   });
 
-  const nowFn = params.now ?? (() => new Date());
+  const createdAt = params.now ? params.now() : new Date();
 
   try {
     const cipher = createCipheriv("aes-256-gcm", derivedKey, iv);
@@ -431,7 +483,7 @@ export function encryptAllowlistedSecretsForOwner(params: {
 
     return {
       schema: BUNDLE_SCHEMA,
-      createdAt: nowFn().toISOString(),
+      createdAt: createdAt.toISOString(),
       recipient: normalizedRecipient,
       ephemeralPublicKey: ephemeralSpki.toString("base64url"),
       iv: iv.toString("base64url"),
@@ -516,7 +568,9 @@ function decryptBundleToMap(
     const decipher = createDecipheriv("aes-256-gcm", derivedKey, iv);
     decipher.setAAD(aad);
     decipher.setAuthTag(authTag);
-    decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    const part1 = decipher.update(ciphertext);
+    const part2 = decipher.final();
+    decrypted = Buffer.concat([part1, part2]);
     const utf8 = decrypted.toString("utf8");
     const parsed = JSON.parse(utf8) as DecryptedEnvelopeShape;
     if (!parsed.values || typeof parsed.values !== "object") {
@@ -539,7 +593,9 @@ function decryptBundleToMap(
   } finally {
     shared.fill(0);
     derivedKey.fill(0);
-    if (decrypted) decrypted.fill(0);
+    if (decrypted) {
+      decrypted.fill(0);
+    }
   }
 }
 
@@ -548,10 +604,9 @@ function decryptBundleToMap(
  * bundle cleanly and that every recovered value satisfies strict runtime
  * format/target validation, returning ONLY values-free metadata.
  */
-export function verifyOwnerEncryptedBundle(params: {
-  bundle: EncryptedSecretBundle;
-  privateKey: string;
-}): BundleVerificationResult {
+export function verifyOwnerEncryptedBundle(
+  params: VerifyBundleParams,
+): BundleVerificationResult {
   try {
     const recovered = decryptBundleToMap(params.bundle, params.privateKey);
     const verifiedKeys = (Object.keys(recovered) as AllowlistedKey[]).sort();
@@ -563,21 +618,16 @@ export function verifyOwnerEncryptedBundle(params: {
       verifiedKeys,
     };
   } catch (err: unknown) {
-    const code =
-      err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)
-        ? err.message
-        : "BUNDLE_VERIFICATION_FAILED";
+    let code = "BUNDLE_VERIFICATION_FAILED";
+    if (err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)) {
+      code = err.message;
+    }
     return { ok: false, code };
   }
 }
 
 export async function verifyRenderServiceOwnership(
-  params: {
-    serviceId: string;
-    renderApiKey: string;
-    expectedWorkspaceId?: string;
-    expectedRegion?: string;
-  },
+  params: VerifyRenderServiceParams,
   deps: FetchDeps = {},
 ): Promise<VerifiedRenderService> {
   const serviceId = params.serviceId.trim();
@@ -588,8 +638,8 @@ export async function verifyRenderServiceOwnership(
   if (!apiCred) {
     throw new Error("MISSING_RENDER_API_KEY");
   }
-  const rawWorkspace =
-    params.expectedWorkspaceId ?? CONFIRMED_RENDER_WORKSPACE_ID;
+  const fallbackWorkspace = CONFIRMED_RENDER_WORKSPACE_ID;
+  const rawWorkspace = params.expectedWorkspaceId ?? fallbackWorkspace;
   const expectedWorkspace = rawWorkspace.trim();
   if (expectedWorkspace !== CONFIRMED_RENDER_WORKSPACE_ID) {
     throw new Error("WORKSPACE_ID_MISMATCH");
@@ -624,34 +674,30 @@ export async function verifyRenderServiceOwnership(
   if (svc.type !== "web_service") {
     throw new Error("RENDER_SERVICE_TYPE_MISMATCH");
   }
-  const region =
-    typeof svc.serviceDetails?.region === "string"
-      ? svc.serviceDetails.region.toLowerCase()
-      : "";
+  let region = "";
+  if (typeof svc.serviceDetails?.region === "string") {
+    region = svc.serviceDetails.region.toLowerCase();
+  }
   if (region && region !== expectedRegion.toLowerCase()) {
     throw new Error("RENDER_REGION_MISMATCH");
+  }
+
+  let serviceName = "unknown";
+  if (typeof svc.name === "string") {
+    serviceName = svc.name;
   }
 
   return {
     ok: true,
     serviceId,
-    serviceName: typeof svc.name === "string" ? svc.name : "unknown",
+    serviceName,
     workspaceId: expectedWorkspace,
     region: region || expectedRegion,
   };
 }
 
 export async function transferAllowlistedSecretsToRender(
-  params: {
-    expectedCommitSha: string;
-    actualCommitSha: string;
-    serviceId: string;
-    renderApiKey: string;
-    ownerRecipient: string;
-    allowlist: AllowlistedKey[];
-    sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
-    dryRun: boolean;
-  },
+  params: TransferRenderParams,
   deps: FetchDeps = {},
 ): Promise<TransferRenderResult> {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
@@ -660,13 +706,11 @@ export async function transferAllowlistedSecretsToRender(
     throw new Error("COMMIT_SHA_MISMATCH");
   }
 
-  const serviceInfo = await verifyRenderServiceOwnership(
-    {
-      serviceId: params.serviceId,
-      renderApiKey: params.renderApiKey,
-    },
-    deps,
-  );
+  const ownershipReq: VerifyRenderServiceParams = {
+    serviceId: params.serviceId,
+    renderApiKey: params.renderApiKey,
+  };
+  const serviceInfo = await verifyRenderServiceOwnership(ownershipReq, deps);
 
   const encryptedBundle = encryptAllowlistedSecretsForOwner({
     recipient: params.ownerRecipient,
@@ -751,7 +795,9 @@ export async function transferAllowlistedSecretsToRender(
 }
 
 function classifyDbHostSafe(rawUrl: string | undefined): DbHostClassification {
-  if (!rawUrl || !rawUrl.trim()) return "MISSING_OR_INVALID";
+  if (!rawUrl || !rawUrl.trim()) {
+    return "MISSING_OR_INVALID";
+  }
   try {
     const parsed = new URL(rawUrl.trim());
     if (AUTHORIZED_ACTIVE_DB_HOSTS.has(parsed.hostname)) {
@@ -767,14 +813,7 @@ function classifyDbHostSafe(rawUrl: string | undefined): DbHostClassification {
 }
 
 export async function inspectRecoverySources(
-  params: {
-    testDatabaseUrl?: string;
-    prodDatabaseUrl?: string;
-    credentialMasterKey?: string;
-    vercelAccessCred?: string;
-    renderApiKey?: string;
-    renderServiceId?: string;
-  },
+  params: InspectSourcesParams,
   deps: FetchDeps = {},
 ): Promise<SourceInspectionReport> {
   const resolvedKey = resolveMasterKey(params.credentialMasterKey?.trim());
@@ -795,34 +834,37 @@ export async function inspectRecoverySources(
     const vBase = "https://api.vercel.com/v10/projects";
     const vProj = CONFIRMED_VERCEL_PROJECT_ID;
     const vercelUrl = `${vBase}/${vProj}/env?decrypt=false`;
+    const vToken = params.vercelAccessCred.trim();
     const res = await fetchImpl(vercelUrl, {
       method: "GET",
-      headers: { Authorization: `Bearer ${params.vercelAccessCred.trim()}` },
+      headers: { Authorization: `Bearer ${vToken}` },
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
     if (res.ok) {
       const data = (await res.json()) as VercelEnvListPayload;
       if (Array.isArray(data.envs)) {
-        const prodEnvs = data.envs.filter((item) => {
+        const keys: VercelEnvKeyMeta[] = [];
+        let sensitiveCount = 0;
+        for (const item of data.envs) {
           const targets: unknown[] = [];
           if (Array.isArray(item.target)) {
             targets.push(...item.target);
           } else if (item.target !== undefined) {
             targets.push(item.target);
           }
-          return targets.includes("production");
-        });
-        // Strip everything except key name and type (never retain value).
-        const keys = prodEnvs
-          .map((item) => ({
-            key: typeof item.key === "string" ? item.key : "UNKNOWN_KEY",
-            type: typeof item.type === "string" ? item.type : "unknown",
-          }))
-          .sort((a, b) => a.key.localeCompare(b.key));
-        const sensitiveCount = keys.filter(
-          (k) => k.type === "sensitive" || k.type === "secret",
-        ).length;
+          if (!targets.includes("production")) {
+            continue;
+          }
+          // Strip everything except key name and type (never retain value).
+          const key = typeof item.key === "string" ? item.key : "UNKNOWN_KEY";
+          const type = typeof item.type === "string" ? item.type : "unknown";
+          keys.push({ key, type });
+          if (type === "sensitive" || type === "secret") {
+            sensitiveCount += 1;
+          }
+        }
+        keys.sort((a, b) => a.key.localeCompare(b.key));
         report.vercelProductionMetadata = {
           totalProductionCount: keys.length,
           sensitiveCount,
@@ -834,13 +876,11 @@ export async function inspectRecoverySources(
   }
 
   if (params.renderApiKey?.trim() && params.renderServiceId?.trim()) {
-    const verified = await verifyRenderServiceOwnership(
-      {
-        serviceId: params.renderServiceId,
-        renderApiKey: params.renderApiKey,
-      },
-      deps,
-    );
+    const svcReq: VerifyRenderServiceParams = {
+      serviceId: params.renderServiceId,
+      renderApiKey: params.renderApiKey,
+    };
+    const verified = await verifyRenderServiceOwnership(svcReq, deps);
     report.renderServiceVerified = {
       serviceId: verified.serviceId,
       workspaceId: verified.workspaceId,
@@ -852,15 +892,7 @@ export async function inspectRecoverySources(
 }
 
 export async function verifyRenderCutoverReadinessAndBacklog(
-  params: {
-    renderOrigin: string;
-    expectedCommitSha: string;
-    expectedVersion: string;
-    databaseUrl: string;
-    cutoverSignerCred: string;
-    pendingUpdateCount: number;
-    backlogPolicy?: BacklogDispositionPolicy;
-  },
+  params: VerifyCutoverParams,
   deps: CutoverDeps = {},
 ): Promise<RenderCutoverOutcome> {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
@@ -874,14 +906,17 @@ export async function verifyRenderCutoverReadinessAndBacklog(
   } catch {
     return { ok: false, code: "INVALID_RENDER_ORIGIN" };
   }
+  const pathName = parsedOrigin.pathname;
+  const validPath = pathName === "/" || pathName === "";
+  const lowerHost = parsedOrigin.hostname.toLowerCase();
   if (
     parsedOrigin.protocol !== "https:" ||
-    parsedOrigin.username ||
-    parsedOrigin.password ||
-    parsedOrigin.search ||
-    parsedOrigin.hash ||
-    (parsedOrigin.pathname !== "/" && parsedOrigin.pathname !== "") ||
-    parsedOrigin.hostname.toLowerCase().endsWith(".vercel.app")
+    Boolean(parsedOrigin.username) ||
+    Boolean(parsedOrigin.password) ||
+    Boolean(parsedOrigin.search) ||
+    Boolean(parsedOrigin.hash) ||
+    !validPath ||
+    lowerHost.endsWith(".vercel.app")
   ) {
     return { ok: false, code: "INVALID_RENDER_ORIGIN" };
   }
@@ -909,21 +944,19 @@ export async function verifyRenderCutoverReadinessAndBacklog(
   }
 
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
-  const nowMs = (deps.now ?? Date.now)();
+  const nowMs = deps.now ? deps.now() : Date.now();
   const timestamp = String(nowMs);
   const origin = parsedOrigin.origin;
+  const botId = CUTOVER_READINESS_BOT_ID;
+  const signature = signCutoverReadiness(signer, timestamp, botId);
 
   const res = await fetchImpl(`${origin}${CUTOVER_READINESS_PATH}`, {
     method: "GET",
     redirect: "error",
     headers: {
-      "x-flowpilot-cutover-bot-id": CUTOVER_READINESS_BOT_ID,
+      "x-flowpilot-cutover-bot-id": botId,
       "x-flowpilot-cutover-timestamp": timestamp,
-      "x-flowpilot-cutover-signature": signCutoverReadiness(
-        signer,
-        timestamp,
-        CUTOVER_READINESS_BOT_ID,
-      ),
+      "x-flowpilot-cutover-signature": signature,
     },
     signal: AbortSignal.timeout(10_000),
   });
@@ -970,7 +1003,9 @@ export async function verifyRenderCutoverReadinessAndBacklog(
 
 function getArgValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
-  if (idx === -1) return undefined;
+  if (idx === -1) {
+    return undefined;
+  }
   return args[idx + 1];
 }
 
@@ -989,21 +1024,21 @@ async function runCli(): Promise<void> {
   if (subcommand === "keygen") {
     const outPath = getArgValue(args, "--out");
     if (!outPath) {
-      console.error(
-        "Usage: tsx scripts/render-vault-tool.ts keygen --out <private-keyfile.json>",
-      );
+      const u = "Usage: tsx scripts/render-vault-tool.ts keygen --out <file>";
+      console.error(u);
       process.exit(1);
     }
     const pair = generateOwnerRecoveryKeypair();
+    const warnMsg =
+      "STORE ONLY IN ENCRYPTED VAULT. NEVER COMMIT OR SHARE privateKey.";
     const keypairPayload = {
       schema: "yakfi.owner-recovery-keypair@v1",
       createdAt: new Date().toISOString(),
       recipient: pair.recipient,
       privateKey: pair.privateKey,
-      warning:
-        "STORE THIS FILE ONLY IN YOUR ENCRYPTED PASSWORD MANAGER VAULT. NEVER COMMIT OR SHARE privateKey.",
+      warning: warnMsg,
     };
-    const keypairJson = JSON.stringify(keypairPayload, null, 2) + "\n";
+    const keypairJson = `${JSON.stringify(keypairPayload, null, 2)}\n`;
     writeFileSync(outPath, keypairJson, { mode: 0o600 });
     console.log(`✅ Wrote owner recovery keypair (0600) to: ${outPath}`);
     console.log("📌 Public recipient (safe for workflow input):");
@@ -1015,9 +1050,8 @@ async function runCli(): Promise<void> {
     const bundlePath = getArgValue(args, "--bundle");
     const keyFilePath = getArgValue(args, "--key-file");
     if (!bundlePath || !keyFilePath) {
-      console.error(
-        "Usage: tsx scripts/render-vault-tool.ts verify-bundle --bundle <bundle.enc.json> --key-file <private-keyfile.json>",
-      );
+      const u = "Usage: verify-bundle --bundle <bundle> --key-file <keyfile>";
+      console.error(u);
       process.exit(1);
     }
     const rawBundle = readFileSync(bundlePath, "utf8");
@@ -1054,22 +1088,15 @@ async function runCli(): Promise<void> {
     const testDbClass = report.testDbClassification;
     const prodDbClass = report.prodDbClassification;
     writeSummaryLine("### Safe Recovery Source Inspection (Values-Free)");
-    writeSummaryLine(`- **TEST_DATABASE_URL target**: \`${testDbClass}\``);
-    writeSummaryLine(
-      `- **PRODUCTION_DATABASE_URL target**: \`${prodDbClass}\``,
-    );
-    writeSummaryLine(
-      `- **CREDENTIAL_MASTER_KEY 32-byte format**: \`${keyFormatLabel}\``,
-    );
+    writeSummaryLine(`- **TEST_DATABASE_URL**: \`${testDbClass}\``);
+    writeSummaryLine(`- **PRODUCTION_DATABASE_URL**: \`${prodDbClass}\``);
+    writeSummaryLine(`- **CREDENTIAL_MASTER_KEY**: \`${keyFormatLabel}\``);
     if (report.vercelProductionMetadata) {
       const v = report.vercelProductionMetadata;
-      writeSummaryLine(
-        `- **Vercel Production Total**: \`${v.totalProductionCount}\``,
-      );
+      const totalProd = v.totalProductionCount;
+      writeSummaryLine(`- **Vercel Prod Total**: \`${totalProd}\``);
       writeSummaryLine(`- **Vercel Sensitive**: \`${v.sensitiveCount}\``);
-      writeSummaryLine(
-        `- **Vercel Non-Sensitive**: \`${v.nonSensitiveCount}\``,
-      );
+      writeSummaryLine(`- **Vercel Config**: \`${v.nonSensitiveCount}\``);
       for (const item of v.keys) {
         writeSummaryLine(`  - \`${item.key}\` (\`${item.type}\`)`);
       }
@@ -1106,7 +1133,7 @@ async function runCli(): Promise<void> {
       commitSha: expectedSha,
       serviceId: process.env.RENDER_SERVICE_ID ?? "",
     });
-    const outJson = JSON.stringify(bundle, null, 2) + "\n";
+    const outJson = `${JSON.stringify(bundle, null, 2)}\n`;
     writeFileSync(bundleOut, outJson, { mode: 0o600 });
     const joinedAllowlist = bundle.metadata.keyNames.join(", ");
     writeSummaryLine("### Encrypted Owner Bundle Created (Zero Plaintext)");
@@ -1136,7 +1163,7 @@ async function runCli(): Promise<void> {
     });
     const { summary, encryptedBundle } = transferResult;
     if (bundleOut) {
-      const jsonOut = JSON.stringify(encryptedBundle, null, 2) + "\n";
+      const jsonOut = `${JSON.stringify(encryptedBundle, null, 2)}\n`;
       writeFileSync(bundleOut, jsonOut, { mode: 0o600 });
     }
     const processed = (summary.transferredKeys ?? []).join(", ");
@@ -1160,10 +1187,10 @@ const argvEntry = process.argv[1];
 const cliEntryHref = argvEntry ? pathToFileURL(argvEntry).href : "";
 if (cliEntryHref && import.meta.url === cliEntryHref) {
   runCli().catch((err: unknown) => {
-    const safeCode =
-      err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)
-        ? err.message
-        : "UNEXPECTED_VAULT_TOOL_ERROR";
+    let safeCode = "UNEXPECTED_VAULT_TOOL_ERROR";
+    if (err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)) {
+      safeCode = err.message;
+    }
     console.error(`::error::${safeCode}`);
     process.exit(1);
   });
