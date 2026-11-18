@@ -45,7 +45,11 @@
   Render runtime readiness, requires `pending_update_count === 0` for apply,
   never uses `drop_pending_updates`, and reports partial failures without blind
   retry.
-  CI covers controlled Telegram responses; no live webhook change was made.
+  CI run `44419719540` passed the required gate with the new checks **18/18**.
+  Manual `workflow_dispatch` from the candidate branch is unavailable until
+  the workflow exists on `main` (GitHub returns 404); no live read-only
+  preflight was executed from the candidate and no local secret workaround was
+  used. No live webhook change was made.
 - **Not done / not verified:** live `getWebhookInfo`/pending backlog via the new
   workflow (candidate is not on `main` until merge), Telegram webhook cutover,
   Telegram messages, live product acceptance, and `512 MB` capacity measurement.

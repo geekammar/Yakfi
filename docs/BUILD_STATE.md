@@ -26,9 +26,13 @@
   read-only zero mutations, wrong SHA/version/DB/bot/current URL, invalid/
   unknown/nonzero pending counts, failed signed readiness/unresolved credential,
   controlled successful apply, already-at-destination, and partial/ambiguous
-  failures using controlled Telegram responses.
-- The candidate workflow cannot be dispatched until it exists on `main`; no
-  local secret-bearing workaround was used. No live `setWebhook`/
+  failures using controlled Telegram responses. CI run `44419719540` passed
+  with **18/18** new checks, 27/27 Render migration checks, `v0.79.18`, and
+  Playwright 175 passed / 0 failed / 15 skipped.
+- The candidate workflow cannot be dispatched until it exists on `main`
+  (GitHub returned 404 on the candidate ref); no local secret-bearing
+  workaround was used, so no live read-only preflight was executed. No live
+  `setWebhook`/
   `deleteWebhook`, secret/hash write, Telegram send, paid AI call, migration,
   application DB write, Blueprint import, Rabet change, or PR88 change was
   performed.

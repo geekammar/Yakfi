@@ -482,7 +482,8 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `drop_pending_updates`, and handles already-at-destination as a no-op.
      Unknown/non-zero backlog or any failed identity/readiness check blocks
      apply. Do **not** use the legacy `cutover-main-runtime-*` Vercel operations
-     for Render.
+     for Render. The workflow must exist on `main` before its first manual
+     dispatch; GitHub rejects dispatch from a feature branch.
    - **Partial-failure boundary:** Telegram `setWebhook` and PostgreSQL
      `webhook_secret_hash` persistence are not atomic. On partial or ambiguous
      failure, inspect `getWebhookInfo` and the DB hash, then use the reviewed
