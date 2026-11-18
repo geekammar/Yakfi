@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.14",
+  "version": "0.79.15",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -36,6 +36,8 @@
     "check:telegram-repair-workflow": "tsx scripts/check-telegram-repair-workflow.ts",
     "check:update-production-runtime-env": "tsx scripts/check-update-production-runtime-env.ts",
     "check:cutover-readiness": "tsx scripts/check-cutover-readiness.ts",
+    "check:render-migration": "tsx scripts/check-render-migration.ts",
+    "check:render-runtime-db": "tsx scripts/check-render-runtime-db.ts",
     "check:telegram-onboarding": "tsx scripts/check-telegram-onboarding.ts",
     "check:telegram-ux001": "tsx scripts/check-telegram-ux001.ts",
     "check:telegram-execution-defects": "tsx scripts/check-telegram-execution-defects.ts",
@@ -163,6 +165,7 @@
     "dev": "pnpm generate:ai-prompts && next dev",
     "build": "pnpm generate:ai-prompts && next build",
     "start": "next start",
+    "start:render": "sh -c 'exec next start --hostname 0.0.0.0 --port \"${PORT:-10000}\"'",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

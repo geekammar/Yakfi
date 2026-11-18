@@ -85,7 +85,7 @@ export default defineConfig({
     ? undefined
     : {
         command: `pnpm start -p ${PORT}`,
-        url: `http://localhost:${PORT}/api/health`,
+        url: `http://localhost:${PORT}/api/health/live`,
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
         env: {

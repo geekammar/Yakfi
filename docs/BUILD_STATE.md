@@ -1,5 +1,64 @@
 # FlowPilot — Build State
 
+## Render migration preparation and recoverable secrets (draft PR, v0.79.15) — 17 November 2026
+
+- Verified baseline: `main` / `v0.79.14` at
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87 merged). Separate branch
+  `feat/yakfi-render-migration-prep` starts directly from `ef3a5d80`; draft PR
+  #88 (`74f6594a6982a2c1381c3e86aecd07d9ba026fce`) remains completely untouched.
+- Reproducible Render Node hosting: added `.node-version` (`22`), `render.yaml`
+  (single `starter` `0.5c-512mb` native Node web service in `ohio` near Neon
+  `us-east-2`, `autoDeployTrigger: off`, `healthCheckPath: /api/health/live`,
+  frozen-lockfile `pnpm@11.24.0 --prod=false` + `pnpm db:generate` + `pnpm build`,
+  `start:render` on `0.0.0.0:$PORT`, zero live migrations/seed/cron/worker/Redis/
+  disk).
+- Platform-neutral hosting & readiness repairs: moved `/sw.js` and
+  `/offline.html` `Cache-Control: public, max-age=0, must-revalidate` from
+  `vercel.json` into `next.config.ts` `headers()`; added `RENDER_GIT_COMMIT`
+  support (`src/lib/runtime-identity.ts`) across `/api/health`,
+  `/api/health/live`, and `/api/operator/cutover-readiness`; fixed `/api/health`
+  to return HTTP `503` (`status: "degraded"`) whenever `deploymentReady` is
+  `false` while introducing zero-DB `/api/health/live` so continuous platform
+  probes do not block Neon idle suspension; hardened `isQaHarnessAllowed` and
+  JEV production budget checks for `RENDER=true`; updated
+  `production-release.yml` + `scripts/verify-production-release.mjs` to require
+  explicit target + exact 40-char `commitSha` with no automatic unverified tags.
+- Recoverable secrets & cutover runbook: added values-free inventory
+  `config/render-env-inventory.json`, owner-encrypted X25519/AES-256-GCM bundle
+  with local restoration check and allowlisted `tea-db9st3gm7kps73ek9op0`
+  transfer tool (`scripts/render-vault-tool.ts`), manual-only workflow
+  (`.github/workflows/render-migration-ops.yml`, not executed), and ordered
+  cutover/backlog/anti-split-brain/rollback runbook in canonical docs.
+- Required CI: wired offline `check:render-migration` and real-Node
+  (`next start`) + disposable-PostgreSQL `check:render-runtime-db` (verifying
+  headers, HTTP 503 readiness failure, exact SHA, Better Auth origins/cookies,
+  and real `next/server` `after()` execution with controlled mocks). Repaired
+  CI run `44177671953` `DB7` harness defects (missing default `Branch` on the
+  synthetic test `Business`, `aiResponseSchema`-compliant OpenRouter mock body,
+  `webhookBody.success` contract check, and `Request`-preserving preload
+  fetch). Verified on the new Boxd VPS that old VPS local files, `rclone`, and
+  Agent Handoff did not survive, `RENDER_API_KEY` is absent from GitHub
+  secrets, and zero encrypted bundles have been exported yet. Added focused
+  recovery/transfer hardening: pre-service `export-encrypted-bundle`
+  (`PRE_SERVICE_CREATION` while keeping strict `srv-...`/workspace checks for
+  transfer), exclusive `0600` `keygen` refusing existing files and symlinks,
+  two-job backup-before-transfer delivering ciphertext before remote `PUT`s with
+  required values-free `owner_restoration_proof`, private-key CI ban, and
+  `always()` artifact preservation across partial/network failures, plus
+  read-only zero-Telegram `verify-selected-runtime` decryption preflight tested
+  against disposable fixtures (`check:render-migration` +
+  `check:render-runtime-db`). Hardened `verifyRenderServiceOwnership` to reject
+  missing, empty, malformed, or wrong `serviceDetails.region` before any `PUT`,
+  and fixed `render-migration-ops.yml` read-only `prisma migrate status` to
+  preserve the real exit code, clean up redacted files on `EXIT`, distinguish
+  credential decryption from migration status, and fail `NOT_READY` without
+  applying migrations on pending/failed/divergent states. Verified actual
+  `package.json` version on `feat/yakfi-render-migration-prep` (including
+  `a0cf117`) is `0.79.15` over `main` `0.79.14` (`0.79.16` in the earlier chat
+  summary was a reporting typo; historical reports and PR #88 remain untouched).
+  `512 MB` live capacity, Render credit details, and live deployment remain
+  unexecuted owner actions.
+
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 
 - Verified baseline: current `main` / Production release `0.79.13`, merge

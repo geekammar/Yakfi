@@ -68,10 +68,12 @@ export function isPublicPath(
     return true;
   }
 
-  // /api/health is the public liveness probe (deployment validation).
+  // /api/health (explicit DB + env readiness) and /api/health/live (lightweight
+  // process liveness with zero DB queries) are public probes.
   return (
     PUBLIC_PATHS.includes(pathname as (typeof PUBLIC_PATHS)[number]) ||
     pathname === "/api/health" ||
+    pathname === "/api/health/live" ||
     PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }

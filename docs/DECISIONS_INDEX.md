@@ -124,6 +124,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
 | 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
 | 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
+| 110 | Render single-service Node migration prep & recoverable secrets: `render.yaml`, `next.config.ts` PWA headers, `RENDER_GIT_COMMIT`, zero-DB `/api/health/live` vs HTTP 503 `/api/health`, exact-SHA release gate, values-free inventory + owner-encrypted X25519/GCM recovery & cutover runbook | Render hosting/health/release gate/secret recovery/cutover | [#110](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 

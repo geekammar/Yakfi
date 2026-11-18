@@ -1,0 +1,43 @@
+# Yakfi (FlowPilot) — Reproducible Render Blueprint
+# Target workspace: My Workspace (tea-db9st3gm7kps73ek9op0)
+# Single Node web service (0.5 CPU / 512 MB RAM Starter plan) in Ohio (AWS us-east-2)
+# near the existing Neon PostgreSQL region (us-east-2).
+#
+# Safety invariants:
+# - Live Prisma migrations and seed commands NEVER run in buildCommand or startCommand.
+# - autoDeployTrigger is off by default so unverified or unconfigured commits never
+#   auto-deploy or compete with the active Telegram webhook runtime.
+# - Continuous platform liveness uses /api/health/live (zero DB queries) so 5-second
+#   Render probes do not block Neon scale-to-zero suspension or burn compute hours.
+#   Post-deploy verification explicitly checks /api/health (DB + env readiness).
+
+services:
+  - type: web
+    name: yakfi-web
+    runtime: node
+    plan: starter
+    region: ohio
+    branch: main
+    autoDeployTrigger: off
+    healthCheckPath: /api/health/live
+    buildCommand: corepack enable && corepack prepare pnpm@11.24.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm build
+    startCommand: pnpm run start:render
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        sync: false
+      - key: BETTER_AUTH_URL
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: CREDENTIAL_MASTER_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: TELEGRAM_MANAGER_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_MANAGER_BOT_USERNAME
+        sync: false

@@ -457,3 +457,135 @@ guaranteed.
   dry-run with `expected_current=main`, and inspect `/api/health`.
 
 Exact order and rollback are in `TROUBLESHOOTING.md`.
+
+## Render Migration Recoverable Secrets & Values-Free Inventory (17 November 2026)
+
+### Two-Output Recoverable Configuration Model
+
+Configuration recoverability separates metadata from secret values:
+
+1. **Git-tracked values-free inventory (`config/render-env-inventory.json`):**
+   records every required, optional, platform-injected, and forbidden variable
+   with 11 mandatory fields (`name`, `purpose`, `environment`, `requiredStatus`,
+   `recoverySource`, `recoveryState`, `replacementImpact`, `owner`,
+   `vaultItemRef`, `verificationDate`, `nextAction`) and **zero** secret values.
+   Validated in CI by `pnpm check:render-migration`.
+2. **Owner-controlled encrypted vault (`yakfi/render-prod/*`):** holds actual
+   secret values in Ammar's password manager plus offline encrypted X25519/GCM
+   recovery bundles (`yakfi.encrypted-secret-bundle@v1`). **Render, Vercel, and
+   GitHub Actions are runtime distribution targets, never the sole backup.** Any
+   newly created secret must be written to the owner vault before installation
+   on Render. Never place secret values in Git, PRs, Drive reports, logs,
+   screenshots, or plaintext CI artifacts.
+
+### Vercel 25-Variable Observation & GitHub Secrets Reality
+
+- Reviewer observed **25 Production variables** in Vercel project
+  `flowpilot-prod` (`prj_CjKh6Qt6IAKEc9EB4StaJJxnP0Fp`): **24 Sensitive/Secret**
+  and **1 Config** (`NEXT_PUBLIC_APP_URL`). Vercel cannot read back Sensitive
+  Production values via CLI (`vercel env pull`) or REST API (`?decrypt=false`),
+  so an `env pull` is never a complete backup.
+- GitHub Actions repository secrets (`gh secret list` metadata re-verified on
+  the new Boxd VPS 2026-11-17/18, values never exposed by API):
+  `CREDENTIAL_MASTER_KEY` (~24d ago), `PRODUCTION_DATABASE_URL` (~1mo ago;
+  overridden in `Production` environment by an environment secret updated ~17d
+  ago), `TEST_DATABASE_URL` (~1mo ago), `VERCEL_TOKEN` (~5d ago),
+  `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (~4d ago), and
+  `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~4d ago — failed recovery candidate
+  on 2026-11-13, not a valid backup). `RENDER_API_KEY` is **not** currently set
+  in GitHub secrets (required only if dispatching `render-migration-ops.yml`
+  service checks/transfer instead of manual vault paste). Secret name presence
+  does **not** prove decryption compatibility until verified by
+  `verify-selected-runtime` (`HEALTHY_LOCAL_KEY`).
+- **Deleted old VPS boundary:** local `.env*`, `rclone`, and Agent Handoff did
+  not survive on the new Boxd VPS. `render-migration-ops.yml` has never been
+  dispatched (zero encrypted bundles exported); any private key that existed
+  solely on the deleted VPS without an external vault copy is permanently lost,
+  and no encrypted backup may ever be claimed recoverable without its private
+  key in Ammar's workstation vault.
+- **Unknown JEV / Shadow settings:** `FLOWPILOT_JEV_SEMANTIC_ENABLED`,
+  `FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET`, `FLOWPILOT_JEV_SHADOW_ENABLED`,
+  `SHADOW_SALT`, `SHADOW_SAMPLE_RATE`, `SHADOW_MAX_CALLS_PER_DAY`, and
+  `JEV_SHADOW_TIMEOUT_MS` remain recorded as `UNKNOWN_UNVERIFIED` until key-name
+  metadata is inspected via `render-migration-ops.yml` (`inspect-sources`) and
+  confirmed by Ammar. Never guess values that alter engine authority or AI spend.
+- **Appointment reminders:** `APPOINTMENT_REMINDERS_ENABLED` remains
+  `CONFIRMED_DISABLED` (unset) unless separately approved.
+
+### Manual Secret Recovery, Owner Encryption & Restoration Check
+
+Prepared in `.github/workflows/render-migration-ops.yml` +
+`scripts/render-vault-tool.ts` (`workflow_dispatch` only; **never** runs in PR
+CI; **not** executed in this preparation task):
+
+1. **Exclusive owner keypair generation (Ammar's private workstation only):**
+   ```bash
+   pnpm exec tsx scripts/render-vault-tool.ts keygen --out ~/yakfi-owner-recovery-key.json
+   ```
+   Uses exclusive `O_CREAT | O_EXCL` (`0600`) creation and refuses existing
+   files or symlinks so an existing private key can never be overwritten. Save
+   `~/yakfi-owner-recovery-key.json` inside Ammar's encrypted password manager
+   vault; copy only the public `yakfi-rcpt-v1:...` recipient (any private key
+   material passed to CI is rejected with `PRIVATE_KEY_INPUT_FORBIDDEN`).
+2. **Read-only decryption preflight (`mode=verify-selected-runtime`) & metadata inspection (`mode=inspect-sources`):**
+   `verify-selected-runtime` proves read-only AES-256-GCM decryption of the
+   intended existing `fp:<id>` credential in the active Neon dataset
+   (`status: HEALTHY_LOCAL_KEY`) with zero Telegram/AI calls and zero secret
+   values in output, then runs read-only `prisma migrate status` (preserving its
+   real exit code, redacting URL credentials, cleaning up via `EXIT` trap,
+   distinguishing decryption status from migration status, and failing
+   `NOT_READY` without applying migrations if migrations are pending, failed, or
+   divergent). `inspect-sources` classifies Neon hosts, checks 32-byte key
+   decoding, optionally verifies Render service ownership
+   (`tea-db9st3gm7kps73ek9op0` / strict `ohio`, rejecting missing, malformed, or
+   wrong region), and lists Vercel Production variable names/types
+   (`?decrypt=false` with `value` stripped).
+3. **Pre-service encrypted export (`mode=export-encrypted-bundle`) & Restoration Proof:**
+   works before any Render service exists (`render_service_id` blank ->
+   `PRE_SERVICE_CREATION`), runs `verify-selected-runtime` first, encrypts only
+   the explicit allowlist (`DATABASE_URL`, `CREDENTIAL_MASTER_KEY`) in memory to
+   `owner_recipient` using ephemeral X25519 ECDH + HKDF-SHA256 + AES-256-GCM,
+   and uploads ciphertext-only `yakfi-owner-encrypted-bundle` (`if: always()`,
+   1-day retention). Ammar verifies restoration locally without printing
+   plaintext and obtains the values-free one-way `restorationProof`
+   (`yakfi-verified-v1:...`):
+   ```bash
+   pnpm exec tsx scripts/render-vault-tool.ts verify-bundle \
+     --bundle yakfi-secrets.enc.json \
+     --key-file ~/yakfi-owner-recovery-key.json
+   ```
+4. **Backup-before-transfer (`mode=transfer-to-render`):** requires exact
+   40-char SHA, confirmed real `srv-...` in `tea-db9st3gm7kps73ek9op0` + `ohio`
+   `web_service` (`PRE_SERVICE_CREATION` rejected), and verified
+   `owner_restoration_proof` (`yakfi-verified-v1:...`) when `dry_run=false`. Job
+   1 (`prepare-and-deliver-backup`) verifies pairing + proof and delivers
+   `yakfi-owner-encrypted-bundle` to GitHub Artifacts **before** Job 2
+   (`apply-render-transfer`) issues single-key
+   `PUT /v1/services/{serviceId}/env-vars/{key}` calls, and `always()` artifact
+   upload + pre-PUT disk persistence preserve ciphertext across partial HTTP
+   failures and network exceptions.
+
+### Selective Re-Linking Contingency (If Recovery Fails)
+
+Never generate a replacement `CREDENTIAL_MASTER_KEY` blindly or rotate all
+secrets at once. If `CREDENTIAL_MASTER_KEY` cannot decrypt the selected DB's
+`fp:<id>` credential:
+
+- **Unaffected / safely regenerable:** `BETTER_AUTH_URL` &
+  `NEXT_PUBLIC_APP_URL` (new Render HTTPS origin), `BETTER_AUTH_SECRET`
+  (fresh vault-backed secret; users sign in again on the new domain),
+  `OPENROUTER_API_KEY` (dedicated bounded key from OpenRouter console, backed up
+  to vault first).
+- **Affected `fp:<id>` integration on active Neon test DB
+  (`ep-little-mouse-a5nh644n.../neondb`):** fixed Business
+  `f5314115-ae8c-46ea-9d7e-080ef5e7366d`, Telegram Connection
+  `1d2cdf87-2bee-4f26-aad5-5ab9efd1c716` (`@Drafnanafnanbot`, ID `8926541123`).
+  Re-link **only** that single connection via reviewed
+  `scripts/repair-test-bot-credential.py --apply` using
+  `YAKFI_TEST_CUSTOMER_BOT_TOKEN` and a vault-backed master key, which writes a
+  new `fp:<id>` row in one guarded transaction while **preserving prior
+  `runtime_credentials` rows, conversations, delivery routes, dedupe records,
+  and all QA249/QA250/QA251/R5/R6/Y83 evidence**.
+- **Inactive legacy Production DB (`ep-tiny-grass-a5e63jev.../neondb`):** 1
+  `runtime_credentials` row, 3 Telegram connections, 2 WhatsApp connections —
+  leave completely untouched as historical recovery data.
