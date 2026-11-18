@@ -496,11 +496,11 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.6 Rollback Plan & PR #88 Separation
 
-- **Application rollback target:** the current live deployment
-  `dep-dbv0vm7f3r2c73ent7ug` is the **first successful Render deployment**; there
-  is no earlier known-good Render deployment to roll back to. A future rollback
-  must target a later verified deployment or a reviewed forward fix. Do not
-  claim a tested Render rollback exists.
+- **Application rollback target:** the current live deployment is
+  `dep-dbv2akqvcj2c73c0a440` at `e1851de` / `0.79.17`. The previous successful
+  Render deployment `dep-dbv0vm7f3r2c73ent7ug` at `629d05f` / `0.79.16` is
+  deactivated but remains a potential rollback target. A Render rollback to a
+  previous deployment has **not** been tested; do not claim it is verified.
 - **Vercel is NOT a rollback target:** while Vercel returns HTTP `402`
   `DEPLOYMENT_DISABLED` (and its Production Sensitive secrets cannot be read
   back), never treat Vercel as an available fallback runtime.
