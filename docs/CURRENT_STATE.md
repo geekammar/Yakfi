@@ -1,42 +1,42 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 17 November 2026.** Read with
+> **Tier 0 orientation snapshot — as of 18 November 2026.** Read with
 > `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records the
-> current Render migration preparation candidate; 00/0A/0B and Sections 1–9
-> retain all prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged. No
-> live deployment, DB migration, secret rotation, webhook move, Telegram send or
-> paid AI call was performed.
+> merged Render preparation and the current direct-transfer candidate;
+> 00/0A/0B and Sections 1–9 retain all prior release, R5, R6, Y83 and QA249/QA250
+> evidence unchanged. No live deployment, DB migration, secret rotation, webhook
+> move, Telegram send or paid AI call was performed.
 
-## 0. Render migration preparation & recoverable secrets — 17 November 2026
+## 0. Render migration preparation & direct transfer — 18 November 2026
 
-- **Current `main` baseline:** `0.79.14`, merge commit
-  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87). At `2026-11-16T21:12Z`
-  Vercel Production returned HTTP `402` / `DEPLOYMENT_DISABLED`; Vercel is not a
-  working runtime or rollback target. Draft PR #88 (`74f6594a...`) remains
-  separate and untouched.
-- **Candidate (`feat/yakfi-render-migration-prep`, `0.79.15`):** prepares one
-  native Node 22 / `pnpm@11.24.0` Render Starter (`0.5c-512mb`, `ohio`) web
-  service in `My Workspace` (`tea-db9st3gm7kps73ek9op0`); moves `/sw.js` and
-  `/offline.html` headers to `next.config.ts`; supports `RENDER_GIT_COMMIT`;
-  separates zero-DB `/api/health/live` from HTTP `200`/`503` `/api/health` DB
-  readiness; requires explicit target + exact 40-char SHA in
-  `production-release.yml`; adds values-free `config/render-env-inventory.json`,
-  manual owner-encrypted X25519/GCM pre-service secret recovery, exclusive
-  `0600` keygen, read-only DB-decryption + truthful migration-status
-  `verify-selected-runtime` preflight (preserving exit code and blocking
-  pending/failed/divergent schemas without applying migrations), strict `ohio`
-  region rejection before any `PUT`, two-job backup-before-transfer with
-  required `owner_restoration_proof` and `always()` ciphertext preservation
-  (`render-migration-ops.yml` / `scripts/render-vault-tool.ts`), and the ordered
-  cutover runbook (`docs/VERCEL_DEPLOYMENT.md` §7).
+- **Current `main` baseline:** `0.79.15`, merge commit
+  `a6a2021d0fc83ffc4744c9b7b2747a98e0d83711` (PR #89 merged 18 November 2026).
+  The merged preparation includes the Render blueprint, platform-neutral
+  headers, `RENDER_GIT_COMMIT` identity, split health routes, exact-SHA release
+  guard, values-free environment inventory, read-only `verify-selected-runtime`
+  DB-decryption + truthful migration-status preflight, strict `ohio` region
+  rejection, and the encrypted owner-recovery transfer path retained as
+  **optional** hardened recovery. Vercel remains unavailable/blocked and is not
+  a working runtime or rollback target. PR #88 (`74f6594a...`) remains open,
+  Draft, and untouched.
+- **Candidate (`feat/yakfi-render-direct-transfer`, `0.79.16`):** adds a
+  manual-only `direct-transfer` mode that moves only `DATABASE_URL` and
+  `CREDENTIAL_MASTER_KEY` from existing GitHub Actions secrets to the confirmed
+  Render web service. It keeps exact-SHA/workspace/region/service verification,
+  a forced read-only dry-run before apply, per-key updates, and sanitized
+  partial-failure reporting; it does not require keygen, an encrypted bundle, or
+  `owner_restoration_proof`. The encrypted-recovery path remains optional.
+  Auto-deploy stays off during initial configuration; after readiness the
+  service is switched to On Commit and `render.yaml` `autoDeployTrigger` is
+  changed to `commit`.
 - **Still open / owner-gated:** Render $50 credit balance/expiry/exhaustion
-  dashboard check, `512 MB` live RAM measurement, owner recovery keypair +
-  vault backup (on Ammar's workstation; old deleted VPS local files, `rclone`,
-  and Agent Handoff did not survive, `RENDER_API_KEY` is not yet in GitHub
-  secrets, and zero encrypted bundles have been exported yet), live Render
+  dashboard check, `512 MB` live RAM measurement, `RENDER_API_KEY` addition to
+  GitHub secrets, service creation, one-time direct transfer, live Render
   deploy, and guarded webhook cutover (explicit backlog policy: no blind replay
-  or `drop_pending_updates`). Reminders stay disabled; unknown JEV/SHADOW
-  values remain `UNKNOWN_UNVERIFIED`.
+  or `drop_pending_updates`). An owner-vault copy of the two existing values is
+  encouraged but optional; the encrypted keygen/bundle/proof path is retained
+  optional. Reminders stay disabled; unknown JEV/SHADOW values remain
+  `UNKNOWN_UNVERIFIED`.
 
 ## 00. Prior acceptance evidence completion — 16 November 2026
 

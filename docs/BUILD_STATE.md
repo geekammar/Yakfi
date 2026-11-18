@@ -1,5 +1,36 @@
 # FlowPilot — Build State
 
+## PR89 merged and direct Render transfer simplification (Draft PR, v0.79.16) — 18 November 2026
+
+- Verified baseline: PR89 merged into `main` at
+  `a6a2021d0fc83ffc4744c9b7b2747a98e0d83711` / `0.79.15`. Read-only
+  `verify-selected-runtime` run `44326554854` succeeded with credential
+  `HEALTHY_LOCAL_KEY` and migration status `UP_TO_DATE`; no migration was
+  applied.
+- Owner decision: the one-time Render migration uses a direct transfer of the
+  existing `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets.
+  Owner keygen, encrypted bundle export, and `owner_restoration_proof` are
+  retained as optional hardened recovery, not required for this migration.
+- Added a manual-only `direct-transfer` mode to
+  `.github/workflows/render-migration-ops.yml` and
+  `scripts/render-vault-tool.ts`: exact 40-char SHA, fixed workspace
+  `tea-db9st3gm7kps73ek9op0` + `ohio` + `web_service` identity, exactly the two
+  allowlisted keys, a forced read-only dry-run in the prepare job before the
+  apply job, per-key `PUT`s preserving unrelated env vars, bounded 15s calls,
+  sanitized outcomes, and honest partial/network failure reporting. No secret
+  values in arguments, artifacts, logs, or reports; no unrelated secret readback.
+- Added focused mocked-provider checks `R7.10`/`R7.11` for wrong
+  SHA/allowlist/workspace/service/region before mutation, zero-write dry-run,
+  only-two-key updates, unrelated env preservation, and sanitized partial/network
+  failures.
+- `render.yaml` keeps `autoDeployTrigger: off` during initial configuration.
+  After readiness, the Render service is switched to On Commit and
+  `render.yaml` is changed to `autoDeployTrigger: commit` so a Blueprint sync
+  cannot disable automatic deploys again.
+- No Render resource creation, secret transfer, deployment, webhook change,
+  Production migration, Telegram send, or paid AI call was executed. No
+  application code changes. PR #88 remains open, Draft, and untouched.
+
 ## Render migration preparation and recoverable secrets (draft PR, v0.79.15) — 17 November 2026
 
 - Verified baseline: `main` / `v0.79.14` at

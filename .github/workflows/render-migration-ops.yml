@@ -13,32 +13,33 @@ on:
           - "inspect-sources"
           - "export-encrypted-bundle"
           - "transfer-to-render"
+          - "direct-transfer"
       expected_commit_sha:
         description: "Exact 40-char reviewed commit SHA matching checked-out ref"
         required: true
         type: string
       render_service_id:
-        description: "Confirmed Render service ID in My Workspace (srv-...; optional before service exists)"
+        description: "Confirmed Render service ID in My Workspace (srv-...; required for direct-transfer/transfer-to-render, optional before service exists)"
         required: false
         type: string
         default: ""
       owner_recipient:
-        description: "Owner-controlled X25519 public recipient (yakfi-rcpt-v1:...)"
+        description: "Optional owner X25519 public recipient for encrypted recovery (yakfi-rcpt-v1:...); unused by direct-transfer"
         required: false
         type: string
         default: ""
       owner_restoration_proof:
-        description: "Values-free proof from local verify-bundle (yakfi-verified-v1:...; NEVER private key)"
+        description: "Encrypted-transfer apply proof from local verify-bundle (yakfi-verified-v1:...); unused by direct-transfer"
         required: false
         type: string
         default: ""
       allowlist:
-        description: "Comma-separated subset of allowlisted keys (DATABASE_URL,CREDENTIAL_MASTER_KEY)"
+        description: "Comma-separated allowlisted keys; direct-transfer requires both (DATABASE_URL,CREDENTIAL_MASTER_KEY)"
         required: false
         type: string
         default: "DATABASE_URL,CREDENTIAL_MASTER_KEY"
       dry_run:
-        description: "Keep true for preflight; set false ONLY after local verify-bundle proof"
+        description: "Keep true for read-only preflight; direct-transfer apply still performs a fresh dry-run before writes"
         required: false
         type: boolean
         default: true
@@ -65,6 +66,7 @@ jobs:
           PROOF_INPUT: ${{ inputs.owner_restoration_proof }}
           MODE_INPUT: ${{ inputs.mode }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          SERVICE_ID_INPUT: ${{ inputs.render_service_id }}
         run: |
           set -euo pipefail
           if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
@@ -78,6 +80,12 @@ jobs:
           if printf '%s\n%s' "$RECIPIENT_INPUT" "$PROOF_INPUT" | grep -Eiq 'yakfi-priv-v1:|PRIVATE[ _]?KEY'; then
             echo '::error::PRIVATE_KEY_INPUT_FORBIDDEN: never supply an owner private key to CI.'
             exit 1
+          fi
+          if [ "$MODE_INPUT" = "direct-transfer" ]; then
+            if ! printf '%s' "$SERVICE_ID_INPUT" | grep -Eq '^srv-[a-z0-9]{16,32}$'; then
+              echo '::error::render_service_id must be the confirmed srv-... service in My Workspace.'
+              exit 1
+            fi
           fi
           if [ "$MODE_INPUT" = "transfer-to-render" ] && [ "$DRY_RUN_INPUT" = "false" ]; then
             if ! printf '%s' "$PROOF_INPUT" | grep -Eq '^yakfi-verified-v1:[A-Za-z0-9_-]{32,}$'; then
@@ -108,6 +116,19 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      - name: Direct-transfer dry-run (read-only, zero writes)
+        if: inputs.mode == 'direct-transfer'
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "true"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: pnpm exec tsx scripts/render-vault-tool.ts direct-transfer
 
       - name: Verify selected runtime DB decryption pairing (read-only, zero Telegram calls)
         id: decryption_preflight
@@ -317,3 +338,49 @@ jobs:
       - name: Remove temporary ciphertext directory after artifact preservation
         if: always()
         run: rm -rf /tmp/yakfi-encrypted-out
+
+  apply-direct-transfer:
+    name: Apply Direct Allowlisted Secrets to Render
+    needs:
+      - prepare-and-deliver-backup
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'direct-transfer' &&
+      inputs.dry_run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact reviewed commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply direct allowlisted secrets to confirmed Render service
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "false"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: pnpm exec tsx scripts/render-vault-tool.ts direct-transfer

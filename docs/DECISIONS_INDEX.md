@@ -125,6 +125,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
 | 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
 | 110 | Render single-service Node migration prep & recoverable secrets: `render.yaml`, `next.config.ts` PWA headers, `RENDER_GIT_COMMIT`, zero-DB `/api/health/live` vs HTTP 503 `/api/health`, exact-SHA release gate, values-free inventory + owner-encrypted X25519/GCM recovery & cutover runbook | Render hosting/health/release gate/secret recovery/cutover | [#110](DECISIONS.md) |
+| 111 | Direct Render secret transfer: owner-approved manual-only `direct-transfer` mode for `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets to confirmed `yakfi-web`/`ohio`; forced dry-run before per-key apply; optional encrypted recovery retained | Render secret transfer/direct transfer | [#111](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -146,4 +147,6 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   not claimed here. Decision #109 merged through PR #85 (`e5ff129`, `v0.79.12`).
   PR #86 merged booking concurrency/tenant-isolation evidence as `472e9aa` /
   `v0.79.13`; the current evidence-completion branch is test/documentation work
-  and does not change a product decision.
+  and does not change a product decision. Decision #111 adds the owner-approved
+  direct Render secret transfer path (draft PR, not applied); it does not
+  require keygen, an encrypted bundle, or `owner_restoration_proof`.

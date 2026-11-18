@@ -493,16 +493,19 @@ Configuration recoverability separates metadata from secret values:
   `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (~4d ago), and
   `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~4d ago — failed recovery candidate
   on 2026-11-13, not a valid backup). `RENDER_API_KEY` is **not** currently set
-  in GitHub secrets (required only if dispatching `render-migration-ops.yml`
-  service checks/transfer instead of manual vault paste). Secret name presence
+  in GitHub secrets (required for the reviewed `direct-transfer` and
+  `transfer-to-render` modes that verify/update the Render service; not needed
+  for `verify-selected-runtime`). Secret name presence
   does **not** prove decryption compatibility until verified by
   `verify-selected-runtime` (`HEALTHY_LOCAL_KEY`).
 - **Deleted old VPS boundary:** local `.env*`, `rclone`, and Agent Handoff did
-  not survive on the new Boxd VPS. `render-migration-ops.yml` has never been
-  dispatched (zero encrypted bundles exported); any private key that existed
-  solely on the deleted VPS without an external vault copy is permanently lost,
-  and no encrypted backup may ever be claimed recoverable without its private
-  key in Ammar's workstation vault.
+  not survive on the new Boxd VPS. `render-migration-ops.yml` has been dispatched
+  only for read-only `verify-selected-runtime` (run `44326554854`,
+  `HEALTHY_LOCAL_KEY`, migrations `UP_TO_DATE`); no secrets were transferred and
+  zero encrypted bundles were exported. Any private key that existed solely on
+  the deleted VPS without an external vault copy is permanently lost, and no
+  encrypted backup may ever be claimed recoverable without its private key in
+  Ammar's workstation vault.
 - **Unknown JEV / Shadow settings:** `FLOWPILOT_JEV_SEMANTIC_ENABLED`,
   `FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET`, `FLOWPILOT_JEV_SHADOW_ENABLED`,
   `SHADOW_SALT`, `SHADOW_SAMPLE_RATE`, `SHADOW_MAX_CALLS_PER_DAY`, and
@@ -512,11 +515,30 @@ Configuration recoverability separates metadata from secret values:
 - **Appointment reminders:** `APPOINTMENT_REMINDERS_ENABLED` remains
   `CONFIRMED_DISABLED` (unset) unless separately approved.
 
-### Manual Secret Recovery, Owner Encryption & Restoration Check
+### Manual Secret Transfer: Direct (Default) & Optional Owner Encryption
 
 Prepared in `.github/workflows/render-migration-ops.yml` +
 `scripts/render-vault-tool.ts` (`workflow_dispatch` only; **never** runs in PR
-CI; **not** executed in this preparation task):
+CI). The owner-approved minimal path is direct transfer; the encrypted recovery
+path is retained optional and is not required for this migration.
+
+**Direct transfer (recommended minimal path):** run the read-only
+`mode=verify-selected-runtime` preflight first at the exact SHA if it has not
+already passed (it did for `a6a2021...`). Then dispatch
+`mode=direct-transfer` with `render_service_id=srv-...`, the default allowlist
+`DATABASE_URL,CREDENTIAL_MASTER_KEY`, and `dry_run=true` first. Inspect the
+sanitized result, then run the same mode with `dry_run=false`; the prepare job
+always performs a fresh read-only dry-run before the apply job writes. It uses
+the existing GitHub Actions secrets `TEST_DATABASE_URL` and
+`CREDENTIAL_MASTER_KEY`, verifies the exact 40-char SHA, fixed workspace
+`tea-db9st3gm7kps73ek9op0`, `ohio`, and `web_service` identity, performs per-key
+`PUT /v1/services/{serviceId}/env-vars/{key}` calls only for the two allowlisted
+keys, preserves unrelated Render environment variables, and reports sanitized
+partial/network failures. It does not use keygen, an encrypted bundle, or
+`owner_restoration_proof`.
+
+The following encrypted-recovery steps are **optional** and not required for the
+direct-transfer migration:
 
 1. **Exclusive owner keypair generation (Ammar's private workstation only):**
    ```bash
@@ -554,9 +576,10 @@ CI; **not** executed in this preparation task):
      --bundle yakfi-secrets.enc.json \
      --key-file ~/yakfi-owner-recovery-key.json
    ```
-4. **Backup-before-transfer (`mode=transfer-to-render`):** requires exact
-   40-char SHA, confirmed real `srv-...` in `tea-db9st3gm7kps73ek9op0` + `ohio`
-   `web_service` (`PRE_SERVICE_CREATION` rejected), and verified
+4. **Optional encrypted backup-before-transfer (`mode=transfer-to-render`):**
+   requires exact 40-char SHA, confirmed real `srv-...` in
+   `tea-db9st3gm7kps73ek9op0` + `ohio` `web_service` (`PRE_SERVICE_CREATION`
+   rejected), and verified
    `owner_restoration_proof` (`yakfi-verified-v1:...`) when `dry_run=false`. Job
    1 (`prepare-and-deliver-backup`) verifies pairing + proof and delivers
    `yakfi-owner-encrypted-bundle` to GitHub Artifacts **before** Job 2
