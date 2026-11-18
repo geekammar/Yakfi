@@ -1419,7 +1419,9 @@ export async function verifyRenderRuntimeReadiness(
     botExternalId: CUTOVER_READINESS_BOT_ID,
     botUsername: CUTOVER_READINESS_BOT_USERNAME,
     credentialResolved: true,
-    ...(typeof body.checkedAt === "string" ? { checkedAt: body.checkedAt } : {}),
+    ...(typeof body.checkedAt === "string"
+      ? { checkedAt: body.checkedAt }
+      : {}),
   };
 }
 

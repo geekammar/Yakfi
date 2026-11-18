@@ -208,7 +208,9 @@ function createDeps(
     switchResult?: Awaited<
       ReturnType<RenderTelegramCutoverDeps["switchWebhook"]>
     >;
-    onSwitch?: (params: Parameters<RenderTelegramCutoverDeps["switchWebhook"]>[0]) => void;
+    onSwitch?: (
+      params: Parameters<RenderTelegramCutoverDeps["switchWebhook"]>[0],
+    ) => void;
     onVerifyRenderService?: (
       params: Parameters<RenderTelegramCutoverDeps["verifyRenderService"]>[0],
     ) => void;
@@ -299,7 +301,10 @@ async function main(): Promise<void> {
       },
       onVerifyRenderService: (params) => serviceCalls.push(params),
     });
-    const result = await preflightRenderTelegramCutover(preflightParams(), deps);
+    const result = await preflightRenderTelegramCutover(
+      preflightParams(),
+      deps,
+    );
     check(
       "P1. Ready preflight reports the fixed Render target, identities, zero pending, and sanitized Telegram error",
       result.status === "READY" &&
@@ -321,7 +326,8 @@ async function main(): Promise<void> {
           RENDER_TELEGRAM_CUTOVER_TARGET.serviceId &&
         result.renderService?.workspaceId ===
           RENDER_TELEGRAM_CUTOVER_TARGET.workspaceId &&
-        result.renderService?.region === RENDER_TELEGRAM_CUTOVER_TARGET.region &&
+        result.renderService?.region ===
+          RENDER_TELEGRAM_CUTOVER_TARGET.region &&
         result.renderReadiness.ok === true &&
         result.observedAt === new Date(FIXED_NOW).toISOString() &&
         serviceCalls.length === 1 &&
@@ -344,7 +350,10 @@ async function main(): Promise<void> {
         throw new Error("RENDER_WORKSPACE_MISMATCH");
       },
     });
-    const result = await preflightRenderTelegramCutover(preflightParams(), deps);
+    const result = await preflightRenderTelegramCutover(
+      preflightParams(),
+      deps,
+    );
     check(
       "P1b. Wrong Render service/workspace/region blocks before any Telegram call",
       result.status === "FAILED" &&
@@ -446,7 +455,10 @@ async function main(): Promise<void> {
         },
       },
     });
-    const result = await preflightRenderTelegramCutover(preflightParams(), deps);
+    const result = await preflightRenderTelegramCutover(
+      preflightParams(),
+      deps,
+    );
     check(
       "P3. Wrong Telegram bot identity blocks the preflight",
       result.status === "FAILED" &&
@@ -881,7 +893,8 @@ async function main(): Promise<void> {
       "P15. Signed Render readiness verifies identity, DB, SHA/version, and rejects unauthorized/legacy origins",
       ok.ok === true &&
         ok.credentialResolved === true &&
-        ok.databaseHost === "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
+        ok.databaseHost ===
+          "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
         capturedHeaders !== undefined &&
         capturedHeaders.get("x-flowpilot-cutover-bot-id") ===
           RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId &&
@@ -910,7 +923,9 @@ main()
       }
     }
     if (failed > 0) {
-      console.error(`\nFailed ${failed} of ${checks.length} Render cutover checks.`);
+      console.error(
+        `\nFailed ${failed} of ${checks.length} Render cutover checks.`,
+      );
       process.exit(1);
     }
     console.log(

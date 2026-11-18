@@ -138,7 +138,12 @@ export type RenderTelegramPreflightResult = {
 
 export type RenderTelegramApplyResult = {
   ok: boolean;
-  status: "SWITCHED" | "ALREADY_AT_DESTINATION" | "BLOCKED" | "PARTIAL_FAILURE" | "FAILED";
+  status:
+    | "SWITCHED"
+    | "ALREADY_AT_DESTINATION"
+    | "BLOCKED"
+    | "PARTIAL_FAILURE"
+    | "FAILED";
   code: string;
   preflight: RenderTelegramPreflightResult;
   webhookUrl?: string;
@@ -524,7 +529,11 @@ export async function applyRenderTelegramCutover(
     "الرابط الحالي المتوقع",
   );
   if (!expectedCurrentValidation.ok) {
-    return applyResult(preflight, "FAILED", "INVALID_EXPECTED_CURRENT_WEBHOOK_URL");
+    return applyResult(
+      preflight,
+      "FAILED",
+      "INVALID_EXPECTED_CURRENT_WEBHOOK_URL",
+    );
   }
 
   if (preflight.status === "FAILED") {
@@ -663,7 +672,8 @@ export async function applyRenderTelegramCutover(
 }
 
 export async function defaultRenderTelegramCutoverDeps(): Promise<RenderTelegramCutoverDeps> {
-  const { telegramConnectionRepository } = await import("@/server/repositories");
+  const { telegramConnectionRepository } =
+    await import("@/server/repositories");
   return {
     connectionRepository: telegramConnectionRepository,
     credentialsResolver: defaultCredentialsResolver,
@@ -837,7 +847,10 @@ async function main(): Promise<void> {
   if (operation === "preflight") {
     const result = await preflightRenderTelegramCutover(baseParams, deps);
     printPreflight(result);
-    if (result.status === "READY" || result.status === "ALREADY_AT_DESTINATION") {
+    if (
+      result.status === "READY" ||
+      result.status === "ALREADY_AT_DESTINATION"
+    ) {
       return;
     }
     process.exit(result.status === "BLOCKED" ? 2 : 1);
@@ -852,7 +865,10 @@ async function main(): Promise<void> {
     deps,
   );
   printApply(result);
-  if (result.status === "SWITCHED" || result.status === "ALREADY_AT_DESTINATION") {
+  if (
+    result.status === "SWITCHED" ||
+    result.status === "ALREADY_AT_DESTINATION"
+  ) {
     return;
   }
   process.exit(result.status === "BLOCKED" ? 2 : 1);

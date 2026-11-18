@@ -1050,10 +1050,7 @@ export async function switchTelegramBotWebhook(
     const requested = requestedInput
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
-    if (
-      requested.length === 0 ||
-      requested.length !== requestedInput.length
-    ) {
+    if (requested.length === 0 || requested.length !== requestedInput.length) {
       return {
         ok: false,
         code: "INVALID_ALLOWED_UPDATES",
