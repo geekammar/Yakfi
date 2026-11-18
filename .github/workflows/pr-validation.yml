@@ -131,6 +131,7 @@ jobs:
           pnpm check:update-production-runtime-env
           pnpm check:cutover-readiness
           pnpm check:render-migration
+          pnpm check:render-telegram-cutover
           pnpm check:telegram-ux001
           pnpm check:telegram-execution-defects
           pnpm check:turn-evidence

@@ -1,5 +1,38 @@
 # FlowPilot — Build State
 
+## Render-targeted Telegram cutover tooling (Draft PR, v0.79.18) — 18 November 2026
+
+- Baseline: PR91 merged at `e1851deec1406d690807440639761152d3d029e1` /
+  `0.79.17`; Render auto-deployed it as `dep-dbv2akqvcj2c73c0a440`
+  (`trigger: new_commit`, live). `/api/health/live` and `/api/health` both
+  return HTTP `200` with version `0.79.17`, exact SHA, `production`, DB
+  `connected`, `deploymentReady=true`, and `missingEnvVars=[]`.
+- Candidate: manual-only `.github/workflows/render-telegram-cutover.yml` +
+  `scripts/render-telegram-cutover.ts`. `operation=preflight` is read-only and
+  default; `operation=apply` is explicit. The destination is pinned to
+  `https://yakfi.onrender.com/api/telegram/webhook`; fixed workspace/service,
+  Business/Connection/Bot, selected `TEST_DATABASE_URL` + `CREDENTIAL_MASTER_KEY`,
+  existing `RENDER_API_KEY` for service/workspace/region verification, exact
+  checkout/deployed SHA, and expected version are required.
+- Preflight resolves the selected bot credential, verifies `getMe`, calls
+  `getWebhookInfo` (current URL, pending count, observation time, allowed
+  updates, sanitized last error), validates pending as a nonnegative integer,
+  and verifies the signed Render `/api/operator/cutover-readiness` proof.
+  Apply reruns preflight immediately before mutation, requires pending `0` and
+  the expected current URL, uses `allowed_updates: ["message","callback_query"]`,
+  never enables `drop_pending_updates`, treats already-at-destination as a no-op,
+  and reports partial/ambiguous failures without blind retry.
+- Added `check:render-telegram-cutover` in CI for fixed Render target/identity,
+  read-only zero mutations, wrong SHA/version/DB/bot/current URL, invalid/
+  unknown/nonzero pending counts, failed signed readiness/unresolved credential,
+  controlled successful apply, already-at-destination, and partial/ambiguous
+  failures using controlled Telegram responses.
+- The candidate workflow cannot be dispatched until it exists on `main`; no
+  local secret-bearing workaround was used. No live `setWebhook`/
+  `deleteWebhook`, secret/hash write, Telegram send, paid AI call, migration,
+  application DB write, Blueprint import, Rabet change, or PR88 change was
+  performed.
+
 ## Render configuration alignment and read-only cutover preflight (Draft PR, v0.79.17) — 18 November 2026
 
 - Baseline: `main` `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` / `0.79.16`;

@@ -494,8 +494,9 @@ Configuration recoverability separates metadata from secret values:
   `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~4d ago — failed recovery candidate
   on 2026-11-13, not a valid backup). `RENDER_API_KEY` is now present in GitHub
   secrets (name observed only; value not read) for the reviewed
-  `direct-transfer`/`transfer-to-render` modes; it is not needed for
-  `verify-selected-runtime`. Secret name presence does **not** prove decryption
+  `direct-transfer`/`transfer-to-render` modes and the Render-targeted Telegram
+  cutover preflight/apply; it is not needed for `verify-selected-runtime`.
+  Secret name presence does **not** prove decryption
   compatibility until verified by `verify-selected-runtime`
   (`HEALTHY_LOCAL_KEY`).
 - **Deleted old VPS boundary:** local `.env*`, `rclone`, and Agent Handoff did

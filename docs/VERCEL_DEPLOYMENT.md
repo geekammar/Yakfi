@@ -466,14 +466,27 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
        `FLOWPILOT_AI_GLOBAL_STOP=true` so queued messages persist safely as
        staff handoffs with zero paid AI calls and zero automated bookings, or
        explicit owner-signed drop).
-   - **Current tooling limitation (18 November 2026):** the existing
-     `cutover-main-runtime-*` operations and `switch-test-bot-webhook.ts` are
-     hardcoded to the Vercel Production origin; they cannot target
-     `https://yakfi.onrender.com/api/telegram/webhook`. The Render-capable
-     `verifyRenderCutoverReadinessAndBacklog` exists but is not exposed by an
-     existing workflow/CLI. Do **not** run `cutover-main-runtime-apply` for
-     Render; use a reviewed Render-targeted read-only preflight and switch tool
-     after separate approval.
+   - **Render-targeted cutover tool (manual only):**
+     `.github/workflows/render-telegram-cutover.yml` +
+     `scripts/render-telegram-cutover.ts` expose `operation=preflight` (default,
+     read-only) and `operation=apply` (explicit). The destination is pinned to
+     `https://yakfi.onrender.com/api/telegram/webhook`; fixed
+     workspace/service, Business/Connection/Bot, selected active DB, exact
+     checkout/deployed SHA, and expected version are required. Preflight
+     resolves the selected bot credential from the selected DB/master key,
+     verifies `getMe`, calls `getWebhookInfo` (URL, pending count, observation
+     time, allowed_updates, last error), and verifies the signed Render
+     `/api/operator/cutover-readiness` proof. Apply requires a fresh preflight,
+     `pending_update_count === 0`, the expected current URL, exact
+     `allowed_updates: ["message", "callback_query"]`, never enables
+     `drop_pending_updates`, and handles already-at-destination as a no-op.
+     Unknown/non-zero backlog or any failed identity/readiness check blocks
+     apply. Do **not** use the legacy `cutover-main-runtime-*` Vercel operations
+     for Render.
+   - **Partial-failure boundary:** Telegram `setWebhook` and PostgreSQL
+     `webhook_secret_hash` persistence are not atomic. On partial or ambiguous
+     failure, inspect `getWebhookInfo` and the DB hash, then use the reviewed
+     reconciliation procedure; never retry blindly.
 6. **Post-Cutover Verification & Release Tagging:**
    - Re-verify `getWebhookInfo` (`url === https://<render-origin>/api/telegram/webhook`,
      `allowed_updates` includes `message` and `callback_query`).
@@ -496,7 +509,7 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 - **PR #88 separation:** draft PR #88 (`feat/durable-turn-usage-cost-evidence`)
   and its additive Prisma migrations remain an independent reviewed decision at
   `0.79.15`; it is not merged or modified. This branch is based on `main`
-  `0.79.16` and carries `0.79.17`; coordinate any later PR88 merge with the
+  `0.79.17` and carries `0.79.18`; coordinate any later PR88 merge with the
   then-current `main` version so `pnpm check:version` remains monotonic.
 
 ### 7.7 Automatic Deploy Activation (after initial readiness)

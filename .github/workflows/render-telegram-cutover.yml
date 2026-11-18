@@ -1,0 +1,115 @@
+name: Render Telegram Cutover (Manual, Render-Targeted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read-only preflight or explicit apply"
+        required: true
+        type: choice
+        default: preflight
+        options:
+          - preflight
+          - apply
+      expected_checkout_sha:
+        description: "Exact reviewed checkout SHA (must equal the dispatched ref HEAD)"
+        required: true
+        type: string
+      expected_deployed_sha:
+        description: "Exact deployed Render app SHA to verify"
+        required: true
+        type: string
+      expected_version:
+        description: "Expected deployed version (e.g. 0.79.17)"
+        required: true
+        type: string
+      expected_current_webhook_url:
+        description: "Required for apply: exact current Telegram webhook URL"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-telegram-cutover-singleton
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: Render Telegram Cutover (${{ inputs.operation }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require exact reviewed SHA and explicit apply inputs
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.expected_checkout_sha }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_CURRENT_WEBHOOK_URL: ${{ inputs.expected_current_webhook_url }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$EXPECTED_CHECKOUT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::expected_checkout_sha must be a full 40-character lowercase hex SHA.'
+            exit 1
+          fi
+          if [ "$EXPECTED_CHECKOUT_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::expected_checkout_sha does not match the checked-out SHA; refusing Telegram cutover.'
+            exit 1
+          fi
+          if ! printf '%s' "$EXPECTED_DEPLOYED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::expected_deployed_sha must be a full 40-character lowercase hex SHA.'
+            exit 1
+          fi
+          if ! printf '%s' "$EXPECTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo '::error::expected_version must be a semantic version like 0.79.17.'
+            exit 1
+          fi
+          if [ "$OPERATION" = "apply" ]; then
+            if ! printf '%s' "$EXPECTED_CURRENT_WEBHOOK_URL" | grep -Eq '^https://[^[:space:]]+/api/telegram/webhook$'; then
+              echo '::error::apply requires the exact current HTTPS /api/telegram/webhook URL.'
+              exit 1
+            fi
+          fi
+
+      - name: Checkout exact reviewed commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Execute Render-targeted Telegram cutover
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_CHECKOUT_SHA: ${{ inputs.expected_checkout_sha }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_CURRENT_WEBHOOK_URL: ${{ inputs.expected_current_webhook_url }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: srv-dbv0igutlv9c73fe4990
+          RENDER_WORKSPACE_ID: tea-db9st3gm7kps73ek9op0
+        run: pnpm exec tsx scripts/render-telegram-cutover.ts

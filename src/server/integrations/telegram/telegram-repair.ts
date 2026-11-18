@@ -760,6 +760,16 @@ export type SwitchTelegramWebhookParams = {
    * switch/restoration operations leave this disabled.
    */
   allowAlreadyAtDestination?: boolean;
+  /**
+   * When true, apply mode refuses an unknown, malformed, or non-zero pending
+   * update count before any Telegram or database mutation.
+   */
+  requireZeroPendingUpdates?: boolean;
+  /**
+   * Optional exact allowed_updates set. When omitted, the existing behavior
+   * merges the current Telegram set with the canonical customer updates.
+   */
+  allowedUpdates?: string[];
 };
 
 export type SwitchTelegramWebhookOutcome =
@@ -845,7 +855,10 @@ export type SwitchTelegramWebhookOutcome =
         | "INVALID_CUSTOMER_WEBHOOK_PATH"
         | "SET_WEBHOOK_FAILED"
         | "DATABASE_UPDATE_FAILED"
-        | "INVALID_SWITCH_PARAMETERS";
+        | "INVALID_SWITCH_PARAMETERS"
+        | "INVALID_ALLOWED_UPDATES"
+        | "PENDING_UPDATES_REQUIRE_DISPOSITION"
+        | "PENDING_UPDATE_COUNT_UNKNOWN";
       message: string;
       reconciliationCommand?: string;
       restorationProcedure?: string;
@@ -1025,10 +1038,56 @@ export async function switchTelegramBotWebhook(
   if (!actualCheck.ok) {
     return actualCheck;
   }
-  const currentUpdates = info.allowed_updates ?? [];
-  const targetUpdates = Array.from(
-    new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
-  );
+  const currentUpdates = Array.isArray(info.allowed_updates)
+    ? info.allowed_updates.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+
+  let targetUpdates: string[];
+  if (params.allowedUpdates !== undefined) {
+    const requested = params.allowedUpdates
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    if (
+      requested.length === 0 ||
+      requested.length !== params.allowedUpdates.length
+    ) {
+      return {
+        ok: false,
+        code: "INVALID_ALLOWED_UPDATES",
+        message: "قائمة allowed_updates المطلوبة غير صالحة أو فارغة",
+      };
+    }
+    targetUpdates = Array.from(new Set(requested));
+  } else {
+    targetUpdates = Array.from(
+      new Set([...currentUpdates, ...TELEGRAM_CUSTOMER_ALLOWED_UPDATES]),
+    );
+  }
+
+  if (params.requireZeroPendingUpdates === true && params.apply === true) {
+    const pending = info.pending_update_count;
+    if (
+      typeof pending !== "number" ||
+      !Number.isInteger(pending) ||
+      pending < 0
+    ) {
+      return {
+        ok: false,
+        code: "PENDING_UPDATE_COUNT_UNKNOWN",
+        message:
+          "عدد التحديثات المعلقة غير معروف أو غير صالح؛ تم رفض التطبيق دون أي تعديل",
+      };
+    }
+    if (pending > 0) {
+      return {
+        ok: false,
+        code: "PENDING_UPDATES_REQUIRE_DISPOSITION",
+        message: `يوجد ${pending} تحديثاً معلقاً؛ يجب تحديد disposition صريح قبل التطبيق. لم يتم إجراء أي تعديل`,
+      };
+    }
+  }
 
   if (
     params.allowAlreadyAtDestination === true &&

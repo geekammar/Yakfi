@@ -316,6 +316,11 @@ connection strings.
   environment, so environment-scoped secrets cannot override its inputs.
 - **Merge and deployment:** approved PR #83 merge to `main`; normal Vercel
   Production build of the exact merge SHA.
+- **Render target (18 November 2026):** the legacy
+  `cutover-main-runtime-*` Vercel path below is **not** valid for Render. Use
+  the manual Render-targeted `render-telegram-cutover.yml`
+  `operation=preflight`/`apply` path documented in
+  `docs/VERCEL_DEPLOYMENT.md` §7.5.
 - **Runtime credential/bot identity and switch:** `test-db-migrate.yml`
   operations `cutover-main-runtime-dry-run` then
   `cutover-main-runtime-apply`, guarded to `main` plus the exact merge SHA.

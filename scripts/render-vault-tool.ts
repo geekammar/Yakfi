@@ -63,6 +63,10 @@ export { verifySelectedRuntimePreflight, type SelectedRuntimePreflightResult };
 
 export const CONFIRMED_RENDER_WORKSPACE_ID = "tea-db9st3gm7kps73ek9op0";
 export const CONFIRMED_RENDER_REGION = "ohio";
+export const CONFIRMED_RENDER_SERVICE_ID = "srv-dbv0igutlv9c73fe4990";
+export const CONFIRMED_RENDER_ORIGIN = "https://yakfi.onrender.com";
+export const CONFIRMED_RENDER_WEBHOOK_URL =
+  "https://yakfi.onrender.com/api/telegram/webhook";
 export const CONFIRMED_VERCEL_PROJECT_ID = "prj_CjKh6Qt6IAKEc9EB4StaJJxnP0Fp";
 export const PRE_SERVICE_EXPORT_SENTINEL = "PRE_SERVICE_CREATION";
 
@@ -280,6 +284,7 @@ type CutoverReadinessPayload = {
   botExternalId?: unknown;
   botUsername?: unknown;
   credentialResolved?: unknown;
+  checkedAt?: unknown;
 };
 
 type OwnerKeyfilePayload = {
@@ -383,6 +388,34 @@ export type VerifyCutoverParams = {
   pendingUpdateCount: number;
   backlogPolicy?: BacklogDispositionPolicy;
 };
+
+export type VerifyRenderRuntimeReadinessParams = {
+  renderOrigin: string;
+  expectedCommitSha: string;
+  expectedVersion: string;
+  databaseUrl: string;
+  cutoverSignerCred: string;
+};
+
+export type RenderRuntimeReadiness =
+  | {
+      ok: true;
+      origin: string;
+      commitSha: string;
+      version: string;
+      databaseHost: string;
+      databaseName: string;
+      businessId: string;
+      connectionId: string;
+      botExternalId: string;
+      botUsername: string;
+      credentialResolved: true;
+      checkedAt?: string;
+    }
+  | {
+      ok: false;
+      code: string;
+    };
 
 export function assertNoPrivateKeyMaterial(raw: string | undefined): void {
   if (!raw) {
@@ -1283,10 +1316,10 @@ export async function inspectRecoverySources(
   return report;
 }
 
-export async function verifyRenderCutoverReadinessAndBacklog(
-  params: VerifyCutoverParams,
+export async function verifyRenderRuntimeReadiness(
+  params: VerifyRenderRuntimeReadinessParams,
   deps: CutoverDeps = {},
-): Promise<RenderCutoverOutcome> {
+): Promise<RenderRuntimeReadiness> {
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(expectedSha)) {
     return { ok: false, code: "INVALID_EXPECTED_COMMIT_SHA" };
@@ -1322,17 +1355,6 @@ export async function verifyRenderCutoverReadinessAndBacklog(
   const signer = params.cutoverSignerCred.trim();
   if (!signer) {
     return { ok: false, code: "MISSING_CUTOVER_SIGNER_CREDENTIAL" };
-  }
-
-  // Enforce explicit backlog policy BEFORE any webhook mutation:
-  // never drop_pending_updates, and never replay non-zero backlog blindly.
-  const policy = params.backlogPolicy ?? "require_zero";
-  if (params.pendingUpdateCount > 0 && policy !== "allow_inspected_replay") {
-    return {
-      ok: false,
-      code: "PENDING_UPDATES_REQUIRE_DISPOSITION",
-      pendingUpdateCount: params.pendingUpdateCount,
-    };
   }
 
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
@@ -1375,9 +1397,11 @@ export async function verifyRenderCutoverReadinessAndBacklog(
   ) {
     return { ok: false, code: "RENDER_RUNTIME_IDENTITY_MISMATCH" };
   }
+
+  const databaseHost = body.databaseHost;
   if (
-    typeof body.databaseHost !== "string" ||
-    !AUTHORIZED_ACTIVE_DB_HOSTS.has(body.databaseHost) ||
+    typeof databaseHost !== "string" ||
+    !AUTHORIZED_ACTIVE_DB_HOSTS.has(databaseHost) ||
     body.databaseName !== "neondb"
   ) {
     return { ok: false, code: "RENDER_RUNTIME_DATABASE_MISMATCH" };
@@ -1388,6 +1412,56 @@ export async function verifyRenderCutoverReadinessAndBacklog(
     origin,
     commitSha: expectedSha,
     version: params.expectedVersion.trim(),
+    databaseHost,
+    databaseName: "neondb",
+    businessId: CUTOVER_READINESS_BUSINESS_ID,
+    connectionId: CUTOVER_READINESS_CONNECTION_ID,
+    botExternalId: CUTOVER_READINESS_BOT_ID,
+    botUsername: CUTOVER_READINESS_BOT_USERNAME,
+    credentialResolved: true,
+    ...(typeof body.checkedAt === "string" ? { checkedAt: body.checkedAt } : {}),
+  };
+}
+
+export async function verifyRenderCutoverReadinessAndBacklog(
+  params: VerifyCutoverParams,
+  deps: CutoverDeps = {},
+): Promise<RenderCutoverOutcome> {
+  const expectedSha = params.expectedCommitSha.trim().toLowerCase();
+  if (!FULL_SHA_RE.test(expectedSha)) {
+    return { ok: false, code: "INVALID_EXPECTED_COMMIT_SHA" };
+  }
+
+  // Enforce explicit backlog policy BEFORE any webhook mutation:
+  // never drop_pending_updates, and never replay non-zero backlog blindly.
+  const policy = params.backlogPolicy ?? "require_zero";
+  if (params.pendingUpdateCount > 0 && policy !== "allow_inspected_replay") {
+    return {
+      ok: false,
+      code: "PENDING_UPDATES_REQUIRE_DISPOSITION",
+      pendingUpdateCount: params.pendingUpdateCount,
+    };
+  }
+
+  const readiness = await verifyRenderRuntimeReadiness(
+    {
+      renderOrigin: params.renderOrigin,
+      expectedCommitSha: params.expectedCommitSha,
+      expectedVersion: params.expectedVersion,
+      databaseUrl: params.databaseUrl,
+      cutoverSignerCred: params.cutoverSignerCred,
+    },
+    deps,
+  );
+  if (!readiness.ok) {
+    return readiness;
+  }
+
+  return {
+    ok: true,
+    origin: readiness.origin,
+    commitSha: readiness.commitSha,
+    version: readiness.version,
     pendingUpdateCount: params.pendingUpdateCount,
     dropPendingUpdates: false,
   };
