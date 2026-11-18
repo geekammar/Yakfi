@@ -51,12 +51,14 @@ import {
   CONFIRMED_RENDER_WORKSPACE_ID,
   PRE_SERVICE_EXPORT_SENTINEL,
   encryptAllowlistedSecretsForOwner,
+  evaluateMigrationStatusPreflight,
   generateOwnerRecoveryKeypair,
   inspectRecoverySources,
   parseAllowlist,
   transferAllowlistedSecretsToRender,
   verifyOwnerEncryptedBundle,
   verifyRenderCutoverReadinessAndBacklog,
+  verifyRenderServiceOwnership,
   verifySelectedRuntimePreflight,
   writeOwnerRecoveryKeypairExclusive,
 } from "./render-vault-tool";
@@ -494,13 +496,23 @@ async function main(): Promise<void> {
   );
   const recoveryWorkflowYaml = readFileSync(opsWorkflowPath, "utf8");
   check(
-    "R7.1 render-migration-ops.yml enforces SHA + private-key ban, verify-selected-runtime, and always() backup-before-transfer",
+    "R7.1 render-migration-ops.yml enforces SHA + private-key ban, verify-selected-runtime, truthful migration-status exit, and always() backup-before-transfer",
     recoveryWorkflowYaml.includes("workflow_dispatch:") &&
       !recoveryWorkflowYaml.includes("pull_request:") &&
       !recoveryWorkflowYaml.includes("\n  push:") &&
       recoveryWorkflowYaml.includes("expected_commit_sha") &&
       recoveryWorkflowYaml.includes("owner_restoration_proof") &&
       recoveryWorkflowYaml.includes("verify-selected-runtime") &&
+      recoveryWorkflowYaml.includes("MIGRATE_EXIT_CODE=$?") &&
+      recoveryWorkflowYaml.includes("evaluate-migration-status") &&
+      recoveryWorkflowYaml.includes(
+        "trap 'rm -f status-selected.raw.txt status-selected.txt' EXIT",
+      ) &&
+      !recoveryWorkflowYaml.includes("exit 0") &&
+      !recoveryWorkflowYaml.includes("migrate deploy") &&
+      !recoveryWorkflowYaml.includes("db:deploy") &&
+      !recoveryWorkflowYaml.includes("migrate dev") &&
+      !recoveryWorkflowYaml.includes("db push") &&
       recoveryWorkflowYaml.includes("PRIVATE_KEY_INPUT_FORBIDDEN") &&
       recoveryWorkflowYaml.includes("prepare-and-deliver-backup:") &&
       recoveryWorkflowYaml.includes("apply-render-transfer:") &&
@@ -972,16 +984,190 @@ async function main(): Promise<void> {
       err instanceof Error && err.message === "RENDER_WORKSPACE_MISMATCH";
   }
 
+  let missingRegionRejected = false;
+  let emptyDetailsRegionRejected = false;
+  let malformedRegionRejected = false;
+  let nonStringRegionRejected = false;
+  let wrongRegionRejected = false;
+  const rejectedRegionPutUrls: string[] = [];
+
+  try {
+    await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: singleKeyProof,
+        allowlist: ["DATABASE_URL"],
+        sourceValues: { DATABASE_URL: syntheticDbConn },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (input, init) => {
+          if (init?.method === "PUT") rejectedRegionPutUrls.push(String(input));
+          return new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+              },
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
+  } catch (err: unknown) {
+    missingRegionRejected =
+      err instanceof Error && err.message === "RENDER_REGION_MISSING";
+  }
+
+  try {
+    await verifyRenderServiceOwnership(
+      {
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+      },
+      {
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: "   " },
+              },
+            }),
+            { status: 200 },
+          ),
+      },
+    );
+  } catch (err: unknown) {
+    emptyDetailsRegionRejected =
+      err instanceof Error && err.message === "RENDER_REGION_MISSING";
+  }
+
+  try {
+    await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: singleKeyProof,
+        allowlist: ["DATABASE_URL"],
+        sourceValues: { DATABASE_URL: syntheticDbConn },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (input, init) => {
+          if (init?.method === "PUT") rejectedRegionPutUrls.push(String(input));
+          return new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: "ohio/invalid!" },
+              },
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
+  } catch (err: unknown) {
+    malformedRegionRejected =
+      err instanceof Error && err.message === "RENDER_REGION_MALFORMED";
+  }
+
+  try {
+    await verifyRenderServiceOwnership(
+      {
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+      },
+      {
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: 42 },
+              },
+            }),
+            { status: 200 },
+          ),
+      },
+    );
+  } catch (err: unknown) {
+    nonStringRegionRejected =
+      err instanceof Error && err.message === "RENDER_REGION_MALFORMED";
+  }
+
+  try {
+    await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: singleKeyProof,
+        allowlist: ["DATABASE_URL"],
+        sourceValues: { DATABASE_URL: syntheticDbConn },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (input, init) => {
+          if (init?.method === "PUT") rejectedRegionPutUrls.push(String(input));
+          return new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: "oregon" },
+              },
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
+  } catch (err: unknown) {
+    wrongRegionRejected =
+      err instanceof Error && err.message === "RENDER_REGION_MISMATCH";
+  }
+
   const expectedEnvPath = `/services/${testServiceId}/env-vars/`;
   check(
-    "R7.5 Render transfer pins workspace tea-db9st3gm7kps73ek9op0 + ohio, performs zero PUTs in dryRun, and uses per-key PUTs only",
+    "R7.5 Render transfer pins workspace tea-db9st3gm7kps73ek9op0 + ohio, rejects missing/malformed/wrong region before any PUT, performs zero PUTs in dryRun, and uses per-key PUTs only",
     dryRunTransfer.summary.ok &&
       dryRunTransfer.summary.code === "DRY_RUN_READY" &&
       applyTransfer.summary.ok &&
       applyTransfer.summary.code === "TRANSFER_APPLIED" &&
       putUrls.length === 2 &&
       putUrls.every((u) => u.includes(expectedEnvPath)) &&
-      wrongWorkspaceRejected,
+      wrongWorkspaceRejected &&
+      missingRegionRejected &&
+      emptyDetailsRegionRejected &&
+      malformedRegionRejected &&
+      nonStringRegionRejected &&
+      wrongRegionRejected &&
+      rejectedRegionPutUrls.length === 0,
   );
 
   const inspection = await inspectRecoverySources(
@@ -1188,6 +1374,85 @@ async function main(): Promise<void> {
       cleanCutover.ok === true &&
       cleanCutover.dropPendingUpdates === false &&
       cleanCutover.commitSha === exactSha,
+  );
+
+  const upToDateEval = evaluateMigrationStatusPreflight({
+    exitCode: 0,
+    rawOutput:
+      "19 migrations found in prisma/migrations\nDatabase schema is up to date!",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const pendingExitOneEval = evaluateMigrationStatusPreflight({
+    exitCode: 1,
+    rawOutput:
+      "Following migration(s) have not yet been applied:\n20261118_example",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const pendingExitZeroEval = evaluateMigrationStatusPreflight({
+    exitCode: 0,
+    rawOutput:
+      "Following migration(s) have not yet been applied:\n20261118_example",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const failedMigrationEval = evaluateMigrationStatusPreflight({
+    exitCode: 1,
+    rawOutput: "Following migration(s) have failed:\n20261110_broken_step",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const divergentMigrationEval = evaluateMigrationStatusPreflight({
+    exitCode: 1,
+    rawOutput:
+      "Your local migration history and the migrations table from your database are different.",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const connErrEval = evaluateMigrationStatusPreflight({
+    exitCode: 2,
+    rawOutput:
+      "Error: P1001 at postgresql://neondb_owner:replace-with-db-pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb?sslmode=require&password=replace-with-query-pass",
+    credentialDecryptionStatus: "HEALTHY_LOCAL_KEY",
+  });
+  const repairNeededButSchemaOkEval = evaluateMigrationStatusPreflight({
+    exitCode: 0,
+    rawOutput: "Database schema is up to date!",
+    credentialDecryptionStatus: "REPAIR_NEEDED",
+  });
+  const repairCredLabel =
+    repairNeededButSchemaOkEval.credentialDecryptionStatus;
+
+  check(
+    "R7.9 Migration-status evaluator preserves real exit codes, redacts credentials, distinguishes decryption from schema status, and blocks pending/failed/divergent states",
+    upToDateEval.ok === true &&
+      upToDateEval.migrationStatus === "UP_TO_DATE" &&
+      upToDateEval.overallReadiness === "READY" &&
+      upToDateEval.propagatedExitCode === 0 &&
+      pendingExitOneEval.ok === false &&
+      pendingExitOneEval.credentialDecryptionStatus === "HEALTHY_LOCAL_KEY" &&
+      pendingExitOneEval.migrationStatus === "PENDING_MIGRATIONS" &&
+      pendingExitOneEval.overallReadiness === "NOT_READY" &&
+      pendingExitOneEval.propagatedExitCode === 1 &&
+      pendingExitZeroEval.ok === false &&
+      pendingExitZeroEval.migrationStatus === "PENDING_MIGRATIONS" &&
+      pendingExitZeroEval.overallReadiness === "NOT_READY" &&
+      pendingExitZeroEval.propagatedExitCode === 1 &&
+      failedMigrationEval.ok === false &&
+      failedMigrationEval.migrationStatus === "FAILED_MIGRATIONS" &&
+      failedMigrationEval.overallReadiness === "NOT_READY" &&
+      failedMigrationEval.propagatedExitCode === 1 &&
+      divergentMigrationEval.ok === false &&
+      divergentMigrationEval.migrationStatus === "DIVERGENT_HISTORY" &&
+      divergentMigrationEval.overallReadiness === "NOT_READY" &&
+      divergentMigrationEval.propagatedExitCode === 1 &&
+      connErrEval.ok === false &&
+      connErrEval.migrationStatus === "COMMAND_FAILED" &&
+      connErrEval.overallReadiness === "NOT_READY" &&
+      connErrEval.propagatedExitCode === 2 &&
+      !connErrEval.redactedOutput.includes("replace-with-db-pass") &&
+      !connErrEval.redactedOutput.includes("replace-with-query-pass") &&
+      connErrEval.redactedOutput.includes("postgresql://***:***@") &&
+      repairNeededButSchemaOkEval.ok === false &&
+      repairCredLabel === "REPAIR_NEEDED" &&
+      repairNeededButSchemaOkEval.migrationStatus === "UP_TO_DATE" &&
+      repairNeededButSchemaOkEval.overallReadiness === "NOT_READY",
   );
 
   // ─── Summary ──────────────────────────────────────────────────────────────

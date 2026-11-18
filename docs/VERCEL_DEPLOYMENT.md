@@ -373,8 +373,11 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `mode=verify-selected-runtime` on the exact reviewed 40-char SHA (proves
      read-only AES-256-GCM decryption of the existing `fp:<id>` credential in
      `ep-little-mouse-a5nh644n.../neondb` -> `status: HEALTHY_LOCAL_KEY` with
-     zero Telegram calls, plus read-only `prisma migrate status`), and
-     `mode=inspect-sources` for values-free metadata.
+     zero Telegram calls, then runs read-only `prisma migrate status` preserving
+     its real exit code, redacting credentials, cleaning up via `EXIT` trap,
+     distinguishing decryption from migration status, and failing `NOT_READY`
+     without applying migrations if migrations are pending, failed, or
+     divergent), and `mode=inspect-sources` for values-free metadata.
    - Dispatch `mode=export-encrypted-bundle` with
      `owner_recipient=yakfi-rcpt-v1:...` and `render_service_id` left blank
      (`PRE_SERVICE_CREATION` — works before any Render service exists), download

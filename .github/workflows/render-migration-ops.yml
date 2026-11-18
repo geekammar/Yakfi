@@ -110,6 +110,7 @@ jobs:
         run: pnpm db:generate
 
       - name: Verify selected runtime DB decryption pairing (read-only, zero Telegram calls)
+        id: decryption_preflight
         if: >-
           inputs.mode == 'verify-selected-runtime' ||
           inputs.mode == 'export-encrypted-bundle' ||
@@ -120,30 +121,52 @@ jobs:
           TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
           CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          set +e
           OUTPUT=$(pnpm exec tsx scripts/render-vault-tool.ts verify-selected-runtime)
+          PREFLIGHT_EXIT=$?
+          set -e
           printf '%s\n' "$OUTPUT"
-          if ! printf '%s\n' "$OUTPUT" | grep -qx 'status: HEALTHY_LOCAL_KEY'; then
+          DEC_STATUS=$(printf '%s\n' "$OUTPUT" | sed -n 's/^status: //p' | head -n 1)
+          DEC_CODE=$(printf '%s\n' "$OUTPUT" | sed -n 's/^code: //p' | head -n 1)
+          echo "credential_status=${DEC_STATUS:-UNKNOWN}" >> "$GITHUB_OUTPUT"
+          if [ "${DEC_CODE:-}" = "DATABASE_TARGET_NOT_AUTHORIZED" ] || [ "${DEC_CODE:-}" = "MISSING_DATABASE_URL" ] || [ "${DEC_CODE:-}" = "INVALID_DATABASE_URL" ]; then
+            echo "db_target_authorized=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "${DEC_STATUS:-}" ]; then
+            echo "db_target_authorized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "db_target_authorized=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$PREFLIGHT_EXIT" -ne 0 ] || [ "${DEC_STATUS:-}" != "HEALTHY_LOCAL_KEY" ]; then
             echo '::error::Selected runtime key failed read-only credential decryption preflight.'
-            exit 1
+            exit "${PREFLIGHT_EXIT:-1}"
           fi
 
       - name: Check selected database migration status (read-only)
-        if: inputs.mode == 'verify-selected-runtime'
+        if: >-
+          !cancelled() &&
+          inputs.mode == 'verify-selected-runtime' &&
+          steps.decryption_preflight.outputs.db_target_authorized == 'true'
         env:
           DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_STATUS: ${{ steps.decryption_preflight.outputs.credential_status }}
         run: |
-          set +e
+          set -uo pipefail
+          trap 'rm -f status-selected.raw.txt status-selected.txt' EXIT
           MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          set +e
           DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-selected.raw.txt 2>&1
-          sed -E 's#(postgres(ql)?://)[^@]+@#\1***:***@#g' status-selected.raw.txt > status-selected.txt
-          echo "### Selected Runtime Migration Status (Read-Only)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-selected.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat status-selected.txt
-          rm -f status-selected.raw.txt status-selected.txt
-          exit 0
+          MIGRATE_EXIT_CODE=$?
+          set -e
+          sed -E \
+            -e 's#(postgres(ql)?://)[^@[:space:]]+@#\1***:***@#g' \
+            -e 's#([?&](password|sslpassword|token|api_key|secret)=)[^&[:space:]]+#\1***#gi' \
+            status-selected.raw.txt > status-selected.txt
+          rm -f status-selected.raw.txt
+          pnpm exec tsx scripts/render-vault-tool.ts evaluate-migration-status \
+            --status-file status-selected.txt \
+            --exit-code "$MIGRATE_EXIT_CODE" \
+            --credential-status "${CREDENTIAL_STATUS:-UNKNOWN}"
 
       - name: Execute values-free source inspection
         if: inputs.mode == 'inspect-sources'

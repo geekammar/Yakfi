@@ -531,11 +531,15 @@ CI; **not** executed in this preparation task):
    `verify-selected-runtime` proves read-only AES-256-GCM decryption of the
    intended existing `fp:<id>` credential in the active Neon dataset
    (`status: HEALTHY_LOCAL_KEY`) with zero Telegram/AI calls and zero secret
-   values in output, plus read-only `prisma migrate status`. `inspect-sources`
-   classifies Neon hosts, checks 32-byte key decoding, optionally verifies
-   Render service ownership (`tea-db9st3gm7kps73ek9op0` / `ohio`), and lists
-   Vercel Production variable names/types (`?decrypt=false` with `value`
-   stripped).
+   values in output, then runs read-only `prisma migrate status` (preserving its
+   real exit code, redacting URL credentials, cleaning up via `EXIT` trap,
+   distinguishing decryption status from migration status, and failing
+   `NOT_READY` without applying migrations if migrations are pending, failed, or
+   divergent). `inspect-sources` classifies Neon hosts, checks 32-byte key
+   decoding, optionally verifies Render service ownership
+   (`tea-db9st3gm7kps73ek9op0` / strict `ohio`, rejecting missing, malformed, or
+   wrong region), and lists Vercel Production variable names/types
+   (`?decrypt=false` with `value` stripped).
 3. **Pre-service encrypted export (`mode=export-encrypted-bundle`) & Restoration Proof:**
    works before any Render service exists (`render_service_id` blank ->
    `PRE_SERVICE_CREATION`), runs `verify-selected-runtime` first, encrypts only

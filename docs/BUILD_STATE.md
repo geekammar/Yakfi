@@ -47,9 +47,17 @@
   `always()` artifact preservation across partial/network failures, plus
   read-only zero-Telegram `verify-selected-runtime` decryption preflight tested
   against disposable fixtures (`check:render-migration` +
-  `check:render-runtime-db`). `512 MB` live
-  capacity, Render credit details, and live deployment remain unexecuted owner
-  actions.
+  `check:render-runtime-db`). Hardened `verifyRenderServiceOwnership` to reject
+  missing, empty, malformed, or wrong `serviceDetails.region` before any `PUT`,
+  and fixed `render-migration-ops.yml` read-only `prisma migrate status` to
+  preserve the real exit code, clean up redacted files on `EXIT`, distinguish
+  credential decryption from migration status, and fail `NOT_READY` without
+  applying migrations on pending/failed/divergent states. Verified actual
+  `package.json` version on `feat/yakfi-render-migration-prep` (including
+  `a0cf117`) is `0.79.15` over `main` `0.79.14` (`0.79.16` in the earlier chat
+  summary was a reporting typo; historical reports and PR #88 remain untouched).
+  `512 MB` live capacity, Render credit details, and live deployment remain
+  unexecuted owner actions.
 
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 

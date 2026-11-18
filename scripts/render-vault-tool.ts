@@ -82,6 +82,7 @@ const BUNDLE_SCHEMA = "yakfi.encrypted-secret-bundle@v1";
 const HKDF_INFO = Buffer.from("yakfi-render-vault-envelope-v1", "utf8");
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const RENDER_SERVICE_ID_RE = /^srv-[a-z0-9]{16,32}$/;
+const RENDER_REGION_RE = /^[a-z][a-z0-9-]{1,31}$/;
 
 const AUTHORIZED_ACTIVE_DB_HOSTS = new Set([
   "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech",
@@ -212,6 +213,31 @@ export type RenderCutoverBlocked = {
 };
 
 export type RenderCutoverOutcome = RenderCutoverReady | RenderCutoverBlocked;
+
+export type MigrationPreflightState =
+  | "UP_TO_DATE"
+  | "PENDING_MIGRATIONS"
+  | "FAILED_MIGRATIONS"
+  | "DIVERGENT_HISTORY"
+  | "COMMAND_FAILED";
+
+export type OverallSelectedRuntimeReadiness = "READY" | "NOT_READY";
+
+export type EvaluateMigrationStatusParams = {
+  exitCode: number;
+  rawOutput: string;
+  credentialDecryptionStatus: string;
+};
+
+export type MigrationStatusEvaluation = {
+  ok: boolean;
+  exitCode: number;
+  propagatedExitCode: number;
+  credentialDecryptionStatus: string;
+  migrationStatus: MigrationPreflightState;
+  overallReadiness: OverallSelectedRuntimeReadiness;
+  redactedOutput: string;
+};
 
 type DecryptedEnvelopeShape = {
   values?: Record<string, unknown>;
@@ -849,7 +875,13 @@ export async function verifyRenderServiceOwnership(
     throw new Error("WORKSPACE_ID_MISMATCH");
   }
   const rawRegion = params.expectedRegion ?? CONFIRMED_RENDER_REGION;
-  const expectedRegion = rawRegion.trim();
+  const expectedRegion = rawRegion.trim().toLowerCase();
+  if (!expectedRegion || !RENDER_REGION_RE.test(expectedRegion)) {
+    throw new Error("RENDER_REGION_MALFORMED");
+  }
+  if (expectedRegion !== CONFIRMED_RENDER_REGION) {
+    throw new Error("RENDER_REGION_MISMATCH");
+  }
 
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const encodedService = encodeURIComponent(serviceId);
@@ -878,11 +910,22 @@ export async function verifyRenderServiceOwnership(
   if (svc.type !== "web_service") {
     throw new Error("RENDER_SERVICE_TYPE_MISMATCH");
   }
-  let region = "";
-  if (typeof svc.serviceDetails?.region === "string") {
-    region = svc.serviceDetails.region.toLowerCase();
+  const rawServiceRegion = svc.serviceDetails?.region;
+  if (rawServiceRegion === undefined || rawServiceRegion === null) {
+    throw new Error("RENDER_REGION_MISSING");
   }
-  if (region && region !== expectedRegion.toLowerCase()) {
+  if (typeof rawServiceRegion !== "string") {
+    throw new Error("RENDER_REGION_MALFORMED");
+  }
+  const trimmedRegion = rawServiceRegion.trim();
+  if (!trimmedRegion) {
+    throw new Error("RENDER_REGION_MISSING");
+  }
+  const region = trimmedRegion.toLowerCase();
+  if (!RENDER_REGION_RE.test(region)) {
+    throw new Error("RENDER_REGION_MALFORMED");
+  }
+  if (region !== expectedRegion) {
     throw new Error("RENDER_REGION_MISMATCH");
   }
 
@@ -896,7 +939,7 @@ export async function verifyRenderServiceOwnership(
     serviceId,
     serviceName,
     workspaceId: expectedWorkspace,
-    region: region || expectedRegion,
+    region,
   };
 }
 
@@ -1256,6 +1299,64 @@ export async function verifyRenderCutoverReadinessAndBacklog(
   };
 }
 
+const FAILED_MIGRATION_RE = /have failed|failed to apply|rolled back/i;
+const DIVERGENT_MIGRATION_RE =
+  /are different|diverged|drift detected|modified after it was applied|missing from the local/i;
+const PENDING_MIGRATION_RE = /have not yet been applied/i;
+const UP_TO_DATE_MIGRATION_RE = /Database schema is up to date/i;
+
+export function redactMigrationStatusOutput(raw: string): string {
+  return raw
+    .replace(/(postgres(?:ql)?:\/\/)[^@\s]+@/gi, "$1***:***@")
+    .replace(
+      /([?&](?:password|sslpassword|token|api_key|secret)=)[^&\s]+/gi,
+      "$1***",
+    );
+}
+
+export function evaluateMigrationStatusPreflight(
+  params: EvaluateMigrationStatusParams,
+): MigrationStatusEvaluation {
+  const exitCode = Number.isInteger(params.exitCode) ? params.exitCode : 1;
+  const credentialDecryptionStatus =
+    params.credentialDecryptionStatus.trim() || "UNKNOWN";
+  const redactedOutput = redactMigrationStatusOutput(params.rawOutput);
+
+  let migrationStatus: MigrationPreflightState;
+  if (FAILED_MIGRATION_RE.test(redactedOutput)) {
+    migrationStatus = "FAILED_MIGRATIONS";
+  } else if (DIVERGENT_MIGRATION_RE.test(redactedOutput)) {
+    migrationStatus = "DIVERGENT_HISTORY";
+  } else if (PENDING_MIGRATION_RE.test(redactedOutput)) {
+    migrationStatus = "PENDING_MIGRATIONS";
+  } else if (exitCode === 0 && UP_TO_DATE_MIGRATION_RE.test(redactedOutput)) {
+    migrationStatus = "UP_TO_DATE";
+  } else {
+    migrationStatus = "COMMAND_FAILED";
+  }
+
+  const credentialOk = credentialDecryptionStatus === "HEALTHY_LOCAL_KEY";
+  const ok = credentialOk && exitCode === 0 && migrationStatus === "UP_TO_DATE";
+  const readinessVal = ok ? "READY" : "NOT_READY";
+  const overallReadiness: OverallSelectedRuntimeReadiness = readinessVal;
+  let propagatedExitCode = 1;
+  if (ok) {
+    propagatedExitCode = 0;
+  } else if (exitCode > 0 && exitCode <= 255) {
+    propagatedExitCode = exitCode;
+  }
+
+  return {
+    ok,
+    exitCode,
+    propagatedExitCode,
+    credentialDecryptionStatus,
+    migrationStatus,
+    overallReadiness,
+    redactedOutput,
+  };
+}
+
 function getArgValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx === -1) {
@@ -1365,6 +1466,50 @@ async function runCli(): Promise<void> {
     console.log(`code: ${preflight.code}`);
     if (!preflight.ok) {
       process.exit(1);
+    }
+    return;
+  }
+
+  if (subcommand === "evaluate-migration-status") {
+    const statusFile = getArgValue(args, "--status-file");
+    const rawExit = getArgValue(args, "--exit-code") ?? "1";
+    const credStatus =
+      getArgValue(args, "--credential-status") ??
+      process.env.CREDENTIAL_STATUS ??
+      "UNKNOWN";
+    if (!statusFile) {
+      throw new Error("MISSING_MIGRATION_STATUS_FILE");
+    }
+    const parsedExit = Number.parseInt(rawExit, 10);
+    const exitCode = Number.isNaN(parsedExit) ? 1 : parsedExit;
+    const rawText = readFileSync(statusFile, "utf8");
+    const evalRes = evaluateMigrationStatusPreflight({
+      exitCode,
+      rawOutput: rawText,
+      credentialDecryptionStatus: credStatus,
+    });
+    const credLabel = evalRes.credentialDecryptionStatus;
+    const migLabel = evalRes.migrationStatus;
+    const readyLabel = evalRes.overallReadiness;
+    writeSummaryLine("### Selected Runtime Migration Status (Read-Only)");
+    writeSummaryLine(`- **Credential Decryption Status**: \`${credLabel}\``);
+    writeSummaryLine(`- **Prisma Migrate Exit Code**: \`${evalRes.exitCode}\``);
+    writeSummaryLine(`- **Migration Status**: \`${migLabel}\``);
+    writeSummaryLine(`- **Overall Runtime Readiness**: \`${readyLabel}\``);
+    writeSummaryLine("```");
+    writeSummaryLine(evalRes.redactedOutput.trimEnd());
+    writeSummaryLine("```");
+    console.log(`credential_decryption_status: ${credLabel}`);
+    console.log(`prisma_migrate_exit_code: ${evalRes.exitCode}`);
+    console.log(`migration_status: ${migLabel}`);
+    console.log(`overall_runtime_readiness: ${readyLabel}`);
+    if (!evalRes.ok) {
+      const errMsg =
+        `Selected runtime credential decryption is ${credLabel}, ` +
+        `migration status is ${migLabel} (exit code ${evalRes.exitCode}); ` +
+        "overall runtime readiness is NOT_READY. Migrations were NOT applied.";
+      console.error(`::error::${errMsg}`);
+      process.exit(evalRes.propagatedExitCode);
     }
     return;
   }
