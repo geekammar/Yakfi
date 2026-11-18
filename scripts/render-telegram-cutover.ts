@@ -15,6 +15,7 @@
  *   printed; results are sanitized identifiers and bounded error text only.
  */
 import { appendFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import {
   defaultCredentialsResolver,
@@ -864,11 +865,10 @@ async function main(): Promise<void> {
   process.exit(result.status === "BLOCKED" ? 2 : 1);
 }
 
-const isCliEntry =
-  typeof process.argv[1] === "string" &&
-  process.argv[1].endsWith("render-telegram-cutover.ts");
+const argvEntry = process.argv[1];
+const cliEntryHref = argvEntry ? pathToFileURL(argvEntry).href : "";
 
-if (isCliEntry) {
+if (cliEntryHref && import.meta.url === cliEntryHref) {
   main().catch((err: unknown) => {
     const safeCode =
       err instanceof Error && /^[A-Z0-9_]+$/.test(err.message)
