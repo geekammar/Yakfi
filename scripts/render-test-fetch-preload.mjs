@@ -9,12 +9,14 @@ const mockOrigin = process.env.FLOWPILOT_CI_MOCK_PROVIDER_ORIGIN?.trim();
 if (mockOrigin) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
-    const rawUrl =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+    let rawUrl;
+    if (typeof input === "string") {
+      rawUrl = input;
+    } else if (input instanceof URL) {
+      rawUrl = input.toString();
+    } else {
+      rawUrl = input.url;
+    }
 
     try {
       const parsed = new URL(rawUrl);
@@ -26,7 +28,19 @@ if (mockOrigin) {
           `/__mock_${parsed.hostname}${parsed.pathname}${parsed.search}`,
           mockOrigin,
         );
-        return originalFetch(target, init);
+        if (typeof input === "string" || input instanceof URL) {
+          return originalFetch(target, init);
+        }
+        let bodyBuffer;
+        if (init?.body === undefined && input.body) {
+          bodyBuffer = await input.arrayBuffer();
+        }
+        return originalFetch(target.toString(), {
+          method: init?.method ?? input.method,
+          headers: init?.headers ?? input.headers,
+          body: init?.body ?? bodyBuffer,
+          signal: init?.signal ?? input.signal,
+        });
       }
     } catch {
       // Pass through non-URL inputs unchanged

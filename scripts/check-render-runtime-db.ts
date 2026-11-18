@@ -33,6 +33,7 @@ import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { auth } from "@/lib/auth";
 import { PostgresRuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
@@ -263,8 +264,17 @@ async function main(): Promise<void> {
                     content: JSON.stringify({
                       intent: "HUMAN_REQUEST",
                       action: "handoff",
+                      content: "تم تحويل المحادثة لفريق العمل للمتابعة.",
+                      extraction: {
+                        service: null,
+                        provider: null,
+                        date: null,
+                        timePreference: null,
+                        temporalRequest: null,
+                        exactTime: null,
+                      },
                       handoffReason: "HUMAN_REQUEST",
-                      reply: "تم تحويل المحادثة لفريق العمل للمتابعة.",
+                      summary: null,
                     }),
                   },
                   finish_reason: "stop",
@@ -366,6 +376,17 @@ async function main(): Promise<void> {
     });
     createdBusinessId = business.id;
 
+    const defaultBranch = await db.branch.create({
+      data: {
+        businessId: business.id,
+        name: "الفرع الرئيسي",
+      },
+    });
+    await db.business.update({
+      where: { id: business.id },
+      data: { defaultBranchId: defaultBranch.id },
+    });
+
     const credStore = new PostgresRuntimeCredentialStore({
       repository: runtimeCredentialRepository,
       masterKey: testMasterKeyHex,
@@ -384,6 +405,7 @@ async function main(): Promise<void> {
     await db.telegramConnection.create({
       data: {
         businessId: business.id,
+        branchId: defaultBranch.id,
         displayName: "Render Test Bot",
         botExternalId: `999${String(Date.now()).slice(-6)}`,
         botUsername: "RenderMigrationCheckBot",
@@ -419,6 +441,11 @@ async function main(): Promise<void> {
       process.cwd(),
       "scripts/render-test-fetch-preload.mjs",
     );
+    const preloadUrl = pathToFileURL(preloadPath).href;
+    const inheritedNodeOptions = process.env.NODE_OPTIONS?.trim();
+    const childNodeOptions = inheritedNodeOptions
+      ? `${inheritedNodeOptions} --import ${preloadUrl}`
+      : `--import ${preloadUrl}`;
     serverB = startNextServer({
       port: portB,
       envOverrides: {
@@ -432,7 +459,7 @@ async function main(): Promise<void> {
         RENDER_GIT_COMMIT: shaB,
         FLOWPILOT_ENABLE_QA_HARNESS: "true",
         FLOWPILOT_CI_MOCK_PROVIDER_ORIGIN: mockOrigin,
-        NODE_OPTIONS: `--import ${preloadPath}`,
+        NODE_OPTIONS: childNodeOptions,
       },
     });
 
@@ -593,7 +620,8 @@ async function main(): Promise<void> {
     check(
       "DB7. Real next/server after() flushes HTTP 200 first, then runs controlled AI + DB + Telegram sendMessage",
       webhookRes.status === 200 &&
-        webhookBody.ok === true &&
+        webhookBody.success === true &&
+        webhookBody.received === 1 &&
         openRouterHits.length === 1 &&
         Boolean(openRouterHit && openRouterHit.at >= responseFlushedAt) &&
         Boolean(sendHit) &&
@@ -604,6 +632,7 @@ async function main(): Promise<void> {
         (persistedConv?.messages.length ?? 0) >= 2,
       {
         webhookStatus: webhookRes.status,
+        webhookSuccess: webhookBody.success,
         openRouterCount: openRouterHits.length,
         afterFlushedDeltaMs: openRouterHit
           ? openRouterHit.at - responseFlushedAt
@@ -629,6 +658,35 @@ async function main(): Promise<void> {
         .catch(() => {});
     }
     if (createdBusinessId) {
+      await db.conversationDeliveryRoute
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
+      await db.inboundMessageDedupe
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
+      await db.message
+        .deleteMany({
+          where: { conversation: { businessId: createdBusinessId } },
+        })
+        .catch(() => {});
+      await db.conversation
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
+      await db.customer
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
+      await db.telegramConnection
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
+      await db.business
+        .updateMany({
+          where: { id: createdBusinessId },
+          data: { defaultBranchId: null },
+        })
+        .catch(() => {});
+      await db.branch
+        .deleteMany({ where: { businessId: createdBusinessId } })
+        .catch(() => {});
       await db.business
         .deleteMany({ where: { id: createdBusinessId } })
         .catch(() => {});

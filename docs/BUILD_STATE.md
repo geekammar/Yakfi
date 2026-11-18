@@ -32,9 +32,15 @@
 - Required CI: wired offline `check:render-migration` and real-Node
   (`next start`) + disposable-PostgreSQL `check:render-runtime-db` (verifying
   headers, HTTP 503 readiness failure, exact SHA, Better Auth origins/cookies,
-  and real `next/server` `after()` execution with controlled mocks). `512 MB`
-  live capacity, Render credit details, and live deployment remain unexecuted
-  owner actions.
+  and real `next/server` `after()` execution with controlled mocks). Repaired
+  CI run `44177671953` `DB7` harness defects (missing default `Branch` on the
+  synthetic test `Business`, `aiResponseSchema`-compliant OpenRouter mock body,
+  `webhookBody.success` contract check, and `Request`-preserving preload
+  fetch). Verified on the new Boxd VPS that old VPS local files, `rclone`, and
+  Agent Handoff did not survive, `RENDER_API_KEY` is absent from GitHub
+  secrets, and zero encrypted bundles have been exported yet. `512 MB` live
+  capacity, Render credit details, and live deployment remain unexecuted owner
+  actions.
 
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 

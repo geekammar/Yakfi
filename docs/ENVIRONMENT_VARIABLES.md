@@ -485,15 +485,24 @@ Configuration recoverability separates metadata from secret values:
   and **1 Config** (`NEXT_PUBLIC_APP_URL`). Vercel cannot read back Sensitive
   Production values via CLI (`vercel env pull`) or REST API (`?decrypt=false`),
   so an `env pull` is never a complete backup.
-- GitHub Actions repository secrets (`gh secret list` metadata verified
-  2026-11-17, values never exposed by API): `CREDENTIAL_MASTER_KEY` (~24d ago),
-  `PRODUCTION_DATABASE_URL` (~1mo ago; overridden in `Production` environment by
-  an environment secret updated ~17d ago), `TEST_DATABASE_URL` (~1mo ago),
-  `VERCEL_TOKEN` (~5d ago), `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (~4d ago), and
-  `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~3d ago — failed recovery candidate
-  on 2026-11-13, not a valid backup). Secret name presence does **not** prove
-  decryption compatibility until verified by `verify-selected-runtime`
-  (`HEALTHY_LOCAL_KEY`).
+- GitHub Actions repository secrets (`gh secret list` metadata re-verified on
+  the new Boxd VPS 2026-11-17/18, values never exposed by API):
+  `CREDENTIAL_MASTER_KEY` (~24d ago), `PRODUCTION_DATABASE_URL` (~1mo ago;
+  overridden in `Production` environment by an environment secret updated ~17d
+  ago), `TEST_DATABASE_URL` (~1mo ago), `VERCEL_TOKEN` (~5d ago),
+  `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (~4d ago), and
+  `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~4d ago — failed recovery candidate
+  on 2026-11-13, not a valid backup). `RENDER_API_KEY` is **not** currently set
+  in GitHub secrets (required only if dispatching `render-migration-ops.yml`
+  service checks/transfer instead of manual vault paste). Secret name presence
+  does **not** prove decryption compatibility until verified by
+  `verify-selected-runtime` (`HEALTHY_LOCAL_KEY`).
+- **Deleted old VPS boundary:** local `.env*`, `rclone`, and Agent Handoff did
+  not survive on the new Boxd VPS. `render-migration-ops.yml` has never been
+  dispatched (zero encrypted bundles exported); any private key that existed
+  solely on the deleted VPS without an external vault copy is permanently lost,
+  and no encrypted backup may ever be claimed recoverable without its private
+  key in Ammar's workstation vault.
 - **Unknown JEV / Shadow settings:** `FLOWPILOT_JEV_SEMANTIC_ENABLED`,
   `FLOWPILOT_JEV_APPROVED_MONTHLY_BUDGET`, `FLOWPILOT_JEV_SHADOW_ENABLED`,
   `SHADOW_SALT`, `SHADOW_SAMPLE_RATE`, `SHADOW_MAX_CALLS_PER_DAY`, and

@@ -26,9 +26,12 @@
   cutover runbook (`docs/VERCEL_DEPLOYMENT.md` §7).
 - **Still open / owner-gated:** Render $50 credit balance/expiry/exhaustion
   dashboard check, `512 MB` live RAM measurement, owner recovery keypair +
-  vault backup, live Render deploy, and guarded webhook cutover (explicit
-  backlog policy: no blind replay or `drop_pending_updates`). Reminders stay
-  disabled; unknown JEV/SHADOW values remain `UNKNOWN_UNVERIFIED`.
+  vault backup (on Ammar's workstation; old deleted VPS local files, `rclone`,
+  and Agent Handoff did not survive, `RENDER_API_KEY` is not yet in GitHub
+  secrets, and zero encrypted bundles have been exported yet), live Render
+  deploy, and guarded webhook cutover (explicit backlog policy: no blind replay
+  or `drop_pending_updates`). Reminders stay disabled; unknown JEV/SHADOW
+  values remain `UNKNOWN_UNVERIFIED`.
 
 ## 00. Prior acceptance evidence completion — 16 November 2026
 
