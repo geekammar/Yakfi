@@ -1,42 +1,46 @@
 # FlowPilot — Current State
 
 > **Tier 0 orientation snapshot — as of 18 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records the
-> merged Render preparation and the current direct-transfer candidate;
-> 00/0A/0B and Sections 1–9 retain all prior release, R5, R6, Y83 and QA249/QA250
-> evidence unchanged. No live deployment, DB migration, secret rotation, webhook
-> move, Telegram send or paid AI call was performed.
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records live
+> Render readiness and the configuration alignment candidate; 00/0A/0B and
+> Sections 1–9 retain all prior release, R5, R6, Y83 and QA249/QA250 evidence
+> unchanged. The Render app is technically ready; Telegram cutover and live
+> product acceptance have not been performed; PR88 remains open.
 
-## 0. Render migration preparation & direct transfer — 18 November 2026
+## 0. Live Render readiness & configuration alignment — 18 November 2026
 
-- **Current `main` baseline:** `0.79.15`, merge commit
-  `a6a2021d0fc83ffc4744c9b7b2747a98e0d83711` (PR #89 merged 18 November 2026).
-  The merged preparation includes the Render blueprint, platform-neutral
-  headers, `RENDER_GIT_COMMIT` identity, split health routes, exact-SHA release
-  guard, values-free environment inventory, read-only `verify-selected-runtime`
-  DB-decryption + truthful migration-status preflight, strict `ohio` region
-  rejection, and the encrypted owner-recovery transfer path retained as
-  **optional** hardened recovery. Vercel remains unavailable/blocked and is not
-  a working runtime or rollback target. PR #88 (`74f6594a...`) remains open,
-  Draft, and untouched.
-- **Candidate (`feat/yakfi-render-direct-transfer`, `0.79.16`):** adds a
-  manual-only `direct-transfer` mode that moves only `DATABASE_URL` and
-  `CREDENTIAL_MASTER_KEY` from existing GitHub Actions secrets to the confirmed
-  Render web service. It keeps exact-SHA/workspace/region/service verification,
-  a forced read-only dry-run before apply, per-key updates, and sanitized
-  partial-failure reporting; it does not require keygen, an encrypted bundle, or
-  `owner_restoration_proof`. The encrypted-recovery path remains optional.
-  Auto-deploy stays off during initial configuration; after readiness the
-  service is switched to On Commit and `render.yaml` `autoDeployTrigger` is
-  changed to `commit`.
-- **Still open / owner-gated:** Render $50 credit balance/expiry/exhaustion
-  dashboard check, `512 MB` live RAM measurement, `RENDER_API_KEY` addition to
-  GitHub secrets, service creation, one-time direct transfer, live Render
-  deploy, and guarded webhook cutover (explicit backlog policy: no blind replay
-  or `drop_pending_updates`). An owner-vault copy of the two existing values is
-  encouraged but optional; the encrypted keygen/bundle/proof path is retained
-  optional. Reminders stay disabled; unknown JEV/SHADOW values remain
-  `UNKNOWN_UNVERIFIED`.
+- **Current `main` baseline:** `0.79.16`, merge commit
+  `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` (PR90 merged 18 November 2026).
+  PR #88 (`74f6594a...`) remains open, Draft, and untouched.
+- **Technically ready Render app:** existing service `Yakfi`
+  (`srv-dbv0igutlv9c73fe4990`) in `My Workspace`
+  (`tea-db9st3gm7kps73ek9op0`), region `ohio`, Starter `0.5c-512mb`, URL
+  `https://yakfi.onrender.com`. Live deployment
+  `dep-dbv0vm7f3r2c73ent7ug` runs `629d05f` / `0.79.16`;
+  `/api/health/live` and `/api/health` return HTTP `200` with
+  `deploymentReady=true`, `database=connected`, and `missingEnvVars=[]`.
+- **Completed configuration:** direct transfer of `DATABASE_URL` +
+  `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets via a read-only dry-run
+  then apply; `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` confirmed present by
+  name only. Render auto-deploy is On Commit (`autoDeployTrigger=commit`) for
+  branch `main`.
+- **Configuration alignment candidate (`chore/yakfi-render-config-alignment`,
+  `0.79.17`):** updates `render.yaml` declared name `yakfi-web` → `Yakfi` and
+  `autoDeployTrigger: off` → `commit`. The existing service is managed through
+  the Render Dashboard/API; this Blueprint has **not** been imported or applied,
+  and matching names do not prove Blueprint ownership or adoption.
+- **Read-only cutover preflight:** selected DB/bot credential and fixed
+  business/connection/bot identity verified as `HEALTHY_LOCAL_KEY` with 30
+  migrations `UP_TO_DATE`; Render readiness is HTTP `200`. Telegram
+  `getWebhookInfo` and the signed Render credential-readiness proof remain
+  **UNVERIFIED** because existing cutover tooling is Vercel-hardcoded and the
+  Production-environment credential path is unresolved. No webhook move was
+  performed; `pending_update_count` and last delivery error remain **UNKNOWN**
+  and must be checked again at actual cutover.
+- **Not done / not verified:** Telegram webhook cutover, Telegram messages,
+  live product acceptance, and `512 MB` capacity measurement. The Render
+  Blueprint ownership/adoption remains unestablished. PR88 remains separate.
+  Historical R5/R6/Y83 and QA249/QA250 evidence is unchanged.
 
 ## 00. Prior acceptance evidence completion — 16 November 2026
 

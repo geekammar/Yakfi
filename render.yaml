@@ -5,23 +5,23 @@
 #
 # Safety invariants:
 # - Live Prisma migrations and seed commands NEVER run in buildCommand or startCommand.
-# - autoDeployTrigger is off during initial configuration so unverified or
-#   unconfigured commits never auto-deploy or compete with the active Telegram
-#   webhook runtime. After live readiness is verified, enable Render Dashboard
-#   "On Commit" and change this value to `commit` so a later Blueprint sync
-#   cannot disable automatic deploys again.
+# - The existing service is `Yakfi` (srv-dbv0igutlv9c73fe4990). It is managed
+#   through the Render Dashboard/API; this Blueprint has not been imported or
+#   applied, and matching the declared name does not prove Blueprint ownership.
+#   Initial setup used autoDeployTrigger: off; after live readiness the service
+#   is On Commit (`commit`) so a later Blueprint sync cannot silently disable it.
 # - Continuous platform liveness uses /api/health/live (zero DB queries) so 5-second
 #   Render probes do not block Neon scale-to-zero suspension or burn compute hours.
 #   Post-deploy verification explicitly checks /api/health (DB + env readiness).
 
 services:
   - type: web
-    name: yakfi-web
+    name: Yakfi
     runtime: node
     plan: starter
     region: ohio
     branch: main
-    autoDeployTrigger: off
+    autoDeployTrigger: commit
     healthCheckPath: /api/health/live
     buildCommand: corepack enable && corepack prepare pnpm@11.24.0 --activate && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm build
     startCommand: pnpm run start:render

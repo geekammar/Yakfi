@@ -12,7 +12,7 @@ on:
           - "render"
           - "vercel"
       production_base_url:
-        description: "Exact HTTPS origin of the target deployment (e.g. https://yakfi-web.onrender.com)"
+        description: "Exact HTTPS origin of the target deployment (e.g. https://yakfi.onrender.com)"
         required: true
         type: string
       expected_commit_sha:

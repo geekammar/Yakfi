@@ -492,17 +492,18 @@ Configuration recoverability separates metadata from secret values:
   ago), `TEST_DATABASE_URL` (~1mo ago), `VERCEL_TOKEN` (~5d ago),
   `YAKFI_TEST_CUSTOMER_BOT_TOKEN` (~4d ago), and
   `YAKFI_PRODUCTION_CREDENTIAL_MASTER_KEY` (~4d ago — failed recovery candidate
-  on 2026-11-13, not a valid backup). `RENDER_API_KEY` is **not** currently set
-  in GitHub secrets (required for the reviewed `direct-transfer` and
-  `transfer-to-render` modes that verify/update the Render service; not needed
-  for `verify-selected-runtime`). Secret name presence
-  does **not** prove decryption compatibility until verified by
-  `verify-selected-runtime` (`HEALTHY_LOCAL_KEY`).
+  on 2026-11-13, not a valid backup). `RENDER_API_KEY` is now present in GitHub
+  secrets (name observed only; value not read) for the reviewed
+  `direct-transfer`/`transfer-to-render` modes; it is not needed for
+  `verify-selected-runtime`. Secret name presence does **not** prove decryption
+  compatibility until verified by `verify-selected-runtime`
+  (`HEALTHY_LOCAL_KEY`).
 - **Deleted old VPS boundary:** local `.env*`, `rclone`, and Agent Handoff did
   not survive on the new Boxd VPS. `render-migration-ops.yml` has been dispatched
-  only for read-only `verify-selected-runtime` (run `44326554854`,
-  `HEALTHY_LOCAL_KEY`, migrations `UP_TO_DATE`); no secrets were transferred and
-  zero encrypted bundles were exported. Any private key that existed solely on
+  for read-only `verify-selected-runtime` (run `44326554854`,
+  `HEALTHY_LOCAL_KEY`, migrations `UP_TO_DATE`) and for the authorized
+  `direct-transfer` dry-run then apply; zero encrypted bundles were exported.
+  Any private key that existed solely on
   the deleted VPS without an external vault copy is permanently lost, and no
   encrypted backup may ever be claimed recoverable without its private key in
   Ammar's workstation vault.
