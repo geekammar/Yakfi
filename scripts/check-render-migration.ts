@@ -50,6 +50,7 @@ import {
   CONFIRMED_RENDER_REGION,
   CONFIRMED_RENDER_WORKSPACE_ID,
   PRE_SERVICE_EXPORT_SENTINEL,
+  directTransferAllowlistedSecretsToRender,
   encryptAllowlistedSecretsForOwner,
   evaluateMigrationStatusPreflight,
   generateOwnerRecoveryKeypair,
@@ -520,6 +521,30 @@ async function main(): Promise<void> {
       !recoveryWorkflowYaml.includes("success() &&") &&
       recoveryWorkflowYaml.includes("yakfi-owner-encrypted-bundle") &&
       recoveryWorkflowYaml.includes("rm -rf /tmp/yakfi-encrypted-out"),
+  );
+
+  const directDryRunBlock = recoveryWorkflowYaml.slice(
+    recoveryWorkflowYaml.indexOf(
+      "Direct-transfer dry-run (read-only, zero writes)",
+    ),
+    recoveryWorkflowYaml.indexOf(
+      "Verify selected runtime DB decryption pairing",
+    ),
+  );
+  const directApplyBlock = recoveryWorkflowYaml.slice(
+    recoveryWorkflowYaml.indexOf("apply-direct-transfer:"),
+  );
+  check(
+    "R7.1b render-migration-ops.yml exposes manual-only direct-transfer with forced dry-run before apply, no owner recovery dependency, and two-key allowlist",
+    recoveryWorkflowYaml.includes('"direct-transfer"') &&
+      directDryRunBlock.includes('DRY_RUN: "true"') &&
+      !directDryRunBlock.includes("OWNER_RESTORATION_PROOF") &&
+      !directDryRunBlock.includes("owner_restoration_proof") &&
+      directApplyBlock.includes("inputs.dry_run == false") &&
+      directApplyBlock.includes("prepare-and-deliver-backup") &&
+      directApplyBlock.includes('DRY_RUN: "false"') &&
+      !directApplyBlock.includes("OWNER_RESTORATION_PROOF") &&
+      !directApplyBlock.includes("owner_restoration_proof"),
   );
 
   const ownerPair = generateOwnerRecoveryKeypair();
@@ -1168,6 +1193,332 @@ async function main(): Promise<void> {
       nonStringRegionRejected &&
       wrongRegionRejected &&
       rejectedRegionPutUrls.length === 0,
+  );
+
+  const directServiceResponse = () =>
+    new Response(
+      JSON.stringify({
+        service: {
+          id: testServiceId,
+          name: "yakfi-web",
+          ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+          type: "web_service",
+          serviceDetails: { region: CONFIRMED_RENDER_REGION },
+        },
+      }),
+      { status: 200 },
+    );
+
+  const captureDirectOwnershipError = async (service: {
+    id: string;
+    name: string;
+    ownerId: string;
+    type: string;
+    serviceDetails: { region: string };
+  }): Promise<{ code: string | null; puts: string[] }> => {
+    const puts: string[] = [];
+    try {
+      await directTransferAllowlistedSecretsToRender(
+        {
+          expectedCommitSha: exactSha,
+          actualCommitSha: exactSha,
+          serviceId: testServiceId,
+          renderApiKey: "rnd_placeholder_example_key",
+          allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+          sourceValues: {
+            DATABASE_URL: syntheticDbConn,
+            CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+          },
+          dryRun: false,
+        },
+        {
+          fetchImpl: async (input, init) => {
+            if (init?.method === "PUT") {
+              puts.push(String(input));
+              return new Response("{}", { status: 200 });
+            }
+            return new Response(JSON.stringify({ service }), { status: 200 });
+          },
+        },
+      );
+      return { code: null, puts };
+    } catch (err: unknown) {
+      return {
+        code: err instanceof Error ? err.message : "UNKNOWN",
+        puts,
+      };
+    }
+  };
+
+  let directWrongShaRejected = false;
+  let directWrongShaFetchCount = 0;
+  try {
+    await directTransferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: otherSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+        sourceValues: {
+          DATABASE_URL: syntheticDbConn,
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async () => {
+          directWrongShaFetchCount += 1;
+          return directServiceResponse();
+        },
+      },
+    );
+  } catch (err: unknown) {
+    directWrongShaRejected =
+      err instanceof Error && err.message === "COMMIT_SHA_MISMATCH";
+  }
+
+  let directWrongAllowlistRejected = false;
+  let directWrongAllowlistFetchCount = 0;
+  try {
+    await directTransferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        allowlist: ["DATABASE_URL"],
+        sourceValues: {
+          DATABASE_URL: syntheticDbConn,
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async () => {
+          directWrongAllowlistFetchCount += 1;
+          return directServiceResponse();
+        },
+      },
+    );
+  } catch (err: unknown) {
+    directWrongAllowlistRejected =
+      err instanceof Error &&
+      err.message === "DIRECT_TRANSFER_ALLOWLIST_MISMATCH";
+  }
+
+  const wrongWorkspaceDirect = await captureDirectOwnershipError({
+    id: testServiceId,
+    name: "yakfi-web",
+    ownerId: "tea-wrongworkspace000000",
+    type: "web_service",
+    serviceDetails: { region: CONFIRMED_RENDER_REGION },
+  });
+  const wrongServiceDirect = await captureDirectOwnershipError({
+    id: "srv-aaaaaaaaaaaaaaaaaaaaaaaa",
+    name: "yakfi-web",
+    ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+    type: "web_service",
+    serviceDetails: { region: CONFIRMED_RENDER_REGION },
+  });
+  const wrongRegionDirect = await captureDirectOwnershipError({
+    id: testServiceId,
+    name: "yakfi-web",
+    ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+    type: "web_service",
+    serviceDetails: { region: "oregon" },
+  });
+
+  let directInvalidValueRejected = false;
+  let directInvalidValuePutCount = 0;
+  try {
+    await directTransferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+        sourceValues: {
+          DATABASE_URL: "not-a-database-url",
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (_input, init) => {
+          if (init?.method === "PUT") directInvalidValuePutCount += 1;
+          return directServiceResponse();
+        },
+      },
+    );
+  } catch (err: unknown) {
+    directInvalidValueRejected =
+      err instanceof Error &&
+      err.message === "UNAUTHORIZED_DATABASE_URL_TARGET";
+  }
+
+  const directDryRunPutUrls: string[] = [];
+  const directDryRun = await directTransferAllowlistedSecretsToRender(
+    {
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: testServiceId,
+      renderApiKey: "rnd_placeholder_example_key",
+      allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+      sourceValues: {
+        DATABASE_URL: syntheticDbConn,
+        CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+      },
+      dryRun: true,
+    },
+    {
+      fetchImpl: async (input, init) => {
+        if (init?.method === "PUT") directDryRunPutUrls.push(String(input));
+        return directServiceResponse();
+      },
+    },
+  );
+
+  const renderEnv = new Map<string, string>([["UNRELATED_KEY", "keep-me"]]);
+  const directApplyPutUrls: string[] = [];
+  const directApply = await directTransferAllowlistedSecretsToRender(
+    {
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: testServiceId,
+      renderApiKey: "rnd_placeholder_example_key",
+      allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+      sourceValues: {
+        DATABASE_URL: syntheticDbConn,
+        CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+      },
+      dryRun: false,
+    },
+    {
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        if (init?.method === "PUT") {
+          directApplyPutUrls.push(url);
+          const key = decodeURIComponent(url.split("/env-vars/")[1] ?? "");
+          const body = JSON.parse(String(init.body ?? "{}")) as {
+            value?: string;
+          };
+          if (key && typeof body.value === "string") {
+            renderEnv.set(key, body.value);
+          }
+          return new Response("{}", { status: 200 });
+        }
+        return directServiceResponse();
+      },
+    },
+  );
+
+  let directPartialPutCount = 0;
+  const directPartial = await directTransferAllowlistedSecretsToRender(
+    {
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: testServiceId,
+      renderApiKey: "rnd_placeholder_example_key",
+      allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+      sourceValues: {
+        DATABASE_URL: syntheticDbConn,
+        CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+      },
+      dryRun: false,
+    },
+    {
+      fetchImpl: async (_input, init) => {
+        if (init?.method === "PUT") {
+          directPartialPutCount += 1;
+          if (directPartialPutCount === 2) {
+            return new Response("{}", { status: 500 });
+          }
+          return new Response("{}", { status: 200 });
+        }
+        return directServiceResponse();
+      },
+    },
+  );
+
+  let directNetworkPutCount = 0;
+  const directNetwork = await directTransferAllowlistedSecretsToRender(
+    {
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: testServiceId,
+      renderApiKey: "rnd_placeholder_example_key",
+      allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+      sourceValues: {
+        DATABASE_URL: syntheticDbConn,
+        CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+      },
+      dryRun: false,
+    },
+    {
+      fetchImpl: async (_input, init) => {
+        if (init?.method === "PUT") {
+          directNetworkPutCount += 1;
+          if (directNetworkPutCount === 2) {
+            throw new Error("ECONNRESET");
+          }
+          return new Response("{}", { status: 200 });
+        }
+        return directServiceResponse();
+      },
+    },
+  );
+
+  check(
+    "R7.10 Direct transfer rejects wrong SHA, allowlist, workspace, service, and region before mutation; dry-run performs zero writes",
+    directWrongShaRejected &&
+      directWrongShaFetchCount === 0 &&
+      directWrongAllowlistRejected &&
+      directWrongAllowlistFetchCount === 0 &&
+      wrongWorkspaceDirect.code === "RENDER_WORKSPACE_MISMATCH" &&
+      wrongWorkspaceDirect.puts.length === 0 &&
+      wrongServiceDirect.code === "RENDER_SERVICE_ID_MISMATCH" &&
+      wrongServiceDirect.puts.length === 0 &&
+      wrongRegionDirect.code === "RENDER_REGION_MISMATCH" &&
+      wrongRegionDirect.puts.length === 0 &&
+      directInvalidValueRejected &&
+      directInvalidValuePutCount === 0 &&
+      directDryRun.summary.ok === true &&
+      directDryRun.summary.code === "DRY_RUN_READY" &&
+      directDryRunPutUrls.length === 0 &&
+      (directDryRun.summary.transferredKeys ?? []).join(",") ===
+        "CREDENTIAL_MASTER_KEY,DATABASE_URL",
+  );
+
+  check(
+    "R7.11 Direct transfer updates only the two allowlisted keys, preserves unrelated env vars, and reports partial/network failures without secret values",
+    directApply.summary.ok === true &&
+      directApply.summary.code === "TRANSFER_APPLIED" &&
+      directApplyPutUrls.length === 2 &&
+      directApplyPutUrls.some((url) =>
+        url.endsWith("/env-vars/DATABASE_URL"),
+      ) &&
+      directApplyPutUrls.some((url) =>
+        url.endsWith("/env-vars/CREDENTIAL_MASTER_KEY"),
+      ) &&
+      renderEnv.get("UNRELATED_KEY") === "keep-me" &&
+      renderEnv.get("DATABASE_URL") === syntheticDbConn &&
+      renderEnv.get("CREDENTIAL_MASTER_KEY") === syntheticKeyHex &&
+      directPartial.summary.ok === false &&
+      directPartial.summary.code.startsWith("PARTIAL_TRANSFER_FAILURE_") &&
+      (directPartial.summary.transferredKeys ?? []).length === 1 &&
+      Boolean(directPartial.summary.failedKey) &&
+      directNetwork.summary.ok === false &&
+      directNetwork.summary.code.startsWith("NETWORK_TRANSFER_FAILURE_") &&
+      (directNetwork.summary.transferredKeys ?? []).length === 1 &&
+      Boolean(directNetwork.summary.failedKey) &&
+      !JSON.stringify(directApply.summary).includes(syntheticDbConn) &&
+      !JSON.stringify(directApply.summary).includes(syntheticKeyHex) &&
+      !JSON.stringify(directPartial.summary).includes(syntheticDbConn) &&
+      !JSON.stringify(directPartial.summary).includes(syntheticKeyHex) &&
+      !JSON.stringify(directNetwork.summary).includes(syntheticDbConn) &&
+      !JSON.stringify(directNetwork.summary).includes(syntheticKeyHex),
   );
 
   const inspection = await inspectRecoverySources(

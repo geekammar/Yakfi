@@ -351,6 +351,20 @@ export type TransferRenderParams = {
   bundleOutPath?: string;
 };
 
+export type DirectTransferParams = {
+  expectedCommitSha: string;
+  actualCommitSha: string;
+  serviceId: string;
+  renderApiKey: string;
+  allowlist: AllowlistedKey[];
+  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
+  dryRun: boolean;
+};
+
+export type DirectTransferResult = {
+  summary: SafeTransferSummary;
+};
+
 export type InspectSourcesParams = {
   testDatabaseUrl?: string;
   prodDatabaseUrl?: string;
@@ -943,6 +957,117 @@ export async function verifyRenderServiceOwnership(
   };
 }
 
+type ApplyAllowlistedParams = {
+  mode: string;
+  commitSha: string;
+  serviceInfo: VerifiedRenderService;
+  allowlist: AllowlistedKey[];
+  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
+  renderApiKey: string;
+  dryRun: boolean;
+  encryptedBundleWritten?: boolean;
+};
+
+async function applyAllowlistedSecretsToRender(
+  params: ApplyAllowlistedParams,
+  deps: FetchDeps = {},
+): Promise<SafeTransferSummary> {
+  if (params.allowlist.length === 0) {
+    throw new Error("EMPTY_ALLOWLIST");
+  }
+  const sortedKeys = [...params.allowlist].sort();
+  for (const key of sortedKeys) {
+    if (!ALLOWLIST_SET.has(key)) {
+      throw new Error("DISALLOWED_SECRET_KEY");
+    }
+  }
+
+  const preparedValues = new Map<AllowlistedKey, string>();
+  for (const key of sortedKeys) {
+    preparedValues.set(
+      key,
+      validateAllowlistedValue(key, params.sourceValues[key]),
+    );
+  }
+
+  const bundleSummary =
+    params.encryptedBundleWritten === undefined
+      ? {}
+      : { encryptedBundleWritten: params.encryptedBundleWritten };
+
+  const base = {
+    mode: params.mode,
+    workspaceId: params.serviceInfo.workspaceId,
+    serviceId: params.serviceInfo.serviceId,
+    commitSha: params.commitSha,
+    ...bundleSummary,
+  };
+
+  if (params.dryRun) {
+    return {
+      ...base,
+      ok: true,
+      code: "DRY_RUN_READY",
+      dryRun: true,
+      transferredKeys: sortedKeys,
+    };
+  }
+
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const apiCred = params.renderApiKey.trim();
+  const completed: AllowlistedKey[] = [];
+  const encodedSvc = encodeURIComponent(params.serviceInfo.serviceId);
+
+  for (const key of sortedKeys) {
+    const val = preparedValues.get(key) ?? "";
+    const encodedKey = encodeURIComponent(key);
+    const svcBase = `https://api.render.com/v1/services/${encodedSvc}`;
+    const putUrl = `${svcBase}/env-vars/${encodedKey}`;
+    let res: Response;
+    try {
+      res = await fetchImpl(putUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${apiCred}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ value: val }),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      return {
+        ...base,
+        ok: false,
+        code: `NETWORK_TRANSFER_FAILURE_${key}`,
+        dryRun: false,
+        transferredKeys: completed,
+        failedKey: key,
+      };
+    }
+    if (!res.ok) {
+      return {
+        ...base,
+        ok: false,
+        code: `PARTIAL_TRANSFER_FAILURE_${key}`,
+        dryRun: false,
+        transferredKeys: completed,
+        failedKey: key,
+      };
+    }
+    completed.push(key);
+  }
+
+  return {
+    ...base,
+    ok: true,
+    code: "TRANSFER_APPLIED",
+    dryRun: false,
+    transferredKeys: completed,
+  };
+}
+
 export async function transferAllowlistedSecretsToRender(
   params: TransferRenderParams,
   deps: FetchDeps = {},
@@ -997,99 +1122,68 @@ export async function transferAllowlistedSecretsToRender(
     encryptedBundleWritten = true;
   }
 
-  const sortedKeys = [...encryptedBundle.metadata.keyNames];
-
-  if (params.dryRun) {
-    return {
-      encryptedBundle,
-      summary: {
-        ok: true,
-        mode: "transfer-to-render",
-        code: "DRY_RUN_READY",
-        workspaceId: serviceInfo.workspaceId,
-        serviceId: serviceInfo.serviceId,
-        commitSha: expectedSha,
-        dryRun: true,
-        transferredKeys: sortedKeys,
-        encryptedBundleWritten,
-      },
-    };
-  }
-
-  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
-  const apiCred = params.renderApiKey.trim();
-  const completed: AllowlistedKey[] = [];
-  const encodedSvc = encodeURIComponent(serviceInfo.serviceId);
-
-  for (const key of sortedKeys) {
-    const val = validateAllowlistedValue(key, params.sourceValues[key]);
-    const encodedKey = encodeURIComponent(key);
-    const svcBase = `https://api.render.com/v1/services/${encodedSvc}`;
-    const putUrl = `${svcBase}/env-vars/${encodedKey}`;
-    let res: Response;
-    try {
-      res = await fetchImpl(putUrl, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${apiCred}`,
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ value: val }),
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch {
-      return {
-        encryptedBundle,
-        summary: {
-          ok: false,
-          mode: "transfer-to-render",
-          code: `NETWORK_TRANSFER_FAILURE_${key}`,
-          workspaceId: serviceInfo.workspaceId,
-          serviceId: serviceInfo.serviceId,
-          commitSha: expectedSha,
-          dryRun: false,
-          transferredKeys: completed,
-          failedKey: key,
-          encryptedBundleWritten,
-        },
-      };
-    }
-    if (!res.ok) {
-      return {
-        encryptedBundle,
-        summary: {
-          ok: false,
-          mode: "transfer-to-render",
-          code: `PARTIAL_TRANSFER_FAILURE_${key}`,
-          workspaceId: serviceInfo.workspaceId,
-          serviceId: serviceInfo.serviceId,
-          commitSha: expectedSha,
-          dryRun: false,
-          transferredKeys: completed,
-          failedKey: key,
-          encryptedBundleWritten,
-        },
-      };
-    }
-    completed.push(key);
-  }
-
-  return {
-    encryptedBundle,
-    summary: {
-      ok: true,
+  const summary = await applyAllowlistedSecretsToRender(
+    {
       mode: "transfer-to-render",
-      code: "TRANSFER_APPLIED",
-      workspaceId: serviceInfo.workspaceId,
-      serviceId: serviceInfo.serviceId,
       commitSha: expectedSha,
-      dryRun: false,
-      transferredKeys: completed,
+      serviceInfo,
+      allowlist: encryptedBundle.metadata.keyNames,
+      sourceValues: params.sourceValues,
+      renderApiKey: params.renderApiKey,
+      dryRun: params.dryRun,
       encryptedBundleWritten,
     },
-  };
+    deps,
+  );
+
+  return { encryptedBundle, summary };
+}
+
+const DIRECT_TRANSFER_ALLOWLIST = [...EXPLICIT_TRANSFER_ALLOWLIST].sort();
+
+function assertDirectTransferAllowlist(allowlist: AllowlistedKey[]): void {
+  const sorted = [...allowlist].sort();
+  if (
+    sorted.length !== DIRECT_TRANSFER_ALLOWLIST.length ||
+    sorted.some((key, index) => key !== DIRECT_TRANSFER_ALLOWLIST[index])
+  ) {
+    throw new Error("DIRECT_TRANSFER_ALLOWLIST_MISMATCH");
+  }
+}
+
+export async function directTransferAllowlistedSecretsToRender(
+  params: DirectTransferParams,
+  deps: FetchDeps = {},
+): Promise<DirectTransferResult> {
+  const expectedSha = params.expectedCommitSha.trim().toLowerCase();
+  const actualSha = params.actualCommitSha.trim().toLowerCase();
+  if (!FULL_SHA_RE.test(expectedSha) || expectedSha !== actualSha) {
+    throw new Error("COMMIT_SHA_MISMATCH");
+  }
+  assertDirectTransferAllowlist(params.allowlist);
+
+  const serviceInfo = await verifyRenderServiceOwnership(
+    {
+      serviceId: params.serviceId,
+      renderApiKey: params.renderApiKey,
+    },
+    deps,
+  );
+
+  const summary = await applyAllowlistedSecretsToRender(
+    {
+      mode: "direct-transfer",
+      commitSha: expectedSha,
+      serviceInfo,
+      allowlist: params.allowlist,
+      sourceValues: params.sourceValues,
+      renderApiKey: params.renderApiKey,
+      dryRun: params.dryRun,
+    },
+    deps,
+  );
+
+  return { summary };
 }
 
 function classifyDbHostSafe(rawUrl: string | undefined): DbHostClassification {
@@ -1610,6 +1704,39 @@ async function runCli(): Promise<void> {
     writeSummaryLine(`- **Service**: \`${summary.serviceId ?? "unknown"}\``);
     writeSummaryLine(`- **Dry Run**: \`${String(summary.dryRun)}\``);
     writeSummaryLine(`- **Processed Keys**: \`${processed}\``);
+    if (!summary.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (subcommand === "direct-transfer") {
+    const allowlist = parseAllowlist(process.env.ALLOWLIST ?? "");
+    const dryRun = (process.env.DRY_RUN ?? "true").trim() !== "false";
+    const transferResult = await directTransferAllowlistedSecretsToRender({
+      expectedCommitSha: process.env.EXPECTED_COMMIT_SHA ?? "",
+      actualCommitSha: process.env.GITHUB_SHA ?? "",
+      serviceId: process.env.RENDER_SERVICE_ID ?? "",
+      renderApiKey: process.env.RENDER_API_KEY_SOURCE ?? "",
+      allowlist,
+      sourceValues: {
+        DATABASE_URL: process.env.TEST_DATABASE_URL_SOURCE,
+        CREDENTIAL_MASTER_KEY: process.env.CREDENTIAL_MASTER_KEY_SOURCE,
+      },
+      dryRun,
+    });
+    const { summary } = transferResult;
+    const processed = (summary.transferredKeys ?? []).join(", ");
+    writeSummaryLine("### Render Direct Allowlisted Transfer Summary");
+    writeSummaryLine(`- **Outcome**: \`${summary.code}\``);
+    writeSummaryLine(`- **Workspace**: \`${summary.workspaceId}\``);
+    writeSummaryLine(`- **Service**: \`${summary.serviceId ?? "unknown"}\``);
+    writeSummaryLine(`- **Commit SHA**: \`${summary.commitSha ?? "unknown"}\``);
+    writeSummaryLine(`- **Dry Run**: \`${String(summary.dryRun)}\``);
+    writeSummaryLine(`- **Processed Keys**: \`${processed}\``);
+    if (summary.failedKey) {
+      writeSummaryLine(`- **Failed Key**: \`${summary.failedKey}\``);
+    }
     if (!summary.ok) {
       process.exit(1);
     }

@@ -363,7 +363,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.5 Concrete Ordered Cutover Runbook
 
-1. **Owner Vault & Pre-Service Recovery Proof (before creating or touching Render):**
+1. **Optional owner-vault hardened recovery (not required for direct transfer):**
+   - The minimal owner-approved path is the direct transfer in step 2. This
+     encrypted-recovery path is retained as optional defense-in-depth for an
+     offline-verifiable copy; it is **not** a prerequisite for this migration.
    - On Ammar's private workstation (never on the VPS or chat), generate the
      owner X25519 recovery keypair exclusively (`0600`; refuses existing files
      or symlinks so an existing private key is never overwritten) and save it in
@@ -391,16 +394,26 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 2. **Create Service & Pin Exact URLs Before Final Build:**
    - Create the single `yakfi-web` Starter service (`srv-...`) in `My Workspace`
      (`tea-db9st3gm7kps73ek9op0`), region `ohio`, `autoDeployTrigger: off`.
+   - Create/obtain the Render API key and add it as the GitHub Actions
+     repository secret `RENDER_API_KEY` (value never in Git or chat). It is
+     required by the direct-transfer service verification and per-key update.
    - Confirm the exact assigned HTTPS origin (e.g.
      `https://yakfi-web.onrender.com`). Set both `NEXT_PUBLIC_APP_URL` and
      `BETTER_AUTH_URL` to that exact HTTPS origin (no trailing slash), populate
-     `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` from the vault, and transfer
-     allowlisted `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` (via owner vault or
-     reviewed `render-migration-ops.yml` `transfer-to-render` with
-     `render_service_id=srv-...` and `owner_restoration_proof=yakfi-verified-v1:...`,
-     `dry_run=true` first then `dry_run=false`; Job 1 delivers the encrypted
-     backup artifact before Job 2 mutates Render, and `always()` upload
-     preserves ciphertext even on partial or network failure).
+     `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` from the vault, then transfer
+     only `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from the existing GitHub
+     Actions secrets using the reviewed **direct-transfer** mode (no keygen,
+     encrypted bundle, or owner proof):
+     `render-migration-ops.yml` with `mode=direct-transfer`,
+     `render_service_id=srv-...`, `allowlist=DATABASE_URL,CREDENTIAL_MASTER_KEY`
+     (default), and `dry_run=true` first. The read-only
+     `verify-selected-runtime` preflight must already have passed at this exact
+     SHA (it did for `a6a2021...`). Inspect the sanitized result, then run
+     the same mode with `dry_run=false`; the prepare job always performs a fresh
+     read-only dry-run before the apply job writes. Per-key PUTs preserve every
+     unrelated Render environment variable. The optional encrypted
+     `transfer-to-render` path remains available for owners who want an offline
+     recovery bundle and values-free `owner_restoration_proof`.
    - Trigger a clean Render build + deploy of the exact merged `main` SHA
      **after** `NEXT_PUBLIC_APP_URL` is set so client bundles inline the true
      origin.
@@ -468,3 +481,19 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
   and its additive Prisma migrations remain an independent reviewed decision.
   Coordinate `package.json` SemVer (`0.79.15` → `0.79.16`) at final merge time
   so `pnpm check:version` passes monotonically without weakening the gate.
+
+### 7.7 Automatic Deploy Activation (after initial readiness)
+
+- Keep `autoDeployTrigger: off` while creating/configuring the service and
+  until live readiness is verified. Do not enable automatic deploys before
+  steps 3–5 pass.
+- After readiness passes (health `200` + exact SHA, Better Auth, DB/key pairing,
+  and webhook state verified), enable Render Dashboard → service → Settings →
+  Auto-Deploy → **On Commit** for the service connected to
+  `geekammar/Yakfi` / `main`.
+- In the same reviewed change, update `render.yaml`
+  `autoDeployTrigger: off` → `autoDeployTrigger: commit` so a later Blueprint
+  sync cannot disable automatic deploys again.
+- Final operating state: connected GitHub repository `geekammar/Yakfi` → `main`
+  → automatic Render deploy. Verify the service remains connected to the
+  correct repo/branch after the change.
